@@ -69,7 +69,8 @@ test( "directive forms are flagged, and each is its own record", () => {
         "// @ts-expect-error because", "// @ts-ignore", "// @ts-check", "// eslint-disable-next-line no-x",
         "// eslint-enable", "// eslint-env node", "// c8 ignore next", "// istanbul ignore else", "// v8 ignore next",
         "// prettier-ignore", "// #region parts", "// #endregion", "/// <reference path=\"x\" />",
-        "//# sourceMappingURL=x.map", "//@ sourceURL=y", "/*! banner */", "/** @license MIT */", "/* @preserve */"
+        "//# sourceMappingURL=x.map", "//@ sourceURL=y", "/*! banner */", "/** @license MIT */", "/* @preserve */",
+        "/* #__PURE__ */", "/*@__PURE__*/", "/* @__NO_SIDE_EFFECTS__ */"
     ];
     for ( const form of forms ) {
         const rows = comments( `${form}\nconst a = 1;\n` );
@@ -164,17 +165,17 @@ test( "block text: a star-margin line loses the star and one space, and trailing
 test( "tags: the compiler's tags for a block beside a declaration, with type and name", () => {
     const rows = comments( "/**\n * Add.\n * @param {number} a - first\n * @param b - untyped\n * @returns {number} sum\n * @typedef {object} Pair\n */\nfunction add( a, b ) {}\n" );
     assert.deepEqual( rows[ 0 ].tags, [
-        { tag: "param", type: "number", name: "a" },
-        { tag: "param", type: null, name: "b" },
-        { tag: "returns", type: "number", name: null },
-        { tag: "typedef", type: "object", name: "Pair" }
+        { tag: "param", type: "number", name: "a", raw: "@param {number} a - first" },
+        { tag: "param", type: null, name: "b", raw: "@param b - untyped" },
+        { tag: "returns", type: "number", name: null, raw: "@returns {number} sum" },
+        { tag: "typedef", type: "object", name: "Pair", raw: "@typedef {object} Pair" }
     ] );
 } );
 
 test( "tags: a type cast written after code on the same line is a trailing record that still carries its tag", () => {
     const rows = comments( "const s = ( /** @type {string} */ ( x ) );\nconst t = 1; /* @type {no} */\n" );
     assert.deepEqual( keep( rows, "kind", "tags" ), [
-        { kind: "trailing", tags: [ { tag: "type", type: "string", name: null } ] },
+        { kind: "trailing", tags: [ { tag: "type", type: "string", name: null, raw: "@type {string}" } ] },
         { kind: "trailing", tags: [] }
     ] );
 } );
@@ -188,22 +189,41 @@ test( "tags: a block with no tags has an empty list, and other kinds never have 
 
 test( "tags: a JavaScript file's type tags are read as types", () => {
     const rows = comments( "/** @type {Map<string, number>} */\nconst m = new Map();\n/** @param {string} a\n * @returns {void} */\nfunction f( a ) {}\n", "a.js" );
-    assert.deepEqual( rows[ 0 ].tags, [ { tag: "type", type: "Map<string, number>", name: null } ] );
-    assert.deepEqual( rows[ 1 ].tags, [ { tag: "param", type: "string", name: "a" }, { tag: "returns", type: "void", name: null } ] );
+    assert.deepEqual( rows[ 0 ].tags, [ { tag: "type", type: "Map<string, number>", name: null, raw: "@type {Map<string, number>}" } ] );
+    assert.deepEqual( rows[ 1 ].tags, [ { tag: "param", type: "string", name: "a", raw: "@param {string} a" }, { tag: "returns", type: "void", name: null, raw: "@returns {void}" } ] );
 } );
 
-test( "tags: a block beside nothing falls back to the line reader", () => {
+test( "tags: a block beside nothing is parsed by the compiler on its own", () => {
     const rows = comments( "function f() {\n    x();\n    /**\n     * @param {string} a - note\n     * @returns {void}\n     * @private\n     * prose line\n     */\n}\n" );
     assert.equal( rows[ 0 ].symbol_key, null );
     assert.deepEqual( rows[ 0 ].tags, [
-        { tag: "param", type: "string", name: "a" }, { tag: "returns", type: "void", name: null }, { tag: "private", type: null, name: null }
+        { tag: "param", type: "string", name: "a", raw: "@param {string} a - note" },
+        { tag: "returns", type: "void", name: null, raw: "@returns {void}" },
+        { tag: "private", type: null, name: null, raw: "@private\nprose line" }
     ] );
+} );
+
+test( "tags: a stray block keeps nested braces in a type, and reads template and extends tags", () => {
+    const rows = comments( "function f() {\n    x();\n    /**\n     * @param {{ a: { b: number } }} cfg\n     * @template T, U\n     * @extends {Base<T>}\n     */\n}\n" );
+    assert.deepEqual( rows[ 0 ].tags.map( ( t: any ) => [ t.tag, t.type, t.name ] ), [
+        [ "param", "{ a: { b: number } }", "cfg" ], [ "template", null, "T,U" ], [ "extends", "Base<T>", null ]
+    ] );
+} );
+
+test( "tags: a template constraint is the type of its tag", () => {
+    const rows = comments( "function f() {\n    x();\n    /** @template {string} K */\n}\n", "a.js" );
+    assert.deepEqual( rows[ 0 ].tags.map( ( t: any ) => [ t.tag, t.type, t.name ] ), [ [ "template", "string", "K" ] ] );
+} );
+
+test( "tags: a stray block that is not a doc comment to the compiler gives no tags", () => {
+    const rows = comments( "function f() {\n    x();\n    /***/\n}\n" );
+    assert.deepEqual( rows[ 0 ].tags, [] );
 } );
 
 test( "tags: a block beside a node that holds no jsdoc falls back too", () => {
     const rows = comments( "const list = [\n    /** @type {number} */\n    first\n];\n" );
     assert.equal( rows[ 0 ].kind, "jsdoc" );
-    assert.deepEqual( rows[ 0 ].tags, [ { tag: "type", type: "number", name: null } ] );
+    assert.deepEqual( rows[ 0 ].tags, [ { tag: "type", type: "number", name: null, raw: "@type {number}" } ] );
 } );
 
 // ---------------------------------------------------------------- symbols

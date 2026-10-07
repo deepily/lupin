@@ -40,6 +40,7 @@ const DIRECTIVE_BODY = new RegExp(
     + "|eslint-(disable|enable|env)\\b"
     + "|(c8|istanbul|v8) ignore\\b"
     + "|prettier-ignore\\b"
+    + "|[#@]__(PURE|NO_SIDE_EFFECTS)__"
     + "|#(end)?region\\b"
     + "|/\\s*<(reference|amd-module|amd-dependency)\\b"
     + "|[#@]\\s*source(Mapping)?URL=)"
@@ -215,40 +216,70 @@ function collectRanges( sf ) {
 }
 
 /**
- * Read the tags of one block comment that has no attached node, with a documented fallback.
+ * Return the type text of one parsed JSDoc tag, or null when the tag carries none.
  *
  * Requires:
- *   - text is the stripped text of a block comment
+ *   - tag is a JSDoc tag node of sf
  *
  * Ensures:
- *   - returns [ { tag, type, name } ] for each line that starts with an at sign and a word
- *   - type is the text inside the braces after the tag, or null; name is the next word, or null
+ *   - a braced type expression gives the text inside its outer braces, nested braces kept
+ *   - an extends or implements tag gives its heritage expression; a template tag gives its constraint
  */
-function fallbackTags( text ) {
-    return text.split( "\n" ).flatMap( ( line ) => {
-        const match = /^\s*@(\w+)(?:\s+\{([^}]*)\})?(?:\s+([\w$.[\]]+))?/.exec( line );
-        return match === null ? [] : [ { tag: match[ 1 ], type: match[ 2 ] ?? null, name: match[ 3 ] ?? null } ];
-    } );
+function tagType( sf, tag ) {
+    const node = tag.typeExpression ?? tag.class ?? tag.constraint;
+    return node === undefined ? null : node.getText( sf ).replace( /^\{|\}$/g, "" ).trim();
 }
 
 /**
- * Return the tags of one JSDoc block, from the compiler when the block is attached to a node.
+ * Return the name text of one parsed JSDoc tag, or null when the tag carries none.
  *
  * Requires:
- *   - range is { pos }, text is its stripped text, owner is the node it sits beside or undefined
+ *   - tag is a JSDoc tag node of sf
  *
  * Ensures:
- *   - returns [ { tag, type, name } ] where type is the type expression text or null
- *   - the compiler's parsed tags are used when the owner carries this block, else the line fallback
+ *   - a template tag gives its type parameter names joined by commas
  */
-function tagsOf( sf, range, text, owner ) {
-    const block = owner === undefined ? undefined : ( owner.jsDoc ?? [] ).find( ( doc ) => doc.pos === range.pos );
-    if ( block === undefined ) return fallbackTags( text );
+function tagName( sf, tag ) {
+    if ( tag.typeParameters !== undefined ) return tag.typeParameters.map( ( param ) => param.name.getText( sf ) ).join( "," );
+    return tag.name === undefined ? null : tag.name.getText( sf );
+}
+
+/**
+ * Return the tags of one parsed JSDoc block.
+ *
+ * Requires:
+ *   - block is a JSDoc node of sf
+ *
+ * Ensures:
+ *   - returns [ { tag, type, name, raw } ]; raw is the tag's own source text with the star margin
+ *     removed, so a reader never has to rebuild it from the type and name
+ */
+function readBlock( sf, block ) {
     return ( block.tags ?? [] ).map( ( tag ) => ( {
         tag  : tag.tagName.text,
-        type : tag.typeExpression === undefined ? null : tag.typeExpression.getText( sf ).replace( /^\{|\}$/g, "" ).trim(),
-        name : tag.name === undefined ? null : tag.name.getText( sf )
+        type : tagType( sf, tag ),
+        name : tagName( sf, tag ),
+        raw  : tag.getText( sf ).replace( /\n[ \t]*\* ?/g, "\n" ).trim()
     } ) );
+}
+
+/**
+ * Return the tags of one JSDoc block, parsed by the compiler.
+ *
+ * Requires:
+ *   - range is { pos, end } in sf, owner is the node it sits beside or undefined
+ *
+ * Ensures:
+ *   - a block the owner carries is read from the owner's own parse
+ *   - any other block (a stray comment, or a trailing one) is parsed on its own, followed by a
+ *     dummy statement to attach to, so braces inside a type and the template and extends tags read
+ *     the same as in an attached block
+ */
+function tagsOf( sf, range, owner ) {
+    const block = owner === undefined ? undefined : ( owner.jsDoc ?? [] ).find( ( doc ) => doc.pos === range.pos );
+    if ( block !== undefined ) return readBlock( sf, block );
+    const alone = ts.createSourceFile( "block.js", sf.text.slice( range.pos, range.end ) + "\nvar _;", ts.ScriptTarget.Latest, true, ts.ScriptKind.JS );
+    return ( alone.statements[ 0 ].jsDoc ).flatMap( ( doc ) => readBlock( alone, doc ) );
 }
 
 /**
@@ -308,7 +339,7 @@ function buildRecords( sf, fileName, ranges ) {
             symbol_key    : symbolKey,
             directive     : item.directive,
             commented_code: item.kind === "line-run" && ! item.directive && looksLikeCode( item.text ),
-            tags          : item.jsdoc ? tagsOf( sf, item.range, item.text, item.range.owner ) : [],
+            tags          : item.jsdoc ? tagsOf( sf, item.range, item.range.owner ) : [],
             ts_version    : ts.version
         };
     } );
