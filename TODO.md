@@ -25,6 +25,8 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **Do not exit; wait and read the eval run** (typed, about 10:00 EDT, reversing his checkpoint-and-exit request of a few minutes earlier).
 - **The full eval run is on demand only** (card, answered 14:30 EDT: "On demand only (Recommended)"). No schedule. The 5-per-command run stays in every integration run. Row `4cbd4858`, closed on job `ts-0850a838`.
 - **Before-and-after showcase of the docstring rewrite: plan it, do not build it yet** (voice and two cards, early afternoon). Internal first. A script ranks and Rick hand-picks. Lead with totals, findings by kind, and proof that meaning was kept. Two data sets: a data story and a gallery of the worst. Saved as an R&D page in the docs-rewrite plan folder. Row `170cda00`.
+- **The before-and-after document is compiled after the last train** (card, evening: "After the last train (Recommended)"). Once, with one fixed set of lint rules. Until then each train is measured as it lands and its worst docstrings are listed in the plan page. Not chosen: start the gallery now; build the tool first.
+- **The R&D directory cleanup stays parked for one week** (card, 20:35 EDT; row `3a2f726b`, next check 2026-10-13). His order of work: the docstring sweep, the wiki generator, the search built on it, then commit, push and merge this branch, then the R&D cleanup tickets. Nothing deleted.
 
 ## 📚 DECISIONS LOG 2026-10-04 (Mr. Radio 🦉 `93ec0919`, then `acd9cc5f` after a self re-spin at 14:52 EDT; crew Tiberius · Sam · Rio) — pilot finished, fast-check trial, Gemini comparison plan
 
