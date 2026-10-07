@@ -11,16 +11,16 @@ pins:
 ---
 # MCP task-store tools
 
-Ten MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
+Eleven MCP tools let a session read and write the task store over HTTP. The tools live in `cosa_voice_mcp.py`; `task_store_tools.py` holds the transport. [[task-store]] owns the rules.
 
 ## What it does
-- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_edit`. Read tools: `task_query`, `task_get`, `task_promotion_status`.
+- Write tools: `task_create`, `task_transition`, `task_correlate`, `task_reassign`, `task_amend`, `task_request`, `task_ask_unpark`, `task_edit`. Read tools: `task_query`, `task_get`, `task_promotion_status`.
 - Every call goes through `task_store_request` to `/api/tasks/...` with the outbound `X-API-Key`. A 2xx body comes back unchanged.
 - `session_spawner.py` also calls `task_transition_impl` and `task_reassign_impl` directly, bypassing the tool layer.
 
 ## Rules it enforces
 - Callers cannot name `created_by` or `actor`. The verb stamps it from the session persona and id, so a session cannot write as another.
-- The seven write tools refuse with `borrowed_identity` when the session id was guessed from the working directory. Read tools do not check.
+- The eight write tools refuse with `borrowed_identity` when the session id was guessed from the working directory. Read tools do not check.
 - Status rules, receipts and blocked fields are not checked here; the server's 422 `errors` list comes back verbatim.
 - `task_reassign` returns `empty_reason` on a blank reason, and sends no `status`. `accountable_manager` is sent only when `new_manager` is given.
 - `task_edit` returns `empty_updates` on an empty dict, and `owner_field_refused` for owner keys before any request. Use `task_reassign` for owners.
