@@ -19,6 +19,7 @@
 | [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | ⚠️ its former code anchor `src/lib/clients/` was deleted 2026-08-26 (row `e2099400` §3b) — the doc now describes the web frontend only |
 | [cost-model-bounded-cc-vs-firewalled-sdk.md](cost-model-bounded-cc-vs-firewalled-sdk.md) | Runbook: move an LLM-driven agent from the direct Anthropic SDK to a bounded Claude Code job (prerequisites, steps, verify, rollback) | `CLAUDE.md` § Cost model |
 | [fleet-liveness-and-task-store-architecture.md](fleet-liveness-and-task-store-architecture.md) | **Top-to-bottom** fleet liveness + unified task-store: one store / three readers (Stop-hook self-poke · arbiter :8001 · UI card), the heartbeat seam + `owed_source_from_store` cutover flag + fail-safe, arbiter detectors (staleness/tap-ACK/whole-fleet-stall), manager/worker lifecycle, migration drain | `src/lupin_cli/claude_code/hooks/`, `src/cosa/agents/heartbeat_arbiter/`, `src/cosa/rest/routers/tasks.py` |
+| [docstring-standard.md](docstring-standard.md) | What the pre-commit doc gate refuses in swept Python, the waiver form, the printed denominator | `src/cosa/repo/doc_lint/gate.py`, `swept_scope.py` |
 
 ## Agentic Jobs & Recovery
 
