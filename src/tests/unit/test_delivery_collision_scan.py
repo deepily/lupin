@@ -26,6 +26,7 @@ cases below assert exit 2, never 0.
 import importlib.util
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -206,6 +207,22 @@ def test_zero_branches_REFUSES_rather_than_reporting_clean( scan, repo ):
     question nobody asked.
     """
     _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+
+    with pytest.raises( LookupError, match="ZERO branches" ):
+        scan.scan( "target", max_tip_age_days=0.0000001 )
+
+
+@pytest.mark.parametrize( "phase", [ 0.0, 0.004, 0.0085, 0.5 ] )
+def test_zero_branches_refusal_holds_at_every_clock_phase( scan, repo, monkeypatch, phase ):
+    """
+    The refusal must not depend on the moment within the second at which the scan runs.
+
+    Git stores commit times in whole seconds, so a fresh branch has a tip up to a second old.
+    The clock is pinned `phase` seconds after that tip.
+    """
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + phase ) )
 
     with pytest.raises( LookupError, match="ZERO branches" ):
         scan.scan( "target", max_tip_age_days=0.0000001 )
