@@ -435,6 +435,7 @@ def test_caps_words_skips_the_placeholder_after_a_command_line_option():
     usage = "        [--allow-thread NAME]... [--json OUT] [--quiet]\n        prog -o OUT --level NOT"
     assert mc.caps_words( usage, words ) == []
     assert mc.caps_words( "the NAME and the OUT are loud", words ) == [ "NAME", "OUT" ]
+    assert mc.caps_words( "a well-known NOT", words ) == [ "NOT" ]
 
 
 def test_caps_words_still_flags_prose_that_does_not_follow_an_option():
