@@ -15,7 +15,11 @@ PROC_FD = "/proc/self/fd"
 
 
 class PinnedPathGone( Exception ):
-    """The path is absent, unlinked, or not the kind of object that was asked for."""
+    """The path is absent, or is not the kind of object that was asked for."""
+
+
+class PinnedPathUnlinked( PinnedPathGone ):
+    """The path opened, and its inode was unlinked before the descriptor could be judged."""
 
 
 def landed_path_of_fd( fd ):
@@ -29,12 +33,12 @@ def landed_path_of_fd( fd ):
         - returns the absolute path /proc reports for the descriptor
 
     Raises:
-        - PinnedPathGone when the inode has been unlinked
-        - OSError when /proc cannot be read, which the caller treats as a refusal
+        - PinnedPathUnlinked when the inode has been unlinked
+        - OSError when /proc cannot be read, which the caller must answer itself
     """
     landed = os.readlink( f"{PROC_FD}/{fd}" )
     if landed.endswith( " (deleted)" ):
-        raise PinnedPathGone( landed )
+        raise PinnedPathUnlinked( landed )
     return landed
 
 
@@ -51,9 +55,11 @@ def open_pinned( full_path, judge, directory=False ):
         - the descriptor is closed before any exception leaves
 
     Raises:
-        - PinnedPathGone when the open fails, the object is the wrong kind, or it was unlinked
+        - PinnedPathGone when the open fails or the object is the wrong kind
+        - PinnedPathUnlinked, a PinnedPathGone, when the inode was unlinked after the open
         - whatever `judge` raises
     """
+    # O_NONBLOCK keeps the open of a FIFO swapped in for the file from blocking the event loop.
     flags = os.O_RDONLY | os.O_CLOEXEC | ( os.O_DIRECTORY if directory else os.O_NONBLOCK )
     try:
         fd = os.open( full_path, flags )

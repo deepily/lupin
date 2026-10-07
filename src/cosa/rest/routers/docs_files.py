@@ -34,7 +34,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.routers._dir_listing import list_directory
-from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, landed_path_of_fd, open_pinned
+from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, PinnedPathUnlinked, landed_path_of_fd, open_pinned
 from cosa.rest.routers._scope_registry import ScopeConfig
 from cosa.rest.routers._scope_registry import (
     SECRETS_BLOCKLIST_PATTERNS,
@@ -393,7 +393,7 @@ def _landed_path_of_fd( fd: int ) -> str:
     """Where the inode behind `fd` lives right now; 404 if it has been unlinked."""
     try:
         return landed_path_of_fd( fd )
-    except PinnedPathGone:
+    except PinnedPathUnlinked:
         raise HTTPException( status_code=404, detail="Path not found" )
 
 
@@ -446,6 +446,8 @@ def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
     """
     try:
         return open_pinned( full_dir, lambda landed: _refuse_hidden_folder( _judge_landed( scope_cfg, landed ) ), directory=True )
+    except PinnedPathUnlinked:
+        raise HTTPException( status_code=404, detail="Path not found" )
     except PinnedPathGone:
         raise HTTPException( status_code=404, detail="Folder not found" )
 

@@ -2,10 +2,15 @@
 The shared descriptor helpers: open first, then judge where the descriptor landed.
 """
 import os
+import threading
 
 import pytest
+from fastapi import HTTPException
 
-from cosa.rest.routers._pinned_open import PinnedPathGone, landed_path_of_fd, open_pinned
+import cosa.rest.routers._pinned_open as pinned_open
+import cosa.rest.routers.docs_files as docs_files
+from cosa.rest.routers._pinned_open import PinnedPathGone, PinnedPathUnlinked, landed_path_of_fd, open_pinned
+from cosa.rest.routers._scope_registry import ScopeConfig
 
 
 def _open_fds():
@@ -71,7 +76,57 @@ def test_an_unlinked_inode_is_gone_not_judged( tmp_path ):
     fd = os.open( victim, os.O_RDONLY )
     try:
         os.unlink( victim )
-        with pytest.raises( PinnedPathGone ):
+        with pytest.raises( PinnedPathUnlinked ):
             landed_path_of_fd( fd )
     finally:
         os.close( fd )
+
+
+def test_a_fifo_in_place_of_the_file_is_refused_not_waited_on( tmp_path ):
+    """Kills the mutant that drops O_NONBLOCK: a FIFO with no writer would block the open."""
+    fifo = tmp_path / "swapped.md"
+    os.mkfifo( fifo )
+    before = _open_fds()
+    outcome = []
+
+    def attempt():
+        try:
+            open_pinned( str( fifo ), lambda landed: None )
+        except PinnedPathGone:
+            outcome.append( "refused" )
+
+    worker = threading.Thread( target=attempt, daemon=True )
+    worker.start()
+    worker.join( timeout=5 )
+    assert not worker.is_alive(), "open_pinned blocked on a FIFO"
+    assert outcome == [ "refused" ] and _open_fds() == before
+
+
+# ── the docs door keeps its own words for each way a folder can be gone ─────
+
+@pytest.fixture
+def scope( tmp_path ):
+    ( tmp_path / "repo" / "docs" / "dir" ).mkdir( parents=True )
+    return ScopeConfig( name="repo", root=str( tmp_path / "repo" ), allowed_prefixes=( "docs", ) ), tmp_path / "repo" / "docs" / "dir"
+
+
+def test_a_folder_missing_before_the_open_says_folder_not_found( scope ):
+    cfg, folder = scope
+    with pytest.raises( HTTPException ) as exc:
+        docs_files._pin_directory( str( folder / "nope" ), cfg )
+    assert ( exc.value.status_code, exc.value.detail ) == ( 404, "Folder not found" )
+
+
+def test_a_folder_unlinked_between_the_open_and_the_read_says_path_not_found( scope, monkeypatch ):
+    """The docs door's words before the shared module: the unlink is found at the readlink."""
+    cfg, folder = scope
+    real = pinned_open.landed_path_of_fd
+
+    def unlink_first( fd ):
+        folder.rmdir()
+        return real( fd )
+
+    monkeypatch.setattr( pinned_open, "landed_path_of_fd", unlink_first )
+    with pytest.raises( HTTPException ) as exc:
+        docs_files._pin_directory( str( folder ), cfg )
+    assert ( exc.value.status_code, exc.value.detail ) == ( 404, "Path not found" )
