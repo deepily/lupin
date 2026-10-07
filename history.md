@@ -33,6 +33,10 @@
 - **State at 13:56 EDT**: the locks are on the branch at `b2e23029d`, and the gate reads 865 files, 0 findings on the host. Not pushed. The push hook is not installed: a guard refuses any seat that writes the hooks folder, so the install is Rick's.
 - **Board review** (broadcast `86e4535b`): 22 open rows read; `170cda00` closed; twelve old held rows checked against the code by two read-only sub-agents, ten still true. List at `io/tmp/2026.10.07-mr-radio-board-cleanup.md`.
 - **Plan 2**: Mr. Radio takes baseline recall (row `6ebcea20`). It waits on Rick: no Jev key in the seat, and one live tool query is 7,603 Jev calls.
+- **The locks went live at 14:12 EDT**: Rick made the pre-push link by hand. Row `2c48c717` is done. The installed hook was run by hand against a planted finding and refused it. Git has not yet invoked it on a real push.
+- **Hook check in the VM preflight** (Rick's voice order, an amendment on row `fae0bc51`): check B7 in `preflight-vm.sh` warns when either git hook link is missing, and the new-host checklist says how to make them. Tiberius reviewed it. It is on the branch as `be4c6cb9b` and `6ea26271f`, inside Cheech's build `24e0882c0`. His tiers on that build: unit 30,601 passed, cosa 9,114 passed, 0 failed.
+- **A crew of two from 14:58 EDT** (Rick lifted the no-seats order on a card): Maya builds a hook installer that deploy runs, Pocholo reviews. A third seat was refused by the fleet cap of 12.
+- **Fix-train spec** for eight held bug rows: `io/tmp/2026.10.07-mr-radio-fix-train-spec.md`. Seven ride. Row `0c695d2a` is pulled until its hang is reproduced. Row `a798d296` is wider than filed: the reap check's default target branch is 839 commits behind the head.
 
 ### 2026.10.06 - Session 4afec3b4 (Mr. Radio 🦉, manager, no crew; from 08:56 EDT) | Legacy task card re-reads on a push; websocket push row and eval row closed; a scheduled job lost on :8000; showcase plan for the docstring rewrite
 
