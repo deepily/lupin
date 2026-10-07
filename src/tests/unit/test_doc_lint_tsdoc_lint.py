@@ -233,6 +233,28 @@ def test_a_header_that_opens_with_a_rule_line_is_summarised_from_the_line_after_
     assert _hits( [ _comment( "==========\n", kind="line-run", start=1, symbol_key="<file-header>" ) ] ) == []
 
 
+def test_box_drawing_rules_are_banners_too():
+    for line in ( "\u2500\u2500 THE OPERATOR ATTESTATION \u2500\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500 NEVER \u2500\u2500\u2500\u2500",
+                  "\u2550\u2550\u2550\u2550\u2550\u2550", "\u2554\u2550\u2550\u2550\u2550 NEVER \u2550\u2550\u2550\u2550\u2557", "\u257f\u257f\u257f\u257f NEVER" ):
+        assert _hits( [ _comment( line + "\n", kind="line-run" ) ] ) == [], line
+    assert _hits( [ _comment( "\u24ff\u24ff\u24ff\u24ff NEVER\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "\u2580\u2580\u2580\u2580 NEVER\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+
+
+def test_a_date_in_a_banner_title_is_still_a_history_marker_but_never_a_caps_finding():
+    assert _hits( [ _comment( "---- UPDATE 2026-10-07 ----\n", kind="line-run" ) ] ) == [ ( 10, "dated-banner" ), ( 10, "iso-date" ) ]
+    assert _hits( [ _comment( "---- fixed 2026-10-07: the cache ----\n", kind="line-run" ) ] ) == [ ( 10, "dated-banner" ), ( 10, "iso-date" ) ]
+    assert _hits( [ _comment( "\u2500\u2500 NEVER ruling 2026-09-28 \u2500\u2500\u2500\u2500\u2500\n", kind="line-run" ) ] ) == [ ( 10, "iso-date" ) ]
+    assert _hits( [ _comment( "---- load-bearing by construction ----\n", kind="line-run" ) ] ) == []
+    assert _hits( [ _comment( "load-bearing by construction\n", kind="line-run" ) ] ) == [ ( 10, "tic" ), ( 10, "tic" ) ]
+
+
+def test_an_indented_rule_line_is_a_banner():
+    for line in ( "   ----------", "\t==== NEVER ====", "  -- NEVER ----" ):
+        assert _hits( [ _comment( line + "\n", kind="line-run" ) ] ) == [], line
+    assert tsdoc_lint._blank_banners( "a\n    ------\nb" ) == "a\n\nb"
+
+
 def test_a_jsdoc_block_keeps_every_line_so_a_rule_like_line_there_is_still_read():
     assert _hits( [ _comment( "\nSummary.\n\n---- NEVER do ----\n" ) ] ) == [ ( 13, "caps" ) ]
 

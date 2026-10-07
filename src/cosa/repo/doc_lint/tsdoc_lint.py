@@ -36,8 +36,9 @@ TAG_LINE   = re.compile( r"([ \t]*)(@[A-Za-z][\w-]*)" )
 NAME_TOKEN = re.compile( r"\[[^\]]*\]|[\w$.]+" )
 LINK_SPAN  = re.compile( r"\{@(?:link|linkcode|linkplain)\b[^}]*\}" )
 # A banner is layout, not prose: a rule of four or more rule characters, with or without a title after it, or a
-# title between a short opening rule (two or more characters) and a closing rule of four or more.
-BANNER_LINE = re.compile( r"^\s*(?:[-=#~*_+]{4,}(?:\s.*)?|[-=#~*_+]{2,}\s.*\s[-=#~*_+]{4,}\s*)$" )
+# title between a short opening rule (two or more characters) and a closing rule of four or more. The rule
+# characters are the ASCII ones and the box-drawing block U+2500 to U+257F.
+BANNER_LINE = re.compile( r"^\s*(?:[-=#~*_+\u2500-\u257f]{4,}(?:\s.*)?|[-=#~*_+\u2500-\u257f]{2,}\s.*\s[-=#~*_+\u2500-\u257f]{4,}\s*)$" )
 
 
 def in_scope( path ):
@@ -208,7 +209,8 @@ def _blank_banners( text ):
         - text is the body of a line run, block or trailing comment
 
     Ensures:
-        - a line that starts with four or more of - = # ~ * _ + , then nothing or a space and a title, becomes empty
+        - a line that starts with four or more of - = # ~ * _ + or a box-drawing character (U+2500 to U+257F), then
+          nothing or a space and a title, becomes empty
         - so does a line that starts with two or more of them and a space, and ends with a space and four or more
         - the number of lines is unchanged, so a finding below a banner keeps its real line
         - a line of three rule characters, or a bullet, is not a banner
@@ -230,16 +232,18 @@ def _plain_findings( path, comment ):
         - returns the emphasis, tic and history findings, as comment_lint does for Python comments
         - the history rule runs without its model-order check
         - a file header run also gets the summary rule
-        - banner lines are blanked first (see _blank_banners), so layout draws no finding and a header that opens with a
-          rule line has its summary read from the first line after it
+        - banner lines are blanked first (see _blank_banners) for the emphasis, tic and summary rules, so layout draws
+          none of them and a header that opens with a rule line has its summary read from the first line after it
+        - the history rules read the unblanked text: a date or an update stamp in a banner title is a history marker
         - sentence, reference and length rules are not applied: a comment is a working note
 
     Raises:
         - nothing
     """
-    text     = _blank_banners( comment[ "text" ] )
+    raw      = comment[ "text" ]
+    text     = _blank_banners( raw )
     first    = comment[ "start_line" ]
-    findings = emphasis_findings( text, path, first ) + rhetoric_findings( text, path, first ) + history_findings( text, path, first, agent_rule=False )
+    findings = emphasis_findings( text, path, first ) + rhetoric_findings( text, path, first ) + history_findings( raw, path, first, agent_rule=False )
     if comment[ "kind" ] == "line-run" and comment[ "symbol_key" ] == FILE_HEADER_KEY:
         findings += summary_findings( text, path, first )
     return findings
