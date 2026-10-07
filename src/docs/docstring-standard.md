@@ -1,5 +1,7 @@
 # Docstring standard
 
+The eight writing rules are not in this page yet. It covers only what the commit gate does.
+
 The rules are in code: `src/cosa/repo/doc_lint/text_rules.py` holds the text rules and `src/cosa/repo/doc_lint/rule_lists.py` holds the limits (summary 90 characters, sentence 25 words, preface 6 lines, docstring 40 lines). This page covers only what the commit gate does with them.
 
 ## The commit gate now refuses
