@@ -1161,19 +1161,43 @@ def _process_cwd_inside( path: str, proc_root: str = "/proc" ) -> Optional[ bool
         - a single unreadable pid (exited, or another user's) is skipped, not fatal
         - never raises
     """
-    target = os.path.realpath( path )
+    cwds = live_process_cwds( proc_root )
+    return None if cwds is None else cwd_inside( path, cwds )
+
+
+def live_process_cwds( proc_root: str = "/proc" ) -> Optional[ set ]:
+    """
+    Where every live process is standing, read once.
+
+    Ensures:
+        - returns the set of real paths that some /proc/<pid>/cwd resolves to
+        - returns None when /proc cannot be listed (cannot prove nobody is inside)
+        - a single unreadable pid (exited, or another user's) is skipped, not fatal
+        - never raises
+    """
     try:
         pids = [ p for p in os.listdir( proc_root ) if p.isdigit() ]
     except OSError:
         return None
+    cwds = set()
     for pid in pids:
         try:
-            cwd = os.path.realpath( os.readlink( os.path.join( proc_root, pid, "cwd" ) ) )
+            cwds.add( os.path.realpath( os.readlink( os.path.join( proc_root, pid, "cwd" ) ) ) )
         except OSError:
             continue
-        if cwd == target or cwd.startswith( target + os.sep ):
-            return True
-    return False
+    return cwds
+
+
+def cwd_inside( path: str, cwds: set ) -> bool:
+    """
+    Does any of these working directories sit in `path` or below it?
+
+    Ensures:
+        - a directory counts when it is `path` itself or under `path` + a separator, so a sibling
+          whose name only starts the same does not
+    """
+    target = os.path.realpath( path )
+    return any( c == target or c.startswith( target + os.sep ) for c in cwds )
 
 
 def seat_is_alive( session_name: str, path: str ) -> bool:
@@ -1204,6 +1228,7 @@ def reconcile_worktrees(
     branch_fn           : Optional[ Callable ] = None,
     debug               : bool                 = False,
     evacuation_root     : Optional[ str ]      = None,
+    cwds_fn             : Optional[ Callable ] = None,
 ) -> dict:
     """
     Janitor backstop: drain_then_remove every abandoned sandbox worktree.
@@ -1215,8 +1240,8 @@ def reconcile_worktrees(
     Requires:
         - sandbox_root is None (meaning <project_root>/.claude/worktrees), an absolute
           path, or a project-root-relative path
-        - run / drain_fn / list_fn / age_fn / seat_alive_fn / branch_fn are None (real
-          impls) or injected (testing); seat_alive_fn( session_name, path ) -> bool;
+        - run / drain_fn / list_fn / age_fn / seat_alive_fn / branch_fn / cwds_fn are None (real
+          impls) or injected (testing); seat_alive_fn( session_name, path ) -> bool; cwds_fn() -> set or None;
           branch_fn( project_root, branch, target, run= ) -> delete_merged_branch's dict
 
     Ensures:
@@ -1231,6 +1256,7 @@ def reconcile_worktrees(
           unlocked and drained, and if the drain does not remove it the lock is put
           back with its original reason (an unlocked survivor would lose the
           protection the next poll relies on)
+        - a tree some live process stands in (its /proc cwd, never a pid) is skipped "process_cwd_inside"; no /proc: "process_cwd_unknown"
         - delegates removal to drain_then_remove, so it never pushes
         - the default drain is handed evacuation_root (None meaning <project_root>/io/worktree-evacuated),
           so a tree holding ignored data is emptied into a dated folder there and removed instead of
@@ -1262,6 +1288,8 @@ def reconcile_worktrees(
     now_ts   = now_dt.timestamp()
     age_fn   = age_fn if age_fn is not None else ( lambda p: _newest_mtime_age_hours( p, now_ts ) )
     seat_alive_fn = seat_alive_fn if seat_alive_fn is not None else seat_is_alive
+    cwds_fn       = cwds_fn       if cwds_fn       is not None else live_process_cwds
+    seen_cwds     = []              # filled on first use: the /proc scan runs once per poll, not once per tree
     branch_fn     = branch_fn     if branch_fn     is not None else retire_branch
 
     sandbox_abs = os.path.abspath( sandbox_root )
@@ -1284,6 +1312,11 @@ def reconcile_worktrees(
                 out[ "skipped" ].append( { "path": path, "reason": "locked" } ); continue
             if seat_lock and seat_alive_fn( lock_reason[ len( SEAT_LOCK_PREFIX ): ], path ):
                 out[ "skipped" ].append( { "path": path, "reason": "seat_alive" } ); continue
+            if not seen_cwds: seen_cwds.append( cwds_fn() )
+            if seen_cwds[ 0 ] is None:
+                out[ "skipped" ].append( { "path": path, "reason": "process_cwd_unknown" } ); continue
+            if cwd_inside( path, seen_cwds[ 0 ] ):
+                out[ "skipped" ].append( { "path": path, "reason": "process_cwd_inside" } ); continue
             age = age_fn( path )
             if age < age_threshold_hours:
                 out[ "skipped" ].append( { "path": path, "reason": f"active_{round( age, 2 )}h" } ); continue
