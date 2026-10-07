@@ -4,12 +4,12 @@
 // #15), reconnect orchestration via the embedded ConnectionStateMachine,
 // and stop() teardown.
 
-import { test, before, after } from "node:test";
+import { test, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
-  createQueueTransport,
+  createQueueTransport as createQueueTransportUntracked,
 } from "../../../lupin_app/static/js/multiplexer/transport/QueueTransport";
 import type {
   AuthStateChangePayload,
@@ -33,6 +33,24 @@ const PINNED_DRAW = 0.9;
 const realRandom  = Math.random;
 before( () => { Math.random = () => PINNED_DRAW; } );
 after(  () => { Math.random = realRandom; } );
+
+// Every transport a test starts arms a handshake timer, and a handshake that times out reconnects
+// on a backoff timer, forever. Left running, those timers keep the process alive after the last
+// assertion passes and the file never exits (row 0c695d2a). Track each one and stop it afterwards.
+// stop() is safe to repeat, so a test that already stopped its transport is unaffected.
+const startedTransports: Array<{ stop(): void }> = [];
+
+function createQueueTransport(
+  options: Parameters<typeof createQueueTransportUntracked>[0],
+): ReturnType<typeof createQueueTransportUntracked> {
+  const transport = createQueueTransportUntracked(options);
+  startedTransports.push(transport);
+  return transport;
+}
+
+afterEach( () => {
+  for ( const transport of startedTransports.splice( 0 ) ) transport.stop();
+} );
 
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") {
@@ -622,7 +640,12 @@ test("handshake-timeout: onHandshakeTimeout() force-closes + drives socket_close
   t.start("wise penguin");
   MockWebSocket.instances[0]!.fireOpen();
   await new Promise((r) => setTimeout(r, 10));   // let getToken settle (still unauthed — no auth_success)
+  // Calling onHandshakeTimeout() directly nulls the field but cannot clear the 10 s timer it never
+  // owned, and stop() then finds nothing to cancel. Clear it here, or it holds the process open
+  // for ten seconds after the file's last assertion (row 0c695d2a).
+  const armed = (t as unknown as { handshakeTimer: ReturnType<typeof setTimeout> | null }).handshakeTimer;
   (t as unknown as { onHandshakeTimeout: () => void }).onHandshakeTimeout();
+  if (armed !== null) clearTimeout(armed);
   assert.equal(MockWebSocket.instances[0]!.closed, true);   // wsChannel.stop() ran (true-arm)
   assert.equal(t.state, "backoff");                         // csm.send(socket_close) ran (true-arm)
   assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);
