@@ -64,6 +64,16 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **The MCP folder is locked only after its prompts are reviewed** (same card, his words): "Hold the count after the dock strings which serve as a prompt to LLMs are reviewed for the appropriateness of the language contained within them Once those prompts are reviewed and edited to remove superfluous or counterproductive mandates Then they can be locked". Row `f2d2a1c7` (Cheech).
 - **The lock work is Mr. Radio's ticket, to be approved and raised to P0** (voice, about 11:53 EDT). Row `2c48c717`.
 - **Both managers review every ticket and propose an easy way to remove obsolete ones** (broadcast `86e4535b`). Not ruled yet: the joint list of four rows to drop, the seats question for Mr. Radio (two cards timed out), and the Jev key and spend question (decision row `53ebe1a9`, Cheech).
+- **A crew of three; the hook check stays at warn; the VM gets its hook links with the next deploy; deploy runs the hook installer** (two cards, answered about 14:50 to 14:55 EDT). The no-seats order of 2026-10-06 is lifted. The crew was two seats, because the fleet cap refused a third.
+- **The fleet cap line in `lupin-app.ini` is committed as 12, and that file is always committed without asking** (card, answered 16:49 EDT). Commit `8662956fa`.
+- **Merge the lineage fix; a picture tolerance with a redden proof; a manager may un-park with the card id; the database cutover is tonight, after the builds land** (one card, answered 16:53 EDT). Rows `8d4a5a59`, `a0d081da`, `9dde52ef`, `80513825`.
+- **For a manager's un-park, only a card the server made for that row counts, and it moves the row to queued only** (card `k3vkxz3y9`, answered between 17:14 and 17:18 EDT: "Server-made card for that row (Recommended)", "No, queue only (Recommended)"). Not chosen: any card he answered yes; the request door; letting the card also start a parked row.
+
+**Mr. Radio ruled**:
+
+- **The fix train lands as one fast-forward after one whole unit tier on the re-picked tip**, not ticket by ticket. Main went from `8267a2c39` to `72f433934` at 17:43 EDT.
+- **The un-park card is minted by a new manager-only endpoint and one new MCP verb** (Maya's option A), with one live card per row and park.
+- **The stock snapshot plugin's 0.1 threshold at nine call sites stays as it is**; the 0.03 tolerance covers the repository's own comparators and the flake tool.
 
 ## 📚 DECISIONS LOG 2026-10-06 (Mr. Radio 🦉 `4afec3b4`, no crew)
 
