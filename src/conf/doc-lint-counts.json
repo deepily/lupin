@@ -416,7 +416,7 @@
     "src/lupin_mcp/commons_persona_matcher.py": 13,
     "src/lupin_mcp/commons_store.py": 67,
     "src/lupin_mcp/commons_xml_models.py": 18,
-    "src/lupin_mcp/cosa_voice_mcp.py": 1134,
+    "src/lupin_mcp/cosa_voice_mcp.py": 658,
     "src/lupin_mcp/fleet_cap_admission.py": 327,
     "src/lupin_mcp/fleet_cap_ini_io.py": 168,
     "src/lupin_mcp/fleet_size_cap.py": 488,
