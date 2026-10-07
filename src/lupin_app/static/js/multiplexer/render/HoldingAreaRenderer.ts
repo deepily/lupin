@@ -570,6 +570,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    * Ensures:
    *   - `.collapsed`, the header's aria-expanded and the chevron all agree with `open`
    *   - the plan id is in expandedPlans exactly when `open`
+   *   - closing the plan disarms its own Approve all, so an arm cannot outlive the view it was made in
+   *   - opening a plan, and opening or closing any other plan, leaves an armed button armed
    */
   private setPlanOpen( group: HTMLElement, open: boolean ): void {
     /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer and data-plan on every plan group.
@@ -579,7 +581,10 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     header.setAttribute( "aria-expanded", open ? "true" : "false" );
     header.querySelector( ".holding-plan-chevron" )!.textContent = holdingPlanChevron( open );
     if ( open ) this.expandedPlans.add( id );
-    else this.expandedPlans.delete( id );
+    else {
+      this.expandedPlans.delete( id );
+      this.disarmPlanButton( group.querySelector<HTMLButtonElement>( ".holding-plan-approve-all" )! );
+    }
   }
 
   /**
@@ -744,11 +749,16 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     /* c8 ignore next */ // defensive: runPlanApprove only runs for a button inside the rendered container.
     if ( this.container === null ) return;
     for ( const b of Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-plan-approve-all" ) ) ) {
-      if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
-      delete b.dataset.armed;
-      b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
-      b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
+      this.disarmPlanButton( b );
     }
+  }
+
+  /** Return one plan's button to its resting label and clear its status line if it was armed. */
+  private disarmPlanButton( b: HTMLButtonElement ): void {
+    if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
+    delete b.dataset.armed;
+    b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
+    b.textContent = holdingPlanApproveLabel( ( b.dataset.taskIds ?? "" ).split( "," ).filter( ( id ) => id !== "" ).length );
   }
 
   /** The group's batch reason box, trimmed, or "" when it is not rendered. */

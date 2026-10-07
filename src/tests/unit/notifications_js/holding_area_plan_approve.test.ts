@@ -568,3 +568,58 @@ test( "arm: the FIRST press OPENS the closed plan, so its rows are on screen bef
   h.repaint();
   assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "the repaint shut the plan the operator is about to approve" );
 } );
+
+
+// ───────────── closing a plan disarms its Approve all (bug e848467a) ─────────────
+
+const planHeader = ( h: Harness, f: string, k: string ): HTMLElement => h.group( f, k ).querySelector( ".holding-plan-header" ) as HTMLElement;
+
+test( "close: closing an armed plan disarms it and clears its line, and the next press arms again instead of approving", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  const btn = h.button( ...RA );
+  click( btn );
+  assert.equal( btn.dataset.armed, "1", "precondition: the first press armed the plan" );
+  click( planHeader( h, ...RA ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "precondition: the header click closed the plan" );
+  assert.equal( btn.dataset.armed, undefined, "closing the plan left its Approve all armed" );
+  assert.equal( btn.classList.contains( "task-submit-armed" ), false );
+  assert.equal( btn.textContent, "Approve all 3" );
+  assert.equal( h.status( ...RA ), "" );
+  click( planHeader( h, ...RA ) );
+  assert.equal( h.button( ...RA ).dataset.armed, undefined, "reopening showed an armed button" );
+  click( h.button( ...RA ) );
+  await settle();
+  assert.equal( h.calls.length, 0, "one press after a close and a reopen approved the plan" );
+  assert.equal( h.button( ...RA ).dataset.armed, "1" );
+} );
+
+test( "close: the keyboard closes an armed plan the same way", () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( h.button( ...RA ) );
+  planHeader( h, ...RA ).dispatchEvent( new window.KeyboardEvent( "keydown", { key: "Enter", bubbles: true, cancelable: true } ) );
+  assert.ok( h.group( ...RA ).classList.contains( "collapsed" ), "precondition: Enter closed the plan" );
+  assert.equal( h.button( ...RA ).dataset.armed, undefined );
+  assert.equal( h.status( ...RA ), "" );
+} );
+
+test( "close: opening or closing any OTHER plan leaves an armed plan armed, and so does opening it", () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( h.button( ...RA ) );
+  click( planHeader( h, ...RC ) );
+  click( planHeader( h, ...SS ) );
+  click( planHeader( h, ...RC ) );
+  click( planHeader( h, ...SS ) );
+  assert.equal( h.button( ...RA ).dataset.armed, "1", "toggling a sibling disarmed the armed plan" );
+  assert.equal( h.button( ...RA ).textContent, "Confirm approve all 3" );
+  assert.equal( h.status( ...RA ), "Click again to approve 3 rows in this plan." );
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "the armed plan was shut" );
+} );
+
+test( "close: closing an unarmed plan changes nothing about it", () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( planHeader( h, ...RA ) );
+  click( planHeader( h, ...RA ) );
+  assert.equal( h.button( ...RA ).textContent, "Approve all 3" );
+  assert.equal( h.button( ...RA ).dataset.armed, undefined );
+  assert.equal( h.status( ...RA ), "" );
+} );

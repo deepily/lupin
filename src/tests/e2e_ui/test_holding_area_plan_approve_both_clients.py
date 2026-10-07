@@ -353,3 +353,51 @@ def test_plan_approve_legacy_board_labels_the_plan_and_never_paints_the_raw_key(
     assert "epic" not in header_text.lower() and "story" not in header_text.lower(), \
         f"the header says story or epic: {header_text!r}"
     expect( logged_in_page.locator( f"{pane} .holding-area-stories, {pane} .holding-story-bar" ) ).to_have_count( 0 )
+
+
+# ---------------------------------------------------------------------------
+# ROUTE-SEEDED: closing a plan disarms its Approve all (bug e848467a)
+# ---------------------------------------------------------------------------
+
+def _arm_close_reopen( page, pane, state ):
+    """
+    Arm a plan, close it, reopen it: the button is at rest and one press only arms.
+
+    The two-press rule exists so nobody approves rows they are not looking at. An arm that outlives
+    a close would let one press, minutes later, approve a plan nobody is looking at.
+    """
+    open_holding_groups( page, pane )
+    rachel = _plan( page, pane, PLAN_KEY, "Rachel" )
+    expect( rachel ).to_have_count( 1, timeout=TIMEOUT_MS )
+    button = rachel.locator( ".holding-plan-approve-all" )
+    header = rachel.locator( ".holding-plan-header" )
+
+    button.click()                                                    # arms, and opens the plan
+    expect( button ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
+    expect( header ).to_have_attribute( "aria-expanded", "true" )
+
+    header.click( position={ "x": 4, "y": 4 } )                       # closes the plan
+    expect( header ).to_have_attribute( "aria-expanded", "false" )
+    expect( button ).to_have_text( f"Approve all {PLAN_ROWS}" )       # disarmed by the close
+    expect( rachel.locator( ".holding-plan-status" ) ).to_have_text( "" )
+
+    header.click( position={ "x": 4, "y": 4 } )                       # reopens it
+    expect( header ).to_have_attribute( "aria-expanded", "true" )
+    expect( button ).to_have_text( f"Approve all {PLAN_ROWS}" )
+    expect( rachel.locator( ".holding-plan-status" ) ).to_have_text( "" )
+
+    button.click()                                                    # one press arms again; it must not approve
+    expect( button ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
+    assert state[ "transitions" ] == [ ], f"a press after a close and a reopen posted: {state[ 'transitions' ]}"
+
+
+def test_plan_approve_legacy_board_closing_a_plan_disarms_it( logged_in_page ):
+    state = _route_operator( logged_in_page )
+    pane  = _open_legacy( logged_in_page )
+    _arm_close_reopen( logged_in_page, pane, state )
+
+
+def test_plan_approve_multiplexer_board_closing_a_plan_disarms_it( page ):
+    state = _route_operator( page )
+    pane  = _open_mux( page )
+    _arm_close_reopen( page, pane, state )

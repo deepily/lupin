@@ -14946,12 +14946,21 @@ class NotificationsUI {
          *     - the status line of a plan that was armed is cleared
          *     - no plan headers on the page is a no-op
          */
-        document.querySelectorAll( ".holding-plan-approve-all" ).forEach( b => {
-            if ( b.dataset.armed === "1" ) this._renderHoldingPlanStatus( this._planButtonId( b ), "" );
-            delete b.dataset.armed;
-            b.classList.remove( "task-submit-armed" );
-            b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length }`;
-        } );
+        document.querySelectorAll( ".holding-plan-approve-all" ).forEach( b => this._disarmHoldingPlanButton( b ) );
+    }
+
+    _disarmHoldingPlanButton( b ) {
+        /**
+         * Return one plan's approve button to its resting label.
+         *
+         * Ensures:
+         *     - the armed flag and class are cleared and the label reads "Approve all N"
+         *     - the status line of the plan is cleared when the button was armed
+         */
+        if ( b.dataset.armed === "1" ) this._renderHoldingPlanStatus( this._planButtonId( b ), "" );
+        delete b.dataset.armed;
+        b.classList.remove( "task-submit-armed" );
+        b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length }`;
     }
 
     _armHoldingPlanButton( button, id, count ) {
@@ -15221,6 +15230,8 @@ class NotificationsUI {
          * Ensures:
          *     - .collapsed, the header's aria-expanded and the chevron all agree with `open`
          *     - the plan id is in _holdingAreaExpandedPlans exactly when `open`
+         *     - closing the plan disarms its own Approve all, so an arm cannot outlive the view it was made in
+         *     - opening a plan, and opening or closing any other plan, leaves an armed button armed
          */
         if ( !( this._holdingAreaExpandedPlans instanceof Set ) ) this._holdingAreaExpandedPlans = new Set();
         const id     = this._holdingPlanId( group.dataset.filer || "", group.dataset.plan || "" );
@@ -15229,7 +15240,10 @@ class NotificationsUI {
         header.setAttribute( "aria-expanded", open ? "true" : "false" );
         header.querySelector( ".holding-plan-chevron" ).textContent = open ? "▼" : "▶";
         if ( open ) this._holdingAreaExpandedPlans.add( id );
-        else this._holdingAreaExpandedPlans.delete( id );
+        else {
+            this._holdingAreaExpandedPlans.delete( id );
+            this._disarmHoldingPlanButton( group.querySelector( ".holding-plan-approve-all" ) );
+        }
     }
 
     _heldRowIdsForFiler( filer ) {
