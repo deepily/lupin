@@ -173,8 +173,9 @@ def test_build_pairs_pairs_the_changed_block_and_reports_every_drop( repo ):
     assert pairs[ 0 ][ "file" ] == "lib/kept.dart" and pairs[ 0 ][ "symbol" ] == "Kept.changed" and pairs[ 0 ][ "linked_doc" ] is None
     assert pairs[ 0 ][ "changed" ] is True
     assert report == { "files_old" : 2, "files_new" : 2, "files_only_old" : [ "lib/deleted.dart" ], "files_only_new" : [ "lib/added.dart" ],
-                       "blocks_old" : 6, "blocks_new" : 5, "eligible_old" : 5,
-                       "dropped_file_deleted" : 1, "dropped_symbol_gone" : 1, "dropped_unchanged" : 2, "pairs" : 1 }
+                       "blocks_old" : 6, "blocks_new" : 5, "eligible_old" : 5, "below_min_words" : 1,
+                       "dropped_file_deleted" : 1, "dropped_symbol_gone" : 1, "dropped_unchanged" : 2,
+                       "paired_plain_comment" : 0, "paired_no_comment" : 0, "pairs" : 1 }
 
 
 def test_the_class_block_of_a_changed_file_is_unchanged_and_the_whitespace_only_rewrite_is_dropped( repo ):

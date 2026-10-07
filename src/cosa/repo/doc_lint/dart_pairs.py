@@ -173,6 +173,39 @@ def declaration_name( lines, index ):
     return match.group( 1 ) if match else None
 
 
+def _owner_spans( lines ):
+    """
+    Find the owner bodies of a Dart source.
+
+    Requires:
+        - lines is a list of source lines
+
+    Ensures:
+        - returns [ ( first_line_index, end_line_index, owner_name ) ] for each class, mixin, enum or
+          extension that opens with { at column 0 and closes with } at column 0 (or the end of the file)
+
+    Raises:
+        - nothing
+    """
+    spans, opened = [], None
+    for number, line in enumerate( lines ):
+        if not line or line[ 0 ].isspace(): continue
+        match = OWNER_REGEX.match( line )
+        if match and match.group( 1 ):
+            if line.count( "{" ) > line.count( "}" ): opened = ( number, match.group( 1 ) )
+        elif line[ 0 ] == "}" and opened is not None:
+            spans.append( ( opened[ 0 ], number, opened[ 1 ] ) )
+            opened = None
+    if opened is not None: spans.append( ( opened[ 0 ], len( lines ), opened[ 1 ] ) )
+    return spans
+
+
+def _symbol( name, owner ):
+    """Ensures: returns Owner.member, Owner.new or the bare name for a declaration."""
+    if owner is None or name in ( "<library>", "<unattached>" ) or name.startswith( f"{owner}." ): return name
+    return f"{owner}.new" if name == owner else f"{owner}.{name}"
+
+
 def extract_blocks( source ):
     """
     List the doc-comment blocks of a Dart source with the symbol each documents.
@@ -191,27 +224,87 @@ def extract_blocks( source ):
         - nothing
     """
     lines  = source.split( "\n" )
-    spans, opened = [], None
-    for number, line in enumerate( lines ):
-        if not line or line[ 0 ].isspace(): continue
-        match = OWNER_REGEX.match( line )
-        if match and match.group( 1 ):
-            if line.count( "{" ) > line.count( "}" ): opened = ( number, match.group( 1 ) )
-        elif line[ 0 ] == "}" and opened is not None:
-            spans.append( ( opened[ 0 ], number, opened[ 1 ] ) )
-            opened = None
-    if opened is not None: spans.append( ( opened[ 0 ], len( lines ), opened[ 1 ] ) )
+    spans  = _owner_spans( lines )
     out, seen = [], {}
     for first_line, text in doc_blocks( source ):
         count = len( text.split( "\n" ) )
         after = _skip_annotations( lines, first_line - 1 + count )
         name  = declaration_name( lines, after ) or "<unattached>"
         owner = next( ( name_ for start, end, name_ in spans if start < after < end ), None )
-        if owner is None or name in ( "<library>", "<unattached>" ) or name.startswith( f"{owner}." ): symbol = name
-        elif name == owner: symbol = f"{owner}.new"
-        else: symbol = f"{owner}.{name}"
+        symbol = _symbol( name, owner )
         seen[ symbol ] = seen.get( symbol, 0 ) + 1
         out.append( ( symbol if seen[ symbol ] == 1 else f"{symbol}#{seen[ symbol ]}", first_line, block_text( text ) ) )
+    return out
+
+
+def declarations( source ):
+    """
+    List the declarations at member level, whether or not a comment sits above them.
+
+    Requires:
+        - source is Dart text
+
+    Ensures:
+        - returns [ ( symbol, line_index ) ] in file order, named as extract_blocks names a block's symbol
+          and numbered #2, #3 for a repeat
+        - a member is a line at the smallest indent found in its owner's body; deeper lines (a statement
+          in a method body, a parameter on its own line) and annotation lines are not declarations
+        - a top-level declaration is a line at column 0 outside an owner's body
+
+    Raises:
+        - nothing
+    """
+    lines = source.split( "\n" )
+    spans = _owner_spans( lines )
+    found, inside = [], set()
+    for start, end, owner in spans:
+        body = [ i for i in range( start + 1, min( end, len( lines ) ) ) if lines[ i ].strip() and not lines[ i ].lstrip().startswith( "//" ) ]
+        inside.update( range( start + 1, min( end, len( lines ) ) ) )
+        if not body: continue
+        indent = min( len( lines[ i ] ) - len( lines[ i ].lstrip() ) for i in body )
+        found += [ ( i, owner ) for i in body if len( lines[ i ] ) - len( lines[ i ].lstrip() ) == indent and lines[ i ].lstrip()[ 0 ] not in "@)]}*" ]
+    found += [ ( i, None ) for i, line in enumerate( lines ) if i not in inside and line and not line[ 0 ].isspace() and line[ 0 ] not in "@)]}*/" ]
+    out, seen = [], {}
+    for index, owner in sorted( found ):
+        name = declaration_name( lines, index )
+        if name is None or name == "<library>": continue
+        symbol = _symbol( name, owner )
+        seen[ symbol ] = seen.get( symbol, 0 ) + 1
+        out.append( ( symbol if seen[ symbol ] == 1 else f"{symbol}#{seen[ symbol ]}", index ) )
+    return out
+
+
+def plain_comments( source ):
+    """
+    Map each declaration to the plain // comment directly above it.
+
+    Requires:
+        - source is Dart text
+
+    Ensures:
+        - returns { symbol: text } for a run of // lines (not ///) that ends on the line just above the
+          declaration or just above its annotations; a blank line in between means no comment
+        - text has the // markers and one leading space removed and is normalized by block_text
+        - a run above anything that is not a member-level declaration is ignored
+
+    Raises:
+        - nothing
+    """
+    lines = source.split( "\n" )
+    by_line = { index : symbol for symbol, index in declarations( source ) }
+    plain = lambda line: line.strip().startswith( "//" ) and not line.strip().startswith( "///" )
+    out, index = {}, 0
+    while index < len( lines ):
+        if not plain( lines[ index ] ):
+            index += 1
+            continue
+        end = index
+        while end + 1 < len( lines ) and plain( lines[ end + 1 ] ): end += 1
+        following = lines[ end + 1 ].strip() if end + 1 < len( lines ) else ""
+        if following and not following.startswith( "///" ):
+            symbol = by_line.get( _skip_annotations( lines, end + 1 ) )
+            if symbol is not None: out.setdefault( symbol, block_text( "\n".join( re.sub( r"^\s*//\s?", "", line ) for line in lines[ index : end + 1 ] ) ) )
+        index = end + 1
     return out
 
 
@@ -244,12 +337,16 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     Ensures:
         - returns ( pairs, report ), pairs in ( file, symbol ) order
         - a pair is one doc block found at old_rev with at least min_words words and a block of the same
-          file and symbol at new_rev; its row is { id, file, symbol, old, new, linked_doc, changed }, id being
-          "file::symbol", linked_doc None and changed False for a pair kept only by include_unchanged
+          file and symbol at new_rev; its row is { id, file, symbol, old, new, new_kind, linked_doc, changed },
+          id being "file::symbol", linked_doc None and changed False for a pair kept only by include_unchanged
+        - when the symbol has no doc block at new_rev but its declaration is still there, the old block pairs
+          with the plain // comment directly above it (new_kind "plain_comment") or with "" (new_kind "none");
+          a normal pair has new_kind "doc". A declaration that is gone is dropped_symbol_gone
         - a pair whose old and new differ only in whitespace is dropped unless include_unchanged
         - the report counts what was not paired and why, so a drop is never silent:
           files_old, files_new, files_only_old, files_only_new, blocks_old, blocks_new, eligible_old,
-          dropped_file_deleted, dropped_symbol_gone, dropped_unchanged, pairs, and the two file lists
+          below_min_words, dropped_file_deleted, dropped_symbol_gone, dropped_unchanged, paired_plain_comment,
+          paired_no_comment, pairs, and the two file lists
 
     Raises:
         - RuntimeError from git when a listing fails
@@ -258,30 +355,47 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     only_old = sorted( set( old_files ) - set( new_files ) )
     only_new = sorted( set( new_files ) - set( old_files ) )
     report = { "files_old" : len( old_files ), "files_new" : len( new_files ), "files_only_old" : only_old, "files_only_new" : only_new,
-               "blocks_old" : 0, "blocks_new" : 0, "eligible_old" : 0,
-               "dropped_file_deleted" : 0, "dropped_symbol_gone" : 0, "dropped_unchanged" : 0, "pairs" : 0 }
+               "blocks_old" : 0, "blocks_new" : 0, "eligible_old" : 0, "below_min_words" : 0,
+               "dropped_file_deleted" : 0, "dropped_symbol_gone" : 0, "dropped_unchanged" : 0,
+               "paired_plain_comment" : 0, "paired_no_comment" : 0, "pairs" : 0 }
     new_blocks = { path : extract_blocks( _show( root, new_rev, path ) or "" ) for path in new_files }
     report[ "blocks_new" ] = sum( len( blocks ) for blocks in new_blocks.values() )
-    pairs = []
+    pairs, left_behind = [], {}
+
+    def what_is_left( path, symbol ):
+        """Ensures: returns ( text, kind ) for a symbol with no doc block now, or None if it is gone."""
+        if path not in left_behind:
+            source = _show( root, new_rev, path ) or ""
+            left_behind[ path ] = ( plain_comments( source ), { s for s, _ in declarations( source ) } )
+        plain, declared = left_behind[ path ]
+        if symbol in plain: return plain[ symbol ], "plain_comment"
+        return ( "", "none" ) if symbol in declared else None
+
     for path in old_files:
         old_blocks = extract_blocks( _show( root, old_rev, path ) or "" )
         report[ "blocks_old" ] += len( old_blocks )
         new_by_symbol = { s : t for s, _, t in new_blocks[ path ] } if path in new_blocks else {}
         for symbol, _, old_text in old_blocks:
-            if len( old_text.split() ) < min_words: continue
+            if len( old_text.split() ) < min_words:
+                report[ "below_min_words" ] += 1
+                continue
             report[ "eligible_old" ] += 1
             if path not in new_blocks:
                 report[ "dropped_file_deleted" ] += 1
                 continue
-            if symbol not in new_by_symbol:
-                report[ "dropped_symbol_gone" ] += 1
-                continue
-            new_text = new_by_symbol[ symbol ]
+            if symbol in new_by_symbol: new_text, kind = new_by_symbol[ symbol ], "doc"
+            else:
+                left = what_is_left( path, symbol )
+                if left is None:
+                    report[ "dropped_symbol_gone" ] += 1
+                    continue
+                new_text, kind = left
             changed = squash( old_text ) != squash( new_text )
             if not changed and not include_unchanged:
                 report[ "dropped_unchanged" ] += 1
                 continue
-            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "linked_doc" : None, "changed" : changed } )
+            if kind != "doc": report[ "paired_plain_comment" if kind == "plain_comment" else "paired_no_comment" ] += 1
+            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "new_kind" : kind, "linked_doc" : None, "changed" : changed } )
     report[ "pairs" ] = len( pairs )
     return pairs, report
 
