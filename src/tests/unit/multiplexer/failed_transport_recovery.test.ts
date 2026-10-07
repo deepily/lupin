@@ -6,7 +6,7 @@
 // connection_state_change payload comment names (4001 token-refresh, 4002 session-displaced,
 // 4003 permission-denied). No fix is chosen here; these tests only say the door is shut.
 
-import { test, before, after } from "node:test";
+import { test, before, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -115,4 +115,39 @@ test( "the restart event the machine accepts brings a failed transport back to a
   await new Promise( ( r ) => setTimeout( r, 10 ) );
   assert.notEqual( transport.state, "failed", "restart must leave failed" );
   assert.ok( MockWebSocket.instances.length > socketsBefore, "restart moves the machine to `connecting`, but no new socket is opened, so the transport waits on a connection nobody started" );
+} );
+
+test( "behaviour: 20 failed reconnects end in failed, and nothing the page can produce reopens it", async () => {
+  MockWebSocket.instances = [];
+  const bus       = createEventBusForTesting();
+  const states: string[] = [];
+  bus.on<{ state: string }>( "connection_state_change", ( e ) => states.push( e.payload.state ) );
+  const transport = createQueueTransport( {
+    authManager   : makeAuth(), bus, baseUrl : "",
+    WebSocketCtor : MockWebSocket as unknown as typeof WebSocket,
+  } );
+  mock.timers.enable( { apis: [ "setTimeout" ] } );
+  try {
+    transport.start( "wise_penguin" );
+    // Every socket dies at once with an ordinary code (1006), never reaching auth_success.
+    for ( let i = 0; i < 60 && transport.state !== "failed"; i++ ) {
+      MockWebSocket.instances[ MockWebSocket.instances.length - 1 ]!.fireClose( 1006, "" );
+      mock.timers.tick( 31_000 );
+    }
+    assert.equal( transport.state, "failed", "precondition: repeated ordinary closes end in failed" );
+    const socketsAtFailure = MockWebSocket.instances.length;
+    assert.equal( socketsAtFailure, 20, "measured: the 20th failed attempt trips the limit, so 20 sockets were opened" );
+
+    // Everything a page can offer: tab hidden and shown, network lost and regained, and ten minutes of clock.
+    for ( const type of [ "page_hidden", "page_visible", "network_offline", "network_online", "page_visible" ] ) {
+      bus.emit( { type, payload: {}, source: "test", ts: Date.now() } as never );
+    }
+    mock.timers.tick( 600_000 );
+
+    assert.equal( transport.state, "failed", "nothing reopened the transport" );
+    assert.equal( MockWebSocket.instances.length, socketsAtFailure, "no new socket was opened" );
+    assert.equal( states[ states.length - 1 ], "failed", "no state change followed failed" );
+  } finally {
+    mock.timers.reset();
+  }
 } );
