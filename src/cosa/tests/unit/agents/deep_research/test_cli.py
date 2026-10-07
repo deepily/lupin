@@ -376,14 +376,20 @@ class TestRunResearch( unittest.IsolatedAsyncioTestCase ):
                                              cost_tracker=MagicMock(), no_confirm=True )
         self.assertIsNone( report )
 
-    async def test_budget_exceeded_returns_none( self ):
+    async def test_budget_exceeded_propagates_and_is_not_a_cancel( self ):
+        # A budget overrun is a failure, not a cancel: None means "cancelled", so the
+        # error must reach the caller, which owns the one notification about it.
+        err = BudgetExceededError( "over", current_cost=0.5, budget_limit=0.1 )
         with rr_env(
             [ clar(), plan( 2 ) ],
-            subagent_side_effect=[ BudgetExceededError( "over", current_cost=0.5, budget_limit=0.1 ) ],
+            subagent_side_effect=[ err ],
         ) as api:
-            report = await cli.run_research( query="q", config=make_config(),
-                                             cost_tracker=MagicMock(), no_confirm=True )
-        self.assertIsNone( report )
+            with self.assertRaises( BudgetExceededError ) as ctx:
+                await cli.run_research( query="q", config=make_config(),
+                                        cost_tracker=MagicMock(), no_confirm=True )
+            self.assertIs( ctx.exception, err )
+            self.assertFalse( [ c for c in cli.voice_io.notify.await_args_list if "Budget exceeded" in str( c ) ] )
+            api.close.assert_awaited()
 
     async def test_cancel_after_clarification( self ):
         with rr_env( [ clar(), plan( 2 ) ] ) as api:
