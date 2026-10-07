@@ -35,6 +35,9 @@ NAMED_TAGS = frozenset( { "param", "arg", "argument", "property", "prop", "typed
 TAG_LINE   = re.compile( r"([ \t]*)(@[A-Za-z][\w-]*)" )
 NAME_TOKEN = re.compile( r"\[[^\]]*\]|[\w$.]+" )
 LINK_SPAN  = re.compile( r"\{@(?:link|linkcode|linkplain)\b[^}]*\}" )
+# A banner is layout, not prose: a rule of four or more rule characters, with or without a title after it, or a
+# title between a short opening rule (two or more characters) and a closing rule of four or more.
+BANNER_LINE = re.compile( r"^\s*(?:[-=#~*_+]{4,}(?:\s.*)?|[-=#~*_+]{2,}\s.*\s[-=#~*_+]{4,}\s*)$" )
 
 
 def in_scope( path ):
@@ -197,6 +200,25 @@ def _jsdoc_findings( path, comment, root ):
     return findings
 
 
+def _blank_banners( text ):
+    """
+    Blank the banner lines of a plain comment, keeping every line break.
+
+    Requires:
+        - text is the body of a line run, block or trailing comment
+
+    Ensures:
+        - a line that starts with four or more of - = # ~ * _ + , then nothing or a space and a title, becomes empty
+        - so does a line that starts with two or more of them and a space, and ends with a space and four or more
+        - the number of lines is unchanged, so a finding below a banner keeps its real line
+        - a line of three rule characters, or a bullet, is not a banner
+
+    Raises:
+        - nothing
+    """
+    return "\n".join( "" if BANNER_LINE.match( line ) else line for line in text.split( "\n" ) )
+
+
 def _plain_findings( path, comment ):
     """
     Run the reduced rule set over one non-JSDoc comment.
@@ -208,12 +230,14 @@ def _plain_findings( path, comment ):
         - returns the emphasis, tic and history findings, as comment_lint does for Python comments
         - the history rule runs without its model-order check
         - a file header run also gets the summary rule
+        - banner lines are blanked first (see _blank_banners), so layout draws no finding and a header that opens with a
+          rule line has its summary read from the first line after it
         - sentence, reference and length rules are not applied: a comment is a working note
 
     Raises:
         - nothing
     """
-    text     = comment[ "text" ]
+    text     = _blank_banners( comment[ "text" ] )
     first    = comment[ "start_line" ]
     findings = emphasis_findings( text, path, first ) + rhetoric_findings( text, path, first ) + history_findings( text, path, first, agent_rule=False )
     if comment[ "kind" ] == "line-run" and comment[ "symbol_key" ] == FILE_HEADER_KEY:

@@ -201,6 +201,48 @@ def test_the_docstring_cap_is_exclusive_at_its_limit():
     assert _hits( [ _comment( block( limit + 1 ) ) ] ) == [ ( 10, "docstring-length" ) ]
 
 
+# ---- banners are layout ------------------------------------------------------------------------
+
+def test_a_banner_line_draws_no_finding_whatever_its_title_says():
+    for line in ( "---------------------", "===================== NEVER do this =====================", "#### NEVER ####",
+                  "~~~~ NEVER", "**** NEVER ****", "____ NEVER", "++++ NEVER", "------------------------- the two sides, NEVER the same",
+                  "--- the [PROJECT] badge -------------------------------", "-- D4, THE BYPASS ----", "== NEVER ==== " ):
+        for kind in ( "line-run", "block", "trailing" ):
+            assert _hits( [ _comment( line + "\n", kind=kind ) ] ) == [], ( line, kind )
+
+
+def test_shouted_prose_right_after_a_banner_is_still_flagged_on_its_own_line():
+    assert _hits( [ _comment( "----------------\nNEVER do that here.\n", kind="line-run" ) ] ) == [ ( 11, "caps" ) ]
+    assert _hits( [ _comment( "NEVER before.\n==== title ====\nNEVER after.\n", kind="line-run" ) ] ) == [ ( 10, "caps" ), ( 12, "caps" ) ]
+
+
+def test_only_four_rule_characters_at_the_start_of_a_line_make_a_banner():
+    assert _hits( [ _comment( "--- NEVER three.\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "- NEVER a bullet.\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "see ---- NEVER inside.\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "-- NEVER two.\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "NEVER do ----------\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "- NEVER do ----------\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+    assert _hits( [ _comment( "-- NEVER do ---\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
+
+
+def test_a_header_that_opens_with_a_rule_line_is_summarised_from_the_line_after_it():
+    long_first = "word " * 30
+    assert _hits( [ _comment( "==========\nShort title.\n==========\n", kind="line-run", start=1, symbol_key="<file-header>" ) ] ) == []
+    assert _hits( [ _comment( "==========\n" + long_first + "\n", kind="line-run", start=1, symbol_key="<file-header>" ) ] ) == [ ( 2, "summary-length" ) ]
+    assert _hits( [ _comment( "==========\n", kind="line-run", start=1, symbol_key="<file-header>" ) ] ) == []
+
+
+def test_a_jsdoc_block_keeps_every_line_so_a_rule_like_line_there_is_still_read():
+    assert _hits( [ _comment( "\nSummary.\n\n---- NEVER do ----\n" ) ] ) == [ ( 13, "caps" ) ]
+
+
+def test_blanking_banners_keeps_the_number_of_lines():
+    text = "a\n------\nb\n=== x ===\n=====\nc"
+    assert tsdoc_lint._blank_banners( text ) == "a\n\nb\n=== x ===\n\nc"
+    assert tsdoc_lint._blank_banners( text ).count( "\n" ) == text.count( "\n" )
+
+
 # ---- same text, same verdict in both languages -----------------------------------------------
 
 def _py_pairs( text ):
