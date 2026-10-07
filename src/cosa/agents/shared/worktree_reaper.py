@@ -324,8 +324,9 @@ def find_ignored_blockers( worktree_path: str, project_root: str, run: Callable 
         - returns { "ok": bool, "blockers": [ rel_path, ... ], "error": str | None }
         - ok=False with error set when git could not list the ignored entries — the
           caller must treat that as "cannot prove it is safe" and refuse
-        - an entry is not a blocker when it is a build artifact (_is_artifact), a
-          root-slot memento record whose mirror is byte-identical, or a root-slot
+        - an entry is not a blocker when it is a build artifact (_is_artifact), the
+          tree's own run output (_is_run_output: a path under RUN_OUTPUT_PREFIXES or a
+          file in RUN_OUTPUT_ROOT_FILES), a root-slot memento record whose mirror is byte-identical, or a root-slot
           memento pointer whose header names a record that cleared that test (not
           merely some record for the same persona)
         - the mirror is keyed on the main checkout's basename, because memento_io's

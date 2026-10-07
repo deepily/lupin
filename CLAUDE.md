@@ -693,7 +693,8 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 - Every worktree goes under `.claude/worktrees/`, never `../`. A spawned seat's tree lands there on its own
   (`seat-<name>`, locked while the seat lives); a hand-made one is
   `git worktree add .claude/worktrees/<persona>-<task>`. That folder is gitignored and swept by the arbiter
-  janitor once a tree is idle. Anything next to the repo is swept by nobody. The janitor moves a tree's ignored files that are not build artifacts or mirrored
+  janitor once a tree is idle. Anything next to the repo is swept by nobody. The janitor moves a tree's ignored files that are not build artifacts, the tree's own run
+  output (`tmp/`, `io/test-suite/`, `io/swe-team/`, `io/claude_code_hooks/`, `src/docs/index/`, `.claude-session.md`) or mirrored
   mementos into `io/worktree-evacuated/<day>-<tree>-<stamp>/` in the main tree and then removes the tree;
   an unmerged branch moves to `refs/archive/<day>/<name>` (restore with
   `git update-ref refs/heads/<name> <sha>`). Both are deleted 14 days later, so keep data in git or
