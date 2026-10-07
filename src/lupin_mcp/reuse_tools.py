@@ -233,8 +233,9 @@ class LiveJevTransport:
 
     Ensures:
         - the key is read from the environment on each post and is never stored on this object
-        - once Jev refuses the key or the request (JevConfigError), later posts raise at once without
+        - once Jev refuses the key (JevConfigError with no status, 401 or 403), later posts raise at once without
           any HTTP, so a bad key costs one refusal per in-flight call and not one per index entry
+        - a 422 refuses only the request that drew it; the next post is sent
         - with a budget (a jev_transport.CallBudget), every HTTP attempt takes one from it, retries included
     Raises:
         - JevConfigError, JevCallError as jev_transport.send does; JevCallError for a body that is not JSON
@@ -253,7 +254,7 @@ class LiveJevTransport:
             text, meta = jev_transport.send_with_meta( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ,
                                                        self.budget, self.random_fn, self.clock_fn )
         except jev_transport.JevConfigError as e:
-            self.refusal = e
+            if e.status != 422: self.refusal = e                          # a 422 refuses this one request, so later requests are still sent
             raise
         try:
             return json.loads( text ), meta

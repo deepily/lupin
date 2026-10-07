@@ -294,3 +294,34 @@ def test_a_missing_key_is_a_refusal_with_no_status():
     with pytest.raises( jev_transport.JevConfigError ) as caught:
         jev_transport.send_with_meta( b"{}", post_fn=door( [ ( 200, "ok" ) ] ), environ={} )
     assert caught.value.status is None
+
+
+def test_a_422_refuses_one_request_and_the_next_post_is_still_sent():
+    seen = []
+    def post( url, headers, body, timeout ):
+        seen.append( body )
+        return ( 422, "bad pack" ) if len( seen ) == 1 else ( 200, json.dumps( with_usage( UNREL ) ) )
+    t = rt.LiveJevTransport( post_fn=post, sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5 )
+    with pytest.raises( jev_transport.JevConfigError ) as caught: t.post_with_meta( {} )
+    assert caught.value.status == 422 and t.refusal is None
+    assert t.post_with_meta( {} )[ 0 ][ "model" ] == "jev-1.13.0" and len( seen ) == 2
+
+
+@pytest.mark.parametrize( "status", [ 401, 403 ] )
+def test_a_401_or_a_403_stays_sticky_and_later_posts_raise_without_http( status ):
+    seen = []
+    def post( url, headers, body, timeout ):
+        seen.append( body )
+        return status, "no"
+    t = rt.LiveJevTransport( post_fn=post, sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5 )
+    for _ in range( 3 ):
+        with pytest.raises( jev_transport.JevConfigError ) as caught: t.post_with_meta( {} )
+        assert caught.value.status == status
+    assert len( seen ) == 1                                                                            # only the first post made HTTP
+
+
+def test_a_missing_key_stays_sticky_with_no_status():
+    t = rt.LiveJevTransport( post_fn=door( [ ( 200, "ok" ) ] ), environ={} )
+    for _ in range( 2 ):
+        with pytest.raises( jev_transport.JevConfigError ) as caught: t.post_with_meta( {} )
+        assert caught.value.status is None
