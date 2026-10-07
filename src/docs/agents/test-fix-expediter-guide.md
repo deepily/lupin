@@ -607,7 +607,10 @@ failures. Possible causes:
 ### Phase 5 commits succeeded but no PR appeared
 
 `commit_and_pr_multi()` degrades to `branch_only` when `gh` CLI is missing or
-fails. The commits + branch exist; the PR just wasn't opened. Create it manually:
+fails. The commits + branch exist; the PR just wasn't opened. At trust 3 and above it
+also stops at `commit_only`, with an error naming `push_branch`, because the real `GitOps`
+cannot push; then the branch exists only on this machine and no PR was tried. Push it
+yourself first, then create the PR manually:
 
 ```bash
 gh pr create --base main --head fix/2026-04-10-tfe-e2e-3-clusters \
