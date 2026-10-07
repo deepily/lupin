@@ -311,7 +311,8 @@ test( "the plan arming strings are carbon copies of notifications.js, compared a
   assert.ok( start !== -1, "legacy _paintHoldingPlanArmed not found — the extraction is pointing at nothing" );
   const end   = src.indexOf( "async _handleHoldingPlanApproveClick( button ) {", start );
   assert.ok( end > start, "legacy plan handler not found after the arming helpers — the slice boundaries have moved" );
-  assert.ok( src.indexOf( "_disarmHoldingPlanButtons() {", start ) < end, "the slice no longer spans the disarm helper — the boundaries have moved" );
+  const disarm = src.indexOf( "_disarmHoldingPlanButtons() {", start );
+  assert.ok( disarm !== -1 && disarm < end, "the slice no longer spans the disarm helper — the boundaries have moved" );
   const templates = Array.from( src.slice( start, end ).matchAll( /`([^`\n]{6,})`/g ) ).map( ( m ) => m[ 1 ] as string );
   assert.ok( templates.length > 0, "the legacy plan region yielded no templates" );
   const confirm   = holdingPlanConfirmLabel( 7 ).replace( "7", "${count}" );
