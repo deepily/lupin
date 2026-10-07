@@ -28,6 +28,25 @@ answers "unrelated 0.85" has `p_overlap = 0.15`: it is neither relevant nor doub
 thousands of unrelated entries in a sweep cannot make every query uncertain. Only calls that
 could matter count.
 
+## Which entries are asked (page-first)
+
+When the wiki holds capability pages, a question is routed before the full sweep. A page can be asked
+about when its `INDEX.md` line names a package and its page file exists. At least one of its pins
+must name an indexed symbol. The receipt records the `route`:
+
+| `route` | What ran | When it decides |
+| --- | --- | --- |
+| `full` | one sweep of every entry | no page can be asked about |
+| `pages` | page stage, then the covered stage | the covered stage finds an entry with `p_overlap >= T` |
+| `pages_then_full` | page stage, covered stage if any, then the full sweep | no page was chosen, or the covered stage found no entry at `T`; answers already cached cost nothing |
+
+The page stage asks one question per page, about the line text after its link. A page is chosen at
+`p_overlap >= F`, at most five of them, best first and ties by slug. A chosen page **covers** every public
+entry in the modules its line lists, or in the whole package when the line lists none. Pins only decide
+that a page can be asked about; they do not shape its coverage. One call budget spans every stage, so a
+spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
+`stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.
+
 ## Verdict
 
 The causes are checked in the order below; the first one that holds decides, and every cause that
@@ -101,5 +120,6 @@ receipt file and each writes its own log line, so no process ever rewrites a rec
 | --- | --- | --- |
 | verdict, causes, precedence, coverage, malformed answers | `verdict.py` | `test_symindex_verdict.py` |
 | sweep, cache by request hash, receipts, snapshots, replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_tools.py` |
+| page routing: scope of a page, page stage, covered stage, fallback, frozen replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_page_first.py` |
 | server-side call log | `src/lupin_mcp/reuse_call_log_middleware.py` | `test_reuse_mcp_mount.py` |
 | replay gate (ii), (iii) by mutation | `mutate_reuse` run, see the W-C handoff | `test_gate_ii_...`, `test_gate_iii_...` |
