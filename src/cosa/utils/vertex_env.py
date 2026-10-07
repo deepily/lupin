@@ -153,8 +153,8 @@ VERTEX_REGION_CERTIFICATIONS = {
 # configuration teaches people to disable guards (C4, one bucket over). Only DRIFT IN THE KEYS
 # is an error; a drift in the version number is merely news.
 PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
-    "cc_version" : "2.1.284",
-    "harvested"  : "2026-09-28",
+    "cc_version" : "2.1.293",
+    "harvested"  : "2026-10-07",
     "instrument" : "strings $(readlink -f $(which claude)) | grep -oE 'VERTEX_REGION_CLAUDE_[A-Z0-9_]+'",
 }
 
@@ -174,6 +174,12 @@ PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
 # again here — 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS, red for however long
 # the upgrade predated this run; and again when VERTEX_REGION_CLAUDE_5_5_OPUS was
 # harvested from 2.1.283 (2026-09-27).
+#
+# Moved again 2026-10-07 (John 🏄🏽): Claude Code updated to 2.1.293 at 14:11 and that
+# binary honors VERTEX_REGION_CLAUDE_HAIKU_5_5. Re-harvested with the documented instrument
+# across every version on disk before touching the tuple: the key is absent from 2.1.289,
+# .290, .291 and .292 and present in 2.1.293, and the binary carries 20 keys against 19
+# guarded, exactly one unguarded and ZERO phantom. Key added first, stamp moved second.
 #
 # Moved again 2026-09-28 (Krishna 🦚, row 922b261a): 2.1.284 added
 # VERTEX_REGION_CLAUDE_5_5_SONNET. Caught by the unit tier on THREE trees at once — my
@@ -230,6 +236,7 @@ PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_FABLE_5",
     "VERTEX_REGION_CLAUDE_FABLE_5_1",       # added 2.1.258 (2026-09-01)
     "VERTEX_REGION_CLAUDE_HAIKU_4_5",
+    "VERTEX_REGION_CLAUDE_HAIKU_5_5",       # added 2.1.293 (2026-10-07) — absent in .289/.290/.291/.292, measured
 )
 
 # §5c.2 is "CLEAR **or ASSERT**", and the distinction is load-bearing:
