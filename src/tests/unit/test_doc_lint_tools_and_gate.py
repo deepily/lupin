@@ -427,13 +427,20 @@ def test_the_chain_refuses_the_commit_on_exit_three_and_allows_every_other_gate_
 CHAIN = os.path.join( cu.get_project_root(), "src", "scripts", "pre-commit-chain.sh" )
 
 
+def _install_real_doc_lint( repo ):
+    """Copy the real doc_lint package into the test repo, untracked, so the chain runs the real gate."""
+    dest = repo / "src" / "cosa" / "repo" / "doc_lint"
+    shutil.copytree( os.path.join( cu.get_project_root(), "src", "cosa", "repo", "doc_lint" ), dest, ignore=shutil.ignore_patterns( "__pycache__" ) )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo" ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+
+
 def _run_chain( repo, env_extra=None ):
     env = { **os.environ, "PLANNING_IS_PROMPTING_ROOT": "", **( env_extra or {} ) }
     return subprocess.run( [ "bash", CHAIN ], cwd=repo, capture_output=True, text=True, env=env )
 
 
 def test_the_chain_runs_the_gate_in_warn_mode_and_still_exits_zero_with_findings( repo ):
-    os.symlink( os.path.join( cu.get_project_root(), "src", "cosa" ), repo / "src" / "cosa" )
+    _install_real_doc_lint( repo )
     _stage( repo, { "docs/p.md": "This is NOT fine.\n" } )
     res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 0
@@ -451,7 +458,7 @@ def test_the_chain_allows_the_commit_when_the_gate_process_itself_fails( repo ):
 
 
 def test_the_chain_gate_does_not_depend_on_planning_is_prompting_root( repo ):
-    os.symlink( os.path.join( cu.get_project_root(), "src", "cosa" ), repo / "src" / "cosa" )
+    _install_real_doc_lint( repo )
     _stage( repo, { "docs/p.md": "clean text\n" } )
     res = _run_chain( repo )
     assert "SKIPPED rnd-guard" in res.stderr                      # the other gate is skipped without the variable
@@ -645,7 +652,7 @@ def test_a_crash_still_allows_the_commit_with_the_loud_line_even_for_a_swept_fil
 
 
 def test_the_real_chain_refuses_a_seeded_swept_commit_and_names_the_waiver( repo ):
-    os.symlink( os.path.join( cu.get_project_root(), "src", "cosa" ), repo / "src" / "cosa" )
+    _install_real_doc_lint( repo )
     _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
     res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 1
@@ -1002,8 +1009,8 @@ def test_a_crash_in_the_counted_check_still_allows_the_commit_with_the_loud_line
 
 
 def test_the_real_chain_refuses_a_counted_file_that_rises_and_allows_one_that_does_not( repo ):
-    stamped = repo                                                                     # the rule files come from the linked tree
-    os.symlink( os.path.join( cu.get_project_root(), "src", "cosa" ), stamped / "src" / "cosa" )
+    stamped = repo                                                                     # the real rule files, copied in
+    _install_real_doc_lint( stamped )
     _stage( stamped, { "src/tests/t.py": ONE } )
     _table( stamped, { "src/tests/t.py": 1 } )
     _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
@@ -1075,6 +1082,11 @@ RULE_FILE = counts.STAMP_FILES[ 0 ]
 
 def _commit_rules_and_table( repo, files, table ):
     """Commit the rule files too, so the index holds them, with a table cut under the rules as they stand."""
+    for rel in ( "src/cosa/repo/doc_lint/gate.py", "src/cosa/repo/doc_lint/swept_scope.py", "src/scripts/pre-commit-chain.sh" ):
+        full = repo / rel
+        full.parent.mkdir( parents=True, exist_ok=True )
+        full.write_text( f"rule file {rel}\n", encoding="utf-8" )
+        _git( repo, "add", "-f", rel )
     _git( repo, "add", "-f", *counts.STAMP_FILES )
     _base( repo, files, table )
 
@@ -1109,7 +1121,7 @@ def test_a_rule_file_that_differs_refuses_a_lone_swept_file_and_names_every_diff
     ( stamped / counts.STAMP_FILES[ 2 ] ).write_text( "two\n", encoding="utf-8" )
     _stage( stamped, { "src/pkg/swept.py": CLEAN } )                                  # nothing wrong with the file itself
     rc, text = _gate( stamped )
-    assert rc == 3 and f"rule file {counts.STAMP_FILES[ 0 ]}, {counts.STAMP_FILES[ 2 ]} {DIVERGED}" in text
+    assert rc == 3 and f"rule file {', '.join( sorted( [ counts.STAMP_FILES[ 0 ], counts.STAMP_FILES[ 2 ] ] ) )} {DIVERGED}" in text
 
 
 def test_a_rule_file_that_differs_gives_no_verdict_on_a_swept_file_that_has_a_finding( stamped, monkeypatch ):
@@ -1217,3 +1229,59 @@ def test_weakened_rule_code_in_the_working_tree_cannot_let_a_counted_rise_throug
     rc, text = _gate( stamped )
     assert rc == 3 and "rule file src/cosa/repo/doc_lint/docstring_lint.py is not the same staged and in the working tree" in text
     assert "findings, the count table allows" not in text
+
+
+@pytest.mark.parametrize( "rule_path", [
+    "src/cosa/repo/doc_lint/gate.py",
+    "src/cosa/repo/doc_lint/swept_scope.py",
+    "src/scripts/pre-commit-chain.sh",
+    "src/conf/dm-tutor-lowercase-words.txt",
+] )
+def test_an_unstaged_edit_to_any_tracked_rule_file_refuses_a_lone_judged_file( stamped, monkeypatch, rule_path ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / rule_path ).write_text( "edited and not staged\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"rule file {rule_path} {DIVERGED}" in text and "(1 of " in text and "rule files differ)" in text
+
+
+def test_a_tracked_rule_file_outside_the_old_list_of_seven_is_compared_too( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    extra = "src/cosa/repo/doc_lint/brand_new_module.py"
+    ( stamped / extra ).write_text( "x = 1\n", encoding="utf-8" )
+    _git( stamped, "add", "-f", extra )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "a new rule module" )
+    ( stamped / extra ).write_text( "x = 2\n", encoding="utf-8" )
+    _stage( stamped, { "src/lupin_mcp/a.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert extra not in counts.STAMP_FILES and rc == 3 and f"rule file {extra} {DIVERGED}" in text
+
+
+def test_the_gate_prints_how_many_rule_files_it_compared_and_the_number_is_what_git_lists( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    listed = [ ln for ln in _git( stamped, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if ln ]
+    assert rc == 0 and len( listed ) > 0
+    assert f"[doc-lint] rule files compared: {len( listed )}, differing: 0" in text
+
+
+def test_a_tree_with_no_tracked_rule_files_compares_none_and_stops_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert "[doc-lint] rule files compared: 0, differing: 0" in text and "REFUSED" not in text
+
+
+def test_the_real_chain_refuses_a_commit_when_a_tracked_rule_file_is_edited_and_not_staged( repo ):
+    _install_real_doc_lint( repo )
+    _git( repo, "add", "-f", "src/cosa/repo/doc_lint/swept_scope.py" )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+    scope = repo / "src/cosa/repo/doc_lint/swept_scope.py"
+    scope.write_text( scope.read_text( encoding="utf-8" ) + "\n# an edit that is not staged\n", encoding="utf-8" )
+    _stage( repo, { "src/pkg/swept.py": SWEPT_CAPS } )
+    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    assert res.returncode == 1 and "rule file src/cosa/repo/doc_lint/swept_scope.py is not the same staged and in the working tree" in res.stderr

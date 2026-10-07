@@ -30,6 +30,7 @@ STAMP_FILES      = (
     "src/cosa/repo/doc_lint/waivers.py",
     "src/conf/dm-tutor-lowercase-words.txt",
 )
+RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" )
 EXIT_TIGHT       = 0
 EXIT_MISMATCH    = 1
 EXIT_NOT_CHECKED = 2
@@ -172,34 +173,44 @@ def rules_stamp( root, read=None ):
     return digest.hexdigest()[ : 16 ]
 
 
-def differing_rule_files( root, read ):
+def rule_files( root ):
     """
-    List the rule files whose staged content differs from the working copy.
+    List the tracked files that decide what a finding is and how the gate judges it.
 
     Requires:
-        - root is a working tree
-        - read( path ) returns a rule file's staged bytes, or raises OSError when it has none
+        - root is a git working tree
 
     Ensures:
-        - returns the paths from STAMP_FILES, in order, whose staged bytes are not the bytes on disk
-        - a rule file missing in one place and present in the other counts as different
-        - a rule file missing in both places is the same, since there is nothing to disagree about
+        - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list and the chain script
+        - the set comes from git at run time, so a new file in the package is covered the day it is added
 
     Raises:
-        - nothing
+        - RuntimeError naming the git error when the listing fails
     """
-    differ = []
-    for path in STAMP_FILES:
-        try:
-            with open( f"{root}/{path}", "rb" ) as handle: on_disk = handle.read()
-        except FileNotFoundError:
-            on_disk = None
-        try:
-            staged = read( path )
-        except OSError:
-            staged = None
-        if staged != on_disk: differ.append( path )
-    return differ
+    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z", "--", *RULE_PATHS ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return sorted( p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p )
+
+
+def differing_rule_files( root ):
+    """
+    Compare the rule files in the index with their working copies.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( compared, differing ): how many rule files were compared, and the sorted paths whose working copy is not the staged one
+        - a rule file deleted on disk, or edited there and not staged, is differing
+        - a file git does not track is not compared
+
+    Raises:
+        - RuntimeError naming the git error when a git call fails
+    """
+    compared = rule_files( root )
+    res      = subprocess.run( [ "git", "-C", str( root ), "diff", "--name-only", "-z", "--", *RULE_PATHS ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return len( compared ), sorted( p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p )
 
 
 def table_text( files, stamp ):

@@ -5,9 +5,11 @@ Unit tests for doc_lint.counts: the per-file finding counts for the Python files
 import io
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.doc_lint import counts, word_list
 from cosa.repo.doc_lint.text_rules import Finding
 
@@ -161,19 +163,59 @@ def test_rules_stamp_reads_what_the_given_reader_returns( repo ):
     assert counts.rules_stamp( str( repo ), read=lambda path: ( repo / path ).read_bytes() ) == on_disk
 
 
-def test_differing_rule_files_lists_each_file_whose_staged_bytes_are_not_the_disk_bytes( repo ):
-    def staged( path ):
-        if path == counts.STAMP_FILES[ 1 ]: return b"changed"                       # differs from the disk
-        if path == counts.STAMP_FILES[ 2 ]: raise OSError( "not in the index" )       # present on disk, absent staged
-        return ( repo / path ).read_bytes()
-    assert counts.differing_rule_files( str( repo ), staged ) == [ counts.STAMP_FILES[ 1 ], counts.STAMP_FILES[ 2 ] ]
-    assert counts.differing_rule_files( str( repo ), lambda path: ( repo / path ).read_bytes() ) == []
+def _track( repo, rel, text="x\n" ):
+    full = repo / rel
+    full.parent.mkdir( parents=True, exist_ok=True )
+    full.write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", rel )
 
 
-def test_differing_rule_files_treats_missing_on_disk_as_different_and_missing_in_both_as_the_same( tmp_path ):
-    assert counts.differing_rule_files( str( tmp_path ), lambda path: b"staged" ) == list( counts.STAMP_FILES )
-    def nowhere( path ): raise OSError( "gone" )
-    assert counts.differing_rule_files( str( tmp_path ), nowhere ) == []
+def test_rule_files_are_the_tracked_files_of_the_package_the_word_list_and_the_chain_script( repo ):
+    for rel in ( "src/cosa/repo/doc_lint/b.py", "src/cosa/repo/doc_lint/sub/a.py", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/cosa/repo/other.py", "src/scripts/other.sh" ):
+        _track( repo, rel )
+    ( repo / "src/cosa/repo/doc_lint/untracked.py" ).write_text( "y\n", encoding="utf-8" )
+    assert counts.rule_files( str( repo ) ) == [ "src/conf/dm-tutor-lowercase-words.txt", "src/cosa/repo/doc_lint/b.py", "src/cosa/repo/doc_lint/sub/a.py", "src/scripts/pre-commit-chain.sh" ]
+
+
+def test_the_rule_files_of_the_real_tree_match_what_git_lists_for_that_set_and_are_not_empty():
+    root   = cu.get_project_root()
+    found  = counts.rule_files( root )
+    listed = sorted( p for p in _git( root, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if p )
+    assert len( found ) > 0 and found == listed and "src/cosa/repo/doc_lint/gate.py" in found and "src/cosa/repo/doc_lint/swept_scope.py" in found
+
+
+def test_differing_rule_files_reports_an_unstaged_edit_and_a_deletion_and_not_a_staged_edit_or_an_untracked_file( repo ):
+    for rel in ( "src/cosa/repo/doc_lint/a.py", "src/cosa/repo/doc_lint/b.py", "src/cosa/repo/doc_lint/c.py", "src/cosa/repo/doc_lint/d.py" ):
+        _track( repo, rel )
+    ( repo / "src/cosa/repo/doc_lint/a.py" ).write_text( "unstaged edit\n", encoding="utf-8" )
+    ( repo / "src/cosa/repo/doc_lint/b.py" ).unlink()
+    ( repo / "src/cosa/repo/doc_lint/c.py" ).write_text( "staged edit\n", encoding="utf-8" )
+    _git( repo, "add", "-f", "src/cosa/repo/doc_lint/c.py" )                                    # staged and on disk: the same
+    ( repo / "src/cosa/repo/doc_lint/new.py" ).write_text( "untracked\n", encoding="utf-8" )
+    ( repo / "src/other.py" ).write_text( "outside\n", encoding="utf-8" )
+    assert counts.differing_rule_files( str( repo ) ) == ( 4, [ "src/cosa/repo/doc_lint/a.py", "src/cosa/repo/doc_lint/b.py" ] )
+
+
+def test_differing_rule_files_over_an_unchanged_tree_compares_the_files_and_finds_none( repo ):
+    _track( repo, "src/cosa/repo/doc_lint/a.py" )
+    assert counts.differing_rule_files( str( repo ) ) == ( 1, [] )
+
+
+def test_rule_files_and_differing_rule_files_name_a_git_error( tmp_path ):
+    with pytest.raises( RuntimeError, match="git ls-files failed" ):
+        counts.rule_files( str( tmp_path ) )
+    with pytest.raises( RuntimeError, match="git ls-files failed" ):
+        counts.differing_rule_files( str( tmp_path ) )
+
+
+def test_differing_rule_files_names_a_failing_git_diff( repo, monkeypatch ):
+    _track( repo, "src/cosa/repo/doc_lint/a.py" )
+    real = counts.subprocess.run
+    def fail_on_diff( cmd, **kw ):
+        return real( cmd, **kw ) if "ls-files" in cmd else SimpleNamespace( returncode=128, stdout=b"", stderr=b"fatal: broken" )
+    monkeypatch.setattr( counts.subprocess, "run", fail_on_diff )
+    with pytest.raises( RuntimeError, match="git diff failed: fatal: broken" ):
+        counts.differing_rule_files( str( repo ) )
 
 
 def test_rules_stamp_names_a_missing_rule_file( tmp_path ):

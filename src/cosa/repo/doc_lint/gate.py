@@ -21,7 +21,8 @@ Three refusals break warn mode, and all exit REFUSAL_EXIT.
 3. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
-Before any of these, a rule file that differs between the index and the working tree refuses the commit.
+Before any of these, a tracked rule file that differs between the index and the working tree refuses the commit.
+The rule files are every tracked file in the doc_lint package, the word list and the chain script.
 The findings would be counted under rules that are not the ones being committed.
 
 Every run prints the denominator for both scopes: files checked, docstrings or counts, waivers honoured.
@@ -220,28 +221,27 @@ def counted_refusal( path, result, allowed, ranges, gone=() ):
     return "\n".join( lines )
 
 
-def rule_divergence( root, judged ):
+def rule_divergence( compared, differing, judged ):
     """
     Refuse a commit whose staged rule files differ from the working copies.
 
     Requires:
-        - root is a git working tree
+        - compared is the number of rule files compared, differing the sorted paths that are not the same
         - judged is True when this commit stages a Python file the gate judges, or the count table
 
     Ensures:
-        - returns None when no judgment is being made or every rule file is the same staged and on disk
-        - else returns one refusal string naming the files and both ways out: stage the edit, or restore the file
-        - the stamp and the files read the index, but the rule code that counts is the working tree's, so a difference could give a wrong verdict or a wrong table
+        - returns None when no judgment is being made or no rule file differs
+        - else returns one refusal string naming the files, how many were compared, and both ways out
+        - the rule code that counts is the working tree's, so a difference could give a wrong verdict or a wrong table
 
     Raises:
-        - OSError when a rule file is in neither place
+        - nothing
     """
-    if not judged: return None
-    differ = counts.differing_rule_files( root, lambda p: staged_bytes( root, p ) )
-    if not differ: return None
+    if not judged or not differing: return None
     return (
-        f"[doc-lint] REFUSED: rule file {', '.join( differ )} is not the same staged and in the working tree, so the findings were counted "
-        f"under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again"
+        f"[doc-lint] REFUSED: rule file {', '.join( differing )} is not the same staged and in the working tree, so the findings were counted "
+        f"under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again "
+        f"({len( differing )} of {compared} rule files differ)"
     )
 
 
@@ -492,7 +492,9 @@ def collect( root ):
     refusals = [ f for f in findings if in_blocking_package( f.path, BLOCKING_PACKAGES ) and is_mechanical( f ) ]
     lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
     staged_counted_paths, _renames, table_staged = staged_counted( root )
-    diverged = rule_divergence( root, bool( swept ) or bool( staged_counted_paths ) or table_staged )
+    compared, differing = counts.differing_rule_files( root )
+    tally[ "rules" ]    = { "compared": compared, "differing": len( differing ) }
+    diverged = rule_divergence( compared, differing, bool( swept ) or bool( staged_counted_paths ) or table_staged )
     if diverged:
         lines_out.append( diverged )
         swept = []
@@ -558,6 +560,7 @@ def main( argv=None, err=None ):
     for f in findings: err.write( f"[doc-lint] {f.path}:{f.line}: {f.rule}: {f.message}\n" )
     for line in refusals: err.write( line + "\n" )
     err.write( f"[doc-lint] swept scope: {tally[ 'files' ]} files checked, {tally[ 'docstrings' ]} docstrings checked, {tally[ 'findings' ]} findings, {tally[ 'waivers' ]} waivers honoured, {tally[ 'unparsed' ]} unparsed, {tally[ 'undecodable' ]} undecodable\n" )
+    err.write( f"[doc-lint] rule files compared: {tally[ 'rules' ][ 'compared' ]}, differing: {tally[ 'rules' ][ 'differing' ]}\n" )
     c = tally[ "counted" ]
     err.write( f"[doc-lint] counted scope: {c[ 'files' ]} files checked, {c[ 'at_or_below' ]} at or below their count, {c[ 'over' ]} over, {c[ 'waivers' ]} waivers honoured, table {c[ 'table' ]}\n" )
     if refusals:
