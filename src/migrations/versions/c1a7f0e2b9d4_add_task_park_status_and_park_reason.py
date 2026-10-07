@@ -2,7 +2,6 @@
 
 Revision ID: c1a7f0e2b9d4
 Revises: f2a3b4c5d6e7
-Create Date: 2026-07-19
 
 Backs the `parked` status (design src/rnd/v0.1.9/2026.07.19-parked-status-board-hygiene.md).
 

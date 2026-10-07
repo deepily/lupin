@@ -2,7 +2,6 @@
 
 Revision ID: e1f2a3b4c5d6
 Revises: d0e1f2a3b4c5
-Create Date: 2026-07-07 10:45:00.000000
 
 The keystone `input_and_output` knn path serves via exact scan, not HNSW.
 The grounding is in the swap-chain execution log

@@ -2,7 +2,6 @@
 
 Revision ID: d47487369407
 Revises: c1a7f0e2b9d4
-Create Date: 2026-07-19
 
 Backs park_reason staleness detection (design src/rnd/v0.1.9/2026.07.19-park-reason-staleness-detection.md, section 3.1).
 

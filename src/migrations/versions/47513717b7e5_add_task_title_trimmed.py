@@ -2,7 +2,6 @@
 
 Revision ID: 47513717b7e5
 Revises: 3da5c0d1eee6
-Create Date: 2026-08-31
 
 `task_store_rules.title_may_be_trimmed` is `len( title ) == TITLE_SOFT_CAP`, and
 `_serialize_item_terse` calls it with no cap argument. The board's `title_trimmed` flag is

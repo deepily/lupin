@@ -2,7 +2,6 @@
 
 Revision ID: 9184990becdf
 Revises: ffbf50040d99
-Create Date: 2026-09-23
 
 Broadcast acks are saved with the notifications, carrying the metadata that
 says which broadcast and which seat each one belongs to. A

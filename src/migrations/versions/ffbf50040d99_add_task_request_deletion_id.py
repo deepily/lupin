@@ -2,7 +2,6 @@
 
 Revision ID: ffbf50040d99
 Revises: 525a4ad4067a
-Create Date: 2026-09-14
 
 An admit request must name one ticket of the requester's own to delete. The
 request rides on the ticket (see 8beada291153), so the pledge rides there too.

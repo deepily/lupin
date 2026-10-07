@@ -2,7 +2,6 @@
 
 Revision ID: b8c9d0e1f2a3
 Revises: a7b8c9d0e1f2
-Create Date: 2026-06-23
 
 Data migration for the `operator` rename. The design is in planning-is-prompting/src/rnd/
 2026.06.23-proactive-manager-doctrine-and-mechanism.md, section Rename. `ricks_court` baked

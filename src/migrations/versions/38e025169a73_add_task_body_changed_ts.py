@@ -2,7 +2,6 @@
 
 Revision ID: 38e025169a73
 Revises: 53835fd51f1a
-Create Date: 2026-07-26
 
 `body_changed_ts TIMESTAMPTZ NULL` is the instant the row's `body` last actually
 changed. The database clock stamps it, from the two paths that write body:

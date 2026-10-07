@@ -2,7 +2,6 @@
 
 Revision ID: 8beada291153
 Revises: 9a1c4f27bd30
-Create Date: 2026-09-09
 
 Backs the rule that a manager may request either move, and a request defaults to no.
 

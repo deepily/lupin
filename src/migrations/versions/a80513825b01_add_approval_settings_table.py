@@ -2,7 +2,6 @@
 
 Revision ID: a80513825b01
 Revises: 9184990becdf
-Create Date: 2026-09-29
 
 The approval settings (manager-pull rescission, approver allowlist and
 accounts, enforcement flag, ...) lived in a JSON file every writer on the host could

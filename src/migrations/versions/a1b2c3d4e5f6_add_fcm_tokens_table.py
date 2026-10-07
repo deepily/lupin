@@ -2,7 +2,6 @@
 
 Revision ID: a1b2c3d4e5f6
 Revises: f0a1b2c3d4e5
-Create Date: 2026-06-12
 
 Add the fcm_tokens table, the durable registry of mobile FCM device tokens for
 the silent-relay wake channel. There is one row per device token, upserted on

@@ -2,7 +2,6 @@
 
 Revision ID: c9d0e1f2a3b4
 Revises: b8c9d0e1f2a3
-Create Date: 2026-06-23
 
 Adds the `urgency` column. An operator gate carries a time-sensitivity tier, one of
 urgent, normal or low, distinct from the existing `priority` importance field.

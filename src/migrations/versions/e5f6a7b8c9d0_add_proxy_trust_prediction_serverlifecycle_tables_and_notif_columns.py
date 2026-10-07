@@ -2,7 +2,6 @@
 
 Revision ID: e5f6a7b8c9d0
 Revises: d4e5f6a7b8c9
-Create Date: 2026-06-17
 
 Close the migration<->ORM drift left open after the "true baseline" collapse (baseline
 000000000000). Four ORM tables had no migration anywhere in the chain, and five

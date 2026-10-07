@@ -2,7 +2,6 @@
 
 Revision ID: c3d4e5f6a7b8
 Revises: b2c3d4e5f6a7
-Create Date: 2026-06-15 09:00:00.000000
 
 First-class columns for notification-native AI<->AI messaging (cosa-voice token
 reduction). Adds:

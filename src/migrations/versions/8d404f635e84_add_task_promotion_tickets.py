@@ -2,7 +2,6 @@
 
 Revision ID: 8d404f635e84
 Revises: 47513717b7e5
-Create Date: 2026-09-06
 
 Backs the first stage of the asynchronous promotion approval design: one table, no
 behaviour change, and no status code touched. The observability surface goes in

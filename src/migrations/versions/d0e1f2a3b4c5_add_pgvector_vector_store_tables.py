@@ -2,7 +2,6 @@
 
 Revision ID: d0e1f2a3b4c5
 Revises: c9d0e1f2a3b4
-Create Date: 2026-07-01 16:30:00.000000
 
 This creates the pgvector `vector` extension and the 8 vector-store tables that
 replace the LanceDB backend. Seven have `vector(768)` columns. `gist_cache` is

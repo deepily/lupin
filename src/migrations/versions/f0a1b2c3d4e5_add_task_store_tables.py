@@ -2,7 +2,6 @@
 
 Revision ID: f0a1b2c3d4e5
 Revises: e9f0a1b2c3d4
-Create Date: 2026-06-11
 
 Unified task store in Postgres (design: planning-is-prompting ->
 planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md v0.4):

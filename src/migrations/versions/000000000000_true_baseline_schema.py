@@ -2,7 +2,6 @@
 
 Revision ID: 000000000000
 Revises:
-Create Date: 2026-06-17
 
 True baseline migration zero. It encodes the origin of ``src/scripts/sql/schema.sql`` as
 the first link in the chain. A fresh, empty database comes fully up to head with

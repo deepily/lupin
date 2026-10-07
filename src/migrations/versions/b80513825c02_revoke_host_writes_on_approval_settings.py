@@ -2,7 +2,6 @@
 
 Revision ID: b80513825c02
 Revises: a80513825b01
-Create Date: 2026-10-02
 
 `init-db-roles.sql` grants `lupin_host` `INSERT`/`UPDATE`/`DELETE` on every app
 table through `ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app`. A table that is

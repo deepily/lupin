@@ -2,7 +2,6 @@
 
 Revision ID: f6a7b8c9d0e1
 Revises: e5f6a7b8c9d0
-Create Date: 2026-06-18
 
 One-time data re-stamp for an alias read/write mismatch that made sessions look idle.
 

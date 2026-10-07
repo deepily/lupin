@@ -2,7 +2,6 @@
 
 Revision ID: d4e5f6a7b8c9
 Revises: c3d4e5f6a7b8
-Create Date: 2026-06-15 22:30:00.000000
 
 Fixes a drift between the model and the migrations. ``User.is_protected``
 (src/cosa/rest/postgres_models.py:84) is declared on the ORM model as

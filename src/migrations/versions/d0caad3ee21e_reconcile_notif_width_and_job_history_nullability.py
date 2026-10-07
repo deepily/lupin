@@ -2,7 +2,6 @@
 
 Revision ID: d0caad3ee21e
 Revises: d47487369407
-Create Date: 2026-07-19
 
 Fixes `lupin_db_dev`, which diverged from its own alembic stamp. `compare_metadata`
 against both live databases at the same stamp (`d47487369407`) gave 0 diff entries

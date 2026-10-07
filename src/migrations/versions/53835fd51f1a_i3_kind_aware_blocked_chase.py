@@ -2,7 +2,6 @@
 
 Revision ID: 53835fd51f1a
 Revises: d0caad3ee21e
-Create Date: 2026-07-20 16:49:14.549311
 
 The kind-aware chase requirement is planned in
 src/rnd/v0.1.9/2026.07.20-i3-kind-aware-chase-migration-plan.md.

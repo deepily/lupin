@@ -2,7 +2,6 @@
 
 Revision ID: f2a3b4c5d6e7
 Revises: e1f2a3b4c5d6
-Create Date: 2026-06-18 (re-filed 2026-07-14)
 
 This migration was re-filed. The original, authored as revision a7b8c9d0e1f2 on
 a branch stranded by a squash-merge, never reached the v0.1.9 line. A different

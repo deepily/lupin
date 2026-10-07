@@ -2,7 +2,6 @@
 
 Revision ID: 3da5c0d1eee6
 Revises: 38e025169a73
-Create Date: 2026-08-01
 
 This adds the durable "owed" mark for the late-answer handback
 (src/rnd/v0.1.9/2026.08.01-late-answer-handback.md). A human's answer to a

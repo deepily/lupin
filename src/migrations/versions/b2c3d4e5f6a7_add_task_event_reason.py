@@ -2,7 +2,6 @@
 
 Revision ID: b2c3d4e5f6a7
 Revises: a1b2c3d4e5f6
-Create Date: 2026-06-12
 
 Adds the `reason` column to task_events. A transition to dropped requires a
 reason. The hook's harness-deleted to dropped mapping and the supersede

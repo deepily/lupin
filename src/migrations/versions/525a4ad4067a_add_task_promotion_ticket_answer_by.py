@@ -2,7 +2,6 @@
 
 Revision ID: 525a4ad4067a
 Revises: 8beada291153
-Create Date: 2026-09-10
 
 What it adds:
 1. `answer_by` TIMESTAMPTZ NULL — when the answer window closes: `requested_at` plus

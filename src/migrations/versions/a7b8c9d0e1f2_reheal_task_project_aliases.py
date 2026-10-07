@@ -2,7 +2,6 @@
 
 Revision ID: a7b8c9d0e1f2
 Revises: f6a7b8c9d0e1
-Create Date: 2026-06-22
 
 The write seam (routers/tasks.py `_canon_project`) and the query filter both
 canonicalize the project name. Every row written now, and every filter value
