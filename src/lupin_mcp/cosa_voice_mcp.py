@@ -982,12 +982,17 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 # Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md §4: the full standing
 # TTS contract is stated ONCE here in the session-init `instructions` payload.
 # The per-turn `<system-reminder>` rider (hook_common._speakerphone_reminder_body)
-# is now slim and only points at this section. The brevity + routing prose is
-# single-sourced from hook_common._brevity_rules() + _routing_reminder() — the
-# SAME functions the rider historically composed from and the same
-# cu.get_spoken_char_cap() source the caller-side enforcement guard reads — so
-# the spoken-char cap never drifts between the rider, this contract, and the
-# server reject boundary.
+# is now slim and only points at this section. The brevity prose is
+# single-sourced from hook_common._brevity_rules() — the SAME function the
+# rider historically composed from and the same cu.get_spoken_char_cap() source
+# the caller-side enforcement guard reads — so the spoken-char cap never drifts
+# between the rider, this contract, and the server reject boundary.
+#
+# The interactive-tool routing rule is NOT in this section. It lives in the
+# "## Interactive Tool Routing" section of the `instructions` body below, built
+# from hook_common._routing_reminder(), and the per-turn rider carries the
+# routing line itself. A unit test ties the reminder text to the served
+# instructions (test_the_routing_reminder_is_in_the_served_instructions.py).
 
 _TTS_CONTRACT_SECTION = (
     "## Speakerphone TTS Contract (applies on every turn — speakerphone is the standing default)\n\n"
