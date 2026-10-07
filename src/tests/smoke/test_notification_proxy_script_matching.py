@@ -811,6 +811,35 @@ def test_exact_scenarios_build_from_every_shipped_script():
         assert all( not e.get( "question_pattern" ) or not e.get( "arg_name" ) for e in card_only )
 
 
+def test_run_single_script_hands_only_question_entries_to_the_tiers( monkeypatch ):
+    """
+    Ensures `_run_single_script` hands the tiers question entries only.
+
+    No LLM and no server. A stand-in strategy holds one question entry and one card entry.
+    The pre-flight check records what it receives, then reports the server unreachable.
+    Restoring `strategy._entries` at the call site passes the card entry on and fails here.
+    """
+    question_entry = { "question_pattern": "any limit?", "arg_name": "budget", "answer": "no limit" }
+    card_entry     = { "card_id": "document_choice" }
+    seen           = []
+
+    class _StubStrategy:
+        available = True
+        def __init__( self, **kwargs ): self._entries = [ question_entry, card_entry ]
+
+    def _record_and_refuse( strategy, entries ):
+        seen.append( list( entries ) )
+        return False
+
+    monkeypatch.setattr( sys.modules[ __name__ ], "LlmScriptMatcherStrategy", _StubStrategy )
+    monkeypatch.setattr( sys.modules[ __name__ ], "_preflight_check", _record_and_refuse )
+
+    results, passed = _run_single_script( "deep_research", "exact", None, False, 0.7, False, False )
+
+    assert ( results, passed ) == ( [], True )
+    assert seen == [ [ question_entry ] ], "the tiers must be handed the question entries only"
+
+
 def test_notification_proxy_script_matching():
     """Pytest entry point."""
     assert quick_smoke_test()
