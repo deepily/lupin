@@ -56,6 +56,12 @@ class TestGetIoFile( unittest.TestCase ):
         p4 = patch( "cosa.rest.routers.io_files.landed_relative_path",
                     side_effect=lambda real, root: "" if os.path.relpath( real, root ) == "." else os.path.relpath( real, root ) )
         p4.start(); self.addCleanup( p4.stop )
+        # The door now opens the file and serves through the descriptor (row 1f4b30ce). /proj does not
+        # exist, so the open is stubbed with a real descriptor on /dev/null; the real open, the judge
+        # and the race are tested in src/tests/unit/test_io_files_check_then_open_race.py.
+        p5 = patch( "cosa.rest.routers.io_files.open_pinned",
+                    side_effect=lambda full_path, judge, directory=False: os.open( "/dev/null", os.O_RDONLY ) )
+        self.mock_open_pinned = p5.start(); self.addCleanup( p5.stop )
 
     def _call( self, path, download=False ):
         return asyncio.run( get_io_file( path=path, download=download, current_user=self.user ) )
@@ -84,7 +90,8 @@ class TestGetIoFile( unittest.TestCase ):
              patch( "builtins.open", mock_open( read_data="x" ) ) as m_open:
             self._call( "/report.txt" )
         # opened the io-relative resolved path (leading slash stripped)
-        m_open.assert_called_once_with( "/proj/io/report.txt", "r", encoding="utf-8" )
+        self.assertEqual( self.mock_open_pinned.call_args[ 0 ][ 0 ], "/proj/io/report.txt" )      # the path that was normalized is the one opened
+        self.assertTrue( m_open.call_args[ 0 ][ 0 ].startswith( "/proc/self/fd/" ) )   # and the bytes are read through the descriptor
 
     def test_relative_io_prefix_stripped( self ):
         """Ensures: a relative 'io/' prefix is stripped to avoid io/io doubling."""
@@ -93,7 +100,8 @@ class TestGetIoFile( unittest.TestCase ):
              patch( "cosa.rest.routers.io_files.PlainTextResponse", return_value="PTR" ), \
              patch( "builtins.open", mock_open( read_data="x" ) ) as m_open:
             self._call( "io/sub/report.json" )
-        m_open.assert_called_once_with( "/proj/io/sub/report.json", "r", encoding="utf-8" )
+        self.assertEqual( self.mock_open_pinned.call_args[ 0 ][ 0 ], "/proj/io/sub/report.json" )      # the path that was normalized is the one opened
+        self.assertTrue( m_open.call_args[ 0 ][ 0 ].startswith( "/proc/self/fd/" ) )   # and the bytes are read through the descriptor
 
     # ---- security blocks -----------------------------------------------------
 

@@ -21,7 +21,6 @@ import contextlib
 import errno
 import os
 import re
-import stat
 import uuid
 from urllib.parse import quote, unquote
 
@@ -35,6 +34,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.routers._dir_listing import list_directory
+from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, landed_path_of_fd, open_pinned
 from cosa.rest.routers._scope_registry import ScopeConfig
 from cosa.rest.routers._scope_registry import (
     SECRETS_BLOCKLIST_PATTERNS,
@@ -386,15 +386,15 @@ async def get_scopes( current_user: dict = Depends( get_current_user ) ):
 # in the tree; the content check (credential_verdict, the PEM scan) always runs on the pinned inode.
 # The directory LISTING branch of `_serve` is not covered by this row.
 
-_PROC_FD = "/proc/self/fd"
+_PROC_FD = PROC_FD
 
 
 def _landed_path_of_fd( fd: int ) -> str:
     """Where the inode behind `fd` lives right now; 404 if it has been unlinked."""
-    landed = os.readlink( f"{_PROC_FD}/{fd}" )
-    if landed.endswith( " (deleted)" ):
+    try:
+        return landed_path_of_fd( fd )
+    except PinnedPathGone:
         raise HTTPException( status_code=404, detail="Path not found" )
-    return landed
 
 
 def _judge_landed( scope_cfg: ScopeConfig, landed: str ) -> str:
@@ -430,17 +430,9 @@ def _open_judged_file( full_path: str, scope_cfg: ScopeConfig ) -> int:
         - 404 when the path is gone or is not a regular file
     """
     try:
-        fd = os.open( full_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK )
-    except OSError:
+        return open_pinned( full_path, lambda landed: _judge_landed( scope_cfg, landed ) )
+    except PinnedPathGone:
         raise HTTPException( status_code=404, detail="Path not found" )
-    try:
-        if not stat.S_ISREG( os.fstat( fd ).st_mode ):
-            raise HTTPException( status_code=404, detail="Path not found" )
-        _judge_landed( scope_cfg, _landed_path_of_fd( fd ) )
-    except BaseException:
-        os.close( fd )
-        raise
-    return fd
 
 
 def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
@@ -453,15 +445,9 @@ def _pin_directory( full_dir: str, scope_cfg: ScopeConfig ) -> int:
         - on any refusal the descriptor is closed before the exception leaves
     """
     try:
-        fd = os.open( full_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC )
-    except OSError:
+        return open_pinned( full_dir, lambda landed: _refuse_hidden_folder( _judge_landed( scope_cfg, landed ) ), directory=True )
+    except PinnedPathGone:
         raise HTTPException( status_code=404, detail="Folder not found" )
-    try:
-        _refuse_hidden_folder( _judge_landed( scope_cfg, _landed_path_of_fd( fd ) ) )
-    except BaseException:
-        os.close( fd )
-        raise
-    return fd
 
 
 def _serve( full_path: str, rel_path: str, scope: str, parent_validator, scope_cfg: ScopeConfig ) -> JSONResponse | PlainTextResponse | FileResponse:

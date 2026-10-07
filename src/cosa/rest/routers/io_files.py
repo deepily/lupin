@@ -18,10 +18,12 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 
 import cosa.utils.util as cu
 from cosa.rest.auth import get_current_user
 from cosa.rest.routers._dir_listing import list_directory
+from cosa.rest.routers._pinned_open import PROC_FD, PinnedPathGone, open_pinned
 from cosa.rest.routers._scope_registry import _is_secrets_path, landed_relative_path, landed_within_roots
 
 router = APIRouter( tags=[ "io-files" ] )
@@ -190,17 +192,32 @@ async def get_io_file(
 
     media_type = MEDIA_TYPES[ ext ]
 
+    # Open first, judge the opened file, serve through the descriptor (row 1f4b30ce). The string
+    # judged above can be swapped for a symlink before the open below; the descriptor cannot.
+    # The answers stay what they were: 400 for a landing outside io/ or on a blocked name, 404
+    # for a file that is gone or is not a regular file.
+    try:
+        fd = open_pinned( full_path, lambda landed: _judge_landed( landed, io_base ) )
+    except PinnedPathGone:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"File not found: {decoded_path}"
+        )
+    pinned   = f"{PROC_FD}/{fd}"
+    filename = os.path.basename( full_path )
+
     # Force download: always return FileResponse with attachment Content-Disposition
     if download:
         try:
-            filename = os.path.basename( full_path )
             return FileResponse(
-                path                 = full_path,
+                path                 = pinned,
                 media_type           = media_type,
                 filename             = filename,
-                content_disposition_type = "attachment"
+                content_disposition_type = "attachment",
+                background           = BackgroundTask( os.close, fd )
             )
         except Exception as e:
+            os.close( fd )
             raise HTTPException(
                 status_code = 500,
                 detail      = f"Error serving file: {str( e )}"
@@ -209,7 +226,7 @@ async def get_io_file(
     # For text files, use PlainTextResponse (better encoding handling)
     if ext in [ ".md", ".txt", ".json", ".yaml", ".yml" ]:
         try:
-            with open( full_path, "r", encoding="utf-8" ) as f:
+            with open( pinned, "r", encoding="utf-8" ) as f:
                 content = f.read()
             return PlainTextResponse(
                 content    = content,
@@ -220,11 +237,12 @@ async def get_io_file(
                 status_code = 500,
                 detail      = f"Error reading file: {str( e )}"
             )
+        finally:
+            os.close( fd )
 
     # For binary files (audio, pdf, images), use FileResponse
     else:
         try:
-            filename = os.path.basename( full_path )
             # Inline-renderable types (pdf, png/jpg/gif/webp, mp3/wav) get
             # Content-Disposition: inline so the browser renders/plays them
             # in place. Other binary types (.pptx, etc.) default to attachment
@@ -232,16 +250,45 @@ async def get_io_file(
             # forces attachment regardless of type.
             disposition = "inline" if ext in INLINE_TYPES else "attachment"
             return FileResponse(
-                path                     = full_path,
+                path                     = pinned,
                 media_type               = media_type,
                 filename                 = filename,
                 content_disposition_type = disposition,
+                background               = BackgroundTask( os.close, fd )
             )
         except Exception as e:
+            os.close( fd )
             raise HTTPException(
                 status_code = 500,
                 detail      = f"Error serving file: {str( e )}"
             )
+
+
+def _judge_landed( landed: str, io_base: str ) -> None:
+    """
+    Apply the io door's guards to the path an opened descriptor landed on.
+
+    Requires:
+        - landed is an absolute path read from /proc for an open descriptor
+        - io_base is the resolved io/ directory
+
+    Ensures:
+        - returns None when the landing is inside io/ and its name passes the secrets blocklist
+
+    Raises:
+        - HTTPException 400 for a landing outside io/ or on a blocked name, with the same text
+          the string checks use
+    """
+    if not landed_within_roots( landed, [ io_base ] ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Invalid path: must be within io/ directory"
+        )
+    if _is_secrets_path( landed_relative_path( landed, io_base ).replace( os.sep, "/" ) ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Path matches secrets blocklist"
+        )
 
 
 @router.get(
