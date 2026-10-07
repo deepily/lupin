@@ -21,7 +21,7 @@ Agents ask a model for XML, and `BaseXMLModel` subclasses turn the reply into va
 - `BaseXMLModel.from_xml( text )` parses, `to_xml()` writes (it leaves out `None` fields). The shared models are in `io_models/xml_models.py`. Nine other packages keep their own `xml_models.py` (calculator, decision_proxy, dm_compression, dm_quality_judge (also `xml_models_v2.py`), dm_tutor, notification_proxy, prediction_engine, runtime_argument_expeditor, crud_for_dataframes), and `lupin_mcp/commons_xml_models.py` is one more.
 - `XmlParserFactory.parse_agent_response( xml, routing_command, tag_names )` is the entry point. `PydanticXmlParser` maps a routing command such as `agent router go to math` to a model class and returns `model_dump()` (fields use underscores, `rephrased_answer` for `<rephrased-answer>`).
 - `PromptTemplateProcessor` fills the XML example in a prompt from each model's `get_example_for_template()`, from its own command-to-model map.
-- `recover_json_object( text )` pulls a JSON value out of a chatty reply. The podcast generator raises when it returns `None`; the presentation generator's four callers do the same.
+- `recover_json_object( text )` pulls a JSON value out of a chatty reply. The podcast script parser and the podcast API client raise `ValueError` on `None`, and so do the presentation generator's four callers (outline, narrative, elaboration, API client). The podcast analysis parser does not: it returns a default analysis dict.
 - `prefilter_docs_map_by_keywords` narrows a path map to the best 50 before an LLM picks a file. Its one production caller is the runtime-argument expeditor; the podcast router function its docstring names, `match_research_docs`, is defined nowhere in `src`.
 
 ## Invariants
