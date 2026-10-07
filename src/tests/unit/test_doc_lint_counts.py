@@ -144,6 +144,16 @@ def test_rules_stamp_is_stable_and_moves_with_any_rule_file( repo ):
     assert counts.rules_stamp( str( repo ) ) == first
 
 
+def test_rules_stamp_moves_when_a_boundary_moves_between_two_rule_files( repo ):
+    one, two = repo / counts.STAMP_FILES[ 0 ], repo / counts.STAMP_FILES[ 1 ]
+    one.write_text( "ab", encoding="utf-8" )
+    two.write_text( "c", encoding="utf-8" )
+    first = counts.rules_stamp( str( repo ) )
+    one.write_text( "a", encoding="utf-8" )
+    two.write_text( "bc", encoding="utf-8" )                                      # the same bytes in the same order, split elsewhere
+    assert counts.rules_stamp( str( repo ) ) != first
+
+
 def test_rules_stamp_names_a_missing_rule_file( tmp_path ):
     with pytest.raises( OSError ):
         counts.rules_stamp( str( tmp_path ) )
