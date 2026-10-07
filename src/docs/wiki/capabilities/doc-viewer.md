@@ -4,7 +4,8 @@ pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
   - cosa.rest.routers.docs_files.get_docs_file@f6b61c9fe4
   - cosa.rest.routers.docs_files.upload_docs_file@ed41be996e
-  - cosa.rest.routers.io_files.get_io_file@2e917695fd
+  - cosa.rest.routers.io_files.get_io_file@8ae4efff80
+  - cosa.rest.routers._pinned_open.open_pinned@4865d9e913
   - cosa.rest.routers._scope_registry.build_scope_registry@31e0911165
   - cosa.rest.routers._scope_registry.resolve_in_scope@b5d0cf1c5e
   - cosa.rest.routers._scope_registry.credential_verdict@6392b090c3
@@ -29,6 +30,8 @@ The doc viewer serves repo files and the `io/` folder to the browser, and lets a
 - Don't pass `?scope=`. It is retired and answers 400.
 
 ## Invariants
+- Both file doors open the file first, judge where the descriptor landed, and serve through it (`open_pinned`). A symlink swapped in after the check cannot redirect them.
+- Upload pins its target folder the same way. All three rely on `/proc/self/fd`, so they work on Linux only.
 - The secrets blocklist runs before the project name is looked up. The whitelist and the manifest's extra blocklist follow.
 - An upload is staged in a hidden temp file, then placed with `os.link`, or `os.replace` when replacing. Only `replace` overwrites an existing name.
 - Every upload is scanned end to end for a PEM private key. Text and SVG uploads also get the credential-content check that reading applies.
