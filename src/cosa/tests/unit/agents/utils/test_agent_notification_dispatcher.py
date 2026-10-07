@@ -270,11 +270,17 @@ def test_ask_confirmation_connection_error_raises_timeout():
             _run( d.ask_confirmation( "Proceed?" ) )
 
 
-def test_ask_confirmation_generic_error_returns_default():
+@pytest.mark.parametrize( "default", [ "yes", "no" ] )
+def test_ask_confirmation_unexpected_error_raises_timeout_not_the_default( default ):
+    # An unexpected error means nobody answered. Returning `default` would hand the
+    # caller "yes" or "no" as if a person had said it, and the caller's own
+    # unattended_default would never be consulted.
     d = AgentNotificationDispatcher( agent_type="test.agent" )
     with patch.object( mod, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ):
-        assert _run( d.ask_confirmation( "Proceed?", default="yes" ) ) is True
-        assert _run( d.ask_confirmation( "Proceed?", default="no" ) ) is False
+        with pytest.raises( VoiceGateTimeoutError ) as ctx:
+            _run( d.ask_confirmation( "Proceed?", default=default ) )
+    assert "RuntimeError" in str( ctx.value )
+    assert "weird" in str( ctx.value )
 
 
 # =========================================================================== #

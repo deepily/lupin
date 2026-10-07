@@ -257,6 +257,33 @@ def test_ask_yes_no_voice_failure_non_interactive_honours_declaration():
         assert _run( mod.ask_yes_no( "Proceed?", unattended_default=True ) ) is True
 
 
+def _dispatcher_iface():
+    """A cosa_interface whose ask_confirmation is the dispatcher's own method, not a mock."""
+    from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+    d = AgentNotificationDispatcher( agent_type="test.agent" )
+    return _fake_iface( ask_confirmation=d.ask_confirmation )
+
+
+@pytest.mark.parametrize( "unattended, default", [ ( False, "yes" ), ( True, "no" ) ] )
+def test_ask_yes_no_dispatcher_error_non_interactive_answers_with_unattended_default( unattended, default ):
+    # Entered where the bug entered: through the real dispatcher, not a mocked
+    # ask_confirmation. The answer must come from unattended_default, never `default`.
+    import cosa.agents.utils.agent_notification_dispatcher as disp
+    _enter_voice_mode( _dispatcher_iface() )
+    with patch.object( disp, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ), \
+         patch.object( mod, "_is_interactive", return_value=False ):
+        assert _run( mod.ask_yes_no( "Proceed?", default=default, unattended_default=unattended ) ) is unattended
+
+
+def test_ask_yes_no_dispatcher_error_non_interactive_refuses_without_declaration():
+    import cosa.agents.utils.agent_notification_dispatcher as disp
+    _enter_voice_mode( _dispatcher_iface() )
+    with patch.object( disp, "_notify_user_sync", side_effect=RuntimeError( "weird" ) ), \
+         patch.object( mod, "_is_interactive", return_value=False ):
+        with pytest.raises( mod.VoiceGateNoDefaultError ):
+            _run( mod.ask_yes_no( "Proceed?", default="yes" ) )
+
+
 def test_ask_yes_no_voice_failure_interactive_cli_fallback():
     iface = _fake_iface( ask_confirmation=AsyncMock( side_effect=RuntimeError( "x" ) ) )
     _enter_voice_mode( iface )
