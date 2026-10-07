@@ -543,3 +543,25 @@ class TestRunPresentationGenerator:
         agent = self._agent()
         with graph.patcher(), patch( "os.path.exists", return_value=True ):
             assert _run( agent._run_presentation_generator( "/io/dr/report.md" ) ) == { "cancelled": True }
+
+
+class TestSlideCountFromTheRealProducer:
+    """
+    The chain reads the slide count out of the dict the real presentation runner builds.
+
+    Ensures: slide_count on the result is the deck's total_slides, not None.
+    """
+
+    def test_the_chain_result_carries_the_slide_count_the_runner_reports( self ):
+        agent = DeepResearchToPresentationAgent( query="q", user_email="u@test.com" )
+        agent._set_modality = MagicMock()
+        agent._notify       = AsyncMock()
+        agent._run_deep_research = AsyncMock( return_value={
+            "cancelled": False, "report_path": "/io/dr/report.md", "abstract": "A", "cost": 1.0, "artifacts": { "tokens_used": 12345, "duration_seconds": 60 },
+        } )
+        graph = _PGGraph()                                                         # the deck reports total_slides = 9
+        with graph.patcher(), patch( "os.path.exists", return_value=True ):
+            result = _run( agent.run_async() )                                     # _run_presentation_generator is the real one
+        assert result.state == PipelineState.COMPLETED
+        assert result.pg_artifacts[ "total_slides" ] == 9 and "slide_count" not in result.pg_artifacts
+        assert result.slide_count == 9
