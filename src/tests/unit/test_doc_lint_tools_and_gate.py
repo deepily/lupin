@@ -682,6 +682,15 @@ def test_a_swept_file_that_is_not_utf8_is_refused_by_name_and_does_not_crash_the
     assert "2 files checked, 1 docstrings checked, 1 findings, 0 waivers honoured, 0 unparsed, 1 undecodable" in text
 
 
+def test_a_swept_file_that_is_not_utf8_is_refused_when_it_is_the_only_staged_file( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    rc, text = _gate( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert "[doc-lint] REFUSED src/pkg/a.py: not UTF-8: " in text and "1 refusals, commit REFUSED" in text
+    assert "WARNING: src/pkg/a.py" not in text
+
+
 def test_a_file_outside_the_swept_scope_that_is_not_utf8_is_skipped_with_a_warning( repo, monkeypatch ):
     _no_external( monkeypatch )
     _stage_bytes( repo, "src/lupin_mcp/a.py", LATIN_1 )
