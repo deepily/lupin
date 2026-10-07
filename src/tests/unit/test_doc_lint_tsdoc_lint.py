@@ -186,6 +186,10 @@ def test_a_type_over_several_lines_is_masked_whole_and_the_name_after_it_too():
     assert _hits( [ _comment( "\nSummary.\n\n@param {{ a: string,\n  b: string }} opts - NEVER used.\n" ) ] ) == [ ( 14, "caps" ) ]
 
 
+def test_an_unclosed_type_does_not_stop_the_next_tag_from_being_masked():
+    assert _hits( [ _comment( "\nSummary.\n\n@param {Foo x\n@param {string} NONE - The value.\n" ) ] ) == []
+
+
 def test_the_prop_tag_names_its_first_word():
     assert _hits( [ _comment( "\nSummary.\n\n@prop {string} NONE - The value.\n" ) ] ) == []
 
