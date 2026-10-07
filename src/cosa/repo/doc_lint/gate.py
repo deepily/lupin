@@ -148,7 +148,28 @@ def head_table_text( root ):
     return res.stdout.decode( "utf-8", "replace" ) if res.returncode == 0 else None
 
 
-def counted_refusal( path, result, allowed, ranges ):
+REGENERATE_COMMAND = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write'
+
+
+def staged_deleted( root ):
+    """
+    List the files the staged commit deletes.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns repo-relative paths with a staged deletion, in git's order
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "--name-only", "-z", "--diff-filter=D", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return [ p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p ]
+
+
+def counted_refusal( path, result, allowed, ranges, gone=() ):
     """
     Format the refusal for a counted file whose count rose above its entry.
 
@@ -159,6 +180,8 @@ def counted_refusal( path, result, allowed, ranges ):
     Ensures:
         - returns one string: a header line, then up to SHOWN_FINDINGS findings with the touched ones first
         - the header names the count, the entry, and how to waive
+        - gone lists deleted paths that had entries; when it is not empty the header says the file may be a rename
+          that git no longer pairs, and names the way out
 
     Raises:
         - nothing
@@ -168,6 +191,7 @@ def counted_refusal( path, result, allowed, ranges ):
     lines   = [
         f"[doc-lint] REFUSED {path}: {result.count} findings, the count table allows {allowed} (+{result.count - allowed}); "
         f"reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>"
+        + ( f"; this commit also deletes {', '.join( gone[ : 3 ] )}, which had an entry: if this file is a rename that git no longer pairs because too much changed, rename it in one commit and rewrite it in the next" if gone else "" )
     ]
     lines += [ f"[doc-lint]   {f.path}:{f.line}: {f.rule}: {f.message}" for f in ordered[ : SHOWN_FINDINGS ] ]
     if len( ordered ) > SHOWN_FINDINGS: lines.append( f"[doc-lint]   and {len( ordered ) - SHOWN_FINDINGS} more" )
@@ -229,7 +253,7 @@ def counted_check( root, ranges ):
             refusals.append( f"[doc-lint] REFUSED {counts.TABLE_PATH}: {path} raised from {old} to {new}; the table may only fall" )
     stats[ "table" ] = "ok" if table.stamp == current else "stale"
     if stats[ "table" ] == "stale":
-        if paths: refusals.append( f"[doc-lint] REFUSED: the count table was cut under other rules (stamp {table.stamp}, now {current}); regenerate it with python -m cosa.repo.doc_lint.counts --write and stage it with the rule change" )
+        if paths: refusals.append( f"[doc-lint] REFUSED: the count table was cut under other rules (stamp {table.stamp}, now {current}); regenerate it with: {REGENERATE_COMMAND} and stage the table with the rule change" )
         return refusals, warnings, stats
     for path in paths:
         try:
@@ -237,11 +261,12 @@ def counted_check( root, ranges ):
         except UnicodeDecodeError as err:
             result = counts.unreadable_count( path, err )
         allowed = counts.allowance( path, table.files, renamed_from )
+        gone    = [ p for p in staged_deleted( root ) if p in table.files ] if allowed == 0 and path not in table.files and result.count > 0 else []
         stats[ "files" ]   += 1
         stats[ "waivers" ] += result.waivers
         if result.count > allowed:
             stats[ "over" ] += 1
-            refusals.append( counted_refusal( path, result, allowed, ranges ) )
+            refusals.append( counted_refusal( path, result, allowed, ranges, gone ) )
         else:
             stats[ "at_or_below" ] += 1
     return refusals, warnings, stats

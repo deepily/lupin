@@ -803,6 +803,7 @@ def test_a_new_counted_file_starts_at_zero( stamped, monkeypatch ):
     _stage( stamped, { "src/tests/new_a.py": ONE } )
     rc, text = _gate( stamped )
     assert rc == 3 and "REFUSED src/tests/new_a.py: 1 findings, the count table allows 0 (+1)" in text
+    assert "also deletes" not in text and "rename" not in text                      # nothing was deleted, so no rename hint
     _git( stamped, "reset", "-q", "--hard" )
     _stage( stamped, { "src/tests/new_b.py": CLEAN } )
     rc, text = _gate( stamped )
@@ -951,7 +952,7 @@ def test_a_table_cut_under_other_rules_refuses_a_commit_that_stages_a_counted_fi
     _stage( stamped, { "src/tests/t.py": CLEAN } )
     rc, text = _gate( stamped )
     assert rc == 3 and "REFUSED: the count table was cut under other rules (stamp oldstamp, now " in text and "table stale" in text
-    assert "python -m cosa.repo.doc_lint.counts --write" in text
+    assert 'regenerate it with: LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write and stage the table with the rule change' in text
     _git( stamped, "reset", "-q", "--hard" )
     _stage( stamped, { "history.md": "A note.\n", "src/pkg/other.py": CLEAN } )     # no counted file staged
     rc, text = _gate( stamped )
@@ -1013,3 +1014,37 @@ def test_the_real_chain_refuses_a_counted_file_that_rises_and_allows_one_that_do
     _stage( stamped, { "src/tests/t.py": ONE + "\nx = 1\n" } )
     res = _run_chain( stamped, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 0 and "counted scope: 1 files checked, 1 at or below their count" in res.stderr
+
+
+def test_a_new_file_beside_a_deleted_entry_is_told_it_may_be_a_rename_git_could_not_pair( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    unique = "".join( f"unique_{i} = {i * 7}\n" for i in range( 30 ) )                          # nothing in common with the new file
+    old    = TWO + "".join( f"old_{i} = {i}\n" for i in range( 30 ) )
+    _base( stamped, { "src/lupin_mcp/old.py": old, "src/lupin_mcp/other.py": unique }, { "src/lupin_mcp/old.py": 2 } )
+    _git( stamped, "rm", "-q", "src/lupin_mcp/old.py", "src/lupin_mcp/other.py" )
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER bad." ) } )         # too different for git to pair with old.py
+    assert sorted( gate.staged_deleted( str( stamped ) ) ) == [ "src/lupin_mcp/old.py", "src/lupin_mcp/other.py" ]
+    rc, text = _gate( stamped )
+    assert rc == 3
+    assert "REFUSED src/lupin_mcp/new.py: 2 findings, the count table allows 0 (+2)" in text
+    assert "this commit also deletes src/lupin_mcp/old.py, which had an entry: if this file is a rename that git no longer pairs because too much changed, rename it in one commit and rewrite it in the next" in text
+    assert "other.py" not in text                                                                      # a deleted file with no entry is not named
+
+
+def test_a_rise_in_a_file_with_an_entry_gets_no_rename_hint_even_when_something_is_deleted( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE, "src/lupin_mcp/gone.py": TWO }, { "src/lupin_mcp/a.py": 1, "src/lupin_mcp/gone.py": 2 } )
+    _git( stamped, "rm", "-q", "src/lupin_mcp/gone.py" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text and "also deletes" not in text
+
+
+def test_staged_deleted_lists_the_deletions_and_names_a_git_error( stamped ):
+    _stage( stamped, { "src/tests/a b.py": CLEAN, "src/tests/c.py": CLEAN } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    assert gate.staged_deleted( str( stamped ) ) == []
+    _git( stamped, "rm", "-q", "src/tests/a b.py" )
+    assert gate.staged_deleted( str( stamped ) ) == [ "src/tests/a b.py" ]
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_deleted( str( stamped / "nope" ) )
