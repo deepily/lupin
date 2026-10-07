@@ -83,6 +83,26 @@ class TestDestructiveAndConfirmation( unittest.TestCase ):
         for op in ( "add", "query", "list_lists" ):
             self.assertFalse( CRUDIntent( operation=op ).is_destructive() )
 
+    def test_destructive_operations_ignore_case_and_surrounding_whitespace( self ):
+        """
+        Ensures a model reply that capitalises or pads the operation is still destructive.
+
+        The dispatcher lowercases and strips the operation before it runs. A predicate on the
+        raw string would let "Delete" or " update" run with no confirmation.
+        """
+        for op in ( "Delete", " update", "DELETE_LIST", "update\n", "\tDelete_List " ):
+            self.assertTrue( CRUDIntent( operation=op ).is_destructive(), f"{op!r} should be destructive" )
+
+    def test_non_destructive_operations_stay_safe_with_case_and_whitespace( self ):
+        """Ensures normalising does not widen the destructive set: padded safe operations stay safe."""
+        for op in ( "Add", " query", "LIST_LISTS ", "mark_done\n" ):
+            self.assertFalse( CRUDIntent( operation=op ).is_destructive(), f"{op!r} should not be destructive" )
+
+    def test_needs_confirmation_for_padded_destructive_operation( self ):
+        """Ensures "Delete" and " update" need confirmation although requires_confirmation is false."""
+        self.assertTrue( CRUDIntent( operation="Delete", requires_confirmation="false" ).needs_confirmation() )
+        self.assertTrue( CRUDIntent( operation=" update", requires_confirmation="false" ).needs_confirmation() )
+
     def test_needs_confirmation_explicit_true( self ):
         """Ensures requires_confirmation='true' forces confirmation on a safe op."""
         self.assertTrue( CRUDIntent( operation="add", requires_confirmation="TRUE" ).needs_confirmation() )

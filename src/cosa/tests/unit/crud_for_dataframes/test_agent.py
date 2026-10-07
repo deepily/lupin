@@ -162,6 +162,22 @@ class TestRunCode( unittest.TestCase ):
         self.assertEqual( result[ "output" ][ "status" ], "cancelled" )
         self.assertIsNone( agent.error )
 
+    def test_padded_destructive_operation_still_asks_and_is_not_dispatched_when_denied( self ):
+        """
+        Ensures "Delete" and " update" reach the confirmation and a denial stops them.
+
+        Before the fix the raw-string compare skipped the ask, so dispatch lowercased the
+        operation and ran the delete with no confirmation.
+        """
+        for op in ( "Delete", " update" ):
+            agent = self._agent_with_intent( CRUDIntent( operation=op, schema_type="todo", item_id="abc" ) )
+            with patch.object( agent, "_confirm_destructive_operation", return_value=False ) as confirm, \
+                 patch( "cosa.crud_for_dataframes.agent.dispatch" ) as dispatch:
+                result = agent.run_code()
+            confirm.assert_called_once()
+            dispatch.assert_not_called()
+            self.assertEqual( result[ "output" ][ "status" ], "cancelled", f"{op!r} should have been cancelled" )
+
     def test_destructive_confirmation_granted_dispatches( self ):
         """Ensures a granted destructive confirmation proceeds to dispatch."""
         agent = self._agent_with_intent( CRUDIntent( operation="delete", schema_type="todo", item_id="abc" ) )

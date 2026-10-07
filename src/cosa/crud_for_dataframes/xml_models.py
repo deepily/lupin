@@ -115,10 +115,11 @@ class CRUDIntent( BaseXMLModel ):
             - self.operation is a string
 
         Ensures:
-            - Returns True for delete, delete_list, update operations
+            - Returns True for delete, delete_list, update operations, ignoring case and
+              surrounding whitespace, the same normalising dispatch() applies before it runs
             - Returns False for read-only operations
         """
-        return self.operation in self.DESTRUCTIVE_OPERATIONS
+        return self.operation.strip().lower() in self.DESTRUCTIVE_OPERATIONS
 
     def needs_confirmation( self ):
         """
