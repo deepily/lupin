@@ -236,3 +236,9 @@ def test_a_strong_match_does_not_hide_a_malformed_answer():
     r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "best", _STRONG ), _ans( "bad", _p( 0.9, 0.9, 0.9 ) ) ] )
     assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "MALFORMED_ANSWER" ] )      # LOW_CONFIDENCE is waived, this is not
     assert r[ "malformed" ] == [ { "id": "bad", "reason": "sum_not_one" } ] and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]
+
+
+def test_open_ruling_a_doubtful_reuse_still_decides_the_verdict_beside_a_strong_extend():
+    """Pins today's behaviour until Rick rules: doubtful entries still count toward the verdict."""
+    r = _decide( [ _ans( "ext", _p( 0.02, 0.95, 0.03 ) ), _ans( "unsure", _p( 0.6, 0.3, 0.1 ) ) ] )        # strong extend, doubtful reuse
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "REUSE", [] ) and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "unsure" ]
