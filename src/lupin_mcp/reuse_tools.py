@@ -424,7 +424,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     Requires:
         - entries are symbol dicts with id, sig and doc
         - when frozen, no transport is used and every answer must already be cached, except the ids in
-          `gaps`, a mapping of id to "failed" or "not_reached" taken from the receipt being replayed
+          `gaps`, a mapping of id to "failed" or "not_reached" taken from the receipt being replayed; a gap
+          id is never read from the cache, because a later run may have filled it
     Ensures:
         - returns { answers, failed, not_reached, calls, cache_hits, attempts_answered, attempts_failed,
           failed_attempts }: answers are { id, probabilities }, failed is the list of ids whose call failed
@@ -444,12 +445,10 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
 
     def one( rec ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
+        if frozen and gaps is not None and rec[ "id" ] in gaps: return rec[ "id" ], None, gaps[ rec[ "id" ] ], 0      # the live run never got an answer; a later run's cache must not supply one
         hit  = cache.get( key )
         if hit is not None: return rec[ "id" ], hit, "hit", 0
-        if frozen:
-            kind = gaps[ rec[ "id" ] ] if gaps is not None and rec[ "id" ] in gaps else None
-            if kind is None: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
-            return rec[ "id" ], None, kind, 0                                  # the live run never got an answer for it either
+        if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
         if budget is not None: budget.begin_tally()
         how, resp, cut_off = "failed", None, False
         try:
@@ -916,7 +915,8 @@ def replay_impl( rid, ctx ):
             route = stored[ "route" ] if "route" in stored else "full"           # a receipt from before page-first has no route
             plan  = stored[ "pages" ] if route in ( "pages", "pages_then_full" ) else None
             pt    = stored[ "page_prompt_template" ] if "page_prompt_template" in stored else None
-            gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ f[ "id" ]: "failed" for f in stored[ "stats" ][ "failed_attempts" ] } }
+            lost  = stored[ "stats" ][ "failed_attempts" ] if "failed_attempts" in stored[ "stats" ] else []         # a receipt from before the call budget lacks it
+            gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ f[ "id" ]: "failed" for f in lost } }
             d     = _route( ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }

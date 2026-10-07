@@ -208,6 +208,7 @@ def test_replay_frozen_treats_a_receipt_with_no_route_as_a_plain_sweep( env ):
     path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
     old  = json.loads( path.read_text( encoding="utf-8" ) )
     for key in ( "route", "pages", "page_prompt_template" ): del old[ key ]                                   # the shape before page-first
+    del old[ "stats" ][ "failed_attempts" ]                                                                    # and before the call budget
     path.write_text( json.dumps( old, sort_keys=True ), encoding="utf-8" )
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
@@ -323,3 +324,19 @@ def test_a_receipt_cut_short_inside_the_page_stage_replays_without_the_unasked_p
     assert len( rec[ "pages" ][ "skipped" ] ) == 1 and r[ "cause" ] == "CALL_FAILED"
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_a_cut_short_receipt_still_replays_to_uncertain_after_a_later_run_fills_the_cache( env, monkeypatch ):
+    write_wiki( env[ 0 ] )
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
+    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
+    need = "something unrelated [laterfill]"
+    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
+    root, data, out = env
+    cut = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, call_budget=4 ) )
+    assert cut[ "cause" ] == "CALL_FAILED"
+    full = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out ) )                             # a complete run now fills the entry the first run never asked
+    assert full[ "verdict" ] == "NEW" and full[ "receipt_id" ] != cut[ "receipt_id" ]
+    rep = rt.replay_impl( cut[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
+    assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
