@@ -196,16 +196,15 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
 
   recipientsChanged( loaded: boolean = true ): void {
     if ( loaded ) {
-      this.recipientsKnown  = true;
-      this.recipientsFailed = false;
+      this.recipientsKnown = true;
       if ( this.deadlinePassed && this.broadcastId !== null ) {
         this.deadlinePassed = false;
         this.settleAtDeadline( this.broadcastId );
         return;
       }
-    } else if ( !this.recipientsKnown ) {
-      // A refresh that fails after a roster was loaded keeps that roster; only a roster we
-      // never had is reported as unknown.
+    } else {
+      // Read only while the roster is unknown, and a loaded roster is never unknown again,
+      // so a refresh that fails after a load keeps the loaded roster and never shows this.
       this.recipientsFailed = true;
     }
     this.render();
