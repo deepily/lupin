@@ -374,6 +374,10 @@ class _DRGraph:
                 "cosa.agents.deep_research.config",
                 ResearchConfig = MagicMock(),
             ),
+            "cosa.agents.deep_research.seed_context": _make_module(
+                "cosa.agents.deep_research.seed_context",
+                query_with_seed_context = lambda query, source_document: query,
+            ),
             "cosa.agents.deep_research.cost_tracker": _make_module(
                 "cosa.agents.deep_research.cost_tracker",
                 CostTracker         = MagicMock( return_value=self.cost_tracker_instance ),
