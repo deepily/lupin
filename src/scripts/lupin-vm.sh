@@ -110,6 +110,8 @@ Deployment contract (task 47c4801b):
                          report), and credential ACCEPTANCE with a wrong-key control.
                          Assert-only — every failure prints an executable remedy.
                          'deploy' runs the pre arm before, and the post arm after, automatically.
+  install-hooks          link the two git hooks (pre-commit, pre-push) on the VM's checkout; 'deploy' runs it
+                         after the checkout. Safe to re-run. Leaves a file in the way alone and says so.
   push-unversioned       ship the payloads git cannot deliver (gitignored keys, personal-data maps),
                          driven by src/conf/vm-unversioned-manifest.tsv. Rows with local_path '-'
                          are VM-local and only ASSERTED, never copied.
@@ -711,6 +713,8 @@ for p in $APP_PORT $ARBITER_PORT; do
   done
   echo \":\$p health -> \$st (after ~\$((i*8))s)\"
 done
+echo '== install git hooks (pre-commit, pre-push) =='
+bash src/scripts/install-git-hooks.sh || echo 'WARN: git hook install reported a problem (above); the post-deploy preflight below will say which hook is missing'
 echo '== [4/4] POST-deploy preflight (--phase post) =='
 bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight reported BLOCKING failures (above). NOT rolling back — a rollback on a half-applied deploy is more dangerous than a named failure. Fix forward.'"
         if [ "$DRY_RUN" -eq 1 ]; then
@@ -952,6 +956,17 @@ bash src/scripts/preflight-vm.sh --phase post || echo 'POST-deploy preflight rep
             --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
             $SSH_KEEPALIVE \
             --command "cd $VM_ROOT && bash src/scripts/preflight-vm.sh --phase $PF_PHASE"
+        ;;
+
+    install-hooks)
+        # Link the two git hooks (pre-commit, pre-push) on the VM's checkout. `deploy` runs the
+        # same installer after its checkout, so this verb is for a VM you did not just deploy to.
+        # Safe to re-run: a correct link is left alone. See src/scripts/install-git-hooks.sh.
+        require_project
+        runit gcloud compute ssh "$VM_NAME" \
+            --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+            $SSH_KEEPALIVE \
+            --command "cd $VM_ROOT && bash src/scripts/install-git-hooks.sh"
         ;;
 
     install-cli)
