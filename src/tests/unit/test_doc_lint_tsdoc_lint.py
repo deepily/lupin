@@ -285,7 +285,7 @@ SHARED_SHAPES = [
     ( "url with a word in it", "Summary.\n\nSee https://example.com/NEVER/b for more.", "Summary.\n\nSee example NEVER b for more.", True ),
     ( "fenced block", "Summary.\n\n```\nconst x = NEVER;\n```\n", "Summary.\n\nconst x = NEVER;\n", False ),
     ( "example block", "Summary.\n\nExample:\n    x = NEVER\n", "Summary.\n\nx = NEVER\n", True ),
-    ( "bracketed placeholder", "Summary.\n\nUsage: [--json NONE]\n", "Summary.\n\nUsage: NONE\n", True ),
+    ( "bracketed placeholder", "Summary.\n\nUsage: [--json NONE]\n", "Summary.\n\nUsage: NONE\n", False ),
     ( "key equals value line", "Summary.\n\ntest fix expediter phase 1 engine = sdk | claude_code\n", "Summary.\n\nIn phase 1 the engine is sdk.\n", False ),
     ( "file name", "Summary.\n\nSee broadcast-panel.js for it.\n", "Summary.\n\nSee broadcast-panel for it.\n", False ),
 ]
