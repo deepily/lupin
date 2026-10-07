@@ -413,28 +413,24 @@ def _parse_iso_aware( raw ):
 # ── The verify predicate (pure) — ALL-OR-ASK ──────────────────────────────────
 def memento_body_lines( text ):
     """
-    Count the content lines of a memento beyond its header comments and its title.
+    Count the content lines of a memento: lines that are not blank, headings or comments.
 
     A deliberate choice: completeness is whether the file says anything, not how many
     bytes it takes. A short job leaves a short, complete memento. Section headings are
-    not consulted, because they change with the workflow and would go stale silently.
+    not consulted by name, because they change with the workflow and would go stale.
 
     Requires:
         - text is a str
 
     Ensures:
-        - returns the number of non-blank lines that are not html comment lines
-        - the first top-level `# ` title line is not counted
+        - returns the number of non-blank lines that do not start with `#` or `<!--`
+        - a file of headings and comments alone counts zero
         - never raises
     """
-    count        = 0
-    title_seen   = False
+    count = 0
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped == "" or stripped.startswith( "<!--" ):
-            continue
-        if not title_seen and stripped.startswith( "# " ):
-            title_seen = True
+        if stripped == "" or stripped.startswith( "#" ) or stripped.startswith( "<!--" ):
             continue
         count += 1
     return count
@@ -462,8 +458,8 @@ def verify_seat_memento(
 
     Ensures:
         - ( True, reason ) ONLY when ALL hold: file readable; byte length >= min_bytes;
-          at least one content line beyond the header comments and the title (so a
-          short, complete memento passes and a header-only stub does not); a parseable memento-record header is present; header session_id's 8-char
+          at least one content line that is not a heading or a comment (so a short,
+          complete memento passes and a skeleton does not); a parseable memento-record header is present; header session_id's 8-char
           prefix == seat_sid8; header written_at is aware, not future, and its age
           <= window_seconds
         - ( False, reason ) otherwise, the reason naming which gate failed — every
@@ -501,7 +497,7 @@ def verify_seat_memento(
     if n_bytes < min_bytes:
         return False, f"memento too small ({n_bytes}B < {min_bytes}B floor) — empty or partial write"
     if memento_body_lines( text ) == 0:
-        return False, f"memento is a header-only stub ({n_bytes}B, no content beyond its header and title)"
+        return False, f"memento is a header-only stub ({n_bytes}B, no content line beyond headings and comments)"
 
     header = parse_memento_header( text )
     if not header:
@@ -539,7 +535,7 @@ def verify_seat_memento(
             return False, refuted
 
     if n_bytes < SHORT_MEMENTO_BYTES:
-        return True, f"verified: short, elements present, session-matched, fresh ({int( age )}s old)"
+        return True, f"verified: short, has content lines, session-matched, fresh ({int( age )}s old)"
     return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
 
 
