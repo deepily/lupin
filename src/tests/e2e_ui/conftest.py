@@ -635,7 +635,8 @@ def clean_test_db():
         - Server hot-swapped to Testing config (lupin_db_test)
 
     Ensures:
-        - Empty application tables before each test; the schema and its grants stay
+        - Empty application tables before each test; the schema and its grants stay.
+          The one exception is job_history: pending jobs scheduled in the future are kept
         - Complete isolation between tests
         - Tests never affect development database
     """
@@ -655,12 +656,14 @@ def clean_test_db():
     from seed_test_companions import COMPANION_EMAILS
 
     # Row-level DELETE: wipe test-generated rows, companions survive via is_protected
+    from tests.helpers.job_history_cleanup import clean_job_history
     with engine.begin() as conn:
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states, refresh_tokens"
+            "proxy_decisions, trust_states, refresh_tokens"
         ) )
+        clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 
     with engine.connect() as conn:
         count    = conn.execute( text( "SELECT count(*) FROM users WHERE is_protected" ) ).scalar()
