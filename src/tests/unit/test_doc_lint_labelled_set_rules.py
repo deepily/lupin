@@ -1172,6 +1172,17 @@ def test_r9_an_unanswered_condition_needs_the_condition_to_open_the_sentence_and
     assert lead_in( "Look up the key. When no key is enrolled, if it is closed, it returns unavailable, so callers can fall back.", "if it is closed, it returns unavailable" ) == "DROPPED_CONDITION"
 
 
+def test_r10_a_cut_that_adds_an_ellipsis_is_not_two_dots():
+    assert rules.stray_punctuation_rejection( "Show the list. Done.", "Show the list... Done." ) is None
+    assert rules.stray_punctuation_rejection( "Show the list. Done.", "Show the list.. Done." ) == "STRAY_PUNCTUATION"
+
+
+def test_r9_a_condition_with_no_comma_before_the_cut_clause_is_a_stated_miss():
+    old = "Look up the key. When no key is enrolled it returns unavailable, so callers can fall back to the default."
+    assert lead_in( old, "it returns unavailable" ) is None                                    # a miss, stated in the docstring
+    assert lead_in( old.replace( "enrolled it", "enrolled, it" ), "it returns unavailable" ) == "UNANSWERED_CONDITION"
+
+
 # ---- rule 4 widened: a subject cut from a sentence start before a parenthesis leaves a fragment (row 6737b017, shape 4) ----
 # Made-up docstrings only. The verb case of the same shape (a subject cut before a lowercase verb) is already LOWERCASE.
 
