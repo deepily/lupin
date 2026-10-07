@@ -119,3 +119,29 @@ def test_the_still_writable_check_is_false_without_the_role_or_the_table():
 
 def test_downgrade_restores_nothing():
     assert _migration().downgrade() is None
+
+
+# ---- CREATEDB: lupin_test only (row 80513825, the .env step) --------------------------------------
+def _code_lines():
+    """The SQL's non-comment lines, stripped; lines because psql meta-commands have no semicolon."""
+    return [ line.strip() for line in _sql().splitlines() if line.strip() and not line.strip().startswith( "--" ) ]
+
+
+def _grants_createdb( line ):
+    return "CREATEDB" in line.replace( "NOCREATEDB", "" )
+
+
+def test_lupin_test_alone_is_given_createdb():
+    lines = _code_lines()
+    assert lines.count( "ALTER ROLE lupin_test CREATEDB;" ) == 1
+    assert [ line for line in lines if _grants_createdb( line ) ] == [ "ALTER ROLE lupin_test CREATEDB;" ]
+
+
+def test_every_role_is_still_created_without_createdb_so_only_the_alter_grants_it():
+    create = [ line for line in _code_lines() if "CREATE ROLE" in line ]
+    assert len( create ) == 1 and "NOCREATEDB" in create[ 0 ]
+
+
+@pytest.mark.parametrize( "role", [ "lupin_app", "lupin_host" ] )
+def test_the_app_and_host_roles_are_never_given_createdb(role):
+    assert not [ line for line in _code_lines() if role in line and _grants_createdb( line ) ]

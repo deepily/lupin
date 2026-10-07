@@ -120,6 +120,11 @@ SELECT format( 'ALTER ROLE %I PASSWORD %L', r, p )
   FROM ( VALUES ( 'lupin_app', :'app_pw' ), ( 'lupin_host', :'host_pw' ), ( 'lupin_test', :'test_pw' ) ) AS v( r, p )
 \gexec
 
+-- lupin_test may create databases: the integration tier logs in as lupin_test and its files run
+-- CREATE DATABASE for a throwaway database. lupin_app and lupin_host keep NOCREATEDB. This is an
+-- ALTER, not part of the CREATE ROLE above, so a role that already exists gets it on a re-apply.
+ALTER ROLE lupin_test CREATEDB;
+
 -- ---- who may connect to which database ---------------------------------------------------
 REVOKE CONNECT ON DATABASE lupin_db_dev  FROM PUBLIC;
 REVOKE CONNECT ON DATABASE lupin_db_test FROM PUBLIC;
