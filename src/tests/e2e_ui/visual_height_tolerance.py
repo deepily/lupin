@@ -41,9 +41,11 @@ from pixelmatch.contrib.PIL import pixelmatch
 
 # Row 4f5301ad: pixelmatch scores in YIQ, so a per-pixel threshold of 0.1 admits a uniform
 # blue shift of up to +78/255 (red +46, green +37, brightness +26) as ZERO difference.
-# The comparators therefore default to 0.0: every non-identical pixel counts, and the
-# tolerance lives in the structural rules (height delta, shift, isolated scatter) instead.
-PIXEL_THRESHOLD = 0.0
+# The comparators therefore default to 0.03, the one tolerance for the whole gate: it forgives
+# a grey shift of up to 7 shades (the 1-shade dither swap seen on 36% of a card's pixels, largest
+# difference 7 of 255) and still fails a block moved 12 shades. A blue-only drift of up to 23
+# shades is forgiven too. The structural rules (height delta, shift, isolated scatter) stay as they were.
+PIXEL_THRESHOLD = 0.03
 
 
 @dataclass( frozen=True )

@@ -162,7 +162,7 @@ def test_lone_pixel_is_forgiven_at_407(edge):
 
 
 # ---------------------------------------------------------------------------
-# Threshold handling: the default is strict, and an explicit value is honoured
+# Threshold handling: the default is the one tolerance, and an explicit value is honoured
 # ---------------------------------------------------------------------------
 
 def test_explicit_threshold_is_honoured_at_every_site():
@@ -171,8 +171,8 @@ def test_explicit_threshold_is_honoured_at_every_site():
     assert _all_three( _tinted( BASE, 78 ), BASE, threshold=0.1 ) == ( True, True, True )
 
 
-def test_pixel_threshold_default_is_zero_and_every_signature_uses_it():
-    assert vht.PIXEL_THRESHOLD == 0.0
+def test_pixel_threshold_is_the_one_tolerance_and_every_signature_uses_it():
+    assert vht.PIXEL_THRESHOLD == 0.03
     for fn in (
         vht.compare_pngs_height_tolerant,
         vht.compare_pngs_aa_scatter_tolerant,
