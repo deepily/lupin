@@ -195,7 +195,7 @@ class TestRunAsync:
             "yaml_path" : "/io/pres/deck.yaml",
             "marp_path" : "/io/pres/deck.md",
             "cost"      : 0.75,
-            "artifacts" : { "presentation_id": "pp-1", "slide_count": 11 },
+            "artifacts" : { "presentation_id": "pp-1", "total_slides": 11 },
         } )
         result = _run( agent.run_async() )
         assert result.state        == PipelineState.COMPLETED
