@@ -667,7 +667,10 @@ case "$SUBCMD" in
         #    the deploy; set LUPIN_SKIP_PREFLIGHT=1 to override deliberately.
         #    Running both arms is what distinguishes "the deploy broke it" from "it was
         #    already broken" — the diagnosis that cost five minutes of bisection on 07-26.
-        if [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            # --dry-run prints and runs nothing; this step goes over IAP SSH, so it must not run.
+            log "(dry-run) PRE-deploy preflight on VM: bash src/scripts/preflight-vm.sh --phase pre"
+        elif [ "${LUPIN_SKIP_PREFLIGHT:-0}" != "1" ]; then
             log "PRE-deploy preflight (--phase pre)"
             if ! gcloud compute ssh "$VM_NAME" \
                     --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
