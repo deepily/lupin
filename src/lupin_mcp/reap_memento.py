@@ -85,7 +85,8 @@ from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
 # ── Defaults (the MCP wrapper overrides these from INI at the live call) ───────
 DEFAULT_WINDOW_SECONDS    = 20 * 60   # 1200 — freshness floor AND ceiling (see module doc)
-DEFAULT_MIN_BYTES         = 1000      # completeness floor — a header-only stub fails this
+DEFAULT_MIN_BYTES         = 200       # byte floor — catches only an empty or near-empty write (row cc86889e)
+SHORT_MEMENTO_BYTES       = 1000      # below this a verified memento is called "short" in the reason
 DEFAULT_ASK_TIMEOUT_SEC   = 45        # total wait after the ask, shared across all asked seats
 DEFAULT_POLL_INTERVAL_SEC = 3         # re-check cadence while polling for a written memento
 
@@ -410,6 +411,35 @@ def _parse_iso_aware( raw ):
 
 
 # ── The verify predicate (pure) — ALL-OR-ASK ──────────────────────────────────
+def memento_body_lines( text ):
+    """
+    Count the content lines of a memento beyond its header comments and its title.
+
+    A deliberate choice: completeness is whether the file says anything, not how many
+    bytes it takes. A short job leaves a short, complete memento. Section headings are
+    not consulted, because they change with the workflow and would go stale silently.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns the number of non-blank lines that are not html comment lines
+        - the first top-level `# ` title line is not counted
+        - never raises
+    """
+    count        = 0
+    title_seen   = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith( "<!--" ):
+            continue
+        if not title_seen and stripped.startswith( "# " ):
+            title_seen = True
+            continue
+        count += 1
+    return count
+
+
 def verify_seat_memento(
     path,
     seat_sid8,
@@ -432,7 +462,8 @@ def verify_seat_memento(
 
     Ensures:
         - ( True, reason ) ONLY when ALL hold: file readable; byte length >= min_bytes;
-          a parseable memento-record header is present; header session_id's 8-char
+          at least one content line beyond the header comments and the title (so a
+          short, complete memento passes and a header-only stub does not); a parseable memento-record header is present; header session_id's 8-char
           prefix == seat_sid8; header written_at is aware, not future, and its age
           <= window_seconds
         - ( False, reason ) otherwise, the reason naming which gate failed — every
@@ -469,6 +500,8 @@ def verify_seat_memento(
     n_bytes = len( text.encode( "utf-8" ) )
     if n_bytes < min_bytes:
         return False, f"memento too small ({n_bytes}B < {min_bytes}B floor) — empty or partial write"
+    if memento_body_lines( text ) == 0:
+        return False, f"memento is a header-only stub ({n_bytes}B, no content beyond its header and title)"
 
     header = parse_memento_header( text )
     if not header:
@@ -505,6 +538,8 @@ def verify_seat_memento(
         if refuted:
             return False, refuted
 
+    if n_bytes < SHORT_MEMENTO_BYTES:
+        return True, f"verified: short, elements present, session-matched, fresh ({int( age )}s old)"
     return True, f"verified: complete, session-matched, fresh ({int( age )}s old)"
 
 
