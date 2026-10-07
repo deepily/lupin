@@ -13,6 +13,7 @@ The plan raises Shortfall when a floor cannot be met. Each rule has a stated bli
                                 Also skips it when another sentence shares two content words with it. That sentence must carry an exclusion cue or the same qualifier.
                                 Misses: an exclusion stated with no shared words.
     Rule 4  delete_rejection    skips a delete that touches the first sentence or leaves a lowercase sentence start. Also skips one that leaves a sentence under four words.
+                                Also skips a delete that leaves a sentence opening on a parenthesis.
                                 Also skips a delete that empties a heading or a field. Also skips one that leaves a paragraph opening on a pronoun.
                                 Misses: a pronoun inside a sentence whose antecedent was cut. Misses: a list item emptied of meaning but not of words.
     Rule 5  restated_elsewhere  skips a delete when another sentence holds 60% of the span's content words.
@@ -271,6 +272,7 @@ def delete_rejection( old, span, cut ):
         - `RESTATED`: another sentence restates the span by content words
         - `PRONOUN`: see paragraph_orphan
         - `LOWERCASE`: the text after the cut becomes a sentence start and begins lowercase
+        - `PAREN_START`: the text after the cut becomes a sentence start and opens on a parenthesis, so a fragment is left
         - SHORT_SENTENCE: a sentence new to cut has fewer than MIN_SENTENCE_WORDS words
         - EMPTY_FIELD / EMPTY_HEADING: see structure_emptied
         - the checks run in that order and the first to fire is returned
@@ -279,7 +281,9 @@ def delete_rejection( old, span, cut ):
     if restated_elsewhere( old, span ): return "RESTATED"
     if paragraph_orphan( old, cut ): return "PRONOUN"
     after = old[ span[ 1 ]: ].lstrip( " \t\n,;:—" )
-    if sentence_start_before( old, span[ 0 ] ) and after[ :1 ].isalpha() and after[ :1 ].islower(): return "LOWERCASE"
+    at_start = sentence_start_before( old, span[ 0 ] )
+    if at_start and after[ :1 ].isalpha() and after[ :1 ].islower(): return "LOWERCASE"
+    if at_start and after[ :1 ] == "(": return "PAREN_START"
     old_sentences = { " ".join( s.split() ) for s in sentences_of( old ) }
     for sentence in sentences_of( cut ):
         if " ".join( sentence.split() ) not in old_sentences and words_of( sentence ) < MIN_SENTENCE_WORDS: return "SHORT_SENTENCE"
