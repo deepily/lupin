@@ -538,11 +538,13 @@ def make_pair( pair_id, kind, d, c, rng, tasks, task_rows ):
     Return the pair record of one pick and add its writer task(s) to tasks and task_rows.
 
     Ensures:
-        - task ids come from rng, random-looking and unrelated to the pair id; the same instruction string serves delete,
-          weaken and paraphrase texts; relocate also has a design-prose task
+        - task ids come from rng, random-looking and unrelated to the pair id; an id already in tasks is drawn again,
+          so a kept pair's task is never replaced
+        - the same instruction string serves delete, weaken and paraphrase texts; relocate also has a design-prose task
     """
     def new_task( role, instruction, text ):
         task_id = "t%016x" % rng.getrandbits( 64 )
+        while task_id in tasks: task_id = "t%016x" % rng.getrandbits( 64 )
         tasks[ task_id ] = { "pair_id": pair_id, "role": role, "sha256": task_sha( INSTRUCTIONS[ instruction ], text ) }
         task_rows.append( { "task_id": task_id, "instruction": INSTRUCTIONS[ instruction ], "text": text } )
 
@@ -1165,6 +1167,7 @@ def cmd_redraw( args ):
     Ensures:
         - returns 2 when the pool is not the one the plan was drawn from, or the output folder already holds this split
         - returns 2 when a replacement is missing for a floor
+        - returns 2, writing nothing, when the redrawn plan would leave a pair without its "new" writer task
         - returns 2 when the --failed file is not a list of strings, or names a pair that is not in the plan
         - no model call is made; the source set is not changed
         - the new folder holds the plan (replaced pairs keep their ids), the writer tasks (kept ones first), the ledger and
@@ -1195,6 +1198,10 @@ def cmd_redraw( args ):
         return 2
     tasks, new_rows = { tid: meta for tid, meta in plan[ "tasks" ].items() if meta[ "pair_id" ] not in picks }, []
     pairs = [ make_pair( p[ "id" ], *picks[ p[ "id" ] ], rng, tasks, new_rows ) if p[ "id" ] in picks else p for p in plan[ "pairs" ] ]
+    bare = sorted( p[ "id" ] for p in pairs if not any( m[ "pair_id" ] == p[ "id" ] and m[ "role" ] == "new" for m in tasks.values() ) )
+    if bare:
+        print( f"REFUSED: the redrawn plan leaves no new writer task for {' '.join( bare )}", file=sys.stderr )
+        return 2
     calls = len( new_rows )
     print( f"redraw {args.split}: {len( picks )} failed pair(s) {' '.join( sorted( picks ) )} are replaced; {calls} new writer call(s) needed, up to {2 * calls} with one retry each; no model call made" )
     new_plan = dict( plan, pairs=pairs, tasks=tasks, units=sorted( { unit_of( p[ "file" ] ) for p in pairs } ), redrawn={ "pairs": sorted( picks ), "from_plan_sha256": plan[ "plan_sha256" ] } )
