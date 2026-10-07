@@ -3049,7 +3049,7 @@ def execute_dm_send(
           None (push_dm_grade_to_sender).
 
     Ensures:
-        - no model call happens in this function's timeline. Grading is queued and returns; a grader that is slow, dead
+        - the baseline path runs the DM tutor's model call here (`_apply_dm_tutor`, when enabled and over the trigger). Grading is queued and returns; a grader that is slow, dead
           or absent costs the sender nothing and fails no send. The 201 therefore carries no `quality` key: the grade does not exist yet, and a message with no grade yet is normal
         - 422 (recipient unresolved) is returned unchanged for AI self-correction
         - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in both the persisted row and the pushed

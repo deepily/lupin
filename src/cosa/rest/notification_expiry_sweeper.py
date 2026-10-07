@@ -9,12 +9,12 @@ So the router's `except Exception` cannot catch it. The `finally` clears the in-
 the row `delivered` past its `expires_at`, forever. `get_expired_notifications()` had no caller
 to sweep them; this module is that caller.
 
-The grace delay is the /respond contract, not a safety margin. `expires_at` is not when the
+The grace delay is the /notify/response contract, not a safety margin. `expires_at` is not when the
 human stopped caring. Of 58 answers that landed after it, 57 came within 300s (highest 298s).
 None came between 301s and 600s, and one came 1,109s late from a 600s ask. So the 300s default
 is not arbitrary: it falls in a real gap in the data and does not cut through a cluster. A row marked expired the
 instant `expires_at` passes would turn a real answer into a 400.
-`POST /api/notifications/{id}/respond` accepts a late answer against an `expired` row for
+`POST /api/notify/response` accepts a late answer against an `expired` row for
 `notification grace period seconds` past `expires_at`, and against a `delivered` row forever.
 So this sweeper narrows the honoured window from forever to expires_at plus grace, which costs
 one keypress in that population. The lever is that one key, which the caller passes as
@@ -88,7 +88,7 @@ def find_sweepable_ids( repo, grace_seconds, now=None ):
         - cannot drift from the live pass, because both express the grace rule through
           `_partition` and nowhere else; without that it would be a second copy and should go
         - returns only rows whose expires_at is at least grace_seconds in the
-          past; a row still inside its /respond grace window is never
+          past; a row still inside its /notify/response grace window is never
           returned, however far past expires_at it is
         - returns ids as strings, in the repository's own order
         - returns [] when nothing qualifies (an empty list is a finding here,
@@ -139,7 +139,7 @@ def sweep_once( session_factory, grace_seconds, batch_limit=200, now=None, debug
 
         # expected_state="delivered" is the CONTROL against the scan-then-mark
         # race (row bf4f65c3): every id here was 'delivered' when the scan ran,
-        # and a /respond that lands before this loop reaches it makes the
+        # and a /notify/response that lands before this loop reaches it makes the
         # UPDATE match zero rows rather than stamping 'expired' over a real
         # human answer.
         #

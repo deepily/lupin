@@ -20,8 +20,10 @@ The two tiers live in the base class:
                      SolutionSnapshotRepository.get_snapshots_by_question. The embedding comes
                      through QuestionEmbeddingRepository, keyed by the same verbatim text that
                      produced the stored question_embedding column. The best score is recorded on
-                     every request for the threshold table. For now it does not trigger
-                     replay. Anything below a perfect match is routed.
+                     every request for the threshold table. The lookup never marks it a replay
+                     hit: only a tier-1 exact hit sets is_replay_hit. The flow's near-match step
+                     can still replay the best candidate after a score threshold and a
+                     confirmation (AskFlow._near_match_replay); otherwise the question is routed.
 
 Write-back rebinds the tagged field as `{ **old, **tag }` and never mutates it in place.
 SolutionSnapshot's runtime_stats is a shared mutable default, so an in-place tag would leak the v2

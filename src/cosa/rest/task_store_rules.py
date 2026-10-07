@@ -967,9 +967,9 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
 
 def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
     """
-    Validate the mint status of a new item: queued or blocked only.
+    Validate the mint status of a new item: queued, blocked or not_approved only.
 
-    A create may mint queued or blocked only, in a single call. This is the status-whitelist half of the blocked-mint rule. The router (create_task) enforces the manager-only guard.
+    A create may mint queued, blocked or not_approved, in a single call. This is the status-whitelist half of the blocked-mint rule. The router (create_task) enforces the manager-only guard.
     That guard needs bridge IO to resolve the caller's role, and this module is pure. The whitelist is a data rule testable with no config; the guard is an authorization rule.
 
     Requires:
@@ -986,8 +986,8 @@ def validate_create_status( status, blocked_by, next_chase_ts ) -> list:
           a valid mint status
         - status == "blocked" -> the same blocked invariant a transition enforces,
           via validate_blocked_fields (>=1 typed ref and a kind-aware chase)
-        - status == "queued" -> [] (blocked_by / next_chase_ts are ignored; a
-          queued mint carries neither)
+        - status == "queued" or "not_approved" -> [] (blocked_by / next_chase_ts are
+          ignored; those mints carry neither)
         - never raises; every violation is a returned string the router maps to 422
     """
     if status not in CREATE_ALLOWED_STATUSES:
@@ -1519,15 +1519,21 @@ def validate_transition(
         - returns [] iff all hold:
             to_status is a valid status and differs from from_status
             authority is a valid authority
-            from_status is not terminal (done/dropped are append-only)
-            to_status == done => receipt_refs passes validate_receipt_refs
+            from_status is not terminal (done, dropped and wont_fix are append-only)
+            to_status == done => receipt_refs passes validate_receipt_refs and
+            carries a key from CLOSING_RECEIPT_KEYS
             receipt_refs present on any transition => it passes
             validate_receipt_refs, so junk never lands in the audit trail
-            to_status == blocked => next_chase_ts present and blocked_by
-            passes validate_blocked_by_refs
-            to_status == dropped => reason is a non-blank string
-        - reason is optional on every other transition (free text, no shape
-          rule; the router's Pydantic model caps its length at the wire)
+            to_status == blocked => blocked_by passes validate_blocked_fields: at
+            least one typed ref, and next_chase_ts only when a persona is among the
+            blockers (a user-only or item-only block needs none)
+            to_status == dropped or wont_fix => reason is a non-blank string, and so
+            is a demotion into not_approved from another status
+            to_status == parked => validate_park passes (legal only from queued or
+            in_progress, with a chase time and a park reason)
+        - the blocked-to-blocked repoint and the parked-to-parked refresh are the two
+          self-edges let through; reason is optional on every other transition (free
+          text, no shape rule; the router's Pydantic model caps its length at the wire)
         - returns the full list of violations otherwise, with one exception: an
           invalid to_status returns at once, since the dependent receipt, blocked
           and reason rules mean nothing without a valid target state

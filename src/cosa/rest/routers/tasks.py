@@ -6,14 +6,19 @@ the same store through these endpoints. Receipts are first class. A `->done` tra
 without valid `receipt_refs` is rejected, which is the mechanical guard against confabulated
 completion.
 
-Every endpoint authenticates through `require_api_key_or_jwt`, so an X-API-Key or a Bearer
-JWT works. Hook writers use the host API-key file, the same lane as the arbiter and the
-Stop-hook liveness path. The endpoints:
-    - POST /api/tasks                  - create item (always status=queued)
-    - POST /api/tasks/{id}/transition  - state change; structural rules enforced
-    - GET  /api/tasks                  - filtered query (owner/status/gate/manager/project/class)
-    - GET  /api/tasks/{id}             - one item
-    - GET  /api/tasks/{id}/events      - the append-only audit trail
+Twenty of the endpoints authenticate through `require_api_key_or_jwt`, so an X-API-Key or a
+Bearer JWT works. Hook writers use the host API-key file, the same lane as the arbiter and the
+Stop-hook liveness path. Three need an admin: `PATCH /api/tasks/manager-pull` and
+`PATCH` and `DELETE /api/tasks/flow-ratio/settings`. The endpoints, all under `/api`:
+    - Items:    POST /tasks (create: queued, blocked or not_approved; an omitted status takes
+                the approval settings' default), GET /tasks, GET /tasks/{id},
+                PATCH /tasks/{id}, GET /tasks/{id}/events, GET /tasks/events
+    - State:    POST /tasks/{id}/transition (structural rules enforced), /correlate, /amend
+    - Requests: POST /tasks/{id}/request and /request-verdict, GET /tasks/request-badges
+    - Settings: GET and PATCH /tasks/approval-settings and /tasks/manager-pull;
+                GET, PATCH and DELETE /tasks/flow-ratio/settings
+    - Reports:  GET /tasks/flow-ratio, GET /tasks/promotions and /promotions/{ticket_id},
+                GET /epic-stories
 
 Every handler here is a sync `def`, so FastAPI runs it in its threadpool. The DB layer is sync
 SQLAlchemy through `get_db()`. Sync work never runs inside an `async def` handler, which is the
