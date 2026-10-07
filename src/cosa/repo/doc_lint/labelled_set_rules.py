@@ -424,6 +424,7 @@ def lead_in_rejection( old, span ):
         - "as" and "even" (as in "even if") are left out of SUBORDINATORS, since "as" is mostly a preposition,
           so a lead-in opened by either is not seen
         - a cut that leaves a lead-in two sentences back hanging, because only the span's own sentence is read
+        - an unanswered condition with no comma before the cut clause: "When no key is enrolled [it returns unavailable], so callers fall back"
     """
     codes = lead_in_codes( old, span )
     return codes[ 0 ] if codes else None
