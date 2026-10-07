@@ -1090,6 +1090,72 @@ def test_r9_delete_candidates_leave_out_each_shape_and_count_it_by_code():
         assert all( rules.lead_in_rejection( old, c[ "span" ] ) is None for c in cands ), code
 
 
+# ---- rule 10: a delete never leaves stray punctuation, and rule 9 reads a condition left in front of a conjunction (row 6737b017) ----
+# Made-up docstrings only. Each case below passes bad_cut, delete_rejection, markup_rejection and lead_in_rejection today.
+
+SEMI_OLD  = "Show the card list. It shows the latest card and a count chip; tapping expands the burst in place. Throws on failure."
+COLON_OLD = "Count the items. It has two modes: strict mode rejects an empty list. Throws on failure."
+BLANK_OLD = "Return the card. It never throws, for any input\n\nCallers hold the lock while they read it."
+SO_OLD    = "Look up the key. When no key is enrolled, it returns unavailable, so callers can fall back to the default."
+
+
+@pytest.mark.parametrize( "old, text, artifact", [
+    ( SEMI_OLD, "tapping expands the burst in place", ";." ),
+    ( COLON_OLD, "strict mode rejects an empty list", ":." ),
+    ( BLANK_OLD, "for any input", ",\n\n" ) ] )
+def test_r10_a_cut_that_leaves_stray_punctuation_is_refused_and_counted_by_its_code( old, text, artifact ):
+    span = span_in( old, text )
+    cut  = s.cut_text( old, span )
+    assert artifact in cut and artifact not in old
+    assert span in s.phrase_units( old ) and s.span_ok( old, span, SL )
+    assert s.bad_cut( old, cut ) is None and rules.delete_rejection( old, span, cut ) is None
+    assert rules.markup_rejection( old, span ) is None and rules.lead_in_rejection( old, span ) is None
+    assert rules.stray_punctuation_rejection( old, cut ) == "STRAY_PUNCTUATION"
+    cands, refused = s.delete_candidates( old, SL )
+    assert text not in [ c[ "span_text" ] for c in cands ] and refused.get( "STRAY_PUNCTUATION", 0 ) >= 1
+
+
+@pytest.mark.parametrize( "cut", [ "Show the list;. Done.", "It has two modes:. Done.", "Shows the card.. Done.", "Callers wait,\n\nDone.", "- never throws,", "Hold the lock!;?" ] )
+def test_r10_each_artifact_is_seen_wherever_it_stands_in_the_text( cut ):
+    assert rules.stray_punctuation_rejection( "Show the list. Done.", cut ) == "STRAY_PUNCTUATION"
+
+
+def test_r10_an_artifact_the_original_already_had_is_not_the_cuts_fault():
+    old = "Show the list;. It also holds, as a note,\n\nthe lock.. Done."
+    assert rules.stray_punctuation_rejection( old, old.replace( "Done.", "Finished." ) ) is None
+
+
+def test_r10_an_ellipsis_a_clean_cut_and_a_comma_kept_inside_a_line_are_not_stray():
+    old = "Show the list. Wait... then read it, and move on. Done."
+    assert rules.stray_punctuation_rejection( old, old ) is None
+    assert rules.stray_punctuation_rejection( old, "Show the list. Wait... then read it. Done." ) is None
+    assert rules.stray_punctuation_rejection( old, "Show the list. Wait, then read it, and move on.\nDone." ) is None
+
+
+def test_r9_a_condition_left_in_front_of_a_conjunction_is_refused_when_its_main_clause_was_cut():
+    span = span_in( SO_OLD, "it returns unavailable" )
+    assert span in s.phrase_units( SO_OLD ) and s.span_ok( SO_OLD, span, SL )
+    cut = s.cut_text( SO_OLD, span )
+    assert s.bad_cut( SO_OLD, cut ) is None and rules.delete_rejection( SO_OLD, span, cut ) is None and rules.markup_rejection( SO_OLD, span ) is None
+    assert rules.lead_in_rejection( SO_OLD, span ) == "UNANSWERED_CONDITION"
+    assert rules.lead_in_codes( SO_OLD, span ) == [ "UNANSWERED_CONDITION" ]
+    cands, refused = s.delete_candidates( SO_OLD, SL )
+    assert "it returns unavailable" not in [ c[ "span_text" ] for c in cands ] and refused.get( "UNANSWERED_CONDITION", 0 ) >= 1
+
+
+@pytest.mark.parametrize( "conjunction", [ "and", "or", "but", "nor", "yet", "so" ] )
+def test_r9_every_coordinator_after_the_cut_clause_leaves_the_condition_unanswered( conjunction ):
+    old = f"Look up the key. When no key is enrolled, it returns unavailable, {conjunction} callers can fall back to the default."
+    assert lead_in( old, "it returns unavailable" ) == "UNANSWERED_CONDITION"
+
+
+def test_r9_an_unanswered_condition_needs_the_condition_to_open_the_sentence_and_nothing_else_to_answer_it():
+    assert lead_in( "Look up the key. It returns unavailable, so callers can fall back to the default.", "It returns unavailable" ) is None
+    assert lead_in( "Look up the key. When no key is enrolled, it returns unavailable, so callers can fall back.", "so callers can fall back" ) is None
+    assert lead_in( "Look up the key. When no key is enrolled, or the pool is closed, it returns unavailable, so callers can fall back.", "it returns unavailable" ) is None    # a miss, stated in the docstring
+    assert lead_in( "Look up the key. When no key is enrolled, if it is closed, it returns unavailable, so callers can fall back.", "if it is closed, it returns unavailable" ) == "DROPPED_CONDITION"
+
+
 # ---- review of e2d510af1 (Rio): two redraw --failed cases the first tests did not pin ------------------------------
 
 def test_redraw_failed_replaces_all_three_pairs_named_on_a_set_rule_1_passes( written, capsys ):
