@@ -669,7 +669,8 @@ def task_ask_unpark_impl(
         - task_id is the item's UUID string, which the server validates
 
     Ensures:
-        - returns { card_id, task_id, expires_at } on success
+        - returns { card_id, task_id, expires_at, pushed } on success
+          pushed is false when the card is saved but the push to the operator failed
         - 403, 404 and 409 surface the server's detail verbatim
     """
     return task_store_request( "POST", f"/api/tasks/{task_id}/unpark-ask", api_base_url, api_key, json_body={ "actor": actor } )

@@ -4637,7 +4637,9 @@ def task_ask_unpark(
         task_id: The parked row's UUID; one row per call
 
     Returns:
-        { card_id, task_id, expires_at }, or an error dict carrying the server's detail verbatim.
+        { card_id, task_id, expires_at, pushed }, or an error dict carrying the server's detail verbatim.
+        When pushed is false the card is saved but Rick was not shown it. A second ask is refused
+        with a 409 until the card expires, 10 minutes after it was made.
 
     Next steps:
       1. Wait. Rick answers the card from his board, and silence refuses.
@@ -4649,7 +4651,7 @@ def task_ask_unpark(
     Refused by the server:
       - 403: you are not a manager
       - 404: no such row, or the operator's account was not found
-      - 409: the row is not parked, or an unanswered card already exists (its id is in the message)
+      - 409: the row is not parked, it has no recorded park time, or an unanswered card already exists (its id is in the message)
 
     The actor is not a parameter: it is stamped from the session bridge.
 
