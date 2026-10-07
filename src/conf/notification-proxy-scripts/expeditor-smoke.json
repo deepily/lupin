@@ -45,6 +45,12 @@
             "_comment"       : "The OPEN-ENDED DESCRIBE-IT ask (row 0c280989), keyed on the ask's own id rather than its wording. It is the sibling of the document_choice card: the card appears when 2..cap candidates match, this appears when the expeditor has to ask which document at all. Six copies across six profiles had drifted into three different wordings, so a change in _handle_fuzzy_file_match would have silently unanswered some and not others. The id is matched exactly, narrowed by the `agents` tag and by arg_name, before the model is asked anything. THE ANSWER IS DELIBERATELY PER-PROFILE and must not be collapsed: these are fixture choices for standalone profiles, not divergence."
         },
         {
+            "card_id"        : "document_choice",
+            "answer"         : "__first_option__",
+            "response_types" : [ "multiple_choice" ],
+            "_comment"       : "The DOCUMENT CHOICE CARD, keyed on the card's own id rather than its wording (row a1420538), the same generic entry every other file-arg profile carries. REACHABLE HERE: the podcast expeditor raises it when 2..cap documents match, and the PG_AUDIENCE scenario hit it unanswered and expired after 180 s (row a362fc8b, #8). __first_option__ picks the first listed document; the card's options are discovered at run time, so no fixed label would hold."
+        },
+        {
             "question_pattern" : "What languages for the podcast?",
             "answer"           : "en",
             "arg_name"         : "languages",
