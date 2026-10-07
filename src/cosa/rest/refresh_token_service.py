@@ -310,16 +310,32 @@ def cleanup_expired_tokens() -> Tuple[bool, str, int]:
         return False, f"Cleanup failed: {e}", 0
 
 
+def _take_back_new_token( new_jti: str ) -> None:
+    """
+    Revoke a replacement token that was stored but must not be used, ignoring any failure.
+
+    Requires:
+        - new_jti is the token ID of a token this call just stored
+
+    Ensures:
+        - Never raises; a failure to revoke leaves an unreturned token that expires on its own
+    """
+    try:
+        revoke_refresh_token( new_jti )
+    except Exception:
+        pass
+
+
 def rotate_refresh_token(
     old_token: str,
     user_agent: Optional[str] = None,
     ip_address: Optional[str] = None
 ) -> Tuple[bool, str, Optional[str]]:
     """
-    Rotate refresh token (revoke old, issue new).
+    Rotate refresh token (issue new, then revoke old).
 
-    The old token is revoked at once and the new one gets a fresh expiry,
-    so a stolen old token cannot be reused.
+    The new token is made and stored first and the old one is revoked last.
+    A failure before that point leaves the old token usable, so the caller can retry.
 
     Requires:
         - old_token is a valid refresh token
@@ -328,11 +344,13 @@ def rotate_refresh_token(
         - Database is initialized
 
     Ensures:
-        - Old token is validated and revoked
-        - New token is generated with same user_id
-        - New token is stored in database
+        - Old token is validated, and left untouched until the new one is stored
+        - New token is generated with same user_id and stored in database
+        - Old token is then revoked; if that fails the new token is revoked again, so the
+          caller is left with the old token only
         - Returns (success, message, new_token)
-        - Atomic operation (both revoke and store succeed or both fail)
+        - Not a database transaction: store and revoke are separate commits, and two
+          rotations of the same old token at once are not serialised
 
     Raises:
         - None (returns error message in tuple)
@@ -347,13 +365,8 @@ def rotate_refresh_token(
 
     user_id = token_data["user_id"]
     old_jti = token_data["jti"]
+    stored_jti = None
 
-    # Revoke old token
-    success, revoke_msg = revoke_refresh_token( old_jti )
-    if not success:
-        return False, f"Failed to revoke old token: {revoke_msg}", None
-
-    # Generate new token
     try:
         from cosa.rest.user_service import get_user_by_id
 
@@ -375,9 +388,19 @@ def rotate_refresh_token(
         if not success:
             return False, f"Failed to store new token: {store_msg}", None
 
+        stored_jti = new_jti
+
+        # Revoke old token last
+        success, revoke_msg = revoke_refresh_token( old_jti )
+        if not success:
+            _take_back_new_token( stored_jti )
+            return False, f"Failed to revoke old token: {revoke_msg}", None
+
         return True, "Token rotated successfully", new_token
 
     except Exception as e:
+        if stored_jti is not None:
+            _take_back_new_token( stored_jti )
         return False, f"Token rotation failed: {e}", None
 
 
