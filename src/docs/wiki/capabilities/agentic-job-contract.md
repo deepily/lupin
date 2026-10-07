@@ -30,7 +30,7 @@ pins:
 ## Invariants
 - `is_cacheable` is always `False` and `is_cache_hit` is `False`: an agentic job is never replayed from a snapshot.
 - The queue may rewrite `id_hash` to `{base}::{user_id}`. Build sender ids from `base_id`, which strips the suffix.
-- `brake_terminal_claimed` is written by `RunningFifoQueue`, never by a job. `spawned_by_id_hash`, `routing_command` and `original_args` are set after construction, by `agentic_job_factory`.
+- `brake_terminal_claimed` is written by `RunningFifoQueue`, never by a job. `routing_command` and `original_args` are set after construction, by `agentic_job_factory` (`_finish`). `spawned_by_id_hash` is also a constructor argument; the factory stamps it only when truthy, and `v2/executor.py` stamps it on a job from the trace's `parent_id_hash`.
 
 ## How to extend
 - Copy the closest member's `__init__`, call `super().__init__` with the user, email and session, and set the two attributes. A job submitted by command also needs a `_build_*` function and an entry in `_UNWRAPPED_JOB_BUILDERS` (`JOB_BUILDERS` wraps it) in `cosa.rest.agentic_job_factory`, and an entry in `JOB_ARG_CONTRACTS` (`runtime_argument_expeditor/agent_registry.py`), from which `cosa.rest.v2.registry` derives `JOB_COMMANDS`; `test_1b2` compares the key sets of `JOB_BUILDERS` and `JOB_COMMANDS` and fails on a command in only one, but it cannot see a `_build_*` function that was never added to `_UNWRAPPED_JOB_BUILDERS`. `HeartbeatPokerJob` and `ArbiterConsumerJob` are not built from a command.
