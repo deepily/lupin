@@ -1,5 +1,5 @@
 """
-Every integration test that waits on the done queue carries the strict drain mark.
+Every done-queue waiter in the integration file carries a strict xfail that names its row.
 
 Inside a monopolize run the suite job holds the slot.
 A job from a user the door does not tie to the suite waits until the suite ends.
@@ -16,7 +16,7 @@ import os
 import pytest
 
 PATH = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "tests", "integration", "test_job_queue_progressive_disclosure.py" )
-MARK = "NEEDS_A_DRAINED_QUEUE"
+MARKS = { "NEEDS_A_DRAINED_QUEUE": "ce29cd20", "NEEDS_THE_LINEAGE_REPAIR": "8d4a5a59" }
 
 
 def _tree():
@@ -46,21 +46,30 @@ def test_the_file_has_tests_and_four_of_them_wait_on_the_done_queue():
 
 
 def test_every_test_that_waits_on_the_done_queue_carries_the_mark():
-    unmarked = [ name for name, waits, marks in _tests_and_waiters() if waits and MARK not in marks ]
+    unmarked = [ name for name, waits, marks in _tests_and_waiters() if waits and not set( marks ) & set( MARKS ) ]
     assert unmarked == [ ], f"waits on the done queue without the drain mark: {unmarked}"
 
 
 def test_no_test_that_does_not_wait_carries_the_mark():
-    stray = [ name for name, waits, marks in _tests_and_waiters() if not waits and MARK in marks ]
+    stray = [ name for name, waits, marks in _tests_and_waiters() if not waits and set( marks ) & set( MARKS ) ]
     assert stray == [ ], f"marked but never waits on the done queue: {stray}"
 
 
-def test_the_mark_is_a_strict_xfail_that_names_its_row():
+@pytest.mark.parametrize( "mark, row", sorted( MARKS.items() ) )
+def test_each_mark_is_a_strict_xfail_that_names_its_row( mark, row ):
     marks = [ n for n in ast.walk( _tree() ) if isinstance( n, ast.Assign )
-              and any( isinstance( t, ast.Name ) and t.id == MARK for t in n.targets ) ]
+              and any( isinstance( t, ast.Name ) and t.id == mark for t in n.targets ) ]
     assert len( marks ) == 1
     call = marks[ 0 ].value
     assert isinstance( call, ast.Call ) and ast.unparse( call.func ) == "pytest.mark.xfail"
     keywords = { k.arg: k.value for k in call.keywords }
     assert isinstance( keywords[ "strict" ], ast.Constant ) and keywords[ "strict" ].value is True
-    assert "ce29cd20" in ast.unparse( keywords[ "reason" ] )
+    assert row in ast.unparse( keywords[ "reason" ] )
+
+
+def test_the_lineage_stop_gap_is_on_the_one_test_it_is_for_and_the_drain_mark_on_the_other_three():
+    by_name = { name: marks for name, waits, marks in _tests_and_waiters() if waits }
+    assert by_name[ "test_job_interactions_endpoint" ] == [ "NEEDS_THE_LINEAGE_REPAIR" ]
+    others = sorted( name for name, marks in by_name.items() if marks == [ "NEEDS_A_DRAINED_QUEUE" ] )
+    assert others == [ "test_done_queue_metadata_includes_session_fields", "test_job_interactions_unauthorized_access",
+                       "test_job_transitions_todo_to_done" ]
