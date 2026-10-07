@@ -419,7 +419,7 @@ def lock_clear_banner( ps ):
 
 def poll_until_terminal( base, jwt, job_id, overall_timeout, on_tick=None ):
     """
-    Poll the queues until the job is in done or dead, or the overall timeout passes.
+    Poll the run, done and dead queues until the job is done or dead, or time runs out.
 
     Returns a tuple of the state ("done", "dead" or "timeout") and the job dict or None.
     """
