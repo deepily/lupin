@@ -1,7 +1,7 @@
 """
-Clustering prompt for TFE Phase 0.
+Clustering prompt stub for the first TFE step, which groups failures into clusters.
 
-**Step 6 scaffolding: stub only.** Full prompt implementation in step 7.
+Stub only. The full prompt is not written yet.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/10-prompt-design.md#1-promptsclusterpy--failure-clustering
 """
@@ -16,6 +16,6 @@ def build_cluster_prompt_stub( snapshot, heuristic_seeds, max_clusters: int ) ->
     """
     Build the user prompt for LLM clustering refinement.
 
-    **STATUS**: Stub. Full implementation in step 7.
+    Stub. The full implementation is not written yet.
     """
     return f"(STUB) Refine these {len( heuristic_seeds )} clusters (max {max_clusters})"

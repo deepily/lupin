@@ -1,14 +1,14 @@
 """
-Test-aware fix application prompts for TFE Phase 3.
+Test-aware fix application prompts for the TFE fix step.
 
-Coder + Tester prompts tailored for the "make N failing tests pass" workflow,
-registered into the shared `FIX_PROMPT_BUILDERS` registry under key `"tfe"` at
-import time so `shared.fix_executor.FixExecutor` can dispatch to them.
+Coder and Tester prompts tailored for the "make N failing tests pass" workflow.
+They are registered into the shared `FIX_PROMPT_BUILDERS` registry under key
+`"tfe"` at import time. That lets `shared.fix_executor.FixExecutor` dispatch to them.
 
 Critical differences from BFE's prompts:
   - The tester runs `pytest -k` filtered by the cluster's failing test names,
     not a re-run of the original agentic job
-  - The coder is instructed that "success" means a specific set of tests pass,
+  - The coder is told that success means a specific set of tests pass,
     not that the dead job restarts cleanly
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/06-phase3-fix-delegation-plan.md
@@ -76,8 +76,8 @@ def build_fix_prompt( selected_fix, diagnosis, fix_context ) -> str:
           .shared_error_signature, .hypothesis
 
     Ensures:
-        - Returns a prompt string instructing the Coder to apply exactly the
-          changes listed in `selected_fix.changes`
+        - Returns a prompt string instructing the Coder to apply the
+          changes listed in `selected_fix.changes` as written
     """
     lines = []
 
@@ -131,11 +131,9 @@ def build_verification_prompt( selected_fix, coder_output, files_changed ) -> st
     """
     Build the Tester prompt for verifying a cluster fix.
 
-    The Tester will receive `selected_fix`, the Coder's summary, and the list
-    of files the Coder modified. The prompt instructs it to construct a
-    `pytest -k` filter from the cluster's failing test names (which the Coder
-    baked into the description via the Phase 2 propose prompt) and run pytest
-    against those specific tests.
+    The prompt tells the Tester to build a `pytest -k` filter from the cluster's
+    failing test names, which the proposal prompt put in the description. The
+    Tester then runs pytest on those tests only.
 
     Requires:
         - selected_fix is a TFEProposedFix (duck-typed)

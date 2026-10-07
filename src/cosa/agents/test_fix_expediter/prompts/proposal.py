@@ -1,15 +1,14 @@
 """
-Per-cluster fix proposal prompt for TFE Phase 2.
+Per-cluster fix proposal prompt for the TFE propose step.
 
 Given a TestDiagnosisResult for one failure cluster, asks the Lead agent
-(Opus, read-only SDK) to propose up to N alternative fixes (N from
-TFEConfig.max_proposals_per_cluster, default 1). Each proposal is a
+(Opus, read-only SDK) to propose up to N alternative fixes. N comes from
+TFEConfig.max_proposals_per_cluster, default 1. Each proposal is a
 TFEProposedFix with title, description, fix_type, confidence, risk,
 estimated effort, and concrete file changes.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/05-phase2-propose-plan.md
         src/rnd/v0.1.6/2026.04.10-test-fix-expediter/10-prompt-design.md#3
-        OOS-1B (2026-04-29): cap parameterized via INI key
 """
 
 from typing import Optional
@@ -110,7 +109,7 @@ def build_proposal_prompt(
 
     Args:
         cluster: FailureCluster being proposed against
-        diagnosis: TestDiagnosisResult from Phase 1
+        diagnosis: TestDiagnosisResult from the diagnosis step
         ctx: TestRemediationContext
         max_proposals: Cap on number of proposals the Lead may emit (default 1)
 
