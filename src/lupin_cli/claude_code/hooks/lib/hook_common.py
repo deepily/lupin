@@ -1637,9 +1637,7 @@ def _routing_reminder():
     The cosa-voice routing-reminder block mapping interaction types to blocking tools.
 
     It moved from CLAUDE.md in the speakerphone refactor and is single-sourced into the cosa-voice MCP server's `instructions` payload.
-    It is not composed into the per-turn rider, and not into the Speakerphone TTS Contract section.
-    It is composed into the "Interactive Tool Routing" section of the `instructions` payload, and
-    a unit test pins that.
+    It is composed into the "Interactive Tool Routing" section of `instructions`, not into the per-turn rider or the Speakerphone TTS Contract section. A unit test pins that.
 
     Ensures:
         - Returns a non-empty paragraph mapping interaction types to cosa-voice

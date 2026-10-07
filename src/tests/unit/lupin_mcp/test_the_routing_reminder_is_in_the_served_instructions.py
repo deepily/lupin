@@ -2,10 +2,9 @@
 """
 Unit test: the interactive-tool routing rule is in the served `instructions`.
 
-`_routing_reminder()` (hook_common) is composed into the cosa-voice server's
-`instructions` payload under "## Interactive Tool Routing". Unit 12 of row
-f2d2a1c7 removed it from the TTS Contract section and left that one call as its
-only route to the caller. Before this test, deleting the call reddened nothing.
+`_routing_reminder()` (hook_common) is composed into the cosa-voice server's `instructions` payload under "## Interactive Tool Routing".
+The TTS Contract section does not carry it, so that one call is its only route to the caller.
+Before this test, deleting the call reddened nothing.
 
 Requires:
     - LUPIN_ROOT names the tree under test (or the cwd is that tree)
