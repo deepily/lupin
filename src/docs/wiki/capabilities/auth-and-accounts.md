@@ -8,7 +8,7 @@ pins:
   - cosa.rest.refresh_token_service.rotate_refresh_token@ec964812ca
   - cosa.rest.rate_limiter.check_account_lockout@d2aa947aba
   - cosa.rest.middleware.api_key_auth.require_api_key@8f714353bd
-  - cosa.rest.auth.verify_token@cad75c091b
+  - cosa.rest.auth.verify_token@d3ed427a0d
   - cosa.rest.admin_service.admin_delete_user@60d01a2fa4
 ---
 # Auth and accounts
@@ -18,7 +18,7 @@ Login, JWT access and refresh tokens, API keys, user accounts, password rules, e
 ## Tokens
 - `create_access_token` signs HS256 by default (`jwt algorithm`), with `sub`, `email`, `roles`, `exp`, `iat`, `jti`. Lifetime is `jwt access token expire minutes`, default 30. A refresh token carries `token_type="refresh"`, lives `jwt refresh token expire days`, default 7.
 - `decode_and_validate_token( token, expected_type )` checks signature and expiry. `"access"` rejects a token whose `token_type` is `refresh`. `"refresh"` rejects any token without `token_type="refresh"`. With no `expected_type`, no type check is made; `PUT /auth/change-password` calls it that way.
-- `verify_token` picks the verifier from env `AUTH_MODE`, else config `auth mode`, else `mock`. `jwt` mode checks an access token, then loads the user row and rejects an inactive account (401). `mock` mode accepts `mock_token_*` strings and checks no password. `firebase` mode calls `verify_firebase_token`, which calls `verify_token` again, so it never returns (bug row f6d07db4). Any value outside those three is 401.
+- `verify_token` picks the verifier from env `AUTH_MODE`, else config `auth mode`, else `mock`. `jwt` mode checks an access token, then loads the user row and rejects an inactive account (401). `mock` mode accepts `mock_token_*` strings and checks no password. Any other value, `firebase` included, is 401.
 
 ## Protecting a route
 - `get_current_user` (in `auth_middleware`) requires a Bearer header and returns the `verify_token` dict. `get_current_user_optional` returns `None` when the header is absent, and still raises 401 on a bad token.
