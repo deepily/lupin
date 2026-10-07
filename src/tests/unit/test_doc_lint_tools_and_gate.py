@@ -560,12 +560,27 @@ def test_a_rename_is_refused_and_a_deletion_is_not( repo, monkeypatch ):
     assert rc == 0 and "REFUSED" not in text and "0 files checked" in text
 
 
-def test_a_swept_file_that_does_not_parse_is_warned_counted_and_not_refused( repo, monkeypatch ):
+def test_a_swept_file_that_does_not_parse_is_refused_counted_and_cannot_be_waived( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _stage( repo, { "src/pkg/a.py": "def broken(:\n", "src/pkg/b.py": SWEPT_CAPS.replace( "NOT", "not" ) } )
+    _stage( repo, { "src/pkg/a.py": 'def f(:\n    """This is NOT fine.  doc-lint: waive parse-error -- trying"""\n', "src/pkg/b.py": SWEPT_CAPS.replace( "NOT", "not" ) } )
     rc, text = _gate( repo )
-    assert rc == 0 and "WARNING: src/pkg/a.py does not parse, its docstrings were NOT checked" in text
+    assert rc == 3
+    assert "REFUSED src/pkg/a.py:1: parse-error: does not parse:" in text and "this cannot be waived" in text
+    assert "[doc-lint] src/pkg/a.py:1: parse-error: does not parse" not in text
     assert "2 files checked, 1 docstrings checked, 0 findings, 0 waivers honoured, 1 unparsed" in text
+
+
+def test_a_file_with_a_byte_order_mark_is_read_like_any_other( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
+    ( repo / "src" / "pkg" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + SWEPT_CAPS.encode( "utf-8" ) )
+    _git( repo, "add", "-f", "src/pkg/a.py" )
+    rc, text = _gate( repo )
+    assert rc == 3 and "REFUSED src/pkg/a.py:5: caps" in text and "parse-error" not in text and "0 unparsed" in text
+    ( repo / "src" / "pkg" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + _doc( "Return it." ).encode( "utf-8" ) )
+    _git( repo, "add", "-f", "src/pkg/a.py" )
+    rc, text = _gate( repo )
+    assert rc == 0 and "1 files checked, 1 docstrings checked, 0 findings" in text and "0 unparsed" in text
 
 
 def test_a_waiver_with_a_reason_is_honoured_and_counted( repo, monkeypatch ):
@@ -586,7 +601,7 @@ def test_a_waiver_after_the_closing_quotes_on_a_one_line_docstring_is_honoured( 
 
 def test_a_waiver_without_a_reason_does_not_waive_and_the_gate_says_so( repo, monkeypatch ):
     _no_external( monkeypatch )
-    for marker in ( "doc-lint: waive caps", "doc-lint: waive caps -- ", 'doc-lint: waive caps -- "' ):
+    for marker in ( "doc-lint: waive caps", "doc-lint: waive caps -- ", 'doc-lint: waive caps -- "', "doc-lint: waive caps -- -", "doc-lint: waive caps -- n/a", "doc-lint: waive caps -- ok" ):
         _stage( repo, { "src/pkg/a.py": _doc( f"This is NOT fine.  {marker}" ) } )
         rc, text = _gate( repo )
         assert rc == 3, marker
@@ -635,3 +650,12 @@ def test_the_real_chain_refuses_a_seeded_swept_commit_and_names_the_waiver( repo
     res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 1
     assert "[doc-lint] REFUSED src/pkg/a.py:5: caps" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
+
+
+def test_a_refused_swept_finding_on_a_touched_line_is_printed_once_as_a_refusal_not_also_as_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )                                   # a new file: line 5 is touched
+    rc, text = _gate( repo )
+    assert rc == 3
+    assert "[doc-lint] src/pkg/a.py:5: caps" not in text                             # the warning form of the same finding
+    assert text.count( "src/pkg/a.py:5: caps" ) == 1 and "REFUSED src/pkg/a.py:5: caps" in text

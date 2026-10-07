@@ -14,7 +14,7 @@ The swept scope is defined once, in `swept_scope.is_swept`: a `.py` path that `c
 
 If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through.
 
-Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed`. A swept file that does not parse is warned about and counted as unparsed; it is not refused.
+Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed`. A swept file that does not parse is refused and counted as unparsed; no waiver covers it. A leading byte-order mark is ignored.
 
 ## Waiving a finding
 
@@ -24,6 +24,6 @@ End the line the finding sits on with:
 doc-lint: waive <rule> -- <reason>
 ```
 
-The rule must be the one the refusal named, and the reason must not be empty. A marker without a reason waives nothing, and the refusal says so. A marker naming another rule, or sitting on another line, waives nothing. For a one-line docstring the marker can follow the closing quotes.
+The rule must be the one the refusal named, and the reason must hold at least one word of three letters or more; `-`, `n/a` and `ok` do not count. A marker without a reason waives nothing, and the refusal says so. A marker naming another rule, or sitting on another line, waives nothing. For a one-line docstring the marker can follow the closing quotes.
 
 Use a waiver when the lint is wrong about this text, not to skip the rewrite. The gate prints how many waivers it honoured on every run.

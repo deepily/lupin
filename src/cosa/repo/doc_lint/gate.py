@@ -11,7 +11,8 @@ Two refusals break warn mode, and both exit REFUSAL_EXIT.
 1. The swept scope, defined once in swept_scope.is_swept. A staged Python file for which it is True is refused when its docstring
    lint holds any finding on any line, touched or not, from any rule. The refusal names the file,
    line, rule, the text and where that text belongs. A finding is waived by a same-line marker,
-   "doc-lint: waive <rule> -- <reason>", which needs a reason. A marker without one waives nothing.
+   "doc-lint: waive <rule> -- <reason>". The reason needs a word of three letters or more.
+   A marker without one waives nothing. A swept file that does not parse is refused and cannot be waived.
 2. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
@@ -39,6 +40,7 @@ BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
+REASON_WORD      = re.compile( r"[A-Za-z]{3,}" )
 WAIVER_REGEX     = re.compile( r"doc-lint: waive (\S+)(?: -- (.*))?" )
 TEXT_LIMIT       = 120
 HISTORY_HOME      = {
@@ -58,6 +60,7 @@ FIX_HOME = {
     "preface-length"  : "fewer lines before the contract; move the detail below Requires and Ensures",
     "docstring-length": "a shorter docstring; move the history and background to a design doc and link it",
     "dead-design"     : "a Design: path that exists, or no Design: line",
+    "parse-error"     : "valid Python; the file must parse before its docstrings can be checked",
 }
 
 
@@ -70,8 +73,8 @@ def waiver_state( finding, source_line ):
         - source_line is the text of the file line the finding sits on
 
     Ensures:
-        - returns "honoured" when a marker names finding.rule and gives a reason
-        - returns "no-reason" when a marker names the rule and gives none
+        - returns "honoured" when a marker names finding.rule and its reason holds a word of three letters or more
+        - returns "no-reason" when a marker names the rule and its reason holds no such word
         - returns "none" otherwise, including a marker that names a different rule
 
     Raises:
@@ -80,7 +83,7 @@ def waiver_state( finding, source_line ):
     state = "none"
     for m in WAIVER_REGEX.finditer( source_line ):
         if m.group( 1 ).strip( "\"'" ) != finding.rule: continue
-        if ( m.group( 2 ) or "" ).strip().strip( "\"' " ): return "honoured"
+        if REASON_WORD.search( m.group( 2 ) or "" ): return "honoured"
         state = "no-reason"
     return state
 
@@ -160,11 +163,12 @@ def staged_source( root, path ):
 
     Ensures:
         - returns the staged text, so findings match the line numbers of the staged diff
+        - a leading byte-order mark is dropped, so such a file parses like any other
 
     Raises:
         - RuntimeError naming the git error when the read fails
     """
-    res = subprocess.run( [ "git", "-C", root, "show", f":{path}" ], capture_output=True, text=True, encoding="utf-8" )
+    res = subprocess.run( [ "git", "-C", root, "show", f":{path}" ], capture_output=True, text=True, encoding="utf-8-sig" )
     if res.returncode != 0: raise RuntimeError( f"git show :{path} failed: {res.stderr.strip()}" )
     return res.stdout
 
@@ -237,7 +241,7 @@ def collect( root ):
         - findings are limited to lines the staged diff touched, minus anything already in refusals
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
-        - a swept file that does not parse is not refused; it is counted in tally["unparsed"] and warned
+        - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
         - tally is the denominator: files, docstrings, findings, waivers, unparsed
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
@@ -275,7 +279,8 @@ def collect( root ):
         tally[ "files" ] += 1
         if doc_findings and doc_findings[ 0 ].rule == "parse-error":
             tally[ "unparsed" ] += 1
-            warnings.append( f"[doc-lint] WARNING: {path} does not parse, its docstrings were NOT checked" )
+            refusals.append( doc_findings[ 0 ] )
+            lines_out.append( f"[doc-lint] REFUSED {path}:{doc_findings[ 0 ].line}: parse-error: {doc_findings[ 0 ].message}; fix: {FIX_HOME[ 'parse-error' ]}; this cannot be waived" )
             continue
         tally[ "docstrings" ] += len( docstring_lint.extract_docstrings( source ) )
         tally[ "findings" ]   += len( doc_findings )
