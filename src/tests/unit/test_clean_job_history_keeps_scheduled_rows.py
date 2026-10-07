@@ -40,6 +40,8 @@ class _Connection:
     def execute( self, statement, params=None ):
         sql = str( statement )
         self.seen.append( ( sql, params ) )
+        if sql.lstrip().upper().startswith( ( "SET LOCAL", "LOCK TABLE" ) ):
+            return _Result( [] )
         if sql.lstrip().upper().startswith( "SELECT" ):
             assert "status = 'pending'" in sql, "the candidate query no longer asks for pending rows only"
             return _Result( [ ( i, s ) for i, st, s in self.rows if st == "pending" ] )
@@ -119,3 +121,135 @@ def test_the_survival_tests_build_their_rows_before_the_real_cleanup_runs( name 
     assert arguments.index( "clean_test_db" ) == len( arguments ) - 1 and "a_scheduled_job" in arguments, arguments
     assert max( arguments.index( "a_scheduled_job" ), arguments.index( "a_finished_job" ) ) < arguments.index( "clean_test_db" ), \
         f"clean_test_db would run before the rows exist: {arguments}"
+
+
+def test_the_table_is_locked_before_the_kept_ids_are_read():
+    conn = _Connection( [ ( "x::u", "pending", _iso( timedelta( days=1 ) ) ) ] )
+    job_history_cleanup.clean_job_history( conn )
+    kinds = [ sql.lstrip().split( None, 1 )[ 0 ].upper() + " " + sql.lstrip().split( None, 2 )[ 1 ].upper() for sql, _ in conn.seen ]
+    assert kinds[ :4 ] == [ "SET LOCAL", "LOCK TABLE", "SELECT ID_HASH,", "DELETE FROM" ], kinds
+    lock_sql = conn.seen[ 1 ][ 0 ]
+    assert "SHARE ROW EXCLUSIVE" in lock_sql and "job_history" in lock_sql, lock_sql
+    assert "lock_timeout" in conn.seen[ 0 ][ 0 ], "a lock that cannot be had must fail, not hang"
+
+
+# ---- the planted row: it removes itself, and it cannot run if it survives ----------------------
+
+class _Persistence:
+    """An in-memory stand-in for job_persistence that honours what it is given."""
+
+    def __init__( self, deletes=True, persists=True ):
+        self.rows, self.deletes, self.persists, self.calls = {}, deletes, persists, []
+
+    def persist_job_created_from_metadata( self, id_hash, user_id, metadata ):
+        self.calls.append( "persist" )
+        if self.persists: self.rows[ id_hash ] = { "id_hash": id_hash, "status": "pending", "metadata_json": metadata }
+
+    def get_job_by_id_hash( self, id_hash ):
+        return self.rows.get( id_hash )
+
+    def delete_job_history( self, id_hash ):
+        self.calls.append( "delete" )
+        if self.deletes: self.rows.pop( id_hash, None )
+
+
+def _metadata():
+    return job_history_cleanup.planted_job_metadata( _iso( timedelta( days=1 ) ) )
+
+
+def test_a_planted_row_exists_inside_the_block_and_is_gone_after_it():
+    persistence = _Persistence()
+    with job_history_cleanup.planted_job_row( persistence, "p::u", "u", _metadata() ) as id_hash:
+        assert persistence.get_job_by_id_hash( id_hash )[ "status" ] == "pending"
+    assert persistence.rows == {}
+
+
+def test_a_planted_row_is_removed_even_when_the_test_body_fails():
+    persistence = _Persistence()
+    with pytest.raises( ZeroDivisionError ):
+        with job_history_cleanup.planted_job_row( persistence, "p::u", "u", _metadata() ):
+            1 / 0
+    assert persistence.rows == {} and persistence.calls == [ "persist", "delete" ]
+
+
+def test_a_row_that_cannot_be_removed_fails_the_teardown_and_names_the_row():
+    persistence = _Persistence( deletes=False )
+    with pytest.raises( AssertionError, match="p::u.*still in job_history" ):
+        with job_history_cleanup.planted_job_row( persistence, "p::u", "u", _metadata() ):
+            pass
+    assert "p::u" in persistence.rows, "the stand-in was meant to leave the row behind"
+
+
+def test_a_row_that_never_persisted_fails_before_the_body_runs_and_the_teardown_still_runs():
+    persistence = _Persistence( persists=False )
+    ran = []
+    with pytest.raises( AssertionError, match="did not persist" ):
+        with job_history_cleanup.planted_job_row( persistence, "p::u", "u", _metadata() ):
+            ran.append( "body" )
+    assert ran == [] and persistence.calls == [ "persist", "delete" ]
+
+
+def test_remove_job_row_is_quiet_when_the_row_is_already_gone():
+    persistence = _Persistence()
+    job_history_cleanup.remove_job_row( persistence, "absent::u" )
+    assert persistence.calls == [ "delete" ]
+
+
+def test_the_planted_metadata_names_no_routing_command_and_no_real_job_type():
+    metadata = job_history_cleanup.planted_job_metadata( "2099-01-01T00:00:00+00:00" )
+    assert "routing_command" not in metadata
+    assert metadata[ "agent_type" ] == "cleanup_survival_marker" and metadata[ "scheduled_at" ].startswith( "2099" )
+
+
+def test_the_producer_stores_no_routing_command_for_the_planted_metadata( monkeypatch ):
+    """The production producer runs over a recording session, so the stored value is its own."""
+    from cosa.rest import job_persistence as jp
+    added = []
+
+    class _Session:
+        def get( self, model, key ): return None
+        def add( self, row ): added.append( row )
+
+    class _Scope:
+        def __enter__( self ): return _Session()
+        def __exit__( self, *exc ): return False
+
+    monkeypatch.setattr( jp, "get_db", lambda: _Scope() )
+    jp.persist_job_created_from_metadata( "p::u", "u", _metadata() )
+    ( row, ) = added
+    assert row.routing_command is None and row.status == "pending" and row.id_hash == "p::u"
+
+
+def test_the_restore_path_skips_a_row_with_no_routing_command_without_building_a_job():
+    from cosa.rest import job_persistence as jp
+    built = []
+    entry = { "id_hash": "p::u", "job_type": "cleanup_survival_marker", "user_id": "u", "user_email": "", "session_id": "",
+              "routing_command": "", "question_text": "", "scheduled_at": _iso( timedelta( days=1 ) ),
+              "monopolize": False, "paused": False, "metadata_json": _metadata() }
+    restored = jp.restore_pending_jobs( [ entry ], lambda **kw: built.append( kw ), ask_flow=None )
+    assert restored == 0 and built == [], "a row with no routing command must never reach the job factory"
+
+
+def _fixture_node( name ):
+    path = os.path.join( ROOT, "src", "tests", "integration", "test_a_scheduled_job_survives_clean_test_db.py" )
+    with open( path, encoding="utf-8" ) as handle: tree = ast.parse( handle.read() )
+    found = [ n for n in ast.walk( tree ) if isinstance( n, ast.FunctionDef ) and n.name == name ]
+    assert len( found ) == 1, f"{name} appears {len( found )} times"
+    return found[ 0 ]
+
+
+def test_the_scheduled_job_fixture_plants_through_the_self_removing_block():
+    node  = _fixture_node( "a_scheduled_job" )
+    withs = [ n for n in ast.walk( node ) if isinstance( n, ast.With ) and "planted_job_row" in ast.dump( n.items[ 0 ] ) ]
+    assert withs, "the fixture no longer plants through planted_job_row, so nothing removes its row"
+    assert any( isinstance( inner, ast.Expr ) and isinstance( inner.value, ast.Yield ) for w in withs for inner in w.body ), \
+        "the yield must sit inside the with block, or the row outlives the test"
+
+
+def test_the_control_fixture_removes_its_row_in_a_finally_block_that_covers_the_yield():
+    node    = _fixture_node( "a_finished_job" )
+    tries   = [ n for n in ast.walk( node ) if isinstance( n, ast.Try ) and n.finalbody ]
+    assert tries, "the control fixture has no finally block"
+    finals  = " ".join( ast.dump( stmt ) for t in tries for stmt in t.finalbody )
+    yields  = [ n for t in tries for n in ast.walk( ast.Module( body=t.body, type_ignores=[] ) ) if isinstance( n, ast.Yield ) ]
+    assert "remove_job_row" in finals and yields, "the finally block must call remove_job_row and cover the yield"
