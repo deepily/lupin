@@ -75,6 +75,11 @@ class LivePipelineTestBase:
     REQUEST_TIMEOUT = 60
     SUBMIT_ENDPOINT = "/api/v2/ask"
 
+    # Scripted replies to the questions a parked ask puts to the human: argument name -> answer.
+    # Empty means a parked ask fails the scenario, which is the right default for tests that
+    # expect to be asked nothing.
+    PARKED_ANSWERS  = {}
+
     # Credential env var prefix — override for tests using different accounts
     CREDENTIAL_ENV_PREFIX = "LUPIN_TEST_INTERACTIVE_MOCK_JOBS"
 
@@ -338,6 +343,41 @@ class LivePipelineTestBase:
     # deliberately absent: it means the job went to a queue and must still be polled.
     V2_TERMINAL_STATUSES = ( "done", "failed", "needs_input", "parked" )
 
+    def _answer_parked( self, push_data, headers, ws_id ):
+        """
+        Answer the questions a parked ask puts to the human, from PARKED_ANSWERS.
+
+        Requires:
+            - push_data is the decoded body of a submit or resume response
+
+        Ensures:
+            - Returns ( push_data, None ) unchanged when it is not a parked ask with a pending id
+            - Returns it unchanged when the first missing argument has no scripted answer, so
+              the caller reports the park as it would have
+            - Otherwise posts each scripted answer to /api/v2/resume and returns the last body
+            - Returns ( None, error_msg ) on a non-200 reply from resume
+            - Answers at most len( PARKED_ANSWERS ) questions, so a flow that keeps asking ends
+        """
+        for _ in range( len( self.PARKED_ANSWERS ) ):
+            missing = push_data.get( "args_missing" ) or []
+            if push_data.get( "status" ) != "parked" or not push_data.get( "pending_id" ): break
+            if not missing or missing[ 0 ] not in self.PARKED_ANSWERS: break
+            answer = self.PARKED_ANSWERS[ missing[ 0 ] ]
+            print( f"    Flow asked for {missing[ 0 ]!r}; answering {answer!r} via /api/v2/resume" )
+            try:
+                resp = requests.post(
+                    f"{self.BASE_URL}/api/v2/resume",
+                    json = { "pending_id": push_data[ "pending_id" ], "answer": answer, "websocket_id": ws_id },
+                    headers = self.get_submit_headers( headers, ws_id ),
+                    timeout = self.REQUEST_TIMEOUT
+                )
+            except Exception as e:
+                return None, f"Resume error: {e}"
+            if resp.status_code != 200:
+                return None, f"Resume HTTP {resp.status_code}: {resp.text[ :200 ]}"
+            push_data = resp.json()
+        return push_data, None
+
     def _terminal_result_or_none( self, push_data ):
         """
         Decide whether a submit response is already the finished result.
@@ -414,7 +454,8 @@ class LivePipelineTestBase:
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
-        push_data = resp.json()
+        push_data, error = self._answer_parked( resp.json(), headers, ws_id )
+        if error: return None, error
 
         # BRANCH ON THE RESPONSE, NOT ON THE ENDPOINT (Cheech's ruling, 2026-08-21).
         #

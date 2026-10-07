@@ -87,6 +87,11 @@ class TestSuitePipelineTest( LivePipelineTestBase ):
     SCENARIOS       = TEST_SUITE_SCENARIOS
     DEFAULT_TIMEOUT = 1200  # 20 min (real E2E can take ~19 min)
 
+    # The ask door asks for each argument the query leaves out, and defaults do not skip the
+    # question. This query names the suites and dry run but not pytest arguments, so the flow
+    # parks on that question; the harness answers it through /api/v2/resume.
+    PARKED_ANSWERS  = { "pytest_args": "none" }
+
     def build_argparser( self ):
         """Add test-suite-specific CLI arguments."""
         parser = super().build_argparser()
@@ -108,15 +113,6 @@ class TestSuitePipelineTest( LivePipelineTestBase ):
         if hasattr( args, "queries" ) and args.queries:
             return [ int( x.strip() ) for x in args.queries.split( "," ) if int( x.strip() ) < len( self.SCENARIOS ) ]
         return list( range( len( self.SCENARIOS ) ) )
-
-    def get_mode_for_scenario( self, scenario ):
-        """
-        Return 'test_suite' for explicit mode routing.
-
-        Ensures:
-            - Returns 'test_suite' to bypass LORA routing
-        """
-        return "test_suite"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
