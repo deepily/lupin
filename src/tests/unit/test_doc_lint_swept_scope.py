@@ -28,6 +28,7 @@ def _write( root, rel, text="x = 1\n" ):
     ( "src/cosa/rest/queue.py",                    True ),
     ( "docker/lupin/scripts/patch.py",             True ),
     ( "src/lupin_mcp_extra/tool.py",               True ),    # a sibling name is not the held directory
+    ( "docker/src/lupin_mcp/tool.py",              True ),    # the held text deeper in a path is not a prefix
     ( "src/lupin_mcp/cosa_voice_mcp.py",           False ),   # held
     ( "src/lupin_mcp/sub/deeper.py",               False ),   # held, at any depth
     ( "src/tests/unit/test_queue.py",              False ),   # a tests directory
