@@ -2,7 +2,7 @@
 
 The eight writing rules are not in this page yet. It covers only what the commit gate does.
 
-The rules are in code: `src/cosa/repo/doc_lint/text_rules.py` holds the text rules and `src/cosa/repo/doc_lint/rule_lists.py` holds the limits (summary 90 characters, sentence 25 words, preface 6 lines, docstring 40 lines). This page covers only what the commit gate does with them.
+The rules are in code. `src/cosa/repo/doc_lint/text_rules.py` holds the text rules. `src/cosa/repo/doc_lint/rule_lists.py` holds the limits: summary 90 characters, sentence 25 words, preface 6 lines, docstring 40 lines. This page covers only what the commit gate does with them.
 
 ## The commit gate now refuses
 
@@ -10,7 +10,7 @@ The rules are in code: `src/cosa/repo/doc_lint/text_rules.py` holds the text rul
 
 A staged Python file in the swept scope that holds one or more docstring-lint findings, on any line and from any rule, is refused. The gate exits 3 and the chain stops the commit. A refusal prints the file, the line, the rule, the text on that line, where the text belongs, and the waiver form.
 
-The swept scope is defined once, in `swept_scope.is_swept`: a `.py` path that `cli.in_scope` accepts (not under `tests/` or `rnd/`, not a vendored tree, not a `test_*` file or `conftest.py`) and not under `src/lupin_mcp/`. Everything outside it stays in warn mode: findings on staged lines are printed and the commit goes through. That covers tests, `src/lupin_mcp`, `rnd`, markdown, `history.md` and `TODO.md`.
+The swept scope is defined once, in `swept_scope.is_swept`. It is a `.py` path that `cli.in_scope` accepts. That excludes `tests/`, `rnd/`, vendored trees, `test_*` files and `conftest.py`. It also excludes `src/lupin_mcp/`. Python outside it is held to a count, below. Markdown, `history.md` and `TODO.md` stay in warn mode: findings on staged lines are printed and the commit goes through.
 
 If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through.
 
@@ -36,8 +36,8 @@ A staged file whose count is above its entry is refused. The refusal prints the 
 
 Fix it by rewording what you added, or waive a finding on its own line with the same marker as above. An honoured waiver lowers the count. A flat count passes, and so does a finding of one rule traded for one of another.
 
-The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change: it carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated; the refusal prints the exact command. The stamp is read from the working tree, the files whose code counts the findings, so an unstaged edit to a rule file or to the word list also makes the table stale.
+The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change. It carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated. The refusal prints the exact command. The stamp is read from the working tree, which holds the code that counts the findings. So an unstaged edit to a rule file or to the word list also makes the table stale.
 
-A new file that follows a deleted counted file in the same commit may be a rename that git no longer pairs because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all the gate says the scope was not checked.
+A new file beside a deleted counted file may be a rename that git no longer pairs, because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all, the gate says the scope was not checked.
 
 The run prints `counted scope: N files checked, N at or below their count, N over, N waivers honoured, table ok|stale|absent|regenerated|malformed`.
