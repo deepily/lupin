@@ -100,3 +100,4 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-jobs-and-session-panes]] — the seven renderers that draw the jobs, submit, Q&A, session strip, persona modal, nav bar and reading panes. `src/lupin_app/static/js/multiplexer/render`
 - [[web-client-transport-and-auth]] — the multiplexer page's two WebSockets, refreshable login token and in-page event bus, wired by `bootMultiplexer`. `src/lupin_app/static/js/multiplexer` (auth, transport, boot, shared)
 - [[web-client-stores]] — the multiplexer page's state stores, each built by a `createXStore` function from the event bus and announcing change as a `store_*_changed` event. `src/lupin_app/static/js/multiplexer/stores`
+- [[db-repositories]] — the Postgres repository classes built on one generic base, mapped to the capability that uses each, and the vector search they share. `cosa.rest.db` (repositories, database)
