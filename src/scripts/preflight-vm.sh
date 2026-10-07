@@ -494,7 +494,8 @@ if [ -z "$GIT_HOOKS_DIR" ]; then
 fi
 for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; do
     hook_name="${hook_row%%:*}"; hook_script="${hook_row##*:}"
-    hook_fix="cd $REPO_ROOT && ln -sf ../../src/scripts/$hook_script .git/hooks/$hook_name   # a person runs this; a Claude seat is refused"
+    # The remedy names the folder this check read, so it is right when core.hooksPath moves it.
+    hook_fix="ln -sf $REPO_ROOT/src/scripts/$hook_script $GIT_HOOKS_DIR/$hook_name   # a person runs this; a Claude seat is refused"
     hook_out="$( pfv_git_hook_status "$GIT_HOOKS_DIR" "$hook_name" "$REPO_ROOT/src/scripts/$hook_script" )"
     case "${hook_out%%$'\t'*}" in
         MATCH)

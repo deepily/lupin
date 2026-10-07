@@ -545,7 +545,7 @@ def test_B7_a_missing_hook_warns_by_name_with_the_link_command( hooked, hook, sc
     out = _run( hooked )
 
     assert "[WARN]" in _line( out, f"git hook {hook} is not installed" )
-    assert f"ln -sf ../../src/scripts/{script} .git/hooks/{hook}" in out
+    assert f"ln -sf {ROOT}/src/scripts/{script} {hooked[ 'hooks' ]}/{hook}" in out
     kept = [ h for h, _ in HOOKS if h != hook ][ 0 ]
     assert "[OK]" in _line( out, f"git hook {kept} links to" )
 
@@ -576,3 +576,66 @@ def test_B7_a_checkout_without_the_script_says_it_predates_the_hook( hooked, tmp
 
     assert "[WARN]" in _line( r.stdout, "this checkout has no src/scripts/pre-push-chain.sh" )
     assert "it predates the pre-push hook" in r.stdout
+
+
+# B7 without the override: the folder comes from git, so these build a real repository.
+
+@pytest.fixture
+def cloned( venue, tmp_path ):
+    """A scratch git tree with the preflight, its library and both hook scripts; no override."""
+    tree = tmp_path / "clone"
+    ( tree / "src" / "scripts" / "lib" ).mkdir( parents=True )
+    for rel in ( "src/scripts/preflight-vm.sh", "src/scripts/lib/preflight-vm-lib.sh", "src/scripts/pre-commit-chain.sh", "src/scripts/pre-push-chain.sh" ):
+        shutil.copy( f"{ROOT}/{rel}", tree / rel )
+    subprocess.run( [ "git", "init", "-q", str( tree ) ], check=True, capture_output=True, timeout=60 )
+    venue[ "env" ][ "LUPIN_ROOT" ] = str( tree )
+    venue[ "env" ][ "GIT_CONFIG_NOSYSTEM" ] = "1"      # HOME is already the venue's, so no user config reaches git either
+    venue[ "tree" ] = tree
+    return venue
+
+
+def _run_clone( cloned ):
+    r = subprocess.run( [ "bash", str( cloned[ "tree" ] / "src/scripts/preflight-vm.sh" ), "--phase", "pre" ], env=cloned[ "env" ], capture_output=True, text=True, timeout=120 )
+    return r.stdout
+
+
+def _link_both( tree, folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    for hook, script in HOOKS: os.symlink( str( tree / "src" / "scripts" / script ), folder / hook )
+
+
+def test_B7_with_no_override_reads_the_clones_own_hooks_folder( cloned ):
+    tree = cloned[ "tree" ]
+    out  = _run_clone( cloned )
+    assert "[WARN]" in _line( out, f"git hook pre-push is not installed in {tree}/.git/hooks" )
+    assert f"ln -sf {tree}/src/scripts/pre-push-chain.sh {tree}/.git/hooks/pre-push" in out
+
+    _link_both( tree, tree / ".git" / "hooks" )
+    out = _run_clone( cloned )
+    for hook, script in HOOKS: assert "[OK]" in _line( out, f"git hook {hook} links to src/scripts/{script}" )
+
+
+def test_B7_follows_an_absolute_core_hooks_path( cloned, tmp_path ):
+    tree, moved = cloned[ "tree" ], tmp_path / "moved-hooks"
+    _link_both( tree, tree / ".git" / "hooks" )
+    subprocess.run( [ "git", "-C", str( tree ), "config", "core.hooksPath", str( moved ) ], check=True, timeout=60 )
+
+    out = _run_clone( cloned )
+    assert "[WARN]" in _line( out, f"git hook pre-push is not installed in {moved}" )
+    assert f"ln -sf {tree}/src/scripts/pre-push-chain.sh {moved}/pre-push" in out
+
+    _link_both( tree, moved )
+    out = _run_clone( cloned )
+    for hook, script in HOOKS: assert "[OK]" in _line( out, f"git hook {hook} links to src/scripts/{script}" )
+
+
+def test_B7_follows_a_relative_core_hooks_path( cloned ):
+    tree = cloned[ "tree" ]
+    subprocess.run( [ "git", "-C", str( tree ), "config", "core.hooksPath", "tools/hooks" ], check=True, timeout=60 )
+
+    out = _run_clone( cloned )
+    assert "[WARN]" in _line( out, f"git hook pre-commit is not installed in {tree}/tools/hooks" )
+
+    _link_both( tree, tree / "tools" / "hooks" )
+    out = _run_clone( cloned )
+    for hook, script in HOOKS: assert "[OK]" in _line( out, f"git hook {hook} links to src/scripts/{script}" )
