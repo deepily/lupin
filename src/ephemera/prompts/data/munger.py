@@ -97,7 +97,7 @@ def get_agent_synonyms():
         dict: Dictionary mapping agent types to lists of synonyms
         
     Raises:
-        No exceptions raised
+        No error is raised
     """
     
     agent_synonyms = {
