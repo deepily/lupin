@@ -28,11 +28,11 @@ a call that happens. A coincidence needs an input that separates the two answers
 as covered and is still unchecked. A file with no hits has not been cleared, only not
 examined. Recall has no denominator, since nobody can enumerate the blind fixtures that
 exist. Quote results as a count against a named sample, never as a bare rate.
-
-Exit codes:
-    0  scanned, nothing matched (not an all-clear)
-    1  findings present (a triage queue)
-    2  nothing could be scanned, no readable files matched
+Mutation executes the code while this probe reads the source. Checking the probe against
+mutation-found fixtures is therefore a legitimate independent check. Measuring it against known
+blind fixtures is worth doing and yields "missed N of the M we know about", never a rate.
+A recall check on a tree where the blindness has been repaired reports zero and means nothing.
+Verify the sample still contains what you claim the probe missed, and say which tree you ran in.
 
 Usage:
     PYTHONPATH=src python src/scripts/find_interchangeable_assertions.py [root]
@@ -234,6 +234,12 @@ def main( argv=None ):
         - returns 2 when no file could be read, 1 when findings exist, else 0
         - --json emits the findings plus files_read and the caveat key
         - never raises
+
+    Notes:
+        Exit codes:
+            0  scanned, nothing matched (not an all-clear)
+            1  findings present (a triage queue)
+            2  nothing could be scanned, no readable files matched
     """
     parser = argparse.ArgumentParser( description="Find assertions whose expected values are interchangeable" )
     parser.add_argument( "root", nargs="?", default=DEFAULT_ROOT )

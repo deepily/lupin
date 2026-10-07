@@ -48,9 +48,7 @@ def _era_predicates( table ):
     """
     Predicates isolating each embedding era, so a clone samples both.
 
-    The whole table gets regenerated, so a probe drawn only from the norm-1.0 rows
-    would rehearse a quarter of the data the run will meet. The OpenAI-era rows are
-    the short ones, so it would also under-measure batch timing and text length.
+    The whole table gets regenerated, so a probe drawn only from the norm-1.0 rows would rehearse a quarter of the data the run will meet. The OpenAI-era rows are the short ones, so it would also under-measure batch timing and text length. The sample is half from each era.
 
     Ensures:
         - returns [(label, sql_predicate), ...] covering the normalized era and

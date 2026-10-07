@@ -14,9 +14,7 @@ CSV records which one produced the destinations.
                 included, stays `MATH`.
 
                 This rule is stale and is left unchanged. It was written when those
-                three were every operation CalculatorAgent implemented, so "what the
-                calculator implements" meant the same thing. CalculatorAgent now has
-                a fourth operation, `arithmetic`. Bare arithmetic is something the
+                three were every operation CalculatorAgent implemented. Then "the operations the calculator actually implements, per `CalcIntent.VALID_OPERATIONS`" meant the same thing. CalculatorAgent now has a fourth operation, `arithmetic`. Bare arithmetic is something the
                 calculator can do, and this rule still sends it to `MATH`.
 
                 Moving corpus lines is the labelling job, which the code change that

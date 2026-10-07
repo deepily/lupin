@@ -8,7 +8,8 @@ positives and must be re-run after any change to the matching loop.
 Requires:
     - mode is worktree, ref followed by a ref name, or history
 Ensures:
-    - output is masked: key, length and a truncated sha256, never the value
+    - output is masked: key, length and a truncated sha256, never the value, since a report
+      that quotes the secret has spread it further
     - earlier misses are now fixtures: a word-boundary test never fires between an
       underscore and a letter, so `DB_PASSWORD`, db_pwd and api_secret were missed;
       a JavaScript declaration such as const apiKey; a value on the following lines
