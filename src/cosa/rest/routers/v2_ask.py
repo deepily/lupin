@@ -415,9 +415,9 @@ def _test_account_email() -> Optional[ str ]:
     """
     The test account (lower-cased), or None when neither source names one.
 
-    The env var is read AT CALL TIME and wins: it is what the suite's own tests log in as, so
-    reading it here cannot drift from them the way a literal INI value could (row 8d4a5a59,
-    review risk 2). The INI key is only the fallback, and it is set in Development and Testing only.
+    The env var is read at call time and wins. The suite's own tests log in as it, so it cannot
+    drift from them the way a literal INI value could. The INI key is only the fallback,
+    and it is set in Development and Testing only.
     """
     from_env = os.environ.get( PARENT_STAMP_TEST_ACCOUNT_ENV, "" ).strip().lower()
     if from_env: return from_env
@@ -427,7 +427,7 @@ def _test_account_email() -> Optional[ str ]:
 
 
 def _loggable( value: Any ) -> str:
-    """repr() of at most PARENT_STAMP_LOG_MAX characters of `value`, so a caller-supplied string cannot forge or flood log lines."""
+    """The repr of the first PARENT_STAMP_LOG_MAX characters, so a caller cannot forge log lines."""
     text = str( value )
     shown = repr( text[ :PARENT_STAMP_LOG_MAX ] )
     return shown + "..." if len( text ) > PARENT_STAMP_LOG_MAX else shown
@@ -435,15 +435,11 @@ def _loggable( value: Any ) -> str:
 
 def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, user_id: str, user_email: str ) -> tuple:
     """
-    Decide whether a caller's `parent_id_hash` lineage claim is honoured (row 8d4a5a59).
+    Decide whether a caller's `parent_id_hash` lineage claim is honoured.
 
-    The field takes any id from the body, and GET /api/busy publishes the running suite's id,
-    so without a check any logged-in caller could claim suite lineage and walk through the
-    monopoly hold. A claim is honoured when ANY of these holds, cheapest first:
-        1. the caller is an admin;
-        2. the caller is the configured test account (the suite's own tests log in as it,
-           whoever submitted the suite, e.g. a TFE validation rerun);
-        3. the parent job's owner is the caller (owner read from job_history).
+    The field takes any id, and GET /api/busy publishes the running suite's id. Unchecked, any
+    caller could claim suite lineage and walk through the monopoly hold. A claim is honoured
+    for an admin, for the configured test account, or for the owner of the parent job.
 
     Requires:
         - user_id / user_email come from the token (identity_or_401).
@@ -451,12 +447,12 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     Ensures:
         - an absent or empty claim returns it unchanged and ( claim, None ): nothing to vet.
         - an honoured claim returns ( parent_id_hash, None ).
-        - a refused claim returns ( None, reason ): the request carries on WITHOUT the stamp, never
-          a 4xx. ⚠️ The consequence for a LEGITIMATE suite child is not "a small loss": Gate B defers
-          every job that is not a lineage child while a monopolize job is active, so a dropped child
-          waits behind the suite that is waiting on it and can starve for the whole run (review
-          risk 1; making a refused claim on the ACTIVE monopolizer a loud 403 is Rick's call, unbuilt).
-          reason is "not_owner" or "owner_unknown" (no job_history row for the parent).
+        - a refused claim returns ( None, reason ) and the request carries on without the stamp, never a 4xx.
+        - a dropped child of a real suite is not a small loss. Gate B defers every job that is not
+          a lineage child while a monopolize job is active, so it waits behind the suite that is
+          waiting on it and can starve for the whole run (review risk 1).
+        - a loud 403 for a refused claim on the active monopolizer is Rick's call, and is unbuilt.
+        - reason is "not_owner" or "owner_unknown" (no job_history row for the parent).
         - the refusal is never silent: one log line names caller and parent, both repr()'d and
           length-capped (a caller-supplied id cannot forge or flood log lines).
     """
@@ -472,7 +468,7 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
 
 
 def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Optional[ str ] ) -> dict:
-    """Extra flow kwargs naming a dropped claim for the request trace; empty when nothing was dropped."""
+    """Extra flow kwargs naming a dropped claim for the trace; empty when none was dropped."""
     if reason is None: return {}
     return { "parent_stamp_dropped": f"{_loggable( parent_id_hash )}:{reason}" }
 
