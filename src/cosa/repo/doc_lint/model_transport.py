@@ -202,6 +202,10 @@ class ModelUnavailableError( ModelCallError ):
     """The service stayed unavailable, or a stop cut the wait; retrying cannot help."""
 
 
+class ModelWaitCutShort( ModelUnavailableError ):
+    """A stop ended the wait for the next try; the cause of the stop is another failure."""
+
+
 class CallBudgetExceeded( Exception ):
     """
     A call would pass the per-model cap, so it was refused before any model was contacted.
@@ -462,7 +466,7 @@ def _agy_call( model, prompt, timeout_seconds ):
 
     Raises:
         - ModelUnavailableError, a ModelCallError, naming the number of tries when every try was answered
-          unavailable, or saying the wait was cut short by a stop
+          unavailable; ModelWaitCutShort, its subclass, saying the wait was cut short by a stop
         - whatever _agy_call_once raises otherwise
     """
     waits = list( AGY_UNAVAILABLE_WAITS )
@@ -478,7 +482,7 @@ def _agy_call( model, prompt, timeout_seconds ):
             wait = waits.pop( 0 )
             print( f"agy unavailable (model {model}), try {tries - len( waits ) - 1} of {tries}; waiting {wait}s", file=sys.stderr )
             if AGY_SLEEP( wait ):
-                raise ModelUnavailableError( f"model call to {model} stopped waiting for the service, the wait was cut short by a stop after try {tries - len( waits ) - 1} of {tries}: {e}" ) from e
+                raise ModelWaitCutShort( f"model call to {model} stopped waiting for the service, the wait was cut short by a stop after try {tries - len( waits ) - 1} of {tries}: {e}" ) from e
 
 
 def _scratch_parent():

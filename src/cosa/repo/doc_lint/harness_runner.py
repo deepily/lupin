@@ -299,7 +299,8 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_
         - pairs with the same old text, new text and design run one after another, so a resumed or repeated
           pair never makes a call a twin has finished
         - once one pair fails, pairs not yet started are skipped, every pair in flight finishes (its ledger
-          rows are kept), and then the failure of the earliest pair in input order is raised
+          rows are kept), and then the failure of the earliest pair in input order is raised; a wait another
+          pair's failure cut short is passed over for the failure that cut it, unless every failure is one
         - a stop signal left from an earlier run is cleared first, and a pair's failure sets it, so a call
           waiting out a 503 in another pair gives up at once
 
@@ -333,5 +334,8 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_
         return outcome
 
     results = await asyncio.gather( *[ one( i, pair ) for i, pair in enumerate( pairs ) ] )
-    if errors: raise errors[ min( errors ) ]
+    if errors:
+        # A call woken by another pair's failure reports a cut-short wait; the failure that woke it is the cause.
+        causes = [ i for i in errors if not isinstance( errors[ i ], model_transport.ModelWaitCutShort ) ]
+        raise errors[ min( causes ) if causes else min( errors ) ]
     return list( results )

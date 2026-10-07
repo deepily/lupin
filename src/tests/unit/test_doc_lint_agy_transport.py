@@ -1341,3 +1341,56 @@ def test_a_binary_change_seen_after_a_peer_already_recorded_the_stop_keeps_the_f
         complete( "m", "s", "u" )
 
     assert mt.AGY_STOP == "peer reason"
+
+
+def _unavailable_then_a_real_cause( monkeypatch, real_cause ):
+    """Pair a waits out a 503 in the real _agy_call; pair b fails with real_cause."""
+    def always_unavailable( model, prompt, timeout_seconds ):
+        raise agy_runtime.AgyUnavailable( "503 service unavailable" )
+
+    monkeypatch.setattr( mt, "_agy_call_once", always_unavailable )
+    monkeypatch.setattr( mt, "AGY_UNAVAILABLE_WAITS", ( 30, ) )
+
+    async def pair_stand_in( pair, *args, **kwargs ):
+        if pair[ "id" ] == "a":
+            return await asyncio.to_thread( mt._agy_call, "m", "p", 5 )
+        await asyncio.sleep( 0.1 )
+        raise real_cause
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+
+def test_run_all_raises_the_real_failure_and_not_the_wait_it_cut_short( monkeypatch ):
+    _unavailable_then_a_real_cause( monkeypatch, ValueError( "THE REAL CAUSE" ) )
+
+    started = time.monotonic()
+    with pytest.raises( ValueError, match="THE REAL CAUSE" ):
+        asyncio.run( hn.run_all( [ PAIR_A, PAIR_B ], None, None, parallel=2 ) )
+
+    assert time.monotonic() - started < 10
+
+
+def test_run_all_raises_the_cut_short_wait_when_it_is_the_only_failure( monkeypatch ):
+    def always_unavailable( model, prompt, timeout_seconds ):
+        raise agy_runtime.AgyUnavailable( "503 service unavailable" )
+
+    monkeypatch.setattr( mt, "_agy_call_once", always_unavailable )
+    monkeypatch.setattr( mt, "AGY_UNAVAILABLE_WAITS", ( 30, ) )
+    mt.AGY_WAKE.clear()
+
+    async def pair_stand_in( pair, *args, **kwargs ):
+        if pair[ "id" ] == "a":
+            return await asyncio.to_thread( mt._agy_call, "m", "p", 5 )
+        await asyncio.sleep( 0.1 )
+        mt.AGY_WAKE.set()
+        return "b done"
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+    with pytest.raises( mt.ModelUnavailableError, match="cut short" ):
+        asyncio.run( hn.run_all( [ PAIR_A, PAIR_B ], None, None, parallel=2 ) )
+
+
+def test_an_unavailable_error_after_every_try_is_not_a_cut_short_wait():
+    assert not issubclass( mt.ModelUnavailableError, mt.ModelWaitCutShort )
+    assert issubclass( mt.ModelWaitCutShort, mt.ModelUnavailableError )
