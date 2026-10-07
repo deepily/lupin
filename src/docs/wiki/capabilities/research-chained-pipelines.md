@@ -5,7 +5,7 @@ pins:
   - cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob@682eb48c2f
   - cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob@ea4f779747
   - cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent@86a17644b5
-  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@b308a2e20d
+  - cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent@062895fbcb
   - cosa.agents.deep_research_to_podcast.state.ChainedResult@c07a929e14
   - cosa.agents.deep_research_to_presentation.state.ChainedResult@5b5f829ef8
   - cosa.agents.deep_research_to_podcast.state.PipelineState@4b3355bdf0
@@ -33,7 +33,6 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 - Presentation options: `target_duration_minutes`, `target_slide_count`, `theme`. The presentation job also takes `lead_model`, which sets the research leg's lead model only; the podcast job does not pass one (its agent accepts it).
 - The presentation leg builds its config from the INI file and then overrides it with these options, plus `audience`. The podcast leg uses a default `PodcastConfig()`.
 - Results: the podcast has `audio_path` and `script_path`, with per-language maps in `pg_artifacts`; the presentation has `yaml_path`, `marp_path` and `slide_count`.
-- The chained agent puts the slide count under `total_slides` in `pg_artifacts` but reads `slide_count` from it, so `ChainedResult.slide_count` is `None` on a real run, and the presentation card prints `None slides`.
 
 ## When not to use it
 - To run just one stage, use [[deep-research]], [[podcast-generation]] or [[presentation-generation]] directly.
