@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-Idempotent, fail-loud replacement for the previous `sed -i` patch on
-pytest-playwright-visual-snapshot's __init__.py.
+Patch pytest-playwright-visual-snapshot's __init__.py, idempotently and failing loudly.
+
+It replaces the previous `sed -i` patch.
 
 Why this exists:
   pytest-playwright-visual-snapshot transitively pulls structlog_config,
   which requires starlette >=0.49.1, which conflicts with the FastAPI
-  pin's starlette <0.47.0. The package is installed with --no-deps, then
-  its __init__.py needs the bare `from structlog_config import ...` line
-  wrapped in a try/except so the package loads when structlog_config is
-  absent (it is never imported at runtime by the parts we use).
+  pin's starlette <0.47.0.
+  The package is installed with --no-deps. Its __init__.py then needs the
+  bare `from structlog_config import ...` line wrapped in a try/except.
+  The package then loads when structlog_config is absent, and the parts
+  we use never import it at runtime.
 
 Why a Python script instead of a unified-diff `.patch`:
   A unified diff requires stable surrounding-line context, which drifts
