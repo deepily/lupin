@@ -227,3 +227,17 @@ def test_choose_pages_keeps_the_best_five_at_the_floor_and_breaks_ties_by_slug()
     chosen  = rt._choose_pages( answers, rt.vd.POLICY )
     assert [ c[ "slug" ] for c in chosen ] == [ "g", "a", "b", "c", "f" ] and len( chosen ) == rt.MAX_PAGES      # d sits at the floor but is sixth; e is below it
     assert [ c[ "slug" ] for c in rt._choose_pages( [ ans( "d", 0.3 ), ans( "e", 0.29 ) ], rt.vd.POLICY ) ] == [ "d" ]
+
+
+def test_a_chosen_page_that_covers_no_indexed_entry_adds_no_covered_stage( env ):
+    empty_line = "a package with nothing indexed. `cosa.nothing`"
+    write_wiki( env[ 0 ], { "empty-page": empty_line }, { "empty-page": "cosa.feeds.parse_feed@aaaaaaaaaa" }, pages=( "empty-page", ) )
+    need  = "something unrelated [emptycover]"
+    table = PageFake( need ); table.table = {}
+    for text, ans in ( ( f"empty-page — {empty_line}", CHOSEN ), *( ( t, UNREL ) for t in ALL_TEXTS ) ):
+        body = literal_body( need, text, *( ( PAGE_INSTR, PAGE_CRIT ) if text.startswith( "empty-page" ) else () ) )
+        table.table[ key_of( body ) ] = ans
+    r   = run( env, need, table )
+    rec = receipt_of( env, r )
+    assert rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "chosen" ][ 0 ][ "slug" ] == "empty-page" and rec[ "pages" ][ "covered" ] == []
+    assert [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "all" ]
