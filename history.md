@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.07 - Session 4afec3b4 → c54f6913 (Mr. Radio 🦉, manager, no crew; checkpoint at 10:42 EDT) | Sweep report compiled as scoped; picture-test reds run down; database logins verified
+
+- **Sweep report, row `170cda00`** (Rick's ruling, 10:29 EDT): `2026.10.07-docstring-sweep-before-and-after-report.md` in the docs-rewrite plan folder, `e68277983`. One linter for every count. Six trains: 3,485 docstrings changed, 29,871 lint findings removed. The swept scope, 859 files, went from 29,838 findings to 0. The whole tree went from 112,416 to 82,545.
+- **Not swept**: test files hold 76,985 of the 82,545 findings that remain. Rick has not ruled on sweeping them.
+- **Meaning kept**: the sweep's own totals, gathered by Krishna, are in the report. 40,100 claims checked, 0 real losses in the final sort. That is the reviewers' sort, not a second measurement.
+- **Picture tests, row `a0d081da`**: four multiplexer picture tests were red twice in the night and passed unchanged at 09:57 EDT. A probe drew section D's baseline with the green-era bundle, the slice-1 bundle and the current one: all three matched the baseline. The bundle is ruled out. The cause of the night reds is not found.
+- **Database logins, row `80513825`**: Rick ran the provision commands. `lupin_app`, `lupin_host` and `lupin_test` exist, none superuser. Compose commit rebuilt on today's head as `185bef930` (kept at `refs/keep/mr-radio/80513825-db-login-rebased`); 809 deploy unit tests passed on it. The full unit tier was not run on it. Nothing landed or restarted.
+- **Files**: history.md, TODO.md, src/rnd/README.md, the report, the showcase plan page. Not pushed by this seat.
+
 ### 2026.10.06 - Session 4afec3b4 (Mr. Radio 🦉, manager, no crew; from 08:56 EDT) | Legacy task card re-reads on a push; websocket push row and eval row closed; a scheduled job lost on :8000; showcase plan for the docstring rewrite
 
 - **Rick's orders**: every seat today is for Cheech's docstring rewrite and Mr. Radio allocates none (broadcast `37434cae`, then voice at about 08:58 EDT). At about 09:57 EDT: checkpoint and exit, to save tokens for that work.

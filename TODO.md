@@ -16,6 +16,14 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-07 (Mr. Radio 🦉 `4afec3b4`, re-spun as `c54f6913`; no crew)
+
+**Rick ruled** (2026-10-07):
+
+- **No report until all of the source is swept; the server stays up all night** (voice, about 23:05 EDT on 2026-10-06). The package sweep then finished as scoped, and its scope was not all of the source.
+- **Compile the sweep report now, as scoped** (card, answered 10:29 EDT: "Compile now, as scoped (Recommended)"). Not chosen: wait for a tests sweep; decide later. Report `2026.10.07-docstring-sweep-before-and-after-report.md` in the docs-rewrite plan folder, row `170cda00`. A second edition follows if the test files are swept. Whether they are swept is not ruled.
+- **The database login cutover: prepare only, cut over later** (card, answered about 10:39 EDT: "Prepare only, cut over later (Recommended)"). Rick ran the two provision commands at about 10:37 EDT. The compose change is rebuilt on today's code and kept off the branch; Rick picks the cutover time. Not chosen: cut over today; stop here. Row `80513825`.
+
 ## 📚 DECISIONS LOG 2026-10-06 (Mr. Radio 🦉 `4afec3b4`, no crew)
 
 **Rick ruled** (2026-10-06):
