@@ -27,6 +27,7 @@ from typing import Optional
 
 import cosa.utils.util as cu
 
+from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
     TFEPhase,
@@ -310,7 +311,7 @@ class TFEOrchestrator:
         # Resume short-circuit: if checkpoint already carried us past this
         # phase, return the rehydrated clusters without re-running heuristic
         # + LLM refinement. See load_checkpoint / set_resume_phase.
-        if self._resume_from_ordinal is not None and self._resume_from_ordinal >= TFE_PHASE_ORDINALS[ TFEPhase.CLUSTERING ]:
+        if resume_covers( self._resume_from_ordinal, TFE_PHASE_ORDINALS, TFEPhase.CLUSTERING ):
             if self.debug: print( f"[TFE] Phase 0 skipped via resume (ordinal={self._resume_from_ordinal})" )
             self.current_phase = TFEPhase.CLUSTERING
             return self.clusters
@@ -352,7 +353,7 @@ class TFEOrchestrator:
             - Failed diagnoses get low-confidence fallback (not exceptions)
         """
         # Resume short-circuit: skip re-diagnosis if checkpoint already has it.
-        if self._resume_from_ordinal is not None and self._resume_from_ordinal >= TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ]:
+        if resume_covers( self._resume_from_ordinal, TFE_PHASE_ORDINALS, TFEPhase.DIAGNOSING ):
             if self.debug: print( f"[TFE] Phase 1 skipped via resume (ordinal={self._resume_from_ordinal})" )
             self.current_phase = TFEPhase.DIAGNOSING
             return self.diagnoses
@@ -640,11 +641,7 @@ class TFEOrchestrator:
         # Resume short-circuit: if the checkpoint captured proposed_fixes from
         # a previous run (stall at voice gate is the common case), skip
         # regenerating proposals and go straight to the voice gate.
-        if (
-            self._resume_from_ordinal is not None
-            and self._resume_from_ordinal >= TFE_PHASE_ORDINALS[ TFEPhase.PROPOSING ]
-            and self.proposed_fixes
-        ):
+        if resume_covers( self._resume_from_ordinal, TFE_PHASE_ORDINALS, TFEPhase.PROPOSING ) and self.proposed_fixes:
             if self.debug: print( f"[TFE] Phase 2 propose-gen skipped via resume (ordinal={self._resume_from_ordinal}, {len( self.proposed_fixes )} proposals rehydrated)" )
             self.current_phase = TFEPhase.PROPOSING
             # Still run the voice gate — that's why we resumed.

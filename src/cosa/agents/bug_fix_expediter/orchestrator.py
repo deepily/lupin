@@ -23,7 +23,7 @@ from typing import Optional, Callable
 
 import cosa.utils.util as cu
 
-from cosa.agents.bug_fix_expediter.state import BFEPhase, DiagnosisResult, ProposedFix, FixResult
+from cosa.agents.bug_fix_expediter.state import BFEPhase, BFE_PHASE_ORDINALS, DiagnosisResult, ProposedFix, FixResult
 from cosa.agents.bug_fix_expediter.prompts.diagnosis import (
     DIAGNOSIS_SYSTEM_PROMPT,
     build_diagnosis_prompt,
@@ -41,6 +41,7 @@ from cosa.agents.bug_fix_expediter.prompts.fix import (
 )
 from cosa.agents.bug_fix_expediter.plan_writer import PlanWriter
 from cosa.agents.shared.git_strategist import GitStrategist
+from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.shared.fix_executor import FixExecutor
 
 # SWE Team reuse — safety, hooks, test runner (kept for back-compat;
@@ -125,6 +126,9 @@ class BFEOrchestrator:
         self.debug             = debug
         self.verbose           = verbose
         self.current_phase     = BFEPhase.PACKAGING
+
+        # Set by set_resume_phase() on a resumed run; None means every phase runs.
+        self._resume_from_ordinal : Optional[ int ] = None
 
         # Checkpoint state (Session 9056c113 Phase E.2) — phase methods populate
         # these as a side effect so save_checkpoint() can serialize mid-pipeline.
@@ -237,9 +241,10 @@ class BFEOrchestrator:
 
     def set_resume_phase( self, phase_ordinal: int ) -> None:
         """
-        Record the phase ordinal that a resumed run treats as already completed.
+        Record the checkpoint's phase ordinal so a resumed run reuses finished work.
 
-        Stores phase_ordinal in the resume marker; nothing in this file reads it yet.
+        run_diagnosis and run_proposal read it through resume_covers and skip the Lead agent
+        when the checkpoint already holds their output. The stalled gate is asked again.
 
         Requires:
             - phase_ordinal >= 0
@@ -268,6 +273,16 @@ class BFEOrchestrator:
             DiagnosisResult: Structured root cause analysis
         """
         from cosa.agents.bug_fix_expediter import voice_io, cosa_interface
+
+        # Resume short-circuit: the checkpoint already holds the diagnosis, so do not
+        # run the Lead agent again. A stall at the diagnosis gate still owes the human
+        # an answer; a stall at the proposal gate means this gate was already passed.
+        if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.DIAGNOSING ) and self.diagnosis is not None:
+            if self.debug: print( f"[BFEOrchestrator] Diagnosis skipped via resume (ordinal={self._resume_from_ordinal})" )
+            self.current_phase = BFEPhase.DIAGNOSING
+            if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.PROPOSING ):
+                return self.diagnosis
+            return await self._diagnosis_gate_or_stall( self.diagnosis, voice_io, cosa_interface )
 
         if not SDK_AVAILABLE:
             logger.error( "Claude Agent SDK not available — cannot run diagnosis" )
@@ -351,25 +366,7 @@ class BFEOrchestrator:
             best_diagnosis = self._fallback_diagnosis( "All diagnosis iterations produced no result" )
 
         # --- Voice gate (natural break point) ---
-        if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import (
-                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
-            )
-            try:
-                best_diagnosis = await self._voice_gate_diagnosis( best_diagnosis, voice_io, cosa_interface )
-            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
-                # No human approved — whether the ask timed out or the gate itself
-                # broke. Same clean yield either way: checkpoint + stall so a human
-                # can answer on resume. The message names which, because the two
-                # are not the same event. (Session 9056c113 doc 16 Phase 1; row 421b9498)
-                self.diagnosis = best_diagnosis   # populate for save_checkpoint
-                checkpoint = self.save_checkpoint()
-                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
-                raise StalledException(
-                    checkpoint = checkpoint,
-                    phase      = BFEPhase.DIAGNOSING.value,
-                    message    = f"Voice gate {why} at diagnosis",
-                )
+        best_diagnosis = await self._diagnosis_gate_or_stall( best_diagnosis, voice_io, cosa_interface )
 
         # --- Completion notification ---
         abstract = self._build_diagnosis_abstract( best_diagnosis )
@@ -379,6 +376,44 @@ class BFEOrchestrator:
         )
 
         return best_diagnosis
+
+    async def _diagnosis_gate_or_stall( self, diagnosis, voice_io, cosa_interface ):
+        """
+        Ask the diagnosis gate, or checkpoint and stall when no human answers.
+
+        Requires:
+            - diagnosis is a DiagnosisResult
+
+        Ensures:
+            - returns the approved or refined diagnosis, or the input when the run is cancelled
+            - a stall saves a checkpoint whose phase is diagnosing, the phase that was gated
+
+        Raises:
+            - StalledException when the gate timed out or could not reach a human
+        """
+        if self._is_cancelled(): return diagnosis
+
+        from cosa.agents.bug_fix_expediter.state import (
+            VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+        )
+        try:
+            return await self._voice_gate_diagnosis( diagnosis, voice_io, cosa_interface )
+        except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+            # No human approved — whether the ask timed out or the gate itself
+            # broke. Same clean yield either way: checkpoint + stall so a human
+            # can answer on resume. The message names which, because the two
+            # are not the same event. (Session 9056c113 doc 16 Phase 1; row 421b9498)
+            # The gate leaves current_phase at WAITING_CONFIRMATION, which has no
+            # ordinal, so name the phase that was gated before saving.
+            self.diagnosis     = diagnosis   # populate for save_checkpoint
+            self.current_phase = BFEPhase.DIAGNOSING
+            checkpoint = self.save_checkpoint()
+            why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
+            raise StalledException(
+                checkpoint = checkpoint,
+                phase      = BFEPhase.DIAGNOSING.value,
+                message    = f"Voice gate {why} at diagnosis",
+            )
 
     def queue_user_message( self, message: str, urgent: bool = False ) -> None:
         """
@@ -596,10 +631,86 @@ class BFEOrchestrator:
         """
         from cosa.agents.bug_fix_expediter import voice_io, cosa_interface
 
+        # Resume short-circuit: the checkpoint already holds the proposals, so do not run
+        # the Lead agent again. Go straight to the gate that stalled; that is why we resumed.
+        if resume_covers( self._resume_from_ordinal, BFE_PHASE_ORDINALS, BFEPhase.PROPOSING ) and self.proposed_fixes:
+            if self.debug: print( f"[BFEOrchestrator] Proposal generation skipped via resume (ordinal={self._resume_from_ordinal}, {len( self.proposed_fixes )} proposals rehydrated)" )
+            self._last_diagnosis = diagnosis
+            self.current_phase   = BFEPhase.PROPOSING
+            fixes                = list( self.proposed_fixes )
+            plan_path            = self.plan_path or ""
+        else:
+            fixes, plan_path, done = await self._generate_proposals( diagnosis, voice_io )
+            if done: return ( fixes, None, plan_path )
+
+        # --- Voice gate (natural break point) ---
+        selected_fix = None
+        if not self._is_cancelled():
+            from cosa.agents.bug_fix_expediter.state import (
+                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
+            )
+            try:
+                selected_fix = await self._voice_gate_proposal( fixes, voice_io, cosa_interface )
+            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
+                # Nobody approved applying a fix — the ask timed out, or the gate
+                # broke. Either way: checkpoint + stall, never apply. (row 421b9498)
+                # Populate orchestrator state first so save_checkpoint captures it.
+                # The gate leaves current_phase at WAITING_CONFIRMATION, which has no
+                # ordinal, so name the phase that was gated before saving.
+                self.diagnosis      = diagnosis
+                self.proposed_fixes = fixes
+                self.plan_path      = plan_path
+                self.current_phase  = BFEPhase.PROPOSING
+                checkpoint = self.save_checkpoint()
+                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
+                raise StalledException(
+                    checkpoint = checkpoint,
+                    phase      = BFEPhase.PROPOSING.value,
+                    message    = f"Voice gate {why} at proposal",
+                )
+
+            # Re-write plan with selection if user chose a fix
+            if selected_fix and plan_path:
+                try:
+                    writer = PlanWriter( user_email=self.dead_job_context.user_email, debug=self.debug )
+                    writer.write_plan(
+                        dead_job_context = self.dead_job_context,
+                        diagnosis        = diagnosis,
+                        proposed_fixes   = fixes,
+                        selected_fix     = selected_fix,
+                    )
+                except Exception as e:
+                    logger.warning( f"Plan document re-write failed: {e}" )
+
+        # --- Completion notification ---
+        fix_summary = f"{len( fixes )} fix(es) proposed"
+        if selected_fix:
+            fix_summary += f", selected: '{selected_fix.title}'"
+
+        await self._notify(
+            voice_io, f"Proposal complete. {fix_summary}",
+            priority="medium",
+            abstract=self._build_proposal_abstract( fixes, selected_fix )
+        )
+
+        return ( fixes, selected_fix, plan_path )
+
+    async def _generate_proposals( self, diagnosis: DiagnosisResult, voice_io ) -> tuple:
+        """
+        Have the Lead agent propose fixes and write the plan document.
+
+        Requires:
+            - diagnosis is a valid DiagnosisResult
+
+        Ensures:
+            - returns ( fixes, plan_path, done )
+            - done is True when the SDK is missing or the run was cancelled, and the caller returns at once
+            - a plan write failure is logged and leaves plan_path empty
+        """
         if not SDK_AVAILABLE:
             logger.error( "Claude Agent SDK not available — cannot run proposal" )
             fallback = self._fallback_proposal( "Claude Agent SDK not installed" )
-            return ( fallback, None, "" )
+            return ( fallback, "", True )
 
         # Store for voice gate retry access
         self._last_diagnosis = diagnosis
@@ -616,7 +727,7 @@ class BFEOrchestrator:
 
         # --- Cancellation check ---
         if self._is_cancelled():
-            return ( self._fallback_proposal( "Cancelled" ), None, "" )
+            return ( self._fallback_proposal( "Cancelled" ), "", True )
 
         # --- Drain user messages ---
         user_messages = self._drain_user_messages()
@@ -657,53 +768,7 @@ class BFEOrchestrator:
         except Exception as e:
             logger.warning( f"Plan document write failed: {e}" )
 
-        # --- Voice gate (natural break point) ---
-        selected_fix = None
-        if not self._is_cancelled():
-            from cosa.agents.bug_fix_expediter.state import (
-                VoiceGateTimeoutError, VoiceGateUnreachableError, StalledException,
-            )
-            try:
-                selected_fix = await self._voice_gate_proposal( fixes, voice_io, cosa_interface )
-            except ( VoiceGateTimeoutError, VoiceGateUnreachableError ) as e:
-                # Nobody approved applying a fix — the ask timed out, or the gate
-                # broke. Either way: checkpoint + stall, never apply. (row 421b9498)
-                # Populate orchestrator state first so save_checkpoint captures it.
-                self.diagnosis      = diagnosis
-                self.proposed_fixes = fixes
-                self.plan_path      = plan_path
-                checkpoint = self.save_checkpoint()
-                why = "timeout" if isinstance( e, VoiceGateTimeoutError ) else "unreachable"
-                raise StalledException(
-                    checkpoint = checkpoint,
-                    phase      = BFEPhase.PROPOSING.value,
-                    message    = f"Voice gate {why} at proposal",
-                )
-
-            # Re-write plan with selection if user chose a fix
-            if selected_fix and plan_path:
-                try:
-                    writer.write_plan(
-                        dead_job_context = self.dead_job_context,
-                        diagnosis        = diagnosis,
-                        proposed_fixes   = fixes,
-                        selected_fix     = selected_fix,
-                    )
-                except Exception as e:
-                    logger.warning( f"Plan document re-write failed: {e}" )
-
-        # --- Completion notification ---
-        fix_summary = f"{len( fixes )} fix(es) proposed"
-        if selected_fix:
-            fix_summary += f", selected: '{selected_fix.title}'"
-
-        await self._notify(
-            voice_io, f"Proposal complete. {fix_summary}",
-            priority="medium",
-            abstract=self._build_proposal_abstract( fixes, selected_fix )
-        )
-
-        return ( fixes, selected_fix, plan_path )
+        return ( fixes, plan_path, False )
 
     def _build_proposal_options( self ):
         """

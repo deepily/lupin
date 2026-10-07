@@ -227,6 +227,8 @@ verification is in progress in a separate console.
 - `bug fix expediter enabled` — BFE feature flag (agent router + REST endpoint), default `false`
 - `auto fix enabled` — `DeadQueueWatchdog` master switch (the actual auto-dispatch toggle), default `true` as of Session 1cfcdf73 (run unless told otherwise). BFE is INI-only — there is no per-run override surface.
 
+**Resuming a stalled job**: a voice gate that times out or cannot reach a human stalls the job with a checkpoint. The checkpoint's phase is the phase that was gated (`diagnosing` or `proposing`), never `waiting_confirmation`. A resumed job reuses the stored diagnosis and proposals instead of running the Lead agent again, and asks the gate that stalled again. A timeout checkpoint taken before this change holds ordinal -1 and re-runs from the start. The skip test is `resume_covers` in `src/cosa/agents/shared/resume_guard.py`, shared with TFE.
+
 **See the BFE R&D dir** for Phase 6 implementation details:
 [`src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/08-phase6-automated-repair-loop-plan.md`](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/08-phase6-automated-repair-loop-plan.md).
 

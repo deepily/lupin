@@ -59,7 +59,8 @@ src/cosa/agents/shared/
 ├── __init__.py               # Re-exports the public API
 ├── plan_writer.py            # PlanWriter class (moved from BFE)
 ├── git_strategist.py         # GitStrategist class (new, extracted from BFE orchestrator)
-└── fix_executor.py           # FixExecutor + FIX_PROMPT_BUILDERS registry (new)
+├── fix_executor.py           # FixExecutor + FIX_PROMPT_BUILDERS registry (new)
+└── resume_guard.py           # resume_covers(): has a resumed run's checkpoint reached a phase (BFE and TFE)
 ```
 
 **Public exports** (from `cosa.agents.shared`):
