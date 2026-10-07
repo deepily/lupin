@@ -22,7 +22,6 @@ Everything else stays warn mode: findings on staged lines are printed and the co
 
 import argparse
 import ast
-import re
 import subprocess
 import sys
 import traceback
@@ -33,6 +32,7 @@ from .cli import in_scope
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
 from .swept_scope import is_swept
 from .tool_runners import run_markdownlint, run_ruff
+from .waivers import waiver_state
 from .word_list import configure_root
 
 # Repo-relative directory prefixes, each ending in a slash, for example "src/cosa/agents/".
@@ -40,8 +40,6 @@ BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
-REASON_WORD      = re.compile( r"[A-Za-z]{3,}" )
-WAIVER_REGEX     = re.compile( r"doc-lint: waive (\S+)(?: -- (.*))?" )
 TEXT_LIMIT       = 120
 HISTORY_HOME      = {
     "dated-banner"     : "the commit message or the Decisions Log",
@@ -63,30 +61,6 @@ FIX_HOME = {
     "not-utf-8"       : "UTF-8; save the file as UTF-8 so its docstrings can be checked",
     "parse-error"     : "valid Python; the file must parse before its docstrings can be checked",
 }
-
-
-def waiver_state( finding, source_line ):
-    """
-    Read the waiver marker on the finding's own source line.
-
-    Requires:
-        - finding is a Finding
-        - source_line is the text of the file line the finding sits on
-
-    Ensures:
-        - returns "honoured" when a marker names finding.rule and its reason holds a word of three letters or more
-        - returns "no-reason" when a marker names the rule and its reason holds no such word
-        - returns "none" otherwise, including a marker that names a different rule
-
-    Raises:
-        - nothing
-    """
-    state = "none"
-    for m in WAIVER_REGEX.finditer( source_line ):
-        if m.group( 1 ).strip( "\"'" ) != finding.rule: continue
-        if REASON_WORD.search( m.group( 2 ) or "" ): return "honoured"
-        state = "no-reason"
-    return state
 
 
 def swept_refusal_line( finding, source_line, state ):
