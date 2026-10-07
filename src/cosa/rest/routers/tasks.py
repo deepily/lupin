@@ -1530,14 +1530,6 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
     claims_approval_card   = ( item.status == rules.PARK_STATUS and payload.to_status == rules.QUEUED_STATUS
                                and isinstance( payload.receipt_refs, dict )
                                and rules.APPROVAL_CARD_KEY in payload.receipt_refs )
-    # The key belongs to this one move. Anywhere else it would write a real card's id onto an
-    # unrelated event and burn the card, since the single-use read looks at the whole trail.
-    if ( isinstance( payload.receipt_refs, dict ) and rules.APPROVAL_CARD_KEY in payload.receipt_refs
-            and not claims_approval_card ):
-        raise HTTPException(
-            status_code = 403,
-            detail      = f"The '{rules.APPROVAL_CARD_KEY}' receipt belongs to an un-park (parked to queued) and to nothing else.",
-        )
     if payload.to_status == approval.DONE_STATUS or claims_manager_key or claims_approval_card:
         closer_manager_refusal = promotion_gate.manager_refusal(
             closer_session_id, payload.actor,
@@ -1554,6 +1546,16 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
     unpark_card_id = None
     if closer_is_manager and claims_approval_card:
         unpark_card_id = _resolved_unpark_card( session, repo, item, payload.receipt_refs )
+    # The key is recorded only when the server resolved it for a manager's parked-to-queued. A typed
+    # id anywhere else would reach an event and burn the card, since the single-use read looks at the
+    # whole trail, and the gate alone does not stop it when enforcement is off. The text is the same
+    # for every refused caller, so nobody learns whether a card id exists.
+    if ( isinstance( payload.receipt_refs, dict ) and rules.APPROVAL_CARD_KEY in payload.receipt_refs
+            and unpark_card_id is None ):
+        raise HTTPException(
+            status_code = 403,
+            detail      = f"The '{rules.APPROVAL_CARD_KEY}' receipt belongs to a manager's un-park (parked to queued) and to nothing else.",
+        )
     manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
 
     manager_attestation = _resolved_manager_attestation(

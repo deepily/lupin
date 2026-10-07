@@ -446,7 +446,44 @@ def test_a_worker_citing_a_valid_card_is_still_refused( repo, settings, seats, c
 
     response = _unpark( item, card, actor=WORKER )
 
-    assert response.status_code == 403 and "un-parking a row out of" in response.json()[ "detail" ]
+    assert response.status_code == 403 and "belongs to a manager's un-park" in response.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_a_workers_own_un_park_with_enforcement_off_does_not_write_the_card_id( repo, settings, seats, cards ):
+    """With the gate off the move is lawful, but a typed card id must never reach an event."""
+    settings.write_text( '{"approvers": ["maria", "mr radio"], "enforcement_active": false}' )
+    item = _item()
+    _armed( repo, item )
+    card = cards.add( _card() )
+
+    response = _unpark( item, card, actor=WORKER )
+
+    assert response.status_code == 403 and "belongs to a manager's un-park" in response.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_a_workers_plain_un_park_with_enforcement_off_still_moves_the_row( repo, settings, seats, cards ):
+    """The control for the test above: the refusal is about the card id, not the move."""
+    settings.write_text( '{"approvers": ["maria", "mr radio"], "enforcement_active": false}' )
+    item = _item()
+    _armed( repo, item )
+
+    response = _post( item, "queued", WORKER )
+
+    assert response.status_code == 200, response.text
+    assert "approval_card" not in ( repo.apply_transition.call_args.kwargs[ "receipt_refs" ] or { } )
+
+
+def test_a_manager_citing_a_card_on_parked_to_in_progress_is_refused_by_the_receipt_rule( repo, settings, seats, cards ):
+    """Without the destination half of the claim, the card is judged first."""
+    item = _item()
+    _armed( repo, item )
+    card = cards.add( _card() )
+
+    response = _post( item, "in_progress", MANAGER, receipt_refs={ "approval_card": str( card.id ) } )
+
+    assert response.status_code == 403 and "belongs to a manager's un-park" in response.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
 
 
@@ -500,7 +537,7 @@ def test_a_card_id_typed_on_an_ordinary_move_is_refused_and_burns_nothing( repo,
 
     response = _post( item, "in_progress", WORKER, receipt_refs={ "approval_card": str( card.id ) } )
 
-    assert response.status_code == 403 and "belongs to an un-park" in response.json()[ "detail" ]
+    assert response.status_code == 403 and "belongs to a manager's un-park" in response.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
 
 
@@ -512,7 +549,7 @@ def test_a_manager_citing_a_card_on_a_row_that_is_not_parked_is_refused_by_the_r
 
     response = _post( item, "queued", MANAGER, receipt_refs={ "approval_card": str( card.id ) } )
 
-    assert response.status_code == 403 and "belongs to an un-park" in response.json()[ "detail" ]
+    assert response.status_code == 403 and "belongs to a manager's un-park" in response.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
 
 
@@ -527,7 +564,7 @@ def test_a_worker_hears_the_same_refusal_for_a_real_card_and_a_made_up_one( repo
 
     assert on_real.status_code == on_fake.status_code == 403
     assert on_real.json()[ "detail" ] == on_fake.json()[ "detail" ]
-    assert "un-parking a row out of" in on_real.json()[ "detail" ]
+    assert "belongs to a manager's un-park" in on_real.json()[ "detail" ]
 
 
 def test_the_single_use_read_counts_only_un_park_events():
