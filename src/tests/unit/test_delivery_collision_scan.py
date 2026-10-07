@@ -275,7 +275,8 @@ def test_exit_codes_are_three_distinct_answers( scan, repo, case, expected, caps
         argv = [ "--target", "target", "--max-tip-age-days", "365" ]
     else:
         _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
-        argv = [ "--target", "target", "--max-tip-age-days", "0.0000001" ]
+        _age_branch( repo, "wt-alpha", days=40 )
+        argv = [ "--target", "target", "--max-tip-age-days", "7" ]
 
     assert scan.main( argv + [ "--quiet" ] ) == expected
 
@@ -285,13 +286,14 @@ def test_the_vacuous_exit_code_holds_at_every_clock_phase( scan, repo, monkeypat
     """
     The vacuous run exits 2 whatever the moment within the second at which the scan starts.
 
-    The clock is pinned `phase` seconds after the branch tip.
+    The branch is 40 days old against a 7-day window. The clock is pinned 40 days and `phase` seconds after its tip.
     """
     _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
     tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
-    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + phase ) )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + 40 * 86400 + phase ) )
 
-    assert scan.main( [ "--target", "target", "--max-tip-age-days", "0.0000001", "--quiet" ] ) == 2
+    assert scan.main( [ "--target", "target", "--max-tip-age-days", "7", "--quiet" ] ) == 2
 
 
 def test_the_scan_states_its_own_denominator( scan, repo, capsys ):
