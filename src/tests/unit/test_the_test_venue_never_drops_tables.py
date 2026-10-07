@@ -23,7 +23,7 @@ _FORBIDDEN = (
     re.compile( r"\bDROP\s+(TABLE|SCHEMA)\b", re.IGNORECASE ),
 )
 _DROP_DATABASE = re.compile( r"\bDROP\s+DATABASE\b", re.IGNORECASE )
-_THROWAWAY     = "_THROWAWAY_DB"
+_THROWAWAY     = "{_THROWAWAY_DB}"      # the constant interpolated into the statement, as the real uses do
 
 
 def drops_found( text ):
@@ -57,6 +57,8 @@ def test_the_scan_finds_the_files_it_is_meant_to_read():
     "conn.execute( text( 'drop table users' ) )",
     "conn.execute( text( 'DROP SCHEMA public CASCADE' ) )",
     "conn.execute( text( 'DROP DATABASE lupin_db_test' ) )",
+    "conn.execute( text( 'DROP DATABASE lupin_db_test' ) )  # _THROWAWAY_DB",
+    "conn.execute( text( f'DROP DATABASE \"{other_name}\"' ) )  # _THROWAWAY_DB",
 ] )
 def test_the_scan_recognises_each_kind_of_drop( line ):
     assert drops_found( line ) != [], f"{line!r} was not recognised as a drop"

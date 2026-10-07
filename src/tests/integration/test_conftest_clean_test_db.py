@@ -52,43 +52,39 @@ def test_clean_test_db_preserves_companions( clean_test_db ):
     assert not missing, f"clean_test_db dropped companion seeds: missing={missing}"
 
 
-def test_clean_test_db_removes_prior_test_users( clean_test_db ):
+STRAY_EMAIL = "should-not-survive@test.local"
+
+
+@pytest.fixture
+def a_stray_user():
     """
-    Insert a fake test user, replay the fixture's row-level cycle (delete the
-    unprotected users, truncate the history tables, reseed), then confirm only
-    the companions remain. This validates that the fix doesn't preserve random
-    leftovers, only the explicit companion seed. No table is dropped, so every
-    grant on the test database survives the cycle.
+    Insert one unprotected, non-companion user and yield its email.
+
+    Requested BEFORE clean_test_db in the test's argument list, so pytest builds this fixture
+    first and the real cleanup then runs over the stray user.
     """
     from cosa.rest.db import database as db_module
-    engine = db_module.engine
-
-    # Insert a non-companion user
-    fake_email = "should-not-survive@test.local"
-    with engine.begin() as conn:
+    with db_module.engine.begin() as conn:
         conn.execute( text(
             "INSERT INTO users ( id, email, password_hash, is_active, email_verified, roles ) "
-            "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb )"
-        ), { "email": fake_email } )
+            "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb ) "
+            "ON CONFLICT ( email ) DO NOTHING"
+        ), { "email": STRAY_EMAIL } )
+    yield STRAY_EMAIL
 
-    assert fake_email in _query_user_emails(), "test setup: fake user did not insert"
 
-    # Replay the fixture's row-level cycle by hand (cannot re-invoke the
-    # fixture mid-test cleanly). Same statements as clean_test_db in conftest.py.
-    with engine.begin() as conn:
-        conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
-        conn.execute( text(
-            "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "job_history, proxy_decisions, trust_states, "
-            "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
-        ) )
-    from seed_test_companions import seed_if_missing
-    seed_if_missing()
+def test_clean_test_db_removes_prior_test_users( a_stray_user, clean_test_db ):
+    """
+    The real clean_test_db fixture wipes a stray user and leaves every companion in place.
 
+    a_stray_user is built first, so the fixture's own cleanup runs over it. No copy of the
+    cleanup statements lives here: a change to the fixture changes what this test measures.
+    No table is dropped, so every grant on the test database survives.
+    """
     after = _query_user_emails()
-    assert fake_email not in after, "fake user survived clean_test_db cycle"
+    assert a_stray_user not in after, "the stray user survived clean_test_db"
     assert set( COMPANION_EMAILS ).issubset( after ), \
-        f"companions missing after second cycle: {set(COMPANION_EMAILS) - after}"
+        f"companions missing after clean_test_db: {set( COMPANION_EMAILS ) - after}"
 
 
 def test_companion_emails_constant_nonempty():

@@ -57,6 +57,15 @@ def test_an_unreadable_file_gives_an_empty_password_and_a_warning_without_its_co
     assert str( missing ) in printed and "FileNotFoundError" in printed
 
 
+def test_a_file_that_is_not_text_gives_an_empty_password_and_a_warning_without_its_bytes( monkeypatch, tmp_path, capsys ):
+    path = tmp_path / "db_app_password"
+    path.write_bytes( b"\xff\xfe-not-utf8" )
+    module  = _load( monkeypatch, password_file=str( path ) )
+    printed = capsys.readouterr().out
+    assert module.DB_PASSWORD == ""
+    assert "UnicodeDecodeError" in printed and "not-utf8" not in printed and "0xff" not in printed
+
+
 def test_an_empty_file_gives_an_empty_password( monkeypatch, tmp_path ):
     path = tmp_path / "db_app_password"
     path.write_text( "\n" )

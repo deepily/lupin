@@ -62,7 +62,7 @@ def _read_password():
 
     try:
         with open( path ) as handle: return handle.read().strip()
-    except OSError as error:
+    except ( OSError, UnicodeDecodeError ) as error:
         print( f"[SEED] DB_PASSWORD_FILE {path} could not be read: {error.__class__.__name__}" )
         return ""
 
