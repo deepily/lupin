@@ -723,7 +723,7 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 
 - Provisioning runs in the Python spawn path only, so a hand-typed `git worktree add` gets nothing — run
   `src/scripts/link-worktree-artifacts.sh` and `src/scripts/link-worktree-venv.sh` yourself there. The
-  first does not link `.venv` (measured 2026-10-07 at `5785c22c0`); the second does.
+  first does not link `.venv`; the second does.
 - Never symlink anything under `src/conf/keys/**` or the repo-root `.env` into a worktree. A venv is a
   build artifact; a key is a secret, and a worktree gets deleted, copied and shared.
 - A failure that passes in the main tree has two explanations — a worktree artifact, or a fix you do not
