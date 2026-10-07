@@ -137,4 +137,4 @@ receipt file and each writes its own log line, so no process ever rewrites a rec
 | sweep, cache by request hash, receipts, snapshots, replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_tools.py` |
 | page routing: scope of a page, page stage, covered stage, fallback, frozen replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_page_first.py` |
 | server-side call log | `src/lupin_mcp/reuse_call_log_middleware.py` | `test_reuse_mcp_mount.py` |
-| replay gate (ii), (iii) by mutation | `mutate_reuse` run, see the W-C handoff | `test_gate_ii_...`, `test_gate_iii_...` |
+| replay gate (ii), (iii) by mutation | `reuse_tools.py` mutated one line per arm; record in `reuse-gates-mutation-evidence.md` | `test_gate_ii_the_id_recomputes_from_the_stored_inputs_and_an_edited_input_is_named`, `test_gate_iii_a_corrupt_or_missing_input_is_a_named_error_never_a_verdict`, and the other named killers in that file |
