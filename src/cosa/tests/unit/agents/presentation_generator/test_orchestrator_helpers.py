@@ -514,14 +514,26 @@ class TestAnalyzeAsync:
                 _run( agent._analyze_async( "src" ) )
         assert "Traceback" in capsys.readouterr().err
 
-    def test_real_exception_returns_empty_debug_traceback( self, capsys, _silence_voice_io ):
-        # A NON-parse API/runtime error still degrades to [] (do_all_async's
-        # empty-guard then fails the job loudly downstream).
+    def test_real_api_exception_propagates_with_real_cause( self, _silence_voice_io ):
+        # Row a362fc8b: an API error must not become [] (the later empty-guard would then
+        # blame "no sections"); the original error propagates and the urgent notify names it.
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
+        with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
+            with pytest.raises( RuntimeError, match="api down" ):
+                _run( agent._analyze_async( "src" ) )
+        assert any( c.kwargs.get( "priority" ) == "urgent" and "api down" in c.args[ 0 ]
+                    for c in _silence_voice_io[ "notify" ].await_args_list )
+
+    def test_real_exception_propagates_debug_traceback( self, capsys, _silence_voice_io ):
+        # A NON-parse API/runtime error propagates too (row a362fc8b); debug prints the traceback.
         agent = _agent( debug=True )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
         with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
-            assert _run( agent._analyze_async( "src" ) ) == []
+            with pytest.raises( RuntimeError, match="api down" ):
+                _run( agent._analyze_async( "src" ) )
         assert "Traceback" in capsys.readouterr().err
 
 
@@ -1391,7 +1403,8 @@ class TestBranchCompleters:
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "x" ) )
         with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
-            assert _run( agent._analyze_async( "src" ) ) == []
+            with pytest.raises( RuntimeError, match="x" ):
+                _run( agent._analyze_async( "src" ) )
 
     # _outline_async: response missing tokens_used (756->760) + debug=False except (796->799)
     def test_outline_happy_no_tokens_attr( self, _silence_voice_io ):

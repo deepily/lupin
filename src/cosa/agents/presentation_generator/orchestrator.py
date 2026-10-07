@@ -687,9 +687,8 @@ class PresentationOrchestratorAgent:
         Raises:
             - ValueError on parse failure / empty result (strict, fails loudly) —
               propagates to do_all_async, which marks the job `FAILED`
-            - Returns empty list only on a non-parse API/runtime error (e.g. the
-              API call itself raised); do_all_async's empty-result guard then
-              fails the job loudly
+            - Any other error (e.g. the API call itself raised) propagates unchanged,
+              so the job fails with the real cause and not a later "no sections" guard
 
         Returns:
             List[NarrativeSection]: Classified document sections
@@ -812,7 +811,7 @@ class PresentationOrchestratorAgent:
                 import traceback
                 traceback.print_exc()
             await voice_io.notify( f"Narrative analysis error: {str( e )[ :80 ]}", priority="urgent" )
-            return []
+            raise
 
     async def _outline_async( self, narrative_sections: List[ NarrativeSection ] ) -> List[ SlideOutline ]:
         """
@@ -2328,7 +2327,10 @@ def quick_smoke_test():
 
             # Run phase 2 stub
             agent.state = OrchestratorState.ANALYZING
-            sections = await agent._analyze_async( content )
+            try:
+                sections = await agent._analyze_async( content )
+            except Exception:
+                sections = []   # no API in the stub: the real error now propagates (row a362fc8b)
             assert sections == []
 
             # D6-STRICT: content gates 1-3 REFUSE to proceed on empty input
