@@ -31,7 +31,8 @@ def check( root, words_root=None ):
         - words_root is a directory that holds the word list, or None to use root
 
     Ensures:
-        - returns a dict with the keys files, docstrings and findings
+        - returns a dict with the keys files, docstrings, findings and not_checked
+        - not_checked lists ( path, line, design_path ) for each Design path outside the root, which is never judged
         - files is the number of swept files read, and docstrings is the number of docstrings in them
         - findings is a list of Finding in path order
         - a file that cannot be read as UTF-8 yields one unreadable finding and is still counted
@@ -43,16 +44,17 @@ def check( root, words_root=None ):
     """
     configure_root( words_root if words_root is not None else root )
     paths, docstrings, findings = swept_files( root ), 0, []
+    stats = { "not_checked": [] }
     for path in paths:
         try:
             with open( f"{root}/{path}", encoding="utf-8" ) as handle: source = handle.read()
         except ( OSError, UnicodeDecodeError ) as err:
             findings.append( Finding( path, 1, "unreadable", f"could not be read: {err}" ) )
             continue
-        found = docstring_lint.lint_source( path, source, root )
+        found = docstring_lint.lint_source( path, source, root, stats )
         findings += found
         if not any( f.rule == "parse-error" for f in found ): docstrings += len( docstring_lint.extract_docstrings( source ) )
-    return { "files": len( paths ), "docstrings": docstrings, "findings": findings }
+    return { "files": len( paths ), "docstrings": docstrings, "findings": findings, "not_checked": stats[ "not_checked" ] }
 
 
 def report( result, out ):
@@ -64,7 +66,8 @@ def report( result, out ):
         - out is a writable text stream
 
     Ensures:
-        - one line per finding, then the counts
+        - one line per finding, one per Design path not checked, then the counts
+        - the not-checked lines and their count carry none of the keys the job reads, so they never move Failed or Errors
         - the unit of Total, Passed and Failed is files; the finding count is on its own Errors line
         - returns the number of files that hold a finding
 
@@ -74,6 +77,8 @@ def report( result, out ):
     findings = result[ "findings" ]
     failed   = len( { f.path for f in findings } )
     for f in findings: out.write( f"    {f.path}:{f.line}: {f.rule}: {f.message}\n" )
+    for path, line, design in result[ "not_checked" ]: out.write( f"    not checked: {path}:{line}: Design path {design!r} is outside the tree\n" )
+    out.write( f"Design paths not checked: {len( result[ 'not_checked' ] )}\n" )
     out.write( f"Docstrings checked: {result[ 'docstrings' ]}\n" )
     out.write( f"Total Tests: {result[ 'files' ]}\n" )
     out.write( f"Passed: {result[ 'files' ] - failed}\n" )

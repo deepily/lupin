@@ -177,6 +177,51 @@ def test_check_returns_the_counts_and_the_findings( repo ):
 
     result = scope_gate.check( str( repo ) )
 
-    assert sorted( result ) == [ "docstrings", "files", "findings" ]
+    assert sorted( result ) == [ "docstrings", "files", "findings", "not_checked" ]
+    assert result[ "not_checked" ] == []
     assert result[ "files" ] == 2 and result[ "docstrings" ] == 3
     assert { f.path for f in result[ "findings" ] } == { "src/app/loud.py" }
+
+
+FOREIGN = '"""\nDo a thing.\n\nDesign: /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/x.md\n"""\n'
+
+
+def _gate_in_tree( tmp_path, name ):
+    root = tmp_path / name
+    root.mkdir( parents=True )
+    _git( root, "init", "-q" )
+    _write( root, "src/conf/dm-tutor-lowercase-words.txt", "\n".join( WORDS ) + "\n" )
+    _write( root, "src/app/a.py", FOREIGN )
+    _git( root, "add", "src" )
+    return _run( root )
+
+
+def test_a_foreign_design_path_gives_one_verdict_under_a_host_style_and_a_container_style_root( tmp_path ):
+    host = _gate_in_tree( tmp_path, "mnt/lupin" )
+    box  = _gate_in_tree( tmp_path, "var/lupin" )
+    assert host == box
+    assert host[ 0 ] == scope_gate.EXIT_CLEAN
+
+
+def test_not_checked_paths_are_printed_and_counted_but_never_move_failed_or_errors( repo ):
+    _write( repo, "src/app/a.py", FOREIGN )
+    _git( repo, "add", "src" )
+
+    code, text = _run( repo )
+
+    assert code == scope_gate.EXIT_CLEAN
+    assert "not checked: src/app/a.py:4: Design path '/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/x.md' is outside the tree\n" in text
+    assert "Design paths not checked: 1\n" in text
+    assert "Total Tests: 1\nPassed: 1\nFailed: 0\nErrors: 0\n" in text
+    for key in ( "Total Tests:", "Passed:", "Failed:", "Not executed:" ):
+        assert [ ln for ln in text.splitlines() if "not checked" in ln.lower() and key in ln ] == []
+
+
+def test_an_in_root_dead_design_path_still_fails_the_gate( repo ):
+    _write( repo, "src/app/a.py", FOREIGN.replace( "/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting/src/rnd/x.md", "src/rnd/missing.md" ) )
+    _git( repo, "add", "src" )
+
+    code, text = _run( repo )
+
+    assert code == scope_gate.EXIT_FINDINGS
+    assert "dead-design" in text and "Failed: 1\nErrors: 1\n" in text

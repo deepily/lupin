@@ -94,7 +94,8 @@ def lint_source( path, source, root=None, stats=None ):
     Ensures:
         - returns a list of Finding, sorted by line
         - a file that does not parse yields one parse-error finding
-        - with root given, a Design: path that does not exist yields a dead-design finding
+        - with root given, a Design: path inside the root that does not exist yields a dead-design finding
+        - a Design: path outside the root is not judged, and goes to stats["not_checked"] when that list is there
         - a registered tool's docstring is exempt from the agent-imperative rule only; every other rule applies
         - with stats given, stats["exempted"] is raised by one for each docstring so exempted
         - a docstring of more than DOCSTRING_MAX_LINES lines yields one docstring-length finding
@@ -113,7 +114,7 @@ def lint_source( path, source, root=None, stats=None ):
         exempt = is_tool_registered( node )
         if exempt and stats is not None: stats[ "exempted" ] = stats.get( "exempted", 0 ) + 1
         findings += lint_text( text, path, first_line, agent_rule=not exempt )
-        if root is not None: findings += design_path_findings( text, path, first_line, root )
+        if root is not None: findings += design_path_findings( text, path, first_line, root, stats[ "not_checked" ] if stats is not None and "not_checked" in stats else None )
         lines = text.strip( "\n" ).count( "\n" ) + 1
         if lines > DOCSTRING_MAX_LINES:
             findings.append( Finding( path, first_line, "docstring-length", f"{kind} {name}: {lines} lines, limit {DOCSTRING_MAX_LINES}" ) )

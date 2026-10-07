@@ -68,7 +68,7 @@ FIX_HOME = {
     "summary-length"  : "a shorter first paragraph; detail goes after the blank line",
     "preface-length"  : "fewer lines before the contract; move the detail below Requires and Ensures",
     "docstring-length": "a shorter docstring; move the history and background to a design doc and link it",
-    "dead-design"     : "a Design: path that exists, or no Design: line",
+    "dead-design"     : "a Design: path that exists in the tree, or one outside it (not judged), or no Design: line",
     "not-utf-8"       : "UTF-8; save the file as UTF-8 so its docstrings can be checked",
     "parse-error"     : "valid Python; the file must parse before its docstrings can be checked",
 }

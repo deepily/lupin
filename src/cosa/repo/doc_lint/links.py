@@ -45,7 +45,27 @@ def markdown_link_findings( text, path, root ):
     return findings
 
 
-def design_path_findings( text, path, first_line, root ):
+def is_outside_root( design_path ):
+    """
+    Say whether a Design path cannot be judged from inside the repo tree.
+
+    Requires:
+        - design_path is a path string as written in a docstring
+
+    Ensures:
+        - True for any absolute path, even one that sits under this machine's root
+        - True for a relative path that leaves the root once normalised
+        - decided by the path's shape alone, never by comparing it to the root string
+
+    Raises:
+        - nothing
+    """
+    if os.path.isabs( design_path ): return True
+    flat = os.path.normpath( design_path )
+    return flat == ".." or flat.startswith( "../" )
+
+
+def design_path_findings( text, path, first_line, root, not_checked=None ):
     """
     Report `Design:` paths that do not exist.
 
@@ -53,11 +73,14 @@ def design_path_findings( text, path, first_line, root ):
         - text is a docstring or page
         - first_line is the 1-based file line of the first line of text
         - root is the repo working tree
+        - not_checked is a list or None
 
     Ensures:
         - paths are resolved from the repo root
+        - a path outside the root is never judged, so the verdict does not depend on where the tree sits
+        - with not_checked given, each such path is appended to it as ( path, line, design_path )
         - a line that carries a removal note with its recovery command is skipped
-        - one Finding per dead path, at its line
+        - one Finding per dead path inside the root, at its line
 
     Raises:
         - nothing
@@ -67,6 +90,9 @@ def design_path_findings( text, path, first_line, root ):
     for m in DESIGN_REGEX.finditer( text ):
         i = line_of_offset( text, m.start() )
         if "REMOVED" in lines[ i ]: continue
+        if is_outside_root( m.group( 1 ) ):
+            if not_checked is not None: not_checked.append( ( path, first_line + i, m.group( 1 ) ) )
+            continue
         if not os.path.exists( os.path.join( root, m.group( 1 ) ) ):
             findings.append( Finding( path, first_line + i, "dead-design", f"Design path {m.group( 1 )!r} does not exist" ) )
     return findings

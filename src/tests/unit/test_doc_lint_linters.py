@@ -291,6 +291,41 @@ def test_design_paths_resolve_from_the_repo_root_and_skip_lines_with_a_removal_n
     assert [ ( f.line, f.message ) for f in found ] == [ ( 11, "Design path 'src/docs/gone.md' does not exist" ) ]
 
 
+def test_an_in_root_dead_design_path_is_still_a_finding_and_is_not_listed_as_not_checked( repo ):
+    skipped = []
+    found   = links.design_path_findings( "Design: src/docs/gone.md", "a.py", 1, str( repo ), skipped )
+    assert [ f.rule for f in found ] == [ "dead-design" ]
+    assert skipped == []
+
+
+@pytest.mark.parametrize( "design", [ "/mnt/DATA01/x/planning-is-prompting/src/rnd/x.md", "/var/lupin/src/docs/x.md", "../x.md", "src/../../x.md", "../../x.md" ] )
+def test_a_design_path_outside_the_root_is_not_judged_and_is_listed_as_not_checked( repo, design ):
+    skipped = []
+    found   = links.design_path_findings( f"x\nDesign: `{design}`", "a.py", 10, str( repo ), skipped )
+    assert found == []
+    assert skipped == [ ( "a.py", 11, design ) ]
+
+
+def test_an_absolute_design_path_gets_the_same_verdict_present_or_absent_and_under_either_root( tmp_path ):
+    host, box = tmp_path / "host" / "lupin", tmp_path / "var" / "lupin"
+    host.mkdir( parents=True ), box.mkdir( parents=True )
+    here, gone = tmp_path / "other" / "present.md", tmp_path / "other" / "absent.md"
+    here.parent.mkdir(), here.write_text( "x\n" )
+    verdicts = set()
+    for root in ( host, box ):
+        for target in ( here, gone ):
+            skipped = []
+            found   = links.design_path_findings( f"Design: {target}", "a.py", 1, str( root ), skipped )
+            verdicts.add( ( len( found ), len( skipped ) ) )
+    assert verdicts == { ( 0, 1 ) }
+
+
+def test_an_absolute_path_under_the_root_is_not_judged_either( repo ):
+    skipped = []
+    assert links.design_path_findings( f"Design: {repo}/src/gone.md", "a.py", 1, str( repo ), skipped ) == []
+    assert len( skipped ) == 1
+
+
 # ---- md_lint ---------------------------------------------------------------------------------
 
 def test_md_lint_blanks_code_and_frontmatter_keeps_line_numbers_and_checks_prose_and_links( repo ):
