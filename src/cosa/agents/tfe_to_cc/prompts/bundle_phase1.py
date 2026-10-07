@@ -1,10 +1,10 @@
 """
-Phase 1 (diagnose) bundle-prompt builder for the TFE-to-CC engine variant.
+Diagnose-step bundle-prompt builder for the TFE-to-CC engine variant.
 
 Builds a single self-contained markdown prompt that instructs Claude Code
-to diagnose the root causes of failing pytest-test clusters produced by
-Phase 0 clustering, emitting a structured `tfe-diagnosis` JSON block at
-end-of-run.
+to diagnose the root causes of failing pytest-test clusters. The clusters
+come from the clustering step. Claude Code emits a structured
+`tfe-diagnosis` JSON block at end-of-run.
 
 Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
 Live test: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/20-tfe-to-cc-phase1-live-test.md
@@ -15,11 +15,11 @@ from typing import Optional
 
 def build_diagnosis_bundle_prompt( clusters: list, failure_context: Optional[ dict ] = None ) -> str:
     """
-    Build the Phase 1 diagnose bundle prompt for Claude Code.
+    Build the diagnose bundle prompt for Claude Code.
 
     Requires:
         - clusters is a non-empty list of cluster dicts with:
-            - cluster_id : str (e.g., "C1")
+            - cluster_id : str (a cluster identifier string)
             - failing_tests : list of dicts, each with test_name + error_message
                               (optional: error_type, traceback_excerpt)
             - shared_error_signature : str (optional)
