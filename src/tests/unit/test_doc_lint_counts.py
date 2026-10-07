@@ -125,9 +125,9 @@ def test_census_over_an_empty_tree_reports_zero_walked( repo ):
 
 def test_census_reads_a_byte_order_mark_like_any_other_file( repo ):
     _stage( repo, { "src/lupin_mcp/a.py": CLEAN } )
-    ( repo / "src" / "lupin_mcp" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + CAPS.encode( "utf-8" ) )
+    ( repo / "src" / "lupin_mcp" / "a.py" ).write_bytes( b"\xef\xbb\xbf" + _doc( "This is NOT fine and NEVER good." ).encode( "utf-8" ) )
     word_list.configure_root( repo )
-    assert counts.census( str( repo ) ) == ( { "src/lupin_mcp/a.py": 1 }, 1 )
+    assert counts.census( str( repo ) ) == ( { "src/lupin_mcp/a.py": 2 }, 1 )       # its two findings, not one parse error
 
 
 # ---- rules_stamp -----------------------------------------------------------------------------
