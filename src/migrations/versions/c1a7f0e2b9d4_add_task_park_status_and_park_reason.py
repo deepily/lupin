@@ -25,18 +25,17 @@ Parking needs a chase, and `next_chase_ts` already is the chase mechanism for
 `blocked`. validate_transition requires it, and the `CHECK` this migration mirrors
 enforces it. A second date field would be a fresh source of reader divergence.
 
-Expiry is computed at read time (cosa.rest.task_store_owed) and never written back.
-No column records it and no daemon maintains it. A parked row whose chase has passed
-simply stops being parked. An unbounded hold is therefore unrepresentable, because
-any timestamp eventually passes.
+Expiry is computed at read time (cosa.rest.task_store_owed) and never written back. No column records it and no daemon
+maintains it. A parked row whose chase has passed simply stops being parked. An unbounded hold is therefore
+unrepresentable, because any timestamp eventually passes.
 
-No data re-stamp: `parked` does not exist before this revision, so no row can be in
-that status and no backfill is needed. The `CHECK` constraints are vacuously true
-over every existing row, so adding them cannot fail on live data.
+No data re-stamp: `parked` does not exist before this revision, so no row can be in that status and no backfill is
+needed. The `CHECK` constraints are vacuously true over every existing row, so adding them cannot fail on live data.
 
-Idempotent and safe to re-run: each step inspects the live schema first. The
-auto-migrate startup path may reach this on an already-migrated DB, and the test
-DB is created from metadata rather than from migrations.
+Idempotent and safe to re-run: each step inspects the live schema first. The auto-migrate startup path may reach this
+on an already-migrated DB, and the test DB is created from metadata rather than from migrations.
+
+Before choosing a revision id, check `_ABSORBED_REVISIONS` in the baseline-chain test and the live scripts first.
 """
 from typing import Sequence, Union
 

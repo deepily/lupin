@@ -14,7 +14,7 @@ which must not land until the sweeper exists. Once the door returns 202, a calle
 that walks away must not be able to lose the approver's keypress.
 
 Why a table rather than columns on `task_items`: the full argument is in the model's
-docstring (`cosa/rest/postgres_models.py::TaskPromotionTicket`). In short, the
+docstring (`cosa/rest/postgres_models.py::TaskPromotionTicket`) and in design section 5.2. In short, the
 notification record knows that a human was asked, not which task, which to_status or
 who asked. Four columns on the hot `task_items` table would be carried forever by
 every reader, for a state that is rare and short-lived.

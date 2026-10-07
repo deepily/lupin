@@ -5,10 +5,9 @@ Revises: 9a1c4f27bd30
 
 Backs the rule that a manager may request either move, and a request defaults to no.
 
-Columns on task_items, not a table: the request rides on the ticket, with no `resolves_by`,
-no `TaskPromotionTicket` and no background resolver. The accepted cost is no history of
-repeated requests, since a re-file overwrites the last. History needs a new ruling, not a
-quietly added table. `TaskPromotionTicket` exists but carries the synchronous ask, so it is not reused.
+Columns on task_items, not a table: the request rides on the ticket, with no `resolves_by`, no `TaskPromotionTicket` and no
+background resolver. The accepted cost is no history of repeated requests, since a re-file overwrites the last. History needs a
+new ruling, not a quietly added table. `TaskPromotionTicket` exists but carries the synchronous ask, so it is not reused.
 
 Columns: `request_state` VARCHAR NULL holds pending, approved or denied. NULL means no
 request. `request_move` VARCHAR NULL is the move asked for, which
@@ -17,9 +16,9 @@ is when it was filed. They are scalar columns, not a JSON blob. `badge_counts` c
 pending requests per badge on every board render, and a predicate that must open a blob
 cannot use an index.
 
-No backfill. Every `CHECK` reads `request_state IS NULL OR ...`, so a row with no request
-satisfies all three vacuously. Every existing row has a NULL `request_state` the instant
-the column is added, so no row can violate and no fabricated value enters the table.
+No backfill. Every `CHECK` reads `request_state IS NULL OR ...`, so a row with no request satisfies all three vacuously. Every
+existing row has a NULL `request_state` the instant the column is added, so no row can violate and no fabricated value enters
+the table.
 
 There are three separate `CHECK`s, not one conjunction, so a violation names the missing
 field. Their literals must match `postgres_models.py` verbatim, and
@@ -30,13 +29,14 @@ things on a metadata-built database and a migrated one.
 The constraints enforce shape, never authority. No validated account exists at this layer,
 so nothing here can tell Rick's verdict from a manager typing one. The router decides
 authority through `approver_persona_for_account`. Moving that check down re-opens the hole.
+`task_request_lifecycle.refusal_for_verdict` names the same authority seam in its own docstring.
 
-The migration is idempotent: every step inspects the live schema first, because
-`auto_migrate.run_migrations_to_head` runs `upgrade head` on every process start. The
-`CHECK` half is PostgreSQL only: on SQLite `upgrade()` adds the columns, then raises at
-`op.create_check_constraint`. The test drives the real upgrade for the columns and the
-no-backfill claim; the `CHECK` half is proven structurally only. The revision id is random,
-because the neighbours' hex pattern walks into the absorbed range.
+The migration is idempotent: every step inspects the live schema first, because `auto_migrate.run_migrations_to_head` runs
+`upgrade head` on every process start. The `CHECK` half is PostgreSQL only: on SQLite `upgrade()` adds the columns, then
+raises at `op.create_check_constraint`. That half-finish does not bite in practice. Production is Postgres. A fresh test
+database is built from `Base.metadata.create_all` plus `stamp head`, not by running migrations. `d47487369407` calls the
+same op. The test drives the real upgrade for the columns and the no-backfill claim; the `CHECK` half is proven structurally
+only. The revision id is random, because the neighbours' hex pattern walks into the absorbed range.
 """
 from typing import Sequence, Union
 
@@ -103,6 +103,8 @@ def _verify_nothing_violates( bind ) -> None:
         - raises RuntimeError naming the violating count otherwise, failing the
           upgrade rather than creating a constraint the table already breaks
         - never guesses: it asks the rows, not the schema
+        - on a re-run existing requests were written through the constraints, so they cannot violate
+        - a non-zero count is not itself a failure; it is printed because a silent zero and a silent hundred read identically
     """
     existing = bind.execute(
         sa.text( f"SELECT count(*) FROM {TABLE_NAME} WHERE request_state IS NOT NULL" )

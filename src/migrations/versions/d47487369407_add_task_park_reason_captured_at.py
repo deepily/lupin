@@ -8,35 +8,34 @@ Backs park_reason staleness detection (design src/rnd/v0.1.9/2026.07.19-park-rea
 `park_reason_captured_at` TIMESTAMPTZ NULL records when the `park_reason` quote was frozen.
 Amend the row afterward and the quote stays valid in form while it stops being true.
 `task_store_owed.park_reason_is_stale` compares the capture instant to `updated_ts`.
-One `CHECK`, mirroring the two `c1a7f0e2b9d4` added, is a separate constraint so a
-violation names the missing field:
+One `CHECK` mirrors the two `c1a7f0e2b9d4` added. It is a separate constraint, so a
+violation names the missing field: `status != 'parked' OR park_reason_captured_at IS NOT NULL`.
 
-```
-status != 'parked' OR park_reason_captured_at IS NOT NULL
-```
+The value written at park time is the post-write `updated_ts`, which `onupdate=func.now()` bumps on the park write
+itself. Writing `now()` races the stamp by microsecond order. The pre-write value leaves captured_at below updated_ts,
+so every row is born stale. The post-write value gives equality at park. A later amendment bumps updated_ts above
+it, so the invariant is equality, not merely "not stale". Asserting only `stale == False` also passes for a
+`now()`-written-after implementation, which leaves an undetectable amendment window.
 
-The value written at park time is the post-write `updated_ts`, which `onupdate=func.now()`
-bumps on the park write itself. Writing `now()` races the stamp by microsecond order.
-The pre-write value leaves captured_at below updated_ts, so every row is born stale.
-The post-write value gives equality at park and a later amendment bumps updated_ts above it, so the invariant is equality.
-
-The backfill value is fabricated, not measured. Rows already parked have no recoverable
-capture time, so the migration writes `park_reason_captured_at = updated_ts` for them.
-That does not mean the quote was captured then. It means we cannot know, and the value makes
-the row read not-stale, as the design prescribes. It is labelled so because an unlabelled
-synthetic timestamp looks measured.
+The backfill value is fabricated, not measured. Rows already parked have no recoverable capture time, so the migration writes
+`park_reason_captured_at = updated_ts` for them. That does not mean the quote was captured then. It means we cannot know, and
+the value makes the row read not-stale, as the design prescribes. It is labelled so because an unlabelled synthetic timestamp
+looks measured.
 
 Backfill rather than `CHECK ... NOT VALID`: the model's `CheckConstraint` (used by
 `create_all`) has no `NOT VALID` equivalent, so migration and model would disagree.
 The backfill cannot bump `updated_ts`: `onupdate` is ORM-client-side only, with no DB
 trigger, and the raw SQL `SET` list names one column. `_verify_backfill_equality` is the
 receipt and fails the upgrade on any violating row. A green does not prove a write path got
-the ordering right, because Postgres `now()` is stable across a transaction. Pin the
+the ordering right, because Postgres `now()` is `transaction_timestamp()` and is stable across a
+transaction. Within one transaction all three capture orderings (post-write, pre-write and `now()`)
+give exact equality. So the born-stale arm of section 3.4 cannot fire on this backend. Pin the
 ordering at the mechanism: one captured value written to both columns in one statement.
 
-Scope is `WHERE status = 'parked'` only. Each step inspects the live schema and the backfill
-is guarded by `IS NULL`, so a re-run is idempotent. The revision id is random (uuid4),
-because the neighbours' visual hex pattern walks into the absorbed range.
+Scope is `WHERE status = 'parked'` only. Each step inspects the live schema. The auto-migrate startup path may reach this on
+an already-migrated database. The test database is created from metadata, not from migrations. The backfill is guarded by
+`IS NULL`, so a re-run is idempotent. The revision id is random (uuid4), because the neighbours' visual hex pattern walks
+into the absorbed range.
 """
 from typing import Sequence, Union
 

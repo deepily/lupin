@@ -19,7 +19,8 @@ The grounding is in the swap-chain execution log
     needed.
 
 Revisit: re-introduce HNSW after the notification-spam purge and dedup collapse
-the duplicate mass, since 5,728 distinct vectors index cleanly.
+the duplicate mass, since 5,728 distinct vectors index cleanly. The re-introduction is tracked
+in the execution log, section 4, as a recommendation.
 
 The solution_snapshots HNSW indexes stay (35 rows; index irrelevant but
 harmless, and the table is not duplicate-pathological).
