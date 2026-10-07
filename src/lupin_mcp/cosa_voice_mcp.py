@@ -1655,9 +1655,9 @@ def converse(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `message` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         User's response as text, or error/timeout message
@@ -2045,9 +2045,9 @@ def notify(
             Notifications sharing this ID update a single element instead of appending new ones.
         session_name: Optional human-readable session name for UI header display.
             When set, updates the sender-session-name span in notification history card.
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `message` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         Delivery status message
@@ -2146,9 +2146,9 @@ def ask_yes_no(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send a long spoken `question` KNOWINGLY. Default False — detail belongs
-            in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `question` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         Annotated string: one of "yes", "no", "neither", optionally suffixed
@@ -2273,9 +2273,9 @@ def ask_multiple_choice(
             return an error dict before the notification fires.
             Backward-compat: ``default=None`` preserves the legacy timeout
             return ``{"error": "timeout - no response received", "timeout": True}``.
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send long spoken `question` text KNOWINGLY. Default False — detail
-            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `question` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         dict with answers keyed by header, PLUS the provenance of those answers:
@@ -2326,8 +2326,6 @@ def ask_multiple_choice(
         # `response_default` this verb does not send — ask_yes_no plumbs it, this
         # one does not. So do NOT reach for this pattern to leave a walkthrough
         # running with nobody at the desk; it will stop on the first question.
-        # A unit test guards this wording — it forbids the retired term outright,
-        # so state what IS true here rather than negating the old claim.
         result = ask_multiple_choice(
             questions=[{
                 "question":    "Which database should we use?",
@@ -2614,9 +2612,9 @@ def ask_open_ended_batch(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
-            and send long spoken `question` text KNOWINGLY. Default False — detail
-            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
+        override_size_limitation: Default False. True sends a spoken `question` over the
+            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
+            which has no length limit, not in speech.
 
     Returns:
         dict with answers keyed by header:
@@ -3942,9 +3940,6 @@ def commons_post(
     Returns:
         dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`,
         `persona_color`, `body`, `metadata`
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§2 autonomy tiers, §3 reserved topics, §5 sensitive-content rules)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
@@ -3990,9 +3985,6 @@ def commons_read(
     Returns:
         List of entry dicts, each containing ts, sender_session_id, persona_*,
         body, metadata
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics + receipt etiquette)
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().read( topic=topic, since=since, limit=limit )
@@ -4032,8 +4024,6 @@ def commons_who(
     Returns:
         List of dicts `{session_id, persona_name, persona_icon, persona_color, last_post_ts}`,
         sorted by last_post_ts descending
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().who( topic=topic, retention_hours=retention_hours )
@@ -4080,9 +4070,6 @@ def commons_ask_sync(
 
     Returns:
         dict `{question_id, posted_ts, replies: [entry, ...]}`
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics — note this is the BLOCKING variant)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
@@ -4131,9 +4118,6 @@ def commons_ask_async(
 
     Returns:
         dict `{question_id, posted_ts}`
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics — for directed DMs use `dm_send`)
     """
     return _commons_ask_async_dispatch(
         topic       = topic,
@@ -4619,15 +4603,10 @@ def dm_respond(
                   "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
 
-    TWO WIDTHS, TWO NAMES — use the right one for the right job:
-      `recipient_session`       FULL session id. Feed this back as
-                                `recipient_session_id` for precise addressing on
-                                a SUBSEQUENT SEND.
-      `recipient_session_hash8` the 8-char form actually persisted, and the form
-                                `dm_list` reports as the addressee. Compare
-                                against `recipient_session_hash8` on listed DMs.
-    They are deliberately NOT the same value; comparing one to the other will
-    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
+    The two id fields are the ones `dm_send` returns: `recipient_session` is the FULL
+    session id (feed it back as `recipient_session_id`), `recipient_session_hash8` the
+    persisted 8-character form that `dm_list` reports. They are deliberately not equal
+    (`dm_list`'s `session_id` filter accepts either).
     """
     persona = _commons_persona_fields()
     return _dm_respond_impl(
@@ -4903,8 +4882,8 @@ def task_create(
         {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
         or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
 
-    `created_by` is NOT a parameter — it is stamped from the session bridge
-    ("<persona> <session id>"), the same identity lane as commons_post.
+    `created_by` is not a parameter: it is stamped from the session bridge
+    ("<persona> <session id>").
     """
     refusal = _refuse_borrowed_identity( "task_create" )
     if refusal is not None: return refusal
@@ -5039,7 +5018,7 @@ def task_transition(
         the transition: the server rejects the retry 422 as a no-op and that 422
         is a success signal wearing a rejection's clothes (row 96cf5cec).
 
-    `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
+    `actor` is not a parameter: it is stamped from the session bridge.
     """
     refusal = _refuse_borrowed_identity( "task_transition" )
     if refusal is not None: return refusal
@@ -5405,7 +5384,7 @@ def task_correlate(
         carries "task {id} not found" verbatim under "detail"; a 422 (terminal
         item / bad authority) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor.
+    `actor` is not a parameter: it is stamped from the session bridge.
     """
     refusal = _refuse_borrowed_identity( "task_correlate" )
     if refusal is not None: return refusal
@@ -5468,9 +5447,8 @@ def task_reassign(
         verbatim; a 422 (terminal item / bad authority) carries the server's
         detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; the manager-relay handoff is auditable to the real
-    session that issued it).
+    `actor` is not a parameter: it is stamped from the session bridge, so the
+    handoff is auditable to the real session that issued it.
     """
     refusal = _refuse_borrowed_identity( "task_reassign" )
     if refusal is not None: return refusal
@@ -5542,8 +5520,8 @@ def task_amend(
         carries "task {id} not found" verbatim under "detail"; a 422 (blank note /
         bad authority) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; the amendment is auditable to the real session).
+    `actor` is not a parameter: it is stamped from the session bridge, so the
+    amendment is auditable to the real session.
     """
     refusal = _refuse_borrowed_identity( "task_amend" )
     if refusal is not None: return refusal
@@ -5616,8 +5594,8 @@ def task_request(
         The row (server 200 body) with request_state "pending", or an error dict carrying
         the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped, so the server's manager check reads your
-    real session, not a name you typed.
+    `actor` is not a parameter: it is stamped from the session bridge, so the manager
+    check reads your real session.
     """
     refusal = _refuse_borrowed_identity( "task_request" )
     if refusal is not None: return refusal
@@ -5692,8 +5670,8 @@ def task_edit(
         a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad
         enum / empty title / terminal item) carries the server's detail verbatim.
 
-    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
-    (anti-impersonation; stamped LAST, so an `updates` "actor" key cannot shadow it).
+    `actor` is not a parameter: it is stamped from the session bridge, last, so an
+    `updates` "actor" key cannot shadow it.
     """
     refusal = _refuse_borrowed_identity( "task_edit" )
     if refusal is not None: return refusal
