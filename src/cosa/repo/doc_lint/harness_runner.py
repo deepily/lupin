@@ -20,6 +20,23 @@ HarnessConfig = namedtuple( "HarnessConfig", [
     "extractor_model", "judge_model", "escalation_model", "writer_model", "extractor_lists", "judge_runs", "judge_thinking"
 ], defaults=( 2, 3, "default" ) )
 
+# Version 2 leaves a pair with empty new text out of the agreement figures; version 1 counted it.
+HARNESS_VERSION  = 2
+EMPTY_NEW_REASON = "new text empty"
+
+
+def judge_skipped( pair ):
+    """
+    Say why a pair never reaches the judge.
+
+    Requires:
+        - pair has a "new" text
+
+    Ensures:
+        - returns EMPTY_NEW_REASON when the new text is empty after strip, else None
+    """
+    return EMPTY_NEW_REASON if not pair[ "new" ].strip() else None
+
 
 def check_models( config ):
     """
@@ -162,7 +179,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
           never resume a Claude verdict or a run with other thresholds
         - a backend's verdicts are ledgered only when its .complete( judged ) is True, so a run in
           which the backend failed to answer is asked again on resume instead of replayed
-        - returns { "id", "seed_span", "lists" }; each list holds its claims, the count of
+        - returns { "id", "seed_span", "judge_skipped", "lists" }; each list holds its claims, the count of
           discarded claims, one { code, words, start, end } per discard (no quote text), the runs
           flagged for a person and their word counts, the extra extractor calls made, the uncovered fraction of the old text, and one verdict row per
           judge run
@@ -173,6 +190,8 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
         - a frozen entry written before these fields existed has no discards, flags, reextract_calls, parse_failed or
           retry_calls; it reads as none of them, so judge_comparison can still rebuild a report from an old ledger
         - a finished call is never made again
+        - a pair with empty new text after strip makes no judge call and writes no judge row: every claim of every run
+          is absent with the reason EMPTY_NEW_REASON, and "judge_skipped" holds that reason (None for a judged pair)
         - with judge_thinking "off" the judge key carries "|thinking=off", so a verdict judged with thinking
           on is never reused for thinking off or the other way round; a ledger of the other setting is not
           refused, its judge rows simply miss and the judge calls run again (extractor lists are shared)
@@ -186,6 +205,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
     """
     check_models( config )
     lists   = []
+    skipped = judge_skipped( pair )
     timing  = {}
     untimed = 0
 
@@ -220,7 +240,7 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
         tally( recorded )
         claims = [ claim_extractor.Claim( **c ) for c in frozen[ "claims" ] ]
         runs   = []
-        for run in range( config.judge_runs ):
+        for run in range( 0 if skipped else config.judge_runs ):
             version = claim_judge.PROMPT_VERSION if judge_backend is None else judge_backend.prompt_version
             model   = config.judge_model + "+" + config.escalation_model if judge_backend is None else judge_backend.key_id
             if judge_backend is None and config.judge_thinking != "default": model += "|thinking=" + config.judge_thinking
@@ -242,12 +262,13 @@ async def run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_
                 recorded = ledger.timing( jkey )
             tally( recorded )
             runs.append( rows )
+        if skipped: runs = [ [ { "verdict": "absent", "escalated": False, "reason": skipped, "noul": None } for _ in claims ] for _ in range( config.judge_runs ) ]
         lists.append( { "claims": frozen[ "claims" ], "discarded": frozen[ "discarded" ],
                         "discards": frozen.get( "discards", [] ), "flags": frozen.get( "flags", [] ),
                         "reextract_calls": frozen.get( "reextract_calls", 0 ), "flag_words": frozen.get( "flag_words", [] ),
                         "parse_failed": frozen.get( "parse_failed", False ), "retry_calls": frozen.get( "retry_calls", 0 ),
                         "uncovered": frozen[ "uncovered" ], "longest_quote": frozen[ "longest_quote" ], "runs": runs } )
-    return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "lists": lists, "timing": { "stages": timing, "untimed_rows": untimed } }
+    return { "id": pair[ "id" ], "seed_span": pair.get( "seed_span" ), "judge_skipped": skipped, "lists": lists, "timing": { "stages": timing, "untimed_rows": untimed } }
 
 
 def summarize_calls( calls ):

@@ -75,7 +75,7 @@ def test_reader_two_agreement_leaves_a_skipped_pair_out_and_says_how_many_and_th
     both, _  = _results( [ pair( "kept", OLD ), pair( "empty", "" ) ], tmp_path )
     kept_only = hr.build_report( [ both[ 0 ] ], CONFIG )
     report    = hr.build_report( both, CONFIG )
-    assert report[ "agreement_all" ][ "claims" ] == kept_only[ "agreement_all" ][ "claims" ] == 3
+    assert report[ "agreement_all" ][ "claims" ] == kept_only[ "agreement_all" ][ "claims" ] == 6
     assert report[ "agreement_all" ][ "excluded_pairs" ] == 1 and report[ "agreement_seeded" ][ "excluded_pairs" ] == 1
     assert kept_only[ "agreement_all" ][ "excluded_pairs" ] == 0
     assert report[ "judge_skipped_pairs" ] == 1 and report[ "harness_version" ] == hn.HARNESS_VERSION
@@ -99,3 +99,18 @@ def test_reader_four_an_unseeded_skipped_pair_is_in_neither_the_false_alarms_nor
     keys = { i: { "seeded_positive": False, "kind": "paraphrase", "injection": False } for i in ( "kept", "empty" ) }
     row  = { r[ "group" ]: r for r in jc.group_rows( results, keys, 1 ) }
     assert row[ "paraphrase" ][ "n" ] == 1 and row[ "paraphrase" ][ "wrong" ] == 0 and row[ "paraphrase" ][ "new_text_empty" ] == 1
+
+
+def test_the_markdown_names_the_pairs_left_out_of_agreement_and_of_the_group_rows_and_still_draws( tmp_path ):
+    pairs  = [ pair( "kept", OLD ), pair( "empty", "" ), pair( "only_empty", "" ) ]
+    pairs[ 2 ][ "old" ] = OLD + "\nA second old line."
+    keys   = { "kept": { "seeded_positive": False, "kind": "paraphrase", "injection": False },
+               "empty": { "seeded_positive": False, "kind": "paraphrase", "injection": False },
+               "only_empty": { "seeded_positive": False, "kind": "relocate", "injection": False } }
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    judge  = ( hn.HarnessConfig( "ext-m", "judge-m", "esc-m", "writer-m", 2, 3 ), None )
+    asyncio.run( hn.run_all( pairs, judge[ 0 ], ledger, query_fn=FakeModel() ) )
+    out  = jc.build_comparison( "dev", pairs, keys, ledger, { "haiku": judge } )
+    text = jc.render_markdown( out )
+    assert "(2 pairs left out)" in text and "New text empty, in neither n nor wrong: haiku relocate 1; haiku paraphrase 1." in text
+    assert [ g for g in out[ "judges" ][ "haiku" ][ "groups" ] if g[ "group" ] == "relocate" ][ 0 ][ "rate" ] is None

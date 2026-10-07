@@ -152,6 +152,8 @@ def group_rows( results, keys, slots ):
           two-sided 95% interval for a group of kept claims
         - a group is a false-pass group when its pairs are seeded, else a false-alarm group
         - an injection pair is counted in its kind's row and in its injection row
+        - an unseeded pair whose judge was skipped (empty new text) is in neither wrong nor n: the row counts it in new_text_empty,
+          and a row with no other pair has rate and bound None
 
     Raises:
         - ValueError when a result has no key, or when a group mixes seeded and unseeded pairs
@@ -166,13 +168,30 @@ def group_rows( results, keys, slots ):
         if not group: continue
         seeded   = group[ 0 ][ "seed_span" ] is not None
         if any( ( r[ "seed_span" ] is not None ) != seeded for r in group ): raise ValueError( f"group {name!r} mixes pairs with and without a seeded removal" )
+        empty    = [ r for r in group if r.get( "judge_skipped" ) and not seeded ]
+        group    = [ r for r in group if r not in empty ]
         per_list = [ sum( 1 for r in group if wrong_on( r, s ) ) for s in range( slots ) ]
         worst    = max( range( slots ), key=lambda s: ( per_list[ s ], -s ) )
         wrong    = per_list[ worst ]
+        if not group:
+            rows.append( { "group": name, "expected": "not flagged", "n": 0, "wrong": 0, "per_list": per_list, "worst_list": worst,
+                           "rate": None, "bound": None, "new_text_empty": len( empty ) } )
+            continue
         bound    = harness_report.upper_bound( wrong, len( group ) ) if seeded else harness_report.interval( wrong, len( group ) )[ 1 ]
         rows.append( { "group": name, "expected": "flagged" if seeded else "not flagged", "n": len( group ), "wrong": wrong,
-                       "per_list": per_list, "worst_list": worst, "rate": wrong / len( group ), "bound": bound } )
+                       "per_list": per_list, "worst_list": worst, "rate": wrong / len( group ), "bound": bound,
+                       "new_text_empty": len( empty ) } )
     return rows
+
+
+def distinct_judged_calls( judged, config ):
+    """
+    Count the judge calls a ledger holds for the pairs that reached the judge.
+
+    Ensures:
+        - returns lists x runs per distinct judged text pair; a skipped pair has none
+    """
+    return judged * config[ "extractor_lists" ] * config[ "judge_runs" ]
 
 
 def pair_hashes( pairs ):
@@ -340,9 +359,10 @@ def build_comparison( split, pairs, keys, ledger, judges, elapsed=None, reports=
         }
     out[ "calls" ] = call_counts( ledger, models, pairs )
     distinct = len( pair_hashes( pairs ) )
+    judged   = len( pair_hashes( [ p for p in pairs if harness_runner.judge_skipped( p ) is None ] ) )
     for name, judge in out[ "judges" ].items():
         want_extract = distinct * out[ "config" ][ name ][ "extractor_lists" ]
-        want_judge   = want_extract * out[ "config" ][ name ][ "judge_runs" ]
+        want_judge   = distinct_judged_calls( judged, out[ "config" ][ name ] )
         if "incomplete" in judge or ( out[ "calls" ][ "extract" ], out[ "calls" ][ "judge" ][ name ] ) == ( want_extract, want_judge ): continue
         out[ "judges" ][ name ] = { "incomplete": f"the ledger holds {out[ 'calls' ][ 'extract' ]} extractor and {out[ 'calls' ][ 'judge' ][ name ]} judge calls for this split, "
                                                   f"and {out[ 'config' ][ name ][ 'extractor_lists' ]} lists x {out[ 'config' ][ name ][ 'judge_runs' ]} runs over {distinct} pairs make {want_extract} and {want_judge}" }
@@ -393,11 +413,13 @@ def render_markdown( comparison ):
         if m[ "positives" ]: passes[ n ] = ( m[ "misses" ] / m[ "positives" ], m[ "upper_bound" ] )
         if a[ "unseeded" ]:  alarms[ n ] = ( a[ "false_alarm_rate" ], fa[ 1 ] )
         lines.append( f"| {n} | {m[ 'positives' ]} | {m[ 'misses' ]} | {pct( passes[ n ][ 0 ] if n in passes else None )} | {pct( m[ 'upper_bound' ] if n in passes else None )} | {a[ 'unseeded' ]} | {a[ 'false_alarms' ]} | "
-                      f"{pct( alarms[ n ][ 0 ] if n in alarms else None )} | {pct( alarms[ n ][ 1 ] if n in alarms else None )} | {pct( h[ 'agreement_all' ][ 'rate' ] )} | {pct( h[ 'agreement_seeded' ][ 'rate' ] )} |" )
+                      f"{pct( alarms[ n ][ 0 ] if n in alarms else None )} | {pct( alarms[ n ][ 1 ] if n in alarms else None )} | {pct( h[ 'agreement_all' ][ 'rate' ] )}{_excluded( h, 'agreement_all' )} | {pct( h[ 'agreement_seeded' ][ 'rate' ] )}{_excluded( h, 'agreement_seeded' )} |" )
     lines += [ "", "| judge | group | expected | n | wrong | rate | 95% bound | worst list |", "|---|---|---|---|---|---|---|---|" ]
     for n, j in done.items():
         for g in j[ "groups" ]:
             lines.append( f"| {n} | {g[ 'group' ]} | {g[ 'expected' ]} | {g[ 'n' ]} | {g[ 'wrong' ]} | {pct( g[ 'rate' ] )} | {pct( g[ 'bound' ] )} | {g[ 'worst_list' ]} |" )
+    empties = [ f"{n} {g[ 'group' ]} {g[ 'new_text_empty' ]}" for n, j in done.items() for g in j[ "groups" ] if g[ "new_text_empty" ] ]
+    if empties: lines += [ "", "New text empty, in neither n nor wrong: " + "; ".join( empties ) + "." ]
     calls = comparison[ "calls" ]
     lines += [ "", f"Extractor calls (shared by every judge): {calls[ 'extract' ]}.", "",
                "| judge | judge calls | escalations | discarded claims | no Jev answer | seconds |", "|---|---|---|---|---|---|" ]
@@ -412,12 +434,24 @@ def render_markdown( comparison ):
             if drawn: lines += [ "" ] + _chart( f"{title}, {split} split", drawn, [ figures[ n ][ 0 ] for n in drawn ], [ figures[ n ][ 1 ] for n in drawn ], "bar", "line" )
         for title, wanted in ( ( "False-pass rate by pair type", ( "delete", "weaken", "injection (removed claim)" ) ),
                                ( "False-alarm rate by pair type", ( "relocate", "paraphrase", "injection (kept claim)" ) ) ):
-            present = [ w for w in wanted if any( g[ "group" ] == w for j in done.values() for g in j[ "groups" ] ) ]
+            present = [ w for w in wanted if any( g[ "group" ] == w for j in done.values() for g in j[ "groups" ] )
+                        and all( g[ "rate" ] is not None for j in done.values() for g in j[ "groups" ] if g[ "group" ] == w ) ]
             if not present: continue
             series  = { n: [ { g[ "group" ]: g[ "rate" ] for g in done[ n ][ "groups" ] }[ w ] for w in present ] for n in names }
             lines  += [ "" ] + _lines_chart( f"{title}, {split} split", present, series )
         lines += [ "" ] + _calls_chart( f"Judge calls, {split} split", names, [ calls[ "judge" ][ n ] for n in names ] )
     return "\n".join( lines ) + "\n"
+
+
+def _excluded( headline, figure ):
+    """
+    Name the pairs with empty new text that left an agreement figure's denominator.
+
+    Ensures:
+        - returns " (n pairs left out)", or an empty string when none left
+    """
+    left = headline[ figure ][ "excluded_pairs" ]
+    return f" ({left} pairs left out)" if left else ""
 
 
 def _chart( title, names, first, second, kind_a, kind_b ):

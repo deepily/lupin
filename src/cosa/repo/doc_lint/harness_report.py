@@ -9,7 +9,7 @@ text no verified quote covers.
 
 from scipy.stats import beta
 
-from . import claim_extractor, claim_judge, history_class
+from . import claim_extractor, claim_judge, harness_runner, history_class
 
 DEFAULT_POSITIVES_NEEDED = 60
 AGREEMENT_BAR            = 0.95
@@ -171,6 +171,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
 
     Ensures:
         - per extractor list: misses, false alarms, and whether each meets its criterion, so a criterion must hold on every list and not on one lucky draw
+        - a pair whose judge_skipped is set (empty new text) is left out of both agreement figures, the Jev unanswered count and the unseeded false-alarm, flagged and review figures; the report counts such pairs in judge_skipped_pairs, in excluded_pairs beside each agreement figure and in unseeded_new_text_empty, and says in agreement_note that agreement across harness versions is not comparable
         - agreement is reported over all claims and over claims overlapping a seed span, each with its interval, because an overall figure can hide disagreement on the dropped claims
         - parse_failed_pairs counts, per list, the pairs whose extractor reply stayed unreadable after one retry (top level: the largest list); retry_calls counts the retries; such a pair is never a catch, never a flag-only catch, and stays out of flagged_pairs, flagged_rate and mean_flag_words; an unseeded one is in review_pairs
         - reports the escalation count, discarded-claim count (and per code) and mean uncovered fraction
@@ -190,7 +191,9 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - nothing
     """
     seeded   = [ r for r in results if r[ "seed_span" ] is not None ]
-    unseeded = [ r for r in results if r[ "seed_span" ] is None ]
+    unseeded = [ r for r in results if r[ "seed_span" ] is None and not r.get( "judge_skipped" ) ]
+    empty_unseeded = sum( 1 for r in results if r[ "seed_span" ] is None and r.get( "judge_skipped" ) )
+    excluded = sum( 1 for r in results if r.get( "judge_skipped" ) )
     lists    = []
     for slot in range( config.extractor_lists ):
         misses = sum( 1 for r in seeded if not caught( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) )
@@ -206,6 +209,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "misses"            : misses,
             "upper_bound"       : upper_bound( misses, len( seeded ) ),
             "unseeded"          : len( unseeded ),
+            "unseeded_new_text_empty": empty_unseeded,
             "false_alarms"      : alarms,
             "false_alarm_rate"  : alarms / len( unseeded ) if unseeded else None,
             "seeded_span_discarded" : sum( 1 for r in seeded if discarded_on( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) ),
@@ -235,7 +239,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             uncovered.append( lst[ "uncovered" ] )
             longest = max( longest, lst[ "longest_quote" ] )
             escalations += sum( row[ "escalated" ] for run in lst[ "runs" ] for row in run )
-            for claim, same in zip( lst[ "claims" ], unanimous( lst[ "runs" ] ) if lst[ "claims" ] else [] ):
+            for claim, same in zip( lst[ "claims" ], unanimous( lst[ "runs" ] ) if lst[ "claims" ] and not r.get( "judge_skipped" ) else [] ):
                 all_total += 1
                 all_same  += same
                 if r[ "seed_span" ] is not None and claim_extractor.spans_overlap( ( claim[ "start" ], claim[ "end" ] ), tuple( r[ "seed_span" ] ) ):
@@ -246,7 +250,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     agree_all  = all_same / all_total if all_total else None
     agree_seed = seed_same / seed_total if seed_total else None
     agree_ok   = agree_all is not None and agree_seed is not None and agree_all >= AGREEMENT_BAR and agree_seed >= AGREEMENT_BAR
-    unanswered = sum( 1 for r in results for lst in r[ "lists" ] for run in lst[ "runs" ] for row in run if row[ "noul" ] is None ) if jev_run else None
+    unanswered = sum( 1 for r in results if not r.get( "judge_skipped" ) for lst in r[ "lists" ] for run in lst[ "runs" ] for row in run if row[ "noul" ] is None ) if jev_run else None
     identical  = sum( 1 for r in results if len( { tuple( c[ "quote" ] for c in lst[ "claims" ] ) for lst in r[ "lists" ] } ) == 1 )
     return {
         "models"            : { "extractor": config.extractor_model, "judge": config.judge_model,
@@ -254,9 +258,14 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         "prompt_versions"   : { "extractor": claim_extractor.PROMPT_VERSION, "judge": claim_judge.PROMPT_VERSION if judge_prompt_version is None else judge_prompt_version },
         "lists"             : lists,
         "agreement_all"     : { "same": all_same, "claims": all_total, "rate": all_same / all_total if all_total else None,
-                                "interval": interval( all_same, all_total ) },
+                                "interval": interval( all_same, all_total ), "excluded_pairs": excluded },
         "agreement_seeded"  : { "same": seed_same, "claims": seed_total, "rate": seed_same / seed_total if seed_total else None,
-                                "interval": interval( seed_same, seed_total ) },
+                                "interval": interval( seed_same, seed_total ), "excluded_pairs": excluded },
+        "judge_skipped_pairs": excluded,
+        "unseeded_new_text_empty": empty_unseeded,
+        "harness_version"   : harness_runner.HARNESS_VERSION,
+        "agreement_note"    : f"from harness version 2, {excluded} pair(s) with empty new text are left out of both agreement figures; "
+                              "agreement before and after that version is not comparable",
         "escalations"       : escalations,
         "discarded_claims"  : discarded,
         "discard_codes"     : codes,
