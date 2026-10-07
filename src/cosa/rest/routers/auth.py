@@ -20,6 +20,7 @@ from cosa.rest.auth_models import (
     ChangePasswordRequest,
     MessageResponse
 )
+from cosa.rest.password_service import validate_password_strength
 from cosa.rest.user_service import (
     create_user,
     authenticate_user,
@@ -892,13 +893,12 @@ async def reset_password( request: ResetPasswordRequest ) -> MessageResponse:
         - New password meets strength requirements
 
     Ensures:
-        - Token validated
-        - Password strength validated
+        - Password strength validated first, so a weak password leaves the token unused
+        - Token validated, and marked used at that point
         - Password updated
-        - Token marked as used
         - Returns 200 on success
+        - Returns 400 if password weak, with the token still usable
         - Returns 400 if token invalid/expired/used
-        - Returns 400 if password weak
 
     Raises:
         - HTTPException 400 if token invalid/expired/used
@@ -909,7 +909,17 @@ async def reset_password( request: ResetPasswordRequest ) -> MessageResponse:
         MessageResponse: Success message
     """
     try:
-        # Validate reset token
+        # Strength first: validate_password_reset_token marks the token used as soon as it
+        # accepts it, so a weak password checked after it would spend the link and change nothing.
+        is_strong, strength_message = validate_password_strength( request.new_password )
+
+        if not is_strong:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail      = strength_message
+            )
+
+        # Validate reset token (this marks it used)
         success, message, user_id = validate_password_reset_token( request.token )
 
         if not success:

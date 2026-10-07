@@ -71,6 +71,10 @@ def _user_dict( **overrides ):
     return base
 
 
+# Built, not written out: it only has to pass the strength rule ( length, three of four character classes ).
+PASSES_STRENGTH_RULE = "Aa1!" * 4
+
+
 def _ns( **kw ):
     """
     Ensures:
@@ -822,7 +826,37 @@ class TestResetPassword( unittest.IsolatedAsyncioTestCase ):
 
     Ensures:
         - token-fail -> 400; reset-fail -> 400; success -> MessageResponse; generic -> 500
+        - A weak password is refused before the reset token is consumed, so the link survives
     """
+
+    async def test_a_weak_password_is_refused_before_the_token_is_consumed( self ):
+        """
+        A weak password is refused with 400 before the token function runs.
+
+        Ensures:
+            - The function that marks the token used is never called
+        """
+        with patch( "cosa.rest.routers.auth.validate_password_reset_token", return_value=( True, "", "uid-1" ) ) as consume, \
+             patch( "cosa.rest.routers.auth.reset_password_with_token", return_value=( True, "" ) ) as reset:
+            with self.assertRaises( HTTPException ) as ctx:
+                await reset_password( _ns( token="rt", new_password="weakpassword" ) )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        consume.assert_not_called()
+        reset.assert_not_called()
+
+    async def test_a_strong_password_consumes_the_token_once_and_resets( self ):
+        """
+        The control: a strong password consumes the token once and resets.
+
+        Ensures:
+            - Both the token function and the reset run once
+        """
+        with patch( "cosa.rest.routers.auth.validate_password_reset_token", return_value=( True, "", "uid-1" ) ) as consume, \
+             patch( "cosa.rest.routers.auth.reset_password_with_token", return_value=( True, "" ) ) as reset:
+            resp = await reset_password( _ns( token="rt", new_password=PASSES_STRENGTH_RULE ) )
+        self.assertEqual( resp.message, "Password reset successfully" )
+        consume.assert_called_once()
+        reset.assert_called_once()
 
     async def test_token_failure_raises_400( self ):
         """
@@ -831,7 +865,7 @@ class TestResetPassword( unittest.IsolatedAsyncioTestCase ):
         """
         with patch( "cosa.rest.routers.auth.validate_password_reset_token", return_value=( False, "bad token", None ) ):
             with self.assertRaises( HTTPException ) as ctx:
-                await reset_password( _ns( token="rt", new_password="newpw" ) )
+                await reset_password( _ns( token="rt", new_password=PASSES_STRENGTH_RULE ) )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_reset_failure_raises_400( self ):
@@ -842,7 +876,7 @@ class TestResetPassword( unittest.IsolatedAsyncioTestCase ):
         with patch( "cosa.rest.routers.auth.validate_password_reset_token", return_value=( True, "", "uid-1" ) ), \
              patch( "cosa.rest.routers.auth.reset_password_with_token", return_value=( False, "too weak" ) ):
             with self.assertRaises( HTTPException ) as ctx:
-                await reset_password( _ns( token="rt", new_password="newpw" ) )
+                await reset_password( _ns( token="rt", new_password=PASSES_STRENGTH_RULE ) )
         self.assertEqual( ctx.exception.status_code, 400 )
 
     async def test_success_returns_message_response( self ):
@@ -852,7 +886,7 @@ class TestResetPassword( unittest.IsolatedAsyncioTestCase ):
         """
         with patch( "cosa.rest.routers.auth.validate_password_reset_token", return_value=( True, "", "uid-1" ) ), \
              patch( "cosa.rest.routers.auth.reset_password_with_token", return_value=( True, "" ) ):
-            resp = await reset_password( _ns( token="rt", new_password="newpw" ) )
+            resp = await reset_password( _ns( token="rt", new_password=PASSES_STRENGTH_RULE ) )
         self.assertEqual( resp.message, "Password reset successfully" )
 
     async def test_generic_exception_wrapped_500( self ):
@@ -862,7 +896,7 @@ class TestResetPassword( unittest.IsolatedAsyncioTestCase ):
         """
         with patch( "cosa.rest.routers.auth.validate_password_reset_token", side_effect=Exception( "boom" ) ):
             with self.assertRaises( HTTPException ) as ctx:
-                await reset_password( _ns( token="rt", new_password="newpw" ) )
+                await reset_password( _ns( token="rt", new_password=PASSES_STRENGTH_RULE ) )
         self.assertEqual( ctx.exception.status_code, 500 )
         self.assertIn( "Password reset failed", ctx.exception.detail )
 
