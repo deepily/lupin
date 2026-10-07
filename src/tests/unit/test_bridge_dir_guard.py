@@ -50,6 +50,22 @@ class TestFingerprintDir:
         fp = fingerprint_dir( tmp_path )
         assert set( fp ) == { "cc-1.json" }
 
+    def test_the_memory_watch_logs_are_not_watched( self, tmp_path ):
+        """Kills the mutant that drops either memory-watch log from the excluded set."""
+        for name in ( "cc-memory-samples.log", "cc-memory-alerts.log" ):
+            ( tmp_path / name ).write_text( "sample" )
+        ( tmp_path / "cc-1.json" ).write_text( "y" )
+        assert set( fingerprint_dir( tmp_path ) ) == { "cc-1.json" }
+
+    def test_a_memory_sample_landing_mid_run_is_no_contact( self, tmp_path ):
+        """A sample appended between two fingerprints must yield no delta."""
+        ( tmp_path / "cc-1.json" ).write_text( "y" )
+        log = tmp_path / "cc-memory-samples.log"
+        log.write_text( "t0\n" )
+        before = fingerprint_dir( tmp_path )
+        log.write_text( "t0\nt1\n" )
+        assert dir_delta( before, fingerprint_dir( tmp_path ) ) == ( [ ], [ ], [ ] )
+
     def test_a_subdirectory_is_marked_not_hashed( self, tmp_path ):
         ( tmp_path / "sub" ).mkdir()
         assert fingerprint_dir( tmp_path )[ "sub" ] == "<dir>"

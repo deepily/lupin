@@ -45,8 +45,11 @@ REAL_SESSIONS_DIR = Path( os.path.expanduser( "~/.claude/sessions" ) )
 
 # Fleet-shared append-only logs — every live listener / idle-waiter writes them
 # continuously, so a change is not attributable to the observing test. Named, not
-# silently globbed around (row 877794ed).
-UNATTRIBUTABLE = frozenset( { "cc-listeners.log", "cc-idle-waiters.log" } )
+# silently globbed around (row 877794ed). The memory-watch service appends its samples
+# and alerts to the same folder (lupin-cc-memory-watch.service, row d9cb4b2b).
+UNATTRIBUTABLE = frozenset( {
+    "cc-listeners.log", "cc-idle-waiters.log", "cc-memory-samples.log", "cc-memory-alerts.log",
+} )
 
 
 def fingerprint_dir( directory: Any, session_ids: Iterable[ str ] = None ) -> Dict[ str, str ]:
@@ -58,7 +61,7 @@ def fingerprint_dir( directory: Any, session_ids: Iterable[ str ] = None ) -> Di
     count unchanged and can swap one id for another of equal length, so only a
     content hash sees it (bug 2508b1ce). Globs `*`, not `cc-*.json`, because the
     narrower glob missed `cc-listener-*.stderr` / `.spawn-lock` writes (row
-    877794ed); the two fleet-shared logs in `UNATTRIBUTABLE` are the sole names
+    877794ed); the fleet-shared logs in `UNATTRIBUTABLE` are the sole names
     dropped.
 
     Requires:
