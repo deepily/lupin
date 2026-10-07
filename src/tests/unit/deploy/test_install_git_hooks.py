@@ -164,6 +164,30 @@ def test_unmakeable_hooks_folder_exits_2( tmp_path ):
     assert r.returncode == 2 and "could not create" in r.stderr
 
 
+# ── what is in the way is named, and the script is found through a link ─────
+
+def test_a_directory_in_the_way_is_named_a_directory( tmp_path ):
+    """Kills the mutant that calls every thing in the way "a regular file"."""
+    repo = _scratch( tmp_path )
+    ( _hooks_dir( repo ) / "pre-push" ).mkdir()
+    r = _run( repo )
+    assert r.returncode == 1
+    assert "pre-push: IN THE WAY — a directory at" in r.stdout and "regular file" not in r.stdout
+    assert ( _hooks_dir( repo ) / "pre-push" ).is_dir()
+
+
+def test_reached_through_a_symlink_the_tree_is_the_real_checkout( tmp_path ):
+    """Kills the mutant that takes the tree from the link, not the script's real path."""
+    repo   = _scratch( tmp_path )
+    away   = tmp_path / "elsewhere" / "deeper" / "x"
+    away.mkdir( parents=True )
+    os.symlink( repo / "src" / "scripts" / "install-git-hooks.sh", away / "install-git-hooks.sh" )
+    r = subprocess.run( [ "bash", str( away / "install-git-hooks.sh" ) ], capture_output=True, text=True, timeout=30 )
+    assert r.returncode == 0, r.stdout + r.stderr
+    for hook, script in HOOKS:
+        assert os.readlink( _hooks_dir( repo ) / hook ) == f"{repo}/src/scripts/{script}"
+
+
 # ── a hooks folder that cannot be written ────────────────────────────────────
 
 needs_non_root = pytest.mark.skipif( os.geteuid() == 0, reason="root ignores a read-only folder, so the write cannot fail" )
@@ -238,6 +262,20 @@ def test_a_linked_worktree_is_refused_and_the_shared_hooks_folder_is_untouched( 
     assert "linked worktree" in r.stderr and "main checkout" in r.stderr
     assert _listing( _hooks_dir( repo ) ) == before
     assert not ( linked / "hooks" ).exists()
+
+
+def test_a_refused_linked_worktree_run_leaves_a_missing_shared_hooks_folder_missing( tmp_path ):
+    """Kills the mutant that creates the hooks folder before the linked-worktree refusal."""
+    repo = _scratch( tmp_path )
+    git  = [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str( repo ) ]
+    subprocess.run( [ *git, "add", "-A" ], check=True )
+    subprocess.run( [ *git, "commit", "-q", "-m", "scratch" ], check=True )
+    linked = tmp_path / "linked"
+    subprocess.run( [ *git, "worktree", "add", "-q", "--detach", str( linked ) ], check=True )
+    shutil.rmtree( _hooks_dir( repo ) )
+    r = _run( linked )
+    assert r.returncode == 2 and "linked worktree" in r.stderr
+    assert not _hooks_dir( repo ).exists()
 
 
 def test_the_main_checkout_of_a_repository_with_a_linked_worktree_still_installs( tmp_path ):

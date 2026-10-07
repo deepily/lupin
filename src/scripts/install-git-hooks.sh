@@ -20,7 +20,9 @@
 #
 set -uo pipefail
 
-ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+# The real path first: reached through a link, the tree is the one the script lives in, not the link's folder.
+SELF="$( readlink -f "${BASH_SOURCE[0]}" )"
+ROOT="$( cd "$( dirname "$SELF" )/../.." && pwd )"
 
 REPLACE=0
 case "${1:-}" in
@@ -53,7 +55,6 @@ case "$hooks_path" in
     /*) HOOKS_DIR="$hooks_path" ;;
     *)  HOOKS_DIR="$ROOT/$hooks_path" ;;
 esac
-mkdir -p "$HOOKS_DIR" || { echo "install-git-hooks: could not create $HOOKS_DIR" >&2; exit 2; }
 
 # 2b. a linked worktree shares the main checkout's hooks folder, so a link made from here would
 # point every worktree's hooks at this one tree, and dangle once this tree is removed.
@@ -67,6 +68,9 @@ if [ "$( readlink -f "$git_dir" )" != "$( readlink -f "$common_dir" )" ]; then
     exit 2
 fi
 
+# 2c. only now create the folder, so a refused run creates nothing.
+mkdir -p "$HOOKS_DIR" || { echo "install-git-hooks: could not create $HOOKS_DIR" >&2; exit 2; }
+
 # 3. look before touching anything: a blocked hook without --replace stops the whole run.
 blocked=0
 for i in "${!HOOK_NAMES[@]}"; do
@@ -77,7 +81,8 @@ for i in "${!HOOK_NAMES[@]}"; do
             if [ -L "$path" ]; then
                 echo "$name: IN THE WAY — a link to $( readlink "$path" ), not to src/scripts/${HOOK_SCRIPTS[$i]} (re-run with --replace to move it aside)"
             else
-                echo "$name: IN THE WAY — a regular file at $path (re-run with --replace to move it aside)"
+                if [ -d "$path" ]; then kind="a directory"; elif [ -f "$path" ]; then kind="a regular file"; else kind="something that is neither a file nor a link"; fi
+                echo "$name: IN THE WAY — $kind at $path (re-run with --replace to move it aside)"
             fi
             blocked=1
         fi
