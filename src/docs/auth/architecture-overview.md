@@ -181,8 +181,8 @@ def validate_password_strength( password: str ) -> Tuple[bool, str]
 def create_refresh_token( user_id: int, token: str ) -> bool
     # Stores SHA-256 hash of token
 
-def validate_refresh_token( token: str ) -> Optional[int]
-    # Returns user_id if valid
+def validate_refresh_token( token: str ) -> Tuple[bool, str, Optional[Dict]]
+    # Returns (success, message, token_data); token_data carries jti, user_id, created_at
 
 def revoke_refresh_token( token: str ) -> bool
 def revoke_all_user_tokens( user_id: int ) -> int
@@ -249,10 +249,10 @@ def log_auth_event( event_type: str, user_id: Optional[int], email: str,
 
 **Key Functions**:
 ```python
-def generate_verification_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
+def generate_verification_token( user_id: str ) -> Tuple[bool, str, Optional[str]]
 def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[str]]
 
-def generate_password_reset_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
+def generate_password_reset_token( user_id: str ) -> Tuple[bool, str, Optional[str]]
 def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[str]]
 ```
 
