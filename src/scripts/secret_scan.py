@@ -1,9 +1,9 @@
 """
 Scan the working tree, a ref or pushed history for committed credential values.
 
-Reports values only, not paths, field names or placeholders. A clean result looks
-the same as a blind scanner. So src/tests/unit/test_secret_scan.py plants known
-positives and must be re-run after any change to the matching loop.
+Reports values only, not paths, field names or placeholders. A clean result looks the same as a blind scanner.
+Its fixture suite `src/tests/unit/test_secret_scan.py` plants known positives and fails loudly if any of them stops being found. That suite is the only reason a number from this scanner means anything.
+Re-run it after any change to the matching loop.
 
 Requires:
     - mode is worktree, ref followed by a ref name, or history
