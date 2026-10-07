@@ -154,18 +154,81 @@ class TestRunMigrationsToHead( unittest.TestCase ):
 # ⚠️ A PLACEHOLDER HERE WOULD BE A MASK, NOT A SCRUB. These are real connections: a fake value
 # makes _pg_reachable() fail and turns every live test below into a PERMANENT SKIP that reads
 # like "Postgres is down". Unset DB_PASSWORD and they skip honestly; set it and they run.
-_PG = dict( host="localhost", port=5432, user="lupin_dev",
+# The login follows the seeded DB_USER (src/conftest.py seeds it from .env), so a seat whose .env
+# carries role keys tests as that role. The superuser name is only the fallback when nothing seeded.
+# Every connection here goes to the maintenance database "postgres", which any login may enter;
+# lupin_db_dev is closed to PUBLIC and to the test role.
+_PG = dict( host="localhost", port=5432, user=os.environ.get( "DB_USER", "lupin_dev" ),
             password=os.environ.get( "DB_PASSWORD", "" ) )
+_REFUSED = ( "authentication failed", "permission denied", "no pg_hba.conf entry", "is not permitted to log in" )
 
 
 def _pg_reachable():
+    """
+    True iff Postgres accepts this login; False when it is down or no password is set.
+
+    A server that answers and refuses the login raises. A wrong role then fails loudly.
+    It does not turn every live test below into a skip that reads like a stopped server.
+    """
+    if not _PG[ "password" ]: return False
+    import psycopg2
     try:
-        import psycopg2
-        conn = psycopg2.connect( dbname="lupin_db_dev", connect_timeout=2, **_PG )
+        conn = psycopg2.connect( dbname="postgres", connect_timeout=2, **_PG )
         conn.close()
         return True
-    except Exception:
+    except psycopg2.OperationalError as error:
+        if any( phrase in str( error ) for phrase in _REFUSED ):
+            raise RuntimeError( f"Postgres refused the login {_PG[ 'user' ]!r}: {error}" ) from error
         return False
+
+
+class TestLiveGateLoginHandling( unittest.TestCase ):
+    """The live-test gate: a refused login fails loudly, a missing server or password skips."""
+
+    def _reachable( self, connect, password="pw" ):
+        import psycopg2
+        with patch.dict( _PG, { "password": password } ), patch.object( psycopg2, "connect", connect ):
+            return _pg_reachable()
+
+    def _login_user_with( self, env ):
+        """The user the live tests would log in as, read from a fresh load of this file under env."""
+        import importlib.util
+        spec   = importlib.util.spec_from_file_location( "_auto_migrate_probe", __file__ )
+        module = importlib.util.module_from_spec( spec )
+        with patch.dict( os.environ, { **env, "DB_PASSWORD": "" } ):
+            spec.loader.exec_module( module )
+        return module._PG[ "user" ]
+
+    def test_the_login_follows_the_seeded_db_user( self ):
+        self.assertEqual( self._login_user_with( { "DB_USER": "lupin_test" } ), "lupin_test" )
+
+    def test_the_login_falls_back_to_the_superuser_name_when_nothing_seeded_it( self ):
+        with patch.dict( os.environ ):
+            os.environ.pop( "DB_USER", None )
+            self.assertEqual( self._login_user_with( { } ), "lupin_dev" )
+
+    def test_an_accepted_login_is_reachable( self ):
+        connect = MagicMock()
+        self.assertTrue( self._reachable( connect ) )
+        self.assertEqual( connect.call_args.kwargs[ "dbname" ], "postgres" )
+        connect.return_value.close.assert_called_once()
+
+    def test_no_password_skips_without_connecting( self ):
+        connect = MagicMock()
+        self.assertFalse( self._reachable( connect, password="" ) )
+        connect.assert_not_called()
+
+    def test_a_server_that_is_down_skips( self ):
+        import psycopg2
+        self.assertFalse( self._reachable( MagicMock( side_effect=psycopg2.OperationalError( "connection refused" ) ) ) )
+
+    def test_a_refused_login_raises_and_names_the_role( self ):
+        import psycopg2
+        for message in ( 'FATAL: password authentication failed for user "lupin_host"', "permission denied for database" ):
+            with self.assertRaises( RuntimeError ) as caught:
+                self._reachable( MagicMock( side_effect=psycopg2.OperationalError( message ) ) )
+            self.assertIn( repr( _PG[ "user" ] ), str( caught.exception ) )
+            self.assertIn( message, str( caught.exception ) )
 
 
 def _pgvector_available():
@@ -181,7 +244,7 @@ def _pgvector_available():
     """
     try:
         import psycopg2
-        conn = psycopg2.connect( dbname="lupin_db_dev", connect_timeout=2, **_PG )
+        conn = psycopg2.connect( dbname="postgres", connect_timeout=2, **_PG )
         try:
             with conn.cursor() as cur:
                 cur.execute( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" )
@@ -226,13 +289,13 @@ class TestAutoMigrateLive( unittest.TestCase ):
     def setUp( self ):
         import psycopg2
         self.dbname = "lupin_am_ut_" + uuid.uuid4().hex[ :12 ]
-        self._admin = psycopg2.connect( dbname="lupin_db_dev", **_PG )
+        self._admin = psycopg2.connect( dbname="postgres", **_PG )
         self._admin.autocommit = True
         from psycopg2 import sql
         self._sql = sql
         with self._admin.cursor() as cur:
             cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
-        self.url = f"postgresql+psycopg2://lupin_dev:{_PG[ 'password' ]}@localhost:5432/{self.dbname}"
+        self.url = f"postgresql+psycopg2://{_PG[ 'user' ]}:{_PG[ 'password' ]}@localhost:5432/{self.dbname}"
 
     def tearDown( self ):
         with self._admin.cursor() as cur:
@@ -314,7 +377,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
         # Task (a): with NO DATABASE_URL and NO injected url, env.py must fall
         # through to cosa.rest.db.database.get_database_url() — the app builder —
         # to find the right database. We point the builder at this throwaway DB
-        # via DB_NAME (development branch: localhost:5432, lupin_dev/$DB_PASSWORD).
+        # via DB_NAME (development branch: localhost:5432, $DB_USER/$DB_PASSWORD).
         from alembic import command
 
         # First bring the DB to head normally (empty -> create_all + stamp head).
@@ -324,7 +387,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
             "DB_NAME"     : self.dbname,
             "DB_HOST"     : "localhost",
             "DB_PORT"     : "5432",
-            "DB_USER"     : "lupin_dev",
+            "DB_USER"     : _PG[ "user" ],
             "DB_PASSWORD" : _PG[ "password" ],
         }
         # build_alembic_config(database_url=None) => NO injected_db_url attribute,
