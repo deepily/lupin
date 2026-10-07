@@ -250,10 +250,10 @@ def log_auth_event( event_type: str, user_id: Optional[int], email: str,
 **Key Functions**:
 ```python
 def generate_verification_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
-def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[int]]
+def validate_verification_token( token: str ) -> Tuple[bool, str, Optional[str]]
 
 def generate_password_reset_token( user_id: int ) -> Tuple[bool, str, Optional[str]]
-def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[int]]
+def validate_password_reset_token( token: str ) -> Tuple[bool, str, Optional[str]]
 ```
 
 **Token Lifetimes**:
