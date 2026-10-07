@@ -35,7 +35,7 @@ import os
 import unittest
 
 import cosa.utils.util as cu
-from cosa.agents.runtime_argument_expeditor.expeditor import DOCUMENT_DESCRIBE_ASK_ID
+from cosa.agents.runtime_argument_expeditor.expeditor import DOCUMENT_CHOICE_CARD_ID, DOCUMENT_DESCRIBE_ASK_ID
 
 
 SCRIPT_DIR = "/src/conf/notification-proxy-scripts"
@@ -157,6 +157,17 @@ class TestEveryProfileAnswersTheDescribeAsk( unittest.TestCase ):
                 continue
             with self.subTest( profile=filename ):
                 self.assertIsInstance( _load( filename ), dict )
+
+
+class TestExpeditorSmokeAnswersTheChoiceCard( unittest.TestCase ):
+    """Tests that expeditor-smoke.json answers the document choice card."""
+
+    def test_the_script_claims_the_card_once_with_a_positional_answer( self ):
+        claims = [ e for e in _load( "expeditor-smoke.json" )[ "entries" ]
+                   if e.get( "card_id" ) == DOCUMENT_CHOICE_CARD_ID ]
+        self.assertEqual( len( claims ), 1, "the PG_AUDIENCE scenario expires unanswered without it" )
+        self.assertEqual( claims[ 0 ][ "answer" ], "__first_option__" )
+        self.assertEqual( claims[ 0 ][ "response_types" ], [ "multiple_choice" ] )
 
 
 if __name__ == "__main__":
