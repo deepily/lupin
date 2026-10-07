@@ -145,6 +145,37 @@ class TestTheTickExitCodes:
 
 
 @pytest.mark.skipif( not os.path.isfile( SWEEP ),
+                     reason=f"planning-is-prompting sweep not resolvable at {SWEEP}" )
+class TestTheTargetBranchIsResolvedNeverFixed:
+    """The target is the env value, else the main tree's branch, else a refusal."""
+
+    def test_with_no_override_the_main_trees_branch_is_the_target( self, repo ):
+        rc, out = _run( repo, CONTEXT_TICK_TARGET_BRANCH="" )
+        assert rc == 0, out
+        assert "target=the-line" in out
+        assert "v0.2.1" not in out
+
+    def test_a_main_tree_on_another_branch_is_followed( self, repo ):
+        _git( repo, "checkout", "-q", "-b", "a-newer-line" )
+        rc, out = _run( repo, CONTEXT_TICK_TARGET_BRANCH="" )
+        assert "target=a-newer-line" in out, out
+        assert "target=the-line" not in out
+
+    def test_the_override_wins_over_the_main_trees_branch( self, repo ):
+        _git( repo, "branch", "the-override" )
+        rc, out = _run( repo, CONTEXT_TICK_TARGET_BRANCH="the-override" )
+        assert "target=the-override" in out, out
+
+    def test_a_detached_main_tree_with_no_override_is_refused( self, repo ):
+        _git( repo, "checkout", "-q", "--detach" )
+        rc, out = _run( repo, CONTEXT_TICK_TARGET_BRANCH="" )
+        assert rc == 2, out
+        assert "no target branch" in out
+        assert "Nothing was scanned" in out
+        assert "orphan-sweep-tick " not in out
+
+
+@pytest.mark.skipif( not os.path.isfile( SWEEP ),
                      reason="planning-is-prompting sweep not resolvable" )
 def test_the_tick_never_delivers_category_ii():
     """
