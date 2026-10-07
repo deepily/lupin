@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 """
-CJ Flow v2 — embedding-cost measurement (unit C2 deliverable).
+CJ Flow v2 embedding-cost measurement.
 
-Answers the question the plan REFUSES to assume (design §6): on the tier-2
-similar path, how expensive is embedding the query, and how much does the
-verbatim embedding cache (R-C3) save on a warm repeat?
+Answers a question the plan refuses to assume. On the tier-2 similar path, how expensive
+is embedding the query? How much does the verbatim embedding cache save on a warm repeat?
 
-    generated  — a query embedding computed by the model server (a round trip).
-    cached     — the SAME query served from QuestionEmbeddingRepository, no model
-                 call (a btree lookup).
+    generated  — a query embedding computed by the model server, a round trip.
+    cached     — the same query served from QuestionEmbeddingRepository.
+                 There is no model call, only a btree lookup.
 
-The instrument measures BOTH per question and reports the delta. The generate
-side spends real inference and needs a live authenticated server, so this is a
-CLI — kept OUT of the run-*.sh rotation (same call the plan makes for the eval
-harness) and run on the :8000 scheduled venue, never :7999.
+The instrument measures both per question and reports the delta. The generate side spends
+real inference and needs a live authenticated server, so this is a CLI.
+It stays out of the run-*.sh rotation, as the plan decides for the eval harness.
+It runs on the :8000 scheduled venue, never :7999.
 
-The measurement LOOP + the summary math are pure and injectable, so they are
-unit-tested with a fake probe (no live server). Only ``--live`` wires the real
-V2Cache against get_db + the embedding provider.
+The measurement loop and the summary math are pure and injectable, so they are unit-tested
+with a fake probe and no live server. Only ``--live`` wires the real V2Cache against
+get_db and the embedding provider.
 
 Usage:
     python src/scripts/v2_embedding_cost.py --live            # real measurement
     python src/scripts/v2_embedding_cost.py --live -q "..."   # extra questions
-
-Created: 2026-08-14 (CJ Flow v2 · unit C2 · Sam 🎙️)
 """
 
 import argparse
@@ -92,8 +89,8 @@ def measure( questions: List[str], embed_once: Callable[ [str, bool], Tuple[bool
             generated — summary of cold timings (cache misses that generated)
             cached    — summary of warm timings reported as cache hits
             speedup   — generated.mean / cached.mean, or None if nothing cached
-        - a warm call that did NOT report a cache hit is excluded from ``cached``
-          (honest: only genuine hits count toward the saved cost)
+        - a warm call that did not report a cache hit is excluded from ``cached``
+          (only real hits count toward the saved cost)
     """
     rows          : List[Tuple[str, float, float, bool]] = []
     cold_times    : List[float] = []
@@ -138,7 +135,7 @@ def format_report( result: Dict ) -> str:
 
 def _live_probe():  # pragma: no cover — needs a live server + model server (:8000 scheduled)
     """
-    Build a probe that measures the REAL V2Cache tier-2 embedding path.
+    Build a probe that measures the real V2Cache tier-2 embedding path.
 
     A cold call clears the verbatim cache row and times a generate; a warm call
     times the cache hit that write-back's cache population leaves behind. Needs a

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-TFE-to-CC Phase 3 LIVE run — full 11-fix set from tfe-72adc928 baseline.
+Live run of the third TFE-to-CC stage over the full 11-fix set.
+
+The set comes from the tfe-72adc928 baseline.
 
 Dispatches one bounded `claude -p` with a coordinator + Task-subagent prompt
 against a fresh git worktree. Tools: Read, Edit, Write, Bash, Grep, Glob,
@@ -325,7 +327,7 @@ def _create_smoke_worktree() -> str:
 
 
 def _write_prompt_to_container( prompt: str, host_scratch: Path ) -> tuple:
-    """Write prompt to container AND persist a host-side copy for reflection."""
+    """Write the prompt into the container and keep a host-side copy for reflection."""
     ts = _ts()
     container_path = f"/tmp/tfe_to_cc_phase3_prompt_{ts}.md"
     host_path      = host_scratch / f"tfe_to_cc_phase3_prompt_{ts}.md"
@@ -350,7 +352,7 @@ def _invoke_claude_p(
     effort                : str,
     max_budget_usd        : float | None,
 ) -> int:
-    """Invoke the coordinator claude -p with full Phase 3 allowlist."""
+    """Invoke the coordinator `claude -p` with the full third-stage tool allowlist."""
     flags = [
         f'--model {model}',
         '--output-format stream-json',

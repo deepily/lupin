@@ -1,27 +1,21 @@
 #!/usr/bin/env python3
 """
-The persistent queue-WebSocket listener, moved out of the v1 arm so it survives it.
+Persistent queue-WebSocket listener, moved out of the v1 arm to survive the v1 excision.
 
-WHY THIS FILE EXISTS. `v2_eval`'s terminal wait (row a2e360f8) imports
-`make_ws_recv_events` from `v1_eval_arm` — a script the V1 excision deletes (row
-e2099400 §2, Step 2). The listener is not v1 apparatus: it watches the SHIPPED queue
-WebSocket and reduces `job_state_transition` frames, which both arms need and which v2
-will keep needing after v1 is gone. Leaving it in the file being deleted would have taken
-v2's terminal wait down with it.
+Why this file exists: the terminal wait in `v2_eval` imports `make_ws_recv_events` from `v1_eval_arm`,
+a script the v1 excision deletes. The listener is not v1 apparatus. It watches the shipped queue
+WebSocket and reduces `job_state_transition` frames, which both arms need and v2 will keep needing.
+Leaving it in the file being deleted would have taken the v2 terminal wait down with it.
 
-⚠️ THE CODE BELOW IS A MOVE, NOT A REWRITE. It is the same block, verbatim, so the
-listener's behaviour cannot change under cover of a relocation — a "while I'm in here"
-edit during a move is the shape that makes a bisect useless. The tests moved with it
-(`src/tests/unit/test_v1_ws_recv_events.py`), and they were run green against this module
-before v1_eval_arm was touched.
+The code below is a move, not a rewrite. It is the same block, verbatim, so the listener's behaviour
+cannot change under cover of a relocation. A "while I'm in here" edit during a move makes a
+bisect useless. The tests moved with it and were run green against this module before `v1_eval_arm`
+was touched.
 
-WHAT IT IS. A listener that connects ONCE, before any job is pushed, and buffers every
-frame by job_id — so `ws_recv_events( job_id )` can hand one job's frames to a reducer
-without racing the server. It REFUSES rather than returning a partial buffer: a span
-computed from whatever arrived before a timeout is a number wrong in the direction nobody
-audits, and it feeds straight into a go/no-go.
-
-Created: 2026-08-26 (row e2099400 §2 Step 2 — the relocation that precedes the deletion)
+What it is: a listener that connects once, before any job is pushed, and buffers every frame by job_id.
+So `ws_recv_events( job_id )` can hand one job's frames to a reducer without racing the server.
+It refuses rather than returning a partial buffer. A span computed from whatever arrived before a
+timeout is wrong in the direction nobody audits, and it feeds straight into a go/no-go.
 """
 
 from __future__ import annotations
@@ -36,15 +30,13 @@ from urllib.parse import urlsplit
 
 class EvalIntegrityError( RuntimeError ):
     """
-    A precondition for a trustworthy measurement was violated — the run fails LOUDLY
-    rather than reporting a number it cannot stand behind.
+    Raised when a precondition for a trustworthy measurement is violated, so the run fails.
 
-    ⚠️ THIS IS A THIRD CLASS OF THE SAME NAME, AND THAT IS DELIBERATE. `v1_eval_arm` and
-    `v2_eval` each define their own; importing either here would re-create the dependency
-    this move exists to cut, in the opposite direction. It costs nothing at the catch site:
-    `v2_eval` already catches `RuntimeError` on purpose — its own comment says catching
-    anything narrower would make it import `v1_eval_arm` for a class alone — so a listener
-    timeout is caught exactly as before.
+    This is a third class of the same name, and that is deliberate. `v1_eval_arm` and `v2_eval` each
+    define their own, and importing either here would re-create the dependency this move exists to cut,
+    in the opposite direction. It costs nothing at the catch site. `v2_eval` already catches `RuntimeError`,
+    and its own comment says catching anything narrower would make it import `v1_eval_arm` for a class alone.
+    A listener timeout is therefore caught exactly as before.
     """
 
 
@@ -56,10 +48,12 @@ _ST_COMPLETED = "completed"
 
 def _iso_to_epoch( iso: Any ) -> Optional[float]:
     """
+    Parse an ISO-8601 event timestamp into epoch seconds, or None when it cannot be parsed.
+
     Ensures:
         - parses an ISO-8601 string (the event `timestamp`, aware) to epoch seconds
-        - returns None for None / non-string / unparseable — never raises, so one
-          malformed stamp cannot crash a whole pass
+        - returns None for None, a non-string or an unparseable value, and never raises,
+          so one malformed stamp cannot crash a whole pass
     """
     import datetime
     if not isinstance( iso, str ):
@@ -72,19 +66,20 @@ def _iso_to_epoch( iso: Any ) -> Optional[float]:
 
 def parse_transitions( events: Sequence[Dict[str, Any]] ) -> Dict[str, Any]:
     """
-    Reduce ONE job's `job_state_transition` events into the transitions dict
-    assemble_v1_record consumes.
+    Reduce one job's `job_state_transition` events into a transitions dict.
+
+    The dict is the one assemble_v1_record consumes.
 
     Requires:
-        - events is the list of job_state_transition payloads for a SINGLE job
+        - events is the list of job_state_transition payloads for a single job
           (each { to_state, timestamp (ISO), metadata? }), already job-filtered
 
     Ensures:
         - returns { queued_ts, running_ts, completed_ts, metadata }, timestamps in
-          epoch seconds (QUEUED/RUNNING/COMPLETED transitions); metadata is the
-          COMPLETED event's metadata (the completion payload), else None
-        - a terminal FAILURE (failed/cancelled/…) leaves completed_ts + metadata
-          None ⇒ the record reads no_completion (honest: no usable span), never a
+          epoch seconds (`queued`, `running` and `completed` transitions); metadata is the
+          `completed` event's metadata (the completion payload), else None
+        - a terminal failure (failed, cancelled and so on) leaves completed_ts and metadata
+          None, so the record reads no_completion: honest, no usable span, never a
           fabricated completion
         - never raises (a malformed timestamp becomes None via _iso_to_epoch)
     """
@@ -119,27 +114,29 @@ _TERMINAL_STATES = frozenset( { "completed", "failed", "cancelled", "interrupted
 
 class WsJobEventListener:
     """
-    A persistent queue-WebSocket listener that buffers `job_state_transition` frames by
-    job_id, so `ws_recv_events( job_id )` can hand a single job's frames to parse_transitions.
+    Queue-WebSocket listener that buffers frames by job_id.
+
+    It buffers `job_state_transition` frames, so `ws_recv_events( job_id )` can hand a single
+    job's frames to parse_transitions.
 
     Requires:
         - base_url points at the (pinned-worktree) v1 server answering /ws/queue/<sid>.
         - token is a JWT for the queue WS auth_request (same user whose jobs are pushed,
           so the server's per-user emit reaches this listener).
-        - start() is called BEFORE any job is pushed — otherwise early frames race the
+        - start() is called before any job is pushed, otherwise early frames race the
           connect and are missed (the mis-measurement this class exists to prevent).
 
     Ensures:
-        - start() connects, sends the auth_request, and BLOCKS until auth_success (or
-          raises on connect/auth failure), so a caller that returns from start() has a
+        - start() connects, sends the auth_request, and blocks until auth_success, or raises
+          on connect or auth failure. A caller that returns from start() therefore has a
           live, subscribed socket.
         - a background thread buffers every job_state_transition frame under its job_id.
-        - ws_recv_events( job_id ) BLOCKS until that job has a frame whose to_state is
-          terminal (completed/failed/cancelled/interrupted), then returns the job's frames
-          in arrival order.
-        - RAISES EvalIntegrityError when collect_timeout elapses with no terminal frame —
-          including a job with no frames at all — rather than returning a partial buffer
-          that would become a wrong-direction span. Never fabricates a completion.
+        - ws_recv_events( job_id ) blocks until that job has a frame whose to_state is
+          terminal (completed, failed, cancelled or interrupted), then returns the job's
+          frames in arrival order.
+        - raises EvalIntegrityError when collect_timeout elapses with no terminal frame,
+          including a job with no frames at all, rather than returning a partial buffer.
+          A partial buffer would become a wrong-direction span. It never fabricates a completion.
         - stop() ends the listener thread and closes the socket.
     """
 
@@ -230,10 +227,10 @@ class WsJobEventListener:
         Ensures:
             - returns the job's buffered frames (arrival order) once any carries a terminal
               to_state.
-            - RAISES EvalIntegrityError when collect_timeout elapses with no terminal frame
-              (a job with zero frames included) — never returns a partial/empty buffer, so
-              a stuck or silent job fails the run loudly instead of feeding a short span
-              into the go/no-go.
+            - raises EvalIntegrityError when collect_timeout elapses with no terminal frame
+              (a job with zero frames included), and never returns a partial or empty buffer.
+              A stuck or silent job therefore fails the run loudly instead of feeding a short
+              span into the go/no-go.
         """
         deadline = time.monotonic() + self.collect_timeout
         with self._cond:
@@ -268,9 +265,9 @@ def make_ws_recv_events(
     """
     Start a WsJobEventListener and return ( listener, listener.ws_recv_events ).
 
-    The RUN wrapper calls this BEFORE the pass, wires ws_recv_events into
+    The run wrapper calls this before the pass, wires ws_recv_events into
     _default_collect_fn, runs both passes, then calls listener.stop(). Returning the
-    listener (not just the callable) keeps stop() in the caller's hands.
+    listener, not just the callable, keeps stop() in the caller's hands.
     """
     listener = WsJobEventListener( base_url, token, session_id, collect_timeout=collect_timeout ).start()
     return listener, listener.ws_recv_events

@@ -1,42 +1,36 @@
 #!/usr/bin/env python3
 """
-Phase 3 persona-slug canonicalization sweep (DRY-RUN by DEFAULT).
+Persona-slug sweep that renames non-canonical DM-topic files (dry-run by default).
 
-Part of the persona-name normalization milestone
-(`src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md`
-§Phase 3). After `_dm_topic_for` / `_derive_dm_topic` / `session_spawner` were
-routed through the shared `persona_slug` root, a persona's DM-topic file and
-spawned tmux sessions should already sit at the canonical slug — the plan
-EXPECTS this sweep to be a near no-op, because live bridges hold the pool form
-("mr radio", "maria") and so existing topics are already `dm-mr_radio` /
-`dm-maria`. This tool proves that, and renames any straggler.
+Part of the persona-name normalization work. The DM-topic and session-spawner helpers are routed
+through the shared `persona_slug` root. Topic files and spawned tmux sessions should therefore
+already sit at the canonical slug. Live bridges hold the pool form ("mr radio", "maria"), so
+topics are already `dm-mr_radio` and `dm-maria`. The sweep should be a near no-op, and this
+tool proves that and renames any straggler.
 
-WHY owner-driven (not a blind scan): `io/commons/` holds many `dm-*` topics that
-are NOT persona-derived — ad-hoc collection topics (`dm-2-reviewers`), session-id
-topics (`dm-07fba31d`), spawned-session topics (`dm-cc-author-mr-radio-1`). A
-blind "is this stem already canonical?" check would FALSE-POSITIVE on all of
-them (their stems are not personas and need not canonicalize). So the sweep
-enumerates KNOWN persona OWNERS and, for each, looks for non-canonical spellings
-of *that owner's* topic. An owner with no variant is a clean no-op.
+It is owner-driven rather than a blind scan. `io/commons/` holds many `dm-*` topics that are not
+persona-derived: ad-hoc collection topics (`dm-2-reviewers`), session-id topics (`dm-07fba31d`),
+and spawned-session topics (`dm-cc-author-mr-radio-1`). A blind "is this stem canonical?" check
+would flag all of them falsely, since their stems are not personas. So the sweep enumerates known
+persona owners and looks for non-canonical spellings of each owner's topic. An owner with no
+variant is a clean no-op.
 
-WHAT it does:
-  - TOPICS  — for each owner, canonical = `dm-{persona_slug(owner, '_')}.md`.
-    Find sibling `dm-*.md` files (commons dir + archive) whose persona_slug
-    matches the owner's canonical slug but whose name differs (e.g. `dm-maría.md`
-    vs canonical `dm-maria.md`). Report; with `--apply`, rename the variant to
-    the canonical name. If the canonical file ALSO exists, this is a MERGE (two
-    real files) — the sweep does NOT auto-merge (that is the dedupe-aware job of
+What it does:
+  - Topics: for each owner, canonical = `dm-{persona_slug(owner, '_')}.md`. It finds sibling
+    `dm-*.md` files (commons dir and archive) whose persona_slug matches the owner's canonical
+    slug but whose name differs, such as `dm-maría.md` against `dm-maria.md`. It reports them,
+    and with `--apply` it renames the variant. If the canonical file also exists, that is a
+    merge of two real files. The sweep never auto-merges (that is the dedupe-aware job of
     `migrate-dm-topic-case.py`); it reports `merge_required` and skips.
-  - TMUX    — for each owner, expected persona slug = `persona_slug(owner, '-')`.
-    Report any live `cc-<role>-<personaslug>-<n>` session whose embedded persona
-    segment is a non-canonical spelling of an owner. tmux is REPORT-ONLY by
-    design: renaming a LIVE session orphans its bridge `tmux_session` linkage, so
-    the manager-owned remedy is reap + respawn, never an in-place rename here.
+  - Tmux: for each owner, expected persona slug = `persona_slug(owner, '-')`. It reports any live
+    `cc-<role>-<personaslug>-<n>` session whose persona segment is a non-canonical spelling of
+    an owner. Tmux is report-only. Renaming a live session orphans its bridge `tmux_session`
+    linkage, so the manager remedy is reap and respawn, never an in-place rename.
 
-SAFETY:
-  - DRY-RUN is the default. `--apply` is required to mutate the filesystem, and
-    only ever renames topic FILES (never live tmux sessions).
-  - The live cutover is gated for a quiet window by the manager / Rick.
+Safety:
+  - Dry-run is the default. `--apply` is required to mutate the filesystem.
+  - It only ever renames topic files, never live tmux sessions.
+  - The live cutover is gated for a quiet window by the manager and Rick.
 
 Run:
     export LUPIN_ROOT=/path/to/lupin
@@ -44,9 +38,7 @@ Run:
     python src/scripts/sweep_persona_slug_canonicalization.py --apply    # rename topic stragglers
     python src/scripts/sweep_persona_slug_canonicalization.py --persona "María" --persona "Mr. Radio"
 
-100% coverage by the companion suite
-`src/tests/unit/test_sweep_persona_slug_canonicalization.py` (scan/report/apply
-exercised with injected owners, a temp commons dir, and a fake tmux lister).
+See: src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md
 """
 import argparse
 import os
@@ -115,14 +107,9 @@ def scan_topic_mismatches( commons_dir, owners ) -> List[ Dict[ str, object ] ]:
     """
     Find non-canonical DM-topic files for each known persona owner.
 
-    For owner O the canonical topic stem is `persona_slug(O, "_")`. Matching a
-    file to an owner uses the SEPARATOR-AGNOSTIC `normalize_for_match` key, so a
-    legacy file under any separator spelling is caught: `dm-mr radio` (space),
-    `dm-mr-radio` (hyphen) and `dm-MR.RADIO` all `normalize_for_match` to
-    "mrradio" — the same as owner "Mr. Radio" — and rename to the canonical
-    `dm-mr_radio`. (Matching on `persona_slug(stem, "_")` instead would MISS the
-    hyphen form, since "-" is stripped, not preserved as a "_" boundary.) Compound
-    topics (`dm-mr_radio_tiberius`) normalize to a different key and are skipped.
+    For owner O the canonical topic stem is `persona_slug(O, "_")`. A file matches an owner on the
+    separator-agnostic `normalize_for_match` key, so `dm-mr radio`, `dm-mr-radio` and `dm-MR.RADIO`
+    all match owner "Mr. Radio" (key "mrradio") and rename to the canonical `dm-mr_radio`.
 
     Requires:
         - commons_dir is a Path to the `io/commons` directory (may be missing)
@@ -136,6 +123,8 @@ def scan_topic_mismatches( commons_dir, owners ) -> List[ Dict[ str, object ] ]:
           (so a plain rename would clobber it — defer to migrate-dm-topic-case.py)
         - A canonical-only owner (no variant) contributes nothing (no-op)
         - Deterministic ordering (sorted file paths; live dir before archive)
+        - Matching on `persona_slug(stem, "_")` instead would miss the hyphen form, because "-" is stripped, not kept as a "_" boundary
+        - Compound topics (`dm-mr_radio_tiberius`) normalize to a different key and are skipped
     """
     commons_dir = Path( commons_dir )
     # Separator-agnostic match key -> (owner, canonical "_"-slug stem).
@@ -225,7 +214,7 @@ def apply_topic_renames( mismatches, *, renamer=None ) -> List[ Dict[ str, objec
 
     Ensures:
         - Each mismatch with merge_required=False is renamed current -> canonical
-        - Each mismatch with merge_required=True is SKIPPED (would clobber) and
+        - Each mismatch with merge_required=True is skipped, since a rename would clobber it, and
           reported with action="skipped_merge_required"
         - Returns a per-file action log:
             { "current", "canonical", "action": "renamed" | "skipped_merge_required" }
@@ -284,7 +273,7 @@ def run_sweep(
 
     Ensures:
         - Returns { "topic_mismatches", "tmux_mismatches", "applied", "no_op" }
-        - no_op is True iff there were zero topic AND zero tmux mismatches
+        - no_op is True iff there were zero topic and zero tmux mismatches
         - When apply is False, "applied" is [] and nothing is mutated
         - Pure reporting via the injected `out` callable (default print)
     """
@@ -327,8 +316,9 @@ def run_sweep(
 def main( argv=None, *, owners=None, session_names=None, commons_dir=None,
           renamer=None, out=print ) -> int:
     """
-    CLI entry point. Test-injectable: pass owners/session_names/commons_dir to
-    bypass live tmux + bridge discovery.
+    Command-line entry point that runs the sweep and returns 0.
+
+    Tests can pass owners, session_names and commons_dir to bypass live tmux and bridge discovery.
 
     Ensures:
         - Parses --apply / --persona; defaults to DRY-RUN

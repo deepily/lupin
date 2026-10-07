@@ -1,51 +1,37 @@
 """
-CJ Flow v2 eval harness — the two-pass run that produces the plan's headline metrics.
+CJ Flow v2 eval harness: the two-pass run that produces the plan's headline metrics.
 
-EXECUTOR: AI
-    This harness is NOT Rick's to run. Its definition of done is "a report from a
-    two-pass run nobody had to babysit" (plan §DoD, cascade ruling R-D9), so leaving
-    it to a human to type the CLI defeats the acceptance criterion in the same
-    document. It is owned by the AI and submitted on a schedule.
+Executor: the AI. This harness is not Rick's to run. The plan's definition of done is a report from a
+two-pass run nobody had to babysit. Leaving the CLI to a human defeats that criterion, so the AI owns the
+run and submits it on a schedule.
 
-VENUE: :8000, SCHEDULED — 10 AM to 1 PM EDT, NOT post-midnight
-    It spends real inference and needs a live server, so it runs on the test server
-    via `POST /api/v2/submit` — NEVER on :7999, NEVER via curl, NEVER
-    side-door injected (cascade ruling R-D5, Lupin venue rules).
+Venue: the :8000 test server, scheduled between 10:00 and 13:00 EDT, never post-midnight.
+It spends real inference and needs a live server, so it runs through `POST /api/v2/submit`.
+Never run it on :7999, never through curl, and never by side-door injection.
 
-    🔴 THIS LINE USED TO SAY "post-midnight off-peak (12 AM - 9 AM EDT)" AND THAT
-    WINDOW IS DEAD. The host is powered off overnight and on most days is still down
-    well past 8:52 AM, so a job placed there does not run late — it does not run at
-    all until the next boot, then drains hours off-schedule. CLAUDE.md has corrected
-    that window TWICE (2026-08-17 and 2026-08-20, both Rick's rulings) and this
-    docstring still carried the version both corrections overturned. On 2026-08-28 a
-    seat read this header, scheduled for 00:15, and had to be told by a peer.
+The post-midnight window is dead. The host is powered off overnight and is often still down well past
+08:52. A job placed there does not run late: it does not run at all until the next boot, then drains
+hours off schedule. The rule is Rick's sleep versus the box's uptime, which are not the same hours.
+Re-derive the window from measured boots (`journalctl --list-boots --no-pager`) rather than trusting this
+text. CLAUDE.md, section "Off-peak scheduling rule", is the source of truth: 10:00 to 13:00 is the only
+window reliably both up and quiet.
 
-    The rule is Rick's SLEEP versus the BOX's uptime — they are not the same hours.
-    Measured boots, not inferred: `last -x reboot | head -20`. Re-derive rather than
-    trust this line; it has been wrong before. CLAUDE.md § Off-peak scheduling rule
-    is the source of truth, and it says 10 AM - 1 PM is the only window reliably both
-    up and quiet.
+What it does: two passes over the same corpus. The cold pass measures router accuracy and first-response
+latency against the existing cache. The warm pass runs immediately after and measures the cache-hit rate
+and the cold to warm latency delta. A single pass cannot produce the cache-hit number. Each request runs
+`speak=false, interactive=false`, so the whole flow executes with TTS dispatch skipped and nothing blocks.
 
-What it does (plan §9, §7, §6a):
-    Two passes over the same corpus. COLD measures router accuracy + first-response
-    latency against the existing cache; WARM, run immediately after, measures the
-    cache-hit rate and the cold->warm latency delta. A single pass cannot produce the
-    cache-hit number. Each request runs `speak=false, interactive=false` so the whole
-    flow executes with TTS dispatch skipped and nothing ever blocks.
+The corpus (`src/conf/training/agent-router-simple-commands.json`) maps each command to a file of one
+utterance per line. The JSON key is the expected command, so routing accuracy comes out for free.
 
-    The corpus (`src/conf/training/agent-router-simple-commands.json`) maps each
-    command to a file of one-utterance-per-line data; the JSON key is the expected
-    command, so intent-routing accuracy comes out for free.
+Metrics come from the ask-endpoint response payloads, cross-checked against the authoritative trace file
+`io/v2-flow/trace-YYYY-MM-DD.jsonl`. Rates: cache_hit_rate, cache_candidate_rate, replay_failure_rate,
+router_error_rate, extract_error_rate, agent_error_rate. Latency: p50 and p95 first-useful. Also routing
+accuracy, the would-be-wrong oracle, and the cache-hit-rate-vs-threshold table.
 
-Metrics (from the §8 response payloads, cross-checked against the authoritative
-`io/v2-flow/trace-YYYY-MM-DD.jsonl`): cache_hit_rate, cache_candidate_rate,
-replay_failure_rate, router_error_rate, extract_error_rate, agent_error_rate,
-p50/p95 first-useful latency, routing accuracy, the would-be-wrong oracle (R-C2),
-and the §6a cache-hit-rate-vs-threshold table.
-
-Dependency: the live path needs Unit D (`routers/v2_ask.py`, `flow.py`) landed. This
-module is written to the §8 endpoint contract and unit-tested against it now; the
-live wiring is a matter of the server answering `POST /api/v2/ask` per that contract.
+Dependency: the live path needs the v2 ask endpoint (`routers/v2_ask.py`, `flow.py`) landed. This module is
+written to that endpoint contract and unit-tested against it. The live wiring is the server answering
+`POST /api/v2/ask` per that contract.
 """
 
 from __future__ import annotations
@@ -162,25 +148,21 @@ UNMEASURABLE_CELL  = "unmeasurable"
 
 def is_completed_ok( status_code, payload ):
     """
-    Did this call COMPLETE the work — the same question v1's arm is made to answer.
+    Say whether a call completed the work, the same question the v1 arm answers.
 
-    🔴 WHY THIS EXISTS (row d8d019f6, 2026-08-20). `ok` was `status_code == 200` and the
-    payload was never inspected, while v1_eval_arm.py:314 required a job_id, an OBSERVED
-    terminal completion, a completed_ts, and a computable span. So v2 was graded on "did
-    the server answer" and v1 on "did the work finish end to end" — two different questions
-    whose failure rates were then compared as though they were one. A v2 response of 200
-    carrying route_reason="agent_error" counted as a SUCCESS.
+    The old test was the status code alone, so v2 was graded on whether the server answered. The v1 arm requires
+    a job id, an observed terminal completion, a completed timestamp and a computable span. A 200 carrying
+    `agent_error` counted as a success, which made the two failure rates incomparable.
 
     Requires:
         - status_code is the HTTP status; payload is the decoded body (or falsy)
 
     Ensures:
-        - False unless the status is 200 (unchanged)
-        - False when the body reports one of ROUTE_ERROR_REASONS — the server answered,
-          and what it said was that the work failed
-        - True otherwise, INCLUDING a body with no route_reason at all: absence of a
-          reported error is not evidence of one, and this predicate must not invent
-          failures v1 would not have counted either
+        - False unless the status is 200 and the payload is a dict (unchanged for dict bodies)
+        - False when the body reports one of ROUTE_ERROR_REASONS: the server answered, and what it said was
+          that the work failed
+        - True otherwise, including a body with no route_reason at all. Absence of a reported error is not
+          evidence of one, and this predicate must not invent failures v1 would not have counted either
     """
     if status_code != 200: return False
     if not isinstance( payload, dict ): return False
@@ -234,11 +216,12 @@ _WEATHER_PAIRS   = (
 
 
 class EvalIntegrityError( RuntimeError ):
-    """Raised when a run's own integrity properties fail — a lying run, not a low score.
+    """
+    Raised when a run's own integrity properties fail: a lying run, not a low score.
 
-    A metric harness that reports over responses whose traces never landed, or over a
-    run where the router was dead, is worse than useless: it manufactures a confident
-    green. This is raised loudly so such a run stops instead of publishing a number.
+    A harness that reports over responses whose traces never landed is worse than useless. So is one that
+    reports over a run with a dead router: each manufactures a confident green. This is raised loudly so such a
+    run stops instead of publishing a number.
     """
 
 
@@ -273,7 +256,7 @@ def load_corpus(
 
     Requires:
         - name is a registered corpus ("simple" or "weather").
-        - limit, when given, is a positive integer bounding utterances PER command.
+        - limit, when given, is a positive integer bounding utterances per command.
 
     Ensures:
         - "weather" returns the two-utterance argument-chain pairs.
@@ -334,14 +317,11 @@ def stratified_sample(
     seed          : int,
 ) -> Tuple[ List[ Tuple[ str, str ] ], Dict[ str, Any ] ]:
     """
-    A seeded, per-command random sample of the corpus (the paired-harness sampler).
+    Draw a seeded, per-command random sample of the corpus (the paired-harness sampler).
 
-    Unlike `_apply_limit` (first-N per command — order-dependent, no randomness), this
-    draws a REPRODUCIBLE random sample of `n_per_command` utterances per command so the
-    biggest command cannot dominate a "system-wide" number and the smallest ones are not
-    starved (plan §5, §1.4a). The sample is a pure function of (utterance set, n, seed):
-    each command's utterances are sorted before sampling, so the source file's line order
-    does not change which utterances are chosen.
+    Unlike `_apply_limit`, which takes the first N per command, this draw is random but reproducible.
+    The biggest command cannot dominate a system-wide number, and the smallest are not starved.
+    The sample depends only on the utterance set, n and seed, because each command's utterances are sorted first.
 
     Requires:
         - pairs is a non-empty list of (utterance, expected_command).
@@ -351,9 +331,9 @@ def stratified_sample(
     Ensures:
         - each command contributes min( n_per_command, available ) utterances, chosen with
           a `random.Random( seed )` draw over that command's sorted utterance set.
-        - commands appear in first-appearance order; a command with fewer than
-          n_per_command utterances contributes all of them and is listed in
-          manifest["under_quota"] so the report names what fell short (never a silent cap).
+        - commands appear in first-appearance order. A command with fewer than n_per_command utterances
+          contributes all of them and is listed in manifest["under_quota"]. The report therefore names what
+          fell short, never a silent cap.
         - returns ( sampled_pairs, manifest ); manifest carries seed, n_per_command,
           per-command {kept, available}, the under_quota command list, and total_kept.
 
@@ -403,14 +383,14 @@ def stratified_sample(
 # single edit rather than a scatter of `.get()` calls across the metrics.
 # ---------------------------------------------------------------------------
 def response_path( record: Dict[ str, Any ] ) -> Optional[ str ]:
-    """The §8 `path` for a record, or None when the request did not return 200."""
+    """The `path` field of a record's response, or None when the record is not ok."""
     if not record[ "ok" ]:
         return None
     return record[ "payload" ].get( "path" )
 
 
 def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
-    """The §8 `route_reason` for a record, or None when the request did not return 200."""
+    """The `route_reason` field of a record's response, or None when the record is not ok."""
     if not record[ "ok" ]:
         return None
     return record[ "payload" ].get( "route_reason" )
@@ -418,28 +398,11 @@ def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
 
 def is_receptionist_degrade( record: Dict[ str, Any ] ) -> bool:
     """
-    Did this request reach the receptionist BECAUSE NOTHING COULD SERVE IT?
+    Say whether a request reached the receptionist because nothing could serve it.
 
-    Row c242166d. The distinction a report has to make before it counts a receptionist
-    outcome against anything: a deliberate pick is the system working, and a degrade is the
-    system failing to route. Both carry path="receptionist", so `path` alone cannot answer
-    it and any metric keyed on `path` alone scores the first as the second.
-
-    ⚠️ WHAT "PICKED" MEANS DIFFERS BY DOOR, and the harness inherits that as-is. On
-    /submit the caller names the command, so a pick is literal. On /ask the command is the
-    ROUTER's output, so the marker means "the router classified this utterance as asking
-    for the receptionist" — a model prediction, not a click. That is still a positive
-    choice rather than an else-branch: the router's command list carries an explicit `none`
-    for "I cannot place this" and `none` resolves to unknown_command, so a low-confidence
-    router lands there instead. A MISclassification will therefore carry the pick marker.
-    That is a wrong routing decision, not a wrong label for the decision that was made, and
-    this predicate does not try to second-guess it.
-
-    ⚠️ NOT MEASURED, and stated rather than left implied: how often the router actually
-    emits the receptionist in real traffic is unknown. Trained-for is not observed-in-
-    traffic. It does not change this predicate — a positive detection reported as a failure
-    is wrong at any frequency — but nobody should read this function's existence as
-    evidence the case is common.
+    A deliberate pick is the system working, and a degrade is the system failing to route. Both carry
+    path "receptionist", so `path` alone cannot tell them apart. A metric keyed on `path` alone scores the
+    first as the second.
 
     Requires:
         - record is a harness record with "ok" and "payload"
@@ -447,11 +410,22 @@ def is_receptionist_degrade( record: Dict[ str, Any ] ) -> bool:
     Ensures:
         - False for any record that did not complete OK (there is no reported path to read)
         - False for any path other than the receptionist
-        - False when the receptionist was ASKED FOR (route_reason "user_picked_receptionist")
-        - True when the receptionist was reached any other way, INCLUDING a body carrying no
-          route_reason at all: before the ced053a1 marker existed every degrade looked like
-          that, so treating a missing marker as a pick would silently un-count the very
-          failures this predicate is for
+        - False when the receptionist was asked for (route_reason "user_picked_receptionist")
+        - True when the receptionist was reached any other way, including a body carrying no route_reason at
+          all. Before the pick marker existed every degrade looked like that, so treating a missing marker
+          as a pick would silently un-count the very failures this predicate is for
+
+    Notes:
+        - What "picked" means differs by door. On /submit the caller names the command, so a pick is literal.
+          On /ask the command is the router's output, so the marker means the router classified the
+          utterance as asking for the receptionist. That is a model prediction, not a click.
+        - It is still a positive choice, not an else-branch. The router's command list carries an explicit
+          `none` for "I cannot place this", and `none` resolves to unknown_command, so a low-confidence router
+          lands there. A misclassification therefore carries the pick marker. That is a wrong routing
+          decision, not a wrong label for the decision made, and this predicate does not second-guess it.
+        - Not measured: how often the router emits the receptionist in real traffic. Trained-for is not
+          observed-in-traffic. A positive detection reported as a failure is wrong at any frequency, so this
+          does not change the predicate, but nobody should read its existence as evidence the case is common.
     """
     if response_path( record ) != PATH_RECEPTIONIST:
         return False
@@ -460,22 +434,21 @@ def is_receptionist_degrade( record: Dict[ str, Any ] ) -> bool:
 
 def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """
-    The `route_reason` a 200 CARRIES, whether or not the work completed.
+    Return the `route_reason` a 200 response carries, whether or not the work completed.
 
-    🔴 THE SECOND LAYER OF THE STRUCTURAL ZERO (row d8d019f6, 2026-08-20). Moving the error
-    rates onto an `answered` denominator was not enough, because response_route_reason
-    GATES ON `ok` and returns None for exactly the records that carry an error. Once
-    is_completed_ok made `ok` mean "the work completed", the accessor stopped being able to
-    read the errored records at all — so the rates still came out 0.0 with a correct
-    denominator. The instrument refused to look at its own evidence at two independent
-    layers, and either one alone was enough to silence it.
-
-    response_route_reason keeps its ok-gated meaning for the cache/candidate views, which
-    legitimately describe completed work only. This is its peer for the error views.
+    Peer of response_route_reason, which keeps its ok-gated meaning for the cache and candidate views because
+    they describe completed work only. This one serves the error views.
 
     Ensures:
         - returns the body's route_reason for any request that returned 200, errored or not
         - returns None for a non-200 (no body was answered) or an unparseable payload
+
+    Notes:
+        - response_route_reason gates on `ok` and returns None for just the records that carry an error.
+          Once is_completed_ok made `ok` mean the work completed, an accessor behind that gate could not read
+          the errored records at all. The error rates still came out 0.0 with a correct denominator. The
+          instrument refused to read its own evidence at two independent layers, the denominator and this
+          accessor, and either one alone was enough to silence it.
     """
     if record.get( "status_code" ) != 200:
         return None
@@ -485,12 +458,11 @@ def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
 
 def response_status( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """
-    The §8 `status` a 200 CARRIES — the field that says whether the work finished.
+    Return the `status` a 200 response carries, the field that says whether the work finished.
 
-    Peer of reported_route_reason: gated on the HTTP status rather than on `ok`, so it
-    can be read for any answered request. Returns None for a non-200 or an unparseable
-    body — in both cases nothing reported a status, and the caller must not read that
-    silence as a terminal outcome.
+    Peer of reported_route_reason: gated on the HTTP status rather than on `ok`, so it can be read for any
+    answered request. Returns None for a non-200 or an unparseable body. Nothing reported a status in
+    either case, and the caller must not read that silence as a terminal outcome.
     """
     if record.get( "status_code" ) != 200:
         return None
@@ -500,26 +472,11 @@ def response_status( record: Dict[ str, Any ] ) -> Optional[ str ]:
 
 def is_outcome_observed( record: Dict[ str, Any ] ) -> bool:
     """
-    Did this response report an outcome the cache metrics can actually READ?
+    Say whether a response reported an outcome the cache metrics can read.
 
-    🔴 WHY (row 2ec6ad9c, 2026-08-25). On the async agent path the server enqueues and
-    answers status="waiting" with similarity None and wrote_snapshot False. Those fields
-    are the entire evidence base for cache_hit_rate, cache_candidate_rate and the §6a
-    table, and on a waiting response they are ABSENT rather than negative. Counting such
-    a record in a cache denominator turns a blind instrument into a confident zero: the
-    warm pass of eval-2026-08-25-16-53-36 reported cache_hit_rate 0.0 over a denominator
-    of 80, of which 79 had not answered. What separates that run from the 2026-08-21 one
-    — same corpus, same harness, cache-hit 0.4586 with replay firing 83 times — is
-    readable in the records themselves: 291 of the 08-21 responses carried status "done"
-    and 158 carried a similarity, while all 200 of the 08-25 responses carry "waiting"
-    and not one carries a similarity.
-
-    This predicate is DELIBERATELY separate from is_completed_ok. A waiting response is
-    still a completed *request* — the server answered and reported no error — so `ok`
-    must not move: routing accuracy, the four error rates and both latency instruments
-    all read denominators built from it, and flipping `waiting` to not-ok would shrink
-    every one of them silently. Only the cache family, whose evidence is genuinely
-    missing, narrows onto this predicate.
+    On the async agent path the server enqueues and answers status "waiting", with similarity None and wrote_snapshot False.
+    Those fields are the whole evidence for the cache rates and threshold table, and on a waiting response they are absent, not negative.
+    Counting such a record in a cache denominator turns a blind instrument into a confident zero.
 
     Requires:
         - record is a harness record with "status_code" and "payload"
@@ -527,9 +484,20 @@ def is_outcome_observed( record: Dict[ str, Any ] ) -> bool:
     Ensures:
         - False for any request that did not return 200 (nothing reported an outcome)
         - False for an unparseable payload, for the same reason
-        - False for a status in DEFERRED_STATUSES — the answer lands later
-        - True otherwise, INCLUDING a body carrying no status field at all: absence of
-          the field is a pre-contract record, not evidence the work was left running
+        - False for a status in DEFERRED_STATUSES: the answer lands later
+        - True otherwise, including a body carrying no status field at all. Absence of the field is a
+          pre-contract record, not evidence the work was left running
+
+    Notes:
+        - Measured: a warm pass reported cache_hit_rate 0.0 over a denominator of 80, of which 79 had not
+          answered. An earlier synchronous run of the same corpus and harness measured 0.4586, with replay
+          firing 83 times. In that run 291 responses carried status "done" and 158 carried a similarity.
+          In the blind run all 200 responses carried "waiting" and none carried a similarity.
+        - This predicate is kept separate from is_completed_ok. A waiting response is still a
+          completed request, since the server answered and reported no error, so `ok` must not move.
+          Routing accuracy and both latency instruments read denominators built from `ok`, and flipping
+          waiting to not-ok would shrink every one of them silently. Only the cache family and the four
+          error rates, whose evidence is missing on such a row, narrow onto this predicate.
     """
     status = response_status( record )
     if status is None:
@@ -538,7 +506,7 @@ def is_outcome_observed( record: Dict[ str, Any ] ) -> bool:
 
 
 def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
-    """The §8 `similarity` (best score) for a record, or None when absent/failed."""
+    """The `similarity` (best score) of a record's response, or None when absent or not ok."""
     if not record[ "ok" ]:
         return None
     value = record[ "payload" ].get( "similarity" )
@@ -547,20 +515,16 @@ def response_similarity( record: Dict[ str, Any ] ) -> Optional[ float ]:
 
 def _crud_agents_enabled() -> bool:
     """
-    The live value of `crud for dataframes agents enabled` (lupin-app.ini:1915).
+    The live value of the `crud for dataframes agents enabled` INI key, defaulting to True.
 
-    Read, not asserted. The reader used to pass crud_enabled=True into resolve(),
-    which is the CONFIGURED value today and not the same statement — with the flag
-    off, calendar and todo do not fork, they ARE snapshotable, and excluding them
-    would drop real cache misses out of the denominator and report a rate that
-    flatters the cache.
+    Read, not asserted. The reader used to pass crud_enabled=True into resolve(). That is the configured value
+    today, not the same statement. With the flag off, calendar and todo do not fork, they are snapshotable.
+    Excluding them would then drop real cache misses out of the denominator and report a rate that flatters the cache.
 
-    Same key and same missing-means-enabled default the v1 queue uses
-    (todo_fifo_queue._crud_agents_enabled) and the flow's construction site reads,
-    so all three surfaces cannot disagree about which agents ran.
-
-    A missing or unreadable config answers True, matching that default rather than
-    inventing a quieter one.
+    It uses the same key and the same missing-means-enabled default as the v1 queue
+    (todo_fifo_queue._crud_agents_enabled) and the flow's construction site. All three surfaces therefore
+    cannot disagree about which agents ran. A missing or unreadable config answers True, matching that default rather
+    than inventing a quieter one.
     """
     try:
         from cosa.config.configuration_manager import ConfigurationManager
@@ -574,18 +538,17 @@ def _crud_agents_enabled() -> bool:
 
 def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ bool ]=None ) -> bool:
     """
-    Could a request that routed to `command` ever have been a cache hit?
+    Say whether a request that routed to `command` could ever have been a cache hit.
 
-    Asks the registry, not a hand-list: a command whose spec says snapshotable=False
-    is never written back, so it can never replay. With the CRUD flag ON that is the
-    forked calendar and todo pair plus weather; with it OFF it is weather alone.
+    It asks the registry, not a hand-written list: a command whose spec says snapshotable=False is never
+    written back, so it can never replay. With the CRUD flag on that is the forked calendar and todo pair
+    plus weather; with it off it is weather alone.
 
-    An unknown or non-conversational command answers True — it is not excluded by
-    THIS rule, and silently dropping it here would hide it from the denominator for
-    a reason that has nothing to do with caching.
+    An unknown or non-conversational command answers True. This rule does not exclude it.
+    Dropping it silently here would hide it from the denominator for a reason that has nothing to do with caching.
 
-    crud_enabled is read from config when not supplied; the parameter exists so a
-    test can state the flag instead of depending on the machine's INI.
+    crud_enabled is read from config when not supplied. The parameter exists so a test can state the flag
+    instead of depending on the machine's INI.
     """
     if command is None:
         return True
@@ -599,11 +562,10 @@ def _is_cacheable_command( command: Optional[ str ], crud_enabled: Optional[ boo
 
 def matched_command( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """
-    The command attributed to a replayed snapshot (the §8 `command` on a replay).
+    Return the command attributed to a replayed snapshot (the response `command` on a replay).
 
-    Seam for the R-C2 would-be-wrong oracle. On the replay path no router runs, so
-    `command` reports the matched snapshot's routing command; if Unit D surfaces it
-    under a different field, this is the one line to change.
+    Seam for the would-be-wrong oracle. On the replay path no router runs, so `command` reports the matched
+    snapshot's routing command. If the server reports it under a different field, this is the one line to change.
     """
     if not record[ "ok" ]:
         return None
@@ -620,7 +582,7 @@ def first_useful_ms( record: Dict[ str, Any ] ) -> Optional[ float ]:
 
 
 def response_trace_id( record: Dict[ str, Any ] ) -> Optional[ str ]:
-    """The §8 `trace_id` for a record, or None when the request did not return 200."""
+    """The `trace_id` of a record's response, or None when the record is not ok."""
     if not record[ "ok" ]:
         return None
     return record[ "payload" ].get( "trace_id" )
@@ -679,59 +641,45 @@ def route_matches( actual: Optional[ str ], expected: str ) -> bool:
 def compute_metrics( records: List[ Dict[ str, Any ] ],
                      mappable_commands: Optional[ Sequence[ str ] ] = None ) -> Dict[ str, Any ]:
     """
-    The full metric set for one pass over the corpus.
+    Compute the full metric set for one pass over the corpus.
 
     Requires:
-        - records is a list of per-request dicts, each {utterance, expected_command,
-          ok, status_code, payload}.
-        - mappable_commands is the set of routing commands the arms CAN score — the
-          same set v1_eval_arm.compute_v1_metrics excludes on. None means no
-          restriction (every utterance eligible), which is the pre-2026-08-20
-          behaviour and is retained only for callers that do not score routing.
+        - records is a list of per-request dicts, each {utterance, expected_command, ok, status_code, payload}.
+        - mappable_commands is the set of routing commands the arms can score, the same set v1_eval_arm.compute_v1_metrics
+          excludes on. None means no restriction (every utterance eligible) and is kept only for callers that do not score routing.
 
     Ensures:
-        - returns a dict of counts, rates (None when the denominator is 0), latency
-          percentiles, routing accuracy, the would-be-wrong count, and by_path counts.
-        - a rate's denominator is the count of completed requests, so a failed
-          call can never inflate a numerator. TWO families narrow further, and each
-          says so below rather than leaving a reader to infer it from the call site.
-        - the CACHE family (cache_hit_rate, cache_candidate_rate) is scored over the
-          OBSERVED completed requests only, and publishes cache_measurable /
-          cache_observed_n / cache_unobserved_n so a run that could not see the cache
-          is distinguishable from one that measured a miss.
-        - the ERROR family (replay_failure_rate, router_error_rate, extract_error_rate,
-          agent_error_rate) is scored over the OBSERVED answered requests — NOT over
-          n_answered, which is still published beside it — and publishes
-          errors_measurable / errors_observed_n / errors_unobserved_n for the same
-          reason. The evidence these four read is the TERMINAL OUTCOME, and a row that
-          has not resolved carries none, so including it makes the numerator
-          structurally 0 and prints a confident zero from a blind instrument.
-          ⚠️ THE PARTIAL CASE IS THE ONE THAT MATTERS: on a pass with SOME rows
-          resolved, the rate is over those rows alone, so one observed replay_error
-          among 99 waiting rows is 1.0 — not 0.01. The cell carries the denominator
-          ("1.0 (n=1)") so a rate resting on a sliver cannot read as a verdict on the
-          pass. On a fully-observed pass errors_observed_n == n_answered and every
-          rate is bit-identical to the pre-2026-08-25 behaviour.
-        - NO OTHER METRIC MOVES ONTO `observed`. routing_accuracy, both latency
-          instruments, n_ok, n_incomplete and n_answered all keep their prior
-          denominators — see test_waiting_does_not_move_any_other_denominator.
-        - routing_accuracy is scored over ELIGIBLE ok records only, and the exclusion
-          is published as routing_eligible_n / routing_excluded_n /
-          routing_excluded_share so it is auditable rather than silent.
-        - a row whose terminal wait TIMED OUT (`wait_timed_out`, set by
-          terminal_waiting_ask) is published as `waits_timed_out_n` and is kept OUT of
-          both client-span sets. It keeps its enqueue span in the raw record, so leaving
-          it in the span sets would feed an enqueue span to the paired gate — the exact
-          bias row a2e360f8 removed. It stays inside cache_unobserved_n /
-          errors_unobserved_n: the count SPLITS the unobserved rows, it does not shrink
-          them.
+        - returns a dict of counts, rates (None when the denominator is 0), latency percentiles, routing
+          accuracy, the would-be-wrong count, and by_path counts.
+        - a rate's denominator is the count of completed requests, so a failed call can never inflate a
+          numerator. Two families narrow further, and each says so below rather than leaving a reader to infer it from the call site.
+        - the cache family (cache_hit_rate, cache_candidate_rate) is scored over the observed completed
+          requests only, and cache_hit_rate over the cacheable ones among them. It publishes cache_measurable,
+          cache_observed_n and cache_unobserved_n, so a run that could not see the cache is distinguishable
+          from one that measured a miss.
+        - the error family (replay_failure_rate, router_error_rate, extract_error_rate, agent_error_rate) is
+          scored over the observed answered requests, not over n_answered, which is still published beside it.
+          It publishes errors_measurable, errors_observed_n and errors_unobserved_n for the same reason. These
+          four read the terminal outcome, and an unresolved row carries none, so including it makes the
+          numerator structurally 0 and prints a confident zero from a blind instrument. The partial case is
+          the one that matters: when only some rows resolved, the rate is over those rows alone, so one
+          observed replay_error among 99 waiting rows is 1.0, not 0.01. The cell carries the denominator
+          ("1.0 (n=1)"), so a rate resting on a sliver cannot read as a verdict on the pass. On a fully
+          observed pass errors_observed_n == n_answered and every rate matches the earlier behaviour.
+        - no other metric moves onto `observed`. routing_accuracy, both latency instruments, n_ok, n_incomplete and
+          n_answered all keep their prior denominators (see test_waiting_does_not_move_any_other_denominator).
+        - routing_accuracy is scored over eligible ok records only, and the exclusion is published as routing_eligible_n,
+          routing_excluded_n and routing_excluded_share so it is auditable rather than silent.
+        - a row whose terminal wait timed out (`wait_timed_out`, set by terminal_waiting_ask) is published as
+          `waits_timed_out_n` and kept out of both client-span sets. It keeps its enqueue span in the raw
+          record, so leaving it in would feed an enqueue span to the paired gate. It stays inside
+          cache_unobserved_n and errors_unobserved_n: the count splits the unobserved rows, it does not
+          shrink them.
 
-    🔴 WHY mappable_commands EXISTS (row d8d019f6, 2026-08-20). v1_eval_arm.py:440 says
-    in as many words "The v2 arm must exclude the SAME utterances", and this module had
-    ZERO occurrences of the word "eligible". v1 excluded 40% of the corpus from its
-    routing denominator as unmappable; v2 excluded nothing and scored those same
-    utterances as routing misses. The two routing-accuracy numbers were then printed
-    side by side as though they answered one question.
+    Notes:
+        - mappable_commands exists because the v2 arm must exclude the same utterances as v1, and this module
+          once excluded none. v1 dropped 40% of the corpus from its routing denominator as unmappable, while
+          v2 scored those utterances as routing misses.
     """
     n        = len( records )
     ok       = [ r for r in records if r[ "ok" ] ]
@@ -951,26 +899,26 @@ def threshold_table(
     floors  : Sequence[ float ] = THRESHOLD_FLOORS,
 ) -> List[ Dict[ str, Any ] ]:
     """
-    The §6a cache-hit-rate-vs-threshold table, computed post-hoc from recorded scores.
+    Build the cache-hit-rate-vs-threshold table, computed after the fact from recorded scores.
 
     Requires:
-        - records carry each request's best similarity (or None) via the §8 payload.
+        - records carry each request's best similarity (or None) via the response payload.
 
     Ensures:
-        - returns one row per floor: {floor, hit_rate, hits, would_be_wrong, measurable},
-          where hit_rate is the fraction of OBSERVED requests whose best similarity is
-          at or above the floor, and would_be_wrong counts those whose matched command
-          differs from the expected command (the R-C2 lower-bound oracle).
-        - `measurable` is False when NO request reported a terminal outcome, and ALSO
-          when the observed requests carried no similarity at all — in both cases every
-          floor reads 0.0 by construction rather than by measurement.
+        - returns one row per floor: {floor, hit_rate, hits, would_be_wrong, measurable}, where hit_rate is
+          the fraction of observed requests whose best similarity is at or above the floor, and
+          would_be_wrong counts those whose matched command differs from the expected command (the
+          lower-bound oracle).
+        - `measurable` is False when no request reported a terminal outcome, and also when the observed
+          requests carried no similarity at all. In both cases every floor reads 0.0 because there is no
+          score to sweep rather than because of a measurement.
         - hit_rate is None when there were no observed requests to divide by.
 
-    🔴 THIS TABLE IS THE SHARPEST FALSE-CLEAN IN THE REPORT (row 2ec6ad9c, 2026-08-25).
-    Scored over `ok` it printed 0.0 at all four floors on a pass where not one response
-    had answered — four rows that read as a decisive threshold finding and were a
-    measurement of nothing. The denominator is the OBSERVED rows for the same reason
-    compute_metrics narrows the cache family onto them.
+    Notes:
+        - This table is the sharpest false-clean in the report. Scored over `ok`, it printed 0.0 at all four
+          floors on a pass where not one response had answered: four rows that read as a decisive threshold
+          finding and measured nothing. The denominator is the observed rows, for the same reason
+          compute_metrics narrows the cache family onto them.
     """
     ok         = [ r for r in records if r[ "ok" ] ]
     observed   = [ r for r in ok if is_outcome_observed( r ) ]
@@ -1055,11 +1003,11 @@ def guard_run_integrity(
           the day's authoritative trace file; 0 <= max_router_error_rate <= 1.
 
     Ensures:
-        - returns None when ALL THREE properties hold:
-            (1) http-all-ok      — no record failed to return 200;
-            (2) trace-parity     — every 200 record's trace_id is in jsonl_trace_ids;
-            (3) router-liveness  — router_error_rate <= max_router_error_rate.
-        - raises EvalIntegrityError naming EVERY violated property otherwise.
+        - returns None when all three properties hold:
+            (1) http-all-ok      - no record failed to return 200;
+            (2) trace-parity     - every 200 record's trace_id is in jsonl_trace_ids;
+            (3) router-liveness  - router_error_rate <= max_router_error_rate.
+        - raises EvalIntegrityError naming every violated property otherwise.
 
     Raises:
         - EvalIntegrityError when any property fails.
@@ -1098,19 +1046,18 @@ def guard_run_integrity(
 
 def guard_cold_start( cold_metrics: Dict[ str, Any ] ) -> None:
     """
-    Raise EvalIntegrityError when the COLD pass was not actually cold (F3).
+    Raise EvalIntegrityError when the cold pass was not actually cold.
 
-    The review's F3: `guard_run_integrity` runs on the WARM pass only, so a store
-    pre-warmed by a prior run — or by the other arm — makes the "cold" pass read
-    cache hits, understating cold latency and contaminating the cold→warm delta.
-    A cold pass with any cache hit is a contaminated baseline reported as clean.
+    `guard_run_integrity` runs on the warm pass only. A store pre-warmed by a prior run, or by the other arm,
+    makes the cold pass read cache hits. That understates cold latency and contaminates the cold to warm
+    delta. A cold pass with any cache hit is a contaminated baseline reported as clean.
 
     Requires:
         - cold_metrics is the compute_metrics dict for the cold pass.
 
     Ensures:
-        - returns None when cold cache_hit_rate is None (no 200s) or 0.0 (truly cold).
-        - raises EvalIntegrityError when cold cache_hit_rate > 0 — a pre-warmed store.
+        - returns None when cold cache_hit_rate is None (no cacheable request was observed) or 0.0 (truly cold).
+        - raises EvalIntegrityError when cold cache_hit_rate > 0, which means a pre-warmed store.
 
     Raises:
         - EvalIntegrityError on a warm cold pass.
@@ -1147,31 +1094,27 @@ def read_jsonl_trace_ids( trace_path: str ) -> List[ str ]:
 
 def neighbouring_trace_paths( trace_path: str ) -> List[ str ]:
     """
-    The trace file named, plus the day either side of it.
+    Return the named trace file plus the files for the day before and the day after.
 
-    🔴 WHY (row d8d019f6, 2026-08-20). The 3-hour run `ts-23613e7d` died at the verdict
-    step with "trace-parity: 100 of 100 traces are absent from the authoritative JSONL",
-    and the traces were not absent — they were in the NEXT DAY'S FILE. Two causes, either
-    one fatal on its own:
-
-      1. TWO CLOCKS. The writer (cosa/rest/v2/trace.py:161) names the file from
-         `datetime.now()`, which inside the container is UTC. The reader named it from
-         `du.get_current_datetime_raw()`, which is US/Eastern. Every run started after
-         8 PM EDT therefore read a file the writer was not writing — a guaranteed
-         100%-missing verdict, every night, forever.
-      2. MIDNIGHT. Even on one clock, a multi-hour run that crosses the writer's midnight
-         has its traces split across two files, so reading any single day is short.
-
-    Reading the neighbours removes both. A trace id is a 32-hex random, so widening the
-    haystack cannot manufacture a false match; it can only stop inventing false misses.
+    A trace id is a random 32-character hex, so widening the search cannot create a false match. It can only
+    stop false misses.
 
     Requires:
         - trace_path ends in "trace-YYYY-MM-DD.jsonl"
 
     Ensures:
-        - returns [ path ] unchanged when the name does not carry a parseable date —
-          a rename must degrade to the old single-file behaviour, never crash a run
+        - returns [ path ] unchanged when the name does not carry a parseable date, because a rename must degrade to
+          the old single-file behaviour and never crash a run
         - otherwise returns the previous day, the named day, and the next day, in order
+
+    Notes:
+        - A single-day read once reported every trace absent from the authoritative JSONL, although the traces
+          were in the next day's file. Either cause alone was fatal.
+        - Two clocks: the writer (cosa/rest/v2/trace.py) names the file from `datetime.now()`, which is UTC
+          inside the container. The reader named it from `du.get_current_datetime_raw()`, which is Eastern
+          time. Every run started after 20:00 EDT therefore read a file the writer was not writing.
+        - Midnight: even on one clock, a multi-hour run that crosses the writer's midnight has its traces
+          split across two files, so reading any single day is short.
     """
     directory = os.path.dirname( trace_path )
     name      = os.path.basename( trace_path )
@@ -1218,41 +1161,39 @@ SYNONYM_TABLE = "canonical_synonyms"   # tier-1 lookup table — the other half 
 
 def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
     """
-    Empty v2's snapshot table so the cold pass starts genuinely cold — TWO guards fire first.
+    Truncate v2's snapshot and synonym tables so the cold pass starts from an empty store.
 
-    Ordering is the safety property. Both guards run and can RAISE before connection.execute is
-    ever reached, so a wrong config or a wrong db never reaches a TRUNCATE:
-      1. CONFIG cross-check (require_config_table_matches_write_target) — the declared
-         `v2 snapshot table` equals the ORM write target; the TRUNCATE identifier is then the
-         RESOLVED __tablename__ it returns, never the raw config string (no injection surface).
-      2. DB assertion (assert_measurement_db) — the connection's OWN db (read off
-         connection.engine.url, never a decoupled arg) is a measurement db, never dev/prod.
+    Ordering is the safety property. Both guards run and can raise before connection.execute is ever
+    reached, so a wrong config or a wrong db never reaches a `TRUNCATE`.
 
     Requires:
-        - connection is the live DB connection the TRUNCATE will run on; it exposes
-          `.engine.url` and `.execute( sql )`. Under decision B its db is v2's own measurement
-          db (lupin_db_test), which assert_measurement_db verifies.
+        - connection is the live DB connection the `TRUNCATE` will run on; it exposes `.engine.url` and
+          `.execute( sql )`. Its db is v2's own measurement db (lupin_db_test), which assert_measurement_db
+          verifies.
         - config_mgr exposes .get( key, default, return_type ).
 
     Ensures:
-        - runs the config cross-check FIRST (raises ConfigTableMismatch on drift), then the db
-          assertion (raises NotAMeasurementDatabase on a wrong db) — connection.execute is
-          NEVER called if either raises.
-        - on a measurement db with a matching config, TRUNCATEs the ORM write target (the value
-          the cross-check returned) **together with the tier-1 synonym table** in one statement,
-          and returns the snapshot table's name.
-
-    🔴 WHY THE SYNONYM TABLE GOES TOO (row d8d019f6, 2026-08-20). Emptying snapshots alone
-    leaves every synonym from every prior run pointing at a row that is gone. Tier 1 matches
-    one of those ghosts by verbatim text, dereferences it to nothing and reports a MISS, so
-    the cache cannot hit however well replay works. Measured on lupin_db_test after
-    ts-23613e7d: 124 snapshots against 1,021 v2-written synonyms, 897 dangling, and every
-    synonym matching a live question resolving to a ghost — v2 was graded at a 0% hit rate
-    with a 65% candidate rate. The two tables are one cache.
+        - runs the config cross-check first (raises ConfigTableMismatch on drift), then the db assertion
+          (raises NotAMeasurementDatabase on a wrong db). connection.execute is never called if either raises.
+        - on a measurement db with a matching config, runs `TRUNCATE` on the ORM write target (the value the
+          cross-check returned) together with the tier-1 synonym table in one statement, and returns the
+          snapshot table's name.
 
     Raises:
         - ConfigTableMismatch when the declared table does not equal the ORM write target.
         - NotAMeasurementDatabase when the connection's db is not a measurement db.
+
+    Notes:
+        - The config cross-check is require_config_table_matches_write_target: the declared `v2 snapshot
+          table` equals the ORM write target. The truncated identifier is the resolved __tablename__ it
+          returns, never the raw config string, so there is no injection surface.
+        - The db assertion is assert_measurement_db: the connection's own db, read off connection.engine.url
+          and never from a decoupled argument, is a measurement db, never dev or prod.
+        - The synonym table goes too because emptying snapshots alone leaves every synonym from every prior
+          run pointing at a row that is gone. Tier 1 matches one of those ghosts by verbatim text,
+          dereferences it to nothing and reports a miss, so the cache cannot hit however well replay works.
+          Measured once on lupin_db_test: 124 snapshots against 1,021 v2-written synonyms, 897 dangling, so v2
+          was graded at a 0% hit rate with a 65% candidate rate. The two tables are one cache.
     """
     from sqlalchemy import text   # SQLAlchemy 2.x rejects a raw string here — statements must be executable
 
@@ -1269,10 +1210,11 @@ def clean_v2_snapshot_store( connection: Any, config_mgr: Any ) -> str:
 # the whole flow is exercisable without a live server (and covered).
 # ---------------------------------------------------------------------------
 class HttpAskClient:
-    """A `POST /api/v2/ask` client for the scheduled :8000 run (§8 contract).
+    """
+    A `POST /api/v2/ask` client for the scheduled :8000 run (the ask endpoint contract).
 
     Requires:
-        - base_url points at a server answering the §8 endpoint contract.
+        - base_url points at a server answering the ask endpoint contract.
         - post_fn(url, json, headers, timeout) returns an object with .status_code
           and .json(); it defaults to requests.post at call time.
         - bearer is a JWT for get_current_user (from /auth/login; mock tokens are
@@ -1312,16 +1254,13 @@ class HttpAskClient:
         """
         Record one attempt-lifecycle row, if a sink is wired.
 
-        WHY THIS EXISTS (María, row d8d019f6). The v2 flow trace writes a row only at
-        COMPLETION, so the one call you most need to see — the one that hung — is the only one
-        guaranteed to leave no evidence. 983 calls survived the last run and the single request
-        that blew the read wall left nothing, which is why the timeout is sized at 4x
-        worst-OBSERVED rather than to a known worst case. A row at START fixes that: a hang
-        leaves a dangling start with no matching end, and that dangling row names the utterance.
+        The v2 flow trace writes a row only at completion, so the call you most need to see, the one that hung, leaves no evidence.
+        The timeout is therefore sized at 4x the worst observed latency, not at a known worst case.
+        A row at start fixes that: a hang leaves a dangling start with no matching end, and that row names the utterance.
 
         Ensures:
-            - never raises. An instrument that can kill the run it is measuring is worse than
-              no instrument, so a sink failure is swallowed deliberately.
+            - never raises. An instrument that can kill the run it is measuring is worse than no instrument, so
+              a sink failure is swallowed.
         """
         if self.attempt_log_fn is None:
             return
@@ -1344,16 +1283,18 @@ class HttpAskClient:
         Ensures:
             - runs speak=false, interactive=false (the flow executes, TTS is skipped,
               nothing blocks).
-            - returns {utterance, ok, status_code, payload, client_span_ms}; ok is
-              (status_code == 200).
-            - client_span_ms is the CLIENT-SEND span (F1): monotonic clock from the
-              instant just before the POST to the instant the reply is in hand. It
-              encloses ALL of v2's server-side work (routing + extract + cache lookup +
-              replay), so it is the SAME kind of measurement the v1 arm takes around
-              /api/push — the one number the paired median-Δ gate may compare. It is a
-              proxy (it also carries network + serialization), NOT v2's precise
-              server-stamped first_useful; both are reported, and the report says which
-              is which.
+            - returns {utterance, ok, status_code, payload, client_span_ms}; ok is is_completed_ok( status_code,
+              payload ): status_code == 200 and the body reports no route error.
+            - client_span_ms is the client-send span: monotonic clock from the instant just before the POST to the
+              instant the reply is in hand. It encloses all of v2's server-side work (routing + extract + cache
+              lookup + replay), so it is the same kind of measurement the v1 arm takes around /api/push. It is the
+              one number the paired median-delta gate may compare. It is a proxy (it also carries network +
+              serialization), not v2's precise server-stamped first_useful. Both are reported, and the report says
+              which is which.
+
+        Notes:
+            - On a 401 with relogin_fn set, the call logs in again and retries once, resetting the stopwatch, so
+              client_span_ms times the successful retry only.
         """
         url     = self.base_url + "/api/v2/ask"
         headers = { "Authorization": f"Bearer {self.bearer}" }
@@ -1425,36 +1366,30 @@ CONTAINER_BASE_URL = "http://localhost:7999"    # the port the app actually LIST
 
 def resolve_base_url( explicit: Optional[ str ], in_container: bool ) -> str:
     """
-    Pick the base url this run should ask, given where the run is EXECUTING.
+    Pick the base url this run should ask, given where the run is executing.
 
-    🔴 THE SAME SERVER HAS TWO ADDRESSES AND ONLY ONE OF THEM WORKS FROM EACH SIDE.
-    `lupin-rest-test` LISTENS on 7999 inside the container and PUBLISHES that as 8000
-    on the host (`docker port` → `7999/tcp -> 0.0.0.0:8000`). So:
-
-        from the host       :8000 works, :7999 does not
-        inside the container :7999 works, :8000 raises OSError errno 99,
-                             "Cannot assign requested address"
-
-    The old default was the bare host address, which is correct for a hand-run and
-    WRONG for the venue this suite is registered to run in. The registered runner
-    executes INSIDE the container, so every submitted v2_eval run died at second one
-    on the sha read, before a single question was asked.
-
-    Measured 2026-08-28: two submitted runs failed in ~2.5s each with errno 99. The
-    suite has a registered runner, a timeout budget, and a scheduling window, and it
-    could not have completed through the only sanctioned door on any of them.
-
-    An EXPLICIT --base-url always wins — this only fills the blank.
+    The same server has two addresses and only one works from each side. `lupin-rest-test` listens on 7999
+    inside the container and the host publishes that port as 8000. An explicit --base-url always wins; this
+    only fills the blank.
 
     Requires:
         - explicit is the user's --base-url, or None when they did not pass one
         - in_container says whether this process is running inside the container
 
     Ensures:
-        - explicit given          → returned unchanged, wherever we are
-        - no explicit, container  → CONTAINER_BASE_URL
-        - no explicit, host       → HOST_BASE_URL
-        - Pure: no I/O, no environment reads; the caller detects and passes in_container
+        - explicit given: returned unchanged, wherever we are
+        - no explicit, container: CONTAINER_BASE_URL
+        - no explicit, host: HOST_BASE_URL
+        - pure: no I/O, no environment reads; the caller detects and passes in_container
+
+    Notes:
+        - From the host :8000 works and :7999 does not. Inside the container :7999 works, and :8000 raises
+          OSError errno 99, "Cannot assign requested address".
+        - The old default was the bare host address, correct for a hand run and wrong for the venue this suite
+          is registered to run in. The registered runner executes inside the container, so every submitted
+          run died at second one on the sha read, before a single question was asked.
+        - Measured: two submitted runs failed in about 2.5s each with errno 99, so the suite could not have
+          completed through the only sanctioned door.
     """
     if explicit is not None and explicit.strip() != "":
         return explicit
@@ -1462,26 +1397,29 @@ def resolve_base_url( explicit: Optional[ str ], in_container: bool ) -> str:
 
 
 def running_in_container() -> bool:   # pragma: no cover - filesystem boundary
-    """True when this process is inside the container. `/.dockerenv` is created by
-    the runtime at container build, is present in every lupin image, and needs no
-    environment cooperation from whoever launched us."""
+    """
+    True when this process runs inside a container (`/.dockerenv` exists).
+
+    The runtime creates that file at container build, and it is present in every lupin image.
+    It needs no environment cooperation from whoever launched the process.
+    """
     return os.path.exists( "/.dockerenv" )
 
 
 def read_running_server_sha( base_url: str ) -> str:   # pragma: no cover - live HTTP boundary
     """
-    Ask the RUNNING v2 server what sha it booted from, so this arm's numbers are auditable
-    back to the tree that produced them (row c9b43538).
+    Ask the running v2 server which git sha it booted from, so numbers trace to a tree.
 
-    Read from GET /api/code-identity, whose JSON body carries `git_sha` at the TOP LEVEL.
-    NOT /health — that returns only {status, timestamp}, so reading it yields "" against a
-    perfectly healthy server. The v1 arm's twin (v1_eval_arm.read_running_server_sha) carries
-    the long form of that warning; this is a deliberate duplicate rather than an import,
-    because v1_eval_arm imports v2_eval and reaching back would make the cycle.
+    Read from GET /api/code-identity, whose JSON body carries `git_sha` at the top level.
+    Reading /health instead yields "" against a healthy server, because it returns only status and timestamp.
 
     Ensures:
-        - returns the reported sha, or "" when the key is absent — "" is a REFUSAL upstream,
-          never a value that reaches a report.
+        - returns the reported sha, or "" when the key is absent. "" is a refusal upstream, never a value
+          that reaches a report.
+
+    Notes:
+        - The v1 arm's twin, v1_eval_arm.read_running_server_sha, carries the long form of the /health warning.
+          This copy is not an import: v1_eval_arm imports v2_eval, so importing back would make a cycle.
     """
     import json, urllib.request
     req  = urllib.request.Request( base_url.rstrip( "/" ) + "/api/code-identity" )
@@ -1498,19 +1436,10 @@ class EligibleCommandsUnavailable( RuntimeError ):
 
 def load_mappable_commands( path: Optional[ str ]=None ) -> List[ str ]:
     """
-    The routing commands both arms score on, read from the FROZEN checked-in list.
+    Read the routing commands both arms score on from the frozen checked-in list.
 
-    ⚠️ THIS USED TO IMPORT `load_v1_class_to_command` FROM `v1_eval_arm`, AND THAT WAS A BREAK
-    WAITING FOR THE DELETION (María's review, 2026-08-26). Two things made it worse than an
-    ordinary dangling import. It ran on EVERY v2 eval, not only paired ones — so the whole v1
-    excision would have changed v2's own numbers. And its failure path returned None, which
-    makes `compute_metrics` score routing over the FULL corpus rather than the eligible-only
-    set: a different denominator, a number that still prints, and the only notice a WARNING
-    line on stdout. Every figure after the deletion would have been quietly incomparable to
-    every figure before it.
-
-    The pin is a fixed sha, so reading the registry live was never buying freshness — only a
-    dependency. The list is now a constant, stamped with the sha it came from.
+    The list is a constant stamped with the sha it came from. The pin is a fixed sha, so reading the
+    registry live never bought freshness, only a dependency.
 
     Requires:
         - the frozen list exists at src/conf/v1-eligible-routing-commands.json, relative to
@@ -1518,13 +1447,20 @@ def load_mappable_commands( path: Optional[ str ]=None ) -> List[ str ]:
 
     Ensures:
         - returns the eligible routing commands, non-empty, in the file's order
-        - NEVER returns None and never falls back to an unrestricted denominator
+        - never returns None and never falls back to an unrestricted denominator
 
     Raises:
-        - EligibleCommandsUnavailable when the file is missing, unreadable, malformed, or
-          carries an empty list. ⚠️ FATAL ON PURPOSE (María's fix (b) on top of (a)): scoring
-          a wider corpus and printing a percentage is the exact failure this replaces, and a
-          run that cannot name its denominator has nothing to report.
+        - EligibleCommandsUnavailable when the file is missing, unreadable, malformed, or carries an empty
+          list. Failure here is fatal. Scoring a wider corpus and printing a percentage is the failure
+          this replaces, and a run that cannot name its denominator has nothing to report.
+
+    Notes:
+        - This used to call `load_v1_class_to_command` out of `v1_eval_arm`, a break waiting for the v1
+          deletion. It ran on every v2 eval, so the excision would have changed v2's own numbers.
+        - Its failure path returned None, which makes compute_metrics score routing over the full corpus
+          instead of the eligible-only set. That is a different denominator and a number that still prints,
+          with only a warning line on stdout. Every later figure would be quietly incomparable to every
+          earlier one.
     """
     resolved = path or os.path.join( du.get_project_root(), ELIGIBLE_COMMANDS_PATH )
     try:
@@ -1557,50 +1493,44 @@ V2_TERMINAL_STATES = frozenset( { "completed", "failed", "cancelled", "interrupt
 
 def terminal_waiting_ask( ask, ws_recv_events, clock=time.monotonic ):
     """
-    Wrap an `ask` so its record's `client_span_ms` ends at the OBSERVED COMPLETION.
+    Wrap an `ask` so its record's `client_span_ms` ends at the observed completion.
 
-    WHY THIS EXISTS (row a2e360f8, Mr Radio's v1_eval_arm.py:373 catch, 2026-08-25).
-    The two arms were not measuring the same thing:
-      - v1 (v1_eval_arm.py:373): send -> observed COMPLETION, via the queue WS terminal frame.
-      - v2 (HttpAskClient.ask):  send -> reply in hand, which under `v2 executor = queued`
-        is the ENQUEUE ACK.
-    The paired median-delta gate compared v1-at-completion against v2-at-enqueue, so every
-    millisecond of v2's deferred work landed in v1's column and none in v2's. The bias ran
-    one way, and it is the plan's PRIMARY criterion.
-
-    The v2 docstring asserting the two spans were equivalent was TRUE when written - under
-    `inline` the executor ran the work synchronously. 22c85b5b flipped the key in an INI
-    file, so nothing in this module changed and the claim was never re-read.
+    The paired median-delta gate compared v1 at observed completion against v2 at the enqueue ack, so all of
+    v2's deferred work landed in v1's column. The bias ran one way, on the plan's primary criterion.
 
     Requires:
         - ask(question) returns {utterance, ok, status_code, payload, client_span_ms}.
-        - ws_recv_events(job_id) BLOCKS until that job reaches a terminal to_state and
-          returns its frames; it RAISES on timeout (v1_eval_arm.WsJobEventListener).
+        - ws_recv_events(job_id) blocks until that job reaches a terminal to_state and returns its frames; it
+          raises on timeout (v1_eval_arm.WsJobEventListener).
         - clock() is a monotonic seconds source.
 
     Ensures:
-        - a reply that is NOT `waiting` is returned untouched - an inline-executor run, an
-          HTTP error and a synchronous reply all keep their original span, so this wrapper
-          is a no-op on every path it was not written for.
-        - a `waiting` reply carrying a job_id BLOCKS for the terminal frame, then returns
-          the record with `client_span_ms` re-measured send->terminal, `payload.status`
-          replaced by the terminal to_state, and `terminal_waited` True.
-        - a wait that TIMES OUT gets its OWN NAMED STATE and does NOT kill the pass
-          (Mr Radio's ruling, 2026-08-25 21:39). The record comes back with
-          `terminal_waited` False, `wait_timed_out` True, `wait_timeout_detail` carrying
-          the listener's own message, and `client_span_ms` LEFT AS THE ENQUEUE SPAN -
-          which compute_metrics then keeps out of the paired gate's span set, so it can
-          never read as a completion span.
-        - THIS IS DELIBERATELY NOT WHAT v1 DOES, and the asymmetry is the point. v1 raises
-          because it has ALREADY DUMPED its artifact (test_v2_paired_live.py:462) - it can
-          afford to stop. A v2 kill loses the whole run and produces NO artifact at all,
-          which is precisely the failure this poll exists to end. A successor reading the
-          divergence as an inconsistency and "fixing" it back would restore that failure.
-        - the third state is NAMED AND COUNTED rather than folded into `waiting`, for the
-          same reason the cache and error families split observed from unobserved: a third
-          state with no name and no count gets read as one of the other two.
-        - a `waiting` reply with NO job_id keeps its original span and is marked
-          `terminal_waited` False, so it is visible rather than silently short.
+        - a reply that is not `waiting` is returned untouched. An inline-executor run, an HTTP error and a
+          synchronous reply all keep their original span, so this wrapper is a no-op on every path it was
+          not written for.
+        - a `waiting` reply carrying a job_id blocks for the terminal frame, then returns the record with
+          `client_span_ms` re-measured send->terminal, `payload.status` replaced by the terminal
+          to_state (when a terminal frame is found), and `terminal_waited` True.
+        - a wait that times out gets its own named state and does not kill the pass. The record comes back
+          with `terminal_waited` False, `wait_timed_out` True, `wait_timeout_detail` carrying the listener's
+          own message, and `client_span_ms` left as the enqueue span. compute_metrics keeps that out of the
+          paired gate's span set, so it can never read as a completion span.
+        - this is not what v1 does, and the asymmetry is the point. v1 raises because it has
+          already dumped its artifact, so it can afford to stop. A v2 kill loses the whole run and produces
+          no artifact at all, which is the failure this poll exists to end. A successor who read the
+          divergence as an inconsistency and fixed it back would restore that failure.
+        - the third state is named and counted rather than folded into `waiting`, for the same reason the
+          cache and error families split observed from unobserved: a third state with no name and no count
+          gets read as one of the other two.
+        - a `waiting` reply with no job_id keeps its original span and is marked `terminal_waited` False, so
+          it is visible rather than silently short.
+
+    Notes:
+        - v1 times from send to the observed completion via the queue WS terminal frame. v2 timed from send
+          to the reply in hand, which under `v2 executor = queued` is the enqueue ack.
+        - The old claim that the two spans were equivalent was true under `inline`, where the executor ran the
+          work synchronously. A later INI change flipped the key to `queued`, so nothing in this module
+          changed and the claim was never re-read.
     """
     def _ask( question ):
         send_ts = clock()
@@ -1654,15 +1584,13 @@ def run_pass(
     Ensures:
         - returns one record per corpus pair, each carrying expected_command and
           pass_kind alongside the ask() result.
-        - when fail_fast is True and the FIRST request does not return 200, raises
-          immediately — a broken endpoint costs one request, not the whole corpus
-          (Cheech, thread 4fb7f475). The first real utterance doubles as the smoke,
+        - when fail_fast is True and the first request does not return 200, raises immediately: a broken
+          endpoint costs one request, not the whole corpus. The first real utterance doubles as the smoke,
           so no extra probe request is spent.
-        - on a COLD pass, raises at the FIRST replayed answer — a pre-warmed store
-          costs the calls made so far, not the whole corpus (row a77a7906).
-        - when allow_warm_cold is True that abort is SUPPRESSED, matching the
-          --allow-warm-cold escape hatch that already suppresses guard_cold_start.
-          One flag, one meaning, both ends of the run.
+        - on a cold pass, raises at the first replayed answer: a pre-warmed store costs the calls made so
+          far, not the whole corpus.
+        - when allow_warm_cold is True that abort is suppressed, matching the --allow-warm-cold escape
+          hatch that already suppresses guard_cold_start. One flag, one meaning, at both ends of the run.
 
     Raises:
         - EvalIntegrityError if fail_fast and the first request is not ok.
@@ -1719,17 +1647,15 @@ def _fmt( value: Optional[ float ] ) -> str:
 
 def _fmt_error_rate( metrics: Dict[ str, Any ], key: str ) -> str:
     """
-    An ERROR-RATE cell — blind rather than empty, exactly like the cache family.
+    Format an error-rate cell: blind rather than empty, like the cache family.
 
-    Row 647f3733 follow-up. These four rates read the TERMINAL OUTCOME of a request, and
-    on a response that has not resolved that evidence is absent, not negative. A pass in
-    which nothing resolved therefore produced `0.0` from zero observations, which reads
-    as "no errors" — measured on ts-f06f5961, where all 200 answered rows were
-    unobserved and all four rates printed 0.0.
+    These four rates read the terminal outcome of a request. On a response that has not resolved, that evidence
+    is absent, not negative. A pass in which nothing resolved therefore printed `0.0` from zero observations,
+    which reads as "no errors". It was measured on a run where all 200 answered rows were unobserved and all
+    four rates printed 0.0.
 
-    Same two-part treatment the cache cell already uses: say "unmeasurable" when there is
-    no evidence at all, and carry the denominator when there is some, so a real rate
-    resting on a sliver cannot pass for a verdict on the whole pass.
+    The treatment matches the cache cell. Say "unmeasurable" when there is no evidence at all, and carry the
+    denominator when there is some. A real rate resting on a sliver then cannot pass for a verdict on the pass.
     """
     if not metrics[ "errors_measurable" ]:
         return UNMEASURABLE_CELL
@@ -1738,11 +1664,11 @@ def _fmt_error_rate( metrics: Dict[ str, Any ], key: str ) -> str:
 
 def _fmt_cache( metrics: Dict[ str, Any ], key: str ) -> str:
     """
-    A CACHE metric cell — the one family that can be blind rather than empty.
+    Format a cache-metric cell, the one family that can be blind rather than empty.
 
-    Row 2ec6ad9c. `n/a` and `0.0` both read as statements about the cache. When nothing
-    in the pass reported a terminal outcome there is no statement to make, so the cell
-    says so in the word itself and the banner under the table carries the count.
+    The words `n/a` and `0.0` both read as statements about the cache. When nothing in the pass reported a
+    terminal outcome, there is no statement to make. So the cell says so in the word itself, and the banner
+    under the table carries the count.
     """
     if not metrics[ "cache_measurable" ]:
         return UNMEASURABLE_CELL
@@ -1784,7 +1710,7 @@ def _unobserved_note(
 
     Ensures:
         - returns None when the unobserved count is zero
-        - otherwise names the count, the total, AND the base set the pair was
+        - otherwise names the count, the total, and the base set the pair was
           counted over, so a reader can tell which family the number describes
     """
     unobserved = metrics[ unobserved_key ]
@@ -1808,15 +1734,13 @@ def render_report(
     n_per_command : int,
 ) -> str:
     """
-    The markdown report for a two-pass run.
+    Render the markdown report for a two-pass run.
 
     Ensures:
-        - returns a markdown string carrying the metric table (cold vs warm), the
-          cold->warm latency delta, the §6a threshold table (from the warm pass), and
-          the R-C2 would-be-wrong caveat verbatim.
-        - STAMPS the sample seed + n_per_command (B3) so the v2 report is reproducible
-          and its stratified sample is auditable — the same reproducibility facts the
-          v1 arm's header carries.
+        - returns a markdown string carrying the metric table (cold vs warm), the cold->warm latency delta, the
+          cache-hit-rate-vs-threshold table (from the warm pass), and the would-be-wrong caveat verbatim.
+        - stamps the sample seed and n_per_command so the v2 report is reproducible and its stratified sample is
+          auditable, the same reproducibility facts the v1 arm's header carries.
     """
     lines : List[ str ] = []
     lines.append( f"# CJ Flow v2 eval — corpus `{corpus_name}` — {timestamp}" )
@@ -1954,19 +1878,16 @@ def render_report(
 def dump_records_early( out_dir: str, cold_records: List[ Dict[ str, Any ] ],
                         warm_records: List[ Dict[ str, Any ] ] ) -> Optional[ str ]:
     """
-    Persist the raw records the moment both passes return, BEFORE anything may refuse.
+    Write the raw records to disk as soon as both passes return, before anything may refuse.
 
-    🔴 WHY (row d8d019f6, 2026-08-20). `guard_run_integrity` fires before `write_outputs`,
-    so when ts-23613e7d raised on trace-parity it destroyed the v2 arm's ENTIRE run — three
-    hours of records that had already been collected never reached disk, and no eval-<stamp>
-    directory was written at all. The v1 arm has carried this insurance since attempt 11
-    (_dump_paired_artifacts fires the moment the v1 arm returns); the v2 arm never got it.
-    A downstream refusal should cost the VERDICT, never the DATA.
+    `guard_run_integrity` fires before `write_outputs`, so a refusal on trace-parity once destroyed the v2 arm's whole run.
+    Hours of collected records never reached disk, and the v1 arm already dumps its artifacts the moment it returns.
+    A downstream refusal should cost the verdict, never the data.
 
     Ensures:
-        - writes records.jsonl into out_dir and returns its path
-        - BEST-EFFORT: a dump failure is reported and swallowed, never allowed to mask the
-          real run outcome — insurance that can itself kill the run is not insurance
+        - writes records.jsonl into out_dir and returns its path (None when the dump fails)
+        - best-effort: a dump failure is reported and swallowed, never allowed to mask the real run outcome.
+          Insurance that can itself kill the run is not insurance
     """
     try:
         os.makedirs( out_dir, exist_ok=True )
@@ -2052,24 +1973,23 @@ def main(
         - argv are CLI args (defaults to sys.argv[1:]).
         - client_factory(base_url) returns an object with .ask(question); when None,
           an HttpAskClient is built from LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* credentials.
-        - passes must be 2 — a single pass cannot produce the cache-hit number.
+        - passes must be 2, because a single pass cannot produce the cache-hit number.
 
     Ensures:
-        - loads the corpus, STRATIFIED-SAMPLES it (seed + n_per_command, design §5 —
-          the same sampler + seed the v1 arm uses, so the two arms measure the same
-          population and the v2 report is reproducible), runs cold then warm, guards
-          run integrity on the warm pass, guards cold-start integrity on the cold pass
-          (F3; unless --allow-warm-cold), renders the seed-stamped report, and writes it
-          under io/v2-flow/eval-<timestamp>/.
-        - stamps a v2 provenance record (make_provenance over the sampled set) and writes
-          a v2-arm-artifact.json = {metrics: warm, provenance} — the input paired_eval
-          consumes to fire the paired median-Δ gate against the v1 arm.
-        - returns {out_dir, paths, cold, warm, provenance}.
+        - loads the corpus and stratified-samples it with the seed and n_per_command, the same sampler and seed
+          the v1 arm uses, so the arms measure the same population and the report is reproducible. Then it runs
+          cold then warm, guards run integrity on the warm pass, guards cold-start integrity on the cold pass
+          (unless --allow-warm-cold), renders the seed-stamped report, and writes it under
+          io/v2-flow/eval-<timestamp>/.
+        - stamps a v2 provenance record (make_provenance over the sampled set) and writes a
+          v2-arm-artifact.json = {metrics: warm, provenance, sample_manifest}, the input paired_eval consumes
+          to fire the paired median-delta gate against the v1 arm.
+        - returns {out_dir, paths, cold, warm, provenance, sample_manifest}.
 
     Raises:
         - ValueError if passes != 2.
-        - EvalIntegrityError if the warm pass fails an integrity property, or (unless
-          --allow-warm-cold) the cold pass shows cache hits (a pre-warmed store).
+        - EvalIntegrityError if the warm pass fails an integrity property, if the server reports no git sha,
+          or (unless --allow-warm-cold) if the cold pass shows cache hits (a pre-warmed store).
     """
     args   = build_arg_parser().parse_args( argv )
     if args.passes != 2:
@@ -2205,13 +2125,12 @@ def main(
 
 def _default_model_probe( context: str ) -> None:   # pragma: no cover - live socket boundary
     """
-    Refuse the run unless EVERY configured vLLM endpoint answers.
+    Refuse the run unless every configured vLLM endpoint answers.
 
-    WHY IT IS HERE. On 2026-08-17 the router at :3000 went down while :3001 stayed up. The
-    box read as alive to any check that probed one port, and the outage surfaced only when
-    a THREE-HOUR job died on it, with an API error three layers from the cause (row
-    b9604f8c). Probing every configured endpoint before the first question turns those
-    hours into a refusal at second one that names the port.
+    A box with one port down and one up reads as alive to any check that probes a single port. When the router
+    at :3000 went down while :3001 stayed up, the outage surfaced only after a three-hour job died on it.
+    The error was an API error three layers from the cause. Probing every configured endpoint before the first
+    question turns those hours into a refusal at second one that names the port.
 
     Injected as `probe_models_fn` in tests, so the unit tier never opens a socket.
     """
@@ -2223,25 +2142,24 @@ def _default_model_probe( context: str ) -> None:   # pragma: no cover - live so
 
 def _default_ws_listener_factory( base_url: str, client: Any ) -> Any:   # pragma: no cover - live socket boundary
     """
-    Build the queue-WS listener `terminal_waiting_ask` needs (row 7e2125a7, D5).
+    Build the queue-WS listener `terminal_waiting_ask` needs.
 
     Requires:
         - base_url is the server this run is asking; the listener opens /ws/queue on it.
-        - client is the authenticated HttpAskClient, so the listener reuses ITS bearer —
-          the server emits queue frames per-user, and a listener authenticated as anyone
-          else would sit on a live socket receiving nothing, which reads as "every job
-          timed out" rather than as "wrong user".
+        - client is the authenticated HttpAskClient, so the listener reuses its bearer. The server emits queue
+          frames per user, and a listener authenticated as anyone else would sit on a live socket receiving
+          nothing, which reads as "every job timed out" rather than as "wrong user".
 
     Ensures:
-        - returns an unstarted WsJobEventListener; the caller starts it BEFORE the first
-          push, because a frame that arrives during the connect is a frame nobody buffered.
+        - returns an unstarted WsJobEventListener; the caller starts it before the first push, because a frame
+          that arrives during the connect is a frame nobody buffered.
 
-    Injected as `ws_listener_factory` in tests, so the unit tier never opens a socket —
-    the same seam `client_factory` and `probe_models_fn` already use.
+    Injected as `ws_listener_factory` in tests, so the unit tier never opens a socket, the same seam
+    `client_factory` and `probe_models_fn` already use.
 
-    The import is local rather than module-level on purpose: `ws_job_listener` pulls in
-    `websockets`, and a `--no-observe-terminal` run on a box without it should still work.
-    A module-level import would make an optional dependency mandatory for everyone.
+    The import is local rather than module-level: `ws_job_listener` pulls in `websockets`, and a
+    `--no-observe-terminal` run on a box without it should still work. A module-level import would make an
+    optional dependency mandatory for everyone.
     """
     from ws_job_listener import WsJobEventListener
     return WsJobEventListener( base_url, client.bearer, session_id="v2-eval-listener" )
@@ -2282,19 +2200,17 @@ def _default_client_factory( base_url: str ) -> HttpAskClient:
 
 def make_attempt_logger( path: Optional[ str ] = None ) -> Callable[ [ Dict[ str, Any ] ], None ]:
     """
-    Build the append-a-JSON-line sink for HttpAskClient's start/end/error rows.
+    Build the append-a-JSON-line sink for HttpAskClient's start, end and error rows.
 
     Requires:
         - path, when given, is the file to append to; otherwise LUPIN_V2_ASK_ATTEMPT_LOG,
           otherwise <project root>/io/v2-flow/ask-attempts.jsonl.
 
     Ensures:
-        - returns a callable that opens, appends ONE json line, and closes — per record. The
-          open/close per row is the durability property that matters: a row still sitting in a
-          buffer when the process dies is a row that does not exist, and that is the failure
-          this instrument was built to end. (An explicit flush() would be redundant, since
-          closing the file already flushes it — there is none, so none can be misread as
-          the control.)
+        - returns a callable that opens, appends one JSON line, and closes, per record. The open and close per
+          row is the durability property that matters: a row still sitting in a buffer when the process dies is
+          a row that does not exist, and that is the failure this instrument was built to end. There is no
+          explicit flush(), since closing the file already flushes it, so none can be misread as the control.
         - creates the parent directory if absent.
     """
     if path is None:

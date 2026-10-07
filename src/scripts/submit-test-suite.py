@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-submit-test-suite.py — submit ONE test-suite job to a Lupin server through POST /api/v2/submit
-(command `agent router go to test suite`; the old /api/test-suite/submit is retired to 410).
+submit-test-suite.py — submit one test-suite job to a Lupin server.
 
-The sanctioned door for :8000 runs (CLAUDE.md § Testing venues; /api/v2/submit), wrapped so a seat does not
-hand-roll a login + POST each time. It does NOT check the venue is idle — run
-`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000` first and read its exit code.
+It posts to POST /api/v2/submit with the command `agent router go to test suite`.
+The old /api/test-suite/submit door is retired and answers 410.
+
+This is the sanctioned door for :8000 runs (CLAUDE.md section Testing venues).
+It is wrapped so a seat does not hand-roll a login and a POST each time.
+It does not check that the venue is idle.
+Run `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000` first and read its exit code.
 
 Usage:
     submit-test-suite.py --test-types e2e_b --pytest-args "-v -k 'name_a or name_b'"
@@ -13,17 +16,17 @@ Usage:
     submit-test-suite.py --test-types unit --dry-run
     submit-test-suite.py --test-types integration --env LUPIN_TEST_V2_EVAL_LIMIT=20
 
---env KEY=VALUE (repeatable) sets an environment variable for that run's pytest process only.
-The server keeps only names with a test-scoped prefix and drops the rest with a log line the
-submitter never sees, so this script refuses such a name here, before anything is sent.
+`--env KEY=VALUE` (repeatable) sets an environment variable for that run's pytest process only.
+The server keeps only names with a test-scoped prefix and drops the rest. Its log line is one
+the submitter never sees, so this script refuses such a name here, before anything is sent.
 
 Credentials: LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD (the shared tester account).
-auto_fix_on_failure defaults to FALSE (landing-run convention, bug 67473d91); pass --auto-fix
-only for a deliberate bug-hunt.
+auto_fix_on_failure defaults to False, the landing-run convention.
+Pass --auto-fix only for a deliberate bug-hunt.
 
-Exit codes: 0 submitted · 1 bad usage or missing credentials · 2 login failed · 3 submit refused
-(v2 answers HTTP 200 with status "failed" for a refused submit -- e.g. an unknown suite name --
-so the exit code reads the reply, not the HTTP code)
+Exit codes: 0 submitted, 1 bad usage or missing credentials, 2 login failed, 3 submit refused.
+Version 2 answers HTTP 200 with status "failed" for a refused submit.
+An unknown suite name is one example, so the exit code reads the reply, not the HTTP code.
 """
 import argparse, json, os, sys
 

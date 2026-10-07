@@ -2,32 +2,29 @@
 """
 Seed companion credentials from lupin_db_dev into lupin_db_test.
 
-Ensures the human admin user, system admin, service account, and API keys
-exist in the test database so the operator can log into the test server
-(port 8000) and monitor test runs with their normal credentials. Also
-ensures the cosa-voice MCP API key resolves against the test database.
+Ensures the human admin user, system admin, service account, and API keys exist in the test
+database. The operator can then log into the test server (port 8000) and monitor test runs
+with their normal credentials. It also ensures the cosa-voice MCP API key resolves against the
+test database.
 
-Runs at test container startup BEFORE uvicorn launches. Safe to run on every
-startup, and CONVERGENT rather than merely create-only: INSERT ... ON CONFLICT
-DO UPDATE refreshes the credential columns from dev each run, so a password or
-key rotated in dev actually reaches test. It used to be DO NOTHING, which meant
-an existing test row froze forever at whatever it was first seeded with — the
-cause of ":8000 returns 401 with credentials that work on :7999" (2026-08-19).
+Runs at test container startup, before uvicorn launches. Safe to run on every startup.
+It converges rather than only creating: `INSERT ... ON CONFLICT DO UPDATE` refreshes the
+credential columns from dev each run, so a password or key rotated in dev reaches test.
+A create-only insert (`ON CONFLICT DO NOTHING`) froze an existing test row at its first value.
+That made :8000 return 401 with credentials that work on :7999.
 
 Records seeded:
-    - Admin user identified by LUPIN_DEV_EMAIL env var (default: ricardo.felipe.ruiz@gmail.com)
-    - System admin (admin@lupin.deepily.ai)
-    - Service account (claude.code@deepily.ai) — API key owner
-    - All api_keys rows owned by the service account
+    - Admin user identified by LUPIN_DEV_EMAIL env var (default: ricardo.felipe.ruiz@gmail.com).
+    - System admin (admin@lupin.deepily.ai).
+    - Service account (claude.code@deepily.ai) — API key owner.
+    - All api_keys rows owned by the service account.
 
 Environment variables:
-    DB_HOST           - PostgreSQL hostname (default: lupin-postgres)
-    DB_PORT           - PostgreSQL port (default: 5432)
-    DB_USER           - PostgreSQL user (default: lupin_dev)
-    DB_PASSWORD       - PostgreSQL password (REQUIRED, no default)
-    LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com)
-
-Created: 2026-04-12 Session 248e740e (dual-container architecture)
+    DB_HOST           - PostgreSQL hostname (default: lupin-postgres).
+    DB_PORT           - PostgreSQL port (default: 5432).
+    DB_USER           - PostgreSQL user (default: lupin_dev).
+    DB_PASSWORD       - PostgreSQL password (required, no default).
+    LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com).
 """
 
 import os
@@ -108,11 +105,11 @@ def seed_if_missing():
         - All companion users exist in lupin_db_test with the same UUID,
           email, password_hash, and roles as in lupin_db_dev
         - All api_keys owned by companion users exist in lupin_db_test
-        - Idempotent: ON CONFLICT DO NOTHING prevents duplicates
+        - Idempotent: `ON CONFLICT DO UPDATE` prevents duplicates, so nothing is inserted twice and existing rows are refreshed
         - Prints summary of what was seeded
 
     Raises:
-        - None (catches and logs all exceptions)
+        - None from database errors, since all exceptions are caught and logged; SystemExit with code 2 if the primary admin is missing from dev, or code 3 if the target is not a test database
     """
     # 🔴 THE TARGET MUST BE A TEST DATABASE — ASSERT IT, DO NOT ASSUME IT (María, 2026-08-19).
     #

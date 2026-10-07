@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-TFE-to-CC Phase 1 (diagnose) live smoke test.
+Live smoke test of the first (diagnose) stage of the TFE-to-CC flow.
 
-Invokes `claude -p` inside lupin-rest-test against a real failure cluster
-(C6 from tfe-a1c6e15a), checks the output contract, and writes results
-to the execution log in docs.
+Invokes `claude -p` inside lupin-rest-test against a real failure cluster, checks the
+output contract, and writes results to the execution log in docs.
 
-This is a read-only probe — no file writes, no git ops outside /tmp, no
-SDK involvement. Safe to run unattended; blocking MCP tools are disabled.
+This is a read-only probe: no file writes, no git operations outside /tmp, and no SDK
+involvement. It is safe to run unattended because blocking MCP tools are disabled.
 
 Usage:
     PYTHONPATH=src:$PYTHONPATH python3 src/scripts/tfe_to_cc_phase1_smoke.py
@@ -192,12 +191,11 @@ def _append_to_execution_log( section_md: str ) -> None:
 
 
 def _run_passed( summary: dict, parsed: dict | None, validation_ok: bool, exit_code: int ) -> bool:
-    """The plan's success criteria (1-6), in ONE place.
+    """Return whether a run meets the plan's success criteria (1-6), defined in one place.
 
-    Both the logged verdict and the process exit code read this. They used to state the
-    criteria separately and had drifted apart: the log applied `is_error` and the turn-budget
-    cap, the exit code did not, so an unattended run could write a FAIL verdict and still
-    exit 0.
+    Both the logged verdict and the process exit code read this. Keeping the criteria in one
+    place stops them drifting apart, which would let an unattended run log a failing verdict
+    and still exit 0.
     """
     result = summary.get( "result" ) or {}
     return (

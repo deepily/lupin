@@ -1,29 +1,30 @@
 #!/usr/bin/env python3
 """
-vertex_publisher_config_guard.py — the clobber-trap guard (store cda7bf8b leg 5).
+Guard that refuses a publisher-model config write that would clobber live settings.
 
-THE TRAP (live, not theoretical — cascade record 8093520f / 31f6d447):
-`setPublisherModelConfig` has NO updateMask; its request schema has exactly one
-field, `publisherModelConfig`. Every write is therefore a FULL-OBJECT SET, and a
-partial payload SILENTLY WIPES whatever it omits (turning logging off wipes the
-search gate; turning search on wipes logging).
+The risk is live, not theoretical. `setPublisherModelConfig` has no updateMask, and its request
+schema has exactly one field, `publisherModelConfig`. Every write is therefore a full-object set,
+and a partial payload silently wipes whatever it omits. Turning logging off wipes the search gate,
+and turning search on wipes logging.
 
-THE GUARD: any config write must send the COMPLETE object. This module compares
-a candidate payload against the LIVE config (fetched read-only by the executor)
-and REFUSES the write when the candidate is missing any key the live config
-carries. It also refuses (by default) when the candidate ADDS keys the live
-config does not carry — because on this surface an added field can itself be a
-disclosure opt-in (`dataSharingEnabledProvider` is the recorded example: setting
-it "because it's free" IS a data-sharing decision). Additions must be
-explicitly acknowledged with --allow-additions.
+The guard: any config write must send the complete object. This module compares a candidate payload
+against the live config, which the executor fetches read-only. It refuses the write when the candidate
+is missing any key the live config carries.
 
-Usage (executor: Mr. Radio / Rick — this guard makes NO network calls):
+By default it also refuses when the candidate adds keys the live config does not carry. On this surface
+an added field can itself be a disclosure opt-in. `dataSharingEnabledProvider` is the recorded example,
+and setting it because it is free is a data-sharing decision. Additions must be explicitly acknowledged
+with --allow-additions.
+
+The executor is Mr. Radio or Rick. This guard makes no network calls.
+
+Usage:
     python3 src/scripts/vertex_publisher_config_guard.py \
         --live /tmp/live-config.json --candidate /tmp/new-config.json
-    # exit 0 = write may proceed; exit 1 = REFUSED, reasons on stdout
+    # exit 0 = write may proceed; exit 1 = `REFUSED`, reasons on stdout
 
 Companion: src/scripts/vertex-config-double-write-proof.sh pipes its payload
-through this guard before its live path (cda7bf8b leg 4).
+through this guard before its live path.
 """
 
 import argparse
@@ -69,8 +70,7 @@ def find_added_keys( live, candidate, path="" ):
 
     Ensures:
         - returns a list of dotted key paths the candidate introduces
-        - an added key can be a silent opt-in (the 8093520f trap) — callers must
-          surface these, never swallow them
+        - an added key can be a silent opt-in, so callers must surface these and never swallow them
 
     Raises:
         - nothing
@@ -90,15 +90,15 @@ def find_added_keys( live, candidate, path="" ):
 
 def check_payload( live, candidate, allow_additions=False ):
     """
-    Decide whether a candidate full-object SET may proceed.
+    Decide whether a candidate full-object set may proceed.
 
     Requires:
-        - live is the parsed CURRENT config (read back from GCP by the executor)
+        - live is the parsed current config (read back from GCP by the executor)
         - candidate is the parsed payload about to be written
 
     Ensures:
         - returns ( ok, report ) where report carries 'missing', 'added', 'reasons'
-        - ok is False if ANY live key is missing from the candidate (clobber)
+        - ok is False if any live key is missing from the candidate (clobber)
         - ok is False if the candidate adds keys and allow_additions is False
         - ok is True otherwise; added keys still appear in the report for the record
 
@@ -126,7 +126,7 @@ def main( argv=None ):
         - --live and --candidate name readable JSON files
 
     Ensures:
-        - prints ALLOW or REFUSED plus the report
+        - prints `ALLOW` or `REFUSED` plus the report
         - returns process exit code 0 (allow) or 1 (refuse / unreadable input)
 
     Raises:

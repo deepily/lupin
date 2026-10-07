@@ -1,69 +1,45 @@
 #!/usr/bin/env python3
 """
-stale-seat-scan.py — the sixth sighting, made loud.
+stale-seat-scan.py: finds live seats editing files that moved on the delivery target.
 
-WHY THIS EXISTS (row d2dd3ee3). The delivery chain is
-`committed -> merged -> respawned -> cache-busted`, and this repo now watches
-three of those links. **NOTHING watches the SEAT.**
+The delivery chain is committed, merged, respawned, cache-busted, and three of those
+links are watched. Nothing watched the seat. `stale-process-scan.py` asks whether a
+running daemon executes superseded code. This scan asks a different question that keeps
+costing people days: is the tree I am editing in behind the branch the fleet merges into?
+A seat can have a fresh process running stale source. Neither the process scan nor the
+collision scan says a word about it. Being behind is the default state of a live seat here.
 
-`stale-process-scan.py` compares a running PROCESS against commits that landed —
-"is this daemon executing superseded code?" That is a different question from the
-one that keeps costing people days: **"is the tree I am editing in behind the
-branch the fleet merges into?"** A seat can have a perfectly fresh process running
-perfectly stale source, and neither the process scan nor the collision scan says a
-word about it.
+The population must be named or the number is worthless. Most `lupin-wt-*` worktrees are
+behind, but almost all are abandoned, so that count is true and useless. The population is
+trees with a live process in them, found from `/proc/<pid>/cwd`, never from a name pattern.
 
-MEASURED, TWICE, ON THE SAME SEAT:
-  · 2026-09-05 ~16:38 EDT — a census of worktrees with a LIVE PROCESS in them
-    found **7 of 8 behind the working branch**, the author's own tree among them.
-  · 2026-09-05 ~21:30 EDT — that same seat came back from a context clear
-    **30 commits behind**, having written the census.
+So there are two stages, and a seat is reported only when both fire:
 
-Neither time did anything warn. This is not a story about careless seats; on the
-evidence it is the DEFAULT STATE of a live seat on this fleet.
+    Behind   does the delivery target carry commits this tree lacks?
+    Overlap  do any of those commits touch a file this seat has also touched, dirty in
+             its tree or committed and not yet delivered?
 
-🔴 NAME THE POPULATION OR THE NUMBER IS WORTHLESS. Across all 185 `lupin-wt-*`
-worktrees, 183 are behind, the worst by 1,121 commits. That figure is TRUE AND
-USELESS — almost every one is an abandoned tree nobody is sitting in, and quoting
-it produces exactly the cry-wolf number this row already rejected for the ancestry
-instrument. **The population is trees with a live process actually in them,
-identified from `/proc/<pid>/cwd` and never from a name pattern.**
+Behind alone reports most seats on an ordinary afternoon, a check nobody reads by the
+second day. Behind is not harmed. A seat 200 commits behind that touches none of them is
+safe. A seat 3 commits behind, where one moved its file, is the incident where four
+people wrote the same gister fix.
 
-⇒ Two stages, and a seat is reported only when BOTH fire:
+Exit codes are three, so failure modes wanting opposite remedies never share one.
+`purge-pycache.sh` is the precedent and both sibling scans use this contract:
 
-    STAGE 1  BEHIND    does the delivery target carry commits this tree lacks?
-    STAGE 2  OVERLAP   do any of those commits touch a file THIS SEAT has also
-                       touched — dirty in its tree, or committed and not yet
-                       delivered?
+    0  scanned, no seat both behind and overlapping: a real all-clear.
+    1  a live seat is editing a file that moved under it.
+    2  refused, nothing was scanned: say so, never report clean.
 
-Stage 1 alone reports 7 of 8 seats on an ordinary afternoon, which is a check
-nobody reads by the second day. **BEHIND IS NOT HARMED.** A seat 200 commits
-behind that touches none of them is behind and safe; a seat 3 commits behind where
-one of the three moved the file under its cursor is the four-people-wrote-the-same-
-gister-fix incident that opened this row.
-
-EXIT CODES — three, so two failure modes wanting opposite remedies never share
-one (`purge-pycache.sh` is the local precedent; both sibling scans use this
-contract):
-
-    0  scanned, no seat both behind AND overlapping   — a real all-clear
-    1  a live seat is editing a file that moved under it
-    2  REFUSED, nothing was scanned                   — say so, never report clean
-
-⚠️ WHAT IT CANNOT SEE, STATED HERE RATHER THAN DISCOVERED LATER:
-  · **It measures EXPOSURE, never damage.** An overlap says two parties touched
-    one file, not that the result is wrong. That is the same caveat the collision
-    scan carries and it is not a weakness to be engineered away — it is the honest
-    limit of what a file-level probe can know.
-  · **A seat that READS a stale file without editing it is invisible.** Stage 2
-    keys on files the seat touched, and reading leaves no trace in git. So this
-    UNDER-reports, in the opposite direction from stage 1 alone. The two errors do
-    not cancel; they are simply the two edges of the instrument.
-  · **`/proc/<pid>/cwd` finds a seat whose shell is IN the tree.** One reading a
-    tree from elsewhere is missed. The occupied count is a FLOOR, not a ceiling.
-  · It reports; it merges nothing. Fast-forwarding another seat's tree while it
-    works is outside any standing authority, and a tree with local commits may not
-    fast-forward at all.
+What it cannot see:
+  - It measures exposure, never damage. An overlap says two parties touched one file,
+    not that the result is wrong. That is the honest limit of a file-level probe.
+  - A seat that reads a stale file without editing it is invisible, because reading
+    leaves no trace in git. The overlap stage under-reports; the two errors do not cancel.
+  - `/proc/<pid>/cwd` finds a seat whose shell is in the tree, so one reading a tree
+    from elsewhere is missed. The occupied count is a floor, not a ceiling.
+  - It reports and merges nothing. Fast-forwarding another seat's tree while it works is
+    outside any standing authority, and a tree with local commits may not fast-forward.
 """
 
 import argparse
@@ -97,9 +73,8 @@ def worktree_roots( repo=None ):
     """
     Every worktree of this repository, longest path first.
 
-    Longest-first matters: a cwd is matched to its tree by prefix, and an
-    unsorted list would attribute a nested path to whichever tree happened to be
-    checked first.
+    Longest first matters because a cwd is matched to its tree by prefix. An unsorted list
+    would attribute a nested path to whichever tree happened to be checked first.
 
     Ensures:
         - returns a list of absolute worktree paths, longest string first
@@ -117,20 +92,17 @@ def occupied_worktrees( roots ):
     """
     Which of `roots` have a live process standing in them.
 
-    🔴 THE POPULATION IS DECIDED BY `/proc/<pid>/cwd`, NEVER BY A NAME PATTERN.
-    Matching `lupin-wt-*` counts 185 trees, 183 of them abandoned, and produces a
-    number that is true and unusable. A cwd is a fact about a process that exists;
-    a name is a fact about a string.
-
-    ⚠️ Deliberately does NOT filter on `comm`. The sibling process scan does,
-    because it asks "what is this process running?" — a question about the
-    executable. This one asks "is anyone standing here?", and a shell, an editor, a
-    pytest run and an agent seat are all equally an occupant.
+    The population is decided by `/proc/<pid>/cwd`, never by a name pattern. This does not
+    filter on `comm`, because it asks whether anyone is standing here, not what is running.
 
     Ensures:
         - returns { worktree_root: [ pid, ... ] } for roots with >= 1 live process
         - a pid that exits mid-scan, or belongs to another user, is skipped rather
-          than crashing the scan — a busy box must not make this fail more often
+          than crashing the scan; a busy box must not make this fail more often
+        - matching `lupin-wt-*` would count 185 trees, 183 of them abandoned, a number
+          that is true and unusable; a cwd is a fact about a live process, a name only a string
+        - a shell, an editor, a pytest run and an agent seat all count equally as occupants
+          here, whereas the sibling process scan filters on `comm` to ask what is executing
     """
     occupants = {}
     for entry in os.listdir( "/proc" ):
@@ -150,7 +122,7 @@ def behind_commits( worktree, target ):
     """
     Commits the delivery target carries that this worktree's HEAD lacks.
 
-    STAGE 1.
+    This is the behind stage.
 
     Requires:
         - target names a ref resolvable from inside `worktree`
@@ -158,7 +130,7 @@ def behind_commits( worktree, target ):
     Ensures:
         - returns a list of full shas, newest first
         - returns None when the target does not resolve there, which is a refusal
-          condition and NOT an empty result
+          condition and not an empty result
     """
     code, out = _git( worktree, "rev-list", f"HEAD..{target}" )
     if code != 0: return None
@@ -183,21 +155,18 @@ def files_touched_by( worktree, shas ):
 
 def files_this_seat_touched( worktree, target ):
     """
-    Everything this seat has its hands on: dirty in the tree, or committed and
-    not yet delivered.
+    Files this seat has touched: dirty, untracked, or committed but not yet delivered.
 
-    STAGE 2's left-hand side. Three sources, because a seat's work lives in three
-    places and leaving any of them out under-reports the overlap:
-
-        · tracked files modified against its own HEAD
-        · untracked files it has created (ignored files excluded by git itself)
-        · files in commits it has made that the target does not carry
-
-    ⚠️ A file the seat only READ is in none of these. Reading leaves no trace in
-    git, so this set is a floor.
+    This is the seat side of the overlap stage. A seat's work lives in three places, and
+    leaving any of them out under-reports the overlap.
 
     Ensures:
         - returns a set of repo-relative paths
+        - includes tracked files modified against its own HEAD
+        - includes untracked files it has created, with ignored files excluded by git itself
+        - includes files in commits it has made that the target does not carry
+        - a file the seat only read is in none of these, because reading leaves no trace in
+          git, so this set is a floor
     """
     touched = set()
 

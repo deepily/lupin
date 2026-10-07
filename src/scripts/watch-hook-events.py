@@ -1,34 +1,36 @@
 #!/usr/bin/env python3
 """
-Live watcher for the Claude Code hook event stream
-(`io/claude_code_hooks/logs/hook-events.jsonl`).
+Live tail of the Claude Code hook event stream (hook-events.jsonl).
 
-Tails the JSONL stream (`tail -f` style) and pretty-prints each entry, with
-special highlighting for the per-Stop **heartbeat oracle** line (added
-2026-06-05) so you can watch the fleet's heartbeat state update in real time:
+The file is `io/claude_code_hooks/logs/hook-events.jsonl`.
+
+Tails the JSONL stream like `tail -f` and pretty-prints each entry.
+The per-Stop **heartbeat oracle** line gets special highlighting.
+That lets you watch the fleet's heartbeat state update in real time:
 
     HH:MM:SS  🫀 Tiberius      not_owed     owed=False(0)  poke=0/3
     HH:MM:SS  🫀 Tiffany       poked        owed=True(2)   poke=1/3
     HH:MM:SS  🫀 Rachel        honored      owed=True      poke=0/3  awaiting=peer:Maria
     HH:MM:SS  🫀 Mr. Radio     cap_reached  owed=True(1)   poke=3/3   ← stuck
 
-Outcome legend (the four heartbeat states):
-    not_owed     idle & FREE      (reassignable)        — green
-    poked        owed, nudged     (working)             — yellow
-    honored      blocked on a peer                      — cyan
-    cap_reached  owed but pokes spent (idle & STUCK)    — red
+Example:
+    Outcome legend, the four heartbeat states:
+    not_owed     idle and free    (reassignable).       — green
+    poked        owed, nudged     (working).            — yellow
+    honored      blocked on a peer.                     — cyan
+    cap_reached  owed but pokes spent (idle and stuck).   — red
 
-Usage:
-    python src/scripts/watch-hook-events.py                 # follow heartbeat lines (default)
-    python src/scripts/watch-hook-events.py --all           # follow EVERY hook entry, not just heartbeat
-    python src/scripts/watch-hook-events.py --replay         # print existing history first, then follow
-    python src/scripts/watch-hook-events.py --no-color       # plain text (also auto-off when piped)
-    python src/scripts/watch-hook-events.py --once           # print current contents and exit (no follow)
+Example:
+    python src/scripts/watch-hook-events.py                 # follow heartbeat lines (default).
+    python src/scripts/watch-hook-events.py --all           # follow every hook entry, not just heartbeat.
+    python src/scripts/watch-hook-events.py --replay         # print existing history first, then follow.
+    python src/scripts/watch-hook-events.py --no-color       # plain text (also auto-off when piped).
+    python src/scripts/watch-hook-events.py --once           # print current contents and exit (no follow).
 
 Requires: stdlib only beyond the in-repo hook constants (one-name-everywhere:
-the outcome→style map keys reference the emitting side's OUTCOME_* constants —
-a stdlib-only import chain). LUPIN_ROOT is honored for path resolution; falls
-back to the repo this script lives in.
+the outcome-to-style map keys reference the emitting side's `OUTCOME_*` constants,
+a stdlib-only import chain).
+`LUPIN_ROOT` is honored for path resolution and falls back to the repo this script lives in.
 """
 import argparse
 import json
@@ -104,8 +106,8 @@ def _c( color, text ):
 def _hhmmss( ts ):
     """Best-effort HH:MM:SS from the entry's `ts` field.
 
-    Handles ISO (`2026-06-06T01:45:55...`) AND the project's hook-log format
-    (`2026.06.06 @ 01:45 55,752ms` → `01:45:55`).
+    Handles ISO timestamps and the project's hook-log format,
+    where `@ 01:45 55,752ms` becomes `01:45:55`.
     """
     if not ts:
         return "--:--:--"

@@ -2,21 +2,9 @@
 """
 SWE Team workload runner — submits catalog tasks and captures proxy decisions.
 
-Authenticates against the running server, submits tasks from the workload
-catalog sequentially via POST /api/v2/submit with dry_run=true, polls
-the done queue for completion, then queries PostgreSQL for all proxy decisions
-created by each job. Writes a JSONL manifest to io/decision-proxies/ for
-downstream analysis and integration test fixture generation.
-
-Usage:
-    python src/scripts/swe_workload_runner.py                    # All catalog tasks
-    python src/scripts/swe_workload_runner.py --category testing # Single category
-    python src/scripts/swe_workload_runner.py --limit 3          # First 3 tasks
-    python src/scripts/swe_workload_runner.py --live             # Live mode (not dry-run)
-    python src/scripts/swe_workload_runner.py --trust-mode shadow  # Set trust mode
-
-Output:
-    io/decision-proxies/workload-manifest-swe-team-catalog-{category|all}-{dry-run|live}-{timestamp}.jsonl
+Logs in to the running server and submits catalog tasks one at a time through POST /api/v2/submit
+with dry_run=true. The done queue is polled for completion. PostgreSQL is then queried for every
+proxy decision created by each job. A JSONL manifest goes to io/decision-proxies/ for analysis.
 
 Requires:
     - LUPIN_ROOT environment variable set
@@ -28,7 +16,15 @@ Ensures:
     - All proxy decisions for each job are captured into a JSONL manifest
     - Manifest path is printed at completion
 
-Session 268: Work Item 2, Step 2.3.
+Usage:
+    python src/scripts/swe_workload_runner.py                    # All catalog tasks
+    python src/scripts/swe_workload_runner.py --category testing # Single category
+    python src/scripts/swe_workload_runner.py --limit 3          # First 3 tasks
+    python src/scripts/swe_workload_runner.py --live             # Live mode (not dry-run)
+    python src/scripts/swe_workload_runner.py --trust-mode shadow  # Set trust mode
+
+Output:
+    io/decision-proxies/workload-manifest-swe-team-catalog-{category|all}-{dry-run|live}-{timestamp}.jsonl
 """
 
 import sys
