@@ -416,8 +416,8 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: typecheck stylelint unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
-All must pass before merging to main, in this order: typecheck → stylelint → unit → cosa → coverage → typescript →
+<!-- merge-pyramid-suites: typecheck stylelint doclint unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
+All must pass before merging to main, in this order: typecheck → stylelint → doclint → unit → cosa → coverage → typescript →
 smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
 e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
@@ -429,6 +429,13 @@ tests: `Failed: 1` means one tsconfig project is red, which may be one type erro
 and the error count is printed on its own line. A waiver needs a same-line reason
 (`stylelint-disable-next-line <rule> -- <why>`); the config refuses one without. Tracked .html inline
 `<style>` blocks are NOT covered — that needs postcss-html, which is not installed.
+
+**doclint runs third, for the same reason** — the docstrings of every swept-scope Python file, about 5s.
+It is a blocking gate so documentation lint findings cannot come back into files the sweep cleaned. Its
+summary counts files: `Failed: 1` is one file with a finding, and `Errors:` is the number of findings.
+The swept scope is every tracked `.py` file the documentation standard covers, except the held
+`src/lupin_mcp/`; `src/cosa/repo/doc_lint/swept_scope.py` decides it. Exit 2 or 3 means the gate could not check, which is
+not a pass. `src/scripts/pre-push-chain.sh` runs the same gate on the tip of a pushed ref.
 
 > The heading above is capitalised and the HTML comment above is machine-read; neither is styling.
 > `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
@@ -442,16 +449,17 @@ and the error count is printed on its own line. A waiver needs a same-line reaso
 |---|---|---|
 | 1 | **typecheck — `src/tests/run-typecheck-gate.sh`** — ~3s, fails a type-red branch first | :7999 |
 | 2 | **stylelint — `src/tests/run-stylelint-gate.sh`** — ~1.5s, every tracked .css file | :7999 |
-| 3 | unit — `pytest src/tests/unit/` | :7999 |
-| 4 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
-| 5 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
-| 6 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
-| 7 | smoke | :7999 |
-| 8 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
-| 9 | websocket smoke | :7999 |
-| 10 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
-| 11 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
-| 12 | **integration — the final gate** | :8000 scheduled |
+| 3 | **doclint — `src/tests/run-doclint-gate.sh`** — ~5s, the docstrings of every swept-scope .py file | :7999 |
+| 4 | unit — `pytest src/tests/unit/` | :7999 |
+| 5 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 6 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 7 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 8 | smoke | :7999 |
+| 9 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 10 | websocket smoke | :7999 |
+| 11 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 12 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 13 | **integration — the final gate** | :8000 scheduled |
 
 This table's numbering and membership are guarded by
 `test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in

@@ -54,6 +54,7 @@ SUITE_SCRIPTS = {
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
     "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
     "stylelint"      : "src/tests/run-stylelint-gate.sh", # every git-tracked .css file as a BLOCKING merge gate (row d3d4a18c, Rick's ruling 2026-09-18 21:06). Runs SECOND, right after typecheck: MEASURED 1.5s wall for 32 files (2026-09-18), static like typecheck, so a style-red branch also fails in seconds. Its summary counts FILES, not tests.
+    "doclint"        : "src/tests/run-doclint-gate.sh", # every swept-scope Python file's docstrings as a blocking merge gate (row 2c48c717, Rick's ruling). Runs third, after the two other static gates: measured 4.6s wall for 862 files. Its summary counts files, and its "Errors:" line counts findings.
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
                                                         # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
                                                         # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
@@ -112,6 +113,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
+    "doclint"      : 300,    #  5 min. Measured 4.6s wall for 862 files (row 2c48c717). The typecheck gate's reasoning applies: a static gate that has run for five minutes has hung.
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -218,13 +220,16 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # 🔴 "stylelint" IS SECOND (row d3d4a18c, Rick's ruling 2026-09-18 21:06), for typecheck's
 # reason: 1.5s of static analysis (measured), so a style-red branch fails before any tier runs.
 # Before it existed no gate ran stylelint, and 329 errors accumulated as "pre-existing".
+# "doclint" is third (row 2c48c717, Rick's ruling), for the same reason: 4.6s of
+# static analysis (measured), so a branch with a docstring lint finding in a swept file fails
+# before any tier runs.
 # 🔴 E2E RUNS AS TWO HALVES, "e2e_a" THEN "e2e_b" (row 2818dad7, Rick's ruling on decision row
 # 4103ea0f, 2026-09-14). The whole suite measured 3038.1s and grows ~5.39 s/day, and one timeout
 # threw away every result in the run (09-10: 633 passed, none written to JUnit). As two entries here,
 # each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
 # the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
 # stays registered for a deliberate whole-suite run.
-ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
 def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
@@ -1903,6 +1908,9 @@ class TestSuiteJob( AgenticJobBase ):
         # ADDED 2026-09-18 with the stylelint gate (row d3d4a18c). Its stdout names every
         # offending file:line:col, and it is the only record a non-pytest gate produces.
         "stylelint"    : "stylelint-gate-latest.log",
+        # The doclint gate (row 2c48c717). Its stdout names every
+        # finding as file:line: rule, and that is the only record this gate produces.
+        "doclint"      : "doclint-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
@@ -2378,7 +2386,9 @@ class TestSuiteJob( AgenticJobBase ):
         # same three lines, and ITS UNIT IS FILES — "Failed: 1" is one red .css file, whatever
         # its error count. The extra "Errors: N" line it prints matches none of these regexes.
         # Its refusals exit 2 with no summary, so they too read NOT EXECUTED, never PASSED.
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint" ):
+        # "doclint" (row 2c48c717) prints the same three lines, and its unit is files too.
+        # Its refusals exit 2 or 3 with no summary, so they read not executed, never passed.
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint" ):
             return None
         if not stdout:
             return None

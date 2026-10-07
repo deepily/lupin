@@ -220,3 +220,55 @@ def test_no_interpreter_exits_three( repo ):
 
     assert code == 3
     assert "PASSED" not in text
+
+
+# The pyramid's side of the contract (row 2c48c717): TestSuiteJob reads this runner's stdout, so
+# these cases pass the real runner's output through the real parser. The counts are literals.
+
+def test_the_job_reads_a_red_run_as_files_passed_and_failed( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/app/b.py", CLEAN )
+    _write( repo, "src/app/loud.py", LOUD )
+    _git( repo, "add", "src/app" )
+
+    code, out, _ = _run_split( repo )
+    parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
+
+    assert code == 1
+    assert parsed is not None, "the job does not parse the doclint runner's summary, so a red gate would read as not executed"
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 1 )
+
+
+def test_the_job_reads_a_clean_run_as_all_files_passed( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/app/b.py", CLEAN )
+    _git( repo, "add", "src/app" )
+
+    code, out, _ = _run_split( repo )
+    parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
+
+    assert code == 0
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 0 )
+
+
+def test_the_job_reads_a_refused_run_as_nothing_parsed( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    code, out, _ = _run_split( repo )
+
+    assert code == 2
+    assert TestSuiteJob._parse_non_pytest_stdout( "doclint", out ) is None
+
+
+def test_the_suite_is_registered_with_this_runner_a_budget_and_a_log_name():
+    from cosa.agents.test_suite.job import ALL_SUITE_COMPONENTS, SUITE_SCRIPTS, SUITE_TIMEOUTS_SECONDS, TestSuiteJob
+
+    assert os.path.join( PROJECT_ROOT, SUITE_SCRIPTS[ "doclint" ] ) == GATE
+    assert os.access( GATE, os.X_OK )
+    assert SUITE_TIMEOUTS_SECONDS[ "doclint" ] == 300
+    assert TestSuiteJob._LOG_BASENAMES[ "doclint" ] == "doclint-gate-latest.log"
+    assert ALL_SUITE_COMPONENTS.index( "doclint" ) < ALL_SUITE_COMPONENTS.index( "unit" )
