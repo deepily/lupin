@@ -112,6 +112,7 @@ case "$1" in
   ps) echo "$FAKE_CONTAINER" ;;
   inspect)
     case "$*" in
+      *Config.Labels*) printf %s "$FAKE_LABEL" ;;
       *State.Running*) echo true ;;
       *Source*) cat "$FAKE_MOUNTS_SRC" ;;
       *Destination*) cut -f2 "$FAKE_MOUNTS_SRC" ;;
@@ -639,3 +640,87 @@ def test_B7_follows_a_relative_core_hooks_path( cloned ):
     _link_both( tree, tree / "tools" / "hooks" )
     out = _run_clone( cloned )
     for hook, script in HOOKS: assert "[OK]" in _line( out, f"git hook {hook} links to src/scripts/{script}" )
+
+
+# ── remedy lines name the compose SERVICE, not the container (row fae0bc51, original bug) ──────────────
+
+REAL_CONTAINER = "lupin-rest-cloud-gpu"
+
+
+def _compose_services():
+    with open( COMPOSE, encoding="utf-8" ) as handle:
+        return set( yaml.safe_load( handle )[ "services" ] )
+
+
+def _recreate_target( out, needle ):
+    """The word after `--force-recreate` or `--no-deps` on the remedy that follows the finding."""
+    hit = out[ out.index( needle ): ].split( "\n" )
+    remedy = next( l for l in hit if "docker compose" in l )
+    return re.search( r"--no-deps(?:\s+--force-recreate)?\s+(\S+)", remedy ).group( 1 )
+
+
+def test_the_service_lookup_finds_the_service_the_real_compose_file_declares():
+    r = _lib( f"pfv_compose_service '{COMPOSE}' {REAL_CONTAINER}" )
+    assert ( r.returncode, r.stdout.strip() ) == ( 0, "lupin-rest" )
+    assert r.stdout.strip() in _compose_services()
+
+
+def test_the_service_lookup_answers_nothing_for_an_unknown_container_or_file( tmp_path ):
+    assert _lib( f"pfv_compose_service '{COMPOSE}' no-such-container" ).returncode == 1
+    assert _lib( f"pfv_compose_service '{tmp_path}/nope.yml' {REAL_CONTAINER}" ).returncode == 1
+
+
+def test_the_service_lookup_reads_a_quoted_container_name( tmp_path ):
+    f = tmp_path / "c.yml"
+    f.write_text( "services:\n  first:\n    image: x\n    container_name: 'one'\n  second:   # note\n    container_name: \"two\"\n" )
+    assert _lib( f"pfv_compose_service '{f}' two" ).stdout.strip() == "second"
+    assert _lib( f"pfv_compose_service '{f}' one" ).stdout.strip() == "first"
+
+
+@pytest.fixture
+def real_container( venue ):
+    venue[ "env" ].update( { "PREFLIGHT_VM_CONTAINER": REAL_CONTAINER, "FAKE_CONTAINER": REAL_CONTAINER } )
+    return venue
+
+
+def test_the_schema_drift_remedy_names_a_declared_service( real_container ):
+    """Kills the mutant that prints the container name in the schema-drift remedy."""
+    out    = _run( real_container )
+    target = _recreate_target( out, "SCHEMA DRIFT" )
+    assert target == "lupin-rest" and target in _compose_services() and target != REAL_CONTAINER
+
+
+def test_the_container_not_running_remedy_names_a_declared_service( real_container ):
+    real_container[ "env" ][ "FAKE_CONTAINER" ] = ""
+    out    = _run( real_container )
+    target = _recreate_target( out, "is not running" )
+    assert target == "lupin-rest" and target in _compose_services()
+
+
+def test_a_label_on_the_running_container_names_the_service( real_container ):
+    real_container[ "env" ][ "FAKE_LABEL" ] = "labelled-service"
+    assert _recreate_target( _run( real_container ), "SCHEMA DRIFT" ) == "labelled-service"
+
+
+def test_the_override_beats_the_label_and_the_compose_file( real_container ):
+    real_container[ "env" ].update( { "FAKE_LABEL": "labelled-service", "PREFLIGHT_VM_SERVICE": "forced-service" } )
+    assert _recreate_target( _run( real_container ), "SCHEMA DRIFT" ) == "forced-service"
+
+
+def test_with_no_label_and_no_compose_entry_the_remedy_prints_a_placeholder_not_a_guess( venue ):
+    """The container `fake-rest` has no label and no compose service."""
+    out    = _run( venue )
+    target = _recreate_target( out, "SCHEMA DRIFT" )
+    assert target.startswith( "<service" ) and "fake-rest" in out[ out.index( "SCHEMA DRIFT" ): ]
+    assert "--force-recreate fake-rest" not in out and "--force-recreate lupin-rest" not in out
+
+
+def test_no_compose_remedy_in_the_script_prints_the_container_name():
+    """Only `docker exec`, `inspect`, `logs` and `ps` may take the container name."""
+    with open( SCRIPT, encoding="utf-8" ) as handle:
+        lines = handle.read().split( "\n" )
+    compose_lines = [ l for l in lines if ( "docker compose" in l or "--force-recreate" in l or "up -d --no-deps" in l ) and not l.lstrip().startswith( "#" ) ]
+    assert len( compose_lines ) >= 8, "the guard found too few remedy lines to be measuring the script"
+    assert [ l for l in compose_lines if "$CONTAINER" in l ] == []
+    named = [ l for l in compose_lines if "up -d --no-deps" in l ]
+    assert len( named ) >= 8 and all( "$SERVICE" in l for l in named )

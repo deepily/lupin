@@ -1332,3 +1332,24 @@ pfv_git_hook_status() {
     [ "$lands" = "$wants" ] && { echo "MATCH"; return 0; }
     printf 'WRONG_TARGET\t%s\n' "${lands:-nowhere}"; return 5
 }
+
+# ── pfv_compose_service ─────────────────────────────────────────────────────
+# Name the compose SERVICE whose container_name is the given container.
+#   pfv_compose_service <compose_file> <container_name>
+# Prints the service name and returns 0; prints nothing and returns 1 when no service
+# sets that container_name (or the file cannot be read). `docker compose ... up` wants the
+# service name, not the container name, so a remedy line must never print the container.
+pfv_compose_service() {
+    local file="$1" container="$2" found
+    [ -r "$file" ] || return 1
+    found="$( awk -v want="$container" '
+        /^services:/                          { in_services = 1; next }
+        in_services && /^[^ #]/               { in_services = 0 }
+        in_services && /^  [A-Za-z0-9_.-]+:[ ]*(#.*)?$/ { service = $1; sub(/:$/, "", service); next }
+        in_services && /^    container_name:/ {
+            value = $2; gsub(/["\047]/, "", value)
+            if ( value == want ) { print service; exit }
+        }' "$file" )"
+    [ -n "$found" ] || return 1
+    printf '%s\n' "$found"
+}

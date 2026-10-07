@@ -58,6 +58,16 @@ PHASE="full"
 VERBOSE=false
 CONTAINER="${PREFLIGHT_VM_CONTAINER:-lupin-rest-cloud-gpu}"
 COMPOSE_FILE="${PREFLIGHT_VM_COMPOSE:-$REPO_ROOT/docker-compose.cloud-gpu.yml}"
+# The compose SERVICE name. A remedy line runs `docker compose ... up <service>`, and compose
+# refuses a container name there ("no such service") and restarts nothing. Order: an explicit
+# override; the label compose put on the running container; the service the compose file gives
+# this container_name. With none of them the remedy prints a placeholder rather than a guess.
+SERVICE="${PREFLIGHT_VM_SERVICE:-}"
+if [ -z "$SERVICE" ] && command -v docker >/dev/null 2>&1; then
+    SERVICE="$( docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || printf '' )"
+fi
+[ -n "$SERVICE" ] || SERVICE="$( pfv_compose_service "$COMPOSE_FILE" "$CONTAINER" 2>/dev/null || printf '' )"
+[ -n "$SERVICE" ] || SERVICE="<service of $CONTAINER in $( basename "$COMPOSE_FILE" )>"
 # The env file compose is invoked with. C6's bootstrap exemption (row e7048496) asks
 # this file whether a var missing from the RUNNING container will be supplied by the
 # imminent recreate, so it needs the real path, not just a basename for a remedy line.
@@ -610,7 +620,7 @@ if ! command -v docker >/dev/null 2>&1; then
     report unknown BLOCK "docker not reachable" "check the docker daemon"
 elif ! docker ps --filter "name=^${CONTAINER}$" --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
     report fail BLOCK "container '$CONTAINER' is not running" \
-                  "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $CONTAINER"
+                  "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps $SERVICE"
 else
     report pass BLOCK "container '$CONTAINER' is running"
 
@@ -637,7 +647,7 @@ PY
         [ $rc -eq 0 ] \
             && report pass BLOCK "running mount set covers every compose-declared mount" \
             || report fail BLOCK "compose declares mounts the RUNNING container lacks: $( printf '%s' "$missing" | tr '\n' ' ' )" \
-                          "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT do it"
+                          "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT do it"
     else
         report unknown WARN "cannot parse $COMPOSE_FILE (need python3 + pyyaml)" "pip install pyyaml"
     fi
@@ -700,7 +710,7 @@ PY
     case $rc in
         0) report pass BLOCK "LUPIN_ENV='$c_env' agrees with config_block_id='$c_block'" ;;
         1) report fail BLOCK "LUPIN_ENV='$c_env' DISAGREES with config_block_id='$c_block' — the app reads one environment's config while addressing another's database" \
-                      "make them agree in $COMPOSE_FILE, then: up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment" ;;
+                      "make them agree in $COMPOSE_FILE, then: up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read the environment" ;;
         2) report unknown BLOCK "cannot compare LUPIN_ENV='$c_env' with config_block_id='$c_block' — one is empty or the block id lacks the 'Lupin:+' prefix" \
                       "check the environment: block for LUPIN_ENV and LUPIN_CONFIG_MGR_CLI_ARGS in $COMPOSE_FILE" ;;
     esac
@@ -852,7 +862,7 @@ PY
                         *) efnote="and $( basename "$ENV_FILE" ) could not be read, so nothing here can say whether a recreate would supply it" ;;
                     esac
                     report unknown "$ctier" "$cname is UNSET in the container (compose regime: $regime) — $efnote   [witness: $cwitness]" \
-                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read the environment"
+                                  "set $cname in $( basename "$ENV_FILE" ) for this venue, then: docker compose -f $( basename "$COMPOSE_FILE" ) --env-file $( basename "$ENV_FILE" ) up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read the environment"
                 fi
             else
                 pfv_shape_matches "$cvalue" "$cshape" "$VM_PREFIX"; crc=$?
@@ -928,7 +938,7 @@ PY
         case $schema_rc in
             0) report pass "$schema_tier" "DB schema is at the tree's head revision ($schema_head)" ;;
             1) report fail "$schema_tier" "SCHEMA DRIFT — ${schema_detail:-db=$schema_cur tree=$schema_head}" \
-                          "restart the app container so main.py migrates to head: sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $CONTAINER" ;;
+                          "restart the app container so main.py migrates to head: sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env up -d --no-deps --force-recreate $SERVICE" ;;
             *) report unknown "$schema_tier" "cannot determine schema revision — ${schema_detail:-$( printf '%s' "$schema_out" | tr '\n' ' ' | cut -c1-160 )}" \
                           "this is NOT drift and does not take drift's remedy — the question could not be answered; check the container is up and the DB reachable: docker exec $CONTAINER python /var/lupin/src/scripts/check_schema_at_head.py" ;;
         esac
@@ -999,7 +1009,7 @@ PY
         report pass BLOCK "Cloud SQL socket exists and IS a socket"
     else
         report fail BLOCK "Cloud SQL socket /cloudsql/$conn/.s.PGSQL.5432 is absent or not a socket (the proxy may still report 'healthy' — bug 70794d58)" \
-                      "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env restart cloud-sql-proxy && ... up -d --no-deps --force-recreate $CONTAINER"
+                      "sudo docker compose -f $COMPOSE_FILE --env-file $REPO_ROOT/cloud-gpu.env restart cloud-sql-proxy && ... up -d --no-deps --force-recreate $SERVICE"
     fi
     # C9 — the flow-ratio override file exists (row 31344c5f). WARN, not block: the
     #      VALUES are the operator's call, so this only reports whether an override is
@@ -1008,7 +1018,7 @@ PY
     fr_dir="$( docker exec "$CONTAINER" sh -c 'printf %s "${LUPIN_FLOW_RATIO_DIR:-}"' 2>/dev/null || printf '' )"
     if [ -z "$fr_dir" ]; then
         report fail WARN "LUPIN_FLOW_RATIO_DIR is unset in $CONTAINER — flow-ratio overrides cannot be read from anywhere" \
-                      "add LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio to the compose environment, then up -d --no-deps --force-recreate $CONTAINER"
+                      "add LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio to the compose environment, then up -d --no-deps --force-recreate $SERVICE"
     else
         fr_body="$( docker exec "$CONTAINER" cat "$fr_dir/flow-ratio-settings.json" 2>/dev/null )"; fr_rc=$?
         if [ $fr_rc -eq 0 ] && [ -n "$fr_body" ]; then
@@ -1045,7 +1055,7 @@ PY
         report pass BLOCK "git rev-parse HEAD succeeds inside $CONTAINER for all $ext_seen external-project mounts"
     else
         report fail BLOCK "git refuses these mounts inside $CONTAINER (dubious ownership):$unsafe_mounts" \
-                      "durable: add GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n=safe.directory / GIT_CONFIG_VALUE_n=<mount> per mount to the lupin-rest environment in $COMPOSE_FILE, then up -d --no-deps --force-recreate $CONTAINER   # a RESTART will NOT re-read env"
+                      "durable: add GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n=safe.directory / GIT_CONFIG_VALUE_n=<mount> per mount to the lupin-rest environment in $COMPOSE_FILE, then up -d --no-deps --force-recreate $SERVICE   # a RESTART will NOT re-read env"
     fi
 
     # C11 — every project actually WORKED on this VM has a roster line. "Worked" is
