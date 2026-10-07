@@ -74,6 +74,41 @@ def test_many_threads_never_take_more_than_the_limit():
     assert sum( took ) == 50 and budget.used == 50
 
 
+class GatedBudget( jev_transport.CallBudget ):
+    """
+    A budget whose every read waits for a second thread, so a missing lock shows itself.
+
+    Both threads reach the read before either writes unless the lock keeps one of them out. The gate
+    times out so the locked case does not hang: the first thread gives up waiting and carries on.
+    """
+
+    gate = None
+
+    @property
+    def used( self ):
+        value = self._used
+        try: self.gate.wait()
+        except threading.BrokenBarrierError: pass
+        return value
+
+    @used.setter
+    def used( self, value ): self._used = value
+
+
+def test_the_check_and_the_count_cannot_interleave_between_two_threads():
+    """Two threads forced to read together may not both take the one attempt."""
+    GatedBudget.gate = threading.Barrier( 2, timeout=0.3 )
+    budget, took, lock = GatedBudget( 1 ), [], threading.Lock()
+    def grab():
+        try: budget.take(); ok = True
+        except jev_transport.JevBudgetSpent: ok = False
+        with lock: took.append( ok )
+    threads = [ threading.Thread( target=grab ) for _ in range( 2 ) ]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert sorted( took ) == [ False, True ], f"both threads took the one attempt: {took}"
+
+
 @pytest.mark.parametrize( "bad", [ 0, -1, 2.5, "5", True, None ] )
 def test_a_budget_that_is_not_a_positive_integer_is_refused( bad ):
     with pytest.raises( ValueError ): jev_transport.CallBudget( bad )
