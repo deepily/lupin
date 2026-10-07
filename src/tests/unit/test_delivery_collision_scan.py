@@ -207,9 +207,10 @@ def test_zero_branches_REFUSES_rather_than_reporting_clean( scan, repo ):
     question nobody asked.
     """
     _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
 
     with pytest.raises( LookupError, match="ZERO branches" ):
-        scan.scan( "target", max_tip_age_days=0.0000001 )
+        scan.scan( "target", max_tip_age_days=7 )
 
 
 @pytest.mark.parametrize( "phase", [ 0.0, 0.004, 0.0085, 0.5 ] )
@@ -217,15 +218,16 @@ def test_zero_branches_refusal_holds_at_every_clock_phase( scan, repo, monkeypat
     """
     The refusal must not depend on the moment within the second at which the scan runs.
 
-    Git stores commit times in whole seconds, so a fresh branch has a tip up to a second old.
-    The clock is pinned `phase` seconds after that tip.
+    A 7-day window never admits a branch that is 40 days old, at any phase.
+    The clock is pinned 40 days and `phase` seconds after the tip.
     """
     _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    _age_branch( repo, "wt-alpha", days=40 )
     tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
-    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + phase ) )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + 40 * 86400 + phase ) )
 
     with pytest.raises( LookupError, match="ZERO branches" ):
-        scan.scan( "target", max_tip_age_days=0.0000001 )
+        scan.scan( "target", max_tip_age_days=7 )
 
 
 def test_zero_candidate_commits_REFUSES_rather_than_reporting_clean( scan, repo ):
