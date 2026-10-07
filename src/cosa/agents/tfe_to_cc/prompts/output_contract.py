@@ -4,7 +4,7 @@ Output-contract parsers for the TFE-to-CC engine variant.
 Claude Code emits diagnosis results as a fenced JSON block at end-of-run:
 
     ```tfe-diagnosis
-    { "clusters": { "<cluster_id>": {...} } }
+    { "clusters": { "C<n>": {...} } }
     ```
 
 The primary parser extracts that block. A defensive fallback parser does

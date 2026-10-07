@@ -19,7 +19,7 @@ def build_diagnosis_bundle_prompt( clusters: list, failure_context: Optional[ di
 
     Requires:
         - clusters is a non-empty list of cluster dicts with:
-            - cluster_id : str (a cluster identifier string)
+            - cluster_id : str (e.g., "C<n>", n a number)
             - failing_tests : list of dicts, each with test_name + error_message
                               (optional: error_type, traceback_excerpt)
             - shared_error_signature : str (optional)
