@@ -253,6 +253,8 @@ class TestExecute( unittest.IsolatedAsyncioTestCase ):
         self.assertTrue( budget_msgs, "expected a 'Budget exceeded' notification" )
         # the carried attrs are formatted into the spoken message
         self.assertIn( "$0.03 spent of $0.01 limit", str( budget_msgs[ 0 ] ) )
+        # a budget stop is the user's to see: high priority, not a background note
+        self.assertEqual( budget_msgs[ 0 ].kwargs[ "priority" ], "high" )
 
 
 # ===========================================================================
@@ -285,6 +287,7 @@ class TestBudgetOverrunEndToEnd( unittest.TestCase ):
         self.assertNotIn( "cancelled", job.answer_conversational.lower() )
         budget_msgs = [ c for c in notify.call_args_list if "Budget exceeded" in str( c ) ]
         self.assertTrue( budget_msgs, "expected the job's own budget notification" )
+        self.assertEqual( budget_msgs[ 0 ].kwargs[ "priority" ], "high" )
         self.assertFalse( [ c for c in notify.call_args_list if "cancelled" in str( c ).lower() ] )
 
 
