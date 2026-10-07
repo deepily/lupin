@@ -232,8 +232,8 @@ export function holdingPlanConfirmLabel( count: number ): string {
 }
 
 /**
- * The plan status line while its button is armed. Not remembered across a repaint: the header is
- * rebuilt unarmed. Carbon copy of notifications.js `_armHoldingPlanButton`.
+ * The plan status line while its button is armed. The renderer paints it again after a repaint
+ * while the plan stays open. Carbon copy of notifications.js `_armHoldingPlanButton`.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line (c8 reports one branch location at the identifier, line 238, with no conditional in the body); the function is called and its string pinned by holding_area_batch.test.ts and the plan tests.
 export function holdingPlanArmedStatus( count: number ): string {

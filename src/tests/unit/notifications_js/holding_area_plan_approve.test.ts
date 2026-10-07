@@ -109,6 +109,7 @@ interface Harness {
   listed : ( filer: string, key: string ) => string[];
   repaint: () => void;
   dropRows: ( key: string ) => void;
+  dropRow: ( id: string ) => void;
   restoreRows: ( key: string ) => void;
   gate   : () => { release(): void } | null;
 }
@@ -142,6 +143,7 @@ function mount( verdict: ( id: string ) => { ok: boolean; message?: string }, ho
     status: ( f, k ) => ( group( f, k ).querySelector( ".holding-plan-status" ) as HTMLElement ).textContent ?? "",
     listed: ( f, k ) => Array.from( group( f, k ).querySelectorAll<HTMLElement>( ".task-verb-select[data-task-id]" ) ).map( ( s ) => s.dataset.taskId as string ),
     dropRows   : ( key ) => { rows = rows.filter( ( r ) => r.correlation_key !== key ); },
+    dropRow    : ( id ) => { rows = rows.filter( ( r ) => r.id !== id ); },
     restoreRows: ( key ) => { rows = [ ...rows, ...ROWS().filter( ( r ) => r.correlation_key === key ) ]; },
   };
 }
@@ -528,17 +530,53 @@ test( "arming one plan disarms the other, and clears the status line of the one 
   assert.equal( h.calls.length, 0 );
 } );
 
-test( "a repaint rebuilds the header unarmed, and the armed status line does not outlive the arming", async () => {
+test( "a repaint keeps an armed plan armed while it stays open with the same rows, and the next press confirms it", async () => {
   const h = mount( () => ( { ok: true } ) );
   click( h.button( ...RA ) );
   h.repaint();
   const fresh = h.button( ...RA );
-  assert.equal( fresh.dataset.armed, undefined );
-  assert.equal( fresh.textContent, "Approve all 3" );
-  assert.equal( h.status( ...RA ), "" );
+  assert.equal( fresh.dataset.armed, "1", "a repaint disarmed a plan that is still open" );
+  assert.ok( fresh.classList.contains( "task-submit-armed" ) );
+  assert.equal( fresh.textContent, "Confirm approve all 3" );
+  assert.equal( h.status( ...RA ), "Click again to approve 3 rows in this plan." );
+  assert.ok( ! h.group( ...RA ).classList.contains( "collapsed" ), "the repaint shut the armed plan" );
+  assert.equal( h.calls.length, 0, "a repaint posted" );
   click( fresh );
   await settle();
-  assert.equal( h.calls.length, 0, "a press after a repaint ran the plan instead of arming it" );
+  assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a1", "a2", "a3" ], "the press after a repaint did not confirm the armed plan" );
+} );
+
+test( "a repaint does not re-arm a plan whose rows changed, or one that left the board and came back", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( h.button( ...RA ) );
+  h.dropRow( "a3" );
+  h.repaint();
+  assert.equal( h.button( ...RA ).dataset.armed, undefined, "an arm survived a change of the rows it was armed for" );
+  assert.equal( h.button( ...RA ).textContent, "Approve all 2" );
+  assert.equal( h.status( ...RA ), "" );
+  click( h.button( ...RC ) );
+  h.dropRows( "epic:plan-c" );
+  h.repaint();
+  h.restoreRows( "epic:plan-c" );
+  h.repaint();
+  assert.equal( h.button( ...RC ).dataset.armed, undefined, "an arm survived its plan leaving the board" );
+  assert.equal( h.button( ...RC ).textContent, "Approve all 2" );
+  click( h.button( ...RC ) );
+  await settle();
+  assert.equal( h.calls.length, 0, "a press after the plan came back approved it instead of arming it" );
+} );
+
+test( "after a repaint only the plan armed last is armed, and closing it disarms it for good", async () => {
+  const h = mount( () => ( { ok: true } ) );
+  click( h.button( ...RA ) );
+  click( h.button( ...RC ) );
+  h.repaint();
+  assert.equal( h.button( ...RA ).dataset.armed, undefined, "two plans were armed after a repaint" );
+  assert.equal( h.button( ...RC ).dataset.armed, "1" );
+  click( h.group( ...RC ).querySelector( ".holding-plan-header" ) as HTMLElement );
+  h.repaint();
+  assert.equal( h.button( ...RC ).dataset.armed, undefined, "a repaint re-armed a plan the operator had closed" );
+  assert.equal( h.button( ...RC ).textContent, "Approve all 2" );
 } );
 
 test( "disarming tolerates an armed header whose attributes were stripped", () => {

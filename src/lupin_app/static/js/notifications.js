@@ -14839,6 +14839,46 @@ class NotificationsUI {
             if ( !livePlans.has( id ) ) this._holdingAreaExpandedPlans.delete( id );
         }
         for ( const [ id, message ] of this._holdingPlanReports ) this._renderHoldingPlanStatus( id, message );
+        this._restoreArmedHoldingPlans();
+    }
+
+    _armedHoldingPlans() {
+        /**
+         * The plans whose Approve all is armed, keyed by plan id, each with the row ids it was armed for.
+         *
+         * A repaint rebuilds every header unarmed, so this map is what puts the arm back on a plan that is
+         * still open and still holds the same rows. Created on demand, like the open set beside it.
+         */
+        if ( !( this._holdingPlanArmed instanceof Map ) ) this._holdingPlanArmed = new Map();
+        return this._holdingPlanArmed;
+    }
+
+    _restoreArmedHoldingPlans() {
+        /**
+         * Put the arm back on every plan that was armed before this repaint and still holds the same rows.
+         *
+         * Ensures:
+         *     - an armed plan still on screen with the same row ids is armed again, label and line included
+         *     - a plan that left the board, or whose rows changed, is dropped from the armed set and left at
+         *       rest, so one press never approves rows other than the ones the operator armed it for
+         *     - an armed plan is open: arming opens it and closing disarms it, so the open state is not checked
+         */
+        const buttons = Array.from( document.querySelectorAll( ".holding-plan-approve-all" ) );
+        for ( const [ id, taskIds ] of Array.from( this._armedHoldingPlans() ) ) {
+            const button = buttons.find( b => this._planButtonId( b ) === id );
+            if ( button && button.dataset.taskIds === taskIds ) this._paintHoldingPlanArmed( button, id, taskIds.split( "," ).filter( Boolean ).length );
+            else this._armedHoldingPlans().delete( id );
+        }
+    }
+
+    _paintHoldingPlanArmed( button, id, count ) {
+        /**
+         * Show one plan's button armed: the confirm label, the armed class and the line saying what the next click does.
+         */
+        button.dataset.armed = "1";
+        button.classList.add( "task-submit-armed" );
+        button.textContent = `Confirm approve all ${count}`;
+        this._renderHoldingPlanStatus( id, `Click again to approve ${count} rows in this plan.` );
     }
 
     _holdingPlanId( filer, key ) {
@@ -14957,6 +14997,7 @@ class NotificationsUI {
          *     - the armed flag and class are cleared and the label reads "Approve all N"
          *     - the status line of the plan is cleared when the button was armed
          */
+        this._armedHoldingPlans().delete( this._planButtonId( b ) );
         if ( b.dataset.armed === "1" ) this._renderHoldingPlanStatus( this._planButtonId( b ), "" );
         delete b.dataset.armed;
         b.classList.remove( "task-submit-armed" );
@@ -14975,10 +15016,8 @@ class NotificationsUI {
          *     - the plan's rows are opened, so the operator sees what the next click approves
          */
         this._disarmHoldingPlanButtons();
-        button.dataset.armed = "1";
-        button.classList.add( "task-submit-armed" );
-        button.textContent = `Confirm approve all ${count}`;
-        this._renderHoldingPlanStatus( id, `Click again to approve ${count} rows in this plan.` );
+        this._paintHoldingPlanArmed( button, id, count );
+        this._armedHoldingPlans().set( id, button.dataset.taskIds );
         // The rows about to be approved must be on screen BEFORE the confirming press.
         this._setHoldingPlanOpen( button.closest( ".holding-plan-group" ), true );
     }

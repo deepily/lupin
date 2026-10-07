@@ -401,3 +401,53 @@ def test_plan_approve_multiplexer_board_closing_a_plan_disarms_it( page ):
     state = _route_operator( page )
     pane  = _open_mux( page )
     _arm_close_reopen( page, pane, state )
+
+
+def _repaint_legacy( page ):
+    page.evaluate( "() => window.notificationsUI.refreshHoldingArea()" )
+
+
+def _repaint_mux( page ):
+    page.evaluate(
+        "() => window.__multiplexerTestHook.eventBus.emit( "
+        "{ type: 'store_holding_area_changed', payload: { stampUpdated: true }, source: 'e2e', ts: 0 } )"
+    )
+
+
+def _arm_repaint_confirm( page, pane, state, repaint ):
+    """
+    Arm a plan and repaint the pen: it stays armed and open, and the next press approves.
+
+    The sixty-second poll repaints the pen. An arm lost to that repaint would make the two-press rule
+    unusable for anyone who reads the rows for a minute before confirming.
+    """
+    open_holding_groups( page, pane )
+    rachel = _plan( page, pane, PLAN_KEY, "Rachel" )
+    expect( rachel ).to_have_count( 1, timeout=TIMEOUT_MS )
+    button = rachel.locator( ".holding-plan-approve-all" )
+    header = rachel.locator( ".holding-plan-header" )
+
+    button.click()
+    expect( button ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
+    repaint( page )
+    page.wait_for_timeout( 500 )                                      # let the repaint land before reading the page
+    expect( button ).to_have_text( f"Confirm approve all {PLAN_ROWS}" )
+    expect( header ).to_have_attribute( "aria-expanded", "true" )
+    expect( rachel.locator( ".holding-plan-status" ) ).to_have_text( f"Click again to approve {PLAN_ROWS} rows in this plan." )
+    assert state[ "transitions" ] == [ ], f"the repaint posted: {state[ 'transitions' ]}"
+
+    button.click()
+    expect( _plan( page, pane, PLAN_KEY, "Rachel" ) ).to_have_count( 0, timeout=TIMEOUT_MS )
+    assert len( state[ "transitions" ] ) == PLAN_ROWS, f"the confirming press did not approve the plan's rows: {state[ 'transitions' ]}"
+
+
+def test_plan_approve_legacy_board_a_repaint_keeps_an_open_plan_armed( logged_in_page ):
+    state = _route_operator( logged_in_page )
+    pane  = _open_legacy( logged_in_page )
+    _arm_repaint_confirm( logged_in_page, pane, state, _repaint_legacy )
+
+
+def test_plan_approve_multiplexer_board_a_repaint_keeps_an_open_plan_armed( page ):
+    state = _route_operator( page )
+    pane  = _open_mux( page )
+    _arm_repaint_confirm( page, pane, state, _repaint_mux )

@@ -226,6 +226,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // leaves no entry: its header is gone because its rows are.
   private readonly planReports = new Map<string, string>();
 
+  // The plans whose Approve all is ARMED, keyed by holdingPlanId, with the row ids it was armed for.
+  // A repaint rebuilds every header unarmed, so this is what puts the arm back on a plan that is
+  // still open and still holds the same rows. Closing the plan, or any change to its rows, drops it.
+  private readonly armedPlans = new Map<string, string>();
+
   // The plans the operator has OPENED, keyed by holdingPlanId. Plans start collapsed, like
   // their filers, and an open one survives the 60s repaint.
   private readonly expandedPlans = new Set<string>();
@@ -497,6 +502,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       if ( !livePlans.has( id ) ) this.expandedPlans.delete( id );
     }
     for ( const [ id, message ] of this.planReports ) this.paintPlanStatus( id, message );
+    this.restoreArmedPlans();
 
     if ( stampUpdated ) this.stampUpdated();
   }
@@ -753,8 +759,40 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
   }
 
+  /**
+   * Put the arm back on every plan that was armed before this repaint and still holds the same rows.
+   *
+   * Ensures:
+   *   - an armed plan that is still on screen with the same row ids is armed again, label and line included
+   *   - a plan that left the board, or whose rows changed, is dropped from the armed set and left at rest,
+   *     so one press never approves rows other than the ones the operator armed it for
+   *   - an armed plan is open: arming opens it and closing disarms it, so nothing here checks the open state
+   */
+  private restoreArmedPlans(): void {
+    /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
+    if ( this.container === null ) return;
+    const buttons = Array.from( this.container.querySelectorAll<HTMLButtonElement>( ".holding-plan-approve-all" ) );
+    for ( const [ id, taskIds ] of Array.from( this.armedPlans ) ) {
+      const button = buttons.find( ( b ) => planButtonId( b ) === id );
+      if ( button !== undefined && button.dataset.taskIds === taskIds ) {
+        this.paintPlanArmed( button, id, taskIds.split( "," ).filter( ( rowId ) => rowId !== "" ).length );
+      } else {
+        this.armedPlans.delete( id );
+      }
+    }
+  }
+
+  /** Show one plan's button armed: the confirm label, the armed class and the line saying what the next press does. */
+  private paintPlanArmed( button: HTMLButtonElement, id: string, count: number ): void {
+    button.dataset.armed = "1";
+    button.classList.add( HOLDING_BATCH_ARMED_CLASS );
+    button.textContent = holdingPlanConfirmLabel( count );
+    this.paintPlanStatus( id, holdingPlanArmedStatus( count ) );
+  }
+
   /** Return one plan's button to its resting label and clear its status line if it was armed. */
   private disarmPlanButton( b: HTMLButtonElement ): void {
+    this.armedPlans.delete( planButtonId( b ) );
     if ( b.dataset.armed === "1" ) this.paintPlanStatus( planButtonId( b ), "" );
     delete b.dataset.armed;
     b.classList.remove( HOLDING_BATCH_ARMED_CLASS );
@@ -914,10 +952,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // button names the row count and nothing is posted. Arming one plan disarms the others.
     if ( button.dataset.armed !== "1" ) {
       this.disarmPlans();
-      button.dataset.armed = "1";
-      button.classList.add( HOLDING_BATCH_ARMED_CLASS );
-      button.textContent = holdingPlanConfirmLabel( ids.length );
-      this.paintPlanStatus( id, holdingPlanArmedStatus( ids.length ) );
+      this.paintPlanArmed( button, id, ids.length );
+      this.armedPlans.set( id, button.dataset.taskIds! );   // present: ids.length is above zero
       // The rows about to be approved must be on screen BEFORE the confirming press.
       this.setPlanOpen( button.closest<HTMLElement>( ".holding-plan-group" )!, true );
       return;
