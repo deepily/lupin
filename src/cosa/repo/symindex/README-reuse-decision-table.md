@@ -42,7 +42,8 @@ must name an indexed symbol. The receipt records the `route`:
 
 The page stage asks one question per page, about the line text after its link. A page is chosen at
 `p_overlap >= F`, at most five of them, best first and ties by slug. A chosen page **covers** every public
-entry in the modules its line lists, or in the whole package when the line lists none. Pins only decide
+Python entry in the modules its line lists, or in the whole package when the line lists none. JavaScript,
+TypeScript and Dart entries are never covered, so only the full sweep reaches them. Pins only decide
 that a page can be asked about; they do not shape its coverage. One call budget spans every stage, so a
 spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
 `stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.

@@ -505,7 +505,7 @@ def scope_of_line( text ):
 
 
 def in_scope( file, scope ):
-    """Ensures: True when the file's module, or a package above it, matches a scope path."""
+    """Ensures: True for a Python file whose module, or a package above it, matches a scope path."""
     mod = module_of( file )
     if mod is None: return False
     parts = mod.split( "." )
@@ -701,8 +701,8 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
     Ensures:
         - with no pages, one sweep of every entry decides (route "full")
         - otherwise the page stage asks one question per page and chooses at most MAX_PAGES at the policy floor; the
-          entry stage sweeps the entries whose file a chosen page pins; if it finds an entry at the policy threshold
-          that entry decides (route "pages")
+          entry stage sweeps the Python entries in the scope of a chosen page; if it finds an entry at the policy
+          threshold that entry decides (route "pages")
         - when no page is chosen, or the entry stage finds nothing at the threshold, every entry is swept and
           decides (route "pages_then_full"); answers already cached cost nothing
         - every stage draws on the transport's one call budget, so the ceiling holds across all of them
