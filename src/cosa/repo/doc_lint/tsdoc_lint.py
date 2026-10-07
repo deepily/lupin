@@ -32,7 +32,7 @@ CHUNK_SIZE        = 200
 # Tags whose first word after the type is a name, not prose.
 NAMED_TAGS = frozenset( { "param", "arg", "argument", "property", "prop", "typedef", "template", "callback" } )
 
-TAG_LINE   = re.compile( r"^(\s*)(@[A-Za-z][\w-]*)" )
+TAG_LINE   = re.compile( r"([ \t]*)(@[A-Za-z][\w-]*)" )
 NAME_TOKEN = re.compile( r"\[[^\]]*\]|[\w$.]+" )
 LINK_SPAN  = re.compile( r"\{@(?:link|linkcode|linkplain)\b[^}]*\}" )
 
@@ -86,7 +86,8 @@ def _balanced_end( text, start ):
 
     Ensures:
         - nested braces are counted, so generics and object types close correctly
-        - returns None when the line ends before the brace closes
+        - the search runs across line breaks, so a type written over several lines closes
+        - returns None when the text ends before the brace closes
 
     Raises:
         - nothing
@@ -100,42 +101,42 @@ def _balanced_end( text, start ):
     return None
 
 
-def _mask_tag_line( line ):
+def _mask_tag_at( text, start, blank ):
     """
-    Blank the parts of one JSDoc tag line that are type syntax or names, not prose.
+    Blank the parts of one JSDoc tag that are type syntax or names, not prose.
 
     Requires:
-        - line is one line of a JSDoc comment body, delimiters already removed
+        - start is the offset of the first character of a line in text
+        - blank( first, last ) replaces the characters from first up to last with spaces, line breaks kept
 
     Ensures:
-        - the tag word, a balanced type in braces and, for a named tag, the name are replaced by spaces
-        - the line keeps its length, so line and column arithmetic still holds
+        - the tag word, a balanced type in braces and, for a named tag, the name are blanked
+        - a type may run over several lines; the name is read after its closing brace
         - an opening brace that never closes ends the masking after the tag word, so the rest is read as prose
-        - a line that does not start with a tag comes back unchanged
+        - a line that does not start with a tag blanks nothing
+        - returns the offset just past the last character blanked, or start when nothing was
         - Python docstrings have no such shape, so text_rules never sees it; this masking is new
 
     Raises:
         - nothing
     """
-    tag = TAG_LINE.match( line )
-    if tag is None: return line
-    chars = list( line )
-
-    def blank( first, last ): chars[ first : last ] = " " * ( last - first )
-
+    tag = TAG_LINE.match( text, start )
+    if tag is None: return start
     blank( tag.start( 2 ), tag.end( 2 ) )
     pos = tag.end()
-    while pos < len( line ) and line[ pos ] == " ": pos += 1
-    if pos < len( line ) and line[ pos ] == "{":
-        end = _balanced_end( line, pos )
-        if end is None: return "".join( chars )
+    while pos < len( text ) and text[ pos ] == " ": pos += 1
+    if pos < len( text ) and text[ pos ] == "{":
+        end = _balanced_end( text, pos )
+        if end is None: return tag.end( 2 )
         blank( pos, end )
         pos = end
     if tag.group( 2 )[ 1 : ] in NAMED_TAGS:
-        while pos < len( line ) and line[ pos ] == " ": pos += 1
-        name = NAME_TOKEN.match( line, pos )
-        if name is not None: blank( name.start(), name.end() )
-    return "".join( chars )
+        while pos < len( text ) and text[ pos ] == " ": pos += 1
+        name = NAME_TOKEN.match( text, pos )
+        if name is not None:
+            blank( name.start(), name.end() )
+            pos = name.end()
+    return pos
 
 
 def mask_jsdoc( text ):
@@ -146,16 +147,28 @@ def mask_jsdoc( text ):
         - text is the body of a JSDoc comment, delimiters removed
 
     Ensures:
-        - tag lines are masked by _mask_tag_line, and each {@link ...} span is replaced by spaces
+        - tags are masked by _mask_tag_at, and each {@link ...} span is blanked
         - nothing else is masked: a backtick span, a dotted name, a URL, a fenced block, a bracketed
           placeholder, a key = value line and a file name reach the rules as they are
-        - the result has the same length and the same line breaks as text
+        - the result has the same length and the same line breaks as text, also when a type or a
+          link runs over several lines
 
     Raises:
         - nothing
     """
-    masked = "\n".join( _mask_tag_line( line ) for line in text.split( "\n" ) )
-    return LINK_SPAN.sub( lambda m: " " * len( m.group( 0 ) ), masked )
+    chars = list( text )
+
+    def blank( first, last ):
+        for i in range( first, last ):
+            if chars[ i ] != "\n": chars[ i ] = " "
+
+    consumed = 0
+    offset   = 0
+    for line in text.split( "\n" ):
+        if offset >= consumed: consumed = max( consumed, _mask_tag_at( text, offset, blank ) )
+        offset += len( line ) + 1
+    for link in LINK_SPAN.finditer( text ): blank( link.start(), link.end() )
+    return "".join( chars )
 
 
 def _jsdoc_findings( path, comment, root ):

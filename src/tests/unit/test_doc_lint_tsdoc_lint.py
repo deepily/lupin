@@ -174,6 +174,29 @@ def test_an_unclosed_type_is_read_as_prose_so_its_words_fire():
     assert _hits( [ _comment( "\nSummary.\n\n@param {NONE name - The value.\n" ) ] ) == [ ( 13, "caps" ) ]
 
 
+def test_a_link_over_two_lines_keeps_the_line_numbers_of_what_follows():
+    text = "\nSummary.\n\nSee {@link Foo\nbar} here.\n\nNEVER do that.\n"
+    assert tsdoc_lint.mask_jsdoc( text ).count( "\n" ) == text.count( "\n" )
+    assert _hits( [ _comment( text ) ] ) == [ ( 16, "caps" ) ]
+
+
+def test_a_type_over_several_lines_is_masked_whole_and_the_name_after_it_too():
+    assert _hits( [ _comment( "\nSummary.\n\n@param {{ a: string,\n  b: NEVER }} opts - The opts.\n" ) ] ) == []
+    assert _hits( [ _comment( "\nSummary.\n\n@param {{ a: string,\n  b: string }} NONE - The opts.\n" ) ] ) == []
+    assert _hits( [ _comment( "\nSummary.\n\n@param {{ a: string,\n  b: string }} opts - NEVER used.\n" ) ] ) == [ ( 14, "caps" ) ]
+
+
+def test_the_prop_tag_names_its_first_word():
+    assert _hits( [ _comment( "\nSummary.\n\n@prop {string} NONE - The value.\n" ) ] ) == []
+
+
+def test_the_docstring_cap_is_exclusive_at_its_limit():
+    def block( n ): return "\n" + "\n".join( [ "Summary." ] + [ "" ] * ( n - 2 ) + [ "Filler." ] ) + "\n"
+    limit = tsdoc_lint.DOCSTRING_MAX_LINES
+    assert _hits( [ _comment( block( limit ) ) ] ) == []
+    assert _hits( [ _comment( block( limit + 1 ) ) ] ) == [ ( 10, "docstring-length" ) ]
+
+
 # ---- same text, same verdict in both languages -----------------------------------------------
 
 def _py_pairs( text ):
