@@ -56,6 +56,11 @@ def call_facts( probabilities ):
     return p_overlap, confidence, choice
 
 
+def _is_strong( row, policy ):
+    """Ensures: returns True when the row's overlap and confidence both reach policy["strong"]."""
+    return row[ "p_overlap" ] >= policy[ "strong" ] and row[ "confidence" ] >= policy[ "strong" ]
+
+
 def _order( rows ):
     """Ensures: returns the rows sorted by p_overlap descending, then id."""
     return sorted( rows, key=lambda r: ( -r[ "p_overlap" ], r[ "id" ] ) )
@@ -86,7 +91,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
           and confidence < the confidence bar, so unrelated entries never cause uncertainty
         - a strong match wins: when policy["strong"] is set and some entry has both p_overlap and
           confidence at or above it, doubtful entries no longer cause LOW_CONFIDENCE and are listed in
-          `doubtful` instead; every other cause still holds. A policy without "strong" (a receipt stored
+          `doubtful` instead; every other cause still holds, and the reuse-or-extend choice is decided from the strong entries only. A policy without "strong" (a receipt stored
           before the rule) never has a strong match, so it replays as it was stored
         - doubtful lists the doubtful entries best first, cut to policy["shortlist"], whether or not they cause uncertainty
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
@@ -112,13 +117,14 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
     if malformed:           holds.add( "MALFORMED_ANSWER" )
     ordered  = _order( rows )
     doubtful = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "floor" ] and r[ "confidence" ] < policy[ "confidence" ] ]
-    strong   = "strong" in policy and any( r[ "p_overlap" ] >= policy[ "strong" ] and r[ "confidence" ] >= policy[ "strong" ] for r in rows )
+    strong   = "strong" in policy and any( _is_strong( r, policy ) for r in rows )
     if doubtful and not strong: holds.add( "LOW_CONFIDENCE" )
     relevant = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "threshold" ] ]
+    deciding = [ r for r in relevant if _is_strong( r, policy ) ] if strong else relevant
     causes   = [ c for c in CAUSES if c in holds ]
     if causes:          verdict = "UNCERTAIN_READ_SOURCE"
     elif not relevant:  verdict = "NEW"
-    elif any( r[ "choice" ] == "reuse" for r in relevant ): verdict = "REUSE"
+    elif any( r[ "choice" ] == "reuse" for r in deciding ): verdict = "REUSE"
     else:               verdict = "EXTEND"
     return { "verdict"         : verdict,
              "cause"           : causes[ 0 ] if causes else None,

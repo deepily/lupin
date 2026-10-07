@@ -238,7 +238,19 @@ def test_a_strong_match_does_not_hide_a_malformed_answer():
     assert r[ "malformed" ] == [ { "id": "bad", "reason": "sum_not_one" } ] and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]
 
 
-def test_open_ruling_a_doubtful_reuse_still_decides_the_verdict_beside_a_strong_extend():
-    """Pins today's behaviour until Rick rules: doubtful entries still count toward the verdict."""
+def test_with_a_strong_match_reuse_or_extend_is_decided_from_the_strong_entries_only():
     r = _decide( [ _ans( "ext", _p( 0.02, 0.95, 0.03 ) ), _ans( "unsure", _p( 0.6, 0.3, 0.1 ) ) ] )        # strong extend, doubtful reuse
-    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "REUSE", [] ) and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "unsure" ]
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "EXTEND", [] ) and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "unsure" ]
+
+
+def test_cheech_case_a_strong_extend_and_a_doubtful_reuse_give_extend_with_both_on_the_shortlist():
+    r = _decide( [ _ans( "A", _p( 0.03, 0.95, 0.02 ) ), _ans( "B", _DOUBTFUL ) ] )                         # A overlap 0.98 conf 0.95; B overlap 0.9 conf 0.7
+    assert r[ "verdict" ] == "EXTEND" and [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "A", "B" ]
+    assert [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "B" ]
+
+
+def test_a_strong_reuse_beside_a_doubtful_extend_is_reuse_and_without_a_strong_match_every_relevant_entry_decides():
+    assert _decide( [ _ans( "A", _STRONG ), _ans( "B", _p( 0.1, 0.8, 0.1 ) ) ] )[ "verdict" ] == "REUSE"
+    old = { k: v for k, v in vd.POLICY.items() if k != "strong" }
+    r   = _decide( [ _ans( "A", _p( 0.02, 0.95, 0.03 ) ), _ans( "B", _DOUBTFUL ) ], policy=old )           # no strong rule: B still decides
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE" )

@@ -30,7 +30,7 @@ could matter count.
 
 A call is **strong** when `p_overlap >= S` and `confidence >= S`. When any call is strong, doubtful calls
 no longer cause `LOW_CONFIDENCE`; they are listed in `doubtful` beside the verdict instead (Rick's ruling).
-Every other cause still holds. A receipt stored before this rule has no `strong` in its policy and replays as it was.
+Every other cause still holds. The reuse-or-extend choice is then decided from the strong calls only; the shortlist is unchanged. A receipt stored before this rule has no `strong` in its policy and replays as it was.
 
 ## Which entries are asked (page-first)
 
