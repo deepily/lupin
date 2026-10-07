@@ -1,5 +1,5 @@
 {
-  "_comment": "Canonical cosa-voice Claude Code hooks block. Verbatim, env-var-relative so it ports to any host. The python hooks resolve their interpreter from ${LUPIN_CC_VENV:-$LUPIN_ROOT/.venv} \u2014 the operator-owned CC venv install-cosa-voice.sh provisions; LUPIN_CC_VENV defaults to $LUPIN_ROOT/.venv (dev box) and is overridden per-machine (e.g. the GCP VM, where $LUPIN_ROOT/.venv symlinks to the arbiter's venv). Installed into ~/.claude/settings.json by install-cosa-voice.sh. Source of truth \u2014 do NOT hardcode absolute paths here.",
+  "_comment": "Canonical cosa-voice Claude Code hooks block. Verbatim, env-var-relative so it ports to any host. The python hooks resolve their interpreter from ${LUPIN_CC_VENV:-$LUPIN_ROOT/.venv} \u2014 the operator-owned CC venv install-cosa-voice.sh provisions; LUPIN_CC_VENV defaults to $LUPIN_ROOT/.venv (dev box) and is overridden per-machine (e.g. the GCP VM, where $LUPIN_ROOT/.venv symlinks to the arbiter's venv). Installed into ~/.claude/settings.json by install-cosa-voice.sh. Source of truth \u2014 do NOT hardcode absolute paths here. The one exception to relative paths is the context-pressure tick, which carries the dev box's default planning-is-prompting path verbatim: a default is never worse than the bare variable, and install-cosa-voice.sh refuses any live entry that differs from the template.",
   "hooks": {
     "SessionStart": [
       {
@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/install_context_pressure_tick.py\""
+            "command": "python3 \"${PLANNING_IS_PROMPTING_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting}/workflow/scripts/install_context_pressure_tick.py\""
           }
         ]
       }

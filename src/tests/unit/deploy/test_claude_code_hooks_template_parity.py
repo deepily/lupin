@@ -51,9 +51,16 @@ def template():
 
 # ── parity: the template carries every hook the fleet runs ──────────────────
 
-def test_every_fleet_hook_command_is_in_the_template( fleet, template ):
+def test_every_fleet_hook_entry_is_in_the_template_exactly( fleet, template ):
     """Kills the mutant that drops a guard from the template: the three that were missing."""
-    assert helper.unknown_commands( fleet, template ) == { }
+    assert helper.unknown_entries( fleet, template ) == { }
+    assert sum( len( v ) for v in helper.entries_by_event( fleet ).values() ) >= 10, "the comparison ran over nothing"
+
+
+def test_the_template_carries_the_dev_boxs_form_for_the_context_tick_default_included( fleet, template ):
+    wanted = 'python3 "${PLANNING_IS_PROMPTING_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting}/workflow/scripts/install_context_pressure_tick.py"'
+    assert wanted in helper.commands_by_event( fleet )[ "SessionStart" ]
+    assert wanted in helper.commands_by_event( template )[ "SessionStart" ]
 
 
 def test_the_three_guards_that_were_missing_are_in_the_template( template ):
@@ -93,10 +100,22 @@ def test_interpreter_prefixes_normalise_to_one_command( command ):
     assert helper.normalise_command( command ) == '"$LUPIN_ROOT/x.py"'
 
 
-def test_a_defaulted_variable_normalises_to_the_bare_variable():
+def test_a_defaulted_variable_is_not_rewritten():
+    """A live entry with a different default is a difference worth refusing on."""
     left  = helper.normalise_command( 'python3 "${PLANNING_IS_PROMPTING_ROOT:-/abs/path}/w/t.py"' )
     right = helper.normalise_command( '/usr/bin/python3 "$PLANNING_IS_PROMPTING_ROOT/w/t.py"' )
-    assert left == right
+    assert left != right
+
+
+@pytest.mark.parametrize( "command,kept", [
+    ( '/opt/mypython "$R/x.py"',        True ),
+    ( '/usr/bin/env python3 "$R/x.py"', True ),
+    ( 'python3.13 "$R/x.py"',           False ),
+    ( '"/home/a/.venv/bin/python3.13" "$R/x.py"', False ),
+] )
+def test_only_a_python_interpreter_is_dropped( command, kept ):
+    """Kills the mutant that strips any program whose name merely ends in python."""
+    assert ( helper.normalise_command( command ) == command.strip() ) is kept
 
 
 def test_arguments_still_tell_two_commands_apart():
@@ -113,7 +132,7 @@ def test_an_unknown_command_refuses_and_leaves_the_file_byte_identical( tmp_path
     before = open( path, "rb" ).read()
     code, message = helper.merge( path, TEMPLATE )
     assert code == helper.EXIT_REFUSED
-    assert "Stop: python3 /opt/host-only-guard.py" in message
+    assert any( line.startswith( "  Stop: " ) and "python3 /opt/host-only-guard.py" in line for line in message.splitlines() )
     assert open( path, "rb" ).read() == before
     assert not [ n for n in os.listdir( tmp_path ) if ".bak-" in n ], "a refusal must not leave a backup"
 
@@ -123,14 +142,65 @@ def test_every_unknown_command_is_named_under_its_event( tmp_path, template ):
     settings[ "hooks" ][ "Stop" ].append( { "hooks": [ { "type": "command", "command": "stop-extra" } ] } )
     settings[ "hooks" ][ "PreToolUse" ].append( { "hooks": [ { "type": "command", "command": "pre-extra" } ] } )
     code, message = helper.merge( _write( tmp_path / "s.json", settings ), TEMPLATE )
-    assert code == helper.EXIT_REFUSED and "Stop: stop-extra" in message and "PreToolUse: pre-extra" in message
+    assert code == helper.EXIT_REFUSED
+    assert any( l.startswith( "  Stop: " ) and "stop-extra" in l for l in message.splitlines() )
+    assert any( l.startswith( "  PreToolUse: " ) and "pre-extra" in l for l in message.splitlines() )
 
 
-def test_a_known_command_moved_to_another_event_counts_as_unknown( tmp_path, template ):
-    """Commands are compared per event, so a guard filed under the wrong event is not "known"."""
-    stray = template[ "PreToolUse" ][ 0 ][ "hooks" ][ 0 ][ "command" ]
-    settings = { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": stray } ] } ] } }
-    assert helper.unknown_commands( settings[ "hooks" ], template ) == { "Stop": [ stray ] }
+def test_a_known_entry_moved_to_another_event_counts_as_unknown( template ):
+    """Entries are compared per event, so a guard filed under the wrong event is not known."""
+    stray = template[ "PreToolUse" ][ 0 ]
+    assert helper.unknown_entries( { "Stop": [ stray ] }, template ) == { "Stop": [ stray ] }
+
+
+def _live_copy_of_the_template( template ):
+    return { "hooks": copy.deepcopy( template ) }
+
+
+def _guard_entry( settings, script ):
+    return next( e for e in settings[ "hooks" ][ "PreToolUse" ] if script in json.dumps( e ) )
+
+
+def test_a_live_guard_with_a_different_matcher_is_refused_and_named( tmp_path, template ):
+    """Kills the mutant that compares commands only: a guard narrowed to Bash."""
+    settings = _live_copy_of_the_template( template )
+    _guard_entry( settings, "worktree_creation_guard.py" )[ "matcher" ] = "Bash"
+    path   = _write( tmp_path / "settings.json", settings )
+    before = open( path, "rb" ).read()
+    code, message = helper.merge( path, TEMPLATE )
+    assert code == helper.EXIT_REFUSED and '"matcher": "Bash"' in message and "worktree_creation_guard.py" in message
+    assert open( path, "rb" ).read() == before
+
+
+def test_a_live_guard_with_an_extra_field_is_refused( tmp_path, template ):
+    """Kills the mutant that ignores every field but the command: a timeout the template lacks."""
+    settings = _live_copy_of_the_template( template )
+    _guard_entry( settings, "rnd_write_guard.py" )[ "hooks" ][ 0 ][ "timeout" ] = 5000
+    code, message = helper.merge( _write( tmp_path / "settings.json", settings ), TEMPLATE )
+    assert code == helper.EXIT_REFUSED and '"timeout": 5000' in message
+
+
+def test_a_live_guard_with_a_different_default_is_refused( tmp_path, template ):
+    settings = _live_copy_of_the_template( template )
+    entry    = next( e for e in settings[ "hooks" ][ "SessionStart" ] if "install_context_pressure_tick" in json.dumps( e ) )
+    for hook in entry[ "hooks" ]:
+        hook[ "command" ] = hook[ "command" ].replace( ":-/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting", "" )
+    assert helper.merge( _write( tmp_path / "settings.json", settings ), TEMPLATE )[ 0 ] == helper.EXIT_REFUSED
+
+
+def test_a_live_entry_with_a_field_of_its_own_is_refused( tmp_path, template ):
+    """Kills the mutant that compares only matcher and hooks: a field on the entry itself."""
+    settings = _live_copy_of_the_template( template )
+    _guard_entry( settings, "worktree_creation_guard.py" )[ "description" ] = "host note"
+    code, message = helper.merge( _write( tmp_path / "settings.json", settings ), TEMPLATE )
+    assert code == helper.EXIT_REFUSED and '"description": "host note"' in message
+
+
+def test_entries_that_are_not_dicts_never_match_and_are_refused( tmp_path, template ):
+    settings = _live_copy_of_the_template( template )
+    settings[ "hooks" ][ "Stop" ].append( "stray text" )
+    code, message = helper.merge( _write( tmp_path / "settings.json", settings ), TEMPLATE )
+    assert code == helper.EXIT_REFUSED and "stray text" in message
 
 
 def test_template_only_commands_merge_cleanly_and_keep_other_settings( tmp_path, template ):
@@ -164,6 +234,44 @@ def test_an_allow_listed_command_is_not_lost( tmp_path, template ):
     path = _write( tmp_path / "settings.json", settings )
     code, _ = helper.merge( path, TEMPLATE, allow=frozenset( { "/opt/host-only-guard.py" } ) )
     assert code == helper.EXIT_WRITTEN
+    kept = _load( path )[ "hooks" ][ "Stop" ][ -1 ]
+    assert kept[ "hooks" ][ 0 ][ "command" ] == "python3 /opt/host-only-guard.py", "an allow-listed entry survives the overwrite"
+
+
+def test_an_interrupted_write_leaves_the_old_settings_whole_and_no_temp_file( tmp_path, monkeypatch ):
+    """Kills the mutant that writes in place: a crash would leave a truncated file."""
+    path   = _write( tmp_path / "settings.json", { "model": "keep-me", "hooks": { } } )
+    before = open( path, "rb" ).read()
+
+    def die( body, handle, **kwargs ):
+        handle.write( "{ truncated" )
+        raise OSError( "disk went away" )
+
+    monkeypatch.setattr( helper.json, "dump", die )
+    with pytest.raises( OSError, match="disk went away" ):
+        helper.merge( path, TEMPLATE, now=lambda: 9 )
+    assert open( path, "rb" ).read() == before
+    assert sorted( os.listdir( tmp_path ) ) == [ "settings.json", "settings.json.bak-9" ]
+
+
+def test_a_write_that_cannot_even_open_its_temp_file_raises_and_leaves_nothing( tmp_path ):
+    with pytest.raises( FileNotFoundError ):
+        helper._write_atomically( str( tmp_path / "no-such-folder" / "settings.json" ), { } )
+    assert os.listdir( tmp_path ) == [ ]
+
+
+def test_entries_with_odd_hooks_values_still_normalise_without_raising():
+    plain = { "matcher": "X", "hooks": "not a list" }
+    mixed = { "matcher": "X", "hooks": [ "text", { "type": "command" }, { "command": "python3 /a.py" } ] }
+    assert json.loads( helper.normalise_entry( plain ) ) == plain
+    assert json.loads( helper.normalise_entry( mixed ) )[ "hooks" ] == [ "text", { "type": "command" }, { "command": "/a.py" } ]
+
+
+def test_the_rewritten_file_keeps_its_mode( tmp_path ):
+    path = _write( tmp_path / "settings.json", { "hooks": { } } )
+    os.chmod( path, 0o600 )
+    assert helper.merge( path, TEMPLATE )[ 0 ] == helper.EXIT_WRITTEN
+    assert os.stat( path ).st_mode & 0o777 == 0o600
 
 
 def test_a_missing_settings_file_is_written_fresh_with_no_backup( tmp_path, template ):
@@ -205,7 +313,7 @@ def test_cli_exit_codes_and_streams( tmp_path, template ):
     assert ok.returncode == 0 and "installed" in ok.stdout and ok.stderr == ""
     refused_path = _write( tmp_path / "b.json", { "hooks": { "Stop": [ { "hooks": [ { "command": "extra" } ] } ] } } )
     refused = _cli( refused_path, TEMPLATE )
-    assert refused.returncode == 3 and "Stop: extra" in refused.stderr and refused.stdout == ""
+    assert refused.returncode == 3 and "  Stop: " in refused.stderr and '"command": "extra"' in refused.stderr and refused.stdout == ""
     forced = _cli( refused_path, TEMPLATE, "--force" )
     assert forced.returncode == 0
     assert _cli().returncode == 2 and _cli( "a", "b", "--nope" ).returncode == 2 and "usage" in _cli( "a" ).stderr
@@ -218,7 +326,7 @@ def test_main_in_process_returns_the_exit_codes_and_prints_to_the_right_stream( 
     refused = _write( tmp_path / "b.json", { "hooks": { "Stop": [ { "hooks": [ { "command": "extra" } ] } ] } } )
     assert helper.main( [ refused, TEMPLATE ] ) == 3
     captured = capsys.readouterr()
-    assert "Stop: extra" in captured.err and captured.out == ""
+    assert "  Stop: " in captured.err and '"command": "extra"' in captured.err and captured.out == ""
     assert helper.main( [ refused, TEMPLATE, "--force" ] ) == 0
     capsys.readouterr()
     assert helper.main( [ "only-one" ] ) == 2 and helper.main( [ "a", "b", "--nope" ] ) == 2

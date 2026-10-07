@@ -442,7 +442,7 @@ else
     # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json by way of
     # src/scripts/lib/merge_cc_hooks.py, replacing ONLY the "hooks" key and preserving
     # every other setting. The helper REFUSES, and leaves settings untouched, when the
-    # settings hold a hook command the template does not know (row ea27d263): a plain
+    # settings hold a hook entry the template does not carry exactly (row ea27d263): a plain
     # replace used to delete live guard hooks and leave only a .bak copy. Opt in to the
     # overwrite with LUPIN_INSTALL_FORCE_HOOKS=1; the .bak copy is still made first.
     # Commands are $LUPIN_ROOT / $PLANNING_IS_PROMPTING_ROOT relative, so the
@@ -462,7 +462,7 @@ else
         if [ "$HOOKS_RC" -eq 0 ]; then
             pass_check "CC hooks installed (8/8)"
         elif [ "$HOOKS_RC" -eq 3 ]; then
-            warn_check "CC hook install REFUSED: $SETTINGS_FILE holds hook commands the template lacks (listed above). Settings left untouched. Add them to $HOOKS_TEMPLATE, or re-run with LUPIN_INSTALL_FORCE_HOOKS=1 (a .bak copy is kept)."
+            warn_check "CC hook install REFUSED: $SETTINGS_FILE holds hook entries the template does not carry exactly (listed above). Settings left untouched. Correct the template at $HOOKS_TEMPLATE, or re-run with LUPIN_INSTALL_FORCE_HOOKS=1 (a .bak copy is kept)."
         else
             warn_check "CC hook install failed (exit $HOOKS_RC) — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
         fi
