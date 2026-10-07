@@ -3174,10 +3174,11 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # partial, not a closure, for the same reason the memento seams are: the wrapper stays
     # covered when the inner dismiss_sessions is stubbed, and probe_seat_branches has its
     # own direct unit tests.
-    # NO target_branch is passed, deliberately. `reap_branch.DEFAULT_TARGET_BRANCH` reads
+    # NO target_branch is passed, deliberately. `reap_branch.resolve_target_branch` reads
     # $CONTEXT_TICK_TARGET_BRANCH — the SAME variable the context-pressure tick already
-    # resolves the working line from. A second INI key here would be a second definition
-    # of one value, and two derivations of one fact coincide until the day they do not.
+    # resolves the working line from — and otherwise the branch checked out in the main
+    # tree. A second INI key here would be a second definition of one value, and two
+    # derivations of one fact coincide until the day they do not.
     branch_probe = functools.partial( reap_branch.probe_seat_branches )
     # SEAT TEARDOWN (row 129cc96b, P3) → wire the LIVE teardown so a reaped seat's own
     # tree and merged branch go with it, instead of waiting hours for the janitor. It

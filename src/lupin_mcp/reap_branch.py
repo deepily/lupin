@@ -63,12 +63,11 @@ import os
 from typing import Any, Callable, Dict, Optional
 
 
-# The working line a branch is measured against. A branch "ahead" of this carries commits
-# the fleet's line does not have. Overridable at the call so a non-lupin repo, or a repo
-# that renames its line, is not silently measured against a ref it does not own.
-DEFAULT_TARGET_BRANCH = os.environ.get(
-    "CONTEXT_TICK_TARGET_BRANCH", "wip-v0.2.1-2026.08.29-cjflow-v2-followup"
-)
+# The environment variable that overrides the working line a seat is measured against. It is
+# read at the call, not at import, so a value set after the server started is still honoured.
+# There is no hard-coded fallback branch: a stale name gives a confident wrong verdict, and
+# `probe_failed` does not (row a798d296).
+TARGET_BRANCH_ENV = "CONTEXT_TICK_TARGET_BRANCH"
 
 # Verdicts that mean COMMITS ARE LEAVING WITH THE SEAT, each paired with how it renders.
 #
@@ -87,7 +86,8 @@ _LOSING_RENDERERS = {
     "unmerged" : lambda name, persona, o:
         f"{name} ({persona}): {o.get( 'commits' )} commit(s) on {o.get( 'branch' )}",
     "detached" : lambda name, persona, o:
-        f"{name} ({persona}): detached HEAD — no branch anchors its commits",
+        f"{name} ({persona}): detached HEAD, {o.get( 'commits' )} commit(s) not on {o.get( 'target' )}"
+        + ( f" ({', '.join( o.get( 'shas' ) )})" if o.get( "shas" ) else "" ),
 }
 
 # DERIVED, never re-typed. `LOSING` and the renderers cannot disagree by construction.
@@ -195,6 +195,98 @@ def commits_ahead( repo, target_branch, branch, git_fn ):
     return int( raw ) if raw.isdigit() else None
 
 
+def main_tree_branch( cwd, git_fn ):
+    """
+    The branch checked out in the main tree of the repository a seat's worktree belongs to.
+
+    Git is run against the main tree's own path, never the seat's directory: a seat is
+    detached, so its own answer is always empty.
+
+    Requires:
+        - cwd is a worktree directory of the repository
+        - git_fn is a callable( repo, *args ) -> CompletedProcess-like
+
+    Ensures:
+        - returns the branch name, or None when the main tree cannot be found, is itself
+          detached, or git failed
+        - never raises
+    """
+    try:
+        listing = git_fn( cwd, "worktree", "list", "--porcelain" )
+    except Exception:
+        return None
+    if getattr( listing, "returncode", 1 ) != 0:
+        return None
+    main_path = None
+    for line in ( getattr( listing, "stdout", "" ) or "" ).splitlines():
+        if line.startswith( "worktree " ):
+            main_path = line[ len( "worktree " ): ].strip()
+            break
+    if not main_path:
+        return None
+    try:
+        head = git_fn( main_path, "symbolic-ref", "--short", "-q", "HEAD" )
+    except Exception:
+        return None
+    if getattr( head, "returncode", 1 ) != 0:
+        return None
+    return ( getattr( head, "stdout", "" ) or "" ).strip() or None
+
+
+def resolve_target_branch( cwd, git_fn, target_branch=None, env=None ):
+    """
+    The working line a seat is measured against.
+
+    Requires:
+        - cwd is a worktree directory; git_fn is a callable( repo, *args )
+        - env is None (-> os.environ) or a mapping
+
+    Ensures:
+        - returns target_branch when given; else the TARGET_BRANCH_ENV override; else the
+          branch checked out in the main tree; else None, which the caller reports as
+          `probe_failed`
+        - never falls back to a fixed branch name
+        - never raises
+    """
+    if target_branch:
+        return target_branch
+    env = os.environ if env is None else env
+    override = ( env.get( TARGET_BRANCH_ENV ) or "" ).strip()
+    if override:
+        return override
+    return main_tree_branch( cwd, git_fn )
+
+
+def unpicked_commits( repo, target_branch, git_fn ):
+    """
+    The commits on HEAD that have no equivalent patch on `target_branch`.
+
+    Seat work lands as cherry-picks, so a picked commit has a new sha and `rev-list`
+    still counts it. `git cherry` compares patches instead. A pick resolved by hand has
+    a different patch id and still counts, which is the safe direction: it alarms.
+
+    Requires:
+        - repo is a worktree directory; target_branch names a ref
+        - git_fn is a callable( repo, *args ) -> CompletedProcess-like
+
+    Ensures:
+        - returns a list of short shas, empty when every commit has an equivalent
+        - returns None when git failed, which is "could not look", never zero
+        - never raises
+    """
+    try:
+        res = git_fn( repo, "cherry", target_branch, "HEAD" )
+    except Exception:
+        return None
+    if getattr( res, "returncode", 1 ) != 0:
+        return None
+    shas = []
+    for line in ( getattr( res, "stdout", "" ) or "" ).splitlines():
+        if line.startswith( "+ " ):
+            shas.append( line[ 2: ].strip()[ :9 ] )
+    return shas
+
+
 def probe_seat_branches(
     identities    : Dict[ str, Any ],
     *,
@@ -212,18 +304,20 @@ def probe_seat_branches(
     Ensures:
         - returns { seat_name: { status, persona, branch, commits, resume } } for every seat
         - `unmerged` carries the commit count and the exact `git log` line a successor runs
+        - a detached seat is judged by patch equivalence (`git cherry`), not ancestry
+        - the working line is the argument, else the env override, else the main tree's branch;
+          none of these resolving is `probe_failed`, never a guessed branch
         - a seat with no bridge, no cwd, or a git failure gets an EXPLICIT unreadable status
           — never a silent pass, which is the defect this whole mechanism exists for
         - when the sweep module cannot be loaded EVERY seat reads `sweep_unavailable`; the
           probe says it could not look rather than reporting a quiet fleet
         - never raises: a reap must never fail because git hiccupped
     """
-    target   = target_branch or DEFAULT_TARGET_BRANCH
     runner   = git_fn if git_fn is not None else default_sweep_git()
-    outcomes : Dict[ str, Any ] = {}
+    outcomes : Dict[ str, Any ] = { }
 
     for name in sorted( identities ):
-        identity = identities[ name ] or {}
+        identity = identities[ name ] or { }
         persona  = identity.get( "persona" )
         cwd      = identity.get( "cwd" )
 
@@ -233,9 +327,19 @@ def probe_seat_branches(
             continue
 
         branch, failure = seat_branch( cwd, runner )
-        if failure is not None:
+        if failure is not None and failure != "detached":
             outcomes[ name ] = { "status": failure, "persona": persona,
                                  "branch": None, "commits": None, "resume": None }
+            continue
+
+        target = resolve_target_branch( cwd, runner, target_branch )
+        if target is None:
+            outcomes[ name ] = { "status": "probe_failed", "persona": persona,
+                                 "branch": branch, "commits": None, "resume": None }
+            continue
+
+        if failure == "detached":
+            outcomes[ name ] = _detached_outcome( persona, cwd, target, runner )
             continue
 
         ahead = commits_ahead( cwd, target, branch, runner )
@@ -257,6 +361,34 @@ def probe_seat_branches(
         }
 
     return outcomes
+
+
+def _detached_outcome( persona, cwd, target, runner ):
+    """
+    The verdict for a detached seat: its commits that have no equivalent patch on the line.
+
+    Requires:
+        - cwd is the seat's worktree; target names the working line; runner runs git
+
+    Ensures:
+        - status `merged` when every commit has an equivalent patch on the target (or the
+          seat made none), `detached` with the count, the short shas and a resume line
+          otherwise, `probe_failed` when git failed
+        - never raises
+    """
+    shas = unpicked_commits( cwd, target, runner )
+    if shas is None:
+        return { "status": "probe_failed", "persona": persona, "branch": None,
+                 "commits": None, "resume": None }
+    return {
+        "status"  : "detached" if shas else "merged",
+        "persona" : persona,
+        "branch"  : None,
+        "target"  : target,
+        "commits" : len( shas ),
+        "shas"    : shas,
+        "resume"  : f"git cherry -v {target} HEAD" if shas else None
+    }
 
 
 def branch_alarm( outcomes ):

@@ -32,12 +32,15 @@ class _Res:
         self.returncode = returncode
 
 
-def _git_fake( branch="wt-feature", ahead="3", rc_head=0, rc_count=0, raises=False ):
+def _git_fake( branch="wt-feature", ahead="3", rc_head=0, rc_count=0, raises=False, main="the-main-line" ):
     """A git runner honouring its ARGS — a fake that ignored them could not discriminate."""
     def run( repo, *args ):
         if raises: raise OSError( "git exploded" )
         if args[ 0 ] == "rev-parse": return _Res( branch, rc_head )
         if args[ 0 ] == "rev-list":  return _Res( ahead,  rc_count )
+        if args[ 0 ] == "worktree":  return _Res( "worktree /main/tree\nHEAD abc\n", 0 )
+        if args[ 0 ] == "symbolic-ref": return _Res( main or "", 0 if main else 1 )
+        if args[ 0 ] == "cherry":    return _Res( "+ abcdef123456\n", 0 )
         raise AssertionError( f"unexpected git verb {args}" )
     return run
 
@@ -136,10 +139,19 @@ def test_a_missing_sweep_module_reads_unavailable_not_clean( monkeypatch ):
     assert out[ "seat-a" ][ "status" ] == "sweep_unavailable"
 
 
-def test_the_target_defaults_when_not_named( tmp_path ):
+def test_the_target_is_the_main_trees_branch_when_not_named( tmp_path, monkeypatch ):
+    monkeypatch.delenv( reap_branch.TARGET_BRANCH_ENV, raising=False )
     out = reap_branch.probe_seat_branches(
         { "s": _identity( str( tmp_path ) ) }, git_fn=_git_fake( ahead="1" ) )
-    assert reap_branch.DEFAULT_TARGET_BRANCH in out[ "s" ][ "resume" ]
+    assert "the-main-line" in out[ "s" ][ "resume" ]
+
+
+def test_a_target_that_resolves_nowhere_reads_probe_failed( tmp_path, monkeypatch ):
+    """No hard-coded fallback: an unresolved line is "could not look", not a guessed branch."""
+    monkeypatch.delenv( reap_branch.TARGET_BRANCH_ENV, raising=False )
+    out = reap_branch.probe_seat_branches(
+        { "s": _identity( str( tmp_path ) ) }, git_fn=_git_fake( main=None ) )
+    assert out[ "s" ][ "status" ] == "probe_failed"
 
 
 # ── default_sweep_git — the REUSE seam ────────────────────────────────────────
@@ -192,8 +204,10 @@ def test_the_alarm_names_the_seat_the_persona_the_count_and_the_branch():
 
 
 def test_a_detached_seat_is_named_in_the_alarm():
-    alarm = reap_branch.branch_alarm( { "s": { "status": "detached", "persona": "Rio" } } )
+    alarm = reap_branch.branch_alarm( { "s": { "status": "detached", "persona": "Rio", "commits": 2,
+                                                "target": "the-line", "shas": [ "aaa", "bbb" ] } } )
     assert "detached" in alarm and "Rio" in alarm
+    assert "2 commit(s) not on the-line" in alarm and "aaa, bbb" in alarm
 
 
 def test_unreadable_seats_get_their_own_clause_not_the_losing_one():
