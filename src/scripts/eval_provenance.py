@@ -68,7 +68,7 @@ def make_provenance(
     Requires:
         - arm is "v1" or "v2"; corpus is the corpus name both arms load.
         - seed / n_per_command describe the sampler (None on a limit-based run that
-          did not sample — such an arm can never pair with a seeded one).
+          did not sample — such an arm can never pair with a seeded one, which is intentional).
         - sampled_pairs is the exact (utterance, expected_command) set the arm measured.
         - git_sha is the sha read back from the server this arm measured — never a
           constant and never a guess. It is a required argument rather than an optional one.

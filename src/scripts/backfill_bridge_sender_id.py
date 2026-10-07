@@ -7,18 +7,16 @@ nothing unless you pass `--write`. `--dry-run` is accepted and does nothing, bec
 that is what a careful operator types first and erroring on it would be the wrong answer.
 
 Why this exists:
-    The SessionStart hook computes the sender id on the host and writes it into the bridge.
-    `routers/commons.py::_sender_id_for_bridge` serves it verbatim instead of re-deriving it
-    inside a container where host paths do not exist. That closes the defect where every
-    worktree seat was served under a second identity
-    (`claude.code@seat-cc-author-<name>.deepily.ai#<hash>`).
-    A session already running before that change has a bridge with no `sender_id`.
-    Nothing rewrites that bridge until its next SessionStart, because `touch_bridge_mtime`
-    moves the mtime, not the content.
-    Until then the server serves null and the phone skips the seat.
-    So a live seat vanishes from the focus rail instead of showing up cold.
+    The SessionStart hook computes the sender id on the host and writes it into the bridge. `routers/commons.py::_sender_id_for_bridge` serves it verbatim instead of re-deriving it inside a container where host paths do not exist. That closes the defect where every worktree seat was served under a second identity (`claude.code@seat-cc-author-<name>.deepily.ai#<hash>`).
+    A session already running before that change has a bridge with no `sender_id`. Nothing rewrites that bridge until its next SessionStart, because `touch_bridge_mtime` moves the mtime, not the content.
+    Until then the server serves null and the phone skips the seat. So a live seat vanishes from the focus rail instead of showing up cold.
 
 Clause 3, described in `classify()`, keeps this script from generating bugs.
+
+Read the skipped counts, not the written count:
+    `skipped_cwd_missing` and `skipped_no_git_ancestor` are the interesting numbers: they are
+    the bridges this script refused to guess for. A run that writes many and skips none on a
+    box with deleted worktrees would mean clause 3 is not firing.
 
 Never a sentinel, never an overwrite:
     - Inferring the project from the path segment before `/.claude/worktrees/` is banned,
@@ -134,10 +132,6 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         return "skipped_no_git_ancestor", None
 
 
-# Read the skipped counts, not the written count:
-#     `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
-#     refused to guess for. A run that writes many and skips none on a box with deleted
-#     worktrees would mean clause 3 is not firing.
 def main() -> int:
     parser = argparse.ArgumentParser( description="Backfill sender_id into pre-Option-B bridges." )
     parser.add_argument( "--write",   action="store_true", help="actually modify bridges (default: report only)" )

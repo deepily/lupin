@@ -399,6 +399,7 @@ def agentic_command_names() -> Set[ str ]:
 
     Read live from the registry (JOB_ARG_CONTRACTS) rather than a frozen list, so the guard
     tracks a newly added agent at once. It detects the contact instead of modelling a snapshot.
+    These commands are the site of the `fallback_defaults` leak.
 
     Ensures:
         - returns the set of command keys the runtime-argument expeditor extracts args for.
