@@ -1,0 +1,149 @@
+"""
+The runner script of the documentation lint gate, driven in a scratch git tree.
+
+The script is what the merge pyramid and the pre-push hook call. These tests pin its exit codes:
+0 clean, 1 a finding, 2 nothing checked, 3 no interpreter. A run that could not check must never
+print what a clean tree prints.
+"""
+
+import os
+import shutil
+import subprocess
+
+import pytest
+
+import cosa.utils.util as cu
+
+PROJECT_ROOT = cu.get_project_root()
+GATE         = os.path.join( PROJECT_ROOT, "src", "tests", "run-doclint-gate.sh" )
+RESOLVER     = os.path.join( PROJECT_ROOT, "src", "scripts", "lib", "resolve-venv-pytest.sh" )
+WORD_LIST    = os.path.join( PROJECT_ROOT, "src", "conf", "dm-tutor-lowercase-words.txt" )
+VENV         = os.path.join( PROJECT_ROOT, ".venv" )
+CLEAN        = '"""\nAdd two numbers.\n"""\n'
+LOUD         = '"""\nThis module must NEVER change.\n"""\n'
+
+pytestmark = pytest.mark.skipif( not os.path.isdir( VENV ), reason="the gate needs a .venv beside the tree, and this tree has none" )
+
+
+def _git( repo, *args ):
+    subprocess.run( [ "git", *args ], cwd=repo, check=True, timeout=60, capture_output=True )
+
+
+def _write( repo, rel, text ):
+    path = repo / rel
+    path.parent.mkdir( parents=True, exist_ok=True )
+    path.write_text( text, encoding="utf-8" )
+
+
+@pytest.fixture
+def repo( tmp_path ):
+    """A scratch git tree holding the real runner, the real resolver and the real lint package."""
+    _git( tmp_path, "init", "-q" )
+    for src, rel in ( ( GATE, "src/tests/run-doclint-gate.sh" ), ( RESOLVER, "src/scripts/lib/resolve-venv-pytest.sh" ), ( WORD_LIST, "src/conf/dm-tutor-lowercase-words.txt" ) ):
+        ( tmp_path / rel ).parent.mkdir( parents=True, exist_ok=True )
+        shutil.copy( src, tmp_path / rel )
+    os.symlink( os.path.join( PROJECT_ROOT, "src", "cosa" ), tmp_path / "src" / "cosa" )
+    os.symlink( VENV, tmp_path / ".venv" )
+    return tmp_path
+
+
+def _run( repo, *args ):
+    done = subprocess.run( [ "bash", str( repo / "src" / "tests" / "run-doclint-gate.sh" ), *args ], capture_output=True, text=True, timeout=120 )
+    return done.returncode, done.stdout + done.stderr
+
+
+def test_a_clean_tree_exits_zero_and_prints_the_file_count( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+
+    code, text = _run( repo )
+
+    assert code == 0
+    assert "Total Tests: 1\nPassed: 1\nFailed: 0\n" in text
+    assert "DOCLINT GATE PASSED: all 1 files clean." in text
+
+
+def test_one_planted_finding_exits_one_and_names_its_line( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/app/loud.py", LOUD )
+    _git( repo, "add", "src/app" )
+
+    code, text = _run( repo )
+
+    assert code == 1
+    assert "src/app/loud.py:2: caps: ALL-CAPS word NEVER" in text
+    assert "DOCLINT GATE FAILED: 1 findings in 1 of 2 files." in text
+
+
+def test_the_population_is_tracked_swept_files_only( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/lupin_mcp/tool.py", LOUD )
+    _git( repo, "add", "src/app", "src/lupin_mcp" )
+    _write( repo, "src/app/untracked.py", LOUD )
+
+    code, text = _run( repo, "--list" )
+
+    assert code == 0
+    assert text.split() == [ "src/app/a.py" ]
+
+
+def test_no_swept_file_refuses_rather_than_passing( repo ):
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "REFUSING: no swept file found" in text
+    assert "PASSED" not in text
+
+
+def test_a_lint_package_that_does_not_import_refuses( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    os.unlink( repo / "src" / "cosa" )
+
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "REFUSING: cosa.repo.doc_lint.scope_gate does not import" in text
+    assert "PASSED" not in text
+
+
+def test_a_gate_that_dies_with_exit_one_is_refused_not_read_as_findings( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    os.unlink( repo / "src" / "cosa" )
+    _write( repo, "src/cosa/__init__.py", "" )
+    _write( repo, "src/cosa/repo/__init__.py", "" )
+    _write( repo, "src/cosa/repo/doc_lint/__init__.py", "" )
+    _write( repo, "src/cosa/repo/doc_lint/scope_gate.py", 'if __name__ == "__main__": raise ValueError( "boom" )\n' )
+
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "REFUSING: the gate exited 1 without a verdict line. Nothing was checked." in text
+
+
+def test_a_gate_that_exits_with_an_unknown_code_is_refused( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    os.unlink( repo / "src" / "cosa" )
+    _write( repo, "src/cosa/__init__.py", "" )
+    _write( repo, "src/cosa/repo/__init__.py", "" )
+    _write( repo, "src/cosa/repo/doc_lint/__init__.py", "" )
+    _write( repo, "src/cosa/repo/doc_lint/scope_gate.py", 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n' )
+
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "REFUSING: the gate exited 7, which is not a lint result. Nothing was checked." in text
+
+
+@pytest.mark.skipif( os.path.exists( "/opt/venv/bin/python3" ), reason="this host has the container interpreter, so the resolver finds one" )
+def test_no_interpreter_exits_three( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    os.unlink( repo / ".venv" )
+
+    code, text = _run( repo )
+
+    assert code == 3
+    assert "PASSED" not in text
