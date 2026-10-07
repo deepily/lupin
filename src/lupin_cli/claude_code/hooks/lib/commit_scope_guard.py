@@ -156,7 +156,7 @@ _GIT_COMMIT_RE = re.compile(
     {_PROGRAM}\b
     (?P<pre>(?:\s+(?:-[Cc]\s+[^\s;&|]+|-{{1,2}}[^\s;&|]+))*)
     \s+
-    commit\b
+    commit(?![\w-])
     """,
     re.VERBOSE,
 )
