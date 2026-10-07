@@ -58,3 +58,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[agent-voice-io]] — how a job tells the user something or asks a question, and what it does when nobody can answer. `cosa.agents.utils` (voice_io, sender_id, sync_notify), `cosa.agents.deep_research` (cosa_interface, voice_io)
 - [[agentic-job-contract]] — `AgenticJobBase`: the fields and lifecycle every long-running queue job provides. `cosa.agents` (agentic_job_base), `cosa.agents.claude_code`, `cosa.agents.deep_research`
 - [[deep-research]] — answering a question from the web and saving a markdown report. `cosa.agents.deep_research` (cli, search_cache, seed_context)
+- [[generator-sdk-clients]] — the Claude Agent SDK client classes of the podcast, presentation and deep-research agents. `cosa.agents.podcast_generator`, `cosa.agents.presentation_generator`, `cosa.agents.deep_research` (api_client)
+- [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
+- [[presentation-visual-renderers]] — phase 7: replacing each VISUAL marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
+- [[podcast-generation]] — turning a research document into a two-host script and one MP3 per language. `cosa.agents.podcast_generator` (orchestrator)
