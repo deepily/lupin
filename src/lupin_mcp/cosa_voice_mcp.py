@@ -4325,72 +4325,16 @@ def task_create(
     authority           : str              = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Create an item in the unified task store, the one door for owed work.
+    **[SELF-DISCLOSURE]** Create an item in the unified task store, the one door for owed work, your own included: an item created on the native harness `TaskCreate` list is invisible to the fleet, the arbiter and the operator's board. Use it for self-owned tasks, cross-persona assignments and typed items (decision, gate, bug, review_request) alike. Omit `status`: the row lands in the holding area (not_approved) and waits for Rick. It is NOT how DM-born tasks get created: `source_qid` only stamps provenance.
 
-    Every owed item goes through here, your own work included
-    ---------------------------------------------------------
-    The store is the single source of truth for owed work, and this verb writes to it.
-    The native harness `TaskCreate` list is not a liveness source and is not mirrored
-    into the store. An item created there is invisible to the fleet, the arbiter and the
-    operator's board. Use this verb for a self-owned task, a cross-persona assignment, and
-    a typed item (decision, gate, bug, review_request) alike. See planning-is-prompting
-    workflow/task-store-discipline.md.
+    FILING A P0 THAT RICK ORDERED. No seat sets P0 directly; a MANAGER relaying Rick's instruction files a PETITION, here, at create:
+      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other authority, or a worker seat, gets a flat 403; a worker escalates through its manager. Raising an EXISTING row to P0 through task_edit is also a 403: the petition exists only at create.
+      2. The create answers 201 with a `petition` field: {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by, deadlines, check_with: "task_promotion_status"}. The row is REAL and yours, but mints at P1 in the holding area (`not_approved`).
+      3. `answer_by` is when his answer window closes: the promotion ask timeout (120s by default). `resolves_by` is NOT his window: it is the STALL deadline (ask timeout + notification grace + apply margin, 480s by default). Relay `answer_by`, never `resolves_by`, as his deadline.
+      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused and the row stays at P1 in holding. Never report the P0 as landed from the 201 — check `task_promotion_status(ticket_id)`: pending | approved | refused | superseded | stalled. One approval raises the row to P0 and admits it to `queued`.
 
-    NOT a reason to reach here
-    --------------------------
-    Do NOT reach for this verb thinking it is how DM-born tasks get created.
-    `source_qid` is a provenance FIELD (plumbed through TaskCreateIn) RESERVED
-    for a designed-but-NOT-YET-BUILT server-side DM→task auto-create path
-    (cold-review C10, still an OPEN design question — no such auto-creator
-    exists in src/cosa today). This wrapper's `source_qid` param only stamps
-    provenance on an item you are already minting.
-
-    FILING A P0 THAT RICK ORDERED (row d2b1b59a)
-    --------------------------------------------
-    No seat sets P0 directly. A MANAGER relaying Rick's instruction files a
-    PETITION, and it must do so HERE, at create:
-      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other
-         authority, or a worker seat, gets a flat 403 — a worker escalates
-         through its manager. Raising an EXISTING row to P0 through task_edit
-         is also a 403: the petition exists only at create.
-      2. The create answers 201 and carries a `petition` field:
-         {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by,
-          deadlines, check_with: "task_promotion_status"}. The row is REAL and
-         yours, but it mints at P1 in the holding area (`not_approved`), whatever
-         status you sent. The ratio gate still judges it at P1 and can refuse a 422.
-      3. Rick is asked in the background. `answer_by` is when his answer window
-         closes: the promotion ask timeout (120s by default).
-         `resolves_by` is NOT his window: it is the STALL deadline (ask timeout +
-         notification grace + apply margin, 480s by default), after which an
-         unresolved ticket is an orphan. Relay `answer_by`, never `resolves_by`,
-         as his deadline.
-      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused, and the row
-         stays at P1 in holding. Never report the P0 as landed from the 201 —
-         check `task_promotion_status(ticket_id)`: pending | approved | refused
-         | superseded | stalled. One approval both raises the row to P0 and
-         admits it to `queued`; a refusal means ask again when Rick is back.
-
-    Examples:
-        # Assign work to ANOTHER persona (cross-persona — harness can't):
-        task_create(item_class="task", title="Review the wrapper build",
-                    project="lupin", owner_persona="tiffany",
-                    accountable_manager="tiberius")
-
-        # A decision for the operator queue (TYPED — harness can't):
-        task_create(item_class="decision", title="Deploy window for MCP restart",
-                    project="lupin", body="Options: ... Recommendation: ...",
-                    gate_class="operator")
-
-        # A P0 Rick ordered (MANAGER seat; mints P1 + a petition, see above):
-        task_create(item_class="bug", title="Prod login is down",
-                    project="lupin", owner_persona="tiffany",
-                    priority="P0", authority="user_direct")
-        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
-
-        # Your own work (a self-owned task uses this door too):
-        task_create(item_class="task", title="Draft the docstring",
-                    project="lupin", owner_persona="<you>",
-                    accountable_manager="<your manager>")
+    Returns:
+        The item dict (server 201 body) verbatim, with `petition` when one was filed, or an error dict: {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header"} or {"status": "error", "http_status": 422, "errors": [...]}.
 
     Args:
         item_class: task | decision | review_request | bug | gate
@@ -4400,36 +4344,20 @@ def task_create(
         owner_persona: Who owes the work
         accountable_manager: Who chases it
         gate_class: none | operator (default "none")
-        priority: P0..P3 (default "P2")
-        urgency: urgent | normal | low (default "normal") — operator-gate TIME-
-            sensitivity (NOT priority/importance); the arbiter routes a gate by it
-            (urgent→interrupt, normal→digest, low→queue)
-        status: OMIT IT. Left unset, the row lands in the holding area
-            (not_approved) where the holding default is on, and waits for Rick.
-            Naming "queued" or "blocked" puts a row straight on the live board, so
-            the server REFUSES it 403 unless the row is P0 or the caller is Rick
-            himself (Rick 2026-09-08; row 2d786391). The 2026-07-20 one-call
-            blocked mint survives only on those two paths, and is still
-            MANAGER-ONLY there. Where the holding default is off, queued|blocked
-            mint as before. done/dropped/parked/claimed/in_progress/review are
-            never mintable — transition after create.
-        blocked_by: typed refs [{kind: item|persona|user, id}] — REQUIRED (>=1)
-            for a blocked mint; ignored for queued
-        next_chase_ts: ISO-8601 chase time — REQUIRED for a blocked mint whose
-            blocked_by names a {kind:persona} ref (I3 — a peer is chaseable)
+        priority: P0..P5 (default "P2")
+        urgency: urgent | normal | low (default "normal"); operator-gate TIME-sensitivity, NOT importance
+        status: OMIT IT. Unset, the row lands in the holding area (not_approved) and waits for Rick. Naming "queued" or "blocked" is a 403 unless the row is P0 or the caller is Rick (a one-call blocked mint is MANAGER-ONLY). done/dropped/parked/claimed/in_progress/review are never mintable; transition after create.
+        blocked_by: typed refs [{kind: item|persona|user, id}], REQUIRED (>=1) for a blocked mint
+        next_chase_ts: ISO-8601 chase time, REQUIRED for a blocked mint whose blocked_by names a {kind:persona} ref
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
-        authority: standing | user_direct | manager_relay (default "standing").
-            "user_direct" with priority="P0" files a petition (see above)
+        authority: standing | user_direct | manager_relay (default "standing"); "user_direct" with priority="P0" files a petition
 
-    Returns:
-        The serialized item dict (server 201 body) verbatim — carrying a
-        `petition` field when the create filed one — or an error dict:
-        {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
-        or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
-
-    `created_by` is not a parameter: it is stamped from the session bridge
-    ("<persona> <session id>").
+    Examples:
+        task_create(item_class="task", title="Review the wrapper build", project="lupin", owner_persona="tiffany", accountable_manager="tiberius")    # assign work to ANOTHER persona
+        task_create(item_class="decision", title="Deploy window for MCP restart", project="lupin", body="Options: ... Recommendation: ...", gate_class="operator")    # a decision for the operator queue
+        task_create(item_class="bug", title="Prod login is down", project="lupin", owner_persona="tiffany", priority="P0", authority="user_direct")    # a P0 Rick ordered (MANAGER seat; mints P1 + a petition)
+        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
     """
     refusal = _refuse_borrowed_identity( "task_create" )
     if refusal is not None: return refusal
@@ -4469,102 +4397,32 @@ def task_transition(
     asynchronous  : Optional[ bool ] = True,
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
+    **[SELF-DISCLOSURE]** Apply one state change to a task-store item. The server enforces the rules and surfaces them verbatim (a 422 carries its errors unedited); this tool pre-checks none of them. `asynchronous` defaults to True and matters only for a promotion out of `not_approved`.
 
-    The receipts discipline is enforced SERVER-side and surfaces verbatim:
-    `->done` REQUIRES receipt_refs — if you can't cite a receipt, the work isn't
-    done. The whitelist is SEVEN keys, and `task_store_rules.RECEIPT_KEY_WHITELIST`
-    is the authority; this list is a courtesy that can drift from it:
-        commit · test_run · qid · doc_path · log_line · operator_attestation ·
-        manager_attestation
-    🔴 BUT ONLY FOUR OF THEM CLOSE A ROW (`CLOSING_RECEIPT_KEYS`). A WORKER seat
-    can mint exactly one of them, and a MANAGER seat two:
-        commit               ✅ a sha you produced
-        test_run             ❌ harness only — `ts-<8 hex>`, a TestSuiteJob id;
-                                nothing you generate yourself will fullmatch
-        operator_attestation ❌ the OPERATOR's word, and the router — not this
-                                tool — decides whether you may assert it
-        manager_attestation  ✅ MANAGER seats only (Rick, 2026-09-10, row
-                                adaf7698). The value is a placeholder: the server
-                                REPLACES it with the manager identity it resolved,
-                                and your text is not stored anywhere (row 8639d1ad).
-                                Put your evidence in `reason`, which IS kept.
-                                It closes decision rows and held
-                                (`not_approved`) rows, never a `parked` one.
-                                A worker seat gets a 403
-    ⇒ So a WORKER whose work produces no commit has no closing receipt it can
-    supply, and should ask its manager to close the row. Do not route around
-    that by naming an unrelated sha (row b4281428). `operator_attestation` was ABSENT from this list until
-    2026-09-09, which meant the one key representing Rick's own word was
-    invisible to every seat that read only this description;
-    `->blocked` REQUIRES BOTH >=1 typed blocked_by ref ({kind: item|persona|user,
-    id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
-    pre-check any of that — a 422 carries the server's errors unedited.
+    `->done` REQUIRES `receipt_refs`: no receipt, no done. Keys: commit · test_run · qid · doc_path · log_line · operator_attestation · manager_attestation, but only four CLOSE a row, and a worker seat can mint one of them, a manager seat two: `commit` (a sha you produced); `test_run` (harness only, `ts-<8 hex>`); `operator_attestation` (the OPERATOR's word; the router decides whether you may assert it); `manager_attestation` (MANAGER seats only, else 403; the server stores the manager identity, so put evidence in `reason`; closes decision and held rows, never `parked`). A worker with no commit asks its manager to close the row; do not name an unrelated sha.
 
-    `->parked` means A HUMAN RULED THIS NOT-NOW: approved, not abandoned, and
-    blocked on NOTHING. It REQUIRES BOTH `park_reason` (non-blank) AND
-    `next_chase_ts`, and is legal ONLY from queued / in_progress.
-      · `park_reason` MUST QUOTE the row's own decisive sentence, not
-        paraphrase it — the quote is what lets the next reader REFUTE the park
-        row-by-row instead of re-deriving the whole board.
-      · The chase IS the un-park. Expiry is computed at READ time: once
-        next_chase_ts passes, the row REJOINS the owed count automatically —
-        no daemon, no sweeper, no human action. Parking buys BOUNDED,
-        SELF-EXPIRING silence, never an exit.
-      · An INDEFINITE hold is NOT a park — that is `dropped` with a reason,
-        because dropping is VISIBLE.
-      · Leaving `parked` CLEARS park_reason: a quote must never outlive the
-        park it justified.
+    `->blocked` REQUIRES BOTH >=1 typed `blocked_by` ref ({kind: item|persona|user, id}) AND `next_chase_ts`. `->dropped` needs a `reason`. done and dropped are terminal.
 
-    Examples:
-        # Close with receipts:
-        task_transition(task_id="<uuid>", to_status="done",
-                        receipt_refs={"commit": "f4e0370", "test_run": "ts-b51e63c9"})
-
-        # Block with a typed wait + chase time:
-        task_transition(task_id="<uuid>", to_status="blocked",
-                        blocked_by=[{"kind": "persona", "id": "tiffany"}],
-                        next_chase_ts="2026-06-13T09:00:00-04:00")
-
-        # Park a deliberately-held row, quoting its OWN decisive sentence:
-        task_transition(task_id="<uuid>", to_status="parked",
-                        park_reason="NOT TO BE WORKED per Rick's direct instruction",
-                        next_chase_ts="2026-07-22T09:00:00-04:00")
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict (422: the server's `errors`; 404: "task {id} not found"). On a PROMOTION whose 25s poll budget runs out you get the 202 body (`status: "awaiting_human_approval"`, `ticket_id`): still waiting. Do NOT retry (it 422s); call `task_promotion_status`.
 
     Args:
         task_id: The item's UUID
-        to_status: Target status (e.g. in_progress | blocked | done | dropped)
-        receipt_refs: Receipt dict — REQUIRED server-side for ->done
-        next_chase_ts: ISO-8601 chase time — REQUIRED server-side for ->blocked
-        blocked_by: Typed refs [{kind, id}] — REQUIRED server-side for ->blocked
-        park_reason: The row's OWN decisive sentence, quoted (<=4000) —
-            REQUIRED server-side (non-blank) for ->parked; cleared on unpark
-        reason: Free-text rationale (<=4000) — REQUIRED server-side (non-empty)
-            for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
-            give one on every ->dropped regardless (task-store-discipline.md §4)
+        to_status: in_progress | blocked | parked | done | dropped
+        receipt_refs: Receipt dict, REQUIRED for ->done
+        next_chase_ts: ISO-8601 time, REQUIRED for ->blocked and ->parked
+        blocked_by: Typed refs [{kind, id}], REQUIRED for ->blocked
+        park_reason: REQUIRED (non-blank, <=4000) for ->parked (only from queued / in_progress): the row's OWN decisive sentence, QUOTED. The chase IS the un-park (the row rejoins the owed count when `next_chase_ts` passes); an INDEFINITE hold is `dropped`. Cleared on unpark
+        reason: Rationale (<=4000); REQUIRED for ->dropped
         authority: standing | user_direct | manager_relay (default "standing")
-        asynchronous: DEFAULTS TO True — this verb is the one caller that opts
-            into the 202 promotion path, so you do not have to remember to. It
-            changes NOTHING except a promotion out of `not_approved`: pass False
-            to demand today's synchronous path, None to omit the field entirely.
-            It is the second of two gates and fails CLOSED behind the operator's
-            INI flag, and it MUST be a real boolean — the wire field is
-            StrictBool, so the string "true" is a deliberate 422.
-
-    Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 422
-        carries the server's detail.errors list VERBATIM under "errors"; a 404
-        carries "task {id} not found" verbatim under "detail".
-
-        ⚠️ ON A PROMOTION, ONE MORE SHAPE IS POSSIBLE and it is not an error: if
-        the 25s poll budget runs out before Rick answers, you get the 202 body
-        back — `status: "awaiting_human_approval"` plus a `ticket_id` and
-        `check_with: "task_promotion_status"`. That is a DETERMINATE "still
-        waiting", not a failure, and the request already succeeded. Do NOT retry
-        the transition: the server rejects the retry 422 as a no-op and that 422
-        is a success signal wearing a rejection's clothes (row 96cf5cec).
+        asynchronous: default True (see above). Pass False for the synchronous path, None to omit the field. Must be a real boolean (the string "true" is a 422).
 
     `actor` is not a parameter: it is stamped from the session bridge.
+
+    Examples:
+        task_transition(task_id="<uuid>", to_status="done", receipt_refs={"commit": "f4e0370", "test_run": "ts-b51e63c9"})    # close with receipts
+        task_transition(task_id="<uuid>", to_status="blocked", blocked_by=[{"kind": "persona", "id": "tiffany"}], next_chase_ts="2026-06-13T09:00:00-04:00")    # block with a typed wait and chase time
+        task_transition(task_id="<uuid>", to_status="parked", park_reason="NOT TO BE WORKED per Rick's direct instruction", next_chase_ts="2026-07-22T09:00:00-04:00")    # park a held row, quoting its OWN decisive sentence
     """
     refusal = _refuse_borrowed_identity( "task_transition" )
     if refusal is not None: return refusal
