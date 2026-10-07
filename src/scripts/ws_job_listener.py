@@ -30,7 +30,9 @@ from urllib.parse import urlsplit
 
 class EvalIntegrityError( RuntimeError ):
     """
-    Raised when a precondition for a trustworthy measurement is violated, so the run fails.
+    Raised when a precondition for a trustworthy measurement is violated.
+
+    The run fails loudly rather than reporting a number it cannot stand behind.
 
     This is a third class of the same name, and that is deliberate. `v1_eval_arm` and `v2_eval` each
     define their own, and importing either here would re-create the dependency this move exists to cut,

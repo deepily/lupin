@@ -4,7 +4,7 @@ SWE Team workload runner — submits catalog tasks and captures proxy decisions.
 
 Logs in to the running server and submits catalog tasks one at a time through POST /api/v2/submit
 with dry_run=true. The done queue is polled for completion. PostgreSQL is then queried for every
-proxy decision created by each job. A JSONL manifest goes to io/decision-proxies/ for analysis.
+proxy decision created by each job. A JSONL manifest goes to io/decision-proxies/ for downstream analysis and integration test fixture generation.
 
 Requires:
     - LUPIN_ROOT environment variable set

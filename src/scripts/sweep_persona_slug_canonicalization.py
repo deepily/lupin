@@ -2,11 +2,7 @@
 """
 Persona-slug sweep that renames non-canonical DM-topic files (dry-run by default).
 
-Part of the persona-name normalization work. The DM-topic and session-spawner helpers are routed
-through the shared `persona_slug` root. Topic files and spawned tmux sessions should therefore
-already sit at the canonical slug. Live bridges hold the pool form ("mr radio", "maria"), so
-topics are already `dm-mr_radio` and `dm-maria`. The sweep should be a near no-op, and this
-tool proves that and renames any straggler.
+Part of the persona-name normalization work. The DM-topic and session-spawner helpers are routed through the shared `persona_slug` root. Topic files and spawned tmux sessions should therefore already sit at the canonical slug. Live bridges hold the pool form ("mr radio", "maria"), so topics are already `dm-mr_radio` and `dm-maria`. The sweep should be a near no-op, and this tool proves that and renames any straggler.
 
 It is owner-driven rather than a blind scan. `io/commons/` holds many `dm-*` topics that are not
 persona-derived: ad-hoc collection topics (`dm-2-reviewers`), session-id topics (`dm-07fba31d`),
@@ -37,6 +33,9 @@ Run:
     python src/scripts/sweep_persona_slug_canonicalization.py            # dry-run report
     python src/scripts/sweep_persona_slug_canonicalization.py --apply    # rename topic stragglers
     python src/scripts/sweep_persona_slug_canonicalization.py --persona "María" --persona "Mr. Radio"
+
+Tests: 100% coverage by the companion suite `src/tests/unit/test_sweep_persona_slug_canonicalization.py`
+(scan/report/apply exercised with injected owners, a temp commons dir, and a fake tmux lister).
 
 See: src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md
 """

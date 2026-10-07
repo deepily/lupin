@@ -14,7 +14,7 @@ Ensures:
       Amend first and a failed transition leaves the row blocked, so nobody works it, with
       a stamp that has not come true yet: visible, harmless and retried on the next run.
       A re-run appends a second stamp, which is honest because it was attempted twice
-    - never touches a row with a dropped blocker, which needs the owner's ruling
+    - never touches a row with a dropped blocker, which needs a ruling from the project owner, and only the owner
     - never touches a row with an unresolvable blocker, since a dead edge is not a
       satisfied precondition
     - never touches a row with a persona or user blocker, since no registry resolves one

@@ -19,7 +19,7 @@ Ensures:
       values that only lived in gitignored or uncommitted files
     - two precision trades can hide a real secret: an all-lowercase value with two
       or more underscores or hyphens reads as an identifier name, and a value that
-      repeats its own key reads as wiring
+      repeats its own key reads as wiring. Both were the price of a readable findings list
     - scan the ref, not the checkout, to see what the public repo shows: a working
       copy can be redacted while the pushed branch still holds the value
     - this is the inventory sweep, not the commit gate; the gate is
