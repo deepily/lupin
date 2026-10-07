@@ -381,3 +381,24 @@ def test_a_page_receipt_replays_the_same_after_the_wiki_changes( env ):
     write_wiki( env[ 0 ], { "other-page": "something else. `cosa.mathx`" }, { "other-page": "cosa.mathx.add@bbbbbbbbbb" }, pages=( "other-page", ) )   # the wiki the receipt used is gone
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "REUSE" and rep[ "differences" ][ "frozen" ] == []
+
+
+class FailsOnMathPage( PageFake ):
+    """A fake whose call for the math page always fails, as a dropped connection would."""
+
+    def answer( self, body ):
+        if body[ "state" ][ "candidate" ] == MATH_PAGE: raise OSError( "connection dropped" )
+        return super().answer( body )
+
+    post = answer
+
+
+def test_a_receipt_with_a_failed_page_call_replays_without_that_page( env ):
+    write_wiki( env[ 0 ] )
+    need = "something unrelated [pagefailed]"
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FailsOnMathPage( need, { FEEDS_PAGE: CHOSEN } ) )
+    r    = rt.check_exists_impl( need, ctx )
+    rec  = receipt_of( env, r )
+    assert rec[ "pages" ][ "skipped" ] == [ "math-page" ] and rec[ "route" ] == "pages_then_full" and r[ "verdict" ] == "NEW"      # the full sweep still decides, so a lost page call hides nothing
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
