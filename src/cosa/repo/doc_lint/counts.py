@@ -172,6 +172,36 @@ def rules_stamp( root, read=None ):
     return digest.hexdigest()[ : 16 ]
 
 
+def differing_rule_files( root, read ):
+    """
+    List the rule files whose staged content differs from the working copy.
+
+    Requires:
+        - root is a working tree
+        - read( path ) returns a rule file's staged bytes, or raises OSError when it has none
+
+    Ensures:
+        - returns the paths from STAMP_FILES, in order, whose staged bytes are not the bytes on disk
+        - a rule file missing in one place and present in the other counts as different
+        - a rule file missing in both places is the same, since there is nothing to disagree about
+
+    Raises:
+        - nothing
+    """
+    differ = []
+    for path in STAMP_FILES:
+        try:
+            with open( f"{root}/{path}", "rb" ) as handle: on_disk = handle.read()
+        except FileNotFoundError:
+            on_disk = None
+        try:
+            staged = read( path )
+        except OSError:
+            staged = None
+        if staged != on_disk: differ.append( path )
+    return differ
+
+
 def table_text( files, stamp ):
     """
     Render the table as text, one entry per line and sorted by path.

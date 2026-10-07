@@ -1089,17 +1089,48 @@ def test_a_staged_rule_edit_makes_the_table_stale( stamped, monkeypatch ):
     assert rc == 3 and "the count table was cut under other rules" in text and "table stale" in text
 
 
-def test_an_unstaged_rule_edit_leaves_the_table_current_and_is_reported( stamped, monkeypatch ):
+DIVERGED = "is not the same staged and in the working tree, so the findings were counted under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again"
+
+
+def test_a_rule_file_that_differs_between_the_index_and_the_disk_refuses_a_commit_that_stages_a_counted_file( stamped, monkeypatch ):
     _no_external( monkeypatch )
     _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
     ( stamped / RULE_FILE ).write_text( "an edit nobody staged\n", encoding="utf-8" )
     _stage( stamped, { "src/tests/t.py": CLEAN } )
     rc, text = _gate( stamped )
-    assert rc == 0 and "REFUSED" not in text and "table ok" in text
-    assert "WARNING: the rule files in the working tree differ from the staged ones" in text
+    assert rc == 3 and f"REFUSED: rule file {RULE_FILE} {DIVERGED}" in text and "table diverged" in text
+    assert "1 refusals, commit REFUSED" in text
 
 
-def test_a_rule_edit_staged_and_then_put_back_on_disk_still_stales_the_table( stamped, monkeypatch ):
+def test_a_rule_file_that_differs_refuses_a_lone_swept_file_and_names_every_differing_rule_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / counts.STAMP_FILES[ 0 ] ).write_text( "one\n", encoding="utf-8" )
+    ( stamped / counts.STAMP_FILES[ 2 ] ).write_text( "two\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": CLEAN } )                                  # nothing wrong with the file itself
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"rule file {counts.STAMP_FILES[ 0 ]}, {counts.STAMP_FILES[ 2 ]} {DIVERGED}" in text
+
+
+def test_a_rule_file_that_differs_gives_no_verdict_on_a_swept_file_that_has_a_finding( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "one\n", encoding="utf-8" )
+    _stage( stamped, { "src/pkg/swept.py": SWEPT_CAPS } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and DIVERGED in text and "REFUSED src/pkg/swept.py" not in text and "0 files checked, 0 docstrings checked" in text
+
+
+def test_a_rule_file_that_differs_refuses_a_lone_staged_table( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "one\n", encoding="utf-8" )
+    _table( stamped, {} )                                                            # the table is the only thing staged
+    rc, text = _gate( stamped )
+    assert rc == 3 and DIVERGED in text
+
+
+def test_a_staged_rule_edit_put_back_on_disk_is_a_divergence_not_a_silent_pass( stamped, monkeypatch ):
     _no_external( monkeypatch )
     _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
     original = ( stamped / RULE_FILE ).read_text( encoding="utf-8" )
@@ -1108,10 +1139,27 @@ def test_a_rule_edit_staged_and_then_put_back_on_disk_still_stales_the_table( st
     ( stamped / RULE_FILE ).write_text( original, encoding="utf-8" )                 # the disk copy matches the table again
     _stage( stamped, { "src/tests/t.py": CLEAN } )
     rc, text = _gate( stamped )
-    assert rc == 3 and "the count table was cut under other rules" in text
+    assert rc == 3 and f"rule file {RULE_FILE} {DIVERGED}" in text
 
 
-def test_the_stamp_the_gate_reads_is_the_staged_one_and_a_clean_tree_has_no_warning( stamped, monkeypatch ):
+def test_a_rule_file_edit_with_nothing_judged_in_the_commit_does_not_stop_it( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    ( stamped / RULE_FILE ).write_text( "work in progress\n", encoding="utf-8" )
+    _stage( stamped, { "history.md": "A note.\n", "src/pkg/notes.txt": "x\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table ok" in text and "not the same staged" not in text
+
+
+def test_rule_files_that_are_the_same_staged_and_on_disk_leave_the_commit_alone( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": CLEAN, "src/pkg/swept.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table ok" in text and "not the same staged" not in text
+
+
+def test_a_clean_tree_has_no_divergence_and_the_stamp_is_the_staged_one( stamped, monkeypatch ):
     _no_external( monkeypatch )
     _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
     _stage( stamped, { "src/tests/t.py": CLEAN } )
@@ -1139,3 +1187,33 @@ def test_the_rename_hint_names_at_most_three_deleted_entries( stamped, monkeypat
     rc, text = _gate( stamped )
     named = text.split( "also deletes " )[ 1 ].split( ", which had an entry" )[ 0 ]
     assert rc == 3 and named == "src/lupin_mcp/d0.py, src/lupin_mcp/d1.py, src/lupin_mcp/d2.py" and "d3.py" not in text
+
+
+def _weaken_the_linter( monkeypatch ):
+    """Stand in for a docstring_lint.py whose working copy was edited, unstaged, to report nothing."""
+    monkeypatch.setattr( gate.docstring_lint, "lint_source", lambda path, source, root=None, stats=None: [] )
+
+
+def test_weakened_rule_code_in_the_working_tree_cannot_let_a_swept_finding_through( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/pkg/swept.py": SWEPT_CAPS } )
+    rc, text = _gate( stamped )                                                       # the rule files are equal: the finding is refused
+    assert rc == 3 and "REFUSED src/pkg/swept.py:5: caps" in text
+    _weaken_the_linter( monkeypatch )
+    ( stamped / "src/cosa/repo/doc_lint/docstring_lint.py" ).write_text( "def lint_source( *a, **k ): return []\n", encoding="utf-8" )
+    rc, text = _gate( stamped )                                                       # the rule file now differs: refused for that, not passed
+    assert rc == 3 and "rule file src/cosa/repo/doc_lint/docstring_lint.py is not the same staged and in the working tree" in text
+
+
+def test_weakened_rule_code_in_the_working_tree_cannot_let_a_counted_rise_through( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit_rules_and_table( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )                                                       # the rule files are equal: the rise is refused
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text
+    _weaken_the_linter( monkeypatch )
+    ( stamped / "src/cosa/repo/doc_lint/docstring_lint.py" ).write_text( "def lint_source( *a, **k ): return []\n", encoding="utf-8" )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "rule file src/cosa/repo/doc_lint/docstring_lint.py is not the same staged and in the working tree" in text
+    assert "findings, the count table allows" not in text

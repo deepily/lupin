@@ -21,6 +21,9 @@ Three refusals break warn mode, and all exit REFUSAL_EXIT.
 3. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
+Before any of these, a rule file that differs between the index and the working tree refuses the commit.
+The findings would be counted under rules that are not the ones being committed.
+
 Every run prints the denominator for both scopes: files checked, docstrings or counts, waivers honoured.
 Everything else stays warn mode: findings on staged lines are printed and the commit goes through.
 """
@@ -217,6 +220,31 @@ def counted_refusal( path, result, allowed, ranges, gone=() ):
     return "\n".join( lines )
 
 
+def rule_divergence( root, judged ):
+    """
+    Refuse a commit whose staged rule files differ from the working copies.
+
+    Requires:
+        - root is a git working tree
+        - judged is True when this commit stages a Python file the gate judges, or the count table
+
+    Ensures:
+        - returns None when no judgment is being made or every rule file is the same staged and on disk
+        - else returns one refusal string naming the files and both ways out: stage the edit, or restore the file
+        - the stamp and the files read the index, but the rule code that counts is the working tree's, so a difference could give a wrong verdict or a wrong table
+
+    Raises:
+        - OSError when a rule file is in neither place
+    """
+    if not judged: return None
+    differ = counts.differing_rule_files( root, lambda p: staged_bytes( root, p ) )
+    if not differ: return None
+    return (
+        f"[doc-lint] REFUSED: rule file {', '.join( differ )} is not the same staged and in the working tree, so the findings were counted "
+        f"under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again"
+    )
+
+
 def counted_check( root, ranges ):
     """
     Hold the staged counted files to the count table.
@@ -232,7 +260,6 @@ def counted_check( root, ranges ):
         - a staged table that raises an entry above HEAD is refused, unless it carries a new stamp
         - a new stamp must equal the stamp of the rule files now and the table must equal a census of the index
         - the current stamp is that of the staged rule files, so a staged rule edit moves it and an unstaged one does not
-        - when the working-tree rule files differ from the staged ones, a warning says which stamp is which
         - a table whose stamp is not the current one refuses a commit that stages a counted file
         - a counted file above its allowance is refused; a renamed file inherits its old entry; a new file has none
 
@@ -260,8 +287,6 @@ def counted_check( root, ranges ):
         if paths: warnings.append( "[doc-lint] WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" )
         return refusals, warnings, stats
     current = counts.rules_stamp( root, read=lambda p: staged_bytes( root, p ) )
-    on_disk = counts.rules_stamp( root )
-    if on_disk != current: warnings.append( f"[doc-lint] WARNING: the rule files in the working tree differ from the staged ones (stamp {on_disk} on disk, {current} staged); counts were measured with the working-tree rules, and the stamp is the staged one" )
     if staged is not None and ( head is None or staged.stamp != head.stamp ):
         found, _walked = counts.census( root, read=lambda p: staged_source( root, p ) )
         problems       = counts.check_table( staged, found, current )
@@ -466,6 +491,11 @@ def collect( root ):
     findings += ruff_findings + md_findings
     refusals = [ f for f in findings if in_blocking_package( f.path, BLOCKING_PACKAGES ) and is_mechanical( f ) ]
     lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
+    staged_counted_paths, _renames, table_staged = staged_counted( root )
+    diverged = rule_divergence( root, bool( swept ) or bool( staged_counted_paths ) or table_staged )
+    if diverged:
+        lines_out.append( diverged )
+        swept = []
     for path, source, doc_findings in swept:
         lines = source.split( "\n" )
         tally[ "files" ] += 1
@@ -484,9 +514,12 @@ def collect( root ):
             elif f not in refusals:
                 refusals.append( f )
                 lines_out.append( swept_refusal_line( f, lines[ f.line - 1 ], state ) )
-    counted_refusals, counted_warnings, tally[ "counted" ] = counted_check( root, ranges )
-    lines_out += counted_refusals
-    warnings  += counted_warnings
+    if diverged:
+        tally[ "counted" ] = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "diverged" }
+    else:
+        counted_refusals, counted_warnings, tally[ "counted" ] = counted_check( root, ranges )
+        lines_out += counted_refusals
+        warnings  += counted_warnings
     kept     = [ f for f in filter_findings( findings, ranges ) if f not in refusals and f not in waived ]
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 

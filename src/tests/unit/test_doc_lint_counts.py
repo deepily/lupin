@@ -161,6 +161,21 @@ def test_rules_stamp_reads_what_the_given_reader_returns( repo ):
     assert counts.rules_stamp( str( repo ), read=lambda path: ( repo / path ).read_bytes() ) == on_disk
 
 
+def test_differing_rule_files_lists_each_file_whose_staged_bytes_are_not_the_disk_bytes( repo ):
+    def staged( path ):
+        if path == counts.STAMP_FILES[ 1 ]: return b"changed"                       # differs from the disk
+        if path == counts.STAMP_FILES[ 2 ]: raise OSError( "not in the index" )       # present on disk, absent staged
+        return ( repo / path ).read_bytes()
+    assert counts.differing_rule_files( str( repo ), staged ) == [ counts.STAMP_FILES[ 1 ], counts.STAMP_FILES[ 2 ] ]
+    assert counts.differing_rule_files( str( repo ), lambda path: ( repo / path ).read_bytes() ) == []
+
+
+def test_differing_rule_files_treats_missing_on_disk_as_different_and_missing_in_both_as_the_same( tmp_path ):
+    assert counts.differing_rule_files( str( tmp_path ), lambda path: b"staged" ) == list( counts.STAMP_FILES )
+    def nowhere( path ): raise OSError( "gone" )
+    assert counts.differing_rule_files( str( tmp_path ), nowhere ) == []
+
+
 def test_rules_stamp_names_a_missing_rule_file( tmp_path ):
     with pytest.raises( OSError ):
         counts.rules_stamp( str( tmp_path ) )

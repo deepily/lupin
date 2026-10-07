@@ -66,7 +66,9 @@ fi
 # its entry in src/conf/doc-lint-counts.json (a new file starts at zero); a staged table may not raise an
 # entry, and a table cut under other rules refuses a commit that stages such a file. With no table the scope is
 # reported as not checked. Third, a mechanical history finding in a package listed in gate.BLOCKING_PACKAGES
-# (empty today). Markdown, history.md and TODO.md stay in warn mode. Every run prints the denominator for both
+# (empty today). First of all, a rule file that differs between the index and the working tree refuses a commit
+# that stages a Python file or the table, since the findings would be counted under uncommitted rules.
+# Markdown, history.md and TODO.md stay in warn mode. Every run prints the denominator for both
 # scopes. The chain stops the commit on ANY non-zero gate exit, so this gate is wrapped: a crash, a missing
 # tool or an import error is reported loudly and then allowed. It does not read PLANNING_IS_PROMPTING_ROOT,
 # so it runs in every worktree.

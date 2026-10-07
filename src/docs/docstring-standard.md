@@ -36,7 +36,9 @@ A staged file whose count is above its entry is refused. The refusal prints the 
 
 Fix it by rewording what you added, or waive a finding on its own line with the same marker as above. An honoured waiver lowers the count. A flat count passes, and so does a finding of one rule traded for one of another.
 
-The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change. It carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated. The refusal prints the exact command. The stamp is read from the staged rule files, the ones being committed. A staged edit to a rule file or to the word list makes the table stale. An unstaged edit does not. The findings are counted by the code in the working tree, so when the two differ the gate prints a warning that names both stamps.
+The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change. It carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated. The refusal prints the exact command. The stamp is read from the staged rule files, the ones being committed. A staged edit to a rule file or to the word list makes the table stale.
+
+The findings are counted by the rule code in the working tree. So the gate refuses a commit when any rule file differs between the index and the working tree, and it names the files. Stage the edit with `git add` or restore the file with `git checkout`, then commit again. This holds for swept files, counted files and the table. A commit that stages none of them is not stopped.
 
 A new file beside a deleted counted file may be a rename that git no longer pairs, because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all, the gate says the scope was not checked.
 
