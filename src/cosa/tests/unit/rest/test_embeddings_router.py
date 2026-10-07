@@ -20,6 +20,8 @@ import time
 
 from fastapi import HTTPException
 
+from cosa.memory.embedding_provider import EmbeddingProvider
+
 from cosa.rest.routers.embeddings import (
     router,
     generate_embedding,
@@ -133,15 +135,16 @@ class TestEmbeddingsRouter( unittest.TestCase ):
         Ensures:
             - /info reports the provider name, dimensions, and 'ready' status
         """
-        provider = MagicMock()
-        provider.provider_name = "local_nomic"
-        provider.dimensions    = 768
+        provider = object.__new__( EmbeddingProvider )                    # the real class; only its config boundary is faked
+        provider._provider   = "local"
+        provider._config_mgr = MagicMock()
+        provider._config_mgr.get.return_value = "768"
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
             resp = asyncio.run( get_info( authenticated_user_id="user_1" ) )
 
         self.assertIsInstance( resp, EmbedInfoResponse )
-        self.assertEqual( resp.provider, "local_nomic" )
+        self.assertEqual( resp.provider, "local" )
         self.assertEqual( resp.dimensions, 768 )
         self.assertEqual( resp.status, "ready" )
 
