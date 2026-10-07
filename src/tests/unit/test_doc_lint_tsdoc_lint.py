@@ -236,7 +236,8 @@ def test_a_header_that_opens_with_a_rule_line_is_summarised_from_the_line_after_
 def test_box_drawing_rules_are_banners_too():
     for line in ( "\u2500\u2500 THE OPERATOR ATTESTATION \u2500\u2500\u2500\u2500\u2500\u2500", "\u2500\u2500\u2500\u2500 NEVER \u2500\u2500\u2500\u2500",
                   "\u2550\u2550\u2550\u2550\u2550\u2550", "\u2554\u2550\u2550\u2550\u2550 NEVER \u2550\u2550\u2550\u2550\u2557", "\u257f\u257f\u257f\u257f NEVER",
-                  "\u2500\u2500\u2500\u2500 NEVER", "\u2500\u2500 NEVER \u257f\u257f\u257f\u257f" ):
+                  "\u2500\u2500\u2500\u2500 NEVER", "\u2500\u2500 NEVER \u257f\u257f\u257f\u257f",
+                  "\u257f\u257f NEVER \u2500\u2500\u2500\u2500" ):
         assert _hits( [ _comment( line + "\n", kind="line-run" ) ] ) == [], line
     assert _hits( [ _comment( "\u24ff\u24ff\u24ff\u24ff NEVER\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
     assert _hits( [ _comment( "\u2580\u2580\u2580\u2580 NEVER\n", kind="line-run" ) ] ) == [ ( 10, "caps" ) ]
