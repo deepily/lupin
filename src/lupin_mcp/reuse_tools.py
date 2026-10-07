@@ -452,9 +452,10 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           HTTP attempts spent on answered and on failed ids, so together they are the sweep's attempts
         - once the budget is spent, later entries are refused before any HTTP and cache hits are still served
         - every successful live response is cached by request hash
-        - tokens_in and tokens_out sum the usage Jev reported on the live answered calls of this sweep; a cache
-          hit adds nothing, a failed call has no response to read, and a live answer whose usage is absent or
-          not two whole numbers adds nothing and is counted in usage_missing
+        - tokens_in and tokens_out sum the usage of every live response Jev returned in this sweep, a response
+          that was then retried because its cache write failed included; a cache hit adds nothing, a call that
+          got no response has nothing to read, and a response whose usage is absent or not two whole numbers
+          adds nothing and is counted in usage_missing
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
     """
@@ -464,16 +465,17 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
 
     def one( rec ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
-        if frozen and gaps is not None and rec[ "id" ] in gaps: return rec[ "id" ], None, gaps[ rec[ "id" ] ], 0      # the live run never got an answer; a later run's cache must not supply one
+        if frozen and gaps is not None and rec[ "id" ] in gaps: return rec[ "id" ], None, gaps[ rec[ "id" ] ], 0, []      # the live run never got an answer; a later run's cache must not supply one
         hit  = cache.get( key )
-        if hit is not None: return rec[ "id" ], hit, "hit", 0
+        if hit is not None: return rec[ "id" ], hit, "hit", 0, []
         if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
         if budget is not None: budget.begin_tally()
-        how, resp, cut_off = "failed", None, False
+        how, resp, cut_off, spent_usage = "failed", None, False, []
         try:
             for _ in range( RETRIES + 1 ):
                 try:
                     resp = ctx.transport.post( body )
+                    spent_usage.append( usage_of( resp ) )                    # Jev answered, so these tokens are spent even if the cache write below fails and the call retries
                     cache.put( key, resp )
                     how = "call"
                     break
@@ -485,23 +487,22 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
         finally:
             attempts = budget.end_tally() if budget is not None else 0
         if cut_off and attempts == 0: how = "not_reached"                 # asked nothing: the budget was already spent
-        return rec[ "id" ], resp, how, attempts
+        return rec[ "id" ], resp, how, attempts, spent_usage
 
     answers, failed, not_reached, failed_attempts = [], [], [], []
     spent = { "answered": 0, "failed": 0 }
     used  = { "in": 0, "out": 0, "missing": 0 }
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
-        for rid, resp, how, attempts in pool.map( one, entries ):
+        for rid, resp, how, attempts, usages in pool.map( one, entries ):
+            for tokens in usages:
+                if tokens is None: used[ "missing" ] += 1
+                else: used[ "in" ] += tokens[ 0 ]; used[ "out" ] += tokens[ 1 ]
             if how == "failed":
                 failed.append( rid ); failed_attempts.append( { "id": rid, "attempts": attempts } ); spent[ "failed" ] += attempts
                 continue
             if how == "not_reached": not_reached.append( rid ); continue
             stats[ "hits" if how == "hit" else "calls" ] += 1
             spent[ "answered" ] += attempts
-            if how == "call":
-                tokens = usage_of( resp )
-                if tokens is None: used[ "missing" ] += 1
-                else: used[ "in" ] += tokens[ 0 ]; used[ "out" ] += tokens[ 1 ]
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
