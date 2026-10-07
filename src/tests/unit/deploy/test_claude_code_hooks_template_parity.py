@@ -254,6 +254,21 @@ def test_an_interrupted_write_leaves_the_old_settings_whole_and_no_temp_file( tm
     assert sorted( os.listdir( tmp_path ) ) == [ "settings.json", "settings.json.bak-9" ]
 
 
+def test_a_write_ends_in_a_rename_so_the_settings_file_is_a_new_inode( tmp_path ):
+    """Kills the mutant that copies over the path in place of os.replace."""
+    path   = _write( tmp_path / "settings.json", { "hooks": { } } )
+    before = os.stat( path ).st_ino
+    helper._write_atomically( path, { "hooks": { "Stop": [ ] } } )
+    assert os.stat( path ).st_ino != before, "a rename gives the path a new inode; a copy-then-remove keeps the old one"
+    assert _load( path ) == { "hooks": { "Stop": [ ] } }
+
+
+def test_an_entry_with_an_empty_hooks_list_is_not_allow_listed():
+    """Kills the mutant that drops the bool( hooks ) guard in _allowed."""
+    assert helper._allowed( { "hooks": [ ] }, frozenset( { "/opt/host-only-guard.py" } ) ) is False
+    assert helper.unknown_entries( { "Stop": [ { "hooks": [ ] } ] }, { }, allow=frozenset( { "/opt/host-only-guard.py" } ) ) == { "Stop": [ { "hooks": [ ] } ] }
+
+
 def test_a_write_that_cannot_even_open_its_temp_file_raises_and_leaves_nothing( tmp_path ):
     with pytest.raises( FileNotFoundError ):
         helper._write_atomically( str( tmp_path / "no-such-folder" / "settings.json" ), { } )
@@ -351,6 +366,15 @@ def test_the_installer_turns_a_refusal_into_a_warning_not_a_silent_pass():
     text = open( INSTALLER, encoding="utf-8" ).read()
     refusal = text[ text.index( 'elif [ "$HOOKS_RC" -eq 3 ]' ): ]
     assert refusal.split( "else", 1 )[ 0 ].count( "warn_check" ) == 1 and "REFUSED" in refusal.split( "else", 1 )[ 0 ]
+
+
+def test_the_refusal_warning_says_what_to_correct_and_how_to_force():
+    """Kills the mutant that puts back the old, vaguer warn_check text."""
+    text    = open( INSTALLER, encoding="utf-8" ).read()
+    refusal = text[ text.index( 'elif [ "$HOOKS_RC" -eq 3 ]' ): ].split( "else", 1 )[ 0 ]
+    assert "hook entries the template does not carry exactly" in refusal
+    assert "Correct the template at $HOOKS_TEMPLATE" in refusal
+    assert "re-run with LUPIN_INSTALL_FORCE_HOOKS=1" in refusal
 
 
 def test_the_installer_still_parses():
