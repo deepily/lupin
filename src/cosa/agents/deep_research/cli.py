@@ -30,7 +30,7 @@ from typing import Optional
 import yaml
 
 from .config import ResearchConfig
-from .cost_tracker import CostTracker, BudgetExceededError
+from .cost_tracker import CostTracker
 from .api_client import ResearchAPIClient, ANTHROPIC_AVAILABLE
 from .orchestrator import ResearchOrchestratorAgent, OrchestratorState  # noqa: F401 — reserved for Phase-3 orchestrator; unused here BY DESIGN (run_research uses a Phase-2 inline flow). Keep, do not strip. Ratified Rick 2026-06-01. See orchestrator.py module docstring.
 from . import cosa_interface
@@ -265,6 +265,9 @@ async def run_research(
 
     Returns:
         str or None: The final research report, or None if cancelled
+
+    Raises:
+        BudgetExceededError: when the cost tracker's limit is crossed; this is a failure, not a cancel
     """
     # Create API client
     api_client = ResearchAPIClient(
@@ -778,10 +781,6 @@ async def run_research(
         # Note: Completion notification is sent in main() with enhanced details
 
         return report
-
-    except BudgetExceededError as e:
-        await voice_io.notify( f"Budget exceeded: {e}", priority="urgent" )
-        return None
 
     finally:
         await api_client.close()
