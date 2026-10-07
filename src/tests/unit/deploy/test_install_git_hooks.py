@@ -14,6 +14,7 @@ Venue: :7999-eligible. No SSH, no network, no real docker.
 """
 import os
 import shutil
+import stat
 import subprocess
 
 import pytest
@@ -174,6 +175,19 @@ def test_a_directory_in_the_way_is_named_a_directory( tmp_path ):
     assert r.returncode == 1
     assert "pre-push: IN THE WAY — a directory at" in r.stdout and "regular file" not in r.stdout
     assert ( _hooks_dir( repo ) / "pre-push" ).is_dir()
+
+
+def test_a_fifo_in_the_way_is_named_neither_a_file_nor_a_link( tmp_path ):
+    """Kills the mutant that words the fallback as "a regular file"."""
+    repo = _scratch( tmp_path )
+    fifo = _hooks_dir( repo ) / "pre-push"
+    os.mkfifo( fifo )
+    r = _run( repo )
+    assert r.returncode == 1
+    assert "pre-push: IN THE WAY — something that is neither a file nor a link at" in r.stdout
+    assert "regular file" not in r.stdout
+    assert stat.S_ISFIFO( os.lstat( fifo ).st_mode )
+    assert not ( _hooks_dir( repo ) / "pre-commit" ).exists()
 
 
 def test_reached_through_a_symlink_the_tree_is_the_real_checkout( tmp_path ):

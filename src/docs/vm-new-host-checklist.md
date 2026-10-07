@@ -128,8 +128,8 @@ linked worktree:
 src/scripts/install-git-hooks.sh            # --replace moves a file in the way to <name>.bak-<epoch>
 ```
 
-Re-running is safe. Exit 0 is both right, 1 is something in the way, 2 is a checkout that predates the
-hook, a linked worktree, or no git tree.
+Re-running is safe. Exit 0 is both right, 1 is something in the way.
+Exit 2 is a checkout that predates the hook, a linked worktree, or no git tree.
 
 Fallback, run by a person: a guard refuses a Claude seat that writes the hooks folder.
 
