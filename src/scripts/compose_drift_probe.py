@@ -91,7 +91,8 @@ def compose_mounts( service, volume_names ):
         - read_only defaults to False, as compose does
         - a named volume's source is the name docker actually created. The service says
           "claude-creds-dev"; docker calls it "lupin_claude-creds-dev", with the project
-          prefix. Comparing the short name would report drift on every container.
+          prefix. Comparing the short name, as was done before this mapping, reported drift on
+          every container.
     """
     mounts = set()
     for v in service.get( "volumes" ) or [ ]:
@@ -199,9 +200,9 @@ def compose_argv( labels ):
     Ensures:
         - names the project, its directory and every config file from the container's own
           labels, never the caller's tree. The probe renders with this prefix and the bounce
-          script recreates with it, so both act on the same compose tree. Using $LUPIN_ROOT
-          instead would, from a worktree, compare one tree and recreate from another, under
-          a project name taken from the worktree directory
+          script recreates with it, so both act on the same compose tree. Before this, the
+          recreate used $LUPIN_ROOT: run from a worktree, that compares one tree and recreates
+          from another, under a project name taken from the worktree directory
 
     Raises:
         - KeyError when a compose label is missing
