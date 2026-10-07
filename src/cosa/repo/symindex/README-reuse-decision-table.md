@@ -39,7 +39,7 @@ holds is also listed, in this order, in `causes`.
 | 2 | `DEPENDENCY_MISSING` | the index header lists a missing tool, or a tool the call needs is absent | UNCERTAIN_READ_SOURCE |
 | 3 | `INDEX_STALE` | the index does not match the tree and cannot be rebuilt | UNCERTAIN_READ_SOURCE |
 | 4 | `KEY_UNREADABLE` | the Jev key file is missing or unreadable | UNCERTAIN_READ_SOURCE |
-| 5 | `CALL_FAILED` | a call failed, or some index entry id is neither answered, failed nor malformed (coverage is checked as set equality, never as a count) | UNCERTAIN_READ_SOURCE |
+| 5 | `CALL_FAILED` | a call failed, or some index entry id is neither answered, failed nor malformed (coverage is checked as set equality, never as a count; an entry the call budget left unasked counts as unanswered, so a spent budget gives this cause and never `NEW`) | UNCERTAIN_READ_SOURCE |
 | 6 | `MALFORMED_ANSWER` | at least one answer is malformed; every malformed answer is dropped and listed with its reason | UNCERTAIN_READ_SOURCE |
 | 7 | `LOW_CONFIDENCE` | at least one call is doubtful | UNCERTAIN_READ_SOURCE |
 | 8 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |

@@ -35,6 +35,9 @@ TOOL_VERSION = "1"
 JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would break replay
 RETRIES      = 2
 WORKERS      = 32
+CALL_BUDGET_CAP     = 8000                      # Rick's hard ceiling on HTTP attempts to Jev in one call (2026-10-07)
+DEFAULT_CALL_BUDGET = CALL_BUDGET_CAP
+BUDGET_VARIABLE     = "LUPIN_REUSE_JEV_CALL_BUDGET"
 NAME_RE      = re.compile( r"[\w\-]+" )
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file" )
 
@@ -136,9 +139,16 @@ class ReuseContext:
     Requires:
         - root is the git working-tree root being asked about
         - data is the per-repository data directory (receipts, snapshots, cache, call log)
+        - call_budget is an integer from 1 to CALL_BUDGET_CAP: the most HTTP attempts, retries included, one call may make
+
+    Raises:
+        - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer
     """
 
-    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL ):
+    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET ):
+        if type( call_budget ) is not int or not 1 <= call_budget <= CALL_BUDGET_CAP:
+            raise ReuseError( "BAD_BUDGET", f"call budget must be an integer from 1 to {CALL_BUDGET_CAP}, got {call_budget!r}" )
+        self.call_budget      = call_budget
         self.root             = pathlib.Path( root )
         self.data             = pathlib.Path( data )
         self.out_dir          = pathlib.Path( out_dir ) if out_dir is not None else default_out_dir( self.root )
@@ -160,6 +170,11 @@ def context_from_environment( root=None ):
           index; they exist so tests and sandboxes leave no persistent state
         - a directory that is not a git working tree is used as it is, and the tools then answer
           NOT_LUPIN_TREE
+        - LUPIN_REUSE_JEV_CALL_BUDGET sets the call budget; unset or empty means DEFAULT_CALL_BUDGET
+
+    Raises:
+        - ReuseError BAD_BUDGET when that variable is not an integer from 1 to CALL_BUDGET_CAP; a budget
+          above the cap is refused, never clamped
     """
     try:
         top = pathlib.Path( root ) if root else git_toplevel()
@@ -167,7 +182,12 @@ def context_from_environment( root=None ):
         top = pathlib.Path.cwd()                                          # not a repository: the tools answer NOT_LUPIN_TREE
     data = os.environ.get( "LUPIN_REUSE_DATA_DIR" )
     out  = os.environ.get( "LUPIN_REUSE_OUT_DIR" )
-    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None )
+    raw  = os.environ.get( BUDGET_VARIABLE )
+    try:
+        budget = int( raw ) if raw else DEFAULT_CALL_BUDGET
+    except ValueError as e:
+        raise ReuseError( "BAD_BUDGET", f"{BUDGET_VARIABLE} must be an integer, got {raw!r}" ) from e
+    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget )
 
 
 def append_call_log( ctx, session_id, record ):
@@ -199,18 +219,20 @@ class LiveJevTransport:
         - the key is read from the environment on each post and is never stored on this object
         - once Jev refuses the key or the request (JevConfigError), later posts raise at once without
           any HTTP, so a bad key costs one refusal per in-flight call and not one per index entry
+        - with a budget (a jev_transport.CallBudget), every HTTP attempt takes one from it, retries included
     Raises:
         - JevConfigError, JevCallError as jev_transport.send does; JevCallError for a body that is not JSON
+        - JevBudgetSpent when the budget has no attempt left; no HTTP is made for it
     """
 
-    def __init__( self, post_fn=None, sleep_fn=None, environ=None ):
-        self.post_fn, self.sleep_fn, self.environ = post_fn, sleep_fn, environ
+    def __init__( self, post_fn=None, sleep_fn=None, environ=None, budget=None ):
+        self.post_fn, self.sleep_fn, self.environ, self.budget = post_fn, sleep_fn, environ, budget
         self.refusal = None
 
     def post( self, body ):
         if self.refusal is not None: raise self.refusal
         try:
-            text = jev_transport.send( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ )
+            text = jev_transport.send( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ, self.budget )
         except jev_transport.JevConfigError as e:
             self.refusal = e
             raise
@@ -388,8 +410,11 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
         - entries are symbol dicts with id, sig and doc
         - when frozen, no transport is used and every answer must already be cached
     Ensures:
-        - returns { answers, failed, calls, cache_hits }: answers are { id, probabilities }, failed is the
+        - returns { answers, failed, not_reached, calls, cache_hits }: answers are { id, probabilities }, failed is the
           list of ids whose call failed after RETRIES, in entry order
+        - not_reached lists the ids no call was made for, in entry order, because the call budget was spent
+        - an unreached id is neither answered nor failed, so decide() reports it under `missing`
+        - once the budget is spent, later entries are refused before any HTTP and cache hits are still served
         - every successful live response is cached by request hash
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
@@ -408,17 +433,20 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
                 resp = ctx.transport.post( body )
                 cache.put( key, resp )
                 return rec[ "id" ], resp, "call"
+            except jev_transport.JevBudgetSpent:
+                return rec[ "id" ], None, "not_reached"
             except Exception as e:                                        # any transport error is a failed call, never a verdict
                 last = e
         return rec[ "id" ], None, "failed"
 
-    answers, failed = [], []
+    answers, failed, not_reached = [], [], []
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
         for rid, resp, how in pool.map( one, entries ):
             if how == "failed": failed.append( rid ); continue
+            if how == "not_reached": not_reached.append( rid ); continue
             stats[ "hits" if how == "hit" else "calls" ] += 1
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
-    return { "answers": answers, "failed": failed, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ] }
+    return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ] }
 
 
 def l0_lines( wiki_dir ):
@@ -530,7 +558,7 @@ def prepare( ctx ):
     header = sx_build.read_header( gen )
     if header[ "missing_dependencies" ]: flags.add( "DEPENDENCY_MISSING" )
     if ctx.transport is None:
-        if jev_transport.has_key(): ctx.transport = LiveJevTransport()
+        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=jev_transport.CallBudget( ctx.call_budget ) )
         else: flags.add( "KEY_UNREADABLE" )
     entries, _ = sendable( sx_build.read_symbols( gen ), ctx.exclude_prefixes )
     l0      = l0_lines( ctx.wiki_dir )
@@ -548,6 +576,12 @@ def _shortlist_view( rows, by_id ):
     return out
 
 
+def _attempts( ctx ):
+    """Ensures: returns the HTTP attempts this context's transport has counted, or 0."""
+    budget = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.budget is not None else None
+    return budget.used if budget is not None else 0
+
+
 def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None ):
     """
     Run one sweep-based question end to end and store its receipt.
@@ -555,6 +589,8 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
     Ensures:
         - returns the receipt dict (stored, immutable) with verdict, cause, causes, shortlist, nearest,
           malformed, missing, stats and the inputs the id is computed from
+        - stats names the entries, calls, cache hits, failed, not_checked (entries no call was made for
+          because the budget was spent), attempts (HTTP attempts so far, retries included) and call_budget
         - a sweep is skipped when NOT_LUPIN_TREE, INDEX_STALE or KEY_UNREADABLE already decides
           UNCERTAIN_READ_SOURCE without one
         - `prepared` is the result of prepare(), when the caller already has it
@@ -564,7 +600,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
-    sw   = sweep( ctx, need, entries ) if entries and not hard else { "answers": [], "failed": [], "calls": 0, "cache_hits": 0 }
+    sw   = sweep( ctx, need, entries ) if entries and not hard else { "answers": [], "failed": [], "not_reached": [], "calls": 0, "cache_hits": 0 }
     expected = [] if hard else [ e[ "id" ] for e in entries ]
     d = vd.decide( sw[ "answers" ], expected, sw[ "failed" ], flags )
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, prompt_template_hash( ctx.template ), d[ "causes" ] ),
@@ -573,7 +609,8 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
             "shortlist": _shortlist_view( d[ "shortlist" ], by_id ), "shortlist_total": d[ "shortlist_total" ],
             "nearest": _shortlist_view( d[ "nearest" ], by_id ), "malformed": d[ "malformed" ], "missing": d[ "missing" ],
-            "stats": { "entries": len( entries ), "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ], "failed": len( sw[ "failed" ] ) } }
+            "stats": { "entries": len( entries ), "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ], "failed": len( sw[ "failed" ] ),
+                       "not_checked": len( sw[ "not_reached" ] ), "attempts": _attempts( ctx ), "call_budget": ctx.call_budget } }
     return store_receipt( ctx, rec ) if write else rec
 
 

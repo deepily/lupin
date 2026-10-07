@@ -8,6 +8,7 @@ printed, logged, stored, or placed in an error message. Standard library HTTP on
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -27,6 +28,39 @@ class JevConfigError( Exception ):
 
 class JevCallError( Exception ):
     """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
+
+
+class JevBudgetSpent( Exception ):
+    """The call budget is used up: no further HTTP attempt may be made."""
+
+
+class CallBudget:
+    """
+    A ceiling on HTTP attempts to Jev, shared by every thread of one sweep.
+
+    Requires:
+        - limit is a positive integer
+
+    Ensures:
+        - take() counts one attempt and returns, or raises JevBudgetSpent without counting when the limit is reached
+        - used never exceeds limit, whatever the number of threads
+    """
+
+    def __init__( self, limit ):
+        if type( limit ) is not int or limit < 1: raise ValueError( f"call budget must be a positive integer, got {limit!r}" )
+        self.limit, self.used, self._lock = limit, 0, threading.Lock()
+
+    def take( self ):
+        """Count one attempt, or raise JevBudgetSpent when the limit is already reached."""
+        with self._lock:
+            refused = self.used >= self.limit
+            if not refused: self.used += 1
+        if refused: raise JevBudgetSpent( f"call budget of {self.limit} attempts is spent" )
+
+    @property
+    def spent( self ):
+        """True when no attempt is left."""
+        with self._lock: return self.used >= self.limit
 
 
 def _post( url, headers, body, timeout ):
@@ -93,7 +127,7 @@ def has_key( environ=None ):
     return bool( ( os.environ if environ is None else environ ).get( KEY_VARIABLE ) )
 
 
-def send( body, post_fn=None, sleep_fn=None, environ=None ):
+def send( body, post_fn=None, sleep_fn=None, environ=None, budget=None ):
     """
     Send one request body to Jev and return the response text. The only HTTP path to Jev.
 
@@ -101,6 +135,7 @@ def send( body, post_fn=None, sleep_fn=None, environ=None ):
         - body is the JSON bytes of one request
         - post_fn, when given, has _post's signature; sleep_fn has time.sleep's; both are test stand-ins
         - environ, when given, replaces os.environ
+        - budget, when given, is a CallBudget; each HTTP attempt, retries included, takes one from it first
 
     Ensures:
         - returns the text of a 200 response
@@ -109,6 +144,7 @@ def send( body, post_fn=None, sleep_fn=None, environ=None ):
 
     Raises:
         - JevConfigError if the key variable is absent or empty, or the server answers 401, 403 or 422
+        - JevBudgetSpent before any attempt the budget has no room for; no HTTP is made for it
         - JevCallError if retries run out, the network fails, or any other status is not 200
     """
     key = ( os.environ if environ is None else environ ).get( KEY_VARIABLE )
@@ -117,6 +153,7 @@ def send( body, post_fn=None, sleep_fn=None, environ=None ):
     sleep_fn = time.sleep if sleep_fn is None else sleep_fn
     headers  = { "Authorization": "Bearer " + key, "Content-Type": "application/json" }
     for attempt in range( MAX_ATTEMPTS ):
+        if budget is not None: budget.take()
         try:
             status, text = post_fn( URL, headers, body, TIMEOUT_SECONDS )
         except OSError as e:
