@@ -80,8 +80,34 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _clear_v2_store():
+    """
+    Empty v2's snapshot and synonym tables on the test database.
+
+    Nothing else in the tier empties them, so the cold pass would start on the last run's rows.
+    The primitive refuses a wrong config table or a non-measurement database before any statement.
+
+    Requires:
+        - the process engine points at lupin_db_test (the integration session fixture checks it)
+
+    Ensures:
+        - solution_snapshots and canonical_synonyms hold no rows afterwards
+        - returns the snapshot table's name, as the primitive does
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    from cosa.rest.db import database as db_module
+    with db_module.engine.connect() as connection:
+        return ve.clean_v2_snapshot_store( connection, ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" ) )
+
+
+@pytest.fixture
+def cold_v2_store():
+    """Start the test with an empty replay store, so its cold pass is cold."""
+    return _clear_v2_store()
+
+
 @pytest.mark.integration
-def test_v2_eval_two_pass_live():
+def test_v2_eval_two_pass_live( cold_v2_store ):
     """
     Run the two-pass v2-only eval against the live server and prove it is real.
 

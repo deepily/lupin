@@ -1148,13 +1148,14 @@ def read_trace_ids_around( trace_path: str ) -> List[ str ]:
 # ---------------------------------------------------------------------------
 # Per-arm clean-step (design §4, decision B). The v2 peer of v1_eval_arm.truncate_snapshots.
 #
-# NOT YET WIRED — this is a BRIDGE-COMPOSABLE PRIMITIVE with NO caller outside its own tests.
-# Under decision B (Mr Radio, 2026-08-16) isolation is on the DATABASE axis: both arms write
-# the same table NAME (solution_snapshots) but on their own measurement db (v1 -> lupin_db_v1baseline,
-# v2 -> lupin_db_test). Sam's paired integration bridge (row d212f54b, currently blocked) is the
-# REAL caller; the paired run MUST NOT proceed until that bridge calls this AND a test proves the
-# call happens. Do not claim it "wired" on a green unit suite — that is the exact orphan defect
-# (row d8d019f6 / require_arms_distinct_and_clean) this row is closing, and it must not recur here.
+# WIRED: the first caller is the `cold_v2_store` fixture of src/tests/integration/test_v2_eval_live.py,
+# which the live two-pass test requests, and a unit test pins both the request and the call. Under decision B
+# (Mr Radio, 2026-08-16) isolation is on the DATABASE axis: both arms write the same table NAME
+# (solution_snapshots) but on their own measurement db (v1 -> lupin_db_v1baseline, v2 -> lupin_db_test).
+# Sam's paired integration bridge (row d212f54b, currently blocked) is the second caller to come: the paired
+# run MUST NOT proceed until that bridge calls this AND a test proves the call happens. Do not claim a caller
+# "wired" on a green unit suite alone: that is the orphan defect (row d8d019f6 /
+# require_arms_distinct_and_clean) this row was closing.
 # ---------------------------------------------------------------------------
 SYNONYM_TABLE = "canonical_synonyms"   # tier-1 lookup table — the other half of the cache
 
@@ -1631,8 +1632,11 @@ def run_pass(
                 f"the store was already warm — {record[ 'utterance' ]!r} came back as a "
                 f"REPLAY, so this pass is not a cold baseline. Aborting rather than "
                 f"spending the rest of the corpus. The store must be cleared before a "
-                f"cold pass, and v2_eval cannot clear it: that is the step-13 cache dump, "
-                f"legal only after 9a and 9b merge. Do NOT hand-truncate the test DB."
+                f"cold pass. The integration test clears it itself through clean_v2_snapshot_store "
+                f"(its cold_v2_store fixture), so a run that did not go through that fixture started "
+                f"from whatever the last run left. Clear it with that function, never by hand: "
+                f"do NOT hand-truncate the test DB. The step-13 cache dump is a separate step "
+                f"that covers the dev store only."
             )
     return records
 

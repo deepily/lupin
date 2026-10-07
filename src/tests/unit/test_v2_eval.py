@@ -1696,8 +1696,9 @@ def test_the_cold_abort_message_names_the_remedy_and_forbids_a_hand_truncate():
     with pytest.raises( ve.EvalIntegrityError ) as excinfo:
         ve.run_pass( [ ( "u1", "cmd-a" ) ], ask, "cold" )
     message = str( excinfo.value )
-    assert "step-13" in message
+    assert "clean_v2_snapshot_store" in message
     assert "hand-truncate" in message
+    assert "cannot clear it" not in message, "the message must not say the harness cannot clear the store"
 
 
 def test_allow_warm_cold_suppresses_the_early_abort_too():
