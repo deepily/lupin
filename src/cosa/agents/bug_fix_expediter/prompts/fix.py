@@ -48,7 +48,7 @@ def build_fix_prompt( selected_fix, diagnosis, dead_job_context ) -> str:
 
     Ensures:
         - Prompt contains fix proposal details + diagnosis context
-        - Instructions to apply ONLY the proposed changes
+        - Instructions to apply only the proposed changes
 
     Args:
         selected_fix: The user-approved ProposedFix
