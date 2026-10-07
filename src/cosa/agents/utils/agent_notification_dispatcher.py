@@ -312,7 +312,8 @@ class AgentNotificationDispatcher:
             bool: True if user said yes, False otherwise
 
         Raises:
-            VoiceGateTimeoutError: when no answer was received, including an unexpected error
+            VoiceGateTimeoutError: when the question was asked and no answer was received
+            VoiceGateUnreachableError: when an unexpected error broke the asking itself
         """
         try:
             effective_target, was_redirected, original_target = self._resolve_routing( self._resolve_target_user() )
@@ -380,14 +381,13 @@ class AgentNotificationDispatcher:
                     phase   = "confirmation",
                     message = f"ask_confirmation pre-MCP failure ({type( e ).__name__}): {str( e )[:200]}"
                 )
-            # An unexpected error means nobody answered. Returning `default` would
-            # present it to the caller as the user's answer and skip the caller's
-            # own unattended_default. Raise, so voice_io.ask_yes_no decides.
+            # An unexpected error means the asking broke and nobody answered. Returning
+            # `default` would present it to the caller as the user's answer and skip the
+            # caller's own unattended_default. It is not a timeout either: the question
+            # may never have been asked. Raise the type that says so.
             logger.warning( f"ask_confirmation failed: {e}" )
-            raise VoiceGateTimeoutError(
-                phase   = "confirmation",
-                message = f"ask_confirmation unexpected failure ({type( e ).__name__}): {str( e )[:200]}"
-            )
+            from cosa.agents.test_fix_expediter.state import VoiceGateUnreachableError
+            raise VoiceGateUnreachableError( "confirmation", e )
 
     async def get_feedback(
         self,

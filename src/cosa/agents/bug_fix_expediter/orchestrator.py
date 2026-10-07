@@ -907,7 +907,7 @@ class BFEOrchestrator:
             # Was: fall through to `return diagnosis` — an auto-approval whose
             # return value was indistinguishable from a real one (row 421b9498).
             from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
-            if isinstance( e, VoiceGateTimeoutError ):
+            if isinstance( e, ( VoiceGateTimeoutError, VoiceGateUnreachableError ) ):
                 raise
             logger.warning( f"Voice gate confirmation failed: {e} — refusing to approve for an absent human" )
             await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.DIAGNOSING )
@@ -1032,7 +1032,7 @@ class BFEOrchestrator:
                 # caller; they stay distinct types so the record says which.
                 # Was: fall through to `return auto` (row 421b9498).
                 from cosa.agents.bug_fix_expediter.state import VoiceGateTimeoutError, VoiceGateUnreachableError
-                if isinstance( e, VoiceGateTimeoutError ):
+                if isinstance( e, ( VoiceGateTimeoutError, VoiceGateUnreachableError ) ):
                     raise
                 logger.warning( f"Voice gate failed: {e} — refusing to apply a fix nobody approved" )
                 await self._emit_state( BFEPhase.WAITING_CONFIRMATION, BFEPhase.PROPOSING )
