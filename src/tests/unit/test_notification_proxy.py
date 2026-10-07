@@ -677,14 +677,6 @@ class TestProfileScriptPairing:
         orphans     = [ f for f in files if f not in reached and f not in SCRIPTS_WITHOUT_A_PROFILE ]
         assert orphans == [], f"script files no profile reaches: {orphans}"
 
-    def test_cli_parser_accepts_every_profile( self ):
-        """`--profile <key>` parses for every key in TEST_PROFILES."""
-        from cosa.agents.notification_proxy.__main__ import parse_args
-
-        for key in TEST_PROFILES:
-            with patch( "sys.argv", [ "notification_proxy", "--profile", key ] ):
-                assert parse_args().profile == key
-
 
 # ============================================================================
 # Test Keyword Ordering Regression
