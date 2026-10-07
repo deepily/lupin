@@ -55,6 +55,11 @@ spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SO
 every stage; each stage entry carries its own pair. A cache hit adds nothing, and a failed call has no response
 to read. A live answer with no `usage`, or one that is not two whole numbers, adds nothing and is counted in
 `stats.usage_missing`. A receipt stored before this tally has none of these keys and still replays.
+`stats.transport` summarises what the transport saw on every live response, all stages together: the count of responses,
+the resolved `model` ids, HTTP statuses and attempts per response as counts, how many calls saw a `retry-after` and the
+largest in seconds, and the latency of each answered attempt as min, max, mean, p50 and p95 in milliseconds. A cache hit
+adds nothing. A retry waits the longer of the `retry-after` (at most 60 seconds) and the doubling backoff scaled by a
+random factor between 0.75 and 1.25. A receipt stored before this summary has no `transport` key and still replays.
 
 ## Verdict
 

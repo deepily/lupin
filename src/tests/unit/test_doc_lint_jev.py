@@ -58,7 +58,8 @@ def scripted_post( statuses, calls=None ):
 
 def ask( post, sleeps=None, environ=ENV, model=MODEL ):
     return jev_transport.ask_noul( model, { "new_text": "x" }, "q", jev_judge.CRITERIA, post_fn=post,
-                                   sleep_fn=( sleeps.append if sleeps is not None else ( lambda s: None ) ), environ=environ )
+                                   sleep_fn=( sleeps.append if sleeps is not None else ( lambda s: None ) ), environ=environ,
+                                   random_fn=lambda: 0.5 )                  # jitter factor exactly 1, so waits are the plain doubling
 
 
 # ---- transport ----------------------------------------------------------------------------
@@ -176,6 +177,7 @@ class _Handler( BaseHTTPRequestHandler ):
         status = 200 if self.path == "/ok" else 429
         payload = ( reply( 0.5 ) if status == 200 else "slow down" ).encode()
         self.send_response( status )
+        if status == 429: self.send_header( "Retry-After", "7" )
         self.end_headers()
         self.wfile.write( payload )
     def log_message( self, *args ): pass
@@ -187,8 +189,9 @@ def test_the_real_http_door_returns_status_and_text_for_ok_and_for_an_error_stat
     thread.start()
     try:
         base = f"http://127.0.0.1:{server.server_address[ 1 ]}"
-        assert jev_transport._post( base + "/ok", {}, b"{}", 5 ) == ( 200, reply( 0.5 ) )
-        assert jev_transport._post( base + "/busy", {}, b"{}", 5 ) == ( 429, "slow down" )
+        ok, busy = jev_transport._post( base + "/ok", {}, b"{}", 5 ), jev_transport._post( base + "/busy", {}, b"{}", 5 )
+        assert ok[ :2 ] == ( 200, reply( 0.5 ) ) and busy[ :2 ] == ( 429, "slow down" )
+        assert "Retry-After" not in ok[ 2 ] and busy[ 2 ][ "Retry-After" ] == "7"                  # the third item is the response headers
     finally:
         server.shutdown()
         server.server_close()
@@ -202,7 +205,8 @@ def test_the_default_post_and_sleep_are_used_when_none_are_given( monkeypatch ):
     monkeypatch.setattr( jev_transport.time, "sleep", waits.append )
     monkeypatch.setattr( jev_transport, "_post", scripted_post( [ 429, 200 ] ) )
     jev_transport.ask_noul( MODEL, {}, "q", jev_judge.CRITERIA, environ=ENV )
-    assert seen == [ jev_transport.URL ] and waits == [ jev_transport.BACKOFF_SECONDS ]
+    assert seen == [ jev_transport.URL ] and len( waits ) == 1
+    assert jev_transport.BACKOFF_SECONDS * ( 1 - jev_transport.JITTER ) <= waits[ 0 ] <= jev_transport.BACKOFF_SECONDS * ( 1 + jev_transport.JITTER )
 
 
 # ---- thresholds and the mapping -----------------------------------------------------------

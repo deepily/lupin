@@ -7,7 +7,9 @@ printed, logged, stored, or placed in an error message. Standard library HTTP on
 """
 
 import json
+import math
 import os
+import random
 import threading
 import time
 import urllib.error
@@ -19,11 +21,17 @@ QUESTION_ID    = "claim_stated"
 RETRY_STATUSES = ( 429, 529 )
 MAX_ATTEMPTS   = 4
 BACKOFF_SECONDS = 1.0
+JITTER          = 0.25      # each backoff wait is scaled by a factor between 1 - JITTER and 1 + JITTER
+RETRY_AFTER_CAP = 60.0      # the longest wait a retry-after header can ask for; a larger value is still recorded
 TIMEOUT_SECONDS = 60
 
 
 class JevConfigError( Exception ):
     """Jev cannot be called as configured: no key, or the server refused the key or the request."""
+
+    def __init__( self, message, status=None ):
+        super().__init__( message )
+        self.status = status        # the HTTP status of a refusal (401, 403 or 422), or None when no request was made
 
 
 class JevCallError( Exception ):
@@ -81,13 +89,30 @@ class CallBudget:
 
 
 def _post( url, headers, body, timeout ):
-    """Send one POST with urllib and return ( status, text ); an error status is returned."""
+    """Send one POST with urllib; return ( status, text, headers ), an error status included."""
     request = urllib.request.Request( url, data=body, headers=headers, method="POST" )
     try:
         with urllib.request.urlopen( request, timeout=timeout ) as response:
-            return response.status, response.read().decode( "utf-8" )
+            return response.status, response.read().decode( "utf-8" ), dict( response.headers.items() )
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode( "utf-8", errors="replace" )
+        return e.code, e.read().decode( "utf-8", errors="replace" ), dict( e.headers.items() )
+
+
+def retry_after_seconds( headers ):
+    """
+    Read a retry-after header as a number of seconds.
+
+    Ensures:
+        - returns the seconds as a float when the header is present, any letter case, and a finite number of at least zero
+        - returns None when it is absent, a date, negative, not finite or not a number
+    """
+    if not isinstance( headers, dict ): return None
+    value = next( ( v for k, v in headers.items() if isinstance( k, str ) and k.lower() == "retry-after" ), None )
+    try:
+        seconds = float( value )
+    except ( TypeError, ValueError ):
+        return None
+    return seconds if math.isfinite( seconds ) and seconds >= 0 else None
 
 
 def build_body( model, state, instructions, criteria ):
@@ -144,53 +169,81 @@ def has_key( environ=None ):
     return bool( ( os.environ if environ is None else environ ).get( KEY_VARIABLE ) )
 
 
-def send( body, post_fn=None, sleep_fn=None, environ=None, budget=None ):
+def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None, clock_fn=None ):
     """
-    Send one request body to Jev and return the response text. The only HTTP path to Jev.
+    Send one request body to Jev and return the response text with what the transport saw.
 
     Requires:
         - body is the JSON bytes of one request
-        - post_fn, when given, has _post's signature; sleep_fn has time.sleep's; both are test stand-ins
+        - post_fn, when given, has _post's signature, and may return ( status, text ) with no headers; sleep_fn
+          has time.sleep's; random_fn returns a float from 0 up to 1; clock_fn has time.monotonic's; all are test stand-ins
         - environ, when given, replaces os.environ
         - budget, when given, is a CallBudget; each HTTP attempt, retries included, takes one from it first
 
     Ensures:
-        - returns the text of a 200 response
-        - a 429 or 529 is retried up to MAX_ATTEMPTS calls in all, waiting BACKOFF_SECONDS doubled each time
+        - returns ( text, meta ) for a 200 response; meta is { status, attempts, retry_after, latency_ms }
+        - attempts counts the HTTP attempts this call took, latency_ms is the final attempt's own time in whole
+          milliseconds, and retry_after is the largest retry-after (seconds) any attempt saw, or None
+        - a 429 or 529 is retried up to MAX_ATTEMPTS calls in all; each wait is the larger of the retry-after
+          (at most RETRY_AFTER_CAP) and BACKOFF_SECONDS doubled each time and scaled by a jitter factor
+          between 1 - JITTER and 1 + JITTER, so a retry never comes sooner than the server asked
         - the key appears only in the Authorization header of the request
 
     Raises:
-        - JevConfigError if the key variable is absent or empty, or the server answers 401, 403 or 422
+        - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 403 or 422 (status set)
         - JevBudgetSpent before any attempt the budget has no room for; no HTTP is made for it
         - JevCallError if retries run out, the network fails, or any other status is not 200
     """
     key = ( os.environ if environ is None else environ ).get( KEY_VARIABLE )
     if not key: raise JevConfigError( f"{KEY_VARIABLE} is not set; the Jev judge refuses to run without it" )
-    post_fn  = _post if post_fn is None else post_fn
-    sleep_fn = time.sleep if sleep_fn is None else sleep_fn
-    headers  = { "Authorization": "Bearer " + key, "Content-Type": "application/json" }
+    post_fn   = _post if post_fn is None else post_fn
+    sleep_fn  = time.sleep if sleep_fn is None else sleep_fn
+    random_fn = random.random if random_fn is None else random_fn
+    clock_fn  = time.monotonic if clock_fn is None else clock_fn
+    headers   = { "Authorization": "Bearer " + key, "Content-Type": "application/json" }
+    seen      = None
     for attempt in range( MAX_ATTEMPTS ):
         if budget is not None: budget.take()
+        started = clock_fn()
         try:
-            status, text = post_fn( URL, headers, body, TIMEOUT_SECONDS )
+            reply = post_fn( URL, headers, body, TIMEOUT_SECONDS )
         except OSError as e:
             raise JevCallError( f"call to Jev failed: {type( e ).__name__}" ) from e
-        if status == 200: return text
+        latency_ms = int( round( ( clock_fn() - started ) * 1000 ) )
+        status, text, reply_headers = reply if len( reply ) == 3 else ( reply[ 0 ], reply[ 1 ], None )
+        if status == 200: return text, { "status": 200, "attempts": attempt + 1, "retry_after": seen, "latency_ms": latency_ms }
         if status in RETRY_STATUSES:
-            if attempt < MAX_ATTEMPTS - 1: sleep_fn( BACKOFF_SECONDS * 2 ** attempt )
+            asked = retry_after_seconds( reply_headers )
+            if asked is not None and ( seen is None or asked > seen ): seen = asked
+            if attempt < MAX_ATTEMPTS - 1:
+                jitter = 1 - JITTER + 2 * JITTER * random_fn()
+                sleep_fn( max( min( asked, RETRY_AFTER_CAP ) if asked is not None else 0.0, BACKOFF_SECONDS * 2 ** attempt * jitter ) )
             continue
-        if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}" )
+        if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}", status )
         raise JevCallError( f"Jev answered status {status}" )
     raise JevCallError( f"Jev still answered a retry status after {MAX_ATTEMPTS} calls" )
 
 
-def ask_noul( model, state, instructions, criteria, post_fn=None, sleep_fn=None, environ=None ):
+def send( body, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None ):
+    """
+    Send one request body to Jev and return the response text. The only HTTP path to Jev.
+
+    Requires:
+        - the arguments are send_with_meta's
+
+    Ensures:
+        - returns the text of a 200 response, and behaves as send_with_meta does otherwise
+    """
+    return send_with_meta( body, post_fn, sleep_fn, environ, budget, random_fn )[ 0 ]
+
+
+def ask_noul( model, state, instructions, criteria, post_fn=None, sleep_fn=None, environ=None, random_fn=None ):
     """
     Ask Jev one yes/no question about a state and return the probability of yes.
 
     Requires:
         - model is a non-empty pinned id such as jev-1.13.0; there is no default
-        - post_fn, sleep_fn and environ are send's test stand-ins
+        - post_fn, sleep_fn, environ and random_fn are send's test stand-ins
 
     Ensures:
         - returns ( noul, response_model ) as parse_answer does
@@ -201,4 +254,4 @@ def ask_noul( model, state, instructions, criteria, post_fn=None, sleep_fn=None,
     """
     if not model: raise ValueError( "model id is required: the harness has no default Jev model" )
     body = build_body( model, state, instructions, criteria )
-    return parse_answer( send( body, post_fn, sleep_fn, environ ), model )
+    return parse_answer( send( body, post_fn, sleep_fn, environ, None, random_fn ), model )

@@ -20,6 +20,7 @@ import fnmatch
 import gzip
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -240,21 +241,28 @@ class LiveJevTransport:
         - JevBudgetSpent when the budget has no attempt left; no HTTP is made for it
     """
 
-    def __init__( self, post_fn=None, sleep_fn=None, environ=None, budget=None ):
+    def __init__( self, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None, clock_fn=None ):
         self.post_fn, self.sleep_fn, self.environ, self.budget = post_fn, sleep_fn, environ, budget
+        self.random_fn, self.clock_fn = random_fn, clock_fn
         self.refusal = None
 
-    def post( self, body ):
+    def post_with_meta( self, body ):
+        """Ensures: returns ( parsed response, meta ) as send_with_meta reports; raises as post does."""
         if self.refusal is not None: raise self.refusal
         try:
-            text = jev_transport.send( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ, self.budget )
+            text, meta = jev_transport.send_with_meta( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ,
+                                                       self.budget, self.random_fn, self.clock_fn )
         except jev_transport.JevConfigError as e:
             self.refusal = e
             raise
         try:
-            return json.loads( text )
+            return json.loads( text ), meta
         except ValueError as e:
             raise jev_transport.JevCallError( "response body is not JSON" ) from e
+
+    def post( self, body ):
+        """Ensures: returns the parsed response alone."""
+        return self.post_with_meta( body )[ 0 ]
 
 
 class JevCache:
@@ -433,6 +441,31 @@ def usage_of( response ):
     return pair if all( isinstance( n, int ) and not isinstance( n, bool ) and n >= 0 for n in pair ) else None
 
 
+def transport_summary( calls ):
+    """
+    Summarise what the transport saw on the live responses of one question.
+
+    Requires:
+        - calls is a list of { model, status, attempts, retry_after, latency_ms }, one per live response
+
+    Ensures:
+        - returns { responses, models, statuses, attempts, attempts_total, retry_after_seen, retry_after_max, latency_ms }
+        - models, statuses and attempts count responses by value, keyed by text, in sorted key order
+        - retry_after_seen counts the responses whose calls saw a retry-after; retry_after_max is the largest in seconds or None
+        - latency_ms holds min, max, mean, p50 and p95 (nearest rank) in whole milliseconds, or None with no response
+    """
+    def count( key ):
+        out = {}
+        for c in calls: out[ str( c[ key ] ) ] = out.get( str( c[ key ] ), 0 ) + 1
+        return dict( sorted( out.items() ) )
+    waits = [ c[ "retry_after" ] for c in calls if c[ "retry_after" ] is not None ]
+    times = sorted( c[ "latency_ms" ] for c in calls )
+    rank  = lambda pct: times[ max( 0, math.ceil( pct / 100 * len( times ) ) - 1 ) ]
+    return { "responses": len( calls ), "models": count( "model" ), "statuses": count( "status" ), "attempts": count( "attempts" ),
+             "attempts_total": sum( c[ "attempts" ] for c in calls ), "retry_after_seen": len( waits ), "retry_after_max": max( waits ) if waits else None,
+             "latency_ms": { "min": times[ 0 ], "max": times[ -1 ], "mean": round( sum( times ) / len( times ) ), "p50": rank( 50 ), "p95": rank( 95 ) } if times else None }
+
+
 def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
     """
     Ask Jev about every entry.
@@ -444,7 +477,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           id is never read from the cache, because a later run may have filled it
     Ensures:
         - returns { answers, failed, not_reached, calls, cache_hits, attempts_answered, attempts_failed,
-          failed_attempts, tokens_in, tokens_out, usage_missing }: answers are { id, probabilities }, failed is the list of ids whose call failed
+          failed_attempts, tokens_in, tokens_out, usage_missing, transport_calls }: answers are { id, probabilities }, failed is the list of ids whose call failed
           after RETRIES or was cut off by the budget after at least one attempt, in entry order
         - not_reached lists the ids no HTTP attempt was made for because the call budget was spent
         - an unreached id is neither answered nor failed, so decide() reports it under `missing`
@@ -456,6 +489,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           that was then retried because its cache write failed included; a cache hit adds nothing, a call that
           got no response has nothing to read, and a response whose usage is absent or not two whole numbers
           adds nothing and is counted in usage_missing
+        - transport_calls lists { status, attempts, retry_after, latency_ms, model } for every live response whose
+          transport reported them; a cache hit adds none, and model is the response's own "model" or None
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
     """
@@ -470,12 +505,13 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
         if hit is not None: return rec[ "id" ], hit, "hit", 0, []
         if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
         if budget is not None: budget.begin_tally()
-        how, resp, cut_off, spent_usage = "failed", None, False, []
+        how, resp, cut_off, got = "failed", None, False, []
         try:
             for _ in range( RETRIES + 1 ):
                 try:
-                    resp = ctx.transport.post( body )
-                    spent_usage.append( usage_of( resp ) )                    # Jev answered, so these tokens are spent even if the cache write below fails and the call retries
+                    # a transport that reports what it saw (the live one) is asked for it; a test fake only answers
+                    resp, meta = ctx.transport.post_with_meta( body ) if hasattr( ctx.transport, "post_with_meta" ) else ( ctx.transport.post( body ), None )
+                    got.append( ( usage_of( resp ), meta, resp ) )            # Jev answered, so these tokens are spent even if the cache write below fails and the call retries
                     cache.put( key, resp )
                     how = "call"
                     break
@@ -487,16 +523,18 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
         finally:
             attempts = budget.end_tally() if budget is not None else 0
         if cut_off and attempts == 0: how = "not_reached"                 # asked nothing: the budget was already spent
-        return rec[ "id" ], resp, how, attempts, spent_usage
+        return rec[ "id" ], resp, how, attempts, got
 
     answers, failed, not_reached, failed_attempts = [], [], [], []
     spent = { "answered": 0, "failed": 0 }
     used  = { "in": 0, "out": 0, "missing": 0 }
+    seen_calls = []
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
-        for rid, resp, how, attempts, usages in pool.map( one, entries ):
-            for tokens in usages:
+        for rid, resp, how, attempts, replies in pool.map( one, entries ):
+            for tokens, meta, reply in replies:
                 if tokens is None: used[ "missing" ] += 1
                 else: used[ "in" ] += tokens[ 0 ]; used[ "out" ] += tokens[ 1 ]
+                if meta is not None: seen_calls.append( { **meta, "model": reply[ "model" ] if isinstance( reply, dict ) and "model" in reply else None } )
             if how == "failed":
                 failed.append( rid ); failed_attempts.append( { "id": rid, "attempts": attempts } ); spent[ "failed" ] += attempts
                 continue
@@ -506,7 +544,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
-             "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ] }
+             "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ], "transport_calls": seen_calls }
 
 
 def module_of( file ):
@@ -744,16 +782,16 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
         - when no page is chosen, or the entry stage finds nothing at the threshold, every entry is swept and
           decides (route "pages_then_full"); answers already cached cost nothing
         - every stage draws on the transport's one call budget, so the ceiling holds across all of them
-        - returns { route, sw, d, deciding, stages, plan }: sw and d belong to the deciding stage, deciding is its
-          entry list, plan records what the page stage asked, chose and covered
+        - returns { route, sw, d, deciding, stages, plan, sweeps }: sw and d belong to the deciding stage, deciding is its
+          entry list, plan records what the page stage asked, chose and covered, sweeps lists every sweep that ran
     """
-    stages, plan_out = [], None
+    stages, swept, plan_out = [], [], None
     if pages:
         asked = [ { "id": p[ "slug" ], "sig": "", "doc": p[ "text" ] } for p in pages ] if plan is None else \
                 [ { "id": a[ "slug" ], "sig": "", "doc": a[ "text" ] } for a in plan[ "asked" ] ]
         gaps = { **( gaps or {} ), **( { s: "not_reached" for s in plan[ "skipped" ] } if plan is not None else {} ) }
         sa = sweep( ctx, need, asked, frozen=frozen, template=page_template or PAGE_TEMPLATE, model=model, gaps=gaps )
-        stages.append( _stage( "pages", sa, len( asked ) ) )
+        stages.append( _stage( "pages", sa, len( asked ) ) ); swept.append( sa )
         chosen  = _choose_pages( sa[ "answers" ], policy )
         wanted  = { c[ "slug" ] for c in chosen }
         covered = [ e for e in entries if e[ "id" ] in set( plan[ "covered" ] ) ] if plan is not None else \
@@ -762,14 +800,14 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
                      "skipped": sorted( sa[ "not_reached" ] + sa[ "failed" ] ) if plan is None else plan[ "skipped" ] }
         if covered:
             sb = sweep( ctx, need, covered, frozen=frozen, template=template, model=model, gaps=gaps )
-            stages.append( _stage( "covered", sb, len( covered ) ) )
+            stages.append( _stage( "covered", sb, len( covered ) ) ); swept.append( sb )
             db = vd.decide( sb[ "answers" ], [ e[ "id" ] for e in covered ], sb[ "failed" ], flags, policy )
             if db[ "shortlist_total" ] > 0:
-                return { "route": "pages", "sw": sb, "d": db, "deciding": covered, "stages": stages, "plan": plan_out }
+                return { "route": "pages", "sw": sb, "d": db, "deciding": covered, "stages": stages, "plan": plan_out, "sweeps": swept }
     sw = sweep( ctx, need, entries, frozen=frozen, template=template, model=model, gaps=gaps )
-    stages.append( _stage( "all", sw, len( entries ) ) )
+    stages.append( _stage( "all", sw, len( entries ) ) ); swept.append( sw )
     d  = vd.decide( sw[ "answers" ], [ e[ "id" ] for e in entries ], sw[ "failed" ], flags, policy )
-    return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out }
+    return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out, "sweeps": swept }
 
 
 def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None ):
@@ -798,7 +836,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
-        routed = { "route": "none", "sw": none, "d": vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None }
+        routed = { "route": "none", "sw": none, "d": vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None, "sweeps": [] }
     sw, d, plan = routed[ "sw" ], routed[ "d" ], routed[ "plan" ]
     template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ] ),
@@ -814,7 +852,8 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
                        "attempts_failed": sw[ "attempts_failed" ], "failed_attempts": sw[ "failed_attempts" ], "call_budget": ctx.call_budget,
                        "route": routed[ "route" ], "stages": routed[ "stages" ], "attempts_total": sum( st[ "attempts" ] for st in routed[ "stages" ] ),
                        "tokens_in": sum( st[ "tokens_in" ] for st in routed[ "stages" ] ), "tokens_out": sum( st[ "tokens_out" ] for st in routed[ "stages" ] ),
-                       "usage_missing": sum( st[ "usage_missing" ] for st in routed[ "stages" ] ) } }
+                       "usage_missing": sum( st[ "usage_missing" ] for st in routed[ "stages" ] ),
+                       "transport": transport_summary( [ c for sweep_ in routed[ "sweeps" ] for c in sweep_[ "transport_calls" ] ] ) } }
     return store_receipt( ctx, rec ) if write else rec
 
 
