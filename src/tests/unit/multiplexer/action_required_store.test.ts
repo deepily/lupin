@@ -525,11 +525,11 @@ test("freezeAll is idempotent — already-frozen entries are not re-emitted on a
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
 
   // First freeze — emits offline-frozen for ar1.
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
   const eventsAfterFirst = ctx.events.length;
 
   // Second freeze (no thaw between) — already frozen, should NOT re-emit.
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
 
   const newOfflineFrozen = ctx.events
     .slice(eventsAfterFirst)
@@ -548,7 +548,7 @@ test("freezeAll skips terminal entries (responded prompt is not re-emitted as of
   // Capture events from this point only.
   const eventsBefore = ctx.events.length;
   // Trigger freezeAll via connection_offline.
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
 
   // Only ar1 should produce an offline-frozen emission; ar2 is terminal → skipped.
   const newEvents = ctx.events.slice(eventsBefore).filter((e) => e.payload.changeKind === "offline-frozen");
@@ -567,7 +567,7 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
   await ctx.store.respondAndAwait("ar3", "ok"); // terminal
 
   // Freeze all (only ar1 + ar2 are pending and will be frozen; ar3 is terminal).
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
 
   // Thaw only ar1: emit "connection_online" then immediately re-freeze ar2 by
   // calling connection_offline again? That doesn't work — events are global.
@@ -581,7 +581,7 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
 
   const eventsBefore = ctx.events.length;
   // Trigger thawAll via connection_online.
-  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_online", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
 
   // 360de81b: only the ACTIVE card (ar1) counts down, so only it was frozen and only it
   // resumes. ar2 and ar4 are queued (no countdown yet); ar3 was answered while queued and
@@ -595,12 +595,12 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
 test("thawAll does not restart the countdown of a frozen card answered while offline (its POST failed, it waits for retry)", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
   ctx.setPostRejects(true);
   await ctx.store.respondAndAwait("ar1", "yes").catch(() => {});
   assert.equal(ctx.store.getById("ar1")!.state, "failed");
   const before = ctx.events.length;
-  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_online", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
   assert.equal(ctx.events.slice(before).filter(e => e.payload.changeKind === "offline-resumed").length, 0);
   assert.equal(ctx.timers.pending(), 0);
 });
@@ -609,7 +609,7 @@ test("thawAll skips an active entry that was never frozen (connection_online wit
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
   const before = ctx.events.length;
-  ctx.bus.emit({ type: "connection_online", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_online", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
   assert.equal(ctx.events.slice(before).filter(e => e.payload.changeKind === "offline-resumed").length, 0);
   assert.equal(ctx.timers.pending(), 1);
 });
@@ -1066,7 +1066,7 @@ test("360de81b: the connection freeze touches only the active card — a queued 
   const ctx = setup({ now: 1_000_000 });
   twoCards(ctx);
   const before = ctx.events.length;
-  ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
+  ctx.bus.emit({ type: "connection_offline", payload: { ts: 0, transport: "QueueTransport" }, source: "test", ts: 0 });
   assert.deepEqual(ctx.events.slice(before).map(e => [e.payload.changeKind, e.payload.id_hash]), [["offline-frozen", "ar1"]]);
 });
 

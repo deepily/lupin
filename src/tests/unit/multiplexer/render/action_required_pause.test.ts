@@ -142,8 +142,8 @@ test( "store: a reconnect does not restart a paused card's countdown", () => {
   const h = harness();
   h.prompt( "a1" );
   h.store.togglePause( "a1" );
-  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "offline" } } as never );
-  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "connected" } } as never );
+  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "offline", transport: "QueueTransport" } } as never );
+  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "connected", transport: "QueueTransport" } } as never );
   assert.equal( h.ticking(), 0, "the thaw restarted a countdown the operator paused" );
   h.store.togglePause( "a1" );
   assert.equal( h.ticking(), 1 );
@@ -152,9 +152,9 @@ test( "store: a reconnect does not restart a paused card's countdown", () => {
 test( "store: a card that is not paused keeps its countdown through an offline freeze and thaw", () => {
   const h = harness();
   h.prompt( "a1" );
-  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "offline" } } as never );
+  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "offline", transport: "QueueTransport" } } as never );
   assert.equal( h.ticking(), 0 );
-  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "connected" } } as never );
+  h.bus.emit( { type: "connection_state_change", source: "test", ts: 0, payload: { state: "connected", transport: "QueueTransport" } } as never );
   assert.equal( h.ticking(), 1 );
 } );
 

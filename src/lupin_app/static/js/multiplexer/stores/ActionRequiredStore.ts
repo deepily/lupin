@@ -56,6 +56,7 @@ import type {
   ActionRequiredChangeKind,
   ActionRequiredResponse,
   ActionRequiredStep,
+  ConnectionLifecyclePayload,
   ConnectionStateChangePayload,
   LupinEvent,
   PredictionHint,
@@ -153,6 +154,11 @@ export function toWireResponseValue(response: ActionRequiredResponse): string {
 export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
 export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
 export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
+
+// The one transport whose state freezes and thaws a card's countdown. The countdown runs on the queue
+// socket's clock; the audio socket (AudioTransport) carries speech, and its drop or return says nothing
+// about whether a card can still be answered. Row 232df5c1.
+export const FREEZE_TRANSPORT = "QueueTransport";
 
 // ---------------------------------------------------------------------------
 // Parity A-1c2 — the prompts survive a reload (legacy saveActionRequiredState /
@@ -480,10 +486,10 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       this.bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => this.onConnectionState(e)),
     );
     this.unsubscribers.push(
-      this.bus.on<unknown>("connection_offline", () => this.freezeAll()),
+      this.bus.on<ConnectionLifecyclePayload>("connection_offline", (e) => { if (e.payload.transport === FREEZE_TRANSPORT) this.freezeAll(); }),
     );
     this.unsubscribers.push(
-      this.bus.on<unknown>("connection_online", () => this.thawAll()),
+      this.bus.on<ConnectionLifecyclePayload>("connection_online", (e) => { if (e.payload.transport === FREEZE_TRANSPORT) this.thawAll(); }),
     );
     // A-2 #2d — the item the waiting card deferred to has left the TTS slot. activateHead is a
     // no-op unless the first card is still unstarted, and only an arrival leaves it that way.
@@ -823,6 +829,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   // -------------------------------------------------------------------------
 
   private onConnectionState(e: LupinEvent<ConnectionStateChangePayload>): void {
+    if (e.payload.transport !== FREEZE_TRANSPORT) return;
     const s = e.payload.state;
     if (s === "backoff" || s === "offline" || s === "failed") {
       this.freezeAll();
