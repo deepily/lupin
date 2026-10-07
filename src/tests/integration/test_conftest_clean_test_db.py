@@ -54,13 +54,13 @@ def test_clean_test_db_preserves_companions( clean_test_db ):
 
 def test_clean_test_db_removes_prior_test_users( clean_test_db ):
     """
-    Insert a fake test user, re-trigger clean_test_db semantics by re-running
-    drop+recreate+reseed, then confirm only the companions remain (the fake
-    user got wiped). This validates that the fix doesn't preserve random
-    leftovers — only the explicit companion seed.
+    Insert a fake test user, replay the fixture's row-level cycle (delete the
+    unprotected users, truncate the history tables, reseed), then confirm only
+    the companions remain. This validates that the fix doesn't preserve random
+    leftovers, only the explicit companion seed. No table is dropped, so every
+    grant on the test database survives the cycle.
     """
     from cosa.rest.db import database as db_module
-    from cosa.rest.postgres_models import Base
     engine = db_module.engine
 
     # Insert a non-companion user
@@ -73,10 +73,15 @@ def test_clean_test_db_removes_prior_test_users( clean_test_db ):
 
     assert fake_email in _query_user_emails(), "test setup: fake user did not insert"
 
-    # Re-trigger the fixture's destructive cycle by manually replaying its
-    # body (cannot re-invoke the fixture mid-test cleanly).
-    Base.metadata.drop_all( bind=engine )
-    Base.metadata.create_all( bind=engine )
+    # Replay the fixture's row-level cycle by hand (cannot re-invoke the
+    # fixture mid-test cleanly). Same statements as clean_test_db in conftest.py.
+    with engine.begin() as conn:
+        conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
+        conn.execute( text(
+            "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
+            "job_history, proxy_decisions, trust_states, "
+            "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
+        ) )
     from seed_test_companions import seed_if_missing
     seed_if_missing()
 

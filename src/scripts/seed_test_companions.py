@@ -23,7 +23,8 @@ Environment variables:
     DB_HOST           - PostgreSQL hostname (default: lupin-postgres).
     DB_PORT           - PostgreSQL port (default: 5432).
     DB_USER           - PostgreSQL user (default: lupin_dev).
-    DB_PASSWORD       - PostgreSQL password (required, no default).
+    DB_PASSWORD       - PostgreSQL password (no default).
+    DB_PASSWORD_FILE  - Path to a file holding the password; read only when DB_PASSWORD is blank.
     LUPIN_DEV_EMAIL   - Human admin email to seed (default: ricardo.felipe.ruiz@gmail.com).
 """
 
@@ -37,10 +38,39 @@ import psycopg2
 # Configuration from environment
 # ---------------------------------------------------------------------------
 
+def _read_password():
+    """
+    The database password: DB_PASSWORD, else the file named by DB_PASSWORD_FILE.
+
+    The app containers log in as lupin_app from a password file and carry no DB_PASSWORD. This
+    script runs from scripts/ with no cosa on its path, so the file is read here, not imported.
+
+    Requires:
+        - the environment is the one the script was started with
+
+    Ensures:
+        - returns DB_PASSWORD when it is not blank
+        - else returns the stripped content of DB_PASSWORD_FILE when that names a readable file
+        - else returns "", after a warning when a file was named but could not be read
+        - never raises
+    """
+    password = os.environ.get( "DB_PASSWORD", "" )
+    if password: return password
+
+    path = os.environ.get( "DB_PASSWORD_FILE", "" )
+    if not path: return ""
+
+    try:
+        with open( path ) as handle: return handle.read().strip()
+    except OSError as error:
+        print( f"[SEED] DB_PASSWORD_FILE {path} could not be read: {error.__class__.__name__}" )
+        return ""
+
+
 DB_HOST     = os.environ.get( "DB_HOST", "lupin-postgres" )
 DB_PORT     = os.environ.get( "DB_PORT", "5432" )
 DB_USER     = os.environ.get( "DB_USER", "lupin_dev" )
-DB_PASSWORD = os.environ.get( "DB_PASSWORD", "" )
+DB_PASSWORD = _read_password()
 
 DEV_DB      = "lupin_db_dev"
 TEST_DB     = "lupin_db_test"

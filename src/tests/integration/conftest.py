@@ -198,8 +198,8 @@ def clean_test_db():
     which points to lupin_db_test.
 
     Companion seed restoration:
-        After drop+recreate, immediately re-runs the same companion seed that
-        the test container runs at startup (src/scripts/seed_test_companions.py).
+        After the row-level cleanup, the companions are checked against the same
+        seed the test container runs at startup (src/scripts/seed_test_companions.py).
         This keeps service-account logins (e.g. PQW polling :8000) working
         across the whole `all`-suite run instead of failing 401 mid-suite the
         moment the first user-management test wipes the users table.
@@ -208,8 +208,9 @@ def clean_test_db():
         - Asserts engine.url contains 'lupin_db_test' before any destructive ops
         - Verifies users table contains exactly the companion rows after reset
           (anything else is a leftover from a prior test or seed regression)
-        - DROP/CREATE provides complete isolation between tests EXCEPT for the
-          companion seed, which is intentional shared infrastructure
+        - Row-level DELETE and TRUNCATE isolate the tests EXCEPT for the
+          companion seed, which is intentional shared infrastructure. No table
+          is dropped, so the grants on the test database survive every run
 
     Requires:
         - PostgreSQL Docker container running (lupin-postgres)
@@ -217,7 +218,7 @@ def clean_test_db():
         - lupin_db_dev populated with companion users (seed source)
 
     Ensures:
-        - Fresh database schema before each test
+        - Empty application tables before each test; the schema and its grants stay
         - Complete isolation between tests for application data
         - Companion users (interactive.job.tester@..., admin@..., etc.) always
           present at test entry

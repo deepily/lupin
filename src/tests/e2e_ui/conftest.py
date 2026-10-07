@@ -627,14 +627,15 @@ def clean_test_db():
     """
     Clean PostgreSQL test database before each test.
 
-    Reuses the same pattern as integration tests: drop all tables,
-    recreate schema, verify empty state.
+    Reuses the same pattern as integration tests: delete the unprotected
+    users, truncate the history tables, verify the companions remain.
+    No table is dropped, so the grants on the test database survive.
 
     Requires:
         - Server hot-swapped to Testing config (lupin_db_test)
 
     Ensures:
-        - Fresh database schema before each test
+        - Empty application tables before each test; the schema and its grants stay
         - Complete isolation between tests
         - Tests never affect development database
     """
