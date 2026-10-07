@@ -4035,53 +4035,24 @@ def _dm_send_fn(
     recipient_session_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[DM — directed attention-demanding]** Send a notification-native direct
-    message to another CC persona session. **PREFERRED** over `commons_send_to`
-    / `commons_ask_async`, which are deprecated.
+    **[DM — directed attention-demanding]** Send a notification-native direct message to another CC persona session. **PREFERRED** over `commons_send_to` / `commons_ask_async`, which are deprecated.
 
-    Unlike the commons DM path (empty-body claim-check → forced `commons_read`
-    re-fetch, ~3,700 tokens per received DM), dm_send carries the body INLINE in
-    the recipient's push (direction='ai_to_ai'), so the recipient processes it
-    directly (~204 tokens — ~18× cheaper) with zero re-fetch.
+    The body travels INLINE in the recipient's push (direction='ai_to_ai'), so the recipient acts on it directly: ~204 tokens, against ~3,700 for the commons claim-check path with its forced `commons_read` re-fetch.
 
-    Replies are symmetric: to answer a DM you received, call dm_send back to the
-    sender with `reply_to` = the message_id from their system-reminder and
-    `thread_id` = the conversation's thread_id (both surfaced in the inbound DM
-    framing). There is no separate watcher/expect_reply — a reply is just a DM.
-
-    Examples:
-        # Basic DM by persona name:
-        dm_send(recipient="tiberius", body="have you touched src/auth.py today?")
-
-        # Threaded reply to a DM you received:
-        dm_send(recipient="tiberius", body="yes — commit f4e0370",
-                reply_to="<message_id>", thread_id="<thread_id>")
+    To answer a DM you received, call dm_send back to the sender with `reply_to` = the message_id from their system-reminder and `thread_id` = the conversation's thread_id (both in the inbound framing). A reply is just a DM; there is no separate watcher.
 
     Args:
         recipient: Recipient persona name (case/punctuation-tolerant resolution).
-        body: Message body (delivered inline — no re-fetch).
-        reply_to: message_id of the DM this answers (threading). Omit for a new DM.
-        thread_id: conversation id (threading). Omit to start a fresh thread (the
-                   server seeds one from the new message_id).
-        recipient_session_id: precise session addressing; takes precedence over
-                   `recipient` when supplied.
+        body: Message body (delivered inline, no re-fetch).
+        reply_to: message_id of the DM this answers. Omit for a new DM.
+        thread_id: conversation id. Omit to start a fresh thread.
+        recipient_session_id: precise session addressing; takes precedence over `recipient`.
 
     Returns:
-        Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_session_hash8","recipient_persona","dispatched":True}.
-        Recipient-resolution failure: {"status":"error",
-                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
-        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+        {"status":"sent","message_id","thread_id","recipient_session","recipient_session_hash8","recipient_persona","dispatched":True}, or {"status":"error","reason":"recipient_unresolved","detail":...}, or a transport/auth error {"status":"error","reason":...,"detail":...}. `recipient_session` is the FULL session id (feed it back as `recipient_session_id` for precise addressing); `recipient_session_hash8` is the persisted 8-character form that `dm_list` reports as the addressee. They are deliberately NOT the same value, so they will not compare equal (`dm_list`'s `session_id` filter accepts either).
 
-    TWO WIDTHS, TWO NAMES — use the right one for the right job:
-      `recipient_session`       FULL session id. Feed this back as
-                                `recipient_session_id` for precise addressing on
-                                a SUBSEQUENT SEND.
-      `recipient_session_hash8` the 8-char form actually persisted, and the form
-                                `dm_list` reports as the addressee. Compare
-                                against `recipient_session_hash8` on listed DMs.
-    They are deliberately NOT the same value; comparing one to the other will
-    not match. (`dm_list`'s `session_id` filter accepts either — it normalizes.)
+    Example:
+        dm_send(recipient="tiberius", body="yes — commit f4e0370", reply_to="<message_id>", thread_id="<thread_id>")
     """
     refusal = _refuse_borrowed_identity( "dm_send" )
     if refusal is not None: return refusal
@@ -4305,36 +4276,20 @@ def dm_respond(
     recipient_session_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[DM — directed attention-demanding]** Reply to a peer DM IN-THREAD.
-
-    A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the
-    message_id you are answering) and `thread_id` (the conversation) are REQUIRED.
-    Use it to answer a DM you received — both ids are surfaced in the inbound DM
-    framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch.
-
-    (Equivalent to `dm_send(..., reply_to=..., thread_id=...)`; this verb exists so
-    the contract reads itself — every /api/dm/<verb> mirrors a dm_<verb> tool — and
-    so the threading fields are enforced, not optional.)
+    **[DM — directed attention-demanding]** Reply to a peer DM IN-THREAD. A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the message_id you are answering) and `thread_id` (the conversation) are REQUIRED, and both are surfaced in the inbound DM framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch. It is equivalent to `dm_send(..., reply_to=..., thread_id=...)`.
 
     Args:
         recipient: Recipient persona name (case/punctuation-tolerant resolution).
-        body: Reply body (delivered inline — no re-fetch).
+        body: Reply body (delivered inline, no re-fetch).
         reply_to: message_id of the DM you are answering (required).
         thread_id: conversation id the reply belongs to (required).
-        recipient_session_id: precise session addressing; takes precedence over
-                   `recipient` when supplied.
+        recipient_session_id: precise session addressing; takes precedence over `recipient` when supplied.
 
     Returns:
-        Success: {"status":"sent","message_id","thread_id","recipient_session",
-                  "recipient_session_hash8","recipient_persona","dispatched":True}.
-        Recipient-resolution failure: {"status":"error",
-                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
+        Success: {"status":"sent","message_id","thread_id","recipient_session","recipient_session_hash8","recipient_persona","dispatched":True}.
+        Recipient-resolution failure: {"status":"error","reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
-
-    The two id fields are the ones `dm_send` returns: `recipient_session` is the FULL
-    session id (feed it back as `recipient_session_id`), `recipient_session_hash8` the
-    persisted 8-character form that `dm_list` reports. They are deliberately not equal
-    (`dm_list`'s `session_id` filter accepts either).
+        The two id fields are the ones `dm_send` returns: `recipient_session` is the FULL session id (feed it back as `recipient_session_id`), `recipient_session_hash8` the persisted 8-character form that `dm_list` reports. They are deliberately not equal (`dm_list`'s `session_id` filter accepts either).
     """
     persona = _commons_persona_fields()
     return _dm_respond_impl(
@@ -4389,55 +4344,22 @@ def dm_list(
     scope     : str             = "session",
 ) -> dict:
     """
-    **[READ]** List or poll peer DMs addressed to THIS session — or, on request,
-    every DM on the account.
+    **[READ]** List or poll peer DMs addressed to THIS session, or on request every DM on the account.
 
-    With `thread_id`, returns that conversation oldest-first (read order). Without
-    it, returns your DMs newest-first. `since` (an ISO-8601 timestamp) tails only
-    messages newer than that instant — the lightweight poll for new replies.
-    `limit` is clamped server-side to [1, 200].
+    With `thread_id`, returns that conversation oldest-first (read order). Without it, returns your DMs newest-first. `since` (an ISO-8601 timestamp) tails only messages newer than that instant, the lightweight poll for new replies. `limit` is clamped server-side to [1, 200].
 
-    ⚠️ THIS TOOL USED TO SAY "your peer-DM inbox," AND THAT WAS FALSE. The
-    underlying store scopes DMs to a SERVICE ACCOUNT, not to a session, and the
-    write path currently stamps one account for the whole fleet — so an
-    unscoped read returns every session's traffic. Measured 2026-07-21: one
-    session's unscoped read returned 50 messages across 7 sender sessions with
-    ZERO addressed to it; another returned 200+ across 12 personas. On
-    2026-07-16 a careful seat read that output as her own mail and filed a
-    false cross-session finding within minutes. The label licensed a claim the
-    payload could not support (row 2565956b).
+    `scope="session"` (the DEFAULT) asks the server to return only DMs ADDRESSED to this session. `scope="account"` is the deliberate wide read for audit and forensics: the store scopes DMs to a service account, so it returns every session's traffic. READ THE RESPONSE'S `scope` FIELD, do not assume it: if this session's id cannot be resolved the server cannot narrow the read and returns `scope:"account"`. A DM's presence in an account-scoped result says only that it EXISTS; each message carries `recipient_session_hash8` (the addressee), so use that field to answer "was this for me?".
 
-    ⇒ `scope="session"` (the DEFAULT) now asks the server to return only DMs
-      ADDRESSED to this session, so the name and the payload finally agree.
-    ⇒ `scope="account"` is the deliberate wide read for audit/forensics. It is
-      never the silent outcome of a normal call — you have to ask for it.
-
-    🔎 READ THE RESPONSE'S `scope` FIELD, DO NOT ASSUME IT. If this session's id
-    cannot be resolved, the server CANNOT narrow the read and returns
-    `scope:"account"` — a wide result, honestly labelled. Presence of a DM in an
-    account-scoped result says only that it EXISTS, never that it was sent to
-    you. Each message carries `recipient_session_hash8` (the addressee) — use
-    that field to answer "was this for me?", never mere presence in the list.
-
-    ⚠️ NOTE THE `_hash8` SUFFIX — it is load-bearing. The addressee is persisted
-    as the recipient's FIRST 8 CHARACTERS, while `dm_send` returns a key called
-    `recipient_session` holding the FULL id. They are deliberately named
-    differently because they are different widths; comparing them directly will
-    not match. (You may still pass a full id as a filter — the server truncates
-    it for you.)
+    Note the `_hash8` suffix: the addressee is persisted as the recipient's FIRST 8 CHARACTERS, while `dm_send` returns `recipient_session` holding the FULL id. They are different widths and will not compare equal (you may still pass a full id as a filter; the server truncates it).
 
     Args:
-        thread_id: a conversation id (thread view) or omit for the inbox view.
-        since: ISO-8601 timestamp — return only messages created after it (poll).
+        thread_id: a conversation id (thread view), or omit for the inbox view.
+        since: ISO-8601 timestamp; return only messages created after it (poll).
         limit: max messages to return (default 50, capped at 200).
-        scope: "session" (default — only DMs addressed here) or "account"
-            (every DM on the account; an explicit, auditable wide read).
-            Anything else is REJECTED (422), never silently narrowed.
+        scope: "session" (default, only DMs addressed here) or "account" (every DM on the account; an explicit, auditable wide read). Anything else is REJECTED (422), never silently narrowed.
 
     Returns:
-        Success: {"status":"ok","thread_id","since","count","scope",
-                  "recipient_session_hash8",
-                  "messages":[ {... ,"recipient_session_hash8"} ]}.
+        Success: {"status":"ok","thread_id","since","count","scope","recipient_session_hash8","messages":[ {... ,"recipient_session_hash8"} ]}.
         Bad `since`: {"status":"error","reason":"bad_request","detail":...}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
     """
