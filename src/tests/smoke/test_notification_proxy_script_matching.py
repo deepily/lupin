@@ -255,6 +255,24 @@ def _preflight_check( strategy, entries ):
         return False
 
 
+def _question_entries( entries ):
+    """
+    Keep the script entries that answer a question by its text.
+
+    A script can also hold card entries, keyed by `card_id`, that answer a multiple-choice
+    card. They carry no `question_pattern` and no `arg_name`, so the question-matching tiers
+    here cannot build a scenario from them.
+
+    Requires:
+        - entries is a list of script entry dicts
+
+    Ensures:
+        - returns the entries that have both a non-empty `question_pattern` and an `arg_name`
+        - preserves their order
+    """
+    return [ e for e in entries if e.get( "question_pattern" ) and e.get( "arg_name" ) ]
+
+
 def _build_exact_scenarios( entries ):
     """
     Auto-generate exact-match scenarios from loaded script entries.
@@ -510,8 +528,8 @@ def _run_single_script( script_name, tier, scenario_indices, verify,
         print( "  Start vLLM with Phi-4 and re-run." )
         return [], True
 
-    entries = strategy._entries
-    print( f"  Loaded {len( entries )} entries, LLM client created: {strategy.available}" )
+    entries = _question_entries( strategy._entries )
+    print( f"  Loaded {len( strategy._entries )} entries ({len( entries )} question entries), LLM client created: {strategy.available}" )
 
     # Pre-flight connectivity check — verify vLLM actually responds
     print( "  Running pre-flight LLM check..." )
@@ -771,6 +789,26 @@ def quick_smoke_test( script_scope="deep_research", tier="all", scenario_indices
         print( "=" * 80 )
 
     return all_passed
+
+
+def test_exact_scenarios_build_from_every_shipped_script():
+    """
+    Ensures the exact tier can be built from each shipped script, card entries included.
+
+    No LLM and no server: it reads the script files the live test reads. A card entry has no
+    `question_pattern` and no `arg_name`. It used to end the live test with a KeyError before any
+    question was asked.
+    """
+    for name in ( "deep_research", "expeditor_smoke" ):
+        with open( resolve_script_path( name ), "r", encoding="utf-8" ) as handle:
+            entries = json.load( handle )[ "entries" ]
+        question = _question_entries( entries )
+        assert question, f"{name}: no question entries survived the filter"
+        scenarios = _build_exact_scenarios( question )
+        assert len( scenarios ) == len( question ), f"{name}: one exact scenario per question entry"
+        assert all( s[ "arg_name" ] and s[ "question" ] for s in scenarios ), f"{name}: empty arg_name or question"
+        card_only = [ e for e in entries if e not in question ]
+        assert all( not e.get( "question_pattern" ) or not e.get( "arg_name" ) for e in card_only )
 
 
 def test_notification_proxy_script_matching():
