@@ -23,6 +23,7 @@ LINTERS  = "src/tests/unit/test_doc_lint_linters.py::"
 TEXT     = "src/tests/unit/test_doc_lint_text_rules.py::"
 TOOLS    = "src/tests/unit/test_doc_lint_tools_and_gate.py::"
 PROSE    = "src/tests/unit/test_doc_lint_prose_judge.py::"
+TSDOC    = "src/tests/unit/test_doc_lint_tsdoc_lint.py::"
 
 # ( rule, module, anchor, expression inside the anchor that names the rule, killing test, failure fragment )
 RULES = [
@@ -38,6 +39,8 @@ RULES = [
     ( "reference-length", "md_lint", '"reference-length"', '"reference-length"', LINTERS + "test_md_lint_template_caps_by_page_kind", "['reference-length']" ),
     ( "runbook-template", "md_lint", '"runbook-template"', '"runbook-template"', LINTERS + "test_md_lint_runbook_needs_four_sections_and_reports_each_missing_one", "runbook has" ),
     ( "parse-error (comment)", "comment_lint", '"parse-error"', '"parse-error"', LINTERS + "test_comment_lint_flags_shouting_tics_and_dates_in_comments_but_not_strings_or_shebang", "parse-error" ),
+    ( "parse-error (tsdoc)", "tsdoc_lint", '"parse-error"', '"parse-error"', TSDOC + "test_a_parse_error_is_one_finding_at_its_first_line_and_the_comments_are_still_read", "parse-error" ),
+    ( "docstring-length (tsdoc)", "tsdoc_lint", '"docstring-length"', '"docstring-length"', TSDOC + "test_jsdoc_longer_than_the_docstring_cap_is_flagged_once_at_its_start", "docstring-length" ),
     ( "unreadable", "cli", '"unreadable"', '"unreadable"', LINTERS + "test_run_linter_reports_text_json_strict_exit_and_unreadable_files", "could not read" ),
     ( "summary-length", "text_rules", '"summary-length"', '"summary-length"', TEXT + "test_summary_rule_flags_a_long_first_line_only_and_only_once", "summary-length" ),
     ( "preface-length", "text_rules", '"preface-length"', '"preface-length"', TEXT + "test_preface_rule_counts_lines_before_the_contract_and_ignores_contractless_text", "preface-length" ),
