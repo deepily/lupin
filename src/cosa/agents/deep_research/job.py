@@ -335,7 +335,8 @@ class DeepResearchJob( AgenticJobBase ):
                 debug          = self.debug,
                 verbose        = self.verbose,
                 confirm_topics = self.confirm_topics,
-                topic_source   = ", ".join( os.path.basename( p ) for p in self.source_document ) or None
+                topic_source   = ", ".join( os.path.basename( p ) for p in self.source_document ) or None,
+                user_email     = self.user_email
             )
 
             if report is None:
