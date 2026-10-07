@@ -20,10 +20,10 @@ pins:
 `LlmClientFactory().get_client( key )` returns the client an agent uses to send a prompt to a model; every client answers `run( prompt )` and `await run_async( prompt )` with a string, whatever the vendor.
 
 ## What it does
-- The factory is a singleton. `get_client` first looks `key` up in the INI through `ConfigurationManager`, and otherwise reads it as `vendor:model` (the colon is the only vendor delimiter; a string with no colon is treated as a local vLLM model id).
+- The factory is a singleton. `get_client` first looks `key` up in the INI through `ConfigurationManager`, and otherwise reads it as `vendor:model` (the colon is the only vendor delimiter; `_parse_model_descriptor` reads a string with no colon that starts `llm_deepily_` as a Deepily model, and any other string with no colon as a local vLLM model id).
 - A configured spec picks the client by its prefix. `vllm://host:port@model` with prompt format `instruction_completion` or `special_token` gives a `CompletionClient`; any other `vllm://` spec gives a `ChatClient`. `vertex://location@model` gives a `GeminiVertexClient`. Anything else gives a `ChatClient`.
 - `ChatClient` goes through pydantic_ai; `CompletionClient` posts to an OpenAI-style completions URL and strips code fences from the reply with `clean_llm_response`.
-- `TokenCounter` uses tiktoken, or `len( text ) // 4` when it is missing. `LlmError` and its subclasses are defined, and only `base_llm_client.py` promises them in its docstrings. No client raises one: the one non-test `raise Llm*Error` in `src/cosa` is `ModelRegistry.get_model_config` (`LlmConfigError`), which the factory never calls (grep, outside tests, 2026-10-07).
+- `TokenCounter` uses tiktoken, or `len( text ) // 4` when it is missing. `LlmError` and its subclasses are defined, and only the docstrings of `base_llm_client.py` and `model_registry.py` promise them. No client raises one: the one non-test `raise Llm*Error` in `src/cosa` is `ModelRegistry.get_model_config` (`LlmConfigError`), which the factory never calls (grep, outside tests, 2026-10-07).
 
 ## Invariants
 - A `vertex://` spec without `@` raises `ValueError`, and so does the location `us-central1` (it returns 404 for these models; use `global`).
