@@ -4630,157 +4630,42 @@ def task_query(
     include_parked      : bool            = False,
 ) -> dict:
     """
-    **[READ — always allowed, no user permission needed]** Query the task store.
+    **[READ — always allowed, no user permission needed]** Query the task store: exact-match filters, AND semantics, newest first. Bad enum values are a 422.
 
-    The deterministic owed-work query (design R4): exact-match filters, AND
-    semantics, newest first. Junk enum filter values are rejected by the
-    server (422), never silently empty.
+    Pass terse=True for any "see my list" / board glance (the at-a-glance projection, without `body`); terse=False only when you need a row's body or audit context.
 
-    TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
-    glance. It returns the at-a-glance projection (id / title / item_class /
-    status / blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
-    request_move — `body` and the
-    other full-row fields
-    dropped), a fraction of the full-row token weight. Reach for the full shape
-    (terse=False) ONLY when you actually need a row's body/audit context.
+    Scope every read: a BARE `task_query()` is REJECTED once the store holds more than the threshold of non-terminal rows. Add a filter (owner_persona / status / item_class / project / gate_class / accountable_manager / correlation_key) or pass `unscoped_audit=True` for a deliberate full-store audit.
 
-    UNSCOPED-QUERY GUARD (design 2026.07.07): a BARE `task_query()` with no
-    narrowing filter is REJECTED with an educational error-dict once the store
-    holds more than the threshold of non-terminal rows — the DB only grows;
-    nobody pulls the whole board by accident. The two fixes the error names:
-    (1) add a narrowing filter (owner_persona / status / item_class / project /
-    gate_class / accountable_manager / correlation_key), or (2) pass
-    `unscoped_audit=True` for a DELIBERATE full-store audit. Terminal (done/
-    dropped) rows are excluded by default; pass `include_terminal=True` to
-    include them on an un-status'd query.
+    Hidden by default: terminal rows (`include_terminal=True` adds done/dropped), held rows (`status="not_approved"` shows them; an un-status'd query puts a HOLDING AREA notice in `warnings[]` when any match) and park-active rows (`include_parked=True` or `status="parked"`). The `in_progress` and `queued` passes cannot see held rows: add a `not_approved` pass before concluding nothing is owed.
 
-    🔴 AND SO ARE `not_approved` ROWS — THE HOLDING AREA IS EXCLUDED BY THE SAME
-    DEFAULT, AND THE FLAG THAT REVEALS IT IS NAMED FOR THE OTHER END OF THE
-    LIFECYCLE (row d254c397, 2026-09-05). `not_approved` is not terminal and not
-    abandoned: it is work awaiting an approver. Nothing in the paragraph above
-    predicted its exclusion, and that omission has cost real work — a seat re-minted
-    a duplicate of its own 50-minute-old row because the original was held and
-    invisible to every query it ran, INCLUDING the un-status'd catch-all, which is
-    the one you reach for precisely when you want everything you own.
+    A `parked` row is a human's not-now ruling, with a `park_reason` quoting the row's decisive sentence. Parking is bounded and self-expiring: once `next_chase_ts` passes, the row rejoins the owed count and shows here. An indefinite hold is `dropped` with a reason, not parked.
 
-    ⇒ **The un-status'd query now DECLARES what it withheld**: when held rows match
-    your filters, `warnings[]` carries a HOLDING AREA notice with the count and the
-    query that reveals them. An absent notice means nothing was withheld.
-    ⇒ To see them directly: `status="not_approved"` with your usual filters — cheap
-    and exact. `include_terminal=True` also works and drags in the whole completed
-    history, which is why it is the wrong reach.
+    `park_reason_stale` (bool, also in terse rows) is True when the row's body changed after the quote was frozen: read the row, not its park_reason, and re-park. False means only "no body change", never "still true" (its basis can live outside the row), and a row parked before capture-time shipped reads False until its body next changes. Advisory: changes no owed-ness.
 
-    ⚠️ SESSION-START HYGIENE IS TWO PASSES AND NEEDS A THIRD. The prescribed
-    `in_progress` then `queued` passes cannot see held rows, so a seat proving
-    "nothing owed" from them has proved nothing about its holding area.
-
-    PARKED ROWS (2026-07-19): a `parked` row is one a human deliberately ruled
-    not-now, carrying a `park_reason` quoting the row's own decisive sentence.
-    Park-ACTIVE rows are HIDDEN from this query by default, so `queued` now
-    means "actually workable now" and the burn-down number stops being fiction.
-    Parking is BOUNDED and SELF-EXPIRING, never an exit: a parked row whose
-    `next_chase_ts` has PASSED is no longer parked — it rejoins the owed count
-    automatically and stays VISIBLE here. Nothing sweeps it; expiry is computed
-    at READ time. An INDEFINITE hold is not parked, it is `dropped` with a
-    reason (dropping is visible). Pass `include_parked=True` (or
-    `status="parked"`) to audit what is currently parked and why.
-
-    STALE PARK REASONS (2026-07-19): every row carries `park_reason_stale`
-    (bool) — in the TERSE projection too, not only the full row. A
-    `park_reason` is a FROZEN QUOTE of the row's decisive sentence, captured at
-    park time. Change the row's BODY afterward and that quote stays syntactically
-    valid while it stops being true, and nothing goes red. `park_reason_stale=True`
-    IS that red: the row's body changed AFTER its quote was frozen, so the
-    quote is no longer known to describe the row — read the row itself, not its
-    park_reason, and re-park to re-freeze the quote.
-
-    ⚠️ FIXED 2026-07-26 (bug 54924128) — IF YOU REMEMBER THIS FLAG BEING NOISE,
-    THAT WAS THE BUG. It used to fire on ANY write that bumped `updated_ts`, so a
-    **priority-only edit during a routine board recut defamed a correct quote**.
-    When it was found, every parked row in the store carried the flag and every
-    one was wrong. It now reads `body_changed_ts`, which moves only when the body
-    actually changes. ⇒ Re-check any `park_reason_stale: true` you saw before that
-    date rather than trusting it.
-
-    ⚠️ AND `False` DOES NOT MEAN "STILL TRUE" (row aa543525 §2). The flag answers
-    "has the BODY changed since the quote was frozen?" — nothing more. A park
-    reason whose basis lived OUTSIDE the row dies without touching the row, so it
-    reads FRESH forever. MEASURED 2026-07-25: four rows read `false` while each
-    quoted a fleet-wide stand-down that had already evaporated. ⇒ Treat `false` as
-    "no body change," NEVER as an endorsement — and note the flag is silent in
-    exactly the case you most want it to speak. The real property is CONTENT
-    CONTRADICTION, which no clock can answer; **the chase is the backstop, because
-    a park is bounded and self-expiring.**
-
-    ADVISORY ONLY. Staleness changes NO owed-ness, unparks nothing, blocks
-    nothing. It marks a quote untrustworthy and stops there — deciding what to
-    do about it is a human's call, not this flag's.
-
-    It under-reports by design, and MORE SO right after the fix: a row parked
-    before capture-time shipped has no capture time and reports False, as does any
-    row never parked — and since the fix ships **no backfill**, every row's
-    `body_changed_ts` starts NULL, which also reports False. So the flag is quiet
-    until each row's body next changes. `True` is strong evidence; `False` is
-    merely the absence of evidence.
-
-    Examples:
-        # My owed work (terse list) — the everyday scoped query:
-        task_query(owner_persona="sam", status="in_progress", terse=True)
-
-        # Operator queue, full rows (need the body):
-        task_query(gate_class="operator")
-
-        # Deliberate full-store audit (past the guard, incl. terminal rows):
-        task_query(unscoped_audit=True, include_terminal=True, terse=True)
-
-        # What is currently parked, and why (the audit surface):
-        task_query(status="parked", terse=True)
+    Returns:
+        { tasks, count, total, has_more, truncated, warnings } verbatim (terse rows when terse=True), or an error dict (a bare over-threshold pull is a 400). READ `total`, NOT `count`: `count` is this PAGE and saturates at `limit`. Branch on `has_more` (= offset + count < total). `truncated` is True when a CHARACTER budget, not the row limit, stopped serialization early.
 
     Args:
         owner_persona: Filter by who owes the work
-        status: Filter by status (not_approved | queued | claimed | in_progress |
-            blocked | parked | review | done | dropped | wont_fix)
-        gate_class: Filter by gate (none | operator)
-        urgency: Filter by operator-gate urgency tier (urgent | normal | low)
+        status: not_approved | queued | claimed | in_progress | blocked | parked | review | done | dropped | wont_fix
+        gate_class: none | operator
+        urgency: operator-gate urgency tier (urgent | normal | low)
         accountable_manager: Filter by chasing manager
         project: Filter by owning project
-        item_class: Filter by class (task | decision | review_request | bug | gate)
+        item_class: task | decision | review_request | bug | gate
         correlation_key: Exact-match filter on the hook-upsert correlation key
-            (Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
         limit: Max rows (server default 100, cap 500)
         offset: Pagination offset
-        terse: True → the at-a-glance projection (§G token win); False (default)
-            → the full wire shape including body
-        include_terminal: True → include done/dropped rows on an un-status'd
-            query (default False excludes them)
-        unscoped_audit: True → the deliberate-full-sweep escape past the
-            unscoped-size guard (default False → a bare over-threshold pull is
-            rejected as an error-dict)
-        include_parked: True → also return park-ACTIVE rows (default False hides
-            them). EXPIRED parked rows are returned either way — they have
-            rejoined the owed count and hiding them would make a row that pokes
-            you invisible on the board.
+        terse: True for the at-a-glance projection; False (default) for the full wire shape including body
+        include_terminal: True also returns done/dropped rows on an un-status'd query (default False)
+        unscoped_audit: True is the deliberate full-sweep escape past the unscoped-size guard (default False)
+        include_parked: True also returns park-ACTIVE rows (default False hides them). EXPIRED parked rows are returned either way: they have rejoined the owed count.
 
-    Returns:
-        { tasks, count, total, has_more, truncated, warnings } verbatim (terse
-        rows when terse=True), or an error dict — an unscoped over-threshold pull
-        without unscoped_audit surfaces { status: "error", http_status: 400,
-        detail: <the two fixes> }.
-
-        ⚠️ READ `total`, NOT `count`. `count` is the length of THIS PAGE and
-        saturates at `limit` (default 100). It was being read as the size of the
-        result and never was: measured 2026-07-21, a properly-SCOPED query
-        reported count:100 while offset=100 returned 100 more rows. `total` is the
-        true count of rows matching your filters, page-independent. `has_more`
-        (= offset + count < total) is the one field to branch on before concluding
-        you have seen everything.
-
-        `truncated` is True when a CHARACTER budget — not the row limit — stopped
-        serialization early, because a row cap is not a size cap: the same 100-row
-        page measures ~21k chars terse and ~424k full. `warnings` carries those
-        notices to YOU rather than to the server's stdout, which is where they
-        used to go — an audience that is not the one paying the token weight.
-        Both truncation and page-saturation are announced; neither is ever silent.
+    Examples:
+        task_query(owner_persona="sam", status="in_progress", terse=True)    # my owed work, the everyday scoped query
+        task_query(gate_class="operator")    # operator queue, full rows
+        task_query(unscoped_audit=True, include_terminal=True, terse=True)    # deliberate full-store audit
+        task_query(status="parked", terse=True)    # what is parked, and why
     """
     return task_query_impl(
         api_base_url        = _get_server_url(),
@@ -4805,37 +4690,18 @@ def task_query(
 @mcp.tool
 def task_get( task_id: str ) -> dict:
     """
-    **[READ — always allowed, no user permission needed]** Fetch ONE store row
-    by its UUID.
+    **[READ — always allowed, no user permission needed]** Fetch ONE store row by its UUID.
 
-    THE FAILURE THIS PREVENTS: a filtered query's empty result is NOT evidence a
-    row is absent — use this to ask about a row DIRECTLY. `task_query` can only
-    ask a filter and scan a page; a row sitting at offset=15 of a limit=15 page
-    reads as gone, and an absence in a filtered page becomes a false fact about
-    the world. This asks about the specific row instead of inferring it from a
-    page's silence.
-
-    Returns the FULL item including `body` (not the terse projection) — you
-    asked for the row, you get the row. An absent id is a 404 → error dict
-    carrying "task {id} not found" verbatim, NEVER an empty success or None: a
-    missing row rendered as a silent nothing is the exact confusion this verb
-    exists to kill.
-
-    Example:
-        # Open one row by id (e.g. from a terse list's `id` field):
-        task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")
+    Use it to ask about a row directly: an empty filtered `task_query` is not evidence a row is absent (a row at offset=15 of a limit=15 page reads as gone). It returns the FULL item including `body`, not the terse projection. An absent id is a 404 error dict carrying "task {id} not found" verbatim, never an empty success or None.
 
     Args:
-        task_id: The item's UUID string. A malformed id is the server's reject
-            to surface (422), never pre-checked here.
+        task_id: The item's UUID string. A malformed id is the server's reject to surface (422), never pre-checked here.
 
     Returns:
-        The full serialized item (200 body) verbatim on success, or an error
-        dict — a 404 carries "task {id} not found" verbatim under "detail"; a
-        malformed UUID carries the server's 422 detail verbatim; auth/transport
-        failures carry the shared missing_auth_header / server_unreachable /
-        server_read_timeout
-        contract. NEVER an empty success, NEVER None.
+        The full serialized item (200 body) verbatim, or an error dict: a 404 carries "task {id} not found" under "detail"; a malformed UUID carries the server's 422 detail; auth/transport failures carry the shared missing_auth_header / server_unreachable / server_read_timeout contract. Never an empty success, never None.
+
+    Example:
+        task_get(task_id="4288dd53-6779-460a-88bd-a7365fb734b2")    # open one row by id, e.g. from a terse list's `id` field
     """
     return task_get_impl(
         api_base_url = _get_server_url(),
