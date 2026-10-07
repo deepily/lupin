@@ -97,7 +97,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id_with_source, wait_for_session_id_with_source,
     SOURCE_CWD_FALLBACK, DEFINITIVE_SOURCES,
     clear_cached_session_id, _find_session_file, _read_session_file,
-    get_speakerphone, set_speakerphone
+    get_speakerphone, set_speakerphone, atomic_write_json
 )
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     log_to_stream,
@@ -2486,8 +2486,8 @@ def set_session_topic( topic: str ) -> dict:
         with open( bridge_path ) as f:
             data = json.load( f )
         data[ "session_topic" ] = topic
-        with open( bridge_path, "w" ) as f:
-            json.dump( data, f, indent=2 )
+        if not atomic_write_json( bridge_path, data ):
+            return { "status": "error", "reason": f"bridge write failed for {bridge_path}" }
 
         # Also push to notification UI for real-time header update
         # Truncate session_name for UI display (max 64 chars)

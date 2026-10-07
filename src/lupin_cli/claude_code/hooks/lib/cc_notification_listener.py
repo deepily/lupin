@@ -856,7 +856,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Logs success or failure without raising
         """
         try:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata, atomic_write_json
             import json
 
             meta        = get_session_metadata()
@@ -868,8 +868,9 @@ class CCNotificationListener( BaseWebSocketListener ):
             with open( bridge_path ) as f:
                 data = json.load( f )
             data[ "session_topic" ] = topic
-            with open( bridge_path, "w" ) as f:
-                json.dump( data, f, indent=2 )
+            if not atomic_write_json( bridge_path, data ):
+                self._log( f"{self.LOG_PREFIX} Failed to set session topic: bridge write failed for {bridge_path}" )
+                return
             self._log( f"{self.LOG_PREFIX} Session topic set: {topic}" )
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} Failed to set session topic: {e}" )
