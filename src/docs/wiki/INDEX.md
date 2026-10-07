@@ -50,3 +50,11 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Web client
 
 - [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (JS and TypeScript docs are out of scope for plan 1, per Rick's JS and TypeScript ruling; the slug exists so the symbols have a home)
+
+## Written pages (added at assembly)
+
+Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the packages it pins. `[[agent-llm-clients]]` is written too; its line is above.
+
+- [[agent-voice-io]] — how a job tells the user something or asks a question, and what it does when nobody can answer. `cosa.agents.utils` (voice_io, sender_id, sync_notify), `cosa.agents.deep_research` (cosa_interface, voice_io)
+- [[agentic-job-contract]] — `AgenticJobBase`: the fields and lifecycle every long-running queue job provides. `cosa.agents` (agentic_job_base), `cosa.agents.claude_code`, `cosa.agents.deep_research`
+- [[deep-research]] — answering a question from the web and saving a markdown report. `cosa.agents.deep_research` (cli, search_cache, seed_context)
