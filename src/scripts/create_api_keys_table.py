@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Create api_keys table for Phase 2.5 notification endpoint authentication.
+Create api_keys table for notification endpoint authentication.
 
-This is initial table creation (NOT migration - table does not currently exist).
-API keys will be used for service-to-service authentication (e.g., Claude Code CLI → Lupin server).
+This is initial table creation, not a migration: the table does not already exist.
+API keys are used for service-to-service authentication (e.g., Claude Code CLI → Lupin server).
 
 Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Schema reference: Lines 439-464 (Database Schema Design)
@@ -74,7 +74,7 @@ CREATE_INDEXES = [
 
 def create_api_keys_table():
     """
-    Create api_keys table with full Phase 2.5 schema.
+    Create api_keys table with its full schema.
 
     Requires:
         - LUPIN_ROOT environment variable set

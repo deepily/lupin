@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-Running-job probe for bounce-dev-server.sh (row 08919110, Rick's ruling 2026-08-02).
+Running-job probe for bounce-dev-server.sh.
 
 GETs the unauthenticated GET /api/busy on :7999 and turns the two integers it returns
-into an EXIT CODE the bounce script reads:
+into an exit code the bounce script reads:
 
-    0  — IDLE: no job running (inflight_agentic_jobs == 0 AND run_queue_size == 0).
+    0  — idle: no job running (inflight_agentic_jobs == 0 and run_queue_size == 0).
          Safe to bounce.
-   10  — BUSY: a job is running (either count > 0). The script REFUSES the bounce
-         unless --force — a restart would destroy that work.
-   20  — UNREACHABLE / MALFORMED: could not get a clean two-integer answer (connection
-         refused, timeout, non-200, bad JSON, missing / non-int field). The script FAILS
-         OPEN and proceeds — a broken probe must never block recovery of a wedged server,
-         which is exactly the state that makes the probe unreachable.
+   10  — busy: a job is running (either count > 0). The script refuses the bounce
+         unless --force, because a restart would destroy that work.
+   20  — unreachable or malformed: could not get a clean two-integer answer.
+         Causes: connection refused, timeout, non-200, bad JSON, missing / non-int field. The script
+         fails open and proceeds. A broken probe must never block recovery of a wedged
+         server, which is the state that makes the probe unreachable.
 
-TRIGGER = OR (Maria's ruling 2026-08-02): either count > 0 is a live job. The run queue
-is delete-on-done (a finished job is removed the instant it completes) and stuck jobs are
-swept by the dead-queue watchdog, so neither count is non-zero on an idle box — the guard
-does not fire spuriously (which would just train people to reflex --force). Both counts
-are printed either way, so the human always sees the depth.
+Trigger is "or": either count > 0 is a live job. The run queue is delete-on-done
+(a finished job is removed the instant it completes). Stuck jobs are swept by the
+dead-queue watchdog, so neither count is non-zero on an idle box. The guard does not
+fire spuriously, which would just train people to reflex --force. Both counts are
+printed either way, so the human always sees the depth.
 
-This is a SEPARATE helper (like bounce_dev_warn.py) precisely so the guard's script test
+This is a separate helper (like bounce_dev_warn.py) so the guard's script test
 can stub it to each exit code without a live server.
 
 Env:
@@ -41,7 +41,7 @@ DEFAULT_URL = "http://localhost:7999/api/busy"
 
 def classify( inflight, run_size ):
     """
-    OR trigger: a job is running if EITHER count is positive.
+    Or-trigger: a job is running if either count is positive.
 
     Requires:
         - inflight, run_size are ints
@@ -62,8 +62,8 @@ def probe( url, timeout=3 ):
 
     Ensures:
         - returns EXIT_BUSY / EXIT_IDLE per classify() on a clean two-int answer
-        - returns EXIT_UNREACHABLE on ANY failure to obtain that answer (network error,
-          non-200, bad JSON, missing / non-int field) — reporting the ambiguity honestly
+        - returns EXIT_UNREACHABLE on any failure to obtain that answer (network error,
+          non-200, bad JSON, missing / non-int field) — reporting the ambiguity
           rather than guessing idle; the script turns that into fail-open
         - prints a one-line human summary to stderr in every case
     """

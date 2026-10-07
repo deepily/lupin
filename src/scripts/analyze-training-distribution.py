@@ -8,8 +8,6 @@ category breakdowns, and summary statistics. No server, GPU, or vLLM needed.
 Usage:
     cd /mnt/DATA01/include/www.deepily.ai/projects/lupin/src
     python scripts/analyze-training-distribution.py
-
-Created: 2026-02-04
 """
 
 import json

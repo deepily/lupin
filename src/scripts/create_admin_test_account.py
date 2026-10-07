@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create (or promote) the dedicated ADMIN test account used by admin-only smoke tests.
+Create (or promote) the dedicated admin test account used by admin-only smoke tests.
 
 Why a dedicated account: the shared LUPIN_TEST_INTERACTIVE_MOCK_JOBS_* tester holds
 roles ["user"], and several tests exist precisely to prove a NON-admin is refused
@@ -16,7 +16,7 @@ Credentials come from the environment — never hardcoded, never printed back:
 The script is idempotent: an existing account is promoted in place (and its password
 reset to the supplied one) rather than duplicated.
 
-⚠️ The dev database lives inside the Docker network, so run this INSIDE the container:
+Warning: the dev database lives inside the Docker network, so run this inside the container:
 
     docker exec -e LUPIN_TEST_ADMIN_EMAIL=... -e LUPIN_TEST_ADMIN_PASSWORD=... \
         lupin-rest-dev python /var/lupin/src/scripts/create_admin_test_account.py

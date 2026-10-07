@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Derive the concurrency + memory peak for row 117ed1b6 from the CC memory watcher log.
+Derive the concurrency and memory peak from the CC memory watcher log.
 
-This REPLACES the snippet retired in that row's body on 2026-08-25. That snippet
-had three defects, and this file exists to not repeat them:
+A steady-state sample shows a cap is safe, never that it is unnecessary, and it cannot bound a peak it was not running for.
 
-  1. It read 3.7% of the log without saying so. Every peak here is printed beside
-     `n_excluded` and the session denominator, so a reader can never mistake a
-     window's property for the fleet's.
-  2. It summed rss_gb, which is per-PROCESS VmRSS. A cgroup cap is enforced on the
-     per-SCOPE tree. This groups on `scope_anon_gb` — the noun the cap acts on,
-     added to the watcher in ab2a321c.
-  3. Summing VmRSS does not recover the scope figure either (shared pages counted
-     once per process vs once per cgroup), so no arithmetic over rss_gb is offered.
-
-⚠️ A steady-state sample shows a cap is SAFE, never that it is UNNECESSARY, and it
-cannot bound a peak it was not running for.
+Notes:
+    Defects of the earlier snippet this file does not repeat:
+    - It read 3.7% of the log without saying so.
+    - Every peak here is printed beside `n_excluded` and the session denominator.
+    - So a reader can never mistake a window's property for the fleet's.
+    - It summed rss_gb, which is per-process VmRSS, but a cgroup cap is enforced on the per-scope tree.
+    - This groups on `scope_anon_gb`, the noun the cap acts on, which the watcher also records.
+    - Summing VmRSS does not recover the scope figure either, because shared pages count once per process and once per cgroup.
+    - So no arithmetic over rss_gb is offered.
 """
 import sys
 import re
@@ -41,8 +38,8 @@ def derive( lines ):
         - lines is an iterable of strings from the watcher's --report stream
 
     Ensures:
-        - returns a dict carrying the peaks AND total/usable/excluded counts
-        - counts sessions over ALL rss_gb lines, not only groupable ones
+        - returns a dict carrying the peaks and total/usable/excluded counts
+        - counts sessions over all rss_gb lines, not only groupable ones
         - returns usable == 0 rather than raising when no line carries both fields
 
     Raises:

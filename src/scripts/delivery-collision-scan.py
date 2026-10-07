@@ -2,88 +2,44 @@
 """
 delivery-collision-scan.py — the delivery step, made loud.
 
-WHY THIS EXISTS (row d2dd3ee3, 2026-09-05). Four engineers wrote the same gister
-fix inside twenty-four hours. Nobody was careless: a commit on a worktree branch
-moves NOBODY'S TREE BUT ITS AUTHOR'S, so each of them looked at a clean tree, saw
-no fix, and wrote one. The work was real, the receipts were real, and the delivery
-never happened. Rick absorbed two days of a bug that had been solved twice before
-breakfast on day one.
+Finds files edited by two or more branches whose edits are not yet delivered to the target branch.
 
-WHAT IT CHECKS, AND WHY IT IS NOT "COUNT THE OLD COMMITS". The row's first cut
-asked for unmerged commits older than 24h. Measured, that filter EXCLUDES the one
-pair known to have collided: `dd81cc7f` was 14 hours old and `755b821c` was 0
-hours old, and together they reddened three tests. Age and risk are ANTI-CORRELATED
-at the dangerous end — two seats editing one file on one morning IS the collision
-case, while a commit sitting alone for a week on a file nobody else touches is the
-safe one. So the trigger here is:
+Notes:
+    Why it exists:
+    - A commit on a worktree branch moves nobody's tree but its author's.
+    - So several engineers looked at a clean tree, saw no fix, and each wrote the same fix.
+    - The work and receipts were real, but the delivery never happened.
 
-    TWO BRANCHES WITH UNDELIVERED EDITS TO ONE FILE, AT ANY AGE.
+    The trigger, at any age:
+    - Two branches with undelivered edits to one file.
+    - Age and risk are anti-correlated at the dangerous end.
+    - Two seats editing one file on one morning is the collision case.
+    - A lone commit that sits for a week on a file nobody else touches is the safe one.
+    - So a filter for unmerged commits older than 24h excludes the pair that collided.
 
-Both of this row's incidents are retro-detected by that predicate, which is the
-only evidence offered for it:
-  · src/cosa/memory/gister.py    — 4298f368, dd81cc7f, aefff8ae, 9c9e6f8c
-  · src/cosa/rest/db/database.py — dd81cc7f + 755b821c, the pair proven to conflict
+    Why not `merge-base --is-ancestor`:
+    - Lupin delivers epics by squash, which destroys ancestry, patch-id and subject at once.
+    - All three instruments then call delivered content unmerged.
+    - Ancestry over-reported about 3x on the measured population.
+    - A scan that cries wolf is a scan nobody reads.
+    - So a commit is reported only once a line it added is confirmed absent from the target branch's tree.
 
-🔴 WHY IT DOES NOT USE `merge-base --is-ancestor`, AND THIS IS THE LOAD-BEARING
-DECISION. Lupin delivers epics by SQUASH — `8bf71a64` is ONE commit carrying 1,546
-files and 349,694 insertions. A squash destroys ancestry, patch-id AND subject
-simultaneously, so all three of the obvious instruments call delivered content
-"unmerged". Measured at a3f45e6d over the same population:
+    Filters must name what they excluded:
+    - A falling count reads as progress, and a shrinking non-zero is the one number nobody re-checks.
+    - Branches crossing the `--max-tip-age-days 7` boundary once dropped the count from 143 to 14 with nothing delivered.
+    - Every filter must say what it excluded on every run, including clean ones.
+    - `discover_branches` returns its exclusions and `_print_not_examined` states them.
+    - A count is meaningless without its window, so quote the parameter with the figure.
 
-    ancestry (`merge-base --is-ancestor`)  3,976   over-reports 3.1x
-    patch-id (`git cherry`)                1,494/1,495 on one branch
-    subject match against the target's log over-reports
-    CONTENT PROBE                          1,283   <- what this script uses
+    Exit codes, three because two failure modes that want opposite remedies must not share one code:
+    - 0 means scanned with no collision, a real all-clear.
+    - 1 means collision, more than one branch on a file.
+    - 2 means refused, nothing scanned. It never reports clean.
+    - A scan that discovered zero branches because a ref pattern went stale would otherwise print "no collisions".
 
-A scan built on ancestry cries wolf at three times the real number, and a check
-that cries wolf is a check nobody reads. So a candidate commit is only reported
-once a line it ADDED is confirmed ABSENT from the target branch's tree.
-
-🔴 A FALLING NUMBER READS AS PROGRESS — READ THIS BEFORE YOU ADD A FILTER.
-Measured on this repo 2026-09-05: the CONFIRMED count fell from 143 to 14 in
-EIGHTEEN MINUTES and NOTHING HAD BEEN DELIVERED. Two branches carrying 1,626 and
-1,627 undelivered commits simply crossed the `--max-tip-age-days 7` boundary
-between two runs. The backlog was unchanged. The instrument had stopped looking.
-
-⚠️ THAT IS WORSE THAN AN EMPTY RESULT, AND THE REASON IS THE WHOLE LESSON. A zero
-from the wrong population at least gets re-checked, because a zero is surprising.
-**A shrinking non-zero is the one number nobody re-checks, because it looks like
-the thing improving.** Two amendments on this row, eighteen minutes apart, would
-have read as 129 files drained.
-
-⇒ SO EVERY FILTER IN THIS SCRIPT MUST NAME WHAT IT EXCLUDED, ON EVERY RUN,
-INCLUDING CLEAN ONES. The age filter is CORRECT and stays — an abandoned tree
-crying wolf is the failure it prevents, the same reasoning that makes the seat
-scan count live processes rather than 185 worktrees. What was wrong is that it
-said nothing. `discover_branches` returns its exclusions and `_print_not_examined`
-states them; a filter added later that does not do the same re-opens this hole.
-
-⇒ AND A COUNT FROM THIS SCRIPT IS MEANINGLESS WITHOUT ITS WINDOW. The same
-backlog reads 222 at 3650d, 143 at 7d this afternoon, and 10 at 7d an hour later.
-All three are correct measurements of three different populations, and the
-population is decided by WALL-CLOCK TIME. **Quote the parameter with the figure,
-or you have published a rumour with a timestamp.**
-
-EXIT CODES — three, because two failure modes that want opposite remedies must not
-share one code (`purge-pycache.sh`'s exit 2 is the local precedent):
-
-    0  scanned, no collision            — a real all-clear
-    1  COLLISION: >1 branch on a file   — the finding
-    2  REFUSED, nothing was scanned     — say so, never report clean
-
-🔴 EXIT 2 IS THE WHOLE POINT OF THE THIRD CODE. This repo's § A CLEAN EXIT IS NOT
-EVIDENCE THE WORK HAPPENED collects five tools whose failure and success printed
-the same thing. `disk-hygiene-report.sh` — the only other script in the tree that
-computes merged-ness — dies on an unmatched glob and prints NOTHING, and its
-silence is indistinguishable from a clean run. A scan that discovers zero branches
-because a ref pattern went stale would print "no collisions" and be believed. It
-refuses instead, and names what it did not do.
-
-WORKTREE-SAFE BY CONSTRUCTION. The repo root is derived from THIS FILE'S location,
-never from $LUPIN_ROOT — commit 5e7f74e8 removed exactly that steering from
-`purge-pycache.sh` after it purged the main checkout from inside a worktree and
-printed its success banner. A script shipped inside the tree it inspects can be
-disagreed with by the environment, never informed by it.
+    Worktree-safe:
+    - The repo root comes from this file's location, never from $LUPIN_ROOT.
+    - A script shipped inside the tree it inspects can be disagreed with by the environment, never informed by it.
 """
 
 import argparse
@@ -130,22 +86,8 @@ def discover_branches( target, max_tip_age_days ):
     """
     Discover candidate branches from git — never from a hand-maintained list.
 
-    This mirrors the cache-bust guard's first property: a population discovered
-    from the artifact picks up branch number N+1 the day it is created, while a
-    hand-list silently stops watching everything added after it was written.
-
-    🔴 IT RETURNS WHAT IT EXCLUDED, AND THAT IS THE WHOLE POINT OF THE SECOND LIST.
-    Until 2026-09-05 this dropped aged-out branches SILENTLY, and the cost was
-    measured on this repo: the confirmed-collision count fell from 143 to 14 in
-    EIGHTEEN MINUTES with nothing delivered, because two branches carrying 1,626
-    and 1,627 undelivered commits crossed the seven-day boundary between two runs.
-    **A falling number reads as a drain**, so the silent filter turned an unchanged
-    backlog into apparent progress — the flattering reading this script exists to
-    refuse. The filter itself is correct and stays; an abandoned tree crying wolf
-    is the failure it prevents. What was wrong is that it said nothing.
-
-    ⇒ A collision on an excluded branch is INVISIBLE, not ABSENT, and the caller
-    can only say so if it is handed the names.
+    A population discovered from the artifact picks up branch number N+1 the day it is created.
+    A hand-list silently stops watching everything added after it was written.
 
     Requires:
         - target is a branch name that exists
@@ -155,6 +97,12 @@ def discover_branches( target, max_tip_age_days ):
         - returns ( inside, excluded ), each [ ( branch, tip_unixtime ), ... ]
         - target itself is in neither list
         - `inside` holds tips newer than max_tip_age_days; `excluded` holds the rest
+
+    Notes:
+        - It returns what it excluded, because a collision on an excluded branch is invisible, not absent.
+        - The caller can only say so if it is handed the names.
+        - Dropping aged-out branches silently once turned an unchanged backlog into an apparent drain.
+        - The age filter is correct and stays, since an abandoned tree crying wolf is the failure it prevents.
     """
     cutoff = time.time() - max_tip_age_days * 86400
     out    = _git( "for-each-ref", "refs/heads", "--format=%(refname:short)\t%(committerdate:unix)" )
@@ -173,15 +121,8 @@ def commit_file_map( branch, target ):
     """
     Every non-ancestor commit on branch, with the code files it touched.
 
-    ONE git invocation per BRANCH, not one per COMMIT. The first cut of this
-    function asked git for each commit's file list separately and did not finish a
-    7-day window in nine minutes — 1,600 candidate commits is 1,600 subprocesses.
-    `git log --name-only` answers the same question in a single pass. Speed is not
-    cosmetic here: a delivery check nobody waits for is a delivery check nobody
-    runs, which is the same not-installed failure this script exists to close.
-
-    Ancestry over-reports ~3x in this repo (squash delivery), so this is a
-    PRE-FILTER and never a verdict — survivors go through `is_absent_from`.
+    Uses one git invocation per branch, not one per commit.
+    `git log --name-only` answers the same question in a single pass.
 
     Requires:
         - branch and target are branch names that exist
@@ -189,6 +130,12 @@ def commit_file_map( branch, target ):
     Ensures:
         - returns [ ( sha, [ path, ... ] ), ... ], merges excluded, code files only
         - a commit touching no code file is still returned, with an empty list
+
+    Notes:
+        - One subprocess per commit did not finish a 7-day window, with about 1,600 candidate commits.
+        - Speed is not cosmetic, because a delivery check nobody waits for is a delivery check nobody runs.
+        - Ancestry over-reports about 3x in this repo because of squash delivery.
+        - So this is a pre-filter and never a verdict, and survivors go through `is_absent_from`.
     """
     out = _git(
         "log", "--no-merges", "--format=%x00%H", "--name-only", branch, "--not", target
@@ -229,23 +176,10 @@ _ABSENCE_CACHE = {}
 
 def is_absent_from( sha, target, path ):
     """
-    Is this commit's contribution to `path` genuinely missing from target's tree?
+    Is this commit's contribution to `path` missing from target's tree?
 
-    THE INSTRUMENT THAT SURVIVED, and the only one here with controls in BOTH
-    directions (measured 2026-09-05 at a3f45e6d): the four commits known to be
-    undelivered read ABSENT, and four commits known to be ancestors of the target
-    read PRESENT. Ancestry, patch-id and subject-matching each failed one of those
-    directions, because delivery in this repo is by squash.
-
-    TWO OPTIMISATIONS, BOTH MEASURED RATHER THAN ASSUMED, because the first cut of
-    this scan ran for over nine minutes and a check nobody waits for is a check
-    nobody runs:
-      · MEMOISED per ( sha, path ). One commit touches many contested files, so the
-        naive loop asked 15,936 questions where 940 distinct ones exist — a 17x
-        multiplier straight out of the loop nesting.
-      · The `git grep` is SCOPED TO THE PATH, not run over the whole tree: 0.003s
-        against 0.086s per call. It is also the more correct question — whether the
-        content landed in THAT file, not merely somewhere in the repo.
+    This is the one instrument with controls in both directions.
+    Known-undelivered commits read absent, and known ancestors of the target read present.
 
     Requires:
         - sha names a commit that exists
@@ -253,11 +187,17 @@ def is_absent_from( sha, target, path ):
         - path is repo-relative and touched by sha
 
     Ensures:
-        - returns True  when a long line sha ADDED to path is not in target's copy
-        - returns False when that line IS present (delivered by some other route)
-        - returns False when no probe line can be found — UNPROBEABLE is not
-          evidence of absence, and silence is the safe direction for a check that
-          must not cry wolf
+        - returns True when a long line sha added to path is not in target's copy
+        - returns False when that line is present (delivered by some other route)
+        - returns False when no probe line can be found, because unprobeable is not evidence of absence.
+          Silence is the safe direction for a check that must not cry wolf.
+
+    Notes:
+        - Ancestry, patch-id and subject-matching each failed one direction, because delivery here is by squash.
+        - Results are memoised per ( sha, path ).
+        - One commit touches many contested files, so the naive loop asked about 17x more questions than exist.
+        - The `git grep` is scoped to the path, not run over the whole tree, and is about 30x faster per call.
+        - That is also the more correct question: whether the content landed in that file, not somewhere in the repo.
     """
     key = ( sha, path )
     if key in _ABSENCE_CACHE: return _ABSENCE_CACHE[ key ]
@@ -290,16 +230,14 @@ def scan( target, max_tip_age_days, deadline_seconds=None, progress=None ):
 
     Ensures:
         - returns ( collisions, stats ) where collisions maps
-          path -> [ ( branch, sha ), ... ] with at least two DISTINCT branches
+          path -> [ ( branch, sha ), ... ] with at least two distinct branches
         - stats carries the denominators this scan actually covered
 
     Raises:
-        - LookupError when discovery is vacuous — zero branches or zero candidate
-          commits. An empty scan passes every per-item check, so it must refuse.
-        - TimeoutError when deadline_seconds elapses mid-probe. A PARTIAL scan is
-          not a clean scan: it has looked at some of the corpus and none of the
-          rest, and reporting its findings as complete is the same substitution
-          this script exists to stop. It refuses and says how far it reached.
+        - LookupError when discovery is vacuous, with zero branches or zero candidate commits.
+          An empty scan passes every per-item check, so it must refuse.
+        - TimeoutError when deadline_seconds elapses mid-probe. A partial scan is not a clean scan.
+          It refuses and says how far it reached, since reporting partial findings as complete is the substitution this script stops.
     """
     started = time.time()
     branches, excluded_by_age = discover_branches( target, max_tip_age_days )
@@ -366,19 +304,9 @@ def scan( target, max_tip_age_days, deadline_seconds=None, progress=None ):
 
 def _print_not_examined( stats, max_tip_age_days, now=None, cap=20 ):
     """
-    Say what the age filter DID NOT look at, before anyone reads what it found.
+    Say what the age filter did not look at, before anyone reads what it found.
 
-    🔴 THIS PRINTS ON EVERY RUN, CLEAN ONES INCLUDED, AND THAT IS THE REQUIREMENT
-    RATHER THAN A COURTESY. A confirmed count that falls because branches aged out
-    is indistinguishable from one that falls because work was delivered — and the
-    second reading is the flattering one, so it is the one that gets taken. Measured
-    on this repo 2026-09-05: 143 -> 14 in eighteen minutes, nothing delivered, two
-    branches holding 1,626 and 1,627 undelivered commits simply crossed the boundary.
-
-    ⚠️ Naming the count alone is not enough. An unnamed count is the easiest thing
-    in a report to wave at, so the branches are named — most recent tip first, since
-    a branch that aged out an hour ago is likelier to be live work than one that
-    aged out in March.
+    This prints on every run, clean ones included, and the branches are named, most recent tip first.
 
     Requires:
         - stats carries "excluded_by_age" and "excluded_branches"
@@ -387,6 +315,11 @@ def _print_not_examined( stats, max_tip_age_days, now=None, cap=20 ):
         - prints exactly one line when nothing was excluded, so silence never means
           "the filter did not run"
         - never prints more than `cap` names, and says how many it withheld
+
+    Notes:
+        - A count that falls from aging out looks like one that falls from delivery, and the delivery reading is the flattering one.
+        - Naming the count alone is not enough, because an unnamed count is the easiest thing in a report to wave at.
+        - A branch that aged out an hour ago is likelier to be live work than one that aged out in March.
     """
     n = stats[ "excluded_by_age" ]
     if not n:

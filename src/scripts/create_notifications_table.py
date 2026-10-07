@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Create notifications table for Phase 2 SSE notification system.
+Create notifications table for the SSE notification system.
 
-This is initial table creation (NOT migration - table does not currently exist).
+This is initial table creation (not a migration - table does not currently exist).
 Current notifications are in-memory only (NotificationItem objects).
 
 Design reference: src/rnd/v0.1.0/2025.10.15-sse-notifications/05-phase2-design-decisions.md
-Schema reference: Lines 136-179 (Area 1 Q1.3) + Line 267 (Q1.4 deleted_at field)
+Schema reference: lines 136-179 (area 1, question 1.3) + line 267 (question 1.4, deleted_at field)
 
 Database: lupin-notifications.db (new dedicated SQLite database)
 Location: src/conf/long-term-memory/lupin-notifications.db
@@ -99,7 +99,7 @@ CREATE_INDEXES = [
 
 def create_notifications_table():
     """
-    Create notifications table with full Phase 2 schema.
+    Create notifications table with the full schema.
 
     Requires:
         - LUPIN_ROOT environment variable set

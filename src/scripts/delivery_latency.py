@@ -1,47 +1,45 @@
 #!/usr/bin/env python3
 """
-delivery_latency.py — the instrument behind §9–§9e of
-`src/rnd/v0.2.1/2026.09.05-no-worker-facing-delivery-route.md`.
+Measure how long each commit waits before it lands on a target branch.
 
-WHY THIS FILE EXISTS. Every figure in those sections was produced by a throwaway probe in a
-session scratchpad. A published number whose only artifact lives in `/tmp` cannot be re-derived,
-and this file's own subject is measurements that turned out to be wrong four times — so it is
-exactly the wrong place to leave the instrument unreproducible.
+The instrument behind sections 9 to 9e of
+`src/rnd/v0.2.1/2026.09.05-no-worker-facing-delivery-route.md`.
+Every figure there came from a throwaway probe. A number whose only artifact lives in `/tmp`
+cannot be re-derived, and this subject is measurements that were wrong four times.
 
     python3 src/scripts/delivery_latency.py --repo /path/to/lupin --branch <target>
 
-=== THE METRIC HAS BEEN REBUILT FOUR TIMES. READ THIS BEFORE TRUSTING A NUMBER. ===
+The metric was rebuilt four times. Read this before trusting a number:
 
-  v1  committer date of the tip   a cherry-pick REWRITES it, so both sides of the comparison
-                                  moved with the delivery act -> median 0.0 across 623 rows.
-                                  The metric COULD NOT FAIL.
-  v2  author date of the tip      a stack waits as long as its OLDEST member; a known 25.5 h
-                                  delivery vanished from the tail entirely.
-  v3  author date of the OLDEST   credible, and what §9 published — but it SHARES A TERM with
-                                  "how many commits are carried" (a bigger stack has an older
-                                  oldest member BY CONSTRUCTION), so stack-size hypotheses are
-                                  untestable against it.
-  v4  author date of the NEWEST   immune to stack size, and it ERASES every stalled commit that
-                                  rides out beside fresh work. Measured: 3 commits that waited
-                                  25.5 h, delivered with 5 commits authored minutes before
-                                  landing, read as 0.08 h.
-  v5  PER COMMIT (this file)      each commit against the landing that carried it. No stack-size
-                                  confound and nothing maskable by a co-traveller.
+  V1  committer date of the tip   a cherry-pick rewrites it.
+                                  Both sides of the comparison moved with the delivery
+                                  act: median 0.0 across 623 rows. The metric could not fail.
+  V2  author date of the tip      a stack waits as long as its oldest member. A known
+                                  25.5 h delivery vanished from the tail entirely.
+  V3  author date of the oldest   credible. But it shares a term with "how many
+                                  commits are carried". A bigger stack necessarily has an older
+                                  oldest member. Stack-size hypotheses are untestable against it.
+  V4  author date of the newest   immune to stack size. But it erases every stalled
+                                  commit that rides out beside fresh work.
+                                  Three commits that waited 25.5 h, delivered with 5 commits
+                                  authored minutes before landing, read as 0.08 h.
+  V5  per commit (this file)      each commit against the landing that carried it. No
+                                  stack-size confound. Nothing a co-traveller can mask.
 
-🔴 AND ONE DECOMPOSITION IS UNFALSIFIABLE — it is v4 wearing a new name. Splitting a wait at
-"the branch finished", taken as the last commit in the delivery, gives a route-side term of
-`landed - max(author)`. ANY COMMIT MADE WHILE WAITING RESETS IT, so a long route wait cannot be
-observed. It is computed here and reported ONLY as `route_side_UNFALSIFIABLE`, never as evidence.
+One decomposition is unfalsifiable, because it is V4 under a new name.
+Splitting a wait at "the branch finished", taken as the last commit in the delivery, gives a
+route-side term of `landed - max(author)`. Any commit made while waiting resets it.
+A long route wait cannot be observed. It is computed here and reported only as
+`route_side_UNFALSIFIABLE`, never as evidence.
+What survives is `largest_silent_stretch`: a gap that has already happened, which no later
+commit can erase. Section 9e's "62.0 of 84.6 box-up hours (73%)" comes from that figure.
 
-⇒ What survives is `largest_silent_stretch`: a gap that ALREADY HAPPENED, which no later commit
-  can erase. That is the figure §9e's "62.0 of 84.6 box-up hours (73%)" comes from.
-
-=== WHAT "BOX UP" MEANS, AND WHAT IT DOES NOT ===
-Uptime comes from `journalctl --list-boots` — the DURABLE instrument. `last -x reboot` reads
-`wtmp`, which rotates: on 2026-09-02 it returned exactly ONE boot and nothing in that output says
-it is a one-day window.
-🔴 "Box up" is NOT "somebody was available." It means an available-action WINDOW existed. It is
-never evidence that a person failed to act, and no output of this script may be read that way.
+What "box up" means, and what it does not:
+  Uptime comes from `journalctl --list-boots`, the durable instrument.
+  `last -x reboot` reads `wtmp`, which rotates, so it can return one boot and nothing in
+  its output says it is a one-day window. "Box up" is not "somebody was available".
+  It means an available-action window existed. It is never evidence that a person failed
+  to act, and no output of this script may be read that way.
 """
 
 import argparse
@@ -56,11 +54,13 @@ TAIL_HOURS = 6.0
 
 def parse_boot_intervals( journal_text ):
     """
+    Parse boot intervals out of `journalctl --list-boots` output.
+
     Requires:
         - journal_text is the stdout of `journalctl --list-boots --no-pager`
     Ensures:
         - returns a sorted list of ( start_epoch, end_epoch ) float pairs, one per boot
-        - returns [] when nothing parses, rather than raising — a caller checking the COUNT
+        - returns [] when nothing parses, rather than raising — a caller checking the count
           can then tell "no boots" from "boots found", which an exception would not allow
     """
     out = []
@@ -75,6 +75,8 @@ def parse_boot_intervals( journal_text ):
 
 def up_hours( intervals, start, end ):
     """
+    Count the hours of a time span that fall inside any boot interval.
+
     Requires:
         - intervals is a list of ( start, end ) epoch pairs; start <= end for each
     Ensures:
@@ -87,14 +89,16 @@ def up_hours( intervals, start, end ):
 
 def largest_silent_stretch( intervals, commit_times, landed ):
     """
-    The measure that survives, per §9e: the longest stretch inside a delivery during which NO
-    commit was made on the branch, counted in BOX-UP hours only.
+    Find the longest commit-free stretch inside a delivery, in box-up hours.
+
+    This is the measure that survives, per section 9e: no commit was made on the branch
+    during the stretch, and only box-up hours count.
 
     Requires:
         - commit_times is a non-empty list of author epochs; landed is the landing epoch
     Ensures:
         - returns ( up_hours, wall_hours, start, end ) for the widest such gap
-        - the gap ending AT `landed` is a candidate, because "branch finished, then sat" is
+        - the gap ending at `landed` is a candidate, because "branch finished, then sat" is
           precisely the unambiguous case this measure exists to surface
     """
     points = sorted( commit_times ) + [ landed ]
@@ -109,8 +113,10 @@ def _git( repo, *args ):
 
 def read_deliveries( repo, branch ):
     """
+    Read the deliveries to a branch from its reflog.
+
     Ensures:
-        - returns one dict per HANDOFF delivery on `branch`'s reflog (a reflog verb starting
+        - returns one dict per handoff delivery on `branch`'s reflog (a reflog verb starting
           "merge" — which covers Fast-forward deliveries, invisible to a merge-commit scan:
           measured at 28 of 188, 15%)
         - each carries landed / commit author epochs / the reflog subject

@@ -1,46 +1,49 @@
 #!/usr/bin/env python3
 """
-Step 13 of the brain-integration plan — dump the solution cache, with receipts.
+Dump the solution cache, with a backup and receipts.
 
-Plan of record: src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md (row 1e597a65). — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md
-This tool is PREP: it does nothing destructive unless --apply is passed, and it
-runs only on Cheech's explicit GO after plan steps 9a + 9b have merged.
+Plan of record: src/rnd/v0.2.0/2026.08.21-step13-cache-dump-plan.md (no longer in the tree).
+This tool is prep: it does nothing destructive unless --apply is passed. It runs only on the
+owner's explicit go, after the 9a and 9b changes have merged.
 
-Parameterised on the three scope questions so the GO just picks values:
-  --db {dev,test,both}        which database(s) — lupin_db_dev (:7999) / lupin_db_test (:8000)
-  --synonyms / --no-synonyms  canonical_synonyms too (default ON — ruled 2026-08-21 11:39)
-  --adjacent-caches           the five adjacent caches too (default OFF — ruled OUT)
+Three flags carry the scope questions, so the go just picks values.
+The --db flag ({dev,test,both}) picks lupin_db_dev (:7999), lupin_db_test (:8000) or both.
+The --synonyms / --no-synonyms flag sets whether canonical_synonyms is included (default on).
+The --adjacent-caches flag adds the five adjacent caches (default off).
 
-Per database, in order: pg_dump backup of the in-scope tables → counts before →
-one DELETE-per-table transaction → counts after → JSON receipts. DELETE, not
-TRUNCATE (truncate takes ACCESS EXCLUSIVE and blocks every live reader).
+Per database, in order: pg_dump backup of the in-scope tables, counts before, one
+DELETE-per-table transaction, counts after, JSON receipts.
+It uses `DELETE`, not `TRUNCATE`,
+because truncate takes `ACCESS EXCLUSIVE` and blocks every live reader.
 
-Verification (the plan's two halves): --verify-empty re-counts every in-scope
-table with a FRESH psql call after the delete transaction has returned — never
-the transaction's own 'after' row, which is pre-commit (Pocholo, review of
-0e6d3b33) — and fails on any non-zero; --verify-learn-back asks one question
-through /api/v2/ask and proves the cache still LEARNS — a snapshot row appeared,
-it passes 9a (non-blank user_id, a routed command), and a second ask RE-RUNS
-rather than replays (9b's guard holds on the fresh, unconfirmed row).
+Verification has two halves. The --verify-empty flag re-counts every in-scope table with a
+fresh psql call after the delete transaction has returned. It never uses the transaction's
+own 'after' row, which is pre-commit, and it fails on any non-zero count.
+The --verify-learn-back flag asks one question through /api/v2/ask and proves the cache
+still learns.
+A snapshot row appeared, it passes 9a (non-blank user_id, a routed command).
+A second ask re-runs rather than replays (9b's guard holds on the fresh, unconfirmed row).
 
-The learn-back check WAITS for that first ask to actually finish. On the agent path
-/api/v2/ask answers `status: "waiting"` with a job_id and the snapshot is written when
-the queued job completes, so reading the answer off the immediate HTTP body reports
-failures against a working system (row 004c94ec). It polls the done/dead queues for the
-job, bounded by --learn-back-timeout, and fails LOUD and BY NAME on a timeout — "the
-answer never arrived" is reported as a timeout, never as "the system is broken". Only
-once the fresh row is read back does it fire the second ask; with no row established, 9b
-is reported UNTESTED rather than passed.
+The learn-back check waits for that first ask to actually finish. On the agent path
+/api/v2/ask answers `status: "waiting"` with a job_id, and the snapshot is written when the
+queued job completes. Reading the answer off the immediate HTTP body would report failures
+against a working system. It polls the done/dead queues for the job, bounded by
+--learn-back-timeout.
+It fails loudly and by name on a timeout: "the answer never arrived"
+is reported as a timeout, never as "the system is broken". Only once the fresh row is read
+back does it fire the second ask. With no row established, 9b is reported untested rather
+than passed.
 
-DRY-RUN IS THE DEFAULT AND TOUCHES NOTHING LIVE: counts only — no pg_dump, no
-DELETE, and no HTTP (the learn-back logs in and asks a question that WRITES a
-snapshot, so it runs only under --apply; without --apply it is described, not
-sent).
+Dry-run is the default and touches nothing live: counts only, no pg_dump, no `DELETE`, no HTTP.
+The learn-back logs in and asks a question that writes a snapshot, so it runs only under
+--apply. Without --apply it is described, not sent.
 
 Dry-run (default):
     python3 src/scripts/dump_solution_cache.py --db both
-Apply, on the GO:
+
+Apply, on the go:
     python3 src/scripts/dump_solution_cache.py --db both --apply --verify-empty
+
 Apply + learn-back check against the dev server (single --db):
     python3 src/scripts/dump_solution_cache.py --db dev --apply --verify-empty --verify-learn-back --base-url http://localhost:7999
 """
@@ -114,28 +117,29 @@ def psql_argv( db, sql=None, variables=None ):
     """
     Build the docker-exec psql argv for one SQL statement.
 
-    Two shapes, chosen by whether the SQL carries parameters:
-      · no variables → `-c sql` (sql is the last argv element)
-      · variables    → `-v name=value` per parameter and `-f -`, and the CALLER
-        pipes the SQL on stdin (run_argv(..., stdin=sql)), referencing each
-        parameter as :'name', which psql quotes as a SQL literal. This is the
-        only way: psql performs NO variable interpolation inside `-c` (measured
-        live: "syntax error at or near ':'"), so the value is never spliced into
-        the statement and never reaches the statement through -c either.
-
     Requires:
         - db is a database name
         - without variables: sql is a non-empty string
-        - with variables: {name: value}; sql is NOT part of the argv
+        - with variables: {name: value}; sql is not part of the argv
 
     Ensures:
         - returns the argv list (no shell), unaligned tuples-only output so
           count rows parse as "a|b|c"
         - ON_ERROR_STOP=1 on every call: a failed statement makes psql exit 3
           instead of running on, so a half-done transaction can never be
-          reported as success (Pocholo, review of c298ca02)
+          reported as success
         - with variables the argv ends with `-f -` and `docker exec` carries `-i`
           so stdin reaches psql
+
+    Notes:
+        Two shapes, chosen by whether the SQL carries parameters:
+          · no variables → `-c sql` (sql is the last argv element)
+          · variables    → `-v name=value` per parameter and `-f -`.
+        With variables the caller pipes the SQL on stdin (run_argv(..., stdin=sql)).
+        It references each parameter as :'name', which psql quotes as a SQL literal.
+        This is the only way: psql performs no variable interpolation inside `-c`
+        (measured live: "syntax error at or near ':'"). So the value is never spliced
+        into the statement and never reaches the statement through -c either.
     """
     argv = [ "docker", "exec" ] + ( [ "-i" ] if variables else [ ] ) + [ PG_CONTAINER, "psql", "-U", PG_USER, "-d", db, "-At", "-v", "ON_ERROR_STOP=1" ]
     if variables:
@@ -164,13 +168,13 @@ def pg_dump_argv( db, tables ):
 
 def count_sql( tables ):
     """
-    One SELECT returning one pipe-separated row of counts, in table order.
+    Build one `SELECT` returning one pipe-separated row of counts, in table order.
 
     Requires:
         - tables is a non-empty list of table names
 
     Ensures:
-        - returns "SELECT (SELECT count(*) FROM a), (SELECT count(*) FROM b);"
+        - returns `SELECT (SELECT count(*) FROM a), (SELECT count(*) FROM b);`
     """
     parts = ", ".join( f"(SELECT count(*) FROM {t})" for t in tables )
     return f"SELECT {parts};"
@@ -184,9 +188,9 @@ def delete_sql( tables ):
         - tables is a non-empty list of table names
 
     Ensures:
-        - BEGIN … DELETE FROM each table … COMMIT, with a 'before' and an 'after'
+        - `BEGIN` … `DELETE FROM` each table … `COMMIT`, with a 'before' and an 'after'
           count row so the psql output carries both
-        - uses DELETE, never TRUNCATE
+        - uses `DELETE`, never `TRUNCATE`
     """
     parts   = ", ".join( f"(SELECT count(*) FROM {t})" for t in tables )
     deletes = " ".join( f"DELETE FROM {t};" for t in tables )
@@ -216,7 +220,7 @@ def parse_count_row( line, tables ):
     Turn one psql -At row ("3|3" or "before|3|3") into {table: count}.
 
     Requires:
-        - line is a pipe-separated row whose LAST len(tables) fields are integers
+        - line is a pipe-separated row whose last len(tables) fields are integers
 
     Ensures:
         - returns a dict keyed by table, in order
@@ -274,7 +278,7 @@ def dump( db, tables, runner=subprocess.run ):
 
     Ensures:
         - returns ( before, after ) count dicts parsed from the transaction's own
-          'before' / 'after' rows — the 'after' row is read INSIDE the transaction,
+          'before' / 'after' rows — the 'after' row is read inside the transaction,
           i.e. pre-commit; callers that need proof of the committed state must
           re-count with count_rows() after this returns (main() does)
         - raises RuntimeError if psql fails (the transaction then rolled back)
@@ -295,11 +299,11 @@ def verify_empty( after ):
     The plan's first verification half: every in-scope count reads 0.
 
     Requires:
-        - after is {table: count} from an INDEPENDENT read taken after the delete
+        - after is {table: count} from an independent read taken after the delete
           transaction returned (count_rows), not the transaction's own 'after' row
 
     Ensures:
-        - returns the list of tables that are NOT empty (empty list == pass)
+        - returns the list of tables that are not empty (empty list == pass)
     """
     return [ t for t, n in after.items() if n != 0 ]
 
@@ -350,7 +354,7 @@ def queue_jobs( base_url, token, queue_name, http ):
 
 def probe_job_terminal( base_url, token, job_id, http ):
     """
-    One look for a queued job in a TERMINAL queue.
+    Look once for a queued job in a terminal queue.
 
     Requires:
         - job_id is the id the ask returned for the queued work
@@ -358,7 +362,7 @@ def probe_job_terminal( base_url, token, job_id, http ):
     Ensures:
         - returns ( "done", job ) or ( "dead", job ) the first time the job appears
           in either terminal queue, done checked first
-        - returns None while it is still in flight — that is "not arrived yet", NOT
+        - returns None while it is still in flight — that is "not arrived yet", not
           a verdict about the system
     """
     for queue_name in ( "done", "dead" ):
@@ -435,23 +439,11 @@ def settle_first_ask( first, db, base_url, token, before_ids, http, runner=subpr
                       timeout_s=DEFAULT_LEARN_BACK_TIMEOUT_S, interval_s=DEFAULT_LEARN_BACK_POLL_S,
                       sleep=time.sleep, clock=time.monotonic ):
     """
-    Wait for the first ask to actually FINISH, then name the snapshot row it wrote.
-
-    THE DEFECT THIS EXISTS TO KILL (row 004c94ec): /api/v2/ask answers INLINE only on
-    the paths that run the work on the request thread. On the agent path — the common
-    one — it answers `status: "waiting"` with a job_id, the work goes to the CJ Flow
-    queue, and the snapshot is written when the job finishes. Reading wrote_snapshot /
-    answer / snapshot_id off that immediate body reports three failures against a
-    system that is working correctly. So this waits, bounded, and keeps "the answer
-    has not arrived yet" separate from "the system is broken":
-      · still in flight        → keep polling (no verdict)
-      · budget expired         → a failure that SAYS it timed out, not that it broke
-      · landed in the dead queue → a failure that names the job's own error
-      · finished with no fresh row → the cache genuinely did not learn
+    Wait for the first ask to finish, then name the snapshot row it wrote.
 
     Requires:
-        - first is the AskResponse body; before_ids is snapshot_ids(db) taken BEFORE
-          the ask, so a row can be proven FRESH rather than merely present
+        - first is the AskResponse body; before_ids is snapshot_ids(db) taken before
+          the ask, so a row can be proven fresh rather than merely present
         - sleep / clock are injection seams
 
     Ensures:
@@ -459,6 +451,19 @@ def settle_first_ask( first, db, base_url, token, before_ids, http, runner=subpr
         - snapshot_id is None whenever the ask could not be settled — the caller must
           then treat 9b as untested rather than as passed
         - never raises for a failed criterion; raises only on transport/psql errors
+
+    Notes:
+        /api/v2/ask answers inline only on the paths that run the work on the request
+        thread. On the agent path, the common one, it answers `status: "waiting"` with a
+        job_id. The work goes to the CJ Flow queue, and the snapshot is written when the
+        job finishes. Reading wrote_snapshot / answer / snapshot_id off that immediate body
+        would report three failures against a system that is working correctly.
+        So this waits, bounded, and keeps "the answer has not arrived yet" separate from
+        "the system is broken":
+          · still in flight        → keep polling (no verdict)
+          · budget expired         → a failure that says it timed out, not that it broke
+          · landed in the dead queue → a failure that names the job's own error
+          · finished with no fresh row → the cache did not learn
     """
     status   = first.get( "status" )
     failures = [ ]
@@ -517,24 +522,24 @@ def verify_learn_back( db, base_url, email, password, question, http, runner=sub
                        timeout_s=DEFAULT_LEARN_BACK_TIMEOUT_S, interval_s=DEFAULT_LEARN_BACK_POLL_S,
                        sleep=time.sleep, clock=time.monotonic ):
     """
-    The plan's second verification half: the emptied cache still LEARNS, and 9b holds.
-
-    ORDER IS PART OF THE CHECK, not an implementation detail. The second ask fires only
-    AFTER the first ask's row has been proven to exist and read back — a second ask sent
-    while the first one is still queued cannot fail to "not replay", so a pass would
-    prove nothing (row 004c94ec). No row established ⇒ 9b is reported UNTESTED, never
-    passed.
+    The plan's second verification half: the emptied cache still learns, and 9b holds.
 
     Requires:
         - the dump has already run against db; base_url serves that db
-        - http is the requests module (or a stand-in) with post() AND get()
+        - http is the requests module (or a stand-in) with post() and get()
 
     Ensures:
         - returns a receipts dict: the first ask's own fields, how it settled, the fresh
           row's user_id/routing_command/answer_is_correct, the second ask's path/cache_hit
           (or None when 9b was not testable), and a list of `failures` (empty == pass)
-        - never raises on a failed CRITERION — failures are listed; raises only on
+        - never raises on a failed criterion — failures are listed; raises only on
           transport/auth errors (RuntimeError) or a missing row (ValueError)
+
+    Notes:
+        Order is part of the check, not an implementation detail. The second ask fires only
+        after the first ask's row has been proven to exist and read back. A second ask sent
+        while the first one is still queued cannot fail to "not replay", so a pass would
+        prove nothing. No row established → 9b is reported untested, never passed.
     """
     token      = login( base_url, email, password, http )
     before_ids = snapshot_ids( db, runner=runner )
@@ -572,7 +577,7 @@ def verify_learn_back( db, base_url, email, password, question, http, runner=sub
 
 def build_parser():
     """
-    The CLI surface — every scope question is a flag, defaults follow the 2026-08-21 ruling.
+    Build the CLI parser: every scope question is a flag.
 
     Ensures:
         - returns an argparse parser; nothing is parsed here
@@ -607,7 +612,7 @@ def main( argv=None, runner=subprocess.run, http=None, now=None, out=print ):
 
     Ensures:
         - returns 0 on success, 2 when a verification failed
-        - without --apply: ONLY count queries run — no pg_dump, no DELETE, no HTTP
+        - without --apply: only count queries run — no pg_dump, no DELETE, no HTTP
         - with --apply + --verify-empty: the verdict comes from a fresh count_rows()
           call made after the delete transaction returned, never the tx's own row
         - raises on transport/psql errors (nothing is swallowed)

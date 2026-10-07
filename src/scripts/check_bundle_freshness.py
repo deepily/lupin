@@ -1,106 +1,66 @@
 #!/usr/bin/env python3
 """
-Bundle-freshness gate — would a rebuild change the DELIVERED BYTES?
+Bundle-freshness gate: would a rebuild change the delivered bytes?
 
-WHY THIS EXISTS
----------------
-Nothing rebuilds `src/lupin_app/static/dist/` automatically and nothing warns when it is
-behind. Measured 2026-09-05 at be1d58b2, each probe naming its population and carrying a
-control:
+Why it exists: nothing rebuilds `src/lupin_app/static/dist/` and nothing warns when it is behind.
+Git hooks have only `pre-commit` (pre-commit-secret-scan.py), no build hook. bounce-dev-server.sh and
+run-fastapi-lupin.sh (the dev container's CMD) have no build step. No crontab or user systemd
+timer names a build. docker/lupin/Dockerfile bakes `RUN npm run build`, but on dev the `src` bind mount
+masks it. The only rebuild is a human typing `npm run build`.
+`:7999` bind-mounts the working tree, so raw js/css/html has zero lag.
+`dist/` sits in the same directory but only moves on a rebuild.
+Same mount, two freshness rules, no signal telling them apart. This script is that signal.
 
-  * git hooks           → only `pre-commit` → pre-commit-secret-scan.py. No build hook.
-  * bounce-dev-server.sh → no build step  (control: it names `docker` 12x, so the grep works)
-  * run-fastapi-lupin.sh → no build step  (control: it names `uvicorn` 3x) — and that is the
-                           dev container's CMD, so a bounce does not rebuild either
-  * crontab / user systemd timers → none naming a build
-  * docker/lupin/Dockerfile:102 DOES bake `RUN npm run build`, but on dev the `src` bind mount
-    MASKS it. The Dockerfile's own comment at :69 says so.
-
-⇒ The only rebuild is a human typing `npm run build`. `:7999` bind-mounts the working tree, so
-raw js/css/html has ZERO lag and lands on refresh, while `dist/` sits in the same directory,
-is served the same way, and only moves when somebody rebuilds it. Same mount, two freshness
-rules, no signal telling them apart. This script is that signal.
-
-WHAT IT CHECKS — AND WHY IT IS A DRY-RUN REBUILD RATHER THAN A TIMESTAMP
-------------------------------------------------------------------------
-It rebuilds each bundle into a TEMPORARY directory using the production flags read out of the
-build script itself, and compares the output's short sha256 to the hash the shipped
+What it checks: it rebuilds each bundle into a temporary directory using the production flags read
+out of the build script itself. It compares the output's short sha256 to the hash the shipped
 `manifest.json` records. Nothing is written into the repository.
+A dry-run rebuild plus hash beat two other instruments measured on the same tree.
+An mtime comparison and a sourcemap `sourcesContent` comparison were both wrong.
+Both flagged `render/templates/taskListTable.ts`, whose only change was an 18-line comment block
+that minification strips. The source had drifted and the delivery had not. Only the second is staleness.
 
-Three instruments were measured against the same tree at the same moment. Only one was right:
+What the silence means: drift that does not change the delivered bytes is reported `FRESH`.
+A barrel such as `render/index.ts` can join the import graph and tree-shake to nothing, so the hash does not move.
+A check keyed on the input set cries wolf there. The precise claim is narrower.
+One comparison catches every drift that changes the delivered bytes (content or population).
+It is silent on drift that does not.
 
-    mtime > bundle mtime              → 2 flagged, 2 WRONG
-    sourcemap sourcesContent != file  → 1 flagged, 1 WRONG
-    DRY-RUN REBUILD + HASH            → 0 flagged, CORRECT
+What it cannot see, and says so in its own output: it measures the tree it is run in.
+Work committed on another branch and not merged is invisible to it, whatever the instrument.
+An example is `render/epicBoardCollapse.ts` and `render/holdingAreaModel.ts` on a worktree branch.
+A green says nothing about such work and must never be read as if it did.
+Every report line therefore names the sha it measured and states the limit.
 
-Both of the losing arms flagged `render/templates/taskListTable.ts`, whose only change since
-the build was an 18-line COMMENT BLOCK (1,177 bytes). Minification strips comments, so it
-cannot reach the emitted bytes. THE SOURCE HAD DRIFTED AND THE DELIVERY HAD NOT — two
-different facts, and only the second one is staleness.
+Root resolution: the root comes from `__file__`, not `LUPIN_ROOT`. This script measures the tree it lives in.
+`LUPIN_ROOT` is inherited from the shell and keeps naming the main checkout from inside a worktree.
+That is how the pyc verifier blessed the wrong tree. `purge-pycache.sh` and
+`migrate-pyc-to-checked-hash.sh` derive their root from `BASH_SOURCE` for the same reason.
+A script shipped inside the tree it inspects can only be disagreed with by the environment, never informed by it.
+To aim this script, run the copy that lives in the tree you mean.
 
-⚠️ WHAT THE SILENCE MEANS, because it will look like a gap and is not. Drift that does not
-change the delivered bytes is reported as FRESH, deliberately. Receipt: `render/index.ts`
-joined the import graph after the shipped build (94 inputs today against 93 shipped) and the
-output hash did NOT move, because it is a barrel that tree-shakes to nothing. A check keyed on
-the input SET cries wolf there; this one correctly stays quiet. A bundle whose bytes would not
-change is not stale.
+Exit codes (four states, three codes):
+    0  every judged bundle is `FRESH`: a rebuild would produce byte-identical output.
+       `NOT-BUILT` bundles do not block this.
+    1  at least one bundle is `STALE`: a rebuild would change the delivered bytes.
+    2  `REFUSED`: could not answer (no esbuild, unparseable build script, a build that failed,
+       or a bundle never built that something references). An unanswered question is never a clean 0.
 
-⇒ SO THE PRECISE CLAIM IS: one comparison catches every drift that changes the delivered
-bytes — content or population — and is silent on drift that does not. It is NOT "any new file
-in the graph moves the hash": a file that emits nothing does not.
+Why `NOT-BUILT` is a fourth state: `dist/diagnostic/` has never been built in this checkout.
+Calling that `REFUSED` would make exit 0 unreachable in the main checkout over a bundle nobody ships.
+An alarm that can never be cleared gets routed around.
+Measured over all tracked files, `dist/diagnostic` appears only in its own build driver's comments,
+`tsconfig.diagnostic.json`'s outDir and one R&D doc. No page loads it.
+The live page `static/html/test/diagnostic-websocket-test.html` loads the raw
+`/static/js/websocket-diagnostic.js` (200). `/static/dist/diagnostic/websocket-diagnostic.js`
+answers 404 and nothing asks for it. It is a dormant TypeScript port, same shape as `dist/nav`.
+So the distinction is drawn on consumers, not on the absence itself:
 
-WHAT IT CANNOT SEE — SAID IN ITS OWN OUTPUT, NOT ONLY HERE
-----------------------------------------------------------
-It measures the tree it is run in. Work that is committed on another branch and not merged is
-invisible to it, permanently and by construction — no instrument choice fixes that. On
-2026-09-05 two modules (`render/epicBoardCollapse.ts`, `render/holdingAreaModel.ts`) sat
-committed on a worktree branch and absent from the served tree; a green from this script said
-nothing about them and must never be read as if it did. That is why every report line names
-the sha it measured and states the limit in words.
+    never built, nothing references its output   ->  `NOT-BUILT`   informational, exit 0 survives
+    never built, something does reference it     ->  `REFUSED`     a live 404, be loud
 
-WHY IT RESOLVES ITS ROOT FROM `__file__` RATHER THAN `LUPIN_ROOT`
------------------------------------------------------------------
-The global path mandate says to resolve from `LUPIN_ROOT`. This script is the documented
-exception class: a tool that MEASURES THE TREE IT LIVES IN. `LUPIN_ROOT` is inherited from the
-shell and keeps naming the main checkout from inside a worktree, which is precisely how the
-pyc verifier blessed the wrong tree and printed a checkmark about it (CLAUDE.md § THE
-CHECKED-HASH VERIFIER SCANS `$LUPIN_ROOT/src`). The ruling that followed — `purge-pycache.sh`
-and `migrate-pyc-to-checked-hash.sh` now derive their root from `BASH_SOURCE`
-unconditionally — is that a script shipped inside the tree it inspects can only be DISAGREED
-WITH by the environment, never informed by it. `$LUPIN_ROOT` is not consulted here. To aim
-this script, run the copy that lives in the tree you mean.
-
-EXIT CODES — FOUR STATES, THREE CODES
--------------------------------------
-    0  every judged bundle FRESH — a rebuild would produce byte-identical output. NOT-BUILT
-       bundles do not block this; see below.
-    1  at least one bundle STALE — a rebuild would change the delivered bytes
-    2  REFUSED — could not answer (no esbuild, unparseable build script, a build that failed,
-       or a bundle that has never been built AND is referenced by something). A question this
-       script could not answer is never reported as a clean 0.
-
-WHY NOT-BUILT IS A FOURTH STATE RATHER THAN A REFUSAL
-------------------------------------------------------
-`dist/diagnostic/` has never been built in this checkout, and the first cut of this script
-called that REFUSED — which made exit 0 UNREACHABLE in the main checkout, permanently, over a
-bundle nobody ships. That is the same false alarm the mtime instrument was rejected for, and
-an alarm that can never be cleared is one people route around.
-
-MEASURED 2026-09-05 over all 5,067 tracked files, with a control on the same strings:
-`dist/diagnostic` appears in exactly 3 files — its own build driver's comments,
-`tsconfig.diagnostic.json`'s outDir, and one R&D doc. NOT ONE PAGE LOADS IT. The live page
-`static/html/test/diagnostic-websocket-test.html` loads the RAW `/static/js/
-websocket-diagnostic.js` (200), while `/static/dist/diagnostic/websocket-diagnostic.js`
-answers 404 and nothing asks for it. It is a dormant TS port, same shape as `dist/nav`.
-
-⇒ So the distinction is drawn on CONSUMERS, not on the absence itself, and it discriminates:
-
-    never built, nothing references its output   →  NOT-BUILT   informational, exit 0 survives
-    never built, something DOES reference it     →  REFUSED     that is a live 404, be loud
-
-A reference in the driver's own comments, in a tsconfig `outDir`, or in prose under `src/rnd`,
-`history`, `src/docs` or a top-level `.md` does not count — those describe the output, they do
-not load it. This is § A HIT IS NOT A USE applied to the tool's own population.
+A reference in the driver's own comments, a tsconfig `outDir`, or prose does not count.
+Prose means `src/rnd`, `history`, `src/docs` or a top-level `.md`. Those describe the output, they do not load it.
+A hit is not a use, applied to the tool's own population.
 """
 
 import argparse
@@ -170,8 +130,9 @@ class BuildScriptError( Exception ):
 
 def short_sha( data ):
     """
-    Twelve-character sha256 prefix of some bytes — the same convention build-multiplexer.sh
-    uses (`sha256sum "$OUTFILE" | awk '{print substr($1, 1, 12)}'`).
+    Twelve-character sha256 prefix of some bytes.
+
+    Same convention as build-multiplexer.sh: `sha256sum "$OUTFILE" | awk '{print substr($1, 1, 12)}'`.
 
     Requires:
         - data is a bytes object
@@ -184,12 +145,10 @@ def short_sha( data ):
 
 def parse_build_script( script_path ):
     """
-    Read a build-*.sh driver and extract what is needed to reproduce its PRODUCTION build.
+    Read a build-*.sh driver and extract what reproduces its production build.
 
     The flags are read out of the script rather than chosen here, so this check cannot drift
-    away from the build it is checking. The `--watch` branch is skipped deliberately: it runs
-    `exec "$ESBUILD"` and omits --minify/--keep-names, so reproducing it would compare against
-    a bundle nobody ships.
+    away from the build it is checking.
 
     Requires:
         - script_path names a readable bash build driver
@@ -197,6 +156,10 @@ def parse_build_script( script_path ):
     Ensures:
         - returns a dict with "entry", "outdir", "out_basename" and "flags"
         - "flags" excludes --outfile and --log-level (this caller supplies its own)
+
+    Notes:
+        - The `--watch` branch is skipped: it runs `exec "$ESBUILD"` and omits --minify/--keep-names,
+          so reproducing it would compare against a bundle nobody ships.
 
     Raises:
         - BuildScriptError if any of entry, outdir, outfile or the production esbuild
@@ -252,23 +215,26 @@ def parse_build_script( script_path ):
 
 def consumers_of( root, outdir ):
     """
-    Tracked files that LOAD a bundle's output, as opposed to merely naming it.
+    Tracked files that load a bundle's output, as opposed to merely naming it.
 
     The distinction decides whether a never-built bundle is a dormant port (harmless) or a live
-    404 (loud). Measured over all 5,067 tracked files: `dist/diagnostic` is named by its own
-    driver, a tsconfig outDir and one R&D doc, and loaded by nothing — while the page that
-    might have loaded it fetches the raw pre-port .js instead.
+    404 (loud).
 
     Requires:
         - root is the project root as a Path
         - outdir is a repo-relative output directory such as "src/lupin_app/static/dist/nav"
 
     Ensures:
-        - searches BOTH the repo path and the URL path a page loads it by; the second is the one
+        - searches both the repo path and the URL path a page loads it by. The second is the one
           loaders actually write, and searching only the first can never find one
         - returns a sorted list of repo-relative paths, excluding build drivers, tsconfigs,
           tests and prose
         - returns None when git cannot answer, so the caller can refuse rather than assume zero
+
+    Notes:
+        - Measured over all tracked files: `dist/diagnostic` is named by its own driver, a tsconfig
+          outDir and one R&D doc, and loaded by nothing. The page that might have loaded it fetches
+          the raw pre-port .js instead.
     """
     keys = [ outdir ]
     if outdir.startswith( STATIC_ROOT + "/" ):
@@ -297,7 +263,7 @@ def discover_bundles( root ):
     """
     Find every build driver that emits a dist manifest, newest name first.
 
-    A driver without a manifest (build-parity-harness.sh) is skipped: with no recorded hash
+    A driver without a manifest (build-parity-harness.sh) is skipped. With no recorded hash
     there is nothing to compare against, and inventing one would be a check that cannot fail.
 
     Requires:
@@ -316,9 +282,7 @@ def check_bundle( root, script_path, esbuild ):
     Dry-run one bundle into a temp directory and compare its hash to the shipped manifest.
 
     Nothing is written inside `root`: the rebuild lands in a TemporaryDirectory that is removed
-    on the way out. The output basename is preserved because esbuild embeds a
-    `//# sourceMappingURL=<basename>.map` comment, so a different filename changes the bytes
-    and would manufacture a false STALE.
+    on the way out.
 
     Requires:
         - root is the project root as a Path
@@ -327,8 +291,12 @@ def check_bundle( root, script_path, esbuild ):
 
     Ensures:
         - returns a dict carrying "name", "status" and enough detail to print a report row
-        - "status" is one of FRESH, STALE, REFUSED — never a bare boolean
-        - a question that cannot be answered returns REFUSED with a "reason", never FRESH
+        - "status" is one of `FRESH`, `STALE`, `REFUSED` — never a bare boolean
+        - a question that cannot be answered returns `REFUSED` with a "reason", never `FRESH`
+
+    Notes:
+        - The output basename is preserved because esbuild embeds a `//# sourceMappingURL=<basename>.map`
+          comment, so a different filename changes the bytes and would manufacture a false `STALE`.
     """
     name   = script_path.stem.replace( "build-", "" )
     result = { "name": name, "script": script_path.name, "status": REFUSED, "reason": None,
@@ -439,9 +407,7 @@ def format_report( root, results, sha ):
     Render the results as report lines.
 
     Every line names the bundle, its source count and both hashes, because a bare verdict is
-    the easiest thing in a log to wave at. The scope sentence is not optional decoration: a
-    green here says nothing about unmerged or unwired work, and a reader who does not know
-    that will over-read it.
+    the easiest thing in a log to wave at.
 
     Requires:
         - results is a list of dicts returned by check_bundle
@@ -450,6 +416,10 @@ def format_report( root, results, sha ):
     Ensures:
         - returns a list of strings, one per output line
         - the scope limit appears in the output whenever any bundle was judged
+
+    Notes:
+        - The scope sentence is not optional decoration. A green here says nothing about unmerged
+          or unwired work, and a reader who does not know that will over-read it.
     """
     lines = [
         f"check_bundle_freshness: tree {root}",
@@ -497,9 +467,9 @@ def main( argv=None ):
         - argv is a list of command-line arguments, or None to read sys.argv
 
     Ensures:
-        - returns EXIT_FRESH only when at least one bundle was judged and all were FRESH
+        - returns EXIT_FRESH only when at least one bundle was judged and all were `FRESH`
         - returns EXIT_REFUSED when any bundle could not be judged, and when none were found
-        - returns EXIT_STALE when any judged bundle was STALE
+        - returns EXIT_STALE when any judged bundle was `STALE`
         - a NOT_BUILT bundle does not block EXIT_FRESH, but EXIT_FRESH still requires that at
           least one bundle was actually judged — an all-NOT_BUILT tree has measured nothing
           and must not report a clean zero

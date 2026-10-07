@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
 """
-Compose-drift probe for bounce-dev-server.sh (row 92374685).
+Compose-drift probe for bounce-dev-server.sh.
 
-`docker restart` REUSES a container, so a tmpfs, bind mount or environment value changed
-in docker-compose.yml never reaches it. Only a recreate applies those. On 2026-09-15 the
-MP3 upload answered 500 on two mornings because 68ce4a7b changed the dev tmpfs and
-lupin-rest-dev, created 2026-09-11, had only ever been restarted.
+`docker restart` reuses a container, so a tmpfs, bind mount or environment value changed
+in docker-compose.yml never reaches it. Only a recreate applies those. A dev container
+that is only ever restarted keeps its old tmpfs, which can break features such as the
+MP3 upload.
 
-This probe asks the container which compose file and service built it (its own
-com.docker.compose.* labels), renders that service with `docker compose config`, and
-compares three things against `docker inspect`:
+This probe asks the container which compose file and service built it, using its own
+com.docker.compose.* labels. It renders that service with `docker compose config`.
+It then compares three things against `docker inspect`.
 
-    tmpfs        every compose tmpfs path, with its options
-    mounts       every compose volume: type, source, target, read-only
-    environment  every compose environment key and value (the container may carry more,
-                 from its image; only compose's own keys are compared)
+    tmpfs        every compose tmpfs path, with its options.
+    mounts       every compose volume: type, source, target, read-only.
+    environment  every compose environment key and value. The container may carry more,
+                 from its image; only compose's own keys are compared.
 
-It prints the drifted FIELD NAMES only. Environment values are never printed, because
+It prints the drifted field names only. Environment values are never printed, because
 compose carries secrets there.
 
 Exit codes, read by bounce-dev-server.sh:
 
-    0  — NO DRIFT: a restart applies everything compose asks for.
-   10  — DRIFT in tmpfs or mounts only: the script recreates instead of restarting.
-   11  — DRIFT that includes an environment key: the script restarts, names the keys and
-         prints the recreate command for a person to run. Compose reads ${VAR} from the
-         caller's shell, so the "drift" may be the caller's own export, and an automatic
-         recreate would bake it into the server.
-   20  — UNKNOWN: docker or compose could not answer, or the output was malformed.
-         The script FAILS OPEN and restarts as before — a broken probe must never block
+    0  — no drift: a restart applies everything compose asks for.
+   10  — drift in tmpfs or mounts only: the script recreates instead of restarting.
+   11  — drift that includes an environment key: the script restarts, names the keys and
+         prints the recreate command for a person to run. Compose reads `${VAR}` from the
+         caller's shell, so the "drift" may be the caller's own export.
+         An automatic recreate would bake it into the server.
+   20  — unknown: docker or compose could not answer, or the output was malformed.
+         The script fails open and restarts as before. A broken probe must never block
          recovery of a wedged server.
 
 Usage:
@@ -91,8 +91,7 @@ def compose_mounts( service, volume_names ):
         - read_only defaults to False, as compose does
         - a named volume's source is the name docker actually created. The service says
           "claude-creds-dev"; docker calls it "lupin_claude-creds-dev", with the project
-          prefix. Comparing the short name reported drift on every container (measured
-          2026-09-15 on both lupin-rest-dev and lupin-rest-test before this mapping).
+          prefix. Comparing the short name would report drift on every container.
     """
     mounts = set()
     for v in service.get( "volumes" ) or [ ]:
@@ -145,7 +144,7 @@ def drifted_fields( service, container, volume_names ):
         - returns a sorted list of human-readable field names, empty when nothing drifted
         - a mount the container has and compose no longer declares counts as drift too,
           since a recreate would remove it
-        - environment entries name the KEY only, never the value
+        - environment entries name the key only, never the value
     """
     fields = [ ]
 
@@ -198,12 +197,11 @@ def compose_argv( labels ):
         - labels are the container's Config.Labels
 
     Ensures:
-        - names the project, its directory and every config file from the container's OWN
+        - names the project, its directory and every config file from the container's own
           labels, never the caller's tree. The probe renders with this prefix and the bounce
-          script recreates with it, so both act on the same compose tree. Before this, the
-          recreate used $LUPIN_ROOT: run from a worktree, that compares one tree and recreates
-          from another, under a project name taken from the worktree directory (María's review
-          of 34a2764a, 2026-09-15)
+          script recreates with it, so both act on the same compose tree. Using $LUPIN_ROOT
+          instead would, from a worktree, compare one tree and recreate from another, under
+          a project name taken from the worktree directory
 
     Raises:
         - KeyError when a compose label is missing
@@ -260,7 +258,7 @@ def main( argv=None, runner=run_json ):
 
     Ensures:
         - returns EXIT_UNKNOWN with a usage line when no container is named
-        - on DRIFT, also prints one `RECREATE_ARG=<arg>` line per argument of the recreate
+        - on drift, also prints one `RECREATE_ARG=<arg>` line per argument of the recreate
           command, which bounce-dev-server.sh reads so it recreates exactly what was compared
     """
     argv = sys.argv[ 1: ] if argv is None else argv

@@ -1,31 +1,35 @@
 #!/usr/bin/env python3
 """
-Merge the portable Claude Code permission stanza into a machine's ~/.claude/settings.json.
+Merge the portable Claude Code permission stanza into ~/.claude/settings.json.
 
-WHY THIS EXISTS
-    Rick's dev box grants a short list of bare tool names ( "Bash", "Read", "Write" — no
-    parentheses, therefore no path ), three deny guards, and defaultMode "auto". The VM did
-    not, so every session there stopped to ask. Copying the whole settings file is NOT the
-    fix: it carries machine-specific "hooks", "env", "model" and "heartbeat" keys that a copy
-    would clobber. So we ship the PERMISSIONS STANZA ONLY and MERGE it.
+Ships only the permissions stanza and merges it, so a copy never clobbers machine-specific keys.
 
-WHY THE SOURCE FILE LIVES OUTSIDE THE REPO
-    Rick's ruling 2026-08-04: the permission list does not go in git. It lives at
-    $DEEPILY_DATA_DIR/claude-permissions.json, and reaches the VM through
-    src/conf/vm-unversioned-manifest.tsv — the registry of payloads git cannot deliver.
+Notes:
+    Why this exists:
+    - Rick's dev box grants a short list of bare tool names ( "Bash", "Read", "Write", with no parentheses and so no path ).
+    - It also carries three deny guards and defaultMode "auto".
+    - A VM without them stops to ask in every session.
+    - Copying the whole settings file is not the fix.
+    - It carries machine-specific "hooks", "env", "model" and "heartbeat" keys that a copy would clobber.
+    - So only the permissions stanza ships, and it is merged.
 
-THE PORTABILITY GUARD
-    A permission rule naming an absolute machine path is dead on any other machine: nothing
-    expands $LUPIN_ROOT inside a permission pattern, and a "*" cannot rescue an absolute
-    prefix. An earlier attempt shipped 96 such rules and they silently did nothing. So this
-    script REFUSES a source file containing one, and names every offender. You find out at
-    authoring time instead of months later.
+    Why the source file lives outside the repo:
+    - The permission list does not go in git.
+    - It lives at $DEEPILY_DATA_DIR/claude-permissions.json.
+    - It reaches the VM through src/conf/vm-unversioned-manifest.tsv, the registry of payloads git cannot deliver.
 
-USAGE
-    python3 apply_claude_permissions.py                 # merge into $HOME/.claude/settings.json
-    python3 apply_claude_permissions.py --dry-run       # report the delta, write nothing
-    python3 apply_claude_permissions.py --verify        # exit 1 if the target is missing a rule
-    python3 apply_claude_permissions.py --source X --target Y
+    The portability guard:
+    - A permission rule naming an absolute machine path is dead on any other machine.
+    - Nothing expands $LUPIN_ROOT inside a permission pattern, and a "*" cannot rescue an absolute prefix.
+    - An earlier attempt shipped 96 such rules and they silently did nothing.
+    - So the script refuses a source file containing one, and names every offender.
+    - You find out at authoring time instead of months later.
+
+    Usage:
+    - python3 apply_claude_permissions.py merges into `$HOME/.claude/settings.json`.
+    - --dry-run reports the delta and writes nothing.
+    - --verify exits 1 if the target is missing a rule.
+    - --source X --target Y override the two paths.
 """
 
 import argparse
@@ -162,7 +166,7 @@ def compute_merge( target_doc, stanza ):
 
 def missing_rules( target_doc, stanza ):
     """
-    Report which stanza rules the target does NOT carry — the --verify oracle.
+    Report which stanza rules the target does not carry — the --verify oracle.
 
     Requires:
         - target_doc is a dict, stanza is the validated portable stanza
@@ -253,6 +257,8 @@ def apply( source_path, target_path, dry_run=False, verify=False, now=None ):
 
 def main( argv=None ):
     """
+    Parse argv, run apply(), and return a process exit code.
+
     Ensures:
         - parses argv, runs apply(), and returns a process exit code
         - a bad source or unreadable target reports the reason and returns 2

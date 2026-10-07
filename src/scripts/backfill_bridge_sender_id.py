@@ -1,81 +1,60 @@
 #!/usr/bin/env python3
 """
-Backfill `sender_id` into session bridges written BEFORE row 2184bebb's Option B.
+Backfill `sender_id` into session bridges written before the host wrote it itself.
 
-Run on the HOST. One-shot, idempotent, re-runnable. REPORT-ONLY BY DEFAULT — it writes
+Run on the host. One-shot, idempotent, re-runnable. Report-only by default: it writes
 nothing unless you pass `--write`. `--dry-run` is accepted and does nothing, because
-that is what a careful operator types first and erroring on it at that exact moment is
-the wrong answer.
+that is what a careful operator types first and erroring on it would be the wrong answer.
 
-WHY THIS EXISTS
----------------
-Option B moved the sender_id computation to the SessionStart hook: the host writes the
-id it already knows into the bridge, and `routers/commons.py::_sender_id_for_bridge`
-serves it verbatim instead of re-deriving it inside a container where host paths do not
-exist. That closes the defect where every worktree seat was served under a second
-identity (`claude.code@seat-cc-author-<name>.deepily.ai#<hash>`).
+Why this exists:
+    The SessionStart hook computes the sender id on the host and writes it into the bridge.
+    `routers/commons.py::_sender_id_for_bridge` serves it verbatim instead of re-deriving it
+    inside a container where host paths do not exist. That closes the defect where every
+    worktree seat was served under a second identity
+    (`claude.code@seat-cc-author-<name>.deepily.ai#<hash>`).
+    A session already running before that change has a bridge with no `sender_id`.
+    Nothing rewrites that bridge until its next SessionStart, because `touch_bridge_mtime`
+    moves the mtime, not the content.
+    Until then the server serves null and the phone skips the seat.
+    So a live seat vanishes from the focus rail instead of showing up cold.
 
-It leaves a MIGRATION GAP. A session already running when Option B ships has a bridge
-with no `sender_id`, and nothing rewrites that bridge until its next SessionStart —
-`touch_bridge_mtime` moves the mtime, not the content. Until then the server serves
-null and the phone skips the seat, so a live seat VANISHES from the focus rail rather
-than showing up cold, which is the requirement Tiffany's 2026-09-17 ask pins.
+Clause 3 keeps this script from generating bugs.
+    Backfill a bridge only when both hold:
+    (i)  `os.path.isdir( cwd )`: the recorded directory still exists.
+    (ii) `resolve_project_for_path( cwd )` returns a name rather than None: a real `.git`
+         ancestor was found by walking up from it. That function refuses, so the check and
+         the name are one call.
+    `detect_project_for_path` falls back to the basename when it finds no `.git` ancestor,
+    and it never raises. That fallback is documented policy for `os.getcwd()`.
+    Measured results.
+        detect_project_for_path( "/mnt/.../lupin/.claude/worktrees/seat-DELETED" ) -> "lupin".
+        detect_project_for_path( "/no/such/place/at/all/seat-x" )                  -> "seat-x".
+        detect_project_for_path( "/tmp" )                                          -> "tmp".
+    That basename fallback is the mechanism of the original defect.
+    It is how the container produced `@seat-cc-author-<name>`.
+    A backfill trusting the return value would compute `claude.code@seat-x.deepily.ai#<hash>`
+    for any bridge whose cwd is gone, and write it into the bridge.
+    There it becomes durable and authoritative, because the server may not question it.
+    Today the defect is contained by being recomputed on every read.
+    Backfilling without clause 3 would make it permanent.
+    When either half fails, write nothing. Absent is the correct answer: the server serves
+    null and the phone skips the seat (`focus_chat_bloc.dart:444`, pinned by
+    `focus_live_seat_roster_test.dart:81`). A skipped seat is a visible gap.
+    A wrong identity is an invisible lie.
 
-🔴 CLAUSE 3 — THE LOAD-BEARING ONE. WITHOUT IT THIS SCRIPT IS A BUG GENERATOR.
-------------------------------------------------------------------------------
-A bridge is backfilled ONLY when BOTH hold:
+Never a sentinel, never an overwrite:
+    - Inferring the project from the path segment before `/.claude/worktrees/` is banned,
+      including as a silent fallback.
+    - A bridge that already carries a `sender_id` is authoritative and never overwritten.
+      It came from that session's own SessionStart, on the host, with its cwd real.
+    - The string "unknown" is never written. It has no "#", so `sessionHashOf` returns null
+      on the phone, the hash-merge never fires, and every unidentified seat would collapse
+      onto one bogus rail row.
 
-    (i)  `os.path.isdir( cwd )` — the recorded directory STILL EXISTS, and
-    (ii) `resolve_project_for_path( cwd )` returns a NAME rather than None —
-         i.e. a REAL `.git` ancestor was found by walking up from it.
-
-✅ UPDATED 2026-09-26 (row 1ca233ae). (ii) used to be a SECOND, LOCAL walk —
-`git_ancestor` — because the naming function could not refuse and its answer therefore
-needed corroborating. `resolve_project_for_path` refuses, so the corroboration and the
-name are now the same call, and the duplicate walk (plus its four tests) is gone. The
-history below is kept because it is why clause 3 exists at all.
-
-(ii) is not a restatement of (i) and it is not paranoia. `detect_project_for_path`
-FALLS BACK TO THE BASENAME when it finds no `.git` ancestor, and it never raises.
-⚠️ It STILL DOES — that fallback is documented policy for `os.getcwd()` and was kept;
-what changed is that it now announces itself on stderr, and that a caller like this one
-has a strict alternative. Measured 2026-09-22 against the real function:
-
-    detect_project_for_path( "/mnt/.../lupin/.claude/worktrees/seat-DELETED" ) -> "lupin"
-    detect_project_for_path( "/no/such/place/at/all/seat-x" )                  -> "seat-x"   🔴
-    detect_project_for_path( "/tmp" )                                          -> "tmp"
-
-That basename fallback IS the original defect's mechanism — it is exactly how the
-container produced `@seat-cc-author-<name>`. So a backfill that trusts the return value
-would compute `claude.code@seat-x.deepily.ai#<hash>` for any bridge whose cwd is gone
-and WRITE IT INTO THE BRIDGE, where it becomes durable, authoritative, and
-un-second-guessable — because the server is now contractually forbidden from
-questioning it.
-
-⇒ Today the defect is CONTAINED by being recomputed on every read. Backfilling without
-clause 3 would make it PERMANENT, laundering the bug into the one place nothing checks.
-That is worse than the gap this script closes.
-
-⇒ When either half of clause 3 fails: WRITE NOTHING. Absent is already the correct
-answer — the server serves null and the phone skips the seat
-(`focus_chat_bloc.dart:444`, pinned by `focus_live_seat_roster_test.dart:81`). A
-skipped seat is a visible gap; a wrong identity is an invisible lie.
-
-NEVER A SENTINEL, NEVER AN OVERWRITE
-------------------------------------
-- Option A — inferring the project from the path segment before `/.claude/worktrees/`
-  — is BANNED by Mr. Radio's ruling (2026-09-19), including as a silent fallback.
-- A bridge that ALREADY carries a `sender_id` is authoritative: it came from that
-  session's own SessionStart, on the host, with its cwd real. Never overwritten.
-- The string "unknown" is never written. It has no "#", so `sessionHashOf` returns null
-  on the phone, the hash-merge never fires, and every unidentified seat would collapse
-  onto one bogus rail row.
-
-READ THE SKIPPED COUNTS, NOT THE WRITTEN COUNT
-----------------------------------------------
-`skipped_cwd_missing` and `skipped_no_git_ancestor` are the interesting numbers: they
-are the bridges this script REFUSED to guess for. A run that writes many and skips none
-on a box with deleted worktrees would mean clause 3 is not firing.
+Read the skipped counts, not the written count:
+    `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
+    refused to guess for. A run that writes many and skips none on a box with deleted
+    worktrees would mean clause 3 is not firing.
 
 Usage:
     python src/scripts/backfill_bridge_sender_id.py              # report only
@@ -83,9 +62,9 @@ Usage:
     python src/scripts/backfill_bridge_sender_id.py --write -v   # name every bridge
 
 Exit codes:
-    0  ran; see the table (0 written is a normal, healthy outcome)
-    2  the sessions directory could not be resolved or read
-    3  a required import failed — wrong interpreter or PYTHONPATH
+    0  ran; see the table. Zero written is a normal, healthy outcome.
+    2  the sessions directory could not be resolved or read.
+    3  a required import failed: wrong interpreter or PYTHONPATH
 """
 
 from __future__ import annotations
@@ -114,7 +93,7 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         - Returns ( outcome, sender_id_or_None ) where outcome is one of:
           "already_has_one", "skipped_no_cwd", "skipped_cwd_missing",
           "skipped_no_git_ancestor", "eligible"
-        - A sender_id is returned ONLY for "eligible", and only after BOTH halves of
+        - A sender_id is returned only for "eligible", and only after both halves of
           clause 3 pass
         - Never raises
     """

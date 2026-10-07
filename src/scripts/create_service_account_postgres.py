@@ -9,7 +9,7 @@ notification endpoints.
 Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: API Key Security Requirements (lines 83-151)
 
-PostgreSQL Migration: Phase 2.6.2 (November 2025)
+PostgreSQL implementation:
 - Uses SQLAlchemy ORM with repository pattern
 - Stores in PostgreSQL-in-Docker (lupin-postgres)
 - Replaces SQLite-based create_service_account.py
