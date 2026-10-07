@@ -47,7 +47,6 @@ import {
   HEALTH_STOPPED,
   HEALTH_CIRCUIT,
   HEALTH_INTERVAL_MS,
-  RETRY_NOW_LABEL,
   type TransportStateLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/SystemStatusRenderer";
 import type { ConnectionState, ConnectionStateChangePayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
@@ -566,7 +565,7 @@ const RETRY = "multiplexer-ws-retry-now-btn";
 test( "Retry-now: hidden while nothing is failed, shown with the circuit line, hidden again after", () => {
   const queue = fakeTransport( "connected" );
   const { q, emitState, intervals } = mountPane( { queue, audio: fakeTransport( "connected" ) } );
-  assert.equal( q( RETRY ).textContent, RETRY_NOW_LABEL );
+  assert.equal( q( RETRY ).textContent, "Retry now" );                    // the label itself, not the constant that holds it
   assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden at mount" );
   intervals[ 0 ]!.cb();
   assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden while healthy" );

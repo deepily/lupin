@@ -291,6 +291,17 @@ test("backoff + permanent_failure → failed", () => {
   assert.equal(h.csm.state, "failed");
 });
 
+test("restart clears the failure's reason and code from the machine's own context", () => {
+  // The event payload only reads the code when a reason is set, so a stale code could not be seen
+  // there: the context is the one place it would survive.
+  const h = makeHarness();
+  h.csm.send({ type: "permanent_failure", reason: "auth-permanent", code: 4001 });
+  h.csm.send({ type: "restart" });
+  const actor = (h.csm as unknown as { actor: { getSnapshot(): { context: { failureReason?: string; failureCode?: number } } } }).actor;
+  assert.equal(actor.getSnapshot().context.failureReason, undefined);
+  assert.equal(actor.getSnapshot().context.failureCode, undefined);
+});
+
 test("non-failed transitions carry NO reason/code", () => {
   const h = makeHarness();
   h.csm.send({ type: "socket_open" });   // → connected (no reason/code)

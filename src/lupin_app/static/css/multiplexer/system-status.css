@@ -181,3 +181,27 @@
 .config-status-error {
     color : #dc3545;
 }
+
+/* Retry-now, the way out of a failed transport (row 5a8bd0c6, Rick 2026-10-07). The class name
+   is legacy's `.ws-circuit-retry-btn`, whose rules live in notifications.css, a sheet this page
+   does not link. The button carries the `hidden` attribute while nothing has failed, and no rule
+   here sets `display`, so the attribute keeps working. */
+.ws-circuit-retry-btn {
+    margin-left   : 10px;
+    padding       : 4px 12px;
+    font-size     : 12px;
+    font-weight   : 600;
+    color         : inherit;
+    background    : transparent;
+    border        : 1px solid currentColor;
+    border-radius : 3px;
+    cursor        : pointer;
+}
+
+.ws-circuit-retry-btn:hover:not(:disabled) {
+    background : rgb( 0, 0, 0, 0.08 );
+}
+
+.ws-circuit-retry-btn[hidden] {
+    display : none;
+}
