@@ -1048,3 +1048,23 @@ def test_staged_deleted_lists_the_deletions_and_names_a_git_error( stamped ):
     assert gate.staged_deleted( str( stamped ) ) == [ "src/tests/a b.py" ]
     with pytest.raises( RuntimeError, match="git diff --cached failed" ):
         gate.staged_deleted( str( stamped / "nope" ) )
+
+
+def test_a_regeneration_commit_counts_the_staged_file_not_the_one_on_disk( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )                                  # two findings go into the index
+    ( stamped / "src" / "lupin_mcp" / "a.py" ).write_text( ONE, encoding="utf-8" )     # and the disk copy is put back
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )                                    # a table that matches the disk, not the index
+    rc, text = _gate( stamped )
+    assert rc == 3 and "[doc-lint]   src/lupin_mcp/a.py: table 1, census 2" in text and "table stale" in text
+
+
+def test_a_stale_table_commit_prints_no_counted_file_refusal_and_checks_no_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )                                  # would rise against the entry, if the table were trusted
+    rc, text = _gate( stamped )
+    assert rc == 3 and text.count( "REFUSED" ) == 2 and "the count table was cut under other rules" in text   # one refusal line plus the summary line
+    assert "findings, the count table allows" not in text
+    assert "counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table stale" in text

@@ -156,6 +156,7 @@ def rules_stamp( root ):
 
     Ensures:
         - returns the first 16 hex characters of a sha256 over each path and its bytes
+        - reads the working tree, the files whose code counts the findings, so an unstaged edit to a rule file moves the stamp
         - the same rule files always give the same stamp
 
     Raises:

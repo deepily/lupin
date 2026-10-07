@@ -36,6 +36,8 @@ A staged file whose count is above its entry is refused. The refusal prints the 
 
 Fix it by rewording what you added, or waive a finding on its own line with the same marker as above. An honoured waiver lowers the count. A flat count passes, and so does a finding of one rule traded for one of another.
 
-The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change: it carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated with `python -m cosa.repo.doc_lint.counts --write`. With no table at all the gate says the scope was not checked.
+The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change: it carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated; the refusal prints the exact command. The stamp is read from the working tree, the files whose code counts the findings, so an unstaged edit to a rule file or to the word list also makes the table stale.
+
+A new file that follows a deleted counted file in the same commit may be a rename that git no longer pairs because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all the gate says the scope was not checked.
 
 The run prints `counted scope: N files checked, N at or below their count, N over, N waivers honoured, table ok|stale|absent|regenerated|malformed`.
