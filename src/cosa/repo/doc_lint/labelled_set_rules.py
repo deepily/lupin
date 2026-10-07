@@ -141,7 +141,12 @@ def restated_elsewhere( old, span ):
 
 
 def protected_regions( old ):
-    """Return the ( start, end ) regions of old holding fences, literals or example blocks."""
+    """
+    Return the ( start, end ) regions of old that are protected from change.
+
+    Ensures:
+        - the regions are code fences, backtick or double-quoted literals, and example blocks
+    """
     return [ ( m.start(), m.end() ) for pattern in PROTECTED_RES for m in pattern.finditer( old ) ]
 
 

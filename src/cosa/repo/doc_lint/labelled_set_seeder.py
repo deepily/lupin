@@ -470,13 +470,15 @@ def short_quota( sizes ):
 
 def build_docs( pool, stoplist, exclude=frozenset() ):
     """
-    Return ( docs_by_kind, units ): usable docstrings with candidates per kind, plus units.
+    Return ( docs_by_kind, units ): usable docstrings by kind, and the sorted units.
 
     Requires:
         - pool is a list of { id, file, symbol, old }; ids unique
 
     Ensures:
+        - docs_by_kind holds each usable docstring with its candidates per kind
         - a docstring under 3 lines or in exclude is left out; a kind keeps only docstrings that have a candidate
+        - units are returned sorted
     """
     docs = []
     for row in sorted( pool, key=lambda r: r[ "id" ] ):
@@ -490,7 +492,12 @@ def build_docs( pool, stoplist, exclude=frozenset() ):
 
 
 def partition_units( units, seed ):
-    """Return the units each split owns for a split seed, as thirds of the shuffled units."""
+    """
+    Return the units each split owns for a split seed, as thirds of the shuffled units.
+
+    Ensures:
+        - returns { "dev", "gate", "gate-reserve" } -> units
+    """
     shuffled = split_units( units, seed )
     third    = max( 1, len( shuffled ) // 3 )
     return { "dev": shuffled[ :third ], "gate": shuffled[ third:2 * third ], "gate-reserve": shuffled[ 2 * third: ] }

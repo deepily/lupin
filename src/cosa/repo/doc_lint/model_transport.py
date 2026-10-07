@@ -293,6 +293,7 @@ def configure( cli_path=None, cwd=None ):
 
     Ensures:
         - later calls to complete pass cli_path and cwd to the SDK; None restores the default
+        - the setting holds for this process only; it is not persisted
 
     Raises:
         - ValueError if cli_path is given and is not an executable file, or cwd is not a directory
