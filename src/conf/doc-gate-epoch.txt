@@ -1,0 +1,6 @@
+# The commit from which the documentation lint gate applies at push.
+# A pushed tip that descends from this commit is held to zero findings in the swept scope.
+# A tip that does not descend from it predates the gate and is pushed with a loud line.
+# One full sha, on a line of its own. It must be an ancestor of every branch that carries the gate;
+# a unit test fails when it is not an ancestor of the tree it sits in.
+23bf04945960ef413b907dc1a870e81a2321dddf

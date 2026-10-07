@@ -22,24 +22,26 @@ EXIT_FINDINGS    = 1
 EXIT_NOT_CHECKED = 2
 
 
-def check( root ):
+def check( root, words_root=None ):
     """
     Lint every swept file of a working tree.
 
     Requires:
         - root is a git working tree
+        - words_root is a directory that holds the word list, or None to use root
 
     Ensures:
         - returns a dict with the keys files, docstrings and findings
         - files is the number of swept files read, and docstrings is the number of docstrings in them
         - findings is a list of Finding in path order
         - a file that cannot be read as UTF-8 yields one unreadable finding and is still counted
+        - the word list is read from words_root, so the tree being checked cannot change the rules
 
     Raises:
         - RuntimeError naming the git error when the file listing fails
-        - OSError when the word list under root cannot be read
+        - OSError when the word list cannot be read
     """
-    configure_root( root )
+    configure_root( words_root if words_root is not None else root )
     paths, docstrings, findings = swept_files( root ), 0, []
     for path in paths:
         try:
@@ -99,9 +101,10 @@ def main( argv=None, out=None ):
     out    = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser( description="Documentation-standard gate over the whole swept scope." )
     parser.add_argument( "--repo-root", default=".", help="git working tree to read" )
+    parser.add_argument( "--words-root", default=None, help="tree that holds the word list; default is the tree being read" )
     args = parser.parse_args( argv )
     try:
-        result = check( args.repo_root )
+        result = check( args.repo_root, args.words_root )
     except ( RuntimeError, OSError ) as err:
         out.write( f"REFUSING: the gate could not run. Nothing was checked. {err}\n" )
         return EXIT_NOT_CHECKED

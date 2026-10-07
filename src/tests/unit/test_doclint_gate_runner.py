@@ -131,6 +131,35 @@ def test_what_the_gate_writes_to_standard_error_is_in_the_printed_report( repo )
     assert "ValueError: boom" not in err
 
 
+def test_tree_mode_lints_another_tree_with_this_trees_word_list( repo, tmp_path_factory ):
+    other = tmp_path_factory.mktemp( "other" )
+    _git( other, "init", "-q" )
+    _write( other, "src/app/loud.py", LOUD )
+    _write( other, "src/conf/dm-tutor-lowercase-words.txt", "" )
+    _git( other, "add", "src" )
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+
+    code, text = _run( repo, "--tree", str( other ) )
+
+    assert code == 1
+    assert "src/app/loud.py:2: caps: ALL-CAPS word NEVER" in text
+    assert f"  tree   : {other}" in text
+    assert "DOCLINT GATE FAILED: 1 findings in 1 of 1 files." in text
+
+
+@pytest.mark.parametrize( "args", [ ( "--tree", ), ( "--tree", "/no/such/directory" ) ] )
+def test_tree_mode_without_a_directory_refuses( repo, args ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+
+    code, text = _run( repo, *args )
+
+    assert code == 2
+    assert "REFUSING: --tree needs a directory" in text
+    assert "PASSED" not in text
+
+
 def test_no_swept_file_refuses_rather_than_passing( repo ):
     code, text = _run( repo )
 

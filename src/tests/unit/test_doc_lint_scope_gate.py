@@ -152,6 +152,24 @@ def test_a_file_that_does_not_parse_is_a_finding_and_adds_no_docstrings( repo ):
     assert "Docstrings checked: 2\n" in text
 
 
+def test_the_word_list_comes_from_the_words_root_not_from_the_tree_being_read( repo, tmp_path_factory ):
+    other = tmp_path_factory.mktemp( "other" )
+    _git( other, "init", "-q" )
+    _write( other, "src/app/loud.py", LOUD )
+    _write( other, "src/conf/dm-tutor-lowercase-words.txt", "" )
+    _git( other, "add", "src" )
+
+    with_own_list   = scope_gate.check( str( other ) )
+    with_given_list = scope_gate.check( str( other ), str( repo ) )
+
+    assert with_own_list[ "findings" ] == []
+    assert [ f.rule for f in with_given_list[ "findings" ] ] == [ "caps" ]
+
+    out  = io.StringIO()
+    code = scope_gate.main( [ "--repo-root", str( other ), "--words-root", str( repo ) ], out=out )
+    assert code == scope_gate.EXIT_FINDINGS
+
+
 def test_check_returns_the_counts_and_the_findings( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _write( repo, "src/app/loud.py", LOUD )

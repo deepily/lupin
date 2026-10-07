@@ -4,6 +4,10 @@
 # Usage:
 #   run-doclint-gate.sh              # the whole swept scope
 #   run-doclint-gate.sh --list       # print the swept files and exit 0
+#   run-doclint-gate.sh --tree DIR   # lint the git tree at DIR with THIS tree's code and word list
+#
+# --tree is what the pre-push hook uses. The files come from DIR; the linter and its word list
+# come from the tree this script lives in, so nothing in DIR can switch the check off.
 #
 # Why this exists. The pre-commit hook lints only the files one commit stages, and a hook can be
 # skipped. This gate reads the whole swept scope, so a finding that arrived by a merge or by a
@@ -37,6 +41,15 @@ if ! "$VENV_PYTHON" -c "import cosa.repo.doc_lint.scope_gate" > /dev/null 2>&1; 
     exit 2
 fi
 
+TARGET="$PROJECT_ROOT"
+if [ "${1:-}" = "--tree" ]; then
+    if [ -z "${2:-}" ] || [ ! -d "$2" ]; then
+        echo "REFUSING: --tree needs a directory, got '${2:-}'. Nothing was checked."
+        exit 2
+    fi
+    TARGET="$( cd "$2" && pwd )"
+fi
+
 if [ "${1:-}" = "--list" ]; then
     "$VENV_PYTHON" -c "import sys; from cosa.repo.doc_lint.swept_scope import swept_files; print( '\n'.join( swept_files( sys.argv[ 1 ] ) ) )" "$PROJECT_ROOT"
     exit $?
@@ -45,13 +58,14 @@ fi
 echo "=========================================================================="
 echo "Documentation lint gate: the swept scope"
 echo "  root   : $PROJECT_ROOT"
+echo "  tree   : $TARGET"
 echo "  python : $VENV_PYTHON"
 echo "=========================================================================="
 
 REPORT="$( mktemp )"
 trap 'rm -f "$REPORT"' EXIT
 
-"$VENV_PYTHON" -m cosa.repo.doc_lint.scope_gate --repo-root "$PROJECT_ROOT" > "$REPORT" 2>&1
+"$VENV_PYTHON" -m cosa.repo.doc_lint.scope_gate --repo-root "$TARGET" --words-root "$PROJECT_ROOT" > "$REPORT" 2>&1
 RC=$?
 cat "$REPORT"
 
