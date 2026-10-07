@@ -12,7 +12,7 @@ Two refusals break warn mode, and both exit REFUSAL_EXIT.
    lint holds any finding on any line, touched or not, from any rule. The refusal names the file,
    line, rule, the text and where that text belongs. A finding is waived by a same-line marker,
    "doc-lint: waive <rule> -- <reason>". The reason needs a word of three letters or more.
-   A marker without one waives nothing. A swept file that does not parse is refused and cannot be waived.
+   A marker without one waives nothing. A swept file that does not parse, or is not UTF-8, is refused and cannot be waived.
 2. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
@@ -60,6 +60,7 @@ FIX_HOME = {
     "preface-length"  : "fewer lines before the contract; move the detail below Requires and Ensures",
     "docstring-length": "a shorter docstring; move the history and background to a design doc and link it",
     "dead-design"     : "a Design: path that exists, or no Design: line",
+    "not-utf-8"       : "UTF-8; save the file as UTF-8 so its docstrings can be checked",
     "parse-error"     : "valid Python; the file must parse before its docstrings can be checked",
 }
 
@@ -167,10 +168,11 @@ def staged_source( root, path ):
 
     Raises:
         - RuntimeError naming the git error when the read fails
+        - UnicodeDecodeError when the staged bytes are not UTF-8
     """
-    res = subprocess.run( [ "git", "-C", root, "show", f":{path}" ], capture_output=True, text=True, encoding="utf-8-sig" )
-    if res.returncode != 0: raise RuntimeError( f"git show :{path} failed: {res.stderr.strip()}" )
-    return res.stdout
+    res = subprocess.run( [ "git", "-C", root, "show", f":{path}" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git show :{path} failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return res.stdout.decode( "utf-8-sig" )
 
 
 def in_blocking_package( path, packages ):
@@ -242,6 +244,7 @@ def collect( root ):
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
+        - a swept file that is not UTF-8 is refused the same way, counted in tally["undecodable"]; any other file that is not UTF-8 is skipped with a warning
         - tally is the denominator: files, docstrings, findings, waivers, unparsed
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
@@ -255,25 +258,37 @@ def collect( root ):
     findings = []
     py_sources = {}
     swept      = []
-    tally      = { "files": 0, "docstrings": 0, "findings": 0, "waivers": 0, "unparsed": 0 }
+    tally      = { "files": 0, "docstrings": 0, "findings": 0, "waivers": 0, "unparsed": 0, "undecodable": 0 }
     waived     = []
     refusals   = []
     warnings   = []
+    skipped    = []
+    decode_out = []
     for path in paths:
+        try:
+            source = staged_source( root, path ) if path.endswith( ( ".py", ".md" ) ) else None
+        except UnicodeDecodeError as err:
+            skipped.append( path )
+            if is_swept( path ):
+                tally[ "files" ] += 1
+                tally[ "undecodable" ] += 1
+                decode_out.append( f"[doc-lint] REFUSED {path}: not UTF-8: {err}; fix: {FIX_HOME[ 'not-utf-8' ]}; this cannot be waived" )
+            else:
+                warnings.append( f"[doc-lint] WARNING: {path} is not UTF-8, it was NOT checked" )
+            continue
         if path.endswith( ".py" ):
-            source = staged_source( root, path )
             py_sources[ path ] = source
             doc_findings = docstring_lint.lint_source( path, source, root )
             findings += doc_findings + comment_lint.lint_source( path, source, root )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
         elif path.endswith( ".md" ):
-            findings += md_lint.lint_source( path, staged_source( root, path ), root )
-    py, md   = [ p for p in paths if p.endswith( ".py" ) ], [ p for p in paths if p.endswith( ".md" ) ]
+            findings += md_lint.lint_source( path, source, root )
+    py, md   = [ p for p in paths if p.endswith( ".py" ) and p not in skipped ], [ p for p in paths if p.endswith( ".md" ) and p not in skipped ]
     ruff_findings, ruff_warnings = run_ruff( root, py, sources=py_sources )
     md_findings, md_warnings     = run_markdownlint( root, md )
     findings += ruff_findings + md_findings
     refusals = [ f for f in findings if in_blocking_package( f.path, BLOCKING_PACKAGES ) and is_mechanical( f ) ]
-    lines_out = [ refusal_line( f ) for f in refusals ]
+    lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
     for path, source, doc_findings in swept:
         lines = source.split( "\n" )
         tally[ "files" ] += 1
@@ -329,7 +344,7 @@ def main( argv=None, err=None ):
     for warning in warnings: err.write( warning + "\n" )
     for f in findings: err.write( f"[doc-lint] {f.path}:{f.line}: {f.rule}: {f.message}\n" )
     for line in refusals: err.write( line + "\n" )
-    err.write( f"[doc-lint] swept scope: {tally[ 'files' ]} files checked, {tally[ 'docstrings' ]} docstrings checked, {tally[ 'findings' ]} findings, {tally[ 'waivers' ]} waivers honoured, {tally[ 'unparsed' ]} unparsed\n" )
+    err.write( f"[doc-lint] swept scope: {tally[ 'files' ]} files checked, {tally[ 'docstrings' ]} docstrings checked, {tally[ 'findings' ]} findings, {tally[ 'waivers' ]} waivers honoured, {tally[ 'unparsed' ]} unparsed, {tally[ 'undecodable' ]} undecodable\n" )
     if refusals:
         err.write( f"[doc-lint] {len( refusals )} refusals, commit REFUSED\n" )
         return REFUSAL_EXIT

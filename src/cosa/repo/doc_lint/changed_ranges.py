@@ -62,6 +62,7 @@ def changed_line_ranges( repo_root, base, cached=False ):
     Ensures:
         - returns the dict from parse_diff_ranges
         - the diff is anchored at repo_root, so the caller's directory does not matter
+        - a byte that is not UTF-8 is replaced, since only the hunk headers are read
 
     Raises:
         - RuntimeError naming the git error when the diff command fails
@@ -69,7 +70,7 @@ def changed_line_ranges( repo_root, base, cached=False ):
     cmd = [ "git", "-C", str( repo_root ), "diff", "-U0", "--no-color", "--no-ext-diff" ]
     cmd += [ "--cached" ] if cached else [ base ]
     cmd += [ "--", ":/" ]
-    res = subprocess.run( cmd, capture_output=True, text=True, encoding="utf-8" )
+    res = subprocess.run( cmd, capture_output=True, text=True, encoding="utf-8", errors="replace" )
     if res.returncode != 0: raise RuntimeError( f"git diff failed: {res.stderr.strip()}" )
     return parse_diff_ranges( res.stdout )
 

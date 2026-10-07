@@ -659,3 +659,57 @@ def test_a_refused_swept_finding_on_a_touched_line_is_printed_once_as_a_refusal_
     assert rc == 3
     assert "[doc-lint] src/pkg/a.py:5: caps" not in text                             # the warning form of the same finding
     assert text.count( "src/pkg/a.py:5: caps" ) == 1 and "REFUSED src/pkg/a.py:5: caps" in text
+
+
+def _stage_bytes( repo, rel, data ):
+    full = repo / rel
+    full.parent.mkdir( parents=True, exist_ok=True )
+    full.write_bytes( data )
+    _git( repo, "add", "-f", rel )
+
+
+LATIN_1 = b'def f():\n    """This is NOT fine \xe9."""\n'
+
+
+def test_a_swept_file_that_is_not_utf8_is_refused_by_name_and_does_not_crash_the_gate( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    _stage( repo, { "src/pkg/b.py": SWEPT_CAPS } )
+    rc, text = _gate( repo )
+    assert rc == 3 and "GATE CRASHED" not in text
+    assert "REFUSED src/pkg/a.py: not UTF-8: " in text and "'utf-8' codec can't decode" in text and "this cannot be waived" in text
+    assert "REFUSED src/pkg/b.py:5: caps" in text                                  # the other staged file is still linted
+    assert "2 files checked, 1 docstrings checked, 1 findings, 0 waivers honoured, 0 unparsed, 1 undecodable" in text
+
+
+def test_a_file_outside_the_swept_scope_that_is_not_utf8_is_skipped_with_a_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "src/lupin_mcp/a.py", LATIN_1 )
+    _stage_bytes( repo, "docs/p.md", b"caf\xe9 is NOT fine\n" )
+    rc, text = _gate( repo )
+    assert rc == 0 and "GATE CRASHED" not in text and "REFUSED" not in text
+    assert "WARNING: src/lupin_mcp/a.py is not UTF-8, it was NOT checked" in text and "WARNING: docs/p.md is not UTF-8, it was NOT checked" in text
+    assert "0 files checked" in text and "0 undecodable" in text
+
+
+def test_staged_source_raises_the_decode_error_for_non_utf8_bytes( repo ):
+    _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
+    with pytest.raises( UnicodeDecodeError ):
+        gate.staged_source( str( repo ), "src/pkg/a.py" )
+
+
+def test_a_file_that_is_not_utf8_is_not_handed_to_ruff_or_markdownlint( repo, monkeypatch ):
+    seen = { "ruff": None, "md": None }
+    def fake_ruff( root, paths, sources=None ):
+        seen[ "ruff" ] = list( paths )
+        return [], []
+    def fake_md( root, paths, sources=None ):
+        seen[ "md" ] = list( paths )
+        return [], []
+    monkeypatch.setattr( gate, "run_ruff", fake_ruff )
+    monkeypatch.setattr( gate, "run_markdownlint", fake_md )
+    _stage_bytes( repo, "src/lupin_mcp/a.py", LATIN_1 )
+    _stage_bytes( repo, "docs/p.md", b"caf\xe9\n" )
+    _stage( repo, { "src/lupin_mcp/ok.py": "x = 1\n", "docs/ok.md": "fine\n" } )
+    rc, _ = _gate( repo )
+    assert rc == 0 and seen == { "ruff": [ "src/lupin_mcp/ok.py" ], "md": [ "docs/ok.md" ] }
