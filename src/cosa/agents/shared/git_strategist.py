@@ -255,6 +255,7 @@ class GitStrategist:
             - Any field may be None on failure; error is set
             - Never raises
             - On a trust level 3 and above error, checks out original branch before returning
+            - Without a successful push (no push_branch, or it failed): commit_only, error set, no PR
 
         Args:
             git_ops: GitOps instance (async git/gh wrapper)
@@ -364,22 +365,23 @@ class GitStrategist:
                     await git_ops.checkout_branch( original_branch )
                 return result
 
-            # Push the branch (GitOps.commit_and_push is commit-and-push-combined;
-            # since we already committed separately, we use the dedicated push if
-            # available, else fall through to commit_and_push with an empty file
-            # list — but most GitOps implementations don't support that. Prefer
-            # a push primitive if present; otherwise call create_pr directly which
-            # many implementations will preflight push.)
-            push_ok = True
+            # Push the branch. GitOps.commit_and_push commits AND pushes, so after separate
+            # commits only a dedicated push_branch can push. When git_ops has none, nothing
+            # was pushed: say so and open no PR (row c07aef9f).
+            push_ok = False
             if hasattr( git_ops, "push_branch" ):
                 push_result = await git_ops.push_branch( slug )
-                if not push_result.get( "success" ):
-                    push_ok = False
+                if push_result.get( "success" ):
+                    push_ok = True
+                else:
                     result[ "error" ] = push_result.get( "error" )
                     await notify_fn(
                         f"Push failed: {push_result.get( 'error' )}",
                         priority="high",
                     )
+            else:
+                result[ "error" ] = "git_ops has no push_branch: nothing was pushed, so no PR was opened"
+                await notify_fn( result[ "error" ], priority="high" )
 
             if not push_ok:
                 # Branch + local commits exist but push failed — restore branch

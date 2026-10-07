@@ -225,11 +225,25 @@ class TestCommitAndPrMulti( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "pr_url" ], "http://pr/1" )
         ops.push_branch.assert_awaited_once()
 
-    async def test_l3_no_push_branch_attr_proceeds_to_pr( self ):
-        # hasattr(git_ops, "push_branch") False → push_ok stays True → create_pr.
+    async def test_l3_no_push_branch_attr_reports_no_push_and_opens_no_pr( self ):
+        # The real GitOps has no push_branch. Nothing was pushed, so no "Pushed" message and no PR
+        # (row c07aef9f); the commits stay local and the original branch is restored.
         ops = make_git_ops( with_push_branch=False )
-        result, _ = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3 )
-        self.assertEqual( result[ "git_strategy" ], "branch_and_pr" )
+        result, notify = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3 )
+        self.assertEqual( result[ "git_strategy" ], "commit_only" )
+        self.assertIn( "push_branch", result[ "error" ] )
+        self.assertIsNone( result[ "pr_url" ] )
+        ops.create_pr.assert_not_awaited()
+        ops.checkout_branch.assert_awaited_once_with( "main" )
+        messages = [ c.args[ 0 ] for c in notify.await_args_list ]
+        self.assertFalse( any( "Pushed" in m for m in messages ) )
+        self.assertTrue( any( "push_branch" in m for m in messages ) )
+
+    async def test_l3_says_pushed_only_after_a_successful_push( self ):
+        ops = make_git_ops( with_push_branch=True )
+        result, notify = await self._run( ops, [ ( "c1", "t", [ "a.py" ], "m" ) ], trust=3, hint="my-fix" )
+        messages = [ c.args[ 0 ] for c in notify.await_args_list ]
+        self.assertTrue( any( m.startswith( "Pushed 1 commit(s)" ) for m in messages ) )
 
     async def test_l3_no_commits_rolls_back( self ):
         # all clusters no-files in L3 → no commit_hashes → checkout original + return.
