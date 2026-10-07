@@ -90,8 +90,12 @@ export interface BroadcastAckTallyRenderer {
    *
    * Until the first call, the recipient list is UNKNOWN rather than empty, and the two
    * are not the same thing. See `render()`.
+   *
+   * `loaded` is false when the fetch FAILED. A failed read is still an answer, but the
+   * answer is "we do not know", never "nobody is listening": the tally says it could not
+   * load the list instead of printing a count. A later successful call clears that.
    */
-  recipientsChanged(): void;
+  recipientsChanged( loaded?: boolean ): void;
 }
 
 export interface BroadcastAckTallyRendererOptions {
@@ -147,6 +151,12 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   // "✅ All 0 sessions acknowledged" and then jump to "2/0": received === expected was
   // true at 0 === 0, so it took the COMPLETE branch. María's finding on 5b569053.
   private recipientsKnown = false;
+  // The first fetch FAILED, so the roster is still unknown. Unknown is not zero here either:
+  // the summary says it could not load the list and prints no denominator.
+  private recipientsFailed = false;
+  // The deadline fired while the roster was unknown. It could not judge then, so it waits
+  // here, and the roster's arrival settles it (time out, or dismiss if everyone answered).
+  private deadlinePassed = false;
 
   constructor( options: BroadcastAckTallyRendererOptions ) {
     this.bus            = options.eventBus;
@@ -184,15 +194,28 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     return this.broadcastId;
   }
 
-  recipientsChanged(): void {
-    this.recipientsKnown = true;
+  recipientsChanged( loaded: boolean = true ): void {
+    if ( loaded ) {
+      this.recipientsKnown  = true;
+      this.recipientsFailed = false;
+      if ( this.deadlinePassed && this.broadcastId !== null ) {
+        this.deadlinePassed = false;
+        this.settleAtDeadline( this.broadcastId );
+        return;
+      }
+    } else if ( !this.recipientsKnown ) {
+      // A refresh that fails after a roster was loaded keeps that roster; only a roster we
+      // never had is reported as unknown.
+      this.recipientsFailed = true;
+    }
     this.render();
   }
 
   track( broadcastId: string ): void {
-    this.broadcastId   = broadcastId;
-    this.timedOut      = false;
-    this.restoreFailed = false;
+    this.broadcastId    = broadcastId;
+    this.timedOut       = false;
+    this.restoreFailed  = false;
+    this.deadlinePassed = false;
     this.cancelTimer();
     this.timerId = this.setTimeoutFn( () => this.onDeadline(), this.timeoutMs );
     this.persist( broadcastId );
@@ -200,9 +223,10 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   }
 
   dismiss(): void {
-    this.broadcastId   = null;
-    this.timedOut      = false;
-    this.restoreFailed = false;
+    this.broadcastId    = null;
+    this.timedOut       = false;
+    this.restoreFailed  = false;
+    this.deadlinePassed = false;
     this.cancelTimer();
     // A dismissed tally must not come back on the next reload. Clearing here is what
     // makes "dismiss" mean dismissed rather than hidden until you refresh.
@@ -250,10 +274,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
       this.unsubscribe = null;
     }
     if ( this.root ) this.root.replaceChildren();
-    this.root          = null;
-    this.broadcastId   = null;
-    this.timedOut      = false;
-    this.restoreFailed = false;
+    this.root           = null;
+    this.broadcastId    = null;
+    this.timedOut       = false;
+    this.restoreFailed  = false;
+    this.deadlinePassed = false;
   }
 
   private cancelTimer(): void {
@@ -276,7 +301,17 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     // 🔴 AN UNKNOWN ROSTER CANNOT BE INCOMPLETE. Without this the deadline would read
     // expected.length === 0, find received >= 0, and DISMISS a tally whose recipients
     // simply had not loaded — silently, and exactly when the network is slow.
-    if ( !this.recipientsKnown ) return;
+    if ( !this.recipientsKnown ) {
+      // Do not judge a roster we do not have, and do not forget the deadline either:
+      // `recipientsChanged` settles it when the list lands, however late.
+      this.deadlinePassed = true;
+      return;
+    }
+    this.settleAtDeadline( broadcastId );
+  }
+
+  /** The deadline's verdict once the roster is known: partial goes timed out, complete is dismissed. */
+  private settleAtDeadline( broadcastId: string ): void {
     if ( this.ackStore.countFor( broadcastId ) < this.expected().length ) {
       this.timedOut = true;
       this.render();
@@ -331,8 +366,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     const summary = el( "div", "", this.recipientsKnown
       ? this.summaryText( received, expected.length )
       // No denominator is honest until the recipient list has landed. Saying so beats
-      // printing a number that is about to change under the reader.
-      : `${received} acknowledged — loading the recipient list…` );
+      // printing a number that is about to change under the reader. A fetch that failed
+      // says so too: "could not load", the wording the saved-acknowledgements error uses.
+      : this.recipientsFailed
+        ? `${received} acknowledged — could not load the recipient list`
+        : `${received} acknowledged — loading the recipient list…` );
     summary.id = "broadcast-aggregate-summary";
     summary.setAttribute( "data-testid", "broadcast-ack-summary" );
     panel.appendChild( summary );
