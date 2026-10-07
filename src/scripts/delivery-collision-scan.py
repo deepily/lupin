@@ -237,7 +237,8 @@ def scan( target, max_tip_age_days, deadline_seconds=None, progress=None ):
         - LookupError when discovery is vacuous, with zero branches or zero candidate commits.
           An empty scan passes every per-item check, so it must refuse.
         - TimeoutError when deadline_seconds elapses mid-probe. A partial scan is not a clean scan.
-          It refuses and says how far it reached, since reporting partial findings as complete is the substitution this script stops.
+          It has looked at some of the corpus and none of the rest. Reporting its findings as
+          complete is the same substitution this script exists to stop. It refuses and says how far it reached.
     """
     started = time.time()
     branches, excluded_by_age = discover_branches( target, max_tip_age_days )
