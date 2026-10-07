@@ -105,3 +105,4 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
+- [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task, replaying frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
