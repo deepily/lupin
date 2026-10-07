@@ -4953,48 +4953,28 @@ def task_promotion_status( ticket_id: str ) -> dict:
     """
     **[READ — always allowed, no user permission needed]** How did that promotion go?
 
-    🔴 THE VERB A CALLER COMES BACK WITH. When a promotion out of the holding area runs
-    ASYNCHRONOUSLY, the door answers immediately with a ticket instead of holding the
-    request open while Rick thinks — and `task_transition` then waits a budget for the
-    answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`,
-    and THIS is what you come back with. So does a caller whose process died: the ticket
-    is persisted, and the answer is waiting whenever you ask.
+    When a promotion out of the holding area runs ASYNCHRONOUSLY, the door answers immediately with a ticket, and `task_transition` waits a budget for Rick's answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`, and THIS is the verb you come back with. So does a caller whose process died: the ticket is persisted, and the answer waits whenever you ask.
 
-    ⚠️ IT EXISTS BECAUSE A 202 WITHOUT IT WOULD BE THE SAME DEFECT WITH THE WAITING MOVED
-    SOMEWHERE NOBODY LOOKS. That is María 🌸's binding condition on the ruling that made
-    the promotion ask asynchronous, and it is the reason this is not optional polish.
-
-    WHAT THE STATES MEAN, and two of them are easy to collapse and must not be:
+    WHAT THE STATES MEAN; two are easy to collapse and must not be:
         pending     the ask is out; Rick has not answered and the deadline has not passed
-        approved    it went through — `response_body` is the { item, event } a synchronous
-                    call would have returned, and `approval_source` says whether it was
-                    his keypress or a timed-out default
-        refused     Rick said no, OR the ask never reached him — `refusal` says which
-        superseded  🔴 HE APPROVED IT AND THE WORLD MOVED. The transition was no longer
-                    legal when the answer landed. NOT a refusal: nobody said no, so read
-                    `refusal` for what the row had become and go look at what else touched
-                    it
-        stalled     the ask died without an answer — usually a server bounce mid-ask. A
-                    human was already told by an urgent notification; nothing was promoted
+        approved    it went through; `response_body` is the { item, event } a synchronous call would have returned, and `approval_source` says whether it was his keypress or a timed-out default
+        refused     Rick said no, OR the ask never reached him; `refusal` says which
+        superseded  HE APPROVED IT AND THE WORLD MOVED: the transition was no longer legal when the answer landed. NOT a refusal, nobody said no; read `refusal` for what the row had become and look at what else touched it
+        stalled     the ask died without an answer, usually a server bounce mid-ask; a human was already told by an urgent notification and nothing was promoted
 
-    TWO DEADLINES, AND ONLY ONE IS RICK'S (row dbe42964):
-        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default).
-                     Null on a ticket minted before the field existed.
-        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin
-                     (480s by default). Still `pending` after it means the ask died.
+    TWO DEADLINES, AND ONLY ONE IS RICK'S:
+        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default). Null on a ticket minted before the field existed.
+        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin (480s by default). Still `pending` after it means the ask died.
     The `deadlines` field repeats this, so a relay never reports the wrong one.
+
+    Args:
+        ticket_id: the id handed back in the 202, and repeated in every `awaiting_human_approval` answer.
+
+    Returns:
+        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found" verbatim, NEVER an empty success: a missing ticket and an unresolved one are different facts and only one of them means "keep waiting".
 
     Example:
         task_promotion_status( ticket_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
-
-    Args:
-        ticket_id: the id handed back in the 202, and repeated in every
-            `awaiting_human_approval` answer.
-
-    Returns:
-        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found"
-        verbatim — NEVER an empty success, because a missing ticket and an unresolved one
-        are different facts and only one of them means "keep waiting".
     """
     return task_promotion_status_impl(
         api_base_url = _get_server_url(),
@@ -5131,57 +5111,34 @@ def task_request(
     deletion_task_id : Optional[ str ] = None,
 ) -> dict:
     """
-    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row.
+    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row. Rick alone promotes and demotes; managers can only request, and requests default to no. This files a question on the row and NEVER moves it: the row stays exactly where it is until Rick answers from his board.
 
-    Rick alone promotes and demotes (his ruling, 2026-09-08): "Only thing managers can do
-    is request And there's requests default to no". This is that request. It files a
-    question on the row and NEVER moves it — the row stays exactly where it is until Rick
-    answers from his board.
-
-    ⚠️ WHAT HAPPENS NEXT, so you do not wait for the wrong thing:
-      · the request waits on Rick's board with NO expiry — silence changes nothing, and
-        NO ANSWER MEANS NO: nothing moves until he approves
-      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the
-        holding area); you do not transition the row yourself
+    What happens next, so you do not wait for the wrong thing:
+      · the request waits on Rick's board with NO expiry: silence changes nothing, and NO ANSWER MEANS NO
+      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the holding area); you do not transition the row yourself
       · if he DENIES, the row stays put and you may file a fresh request
       · if the row moves another way first, the request is withdrawn, not denied
 
-    ⚔️ THE SWORD OF DAMOCLES (row ab8c5728) — AN ADMIT COSTS ONE OF YOUR OWN TICKETS.
-    While Rick's `sword_of_damocles_active` switch is on, an admit must name
-    `deletion_task_id`: a live ticket YOU own. When he approves, the row is admitted and
-    that ticket is dropped in the same step; if he denies, neither moves. Ownership is
-    checked against your session's persona, not a name you type. A demote pays nothing.
-
-    Refused by the server, with its words verbatim:
-      · 403 — you are not a manager (a worker asks its manager to file this), or the
-        deletion ticket is not yours, or your persona could not be read
-      · 409 — the row cannot make that move from where it is (admit is only for a row in
-        the holding area; demote only for a live, unfinished row), or a request is
-        already pending on it (one at a time — Rick's no-batches rule), or the deletion
-        ticket is already finished or already pledged on another pending admit
-      · 422 — `move` is not "admit" or "demote", `reason` is blank, an admit named no
-        deletion ticket while the switch is on, a demote named one, or the ticket does
-        not exist or is the row itself
-
-    Example:
-        task_request(task_id="<uuid>", move="admit",
-                     reason="fix merged at 36a0a403; the row is ready to work",
-                     deletion_task_id="<uuid of a live ticket you own>")
+    AN ADMIT COSTS ONE OF YOUR OWN TICKETS while Rick's `sword_of_damocles_active` switch is on: an admit must name `deletion_task_id`, a live ticket YOU own. When he approves, the row is admitted and that ticket is dropped in the same step; if he denies, neither moves. Ownership is checked against your session's persona, not a name you type. A demote pays nothing.
 
     Args:
-        task_id: The row's UUID — one row per call, never a batch
+        task_id: The row's UUID; one row per call, never a batch
         move: "admit" (promote out of the holding area) or "demote" (off the live board)
-        reason: Why the row should move. Rick reads it to decide — make it the one
-            sentence he needs
-        deletion_task_id: admit only — the UUID of a live ticket you own, dropped when
-            Rick approves. Required while the Sword of Damocles switch is on
+        reason: Why the row should move. Rick reads it to decide: make it the one sentence he needs
+        deletion_task_id: admit only; the UUID of a live ticket you own, dropped when Rick approves. Required while the switch is on
 
     Returns:
-        The row (server 200 body) with request_state "pending", or an error dict carrying
-        the server's detail verbatim.
+        The row (server 200 body) with request_state "pending", or an error dict carrying the server's detail verbatim.
 
-    `actor` is not a parameter: it is stamped from the session bridge, so the manager
-    check reads your real session.
+    Refused by the server, with its words verbatim:
+      · 403: you are not a manager (a worker asks its manager to file this), or the deletion ticket is not yours, or your persona could not be read
+      · 409: the row cannot make that move from where it is (admit is only for a row in the holding area; demote only for a live, unfinished row), or a request is already pending on it (one at a time), or the deletion ticket is already finished or already pledged on another pending admit
+      · 422: `move` is not "admit" or "demote", `reason` is blank, an admit named no deletion ticket while the switch is on, a demote named one, or the ticket does not exist or is the row itself
+
+    `actor` is not a parameter: it is stamped from the session bridge, so the manager check reads your real session.
+
+    Example:
+        task_request(task_id="<uuid>", move="admit", reason="fix merged at 36a0a403; the row is ready to work", deletion_task_id="<uuid of a live ticket you own>")
     """
     refusal = _refuse_borrowed_identity( "task_request" )
     if refusal is not None: return refusal
