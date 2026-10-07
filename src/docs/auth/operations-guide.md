@@ -173,7 +173,7 @@ sudo systemctl status lupin-fastapi
 
 # Authentication Mode
 auth mode = jwt
-# Options: mock (dev only), jwt (production), firebase (future)
+# Options: mock (dev only), jwt (production). Any other value, firebase included, answers 401
 
 # JWT Settings
 jwt secret key = ${JWT_SECRET_KEY}

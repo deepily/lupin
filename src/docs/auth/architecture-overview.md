@@ -25,7 +25,7 @@ The Lupin Authentication System is a JWT-based authentication solution built on 
 
 - **Stateless Authentication**: JWT tokens carry all user information
 - **Token Rotation**: Refresh tokens rotate on each use for enhanced security
-- **Multi-Mode Support**: JWT (production), mock (development), Firebase (future)
+- **Multi-Mode Support**: JWT (production), mock (development); any other mode, Firebase included, is not built and answers 401
 - **Role-Based Access Control**: Admin/user roles with middleware enforcement
 - **Audit Trail**: Comprehensive logging of all authentication events
 - **Backward Compatibility**: Seamless integration with existing mock auth systems
