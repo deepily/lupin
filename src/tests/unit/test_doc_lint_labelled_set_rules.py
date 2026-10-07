@@ -533,6 +533,79 @@ def test_redraw_is_deterministic_for_one_seed( written ):
     assert ( tmp_path / "redrawn" / "gate" / "plan.json" ).read_bytes() == first
 
 
+# ---- redraw: a task id minted by one round must not take another pair's id (row e86e07b1) ------------------------------
+
+class ForcedTaskId( random.Random ):
+    """A Random whose first 64-bit draw is a chosen value.
+
+    Every other draw is the seeded one, so a task id collision can be forced.
+    """
+    forced = []
+
+    def getrandbits( self, k ):
+        if k == 64 and ForcedTaskId.forced: return ForcedTaskId.forced.pop( 0 )
+        return super().getrandbits( k )
+
+
+def test_make_pair_draws_again_when_its_task_id_is_already_taken():
+    d      = { "pool_id": "x", "file": "a/b.py", "symbol": "f", "old": "o", "stratum": "S" }
+    taken  = "t%016x" % random.Random( 1 ).getrandbits( 64 )
+    tasks  = { taken: { "pair_id": "p001", "role": "new", "sha256": "kept" } }
+    rows   = []
+    s.make_pair( "p000", "delete", d, { "span_text": "- keep the lock", "cut": "c" }, random.Random( 1 ), tasks, rows )
+    assert tasks[ taken ] == { "pair_id": "p001", "role": "new", "sha256": "kept" }
+    assert len( tasks ) == 2 and rows[ 0 ][ "task_id" ] != taken and rows[ 0 ][ "task_id" ] in tasks
+
+
+def test_redraw_with_a_task_id_that_collides_with_a_kept_pair_keeps_every_pairs_new_task( written, monkeypatch ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    before = load( gate, "gate" )
+    ids    = break_outputs( gate, "gate", 1 )
+    kept   = next( t for t, m in before[ "tasks" ].items() if m[ "pair_id" ] not in ids and m[ "role" ] == "new" )
+    ForcedTaskId.forced = [ int( kept[ 1: ], 16 ) ]
+    monkeypatch.setattr( s.random, "Random", ForcedTaskId )
+    assert s.main( redraw_args( tmp_path, pool ) ) == 0
+    new_plan = load( tmp_path / "redrawn", "gate" )
+    assert len( new_plan[ "tasks" ] ) == len( before[ "tasks" ] )
+    assert new_plan[ "tasks" ][ kept ] == before[ "tasks" ][ kept ]
+    assert all( any( m[ "pair_id" ] == p[ "id" ] and m[ "role" ] == "new" for m in new_plan[ "tasks" ].values() ) for p in new_plan[ "pairs" ] )
+    s.check_set( str( tmp_path / "redrawn" ), "gate" )                                   # the StopIteration of the row
+
+
+def test_two_redraw_rounds_with_one_seed_leave_every_pair_its_own_task( written, capsys ):
+    tmp_path, pool = written
+    gate   = tmp_path / "gate-store"
+    first  = break_outputs( gate, "gate", 1 )
+    assert s.main( redraw_args( tmp_path, pool ) ) == 0
+    round1 = tmp_path / "redrawn"
+    plan1  = load( round1, "gate" )
+    path   = str( round1 / "gate" / "writer_outputs.jsonl" )
+    done   = { r[ "task_id" ] for r in s.read_jsonl( path ) }
+    s.write_jsonl( path, s.read_jsonl( path ) + [ { "task_id": t, "text": "Reworded: " + r[ "text" ], "task_sha": plan1[ "tasks" ][ t ][ "sha256" ] }
+                                                  for r in s.read_jsonl( str( round1 / "gate" / "writer_tasks.jsonl" ) ) for t in [ r[ "task_id" ] ] if t not in done ] )
+    second = break_outputs( round1, "gate", 1, skip=first )
+    assert second != first
+    args = [ "redraw", "--base", str( round1 ), "--split", "gate", "--pool", pool, "--out", str( tmp_path / "round2" ), "--seed", "7" ]
+    assert s.main( args ) == 0
+    plan2 = load( tmp_path / "round2", "gate" )
+    assert len( plan2[ "tasks" ] ) == len( plan1[ "tasks" ] )
+    assert all( any( m[ "pair_id" ] == p[ "id" ] and m[ "role" ] == "new" for m in plan2[ "tasks" ].values() ) for p in plan2[ "pairs" ] )
+
+
+def test_redraw_refuses_and_writes_nothing_when_a_pair_is_left_without_a_new_task( written, capsys, monkeypatch ):
+    tmp_path, pool = written
+    break_outputs( tmp_path / "gate-store", "gate", 1 )
+    real = s.make_pair
+    def lossy( pair_id, kind, d, c, rng, tasks, task_rows ):
+        rec = real( pair_id, kind, d, c, rng, tasks, task_rows )
+        for t in [ t for t, m in tasks.items() if m[ "pair_id" ] == pair_id ]: del tasks[ t ]
+        return rec
+    monkeypatch.setattr( s, "make_pair", lossy )
+    assert s.main( redraw_args( tmp_path, pool ) ) == 2
+    assert "no new writer task" in capsys.readouterr().err and not ( tmp_path / "redrawn" ).exists()
+
+
 def test_redraw_never_redraws_the_span_that_failed():
     plan = { "pairs": [ { "id": "p000", "kind": "delete", "weaken_class": None, "short": False, "stratum": "S", "pool_id": "d1", "x_span_in_old": "when the pool is closed" } ] }
     doc  = lambda *spans: { "pool_id": "d1", "unit": "u", "stratum": "S", "cands": [ { "span_text": sp } for sp in spans ] }
