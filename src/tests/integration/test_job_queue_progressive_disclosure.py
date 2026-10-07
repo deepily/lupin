@@ -327,9 +327,13 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
-    # No NEEDS_A_DRAINED_QUEUE mark: it XPASSed(strict) in ts-84720dde on 222ba140c, once
-    # /api/v2/ask lineage (933287956, fa08ea851) made the drain observable. The other three
-    # marked tests were not reported as XPASS in that run and keep the mark.
+    # Marked again, as a stop-gap. The mark came off in ad98148cd, after this test XPASSed(strict)
+    # in ts-84720dde on 222ba140c, once the lineage claim made the drain observable. Since
+    # 996dfdb8f (row 8d4a5a59) the door drops that claim for a fresh random user, so the job
+    # waits behind the suite and the test fails with "Job did not complete in time" (row ce29cd20).
+    # strict=True: when the repair lands and the drain is observable again, this XPASSes and the
+    # run goes red, which forces the mark off.
+    @NEEDS_A_DRAINED_QUEUE
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.
