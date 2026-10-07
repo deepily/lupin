@@ -66,7 +66,7 @@ def quick_smoke_test():
 
     Ensures:
         - Endpoint accepts authenticated POST requests with dry_run=true
-        - Returns expected response structure (status, job_id, queue_position, message)
+        - Returns expected response structure (status, job_id, queue_position)
         - Job completes in done queue with mock results ($0.00 cost)
     """
     cu.print_banner( "Deep Research Dry-Run Smoke Test", prepend_nl=True )
@@ -145,7 +145,6 @@ def quick_smoke_test():
         print( f"  Status: {data.get( 'status', 'unknown' )}" )
         print( f"  Job ID: {data.get( 'job_id', 'unknown' )}" )
         print( f"  Queue position: {data.get( 'queue_position', 'unknown' )}" )
-        print( f"  Message: {data.get( 'message', 'unknown' )}" )
 
         job_id = data.get( "job_id" )
 
@@ -153,7 +152,7 @@ def quick_smoke_test():
         # Test 3: Verify response structure
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 3: Verifying response structure..." )
-        required_keys = [ "status", "job_id", "queue_position", "message" ]
+        required_keys = [ "status", "job_id", "queue_position" ]
         for key in required_keys:
             if key not in data:
                 print( f"✗ Missing required key: {key}" )
@@ -161,8 +160,10 @@ def quick_smoke_test():
             print( f"✓ {key}: present" )
 
         # Verify expected values
-        assert data[ "status" ] == "queued", f"Expected status 'queued', got '{data[ 'status' ]}'"
-        print( "✓ Status is 'queued'" )
+        # AskResponse.status is done | waiting | parked | needs_input | expired | failed. A job the
+        # executor just queued answers "waiting" (v2/executor.py); "queued" is not in that set.
+        assert data[ "status" ] == "waiting", f"Expected status 'waiting', got '{data[ 'status' ]}'"
+        print( "✓ Status is 'waiting'" )
 
         assert data[ "job_id" ].startswith( "dr-" ), f"Expected job_id to start with 'dr-', got '{data[ 'job_id' ]}'"
         print( f"✓ Job ID format correct: {data[ 'job_id' ]}" )
