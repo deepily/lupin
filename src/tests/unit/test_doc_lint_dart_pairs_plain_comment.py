@@ -113,3 +113,41 @@ def test_the_report_counts_old_blocks_under_min_words( tmp_path ):
     root, old, new = _range( tmp_path, f"class A {{\n  /// {LONG}\n  void a() {{}}\n  /// Short.\n  void b() {{}}\n}}\n", "class A {\n  void a() {}\n  void b() {}\n}\n" )
     _, report = dp.build_pairs( root, old, new )
     assert report[ "below_min_words" ] == 1 and report[ "eligible_old" ] == 1
+
+
+MULTI_HEAD = "class A extends Bloc<E, S>\n    with M<E, S>,\n        N<E, S> {{\n  {body}\n}}\n"
+
+
+def test_a_member_of_a_class_whose_header_spans_lines_is_paired( tmp_path ):
+    old = MULTI_HEAD.format( body=f"/// {LONG}\n  void _helper() {{}}" )
+    new = MULTI_HEAD.format( body="// Kept.\n  void _helper() {}" )
+    root, old_rev, new_rev = _range( tmp_path, old, new )
+    pairs, report = dp.build_pairs( root, old_rev, new_rev )
+    assert [ p[ "id" ] for p in pairs ] == [ "lib/a.dart::A._helper" ]
+    assert report[ "dropped_symbol_gone" ] == 0
+
+
+def test_a_call_inside_a_multi_line_header_class_body_is_not_a_declaration( tmp_path ):
+    old = MULTI_HEAD.format( body=f"/// {LONG}\n  void _helper() {{}}" )
+    new = MULTI_HEAD.format( body="void run() {\n    await _helper();\n  }" )
+    root, old_rev, new_rev = _range( tmp_path, old, new )
+    _, report = dp.build_pairs( root, old_rev, new_rev )
+    assert report[ "dropped_symbol_gone" ] == 1 and report[ "pairs" ] == 0
+
+
+def test_a_header_ending_in_a_semicolon_opens_no_body():
+    assert dp._header_opens_body( [ "class A = B", "    with C;", "  void x() {", "}" ], 0 ) is False
+
+
+def test_a_header_followed_by_a_column_zero_line_opens_no_body():
+    assert dp._header_opens_body( [ "class A extends B", "void x() {}" ], 0 ) is False
+    assert dp._header_opens_body( [ "class A extends B" ], 0 ) is False
+
+
+def test_two_symbols_of_one_file_share_one_read_and_an_import_and_an_empty_class_are_no_symbols( tmp_path ):
+    old = f"class A {{\n  /// {LONG}\n  void _one() {{}}\n\n  /// {LONG}\n  void _two() {{}}\n}}\n"
+    new = "import 'x.dart';\n\nclass E {\n}\n\nclass A {\n  void _one() {}\n\n  // Note.\n  void _two() {}\n}\n"
+    root, old_rev, new_rev = _range( tmp_path, old, new )
+    pairs, report = dp.build_pairs( root, old_rev, new_rev )
+    assert sorted( ( p[ "id" ], p[ "new_kind" ] ) for p in pairs ) == [ ( "lib/a.dart::A._one", "none" ), ( "lib/a.dart::A._two", "plain_comment" ) ]
+    assert report[ "dropped_symbol_gone" ] == 0

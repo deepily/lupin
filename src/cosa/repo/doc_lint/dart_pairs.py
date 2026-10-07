@@ -10,7 +10,10 @@ loads through labelled_pairs.load_pairs once a keys file exists. No model is cal
 Known limits:
     - a symbol is "Owner.member": "Owner.new" for the unnamed constructor, "Owner.named" for a named one
     - the owner is the class, mixin, enum or extension whose body holds the block. The body runs from a
-      declaration at column 0 ending in { to the next line that starts with } at column 0
+      declaration at column 0 to the next line that starts with } at column 0. The { may sit on the
+      header line or on an indented line after it
+    - a block turned into a // comment is paired with that comment (new_kind plain_comment), a removed one
+      with empty text (none); a vanished declaration is still dropped
     - a one-line declaration has no body, and a nested type is not an owner
     - an unnamed extension ( extension on Foo ) has no name and its blocks read "<unattached>"
     - a renamed or moved symbol is reported as gone and as new, never as a pair
@@ -173,6 +176,31 @@ def declaration_name( lines, index ):
     return match.group( 1 ) if match else None
 
 
+def _header_opens_body( lines, number ):
+    """
+    Tell whether the owner header at a line opens its body, even over several lines.
+
+    Requires:
+        - lines is a list of source lines and number indexes an owner header at column 0
+
+    Ensures:
+        - returns True when the header, or the indented lines right after it, bring more { than }
+          before a ; or a blank or column-0 line ends the search
+        - returns False for a header that ends in ; or never opens a body
+
+    Raises:
+        - nothing
+    """
+    opens = 0
+    for index in range( number, len( lines ) ):
+        line = lines[ index ]
+        if index > number and ( not line or not line[ 0 ].isspace() ): return False
+        opens += line.count( "{" ) - line.count( "}" )
+        if opens > 0: return True
+        if ";" in line: return False
+    return False
+
+
 def _owner_spans( lines ):
     """
     Find the owner bodies of a Dart source.
@@ -192,7 +220,7 @@ def _owner_spans( lines ):
         if not line or line[ 0 ].isspace(): continue
         match = OWNER_REGEX.match( line )
         if match and match.group( 1 ):
-            if line.count( "{" ) > line.count( "}" ): opened = ( number, match.group( 1 ) )
+            if _header_opens_body( lines, number ): opened = ( number, match.group( 1 ) )
         elif line[ 0 ] == "}" and opened is not None:
             spans.append( ( opened[ 0 ], number, opened[ 1 ] ) )
             opened = None
