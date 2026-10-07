@@ -1243,7 +1243,8 @@ def test_an_unstaged_edit_to_any_tracked_rule_file_refuses_a_lone_judged_file( s
     ( stamped / rule_path ).write_text( "edited and not staged\n", encoding="utf-8" )
     _stage( stamped, { "src/pkg/swept.py": CLEAN } )
     rc, text = _gate( stamped )
-    assert rc == 3 and f"rule file {rule_path} {DIVERGED}" in text and "(1 of " in text and "rule files differ)" in text
+    listed = [ ln for ln in _git( stamped, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if ln ]
+    assert rc == 3 and f"rule file {rule_path} {DIVERGED}" in text and f"(1 of {len( listed )} rule files differ)" in text
 
 
 def test_a_tracked_rule_file_outside_the_old_list_of_seven_is_compared_too( stamped, monkeypatch ):
