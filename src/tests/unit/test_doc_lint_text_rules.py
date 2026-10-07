@@ -428,3 +428,16 @@ def test_an_all_lowercase_prose_line_with_an_equals_sign_is_skipped_as_a_chosen_
     assert tr.reference_findings( "phase 1 = the first stage.", "a.py", 1 ) == []
     assert [ f.message for f in tr.reference_findings( "set phase 2 = done before launch", "a.py", 1 ) ] == []
     assert [ f.message for f in tr.reference_findings( "done before launch, phase 2 = done", "a.py", 1 ) ] == [ "bare reference 'phase 2'" ]
+
+
+def test_caps_words_skips_the_placeholder_after_a_command_line_option():
+    usage = "        [--allow-thread NAME]... [--json OUT] [--quiet]\n        prog -o OUT --level NOT"
+    assert mc.caps_words( usage, WORDS ) == []
+
+
+def test_caps_words_still_flags_prose_that_does_not_follow_an_option():
+    assert mc.caps_words( "it is NOT enough -- ONLY this; use the flag then NEVER stop", WORDS ) == [ "NOT", "ONLY", "NEVER" ]
+
+
+def test_caps_words_skips_a_capitalised_word_right_after_an_option_name_as_a_chosen_limit():
+    assert mc.caps_words( "pass --force NOT twice", WORDS ) == []

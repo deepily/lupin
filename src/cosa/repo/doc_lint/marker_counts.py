@@ -18,6 +18,7 @@ MARKER_COLUMNS = ( "em_dash", "caps_words", "section_refs", "id_refs", "tics", "
 WORD_REGEX       = re.compile( r"[A-Za-z0-9][\w'’\-]*" )
 CAPS_REGEX       = re.compile( r"\b[A-Z][A-Z0-9]+\b" )
 MEMBER_ACCESS    = re.compile( r"[A-Za-z_][A-Za-z0-9_]*\.$" )
+OPTION_ARGUMENT  = re.compile( r"(?<![A-Za-z0-9_-])-{1,2}[A-Za-z][A-Za-z0-9_-]*[ \t]+$" )
 FRONTMATTER      = re.compile( r"\A---\n.*?\n---\n", re.DOTALL )
 FENCED_BLOCK     = re.compile( r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE )
 INLINE_CODE      = re.compile( r"`[^`\n]*`" )
@@ -131,6 +132,9 @@ def caps_words( text, words=None ):
         - words inside quotes or backticks, with a digit, next to an underscore or hyphen, are skipped
         - a word that follows an identifier and a dot with no space, as in TaskType.BOUNDED, is a code member and is skipped
         - a capitalised word after a period and a space is still read as prose
+        - a word that follows a command-line option and a space, as in `--json OUT`, is the option's placeholder and is skipped
+        - a word after a bare double dash and a space is still read as prose, and so is a capitalised word after a plain word
+        - a prose sentence that puts a capitalised word right after an option name is skipped too; that is a chosen limit
 
     Raises:
         - OSError when words is None and the vendored list is missing
@@ -144,6 +148,7 @@ def caps_words( text, words=None ):
         after  = text[ m.end() ] if m.end() < len( text ) else ""
         if before in ( "_", "-" ) or after in ( "_", "-" ): continue
         if before == "." and MEMBER_ACCESS.search( text[ : m.start() ] ) is not None: continue
+        if before in ( " ", "\t" ) and OPTION_ARGUMENT.search( text[ : m.start() ] ) is not None: continue
         if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
         if word.lower() in words: found.append( word )
     return found
