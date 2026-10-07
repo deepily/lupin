@@ -157,3 +157,26 @@ test( "behaviour: 20 failed reconnects end in failed, and nothing the page can p
     mock.timers.reset();
   }
 } );
+
+test( "a restart after the retry budget ran out gets a fresh budget: one ordinary close lands in backoff, not failed", { todo: "row 5a8bd0c6: open, the machine keeps attempts at 20 across a restart" }, () => {
+  MockWebSocket.instances = [];
+  const transport = createQueueTransport( {
+    authManager   : makeAuth(), bus : createEventBusForTesting(), baseUrl : "",
+    WebSocketCtor : MockWebSocket as unknown as typeof WebSocket,
+  } );
+  mock.timers.enable( { apis: [ "setTimeout" ] } );
+  try {
+    transport.start( "wise_penguin" );
+    for ( let i = 0; i < 60 && transport.state !== "failed"; i++ ) {
+      MockWebSocket.instances[ MockWebSocket.instances.length - 1 ]!.fireClose( 1006, "" );
+      mock.timers.tick( 31_000 );
+    }
+    assert.equal( transport.state, "failed", "precondition: the budget ran out" );
+    ( transport as unknown as { csm: { send( e: unknown ): void } } ).csm.send( { type: "restart" } );
+    MockWebSocket.instances[ MockWebSocket.instances.length - 1 ]!.fireClose( 1006, "" );
+    assert.equal( transport.state, "backoff", "one failed attempt after a restart must back off, not return to failed" );
+  } finally {
+    transport.stop();
+    mock.timers.reset();
+  }
+} );
