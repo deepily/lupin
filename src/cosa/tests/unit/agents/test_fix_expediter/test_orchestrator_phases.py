@@ -112,11 +112,12 @@ def run( coro ):
 # ============================================================================
 class TestPhase0:
     def test_resume_short_circuit( self ):
+        # The stored cluster has an id a fresh clustering cannot produce, so only a skip returns it.
         o = _orch( debug=True )
-        o.clusters = [ _cluster() ]
+        o.clusters = [ _cluster( "STORED" ) ]
         o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.CLUSTERING ] )
         out = run( o.run_phase0_cluster() )
-        assert out == o.clusters
+        assert [ c.cluster_id for c in out ] == [ "STORED" ]
         assert o.current_phase == TFEPhase.CLUSTERING
 
     def test_resume_from_the_phase_before_clustering_does_not_skip_it( self ):
@@ -138,11 +139,14 @@ class TestPhase0:
 # ============================================================================
 class TestPhase1:
     def test_resume_short_circuit( self ):
+        # A run would diagnose cluster C1; only a skip returns the stored diagnosis for STORED.
         o = _orch( debug=True )
-        o.diagnoses = { "C1": _diag() }
+        o.clusters  = [ _cluster( "C1" ) ]
+        o.diagnoses = { "STORED": _diag( "STORED" ) }
         o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ] )
-        out = run( o.run_phase1_diagnose() )
-        assert out == o.diagnoses
+        with patch.object( orch_mod, "SDK_AVAILABLE", False ):
+            out = run( o.run_phase1_diagnose() )
+        assert set( out.keys() ) == { "STORED" }
 
     def test_resume_from_the_phase_before_diagnosing_does_not_skip_it( self ):
         o = _orch()

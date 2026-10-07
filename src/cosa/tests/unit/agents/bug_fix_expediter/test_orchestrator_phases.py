@@ -1083,11 +1083,11 @@ class TestResumeFromCheckpoint( unittest.TestCase ):
             return_value='[{"title":"Revised","description":"d","fix_type":"x","confidence":0.8}]' )
         with patch.object( ci_mod, "ask_confirmation", AsyncMock( return_value=False ) ), \
              patch.object( ci_mod, "get_feedback", AsyncMock( return_value="try the other approach" ) ):
-            fixes, selected, plan = _run( orch.run_proposal( _diag() ) )
+            fixes, selected, plan = _run( orch.run_proposal( _diag( root_cause="the cache key collides" ) ) )
         orch._delegate_to_lead.assert_awaited_once()
         prompt = orch._delegate_to_lead.await_args.args[ 1 ]
         self.assertIn( "try the other approach", prompt )
-        self.assertIn( "rc", prompt )                      # the diagnosis root cause
+        self.assertIn( "the cache key collides", prompt )   # the diagnosis root cause
         self.assertEqual( selected.title, "Revised" )
 
     def test_control_without_a_resume_the_phases_still_run( self ):
