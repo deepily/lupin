@@ -2097,9 +2097,10 @@ def ask_to_unpark(
 
     Ensures:
         - 403 when the caller is not a manager; 404 for an unknown row; 409 when the row is not parked
+        - 409 when the row has no recorded park time, before any card is made
         - 409, naming the waiting card, when an unanswered card for this row and park already exists
         - otherwise inserts one card whose `payload` is `unpark_ask_payload( row )`, whose default
-          answer is "no", and returns { card_id, task_id, expires_at }
+          answer is "no", and returns { card_id, task_id, expires_at, pushed }
         - the card is pushed to the operator only after the insert has committed, so an answer
           cannot arrive for a card the database does not have yet
         - the row is locked while the card is made, so two managers asking at once make one card
@@ -2129,6 +2130,8 @@ def ask_to_unpark(
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
         if item.status != rules.PARK_STATUS:
             raise HTTPException( status_code=409, detail=f"task {task_id} is '{item.status}', not parked, so there is nothing to un-park" )
+        if item.park_reason_captured_at is None:
+            raise HTTPException( status_code=409, detail=f"task {task_id} is parked but has no recorded park time, so no card could be judged newer than the park and none is made" )
         cards = NotificationRepository( session )
         waiting = cards.find_live_unpark_card( item.id, item.park_reason_captured_at, now )
         if waiting is not None:
@@ -2157,24 +2160,30 @@ def ask_to_unpark(
         recipient_id = str( card.recipient_id )
         connected = ws_manager.is_user_connected( recipient_id )
         cards.update_state( card.id, "delivered" if connected else "created" )
-    notification_queue.push_notification(
-        message            = question,
-        type               = "custom",
-        priority           = "high",
-        source             = "claude_code",
-        user_id            = recipient_id,
-        id                 = card_id,
-        title              = "Un-park a row",
-        response_requested = True,
-        response_type      = "yes_no",
-        response_default   = "no",
-        timeout_seconds    = promotion_gate.UNPARK_ASK_TIMEOUT_SECONDS,
-        human_only         = True,
-        sender_id          = sender_id,
-        abstract           = abstract,
-        payload            = ask_payload,
-    )
-    return { "card_id": card_id, "task_id": str( task_id ), "expires_at": expires_at.isoformat() }
+    pushed = True
+    try:
+        notification_queue.push_notification(
+            message            = question,
+            type               = "custom",
+            priority           = "high",
+            source             = "claude_code",
+            user_id            = recipient_id,
+            id                 = card_id,
+            title              = "Un-park a row",
+            response_requested = True,
+            response_type      = "yes_no",
+            response_default   = "no",
+            timeout_seconds    = promotion_gate.UNPARK_ASK_TIMEOUT_SECONDS,
+            human_only         = True,
+            sender_id          = sender_id,
+            abstract           = abstract,
+            payload            = ask_payload,
+        )
+    except Exception as e:
+        # The card is saved, so the manager still gets its id; the operator can find it in history.
+        pushed = False
+        print( f"[unpark-ask] card {card_id} saved but the push failed: {type( e ).__name__}: {e}" )
+    return { "card_id": card_id, "task_id": str( task_id ), "expires_at": expires_at.isoformat(), "pushed": pushed }
 
 
 @router.post(

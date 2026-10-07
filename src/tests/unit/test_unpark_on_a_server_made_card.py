@@ -359,10 +359,12 @@ def repo( monkeypatch ):
     fake = MagicMock()
     fake.statuses_for_ids.return_value      = { }
     fake.approval_card_ids_used.return_value = set()
+    fake.order = [ ]
 
     @contextmanager
     def _fake_get_db():
         yield MagicMock()
+        fake.order.append( "commit" )
 
     monkeypatch.setattr( tasks, "get_db", _fake_get_db )
     monkeypatch.setattr( tasks, "TaskRepository", lambda session: fake )
@@ -643,6 +645,7 @@ class _MintTable( _Cards ):
         self.states  = [ ]
 
     def create_notification( self, **fields ):
+        self.order.append( "create" )
         card = Notification( id=uuid.uuid4(), created_at=CARD_MADE_AT, state="created", **fields )
         self.rows[ card.id ] = card
         return card
@@ -657,8 +660,12 @@ class _MintTable( _Cards ):
 
 
 class _Queue:
-    def __init__( self ): self.pushed = [ ]
-    def push_notification( self, **fields ): self.pushed.append( fields )
+    def __init__( self, order ): self.pushed, self.order, self.fail = [ ], order, False
+
+    def push_notification( self, **fields ):
+        if self.fail: raise RuntimeError( "the queue is down" )
+        self.order.append( "push" )
+        self.pushed.append( fields )
 
 
 class _Ws:
@@ -671,7 +678,8 @@ def mint( monkeypatch, repo, seats, cards ):
     table = _MintTable()
     monkeypatch.setattr( tasks, "NotificationRepository", table )
     cards.rows = table.rows
-    queue, ws = _Queue(), _Ws()
+    table.order = repo.order
+    queue, ws = _Queue( repo.order ), _Ws()
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: { "id": str( OPERATOR_ID ) } )
     monkeypatch.setattr( "lupin_cli.notifications.notification_models.resolve_target_user", lambda *a, **k: "rick@example.com" )
     monkeypatch.setattr( tasks, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: CARD_MADE_AT ) } ) )
@@ -717,6 +725,34 @@ def test_the_card_waits_as_delivered_when_the_operator_is_connected_and_created_
     mint.ws.connected = False
     assert _ask( item, mint_table=mint ).status_code == 200
     assert [ state for _, state in mint.states ] == [ "delivered", "created" ]
+
+
+def test_the_card_is_pushed_only_after_the_insert_has_committed( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    assert _ask( item, mint_table=mint ).status_code == 200
+    assert repo.order == [ "create", "commit", "push" ]
+
+
+def test_a_push_that_fails_still_returns_the_saved_card_and_says_so( repo, settings, mint ):
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    mint.queue.fail = True
+
+    response = _ask( item, mint_table=mint )
+
+    assert response.status_code == 200 and response.json()[ "pushed" ] is False
+    assert uuid.UUID( response.json()[ "card_id" ] ) in mint.rows
+
+
+def test_a_parked_row_with_no_recorded_park_time_is_a_409_and_no_card_is_made( repo, settings, mint ):
+    item = _item( park_reason_captured_at=None )
+    repo.get_by_id_for_update.return_value = item
+
+    response = _ask( item, mint_table=mint )
+
+    assert response.status_code == 409 and "no recorded park time" in response.json()[ "detail" ]
+    assert mint.rows == { } and mint.queue.pushed == [ ] and repo.order == [ ]
 
 
 def test_a_second_live_card_for_the_same_row_and_park_is_refused_and_names_the_first( repo, settings, mint ):
