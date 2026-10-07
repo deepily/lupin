@@ -1172,6 +1172,33 @@ def test_r9_an_unanswered_condition_needs_the_condition_to_open_the_sentence_and
     assert lead_in( "Look up the key. When no key is enrolled, if it is closed, it returns unavailable, so callers can fall back.", "if it is closed, it returns unavailable" ) == "DROPPED_CONDITION"
 
 
+# ---- rule 4 widened: a subject cut from a sentence start before a parenthesis leaves a fragment (row 6737b017, shape 4) ----
+# Made-up docstrings only. The verb case of the same shape (a subject cut before a lowercase verb) is already LOWERCASE.
+
+PAREN_TICKS = "Build the snapshot of a session. A cold start (`order` empty) builds the snapshot from the log. Throws on failure."
+PAREN_PLAIN = "Build the snapshot of a session. The first read (order empty) builds the snapshot from the log. Throws on failure."
+
+
+@pytest.mark.parametrize( "old, text", [ ( PAREN_TICKS, "A cold start" ), ( PAREN_PLAIN, "The first read" ) ] )
+def test_r4_a_subject_cut_from_a_sentence_start_before_a_parenthesis_is_refused_and_counted( old, text ):
+    span = span_in( old, text )
+    cut  = s.cut_text( old, span )
+    assert "snapshot of a session. (" in cut and span in s.phrase_units( old ) and s.span_ok( old, span, SL )
+    assert s.bad_cut( old, cut ) is None and rules.markup_rejection( old, span ) is None and rules.lead_in_rejection( old, span ) is None
+    assert rules.stray_punctuation_rejection( old, cut ) is None
+    assert rules.delete_rejection( old, span, cut ) == "PAREN_START"
+    cands, refused = s.delete_candidates( old, SL )
+    assert text not in [ c[ "span_text" ] for c in cands ] and refused.get( "PAREN_START", 0 ) >= 1
+
+
+def test_r4_a_parenthesis_after_a_cut_inside_a_sentence_or_after_a_kept_word_is_not_paren_start():
+    mid = "Build the snapshot of a session. It reads the log and (when empty) builds the snapshot. Throws on failure."
+    assert reject( mid, "reads the log and" ) is None                                              # the cut starts mid-sentence
+    kept = "Build the snapshot of a session. A cold start builds the snapshot (from the log). Throws on failure."
+    assert reject( kept, "builds the snapshot" ) != "PAREN_START"                                  # the parenthesis ends up after a kept word, not first
+    assert reject( PAREN_TICKS, "A cold start (`order` empty)" ) != "PAREN_START"                  # the parenthesis goes with the subject
+
+
 # ---- review of e2d510af1 (Rio): two redraw --failed cases the first tests did not pin ------------------------------
 
 def test_redraw_failed_replaces_all_three_pairs_named_on_a_set_rule_1_passes( written, capsys ):
