@@ -151,3 +151,11 @@ def test_two_symbols_of_one_file_share_one_read_and_an_import_and_an_empty_class
     pairs, report = dp.build_pairs( root, old_rev, new_rev )
     assert sorted( ( p[ "id" ], p[ "new_kind" ] ) for p in pairs ) == [ ( "lib/a.dart::A._one", "none" ), ( "lib/a.dart::A._two", "plain_comment" ) ]
     assert report[ "dropped_symbol_gone" ] == 0
+
+
+def test_a_column_zero_line_with_an_unmatched_brace_after_a_header_does_not_open_its_body():
+    assert dp._header_opens_body( [ "class A extends B", "void x() {" ], 0 ) is False
+
+
+def test_a_one_line_class_with_balanced_braces_opens_no_body():
+    assert dp._header_opens_body( [ "class A {}" ], 0 ) is False
