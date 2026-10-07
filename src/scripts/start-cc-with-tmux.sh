@@ -464,6 +464,38 @@ if [[ -n "${LUPIN_SUBAGENT_GOVERNANCE:-}" ]]; then
     PERSONA_ENV_FLAGS+=( -e "LUPIN_SUBAGENT_GOVERNANCE=${LUPIN_SUBAGENT_GOVERNANCE}" )
 fi
 
+# ── Jev key pass-through (row 53ebe1a9, Rick 2026-10-07) ─────────────────────────────────
+# JEV_API_TOASTER lives in Rick's ~/.bashrc below an interactive-only guard, so a seat
+# started from a non-interactive parent (the MCP spawn path) never has it. THE VALUE IS
+# NEVER PUT ON AN ARGV, PRINTED OR LOGGED: this script reports only WHERE it found the
+# variable. It is deliberately NOT a PERSONA_ENV_FLAGS `-e` flag, because those are
+# printed by --dry-run and sit on the tmux command line, readable in /proc.
+#   launcher-env : the caller had it. It is exported, so a server this run BIRTHS carries
+#                  it; an existing server gets it through `tmux source-file -` (stdin)
+#                  just before new-session, below.
+#   tmux-global  : the caller lacked it but the tmux server's global environment holds it
+#                  (Rick's interactive start puts it there). New sessions inherit it as is.
+#   none         : said out loud on stderr. The seat still starts, without the Jev key.
+# No guessing and no key file: the variable is the only source.
+JEV_KEY_SOURCE="none"
+_jev_val="${JEV_API_TOASTER:-}"
+if [[ -n "$_jev_val" ]]; then
+    JEV_KEY_SOURCE="launcher-env"
+else
+    _jev_val="$( tmux show-environment -g JEV_API_TOASTER 2>/dev/null | sed -n 's/^JEV_API_TOASTER=//p' || true )"
+    if [[ -n "$_jev_val" ]]; then JEV_KEY_SOURCE="tmux-global"; fi
+fi
+if [[ -n "$_jev_val" && ! "$_jev_val" =~ ^[A-Za-z0-9._~+/=:-]+$ ]]; then
+    echo "WARNING: JEV_API_TOASTER holds characters this launcher will not pass through tmux (value not shown). This seat starts WITHOUT the Jev key; the reuse tools will answer KEY_UNREADABLE." >&2
+    JEV_KEY_SOURCE="none"
+    unset JEV_API_TOASTER     # the caller exported it: do not let a server born below freeze the unusable value
+elif [[ "$JEV_KEY_SOURCE" == "none" ]]; then
+    echo "WARNING: JEV_API_TOASTER is set neither in this shell nor in the tmux global environment. This seat starts WITHOUT the Jev key; the reuse tools will answer KEY_UNREADABLE. Start from a shell that has it (~/.bashrc, interactive)." >&2
+elif [[ "$JEV_KEY_SOURCE" == "launcher-env" ]]; then
+    export JEV_API_TOASTER="$_jev_val"
+fi
+unset _jev_val
+
 # ── Dry-run: print what would happen and exit (no tmux side effects) ──────────
 # Sits AFTER the env-flag assembly (moved 2026-06-11) so the PERSONA-ENV line
 # shows the REAL forwarded flags — the fleet-roster unit test asserts the
@@ -471,6 +503,7 @@ fi
 if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "DRY-RUN headless=$HEADLESS vertex=$VERTEX session='$SESSION_NAME'"
     printf 'PERSONA-ENV:'; printf ' %q' "${PERSONA_ENV_FLAGS[@]}"; printf '\n'
+    echo "JEV-KEY: source=$JEV_KEY_SOURCE"     # where it was found; the value is never printed
     # AC-D1 asserts on this line. It MUST show the real forwarded flags: a --dry-run
     # that omits what would actually be exported is a test oracle that cannot fail.
     if [[ "$VERTEX" -eq 1 ]]; then
@@ -703,6 +736,16 @@ else
             exit 1
         fi
         TMUX_WORKDIR_FLAGS=( -c "$WORK_DIR" )
+    fi
+    # A server that already exists keeps ITS global environment, not this script's. When the
+    # key came from this script's own env, hand it to the server on stdin (never an argv) so
+    # the new pane inherits it. No server yet: new-session below births one from this env.
+    if [[ "$JEV_KEY_SOURCE" == "launcher-env" ]] && tmux show-environment -g >/dev/null 2>&1; then
+        if ! printf "set-environment -g JEV_API_TOASTER '%s'\n" "$JEV_API_TOASTER" | tmux source-file - >/dev/null 2>&1; then
+            echo "REFUSING TO LAUNCH: could not hand JEV_API_TOASTER to the running tmux server (value not shown)." >&2
+            _release_fleet_seat
+            exit 1
+        fi
     fi
     if ! "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" "${TMUX_WORKDIR_FLAGS[@]}" -d "$INNER"; then
         # The seat was reserved and nothing will ever materialise into it. Hand it back
