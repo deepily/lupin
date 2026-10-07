@@ -131,7 +131,7 @@ async def get_info(
     provider = get_embedding_provider()
 
     return EmbedInfoResponse(
-        provider   = provider.provider_name,
+        provider   = provider.provider,
         dimensions = provider.dimensions,
         status     = "ready"
     )
