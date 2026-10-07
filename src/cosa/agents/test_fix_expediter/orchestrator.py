@@ -93,9 +93,13 @@ class TFEOrchestrator:
         - job_id has a "tfe-" prefix
 
     Ensures:
-        - Phase methods are callable (real for P0/P1, stubs for P2-P6)
-        - Never raises from public phase methods — failures surface as
-          low-confidence or empty results
+        - Phase methods are callable and each runs a working implementation
+          (P0 cluster, P1 diagnose, P2 propose, P3 fix, P5 git, P6 validation rerun)
+        - Public phase methods do not raise for ordinary failures, which surface as
+          low-confidence or empty results. Two exceptions come from the Propose
+          phase's voice gate: StalledException (with a checkpoint) when the gate
+          times out under the stall policy, and NotImplementedError under the
+          unbuilt delegate policy
     """
 
     def __init__(
