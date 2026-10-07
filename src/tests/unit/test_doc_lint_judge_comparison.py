@@ -318,6 +318,8 @@ def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_a
     # The fixture ledger was written by the extractor before row ed2f9b4e (version extractor-a3bde07306, entries
     # without discards or flags). Its keys carry that version, so the rebuild is pinned to it; the new extractor has another.
     monkeypatch.setattr( hn.claim_extractor, "PROMPT_VERSION", "extractor-a3bde07306" )
+    # The judge's version hashes its own source, so a docstring edit moves it; the fixture keys carry the version below.
+    monkeypatch.setattr( hn.claim_judge, "PROMPT_VERSION", "judge-c6dc7c2165" )
     pairs  = json.load( open( os.path.join( FIXTURES, "pairs.json" ) ) )
     keys   = json.load( open( os.path.join( FIXTURES, "keys.json" ) ) )[ "keys" ]
     report = json.load( open( os.path.join( FIXTURES, "harness-report.json" ) ) )
