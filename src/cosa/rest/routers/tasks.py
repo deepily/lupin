@@ -1530,6 +1530,14 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
     claims_approval_card   = ( item.status == rules.PARK_STATUS and payload.to_status == rules.QUEUED_STATUS
                                and isinstance( payload.receipt_refs, dict )
                                and rules.APPROVAL_CARD_KEY in payload.receipt_refs )
+    # The key belongs to this one move. Anywhere else it would write a real card's id onto an
+    # unrelated event and burn the card, since the single-use read looks at the whole trail.
+    if ( isinstance( payload.receipt_refs, dict ) and rules.APPROVAL_CARD_KEY in payload.receipt_refs
+            and not claims_approval_card ):
+        raise HTTPException(
+            status_code = 403,
+            detail      = f"The '{rules.APPROVAL_CARD_KEY}' receipt belongs to an un-park (parked to queued) and to nothing else.",
+        )
     if payload.to_status == approval.DONE_STATUS or claims_manager_key or claims_approval_card:
         closer_manager_refusal = promotion_gate.manager_refusal(
             closer_session_id, payload.actor,

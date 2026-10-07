@@ -34,7 +34,9 @@ from cosa.rest import task_promotion_gate as gate
 from cosa.rest import task_store_rules as rules
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
+from cosa.rest.db.repositories.notification_repository import NotificationRepository
 from cosa.rest.postgres_models import Notification, TaskEvent, TaskItem
+from cosa.rest.routers import notifications
 from cosa.rest.routers import tasks
 from lupin_cli.claude_code.hooks.lib.manager_figure import DENIAL_DENIED
 from tests.helpers.approval_settings_fixtures import SettingsHandle
@@ -61,8 +63,17 @@ def accounts( monkeypatch ):
     monkeypatch.setattr( gate, "approver_persona_for_account", lambda email: { RICK_EMAIL: "rick", MARIA_EMAIL: "maria" }.get( email ) )
 
 
+def _answered_yes_through_the_real_door( card, answered_by_user="u-1", account_email=RICK_EMAIL, x_api_key=None ):
+    """Store a yes on `card` with the answer door's and the repository's own writers."""
+    stored = notifications._stored_response_dict( "yes", notifications._answered_by( answered_by_user, account_email, x_api_key ) )
+    session = MagicMock()
+    session.query.return_value.filter.return_value.first.return_value = card
+    NotificationRepository( session ).update_response( card.id, stored )
+    return card
+
+
 def _card( **overrides ):
-    """A real Notification record: an operator-answered yes on a card minted for ROW_ID."""
+    """A real Notification made for ROW_ID, answered yes by the operator through the real door."""
     fields = dict(
         id                 = uuid.uuid4(),
         sender_id          = "claude.code@lupin.deepily.ai#promotion-gate",
@@ -72,14 +83,18 @@ def _card( **overrides ):
         priority           = "high",
         response_requested = True,
         response_type      = "yes_no",
-        response_value     = { "value": "yes", "source": "ui", "answered_by": OPERATOR_STAMP },
-        responded_at       = CARD_MADE_AT + timedelta( minutes = 1 ),
         state              = "responded",
+        responded_at       = CARD_MADE_AT + timedelta( minutes = 1 ),
         payload            = gate.unpark_ask_payload( ROW_ID ),
         created_at         = CARD_MADE_AT,
     )
     fields.update( overrides )
-    return Notification( **fields )
+    card = Notification( **fields )
+    if "response_value" not in overrides:
+        stored_state, stored_at = card.state, card.responded_at
+        _answered_yes_through_the_real_door( card )
+        card.state, card.responded_at = stored_state, stored_at
+    return card
 
 
 def _refusal( card, used=( ), task_id=ROW_ID, parked_since=PARKED_AT ):
@@ -113,6 +128,24 @@ def test_an_unanswered_card_is_refused():
 
 def test_a_card_that_is_answered_but_not_in_the_responded_state_is_refused():
     assert "no answer yet" in _refusal( _card( state="expired" ) )
+
+
+def test_the_fixture_is_the_shape_the_real_door_and_repository_write():
+    card = _card()
+    assert card.response_value == { "value": "yes", "source": "ui",
+                                    "answered_by": { "user_id": "u-1", "account_email": RICK_EMAIL, "method": "jwt" } }
+
+
+def test_the_real_writer_marks_a_delivered_card_responded_and_stamps_the_time():
+    waiting = Notification( id=uuid.uuid4(), sender_id="x", recipient_id=uuid.uuid4(), message="m", type="custom",
+                            priority="high", state="delivered", response_requested=True )
+    _answered_yes_through_the_real_door( waiting )
+    assert waiting.state == "responded" and waiting.responded_at is not None
+
+
+def test_the_answer_is_read_without_regard_to_capital_letters():
+    assert _refusal( _card( response_value={ "value": "Yes", "source": "ui", "answered_by": OPERATOR_STAMP }, state="responded",
+                            responded_at=CARD_MADE_AT + timedelta( minutes = 1 ) ) ) is None
 
 
 def test_a_card_settled_by_its_timed_out_default_is_refused():
@@ -455,3 +488,88 @@ def test_a_card_id_the_server_cannot_parse_is_refused_by_the_helper( repo, setti
     with pytest.raises( tasks.HTTPException ) as raised:
         tasks._resolved_unpark_card( MagicMock(), repo, item, { "approval_card": "not-a-uuid" } )
     assert raised.value.status_code == 403 and "not a card id" in raised.value.detail
+
+
+# ── the door: a card id is not a thing to type on other moves ───────────────
+
+def test_a_card_id_typed_on_an_ordinary_move_is_refused_and_burns_nothing( repo, settings, seats, cards ):
+    """Finding 1: a worker moving a row queued to in_progress with someone's real card id."""
+    item = _item( status="queued" )
+    _armed( repo, item )
+    card = cards.add( _card() )
+
+    response = _post( item, "in_progress", WORKER, receipt_refs={ "approval_card": str( card.id ) } )
+
+    assert response.status_code == 403 and "belongs to an un-park" in response.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_a_manager_citing_a_card_on_a_row_that_is_not_parked_is_refused_by_the_receipt_rule( repo, settings, seats, cards ):
+    """Finding 3a: no card is looked up, and no card sentence comes back."""
+    item = _item( status="blocked", next_chase_ts=None )
+    _armed( repo, item )
+    card = cards.add( _card() )
+
+    response = _post( item, "queued", MANAGER, receipt_refs={ "approval_card": str( card.id ) } )
+
+    assert response.status_code == 403 and "belongs to an un-park" in response.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_a_worker_hears_the_same_refusal_for_a_real_card_and_a_made_up_one( repo, settings, seats, cards ):
+    """Finding 3b: a worker must not learn whether a card id exists or who answered it."""
+    item = _item()
+    _armed( repo, item )
+    real = cards.add( _card() )
+
+    on_real = _unpark( item, real, actor=WORKER )
+    on_fake = _unpark( item, None, actor=WORKER )
+
+    assert on_real.status_code == on_fake.status_code == 403
+    assert on_real.json()[ "detail" ] == on_fake.json()[ "detail" ]
+    assert "un-parking a row out of" in on_real.json()[ "detail" ]
+
+
+def test_the_single_use_read_counts_only_un_park_events():
+    session = MagicMock()
+    query   = session.query.return_value
+    query.filter.return_value = query
+    query.scalar.return_value = 0
+    TaskRepository( session ).approval_card_ids_used( uuid.uuid4() )
+    filters = [ str( call.args[ 0 ].compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) ) for call in query.filter.call_args_list ]
+    assert any( "task_events.transition = 'parked->queued'" in text for text in filters ), filters
+
+
+# ── the binding rests on one fact: no public door writes a payload on a question ──
+
+def _create_notification_calls_that_pass_a_payload():
+    """Files under src/cosa that call create_notification with a payload keyword, found by AST."""
+    import ast
+    root   = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src", "cosa" )
+    found  = set()
+    walked = 0
+    for folder, dirs, names in os.walk( root ):
+        dirs[ : ] = [ d for d in dirs if d not in ( ".venv", "node_modules", "__pycache__", "tests" ) ]
+        for name in names:
+            if not name.endswith( ".py" ): continue
+            walked += 1
+            path = os.path.join( folder, name )
+            tree = ast.parse( open( path, encoding="utf-8" ).read() )
+            for node in ast.walk( tree ):
+                if isinstance( node, ast.Call ) and getattr( node.func, "attr", None ) == "create_notification":
+                    if any( k.arg == "payload" for k in node.keywords ):
+                        found.add( os.path.relpath( path, root ) )
+    return found, walked
+
+
+def test_the_files_that_write_a_notification_payload_are_pinned():
+    found, walked = _create_notification_calls_that_pass_a_payload()
+    assert walked > 200, "the sweep found too few files to mean anything"
+    assert found == { "rest/commons_ack_watcher.py" }, found
+
+
+def test_the_payload_guard_would_notice_a_call_that_passes_one( tmp_path ):
+    """The instrument finds a positive: the same walk over a planted file."""
+    import ast
+    planted = ast.parse( "repo.create_notification( message='x', payload={ 'kind': 'unpark_ask' } )" )
+    assert any( isinstance( n, ast.Call ) and any( k.arg == "payload" for k in n.keywords ) for n in ast.walk( planted ) )

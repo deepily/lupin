@@ -1403,10 +1403,12 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Ensures:
             - returns { str( card_id ) } when at least one event names it, else an empty set
+            - counts only un-park events (parked->queued), so a card id typed on another move burns nothing
             - reads the trail in SQL, one round trip, and writes nothing
         """
         found = (
             self.session.query( func.count( TaskEvent.id ) )
+                .filter( TaskEvent.transition == "parked->queued" )
                 .filter( TaskEvent.receipt_refs[ "approval_card" ].astext == str( card_id ) )
                 .scalar()
         ) or 0
