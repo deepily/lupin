@@ -119,6 +119,13 @@ class TestPhase0:
         assert out == o.clusters
         assert o.current_phase == TFEPhase.CLUSTERING
 
+    def test_resume_from_the_phase_before_clustering_does_not_skip_it( self ):
+        o = _orch()
+        o.clusters = [ _cluster( "STALE" ) ]
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.LOADING ] )
+        out = run( o.run_phase0_cluster() )
+        assert "STALE" not in [ c.cluster_id for c in out ]
+
     def test_normal_clustering( self ):
         o = _orch()
         out = run( o.run_phase0_cluster() )
@@ -136,6 +143,15 @@ class TestPhase1:
         o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ] )
         out = run( o.run_phase1_diagnose() )
         assert out == o.diagnoses
+
+    def test_resume_from_the_phase_before_diagnosing_does_not_skip_it( self ):
+        o = _orch()
+        o.clusters  = [ _cluster( "C1" ) ]
+        o.diagnoses = { "STALE": _diag( "STALE" ) }
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.CLUSTERING ] )
+        with patch.object( orch_mod, "SDK_AVAILABLE", False ):
+            out = run( o.run_phase1_diagnose() )
+        assert set( out.keys() ) == { "C1" }
 
     def test_no_clusters_returns_empty( self ):
         o = _orch()
@@ -285,6 +301,16 @@ class TestPhase2:
         with patch.object( o, "_proposal_voice_gate", AsyncMock() ) as gate:
             proposed, selected, plan = run( o.run_phase2_propose() )
         gate.assert_not_called()
+
+    def test_resume_from_the_phase_before_proposing_does_not_skip_generation( self ):
+        o = _orch()
+        o.proposed_fixes = [ _prop() ]
+        o.clusters = []; o.diagnoses = {}
+        o.set_resume_phase( TFE_PHASE_ORDINALS[ TFEPhase.DIAGNOSING ] )
+        with patch.object( o, "_proposal_voice_gate", AsyncMock() ) as gate:
+            proposed, selected, plan = run( o.run_phase2_propose() )
+        gate.assert_not_called()
+        assert proposed == [] and selected == []
 
     def test_no_clusters_or_diagnoses_skips( self ):
         o = _orch()
