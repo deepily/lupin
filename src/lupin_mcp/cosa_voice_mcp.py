@@ -4250,7 +4250,7 @@ def task_transition(
 
     `->done` REQUIRES `receipt_refs`: no receipt, no done. Keys: commit · test_run · qid · doc_path · log_line · operator_attestation · manager_attestation, but only four CLOSE a row, and a worker seat can mint one of them, a manager seat two: `commit` (a sha you produced); `test_run` (harness only, `ts-<8 hex>`); `operator_attestation` (the OPERATOR's word; the router decides whether you may assert it); `manager_attestation` (MANAGER seats only, else 403; the server stores the manager identity, so put evidence in `reason`; closes decision and held rows, never `parked`). A worker with no commit asks its manager to close the row; do not name an unrelated sha.
 
-    `->blocked` REQUIRES BOTH >=1 typed `blocked_by` ref ({kind: item|persona|user, id}) AND `next_chase_ts`. `->dropped` needs a `reason`. done and dropped are terminal.
+    `->blocked` REQUIRES >=1 typed `blocked_by` ref ({kind: item|persona|user, id}), and `next_chase_ts` only when a ref is `persona` (a user-only or item-only block needs none). `->dropped` needs a `reason`. done and dropped are terminal.
 
     Returns:
         { item, event } (server 200 body) verbatim, or an error dict (422: the server's `errors`; 404: "task {id} not found"). On a PROMOTION whose 25s poll budget runs out you get the 202 body (`status: "awaiting_human_approval"`, `ticket_id`): still waiting. Do NOT retry (it 422s); call `task_promotion_status`.
@@ -4259,7 +4259,7 @@ def task_transition(
         task_id: The item's UUID
         to_status: in_progress | blocked | parked | done | dropped
         receipt_refs: Receipt dict, REQUIRED for ->done
-        next_chase_ts: ISO-8601 time, REQUIRED for ->blocked and ->parked
+        next_chase_ts: ISO-8601 time, REQUIRED for ->parked, and for ->blocked when `blocked_by` has a persona ref
         blocked_by: Typed refs [{kind, id}], REQUIRED for ->blocked
         park_reason: REQUIRED (non-blank, <=4000) for ->parked (only from queued / in_progress): the row's OWN decisive sentence, QUOTED. The chase IS the un-park (the row rejoins the owed count when `next_chase_ts` passes); an INDEFINITE hold is `dropped`. Cleared on unpark
         reason: Rationale (<=4000); REQUIRED for ->dropped
