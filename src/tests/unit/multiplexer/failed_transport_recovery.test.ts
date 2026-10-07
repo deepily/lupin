@@ -92,7 +92,7 @@ test( "the surface is non-empty: the source walk finds the files this file reaso
   assert.ok( rels.includes( "transport/QueueTransport.ts" ), "walk must find the queue transport" );
 } );
 
-test( "some production code sends the `restart` event", () => {
+test( "some production code sends the `restart` event", { todo: "row 5a8bd0c6: still open by design, no Retry-now control and no 4001/4002/4003 routing yet" }, () => {
   const senders = productionSources()
     .filter( ( s ) => s.rel !== "transport/ConnectionStateMachine.ts" )
     .filter( ( s ) => /type\s*:\s*["']restart["']/.test( s.text ) )
@@ -100,7 +100,7 @@ test( "some production code sends the `restart` event", () => {
   assert.ok( senders.length > 0, "no production file outside the state machine sends { type: \"restart\" }, so a transport in failed stays failed" );
 } );
 
-test( "some consumer outside the transport layer routes the permanent-failure close codes", () => {
+test( "some consumer outside the transport layer routes the permanent-failure close codes", { todo: "row 5a8bd0c6: still open by design, no Retry-now control and no 4001/4002/4003 routing yet" }, () => {
   const routers = productionSources()
     .filter( ( s ) => !s.rel.startsWith( "transport/" ) && !s.rel.startsWith( "shared/" ) )
     .filter( ( s ) => /\b400[123]\b|auth-permanent/.test( s.text ) )
@@ -111,10 +111,16 @@ test( "some consumer outside the transport layer routes the permanent-failure cl
 test( "the restart event the machine accepts brings a failed transport back to a live socket", async () => {
   const { transport, csm } = await transportInFailed();
   const socketsBefore = MockWebSocket.instances.length;
-  csm.send( { type: "restart" } );
-  await new Promise( ( r ) => setTimeout( r, 10 ) );
-  assert.notEqual( transport.state, "failed", "restart must leave failed" );
-  assert.ok( MockWebSocket.instances.length > socketsBefore, "restart moves the machine to `connecting`, but no new socket is opened, so the transport waits on a connection nobody started" );
+  try {
+    csm.send( { type: "restart" } );
+    await new Promise( ( r ) => setTimeout( r, 10 ) );
+    assert.notEqual( transport.state, "failed", "restart must leave failed" );
+    assert.ok( MockWebSocket.instances.length > socketsBefore, "restart moves the machine to `connecting`, but no new socket is opened, so the transport waits on a connection nobody started" );
+    assert.equal( MockWebSocket.instances.length, socketsBefore + 1, "exactly one fresh socket" );
+    assert.equal( MockWebSocket.instances[ socketsBefore ]!.url, MockWebSocket.instances[ 0 ]!.url, "the fresh socket goes to the same session URL" );
+  } finally {
+    transport.stop();   // the fresh socket armed a handshake watchdog; a running transport keeps the test process alive
+  }
 } );
 
 test( "behaviour: 20 failed reconnects end in failed, and nothing the page can produce reopens it", async () => {

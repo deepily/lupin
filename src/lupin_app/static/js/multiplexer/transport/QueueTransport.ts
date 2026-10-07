@@ -355,6 +355,12 @@ export abstract class BaseTransportImpl implements Transport {
     } else if (state === "reconnecting") {
       this.cancelBackoffTimer();
       this.openSocket();
+    } else if (state === "connecting") {
+      // The initial `connecting` never reaches here (start() opens the first socket itself and the
+      // machine emits no transition for it). The only way back into `connecting` is `restart`
+      // from `failed`, whose entry stopped the socket, so a restart must open a fresh one.
+      this.cancelBackoffTimer();
+      this.openSocket();
     } else if (state === "offline" || state === "failed") {
       this.cancelBackoffTimer();
       this.cancelHandshakeTimer();
