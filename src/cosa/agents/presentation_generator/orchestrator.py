@@ -2274,6 +2274,8 @@ class PresentationOrchestratorAgent:
 def quick_smoke_test():
     """Quick smoke test for PresentationOrchestratorAgent."""
     import cosa.utils.util as cu
+    import tempfile, types
+    from unittest.mock import AsyncMock
 
     cu.print_banner( "PresentationOrchestratorAgent Smoke Test", prepend_nl=True )
 
@@ -2320,18 +2322,23 @@ def quick_smoke_test():
             # Reset stop flag
             agent._stop_requested = False
 
-            # Run phase 1 stub
-            agent.state = OrchestratorState.INGESTING
-            content = await agent._ingest_async()
-            assert "[stub]" in content
+            # Run phase 1 on a real temp file: ingest reads the file, it is no longer a stub
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                agent.source_path = os.path.join( tmp_dir, "doc.md" )
+                with open( agent.source_path, "w" ) as f: f.write( "# Title\n\nSome body text.\n" )
+                agent.state = OrchestratorState.INGESTING
+                content = await agent._ingest_async()
+            assert content == "# Title\n\nSome body text.\n"
 
-            # Run phase 2 stub
+            # Run phase 2 with an API client that raises: the real error propagates
+            agent._api_client = types.SimpleNamespace( call_for_analysis=AsyncMock( side_effect=RuntimeError( "smoke api down" ) ) )
             agent.state = OrchestratorState.ANALYZING
             try:
-                sections = await agent._analyze_async( content )
-            except Exception:
-                sections = []   # no API in the stub: the real error now propagates (row a362fc8b)
-            assert sections == []
+                await agent._analyze_async( content )
+                raise AssertionError( "analyze swallowed the API error" )
+            except RuntimeError as e:
+                assert "smoke api down" in str( e )
+            sections = []
 
             # D6-STRICT: content gates 1-3 REFUSE to proceed on empty input
             # (no auto-approve); the render gate (4) still auto-approves on None.
