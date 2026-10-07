@@ -2955,27 +2955,14 @@ def enable_speakerphone() -> dict:
     """
     Enter conversation mode for this session.
 
-    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an
-    explicit user instruction — voice phrase like "enter conversation mode" (or
-    close paraphrases), typed request, or slash command. NEVER call on your own
-    initiative. Preemptive activation ("since this is a long task...") is
-    forbidden. The mic is the user's to direct, not yours to grab.
+    USER-ONLY INITIATION (HARD RULE): Call this ONLY in direct response to an explicit user instruction: a voice phrase like "enter conversation mode" (or a close paraphrase), a typed request, or a slash command. NEVER call it on your own initiative; preemptive activation ("since this is a long task...") is forbidden. The mic is the user's to direct, not yours to grab.
 
-    When conversation mode is on, after every assistant turn you should call
-    `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the
-    response is spoken aloud (the user is listening at a distance via TTS, not reading
-    the terminal). Strip fenced code blocks and tool-call narration from the spoken text.
+    While conversation mode is on, after every assistant turn call `notify(message=<full_response_text>, suppress_ding=True, priority='high')` so the response is spoken aloud (the user is listening at a distance). Strip fenced code blocks and tool-call narration from the spoken text.
 
-    Mutual exclusion: at most one CC session at a time can hold conversation mode
-    across the user's sessions. Activating here will atomically displace any other
-    active session — its UI reverts, in-flight TTS pauses, sender card unpins.
-
-    State is stored in the bridge file and survives /clear within this session.
+    At most one CC session at a time can hold conversation mode across the user's sessions; activating here atomically displaces any other (its UI reverts, in-flight TTS pauses, sender card unpins). State is stored in the bridge file and survives /clear within this session.
 
     Returns:
-        dict with status, session_id, speakerphone_on=True on success;
-        when HTTP path is reachable, also includes "displaced_sessions" list and
-        "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
+        dict with status, session_id, speakerphone_on=True on success; when the HTTP path is reachable, also includes "displaced_sessions" and "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
     """
     return _flip_speakerphone( True )
 
@@ -3157,47 +3144,18 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
     """
     Request a named voice persona for this session, or let the server pick one.
 
-    USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an
-    explicit user instruction — e.g. "become Mr. Radio", "switch my voice to
-    Rachel", or a request to reclaim a persona that was lost after a context
-    compaction. NEVER call it on your own initiative. The persona pool is a
-    shared resource and the voice is the user's to assign, not yours to grab.
+    USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an explicit user instruction, e.g. "become Mr. Radio", "switch my voice to Rachel", or a request to reclaim a persona lost after a context compaction. NEVER call it on your own initiative: the persona pool is shared, and the voice is the user's to assign. This applies equally to the no-argument form: `request_persona()` is not a self-service fix for your own null persona; it only surrenders the choice of name to the server. Ask the user first, every time.
 
-    USER-INITIATED ONLY APPLIES EQUALLY TO THE NO-ARGUMENT FORM. Calling
-    `request_persona()` with no name is NOT a self-service path — it still
-    requires the user to have asked for a persona; it only surrenders the
-    CHOICE OF NAME to the server, which the user is not exercising when the
-    session is unnamed. Do not call it to fix your own null persona on your own
-    initiative. Ask the user first, every time.
-
-    (Historical note, so the rule is not mistaken for boilerplate: `name` used
-    to be a required argument. That requirement was doing double duty as an
-    accidental guard — self-allocating meant guessing a specific free pool name,
-    and the friction discouraged it. The no-argument form removes that friction,
-    so this instruction is now the only thing standing in its place.)
-
-    Routes through the canonical allocate endpoint, which swaps this session's
-    persona atomically under a server-side lock and broadcasts a
-    `voice_persona_assigned` WebSocket event — every connected browser tab
-    re-badges immediately, no extra client work. If another LIVE session
-    already holds the requested name you get status "occupied"; if the name is
-    not in the configured pool you get status "not_in_pool".
+    It swaps this session's persona atomically under a server-side lock and broadcasts a `voice_persona_assigned` WebSocket event, so every connected browser tab re-badges immediately. If another LIVE session already holds the requested name you get status "occupied"; if the name is not in the configured pool you get status "not_in_pool".
 
     Args:
-        name: The persona name to request (e.g. "Mr. Radio", "rachel",
-              "Tiberius"). Server-side resolution is case-insensitive.
-              OMIT ENTIRELY to have the server pick uniformly at random from
-              the unallocated pool — the path for healing a session whose
-              `voice_persona` is null, where no specific name is wanted.
-              Passing "" or "   " is a caller error, not a request for
-              auto-pick; only omission selects it.
+        name: The persona name to request (e.g. "Mr. Radio", "rachel", "Tiberius"); resolution is case-insensitive. OMIT ENTIRELY to have the server pick uniformly at random from the unallocated pool (the path for healing a session whose `voice_persona` is null, where no specific name is wanted). Passing "" or "   " is a caller error, not a request for auto-pick; only omission selects it.
 
     Returns:
-        dict — one of:
+        dict, one of:
           {status:"ok", session_id, voice_persona, swapped, message}
           {status:"not_in_pool", requested, available}
-          {status:"occupied", requested, holding_session_id,
-           holding_persona_name, available}
+          {status:"occupied", requested, holding_session_id, holding_persona_name, available}
           {status:"error", reason, ...}
 
     Examples:
