@@ -6,10 +6,10 @@ Provides a structured LLM prompt that includes similar past decisions
 as in-context examples, enabling pattern-matching for ambiguous CBR cases.
 
 Used only when CBR returns mixed verdicts with low confidence — a rare
-fallback path for genuinely ambiguous decisions.
+fallback path for ambiguous decisions.
 
 Dependency Rule:
-    This module NEVER imports from notification_proxy or swe_team.
+    This module never imports from notification_proxy or swe_team.
 """
 
 ICRL_DECISION_PROMPT = """You are a decision proxy that approves or rejects engineering actions.
