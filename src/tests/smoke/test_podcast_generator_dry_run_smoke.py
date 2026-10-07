@@ -192,8 +192,10 @@ def quick_smoke_test():
             print( f"✓ {key}: present" )
 
         # Verify expected values
-        assert data[ "status" ] == "queued", f"Expected status 'queued', got '{data[ 'status' ]}'"
-        print( "✓ Status is 'queued'" )
+        # AskResponse.status is done | waiting | parked | needs_input | expired | failed. A job the
+        # executor just queued answers "waiting" (v2/executor.py); "queued" is not in that set.
+        assert data[ "status" ] == "waiting", f"Expected status 'waiting', got '{data[ 'status' ]}'"
+        print( "✓ Status is 'waiting'" )
 
         assert data[ "job_id" ].startswith( "pg-" ), f"Expected job_id to start with 'pg-', got '{data[ 'job_id' ]}'"
         print( f"✓ Job ID format correct: {data[ 'job_id' ]}" )
