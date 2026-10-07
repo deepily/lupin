@@ -101,3 +101,5 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-transport-and-auth]] — the multiplexer page's two WebSockets, refreshable login token and in-page event bus, wired by `bootMultiplexer`. `src/lupin_app/static/js/multiplexer` (auth, transport, boot, shared)
 - [[web-client-stores]] — the multiplexer page's state stores, each built by a `createXStore` function from the event bus and announcing change as a `store_*_changed` event. `src/lupin_app/static/js/multiplexer/stores`
 - [[db-repositories]] — the Postgres repository classes built on one generic base, mapped to the capability that uses each, and the vector search they share. `cosa.rest.db` (repositories, database)
+- [[web-client-task-board-panes]] — the four panes that show the task store: task list, epic board, holding area and finished tasks. `src/lupin_app/static/js/multiplexer/render`
+- [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
