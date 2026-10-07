@@ -112,7 +112,7 @@ def test_a_login_changed_after_seeding_is_treated_as_exported( swap, monkeypatch
 def test_a_swap_before_any_login_was_chosen_chooses_the_one_for_the_new_environment( swap ):
     swap( "testing" )
     assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_test", "testpw" )
-    assert dotenv_password.reselect_seeded_login() is True
+    assert database.reselect_seeded_login() is True
 
 
 def test_the_previous_login_is_put_back_when_the_new_environment_finds_none( swap, tmp_path ):
@@ -130,3 +130,45 @@ def test_a_superuser_password_seeded_alone_is_chosen_again_too( swap, tmp_path )
     assert os.environ[ "DB_PASSWORD" ] == "superpw" and "DB_USER" not in os.environ
     swap( "testing" )
     assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_test", "testpw" )
+
+
+def test_a_superuser_password_does_not_replace_a_role_login_when_no_test_keys_exist( swap, tmp_path ):
+    ( tmp_path / ".env" ).write_text( _env( POSTGRES_PASSWORD="superpw", LUPIN_HOST_DB_PASSWORD="hostpw" ) )
+    database.get_database_url()
+    assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_host", "hostpw" )
+    swap( "testing" )
+    assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_host", "hostpw" )
+    swap( "development" )
+    assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_host", "hostpw" )
+
+
+SUPER = ( None, "superpw" )
+HOST  = ( "lupin_host", "hostpw" )
+TEST  = ( "lupin_test", "testpw" )
+NONE  = ( None, None )
+
+
+@pytest.mark.parametrize( "host_keys, test_keys, superuser, first, in_testing, back_in_development", [
+    ( True,  False, True,  HOST,  HOST, HOST ),
+    ( True,  False, False, HOST,  HOST, HOST ),
+    ( False, True,  True,  SUPER, TEST, TEST ),
+    ( False, True,  False, NONE,  TEST, TEST ),
+    ( True,  True,  True,  HOST,  TEST, HOST ),
+    ( True,  True,  False, HOST,  TEST, HOST ),
+    ( False, False, True,  SUPER, SUPER, SUPER ),
+    ( False, False, False, NONE,  NONE, NONE ),
+] )
+def test_every_combination_of_env_keys_never_ends_on_a_wider_login_than_it_found(
+        swap, tmp_path, host_keys, test_keys, superuser, first, in_testing, back_in_development ):
+    pairs = { }
+    if superuser: pairs[ "POSTGRES_PASSWORD" ]        = "superpw"
+    if host_keys: pairs[ "LUPIN_HOST_DB_PASSWORD" ]   = "hostpw"
+    if test_keys: pairs[ "LUPIN_TEST_DB_PASSWORD" ]   = "testpw"
+    ( tmp_path / ".env" ).write_text( _env( **pairs ) )
+    login = lambda: ( os.environ.get( "DB_USER" ), os.environ.get( "DB_PASSWORD" ) )
+    database.get_database_url()
+    assert login() == first
+    swap( "testing" )
+    assert login() == in_testing
+    swap( "development" )
+    assert login() == back_in_development

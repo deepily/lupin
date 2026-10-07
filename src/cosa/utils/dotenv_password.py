@@ -152,6 +152,7 @@ def reselect_seeded_login( root=None ):
         - otherwise clears the seeded values and seeds again, so the role matches LUPIN_ENV, and
           returns True
         - puts the previous login back, and returns False, when the second seeding finds nothing
+          or finds only a password that would replace a role login with the superuser's name
         - never raises
     """
     if not _SEEDED: return False
@@ -163,7 +164,13 @@ def reselect_seeded_login( root=None ):
     _SEEDED.clear()
 
     seed_db_password_from_dotenv( root )
-    if os.environ.get( "DB_PASSWORD" ): return True
+    # A role login that is replaced by a bare password (no DB_USER) would fall back to the
+    # superuser's name, so that counts as finding none.
+    lost_role = "DB_USER" in previous and "DB_USER" not in os.environ
+    if os.environ.get( "DB_PASSWORD" ) and not lost_role: return True
+
+    for key in ( "DB_USER", "DB_PASSWORD" ): os.environ.pop( key, None )
+    _SEEDED.clear()
 
     os.environ.update( previous )
     _SEEDED.update( previous )
