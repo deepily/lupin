@@ -293,8 +293,12 @@
         confirmBtn.addEventListener( "click", async () => {
             confirmBtn.disabled = true;
             confirmBtn.textContent = "sending…";
+            // The recipients the user is confirming, captured NOW. The tally's denominator must be
+            // what was shown and sent to, not whatever recipientCache holds when the POST returns:
+            // a refresh that fails in between empties the cache and read as "All 0 sessions".
+            const sentTo = recipientCache.slice();
             try {
-                await postBroadcast( ta.value );
+                await postBroadcast( ta.value, sentTo );
                 overlay.remove();
             } catch ( e ) {
                 confirmBtn.disabled = false;
@@ -316,7 +320,7 @@
     }
 
     // ─── POST broadcast ────────────────────────────────────────────────
-    async function postBroadcast( message ) {
+    async function postBroadcast( message, sentTo ) {
         setStatus( "submitting…" );
         const res = await authedFetch( BROADCAST_URL, { "Content-Type": "application/json" }, {
             method  : "POST",
@@ -339,7 +343,7 @@
 
         const data = await res.json();
         // Initialize the aggregate panel — start tracking expected sessions.
-        const expected = recipientCache.map( s => s.session_id );
+        const expected = sentTo.map( s => s.session_id );
         initializeAggregate( data.broadcast_id, expected, data.recipients );
 
         const ta = document.getElementById( "broadcast-textarea" );
@@ -395,6 +399,8 @@
             timedOut         : false,
         };
         renderAggregate();
+        // Armed now, not by the first ack: a broadcast nobody answers must still time out.
+        scheduleAutoDismiss();
     }
 
     /**

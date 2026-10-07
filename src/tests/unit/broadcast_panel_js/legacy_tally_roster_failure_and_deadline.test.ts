@@ -112,12 +112,12 @@ test( "a broadcast nobody acknowledges still times out: the deadline is armed wh
   assert.equal( timers.filter( ( t ) => t.ms === 5 * 60 * 1000 ).length, 1, "one 5-minute deadline must be armed by the send; no ack has arrived to arm it" );
 } );
 
-test( "control for the timer capture: the first ack DOES arm the 5-minute deadline", async () => {
+test( "control for the timer capture: an ack re-arms the 5-minute deadline", async () => {
   await sendWithPostPending();
   release( jsonResponse( { broadcast_id: "bbbbbbbb-1111-4222-8333-444444444444", recipients: 2 } ) );
   await tick();
   ( window as unknown as { broadcastPanel: { handleAck( n: unknown ): void } } ).broadcastPanel.handleAck( {
     payload: { broadcast_id: "bbbbbbbb-1111-4222-8333-444444444444", session_id: "s1aaaaaa-1111", persona_name: "Rio", status: "ok", body_summary: "got it" },
   } );
-  assert.equal( timers.filter( ( t ) => t.ms === 5 * 60 * 1000 ).length, 1, "the capture sees the timer the ack arms" );
+  assert.equal( timers.filter( ( t ) => t.ms === 5 * 60 * 1000 ).length, 2, "the capture sees the send's timer and the one the ack re-arms" );
 } );
