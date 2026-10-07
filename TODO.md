@@ -59,6 +59,11 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **No report until all of the source is swept; the server stays up all night** (voice, about 23:05 EDT on 2026-10-06). The package sweep then finished as scoped, and its scope was not all of the source.
 - **Compile the sweep report now, as scoped** (card, answered 10:29 EDT: "Compile now, as scoped (Recommended)"). Not chosen: wait for a tests sweep; decide later. Report `2026.10.07-docstring-sweep-before-and-after-report.md` in the docs-rewrite plan folder, row `170cda00`. A second edition follows if the test files are swept. Whether they are swept is not ruled.
 - **The database login cutover: prepare only, cut over later** (card, answered about 10:39 EDT: "Prepare only, cut over later (Recommended)"). Rick ran the two provision commands at about 10:37 EDT. The compose change is rebuilt on today's code and kept off the branch; Rick picks the cutover time. Not chosen: cut over today; stop here. Row `80513825`.
+- **Keep lint findings out of swept docstrings by refusing them, not logging them** (broadcast `94bac2c0`; card answered before 10:58 EDT: "Yes, swept files first (Recommended)"). Three locks: a commit gate, a push hook and a merge-pyramid suite named `doclint`. Rows `4226b1b1` (Cheech) and `2c48c717` (Mr. Radio).
+- **A waiver is allowed with a same-line reason** (same card: "Yes, with a reason (Recommended)").
+- **The MCP folder is locked only after its prompts are reviewed** (same card, his words): "Hold the count after the dock strings which serve as a prompt to LLMs are reviewed for the appropriateness of the language contained within them Once those prompts are reviewed and edited to remove superfluous or counterproductive mandates Then they can be locked". Row `f2d2a1c7` (Cheech).
+- **The lock work is Mr. Radio's ticket, to be approved and raised to P0** (voice, about 11:53 EDT). Row `2c48c717`.
+- **Both managers review every ticket and propose an easy way to remove obsolete ones** (broadcast `86e4535b`). Not ruled yet: the joint list of four rows to drop, the seats question for Mr. Radio (two cards timed out), and the Jev key and spend question (decision row `53ebe1a9`, Cheech).
 
 ## 📚 DECISIONS LOG 2026-10-06 (Mr. Radio 🦉 `4afec3b4`, no crew)
 
