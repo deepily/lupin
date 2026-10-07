@@ -162,6 +162,9 @@ class PresentationOrchestratorAgent:
         # Lazy-initialized clients
         self._api_client = None
 
+        # The error a gate-1 re-analysis raised, so the gate lets it through as itself
+        self._analysis_failure = None
+
         if self.debug:
             print( f"[PresentationOrchestratorAgent] Initialized for: {source_path}" )
             print( f"[PresentationOrchestratorAgent] Presentation ID: {self.presentation_id}" )
@@ -1924,7 +1927,11 @@ class PresentationOrchestratorAgent:
 
                     # Re-run analysis with feedback appended
                     source_content = self._presentation_state.get( "source_content", "" )
-                    new_sections = await self._analyze_async( source_content )
+                    try:
+                        new_sections = await self._analyze_async( source_content )
+                    except Exception as analysis_error:
+                        self._analysis_failure = analysis_error
+                        raise
                     self._presentation_state[ "narrative_sections" ] = new_sections
 
                     # Recursive gate review with new sections
@@ -1938,6 +1945,8 @@ class PresentationOrchestratorAgent:
                 return True
 
         except Exception as e:
+            # A failed re-analysis is not a voice failure: it keeps its own type and message.
+            if e is self._analysis_failure: raise
             # A gate that could not reach a human FAILS. It does not proceed.
             # This previously returned True "to not block the pipeline", which
             # turned the failure of the approval mechanism into an approval.

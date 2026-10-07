@@ -1164,6 +1164,26 @@ class TestGate1NarrativeReview:
         assert agent._presentation_state[ "revision_count" ] == 1
         agent._analyze_async.assert_awaited_once()
 
+    def test_revise_analysis_error_keeps_its_own_type( self, _silence_voice_io ):
+        # A failed re-analysis is not a gate that could not reach a human: the API error
+        # propagates as itself, in the first revision and in a nested one.
+        agent = _agent()
+        agent._analyze_async = AsyncMock( side_effect=RuntimeError( "api down" ) )
+        _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
+        _silence_voice_io[ "input" ].return_value = "merge sections"
+        with pytest.raises( RuntimeError, match="api down" ) as excinfo:
+            _run( agent._gate_1_narrative_review( [ _section() ] ) )
+        assert not isinstance( excinfo.value, VoiceGateNotAnsweredError )
+
+    def test_nested_revise_analysis_error_keeps_its_own_type( self, _silence_voice_io ):
+        agent = _agent()
+        agent._analyze_async = AsyncMock( side_effect=[ [ _section( "New" ) ], RuntimeError( "api down" ) ] )
+        _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
+        _silence_voice_io[ "input" ].return_value = "again"
+        with pytest.raises( RuntimeError, match="api down" ) as excinfo:
+            _run( agent._gate_1_narrative_review( [ _section() ] ) )
+        assert not isinstance( excinfo.value, VoiceGateNotAnsweredError )
+
     def test_revise_empty_feedback_approves( self, _silence_voice_io ):
         agent = _agent()
         _silence_voice_io[ "choices" ].return_value = _ans( "Narrative Arc", "Revise" )
