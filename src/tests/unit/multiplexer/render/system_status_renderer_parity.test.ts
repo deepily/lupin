@@ -47,6 +47,7 @@ import {
   HEALTH_STOPPED,
   HEALTH_CIRCUIT,
   HEALTH_INTERVAL_MS,
+  RETRY_NOW_LABEL,
   type TransportStateLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/SystemStatusRenderer";
 import type { ConnectionState, ConnectionStateChangePayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
@@ -58,8 +59,8 @@ before( () => {
 const FIXED_DATE = (): Date => new Date( "2026-09-23T20:30:07Z" );
 
 /** A transport whose state can be moved between assertions. */
-function fakeTransport( state: ConnectionState ): TransportStateLike & { set( s: ConnectionState ): void } {
-  const holder = { state, set( s: ConnectionState ) { holder.state = s; } };
+function fakeTransport( state: ConnectionState ): TransportStateLike & { set( s: ConnectionState ): void; restarts: number } {
+  const holder = { state, restarts: 0, set( s: ConnectionState ) { holder.state = s; }, restart() { holder.restarts++; } };
   return holder;
 }
 
@@ -555,4 +556,40 @@ test( "mounting twice throws; unmount empties the root and detaches the socket s
   assert.equal( root.children.length, 0 );
   queue.set( "failed" );
   emitState( "QueueTransport", "failed" );   // must not throw into a torn-down pane
+} );
+
+
+// ---- Retry-now (row 5a8bd0c6, Rick's ruling 2026-10-07) -------------------------------------
+
+const RETRY = "multiplexer-ws-retry-now-btn";
+
+test( "Retry-now: hidden while nothing is failed, shown with the circuit line, hidden again after", () => {
+  const queue = fakeTransport( "connected" );
+  const { q, emitState, intervals } = mountPane( { queue, audio: fakeTransport( "connected" ) } );
+  assert.equal( q( RETRY ).textContent, RETRY_NOW_LABEL );
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden at mount" );
+  intervals[ 0 ]!.cb();
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden while healthy" );
+  queue.set( "failed" );
+  emitState( "QueueTransport", "failed" );
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, false, "shown with HEALTH_CIRCUIT" );
+  queue.set( "connecting" );
+  emitState( "QueueTransport", "connecting" );
+  assert.equal( ( q( RETRY ) as HTMLButtonElement ).hidden, true, "hidden once the transport left failed" );
+} );
+
+test( "Retry-now: a click restarts the failed transport and leaves the healthy one alone", () => {
+  const queue = fakeTransport( "failed" );
+  const audio = fakeTransport( "connected" );
+  const { q } = mountPane( { queue, audio } );
+  q( RETRY ).click();
+  assert.deepEqual( [ queue.restarts, audio.restarts ], [ 1, 0 ] );
+} );
+
+test( "Retry-now: both failed → both restart; a pane with no transports wired clicks without throwing", () => {
+  const queue = fakeTransport( "failed" );
+  const audio = fakeTransport( "failed" );
+  mountPane( { queue, audio } ).q( RETRY ).click();
+  assert.deepEqual( [ queue.restarts, audio.restarts ], [ 1, 1 ] );
+  mountPane( {} ).q( RETRY ).click();
 } );

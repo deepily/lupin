@@ -41,9 +41,10 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
-/** The one thing this pane asks a transport: what state is it in right now. */
+/** What this pane asks a transport: what state is it in, and (Retry-now) restart from `failed`. */
 export interface TransportStateLike {
   readonly state: ConnectionState;
+  restart(): void;
 }
 
 /** A status pill: the words, and the class that colours them. */
@@ -98,6 +99,9 @@ export const SEEDED = Object.freeze( {
 export const HEALTH_MONITORING = "Monitoring (90s interval)";
 export const HEALTH_STOPPED    = "Stopped";
 export const HEALTH_CIRCUIT    = "Circuit open — click Retry-now";
+
+/** The Retry-now button's label, verbatim from the legacy banner's button. */
+export const RETRY_NOW_LABEL   = "Retry now";
 
 /** The readout interval. Legacy's watchdog cadence, and its words say so. */
 export const HEALTH_INTERVAL_MS = 90_000;
@@ -178,6 +182,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   private queueCodeEl : HTMLElement | null = null;
   private audioCodeEl : HTMLElement | null = null;
   private healthEl    : HTMLElement | null = null;
+  private retryBtn    : HTMLButtonElement | null = null;
   private configEl    : HTMLElement | null = null;
   private reinitBtn   : HTMLButtonElement | null = null;
   private refreshBtn  : HTMLButtonElement | null = null;
@@ -253,6 +258,19 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     const healthRow = statusRow( "Health Monitor", "multiplexer-ws-health-status", SEEDED.health, "status-info" );
     this.healthEl = healthRow.valueEl;
 
+    // Retry-now (row 5a8bd0c6, Rick 2026-10-07): the one way out of `failed`. Hidden unless a
+    // transport is failed; paintHealth shows and hides it with the circuit line it belongs to.
+    const retryBtn = document.createElement( "button" );
+    retryBtn.type = "button";
+    retryBtn.className = "ws-circuit-retry-btn";
+    retryBtn.setAttribute( "data-testid", "multiplexer-ws-retry-now-btn" );
+    retryBtn.setAttribute( "title", "Restart every socket that has given up reconnecting" );
+    retryBtn.textContent = RETRY_NOW_LABEL;
+    retryBtn.hidden = true;
+    retryBtn.addEventListener( "click", () => { this.retryNow(); } );
+    this.retryBtn = retryBtn;
+    healthRow.root.append( retryBtn );
+
     // --- the Config row (S8 / B-5L) -----------------------------------------
     const configRoot = document.createElement( "div" );
     configRoot.className = "status-item";
@@ -322,7 +340,7 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     if ( this.root !== null ) this.root.replaceChildren();
     this.root = null;
     this.queuePillEl = this.audioPillEl = this.authEl = this.userEl = null;
-    this.queueCodeEl = this.audioCodeEl = this.healthEl = this.configEl = null;
+    this.queueCodeEl = this.audioCodeEl = this.healthEl = this.configEl = this.retryBtn = null;
     this.reinitBtn = this.refreshBtn = null;
     this.mounted = false;
   }
@@ -495,12 +513,27 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     const queue = this.transports.queue?.state;
     const audio = this.transports.audio?.state;
 
+    if ( this.retryBtn !== null ) this.retryBtn.hidden = !( queue === "failed" || audio === "failed" );
+
     if ( queue === "connected" && audio === "connected" ) {
       this.setHealth( `✓ Healthy (checked ${ this.nowDateFn().toLocaleTimeString() })`, "status-success" );
     } else if ( queue === "failed" || audio === "failed" ) {
       this.setHealth( HEALTH_CIRCUIT, "status-error" );
     } else {
       this.setHealth( `Watchdog: queue=${ queue ?? "none" } audio=${ audio ?? "none" }`, "status-warning" );
+    }
+  }
+
+  /**
+   * Retry-now — restart each transport that is in `failed`, and only those.
+   *
+   * Ensures:
+   *   - a transport in any other state is not touched (restart is also a no-op there)
+   *   - the pane repaints from the transports' own `connection_state_change` events, not here
+   */
+  private retryNow(): void {
+    for ( const transport of [ this.transports.queue, this.transports.audio ] ) {
+      if ( transport?.state === "failed" ) transport.restart();
     }
   }
 

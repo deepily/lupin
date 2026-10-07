@@ -92,15 +92,38 @@ test( "the surface is non-empty: the source walk finds the files this file reaso
   assert.ok( rels.includes( "transport/QueueTransport.ts" ), "walk must find the queue transport" );
 } );
 
-test( "some production code sends the `restart` event", { todo: "row 5a8bd0c6: still open by design, no Retry-now control and no 4001/4002/4003 routing yet" }, () => {
-  const senders = productionSources()
-    .filter( ( s ) => s.rel !== "transport/ConnectionStateMachine.ts" )
-    .filter( ( s ) => /type\s*:\s*["']restart["']/.test( s.text ) )
+test( "a consumer outside the transport layer asks a failed transport to restart", () => {
+  const callers = productionSources()
+    .filter( ( s ) => !s.rel.startsWith( "transport/" ) )
+    .filter( ( s ) => /\.restart\(\s*\)/.test( s.text ) )
     .map( ( s ) => s.rel );
-  assert.ok( senders.length > 0, "no production file outside the state machine sends { type: \"restart\" }, so a transport in failed stays failed" );
+  assert.deepEqual( callers, [ "render/SystemStatusRenderer.ts" ], "the Retry-now button in the System Status pane is the one caller" );
 } );
 
-test( "some consumer outside the transport layer routes the permanent-failure close codes", { todo: "row 5a8bd0c6: still open by design, no Retry-now control and no 4001/4002/4003 routing yet" }, () => {
+test( "Transport.restart() leaves failed and opens one fresh socket; in any other state it does nothing", async () => {
+  const { transport } = await transportInFailed();
+  const before = MockWebSocket.instances.length;
+  try {
+    transport.restart();
+    assert.notEqual( transport.state, "failed" );
+    assert.equal( MockWebSocket.instances.length, before + 1, "exactly one fresh socket" );
+    transport.restart();   // now connecting: a second click must not open another
+    assert.equal( MockWebSocket.instances.length, before + 1, "a restart outside failed is a no-op" );
+  } finally {
+    transport.stop();
+  }
+} );
+
+test( "Transport.restart() before start() is a no-op", () => {
+  const transport = createQueueTransport( {
+    authManager : makeAuth(), bus : createEventBusForTesting(), baseUrl : "",
+    WebSocketCtor : MockWebSocket as unknown as typeof WebSocket,
+  } );
+  transport.restart();
+  assert.equal( transport.state, "connecting" );
+} );
+
+test( "some consumer outside the transport layer routes the permanent-failure close codes", { todo: "row 5a8bd0c6: still open by design, Rick has not ruled on 4001/4002/4003 routing" }, () => {
   const routers = productionSources()
     .filter( ( s ) => !s.rel.startsWith( "transport/" ) && !s.rel.startsWith( "shared/" ) )
     .filter( ( s ) => /\b400[123]\b|auth-permanent/.test( s.text ) )

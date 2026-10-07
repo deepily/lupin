@@ -53,6 +53,8 @@ const HANDSHAKE_TIMEOUT_MS = 10000;
 export interface Transport {
   start(sessionId: string): void;
   stop(): void;
+  /** Leave `failed` and open a fresh socket. A no-op in any other state. */
+  restart(): void;
   send(envelope: unknown): void;
   readonly state: ConnectionState;
 }
@@ -172,6 +174,17 @@ export abstract class BaseTransportImpl implements Transport {
       this.csm = null;
     }
     this.authReady = false;
+  }
+
+  /**
+   * The operator's way out of `failed` (row 5a8bd0c6, Rick's ruling 2026-10-07): sends the
+   * machine's `restart` event, whose move into `connecting` opens a fresh socket in
+   * `onStateChange`. Only `failed` accepts the event, so a double click or a stale button
+   * cannot disturb a socket that is already trying.
+   */
+  restart(): void {
+    if (this.csm === null) return;
+    this.csm.send({ type: "restart" });
   }
 
   send(envelope: unknown): void {
