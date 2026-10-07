@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.06 to 10.07 - Session e281ef6f (Cheech 🌿, manager; crew Rachel 🕊️, Rio ⚡, John 🏄🏽, Chloé 🗼 writers, Tiberius 👑, Krishna 🦚, Sam 🎙️ reviewers, all Sonnet; seven self re-spins) | Docs sweep finished as scoped in six trains; full pyramid not green; tests assessed; crew stood down
+
+- **Package sweep, row `51cd818b`**: six trains merged by fast-forward on 2026-10-06, 14:30 to 23:06 EDT: `ce73541d3`, `b5dce3f8e`, `c05bf4103`, `7d2a04764`, `b34dfd63d`, `72fb54a2e`. 74 packages and directories. Integration 451 passed, 0 failed after each (`ts-d1221709`, `ts-1a955ad8`, `ts-7686cfc2`, `ts-d1cefd44`, `ts-d054b3a6`, `ts-ee95baf8`). Flagged docstrings in scope: 3,736 at `ce39674c7`, 324 at `72fb54a2e` (323 in `src/lupin_mcp`, left out on purpose).
+- **Meaning kept** (Krishna's totals, `io/tmp/2026.10.07-krishna-sweep-meaning-kept-totals.md`): 40,100 claims checked, 4,112 judged absent, final reviewer sorts 2,303 history, 1,655 judge error, 175 moved, 0 real loss; 37 restore commits. Losses found before restore: 117, a floor from 23 of 74 packages.
+- **Full pyramid on `42add0f35`** (`ts-94121d63`, ended 02:13 EDT 2026-10-07): not green. Clean: typecheck, stylelint, cosa, typescript, websocket, integration; host unit 30,276 passed; measured coverage 97.65%. Red: the container unit tier killed at 1,800 s (row `2f18ad99`), 11 older smoke defects (row `a362fc8b`), four picture tests (row `a0d081da`, now Mr. Radio's). Record: `io/tmp/2026.10.07-cheech-morning-report.md`.
+- **Side work, built and reviewed, not merged**: TypeScript and JavaScript doc checker at `refs/keep/ts-doc-checker/11` (row `6fc942bb`); claim extractor revision 2 rejected by me, pinned `refs/keep/extractor-granularity/04` to `07` (row `7e2c8696`). Dart dev 80 failed the pass rule; gate 175 not run (row `3740dd5b`).
+- **Tests assessment** (Rick's order, row `573056ae`): 25,823 test docstrings, 12,409 flagged; neither v0.2.2 plan covers tests; identical copied helpers are 10.2% of test helper definitions against 1.9% in the application. `io/tmp/2026.10.07-cheech-tests-preliminary-assessment.md`.
+- **Crew**: all seven seats reaped 10:36 to 10:41 EDT on 2026-10-07 on Rick's card, each memento verified by the reap. John left four sweep locks his seat could not release.
+- **Owed**: the post-game for this run; Rick's four decisions on tests; his rulings on the held rows.
+- **Files**: history.md, TODO.md; code via six reviewed fast-forward merges.
+
 ### 2026.10.07 - Session 4afec3b4 → c54f6913 (Mr. Radio 🦉, manager, no crew; checkpoint at 10:42 EDT) | Sweep report compiled as scoped; picture-test reds run down; database logins verified
 
 - **Sweep report, row `170cda00`** (Rick's ruling, 10:29 EDT): `2026.10.07-docstring-sweep-before-and-after-report.md` in the docs-rewrite plan folder, `e68277983`. One linter for every count. Six trains: 3,485 docstrings changed, 29,871 lint findings removed. The swept scope, 859 files, went from 29,838 findings to 0. The whole tree went from 112,416 to 82,545.

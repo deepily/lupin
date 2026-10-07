@@ -16,6 +16,42 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-06 to 10-07 (Cheech 🌿 `e281ef6f`; crew Rachel · Rio · John · Chloé · Tiberius · Krishna · Sam) — docs sweep, six trains
+
+**Rick ruled** (voice unless marked; recorded on row `51cd818b` unless another row is named):
+
+- **Seven seats for the sweep, and a second train as soon as the first is tested** (2026-10-06, 08:56 and 10:02 EDT). "I'm giving you exclusive access to the fleet and fleet cap."
+- **John runs Chloé's claim checks** (keypress, about 14:05 EDT), after the permission classifier refused her seat.
+- **A unit test that compares an installed file byte for byte is fixed by a redeploy after the merge** (keypress, 16:09 EDT).
+- **Trains 4 to 8 are pre-approved** (19:33 to 19:48 EDT).
+- **A standing yes to write the wake-proof marker on my own self re-spin** (voice, then keypress, about 19:40 EDT).
+- **The agent prompt folders are swept, in the last train** (keypress, 20:38 EDT).
+- **Start a TypeScript and JavaScript doc checker tonight: designed, built, reviewed, not merged until he has seen it** (keypress, 20:38 EDT; row `6fc942bb`).
+- **The Dart labelled set runs after the Python sweep** (keypress, 20:38 EDT), then **"Hold it, fix the extractor first"** (keypress, about 22:31 EDT; rows `3740dd5b`, `7e2c8696`).
+- **The stop poke is on and the host stays up all night** (20:29 and 20:46 EDT).
+- **Decisions on how to pursue ordered work are the manager's: decide, record on the row, report in the morning** (about 23:02 EDT). Still his: push, merging the TypeScript checker, the one-time Dart gate run.
+- **He will not approve holding-area rows one at a time**; he wants one bulk card (evening).
+- **A preliminary assessment of the tests** (typed on a card, 2026-10-07 about 10:30 EDT; row `573056ae`): terrain, whether the planning documents cover them, whether reuse matters there.
+- **Keep three seats for that assessment, reap four, then reap the three** (card, 2026-10-07 about 10:35 EDT: "Keep three, reap four (Recommended)"). An earlier card answered "Stand the crew down".
+- **A full session-end ritual with a push and a backup, and the day continues** (broadcast `3b13eabd`, 2026-10-07).
+
+**Cheech ruled** (each told to the crew; detail in `io/tmp/2026.10.07-cheech-morning-report.md` section 4):
+
+- **At most two claim checks run at once, and the manager gives the slots.** Four at once spent the plan's usage window in 30 minutes.
+- **The last text commit of a package is always claim-checked**, a one-line fix included.
+- **Dropped history goes word for word into an empty commit's body.** A date, a sha or a name is history; a present-day fact is never cut to fit a length limit.
+- **Correct code, a literal config key or literal command syntax is never reworded to satisfy the lint; the lint gets fixed** (bugs `530f1056`, `42b51734`).
+- **A test that pins docstring wording gets a reviewed test update with a redden proof**, never a bent docstring. A test change is never inside a docs commit.
+- **Migrations: no code line changes; "Revision ID" and "Revises" stay word for word; "Create Date" lines are history.**
+- **Only the manager closes a claim row, with the merge commit as receipt.** The builder treats a done row as landed.
+- **A row either reviewer calls a loss is restored.** `src/scripts` was sorted twice by two seats after the first sort missed five losses.
+- **Left out of the sweep**: `src/lupin_mcp` (its tool docstrings are prompts) and one Docker script (an edit invalidates the image layer cache; row `b866d466`).
+- **Claim extractor revision 2 is not adopted** (row `7e2c8696`): it reworded the deciding claim of pair p052, which went from caught to missed in one of two runs. No revision 3 before a fresh dev slice from Tiffany.
+- **No judge change for pair p068** (row `e84d5b49`): two blind readers called the pair ambiguous; it goes to Tiffany.
+- **The ten TypeScript checker design questions take the recommended answer each** (row `6fc942bb`), Rick being asleep; the merge stays his.
+
+**Open with Rick**: push of later work; the TypeScript checker merge; the Dart gate run; a tests sweep and the three other choices in `io/tmp/2026.10.07-cheech-tests-preliminary-assessment.md`; the held rows as one bulk card.
+
 ## 📚 DECISIONS LOG 2026-10-07 (Mr. Radio 🦉 `4afec3b4`, re-spun as `c54f6913`; no crew)
 
 **Rick ruled** (2026-10-07):
