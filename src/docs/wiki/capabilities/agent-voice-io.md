@@ -21,7 +21,7 @@ How a job tells the user something or asks a question: by voice when a notificat
 ## What it does
 - `notify` announces progress, `ask_yes_no` asks for a yes or no, `present_choices` asks a multiple-choice question and returns a dict, `choose`, `select_themes` and `select_topics` return a bare label or list.
 - `configure( cosa_interface )` binds the module to one agent's `cosa_interface`, which must provide `notify_progress`, `ask_confirmation`, `get_feedback` and `present_choices`.
-- `AgentNotificationDispatcher` is what each `cosa_interface` delegates to: it builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
+- `AgentNotificationDispatcher` is what seven of the ten `cosa_interface.py` files build (not decision_proxy, notification_proxy or test_fix_expediter, which reuses bug_fix_expediter's): it builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
 
 ## When nobody can answer
 - On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`, and raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers; on the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
@@ -29,7 +29,7 @@ How a job tells the user something or asks a question: by voice when a notificat
 - `read_gate_answer` returns the answer under a header. A missing header raises `VoiceGateNoDefaultError` unless the caller passed an `unattended_default`, which is then returned; a default used is logged as a warning.
 
 ## Invariants
-- One module-level interface binding serves the whole process, so the last `configure()` wins. Each agent's `voice_io.reconfigure()` (see deep_research's) re-asserts its own binding; call it at the start of a job.
+- One module-level interface binding serves the whole process, so the last `configure()` wins. Six agents define `voice_io.reconfigure()` (bug_fix_expediter, deep_research, podcast_generator, presentation_generator, swe_team, test_suite); it re-asserts that agent's binding, so call it at the start of a job.
 - Inside the agentic pool, set the sender, user and session name with the agent's `set_dispatch_context()` (ContextVars). Writing the module-level `SENDER_ID` or `TARGET_USER` leaks one job's identity onto a concurrent job's notifications.
 - `notify` never raises: a failed dispatch falls back to `print`.
 
