@@ -462,18 +462,37 @@ def quick_smoke_test():
         assert gs.verbose is False
         print( "✓ Constructor works" )
 
-        # 4: commit_and_pr_multi is a stub
+        # 4: commit_and_pr_multi — empty clusters answer with an error dict, never a raise
         import asyncio
-        async def test_multi_stub():
+        async def test_multi_empty():
             gs2 = GitStrategist( debug=False )
-            try:
-                await gs2.commit_and_pr_multi( None, [], 1, None, "", "" )
-                return False
-            except NotImplementedError:
-                return True
+            return await gs2.commit_and_pr_multi( None, [], 1, None, "", "" )
 
-        assert asyncio.run( test_multi_stub() ), "multi should raise NotImplementedError"
-        print( "✓ commit_and_pr_multi stub raises NotImplementedError as expected" )
+        empty = asyncio.run( test_multi_empty() )
+        assert empty[ "git_strategy" ] is None and empty[ "commit_hashes" ] == [], "empty clusters → nothing done"
+        assert "empty clusters" in empty[ "error" ], "empty clusters → error names the cause"
+        print( "✓ commit_and_pr_multi empty clusters returns an error dict" )
+
+        # 5: commit_and_pr_multi at trust 1 — one commit per cluster on the current branch
+        class FakeGitOps:
+            def __init__( self ): self.committed = []
+            async def commit_on_branch( self, files, message ):
+                self.committed.append( ( files, message ) )
+                return { "success": True, "commit_hash": f"hash{len( self.committed )}00000000", "error": None }
+
+        async def fake_notify( message, priority="low" ): pass
+
+        async def test_multi_l1():
+            ops = FakeGitOps()
+            clusters = [ ( "c1", "one", [ "a.py" ], "msg one" ), ( "c2", "two", [ "b.py" ], "msg two" ) ]
+            res = await GitStrategist( debug=False ).commit_and_pr_multi( ops, clusters, 1, fake_notify, "", "" )
+            return ops, res
+
+        ops, res = asyncio.run( test_multi_l1() )
+        assert res[ "git_strategy" ] == "commit_only" and res[ "error" ] is None
+        assert res[ "commit_hashes" ] == [ "hash100000000", "hash200000000" ], "one hash per cluster, in order"
+        assert [ m for _f, m in ops.committed ] == [ "msg one", "msg two" ]
+        print( "✓ commit_and_pr_multi trust 1 commits each cluster in order" )
 
         print( "\n✓ Shared GitStrategist smoke test completed successfully" )
 
