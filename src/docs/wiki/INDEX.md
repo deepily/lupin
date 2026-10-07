@@ -67,3 +67,11 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[fix-shared-primitives]] — the coder and tester retry loop, the git step and the plan and report writers both expediters use. `cosa.agents.shared` (fix_executor)
 - [[swe-team-orchestrator]] — the SWE team job: a Lead splits a task, a Coder builds each piece, a Tester checks it. `cosa.agents.swe_team` (agent_definitions)
 - [[scheduled-test-suite]] — the test suite runner as a queue job, its scheduling and attestation. `cosa.agents.test_suite` (job, attestation, v2_client)
+- [[notification-proxy]] — a separate process that answers response-required notifications by following a script for a test profile. `cosa.agents.notification_proxy` (option_sentinels, scalar_answers, strategies)
+- [[proxy-agent-base]] — the shared layer under the proxy agents: WebSocket listener, responder base, strategy protocol, REST submitter, settings and flags. `cosa.agents.utils.proxy_agents` (base_cli, base_config, rest_submitter)
+- [[dev-server-lifecycle]] — small modules that say whether a server is free, announce its restarts and name the code it runs. `cosa.rest` (venue_idle, managed_bounce_broadcast, code_identity, error_envelope, pytest_args_policy)
+- [[embedding-pipeline]] — turning text into vectors, caching them and searching them in Postgres. `cosa.memory`, `cosa.rest.db` (embedding_regeneration, repositories.vector_search)
+- [[question-gist-and-synonyms]] — reducing a spoken question to verbatim, normalized and gist forms so a repeat skips the similarity search. `cosa.memory`, `cosa.rest.db.repositories`
+- [[web-search-tools]] — the Kagi search client and the vendor-neutral wrapper the weather agent and router fallback use. `cosa.tools` (search_kagi)
+- [[commons-and-dm]] — the server half of cross-session messaging: operator broadcasts and AI-to-AI direct messages. `cosa.rest` (dm_experiment), `cosa.rest.routers` (commons, dm)
+- [[retired-queue-doors]] — the old queue routes that now answer 410 Gone and name the door that replaced them. `cosa.rest.routers` (_retired_doors)
