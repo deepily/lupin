@@ -446,11 +446,21 @@ def test_caps_words_skips_a_capitalised_word_right_after_an_option_name_as_a_cho
     assert mc.caps_words( "pass --force NOT twice", WORDS ) == []
 
 
-def test_caps_words_cost_does_not_grow_with_the_length_of_the_text_before_each_word():
-    import time
-    text  = "\n".join( "pass --json OUT and call TaskType.NOT here" for _ in range( 3200 ) )
-    start = time.perf_counter()
-    found = mc.caps_words( text, WORDS )
-    spent = time.perf_counter() - start
-    assert found == []
-    assert spent < 0.5
+def test_caps_words_guards_search_only_the_current_line_not_the_text_before_it( monkeypatch ):
+    searched = []
+    class Spy:
+        def __init__( self, real ): self.real = real
+        def search( self, text ):
+            searched.append( len( text ) )
+            return self.real.search( text )
+    monkeypatch.setattr( mc, "OPTION_ARGUMENT", Spy( mc.OPTION_ARGUMENT ) )
+    monkeypatch.setattr( mc, "MEMBER_ACCESS", Spy( mc.MEMBER_ACCESS ) )
+    line = "pass --json OUT and call TaskType.NOT here"
+    assert mc.caps_words( "\n".join( [ line ] * 3200 ), WORDS ) == []
+    assert searched and max( searched ) <= len( line )
+
+
+def test_caps_words_judges_a_word_the_same_with_any_number_of_lines_above_it():
+    for above in ( 0, 1, 10, 10000 ):
+        assert mc.caps_words( "ok --json \n" * above + "NOT", WORDS ) == [ "NOT" ]
+        assert mc.caps_words( "ok --json \n" * above + "pass --json NOT", WORDS ) == []
