@@ -684,7 +684,8 @@ def move_for_ticket( to_status ):
     return MOVE_DEMOTE if to_status == NOT_APPROVED_STATUS else MOVE_ADMIT
 
 
-def refusal_for_admission( from_status, to_status, actor, account_email=None, closer_is_manager=False ):
+def refusal_for_admission( from_status, to_status, actor, account_email=None, closer_is_manager=False,
+                           unpark_card_ok=False ):
     """
     The gate's whole decision, as a pure function: the refusal detail, or None.
 
@@ -699,8 +700,10 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
         - closer_is_manager is the router's answer to "is this caller a manager seat?",
           resolved once from the server-side manager check. It is never a value the
           caller typed
+        - unpark_card_ok is the router's resolved "operator said yes on the server's card"; default False
 
     Ensures:
+        - returns None for 'parked' -> 'queued' when closer_is_manager and unpark_card_ok; no other park move
         - returns None for 'not_approved' -> 'done' when closer_is_manager: a manager
           may close a held row. Won't-fix, promote, demote, un-park and 'parked' -> 'done'
           are untouched by it
@@ -766,6 +769,14 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # Rick's own not-now (Mr. Radio's review ruling, 2026-09-10 17:10 EDT), so it stays
     # with the un-park clause below.
     if kind == MOVE_ADMIT and to_status == DONE_STATUS and closer_is_manager: return None
+    # -- A MANAGER MAY UN-PARK ON THE OPERATOR'S CARD (Rick, 2026-10-07, row 9dde52ef) --
+    #
+    # "A manager may un-park, with the card id on the row", and the card must be the server's
+    # own, for this row and this move. The destination is `queued` and nothing else: a park is
+    # Rick's own not-now, so `parked -> in_progress` and `parked -> done` stay with the clauses
+    # below. The router resolves the card fact; this clause only reads it, and a worker never
+    # reaches it because `closer_is_manager` is False for a worker.
+    if kind == MOVE_UN_PARK and to_status == rules.QUEUED_STATUS and closer_is_manager and unpark_card_ok: return None
     move = MOVE_SENTENCES[ kind ]
     # -- DEMOTE: THE HOLDING AREA'S ENTRANCE (Rick's P0, 2026-09-07, row d8be585a) --
     #

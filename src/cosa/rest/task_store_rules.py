@@ -46,6 +46,7 @@ VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
 # The dependency runs owed -> rules and never back, so `task_store_rules` keeps its
 # purity contract ("no DB, no HTTP") while the SQLAlchemy twin stays out of it.
 PARK_STATUS              = "parked"
+QUEUED_STATUS            = "queued"
 
 # The park ENTRY set. Park is legal from these statuses. This is what makes
 # re-admitting expired-parked rows to the owed set an exact RESTORATION rather than
@@ -140,7 +141,11 @@ LEGAL_TRANSITIONS = {
 }
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
-RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation", "manager_attestation" )
+# The card a manager cites to un-park a row. Not a closing key: it never closes anything, and the
+# server, not the caller, decides whether it counts (task_promotion_gate.unpark_card_refusal).
+APPROVAL_CARD_KEY = "approval_card"
+
+RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation", "manager_attestation", APPROVAL_CARD_KEY )
 
 # The subset a THIRD PARTY can independently check without taking the closer's word
 # (row 9bfb4b73). The others are not junk — they are context — but `doc_path` and
@@ -555,6 +560,8 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
         elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
+        elif key == APPROVAL_CARD_KEY and not QID_PATTERN.fullmatch( value ):
+            errors.append( f"receipt {APPROVAL_CARD_KEY} '{value}' must be a canonical lowercase UUID" )
         elif key in ( OPERATOR_ATTESTATION_KEY, MANAGER_ATTESTATION_KEY ) and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
             # Shape only, for both attestations. Whether this caller may ASSERT one is
             # the router's question and cannot be asked here — see

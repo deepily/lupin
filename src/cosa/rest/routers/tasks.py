@@ -46,6 +46,7 @@ from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest import task_promotion_resolver as promotion_resolver
+from cosa.rest.db.repositories.notification_repository import NotificationRepository
 from cosa.rest.postgres_models import TaskItem, TaskPromotionTicket
 from cosa.rest import task_request_lifecycle as request_lifecycle
 from cosa.rest import task_request_pledge as pledge_rules
@@ -1525,7 +1526,11 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
     closer_is_manager      = False
     claims_manager_key     = ( isinstance( payload.receipt_refs, dict )
                                and rules.MANAGER_ATTESTATION_KEY in payload.receipt_refs )
-    if payload.to_status == approval.DONE_STATUS or claims_manager_key:
+    # An un-park that cites a card (row 9dde52ef): the same server-side manager check, asked once.
+    claims_approval_card   = ( item.status == rules.PARK_STATUS and payload.to_status == rules.QUEUED_STATUS
+                               and isinstance( payload.receipt_refs, dict )
+                               and rules.APPROVAL_CARD_KEY in payload.receipt_refs )
+    if payload.to_status == approval.DONE_STATUS or claims_manager_key or claims_approval_card:
         closer_manager_refusal = promotion_gate.manager_refusal(
             closer_session_id, payload.actor,
             # Named on THIS module and looked up when the line runs, so a test can
@@ -1534,9 +1539,13 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
             is_manager_fn   = is_manager_figure,
             classify_fn     = classify_manager_figure_denial,
             account_persona = approval.approver_persona_for_account( account_email ),
-            move            = promotion_gate.MOVE_MANAGER_CLOSE,
+            move            = ( promotion_gate.MOVE_MANAGER_UNPARK if claims_approval_card
+                                else promotion_gate.MOVE_MANAGER_CLOSE ),
         )
         closer_is_manager = closer_manager_refusal is None
+    unpark_card_id = None
+    if closer_is_manager and claims_approval_card:
+        unpark_card_id = _resolved_unpark_card( session, repo, item, payload.receipt_refs )
     manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
 
     manager_attestation = _resolved_manager_attestation(
@@ -1558,6 +1567,9 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
         recorded_receipt_refs = { **recorded_receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
     if manager_attestation is not None:
         recorded_receipt_refs = { **recorded_receipt_refs, rules.MANAGER_ATTESTATION_KEY: manager_attestation }
+    if unpark_card_id is not None:
+        # The server's own resolved id replaces whatever the caller typed, like the attestations above.
+        recorded_receipt_refs = { **recorded_receipt_refs, rules.APPROVAL_CARD_KEY: str( unpark_card_id ) }
 
     approval_refusal = approval.refusal_for_admission(
         from_status       = item.status,
@@ -1565,6 +1577,7 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
         actor             = payload.actor,
         account_email     = account_email,
         closer_is_manager = closer_is_manager,
+        unpark_card_ok    = unpark_card_id is not None,
     )
     if approval_refusal is not None:
         raise HTTPException( status_code=403, detail=approval_refusal )
@@ -1847,6 +1860,31 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
         park_reason   = payload.park_reason,
     )
     return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
+def _resolved_unpark_card( session, repo, item, receipt_refs ):
+    """
+    The cited card's id when it lets a manager un-park this row, else a 403 that says why.
+
+    Requires:
+        - the caller is a manager (the router resolved it) and the row is parked, moving to queued
+        - receipt_refs is a dict carrying `approval_card`
+
+    Ensures:
+        - returns the card id (UUID) only when `unpark_card_refusal` passes on the stored card
+        - raises HTTPException 403 naming the first failed condition otherwise, and writes nothing
+        - the caller's text is only the lookup key; every other fact is read from the stored card
+    """
+    card_id = promotion_gate.approval_card_id( receipt_refs )
+    if card_id is None:
+        raise HTTPException( status_code=403, detail="The approval_card receipt is not a card id the server can look up, so the un-park is refused." )
+    card    = NotificationRepository( session ).get_by_id( card_id )
+    refusal = promotion_gate.unpark_card_refusal(
+        card, item.id, item.park_reason_captured_at, repo.approval_card_ids_used( card_id ),
+    )
+    if refusal is not None:
+        raise HTTPException( status_code=403, detail=refusal )
+    return card_id
 
 
 def _resolved_operator_attestation( receipt_refs, account_email ):

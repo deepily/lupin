@@ -19,6 +19,7 @@ from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_store_rules       as rules
 
 import re
+import uuid
 
 from dataclasses import dataclass
 from typing      import Optional
@@ -242,10 +243,14 @@ MOVE_MANAGER_CLOSE = "manager_close"
 # REQUEST a promote or demote (Mr. Radio's D1, 2026-09-10).
 MOVE_REQUEST_FILING = "request_filing"
 
+# The un-park door (row 9dde52ef) asks the same question about a manager citing a card.
+MOVE_MANAGER_UNPARK = "manager_unpark"
+
 MANAGER_ONLY_SENTENCES = {
     **approval.MOVE_SENTENCES,
     MOVE_MANAGER_CLOSE  : f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
     MOVE_REQUEST_FILING : "filing a promote or demote request",
+    MOVE_MANAGER_UNPARK : f"un-parking a row on an '{rules.APPROVAL_CARD_KEY}' receipt",
 }
 
 
@@ -762,6 +767,95 @@ def describe_who_answered( answered_by ):
         return f"an API-key caller (user {answered_by.get( 'user_id' )})"
     email = answered_by.get( "account_email" )
     return f"the login {email}" if email else "a login whose token carried no email"
+
+
+# ── THE UN-PARK CARD (Rick, 2026-10-07, row 9dde52ef) ──────────────────────────────
+#
+# A manager may un-park a row when the operator answered yes on a card THE SERVER made for that
+# row and that move. A card a manager wrote by hand never counts: its text is free, so nothing
+# in it can say which row the yes was about. The binding therefore lives in the card's `payload`,
+# a column no public door can write on a question (the notify door has no such parameter).
+# The receipt covers `parked -> queued` only.
+UNPARK_ASK_KIND = "unpark_ask"
+UNPARK_MOVE     = "parked->queued"
+
+
+def unpark_ask_payload( task_id ):
+    """
+    The server-written binding a minted un-park card carries in its `payload`.
+
+    Requires:
+        - task_id is a row id (UUID or its string form)
+
+    Ensures:
+        - returns { kind, task_id, move } with task_id as a string
+        - the only writer is the server's mint; `unpark_card_refusal` reads it back
+    """
+    return { "kind": UNPARK_ASK_KIND, "task_id": str( task_id ), "move": UNPARK_MOVE }
+
+
+def approval_card_id( receipt_refs ):
+    """
+    The card id a transition cites, as a UUID, or None when the server cannot look it up.
+
+    Requires:
+        - receipt_refs is whatever the caller sent (any type)
+
+    Ensures:
+        - returns the UUID when receipt_refs is a dict whose `approval_card` is a well-formed UUID string
+        - returns None for a non-dict, a missing key, a non-string and a malformed string
+        - never raises
+    """
+    if not isinstance( receipt_refs, dict ): return None
+    value = receipt_refs.get( rules.APPROVAL_CARD_KEY )
+    if not isinstance( value, str ): return None
+    try:
+        return uuid.UUID( value )
+    except ValueError:
+        return None
+
+
+def unpark_card_refusal( card, task_id, parked_since, used_card_ids ):
+    """
+    None when the card lets a manager un-park the row, else the refusal sentence.
+
+    Requires:
+        - card is the Notification row read by the id the caller cited, or None when no row has it
+        - task_id is the row being un-parked; parked_since is the instant it was parked (aware)
+        - used_card_ids is the collection of card ids already written onto a transition's receipts
+
+    Ensures:
+        - returns None only when every one of these holds: the card exists and asked a question; it was answered;
+          the answer is a yes that a person gave, not the timed-out default; the server saw it
+          arrive on the operator's own login; the payload names this row and this move, as the
+          server wrote it; the card was made after the row was parked; its id was never used
+        - the card's message and abstract are never read: they are text a manager could have typed
+        - never raises for a card the table can store
+    """
+    if card is None:
+        return "No card with that id exists, so the un-park is refused."
+    if parked_since is None:
+        return "The row has no recorded park time, so no card can be newer than it. The un-park is refused."
+    if card.response_requested is not True:
+        return "That notification asked no question, so it cannot approve an un-park."
+    answer = card.response_value if isinstance( card.response_value, dict ) else { }
+    if card.responded_at is None or card.state != "responded":
+        return "That card has no answer yet, so the un-park is refused."
+    if answer.get( "source" ) == "timeout_default":
+        return "That card was settled by its timed-out default, not by an answer, so the un-park is refused."
+    if str( answer.get( "value", "" ) ).strip().lower() != "yes":
+        return "The answer on that card was not yes, so the un-park is refused."
+    answered_by = answer.get( "answered_by" )
+    if not answer_posted_by_the_operator( answered_by ):
+        return ( f"That card was answered by {describe_who_answered( answered_by )}, not by the operator's own "
+                 f"login, so the un-park is refused." )
+    if card.payload != unpark_ask_payload( task_id ):
+        return "That card was not made by the server for this row and this move, so the un-park is refused."
+    if card.created_at is None or card.created_at <= parked_since:
+        return "That card is older than the park, so it answered something else. The un-park is refused."
+    if str( card.id ) in { str( used ) for used in used_card_ids }:
+        return "That card has already been used for an un-park, and a yes covers one move, so it is refused."
+    return None
 
 
 def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask,

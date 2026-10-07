@@ -1391,6 +1391,27 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         return query.order_by( TaskEvent.ts.desc(), TaskEvent.id.desc() ).limit( limit ).offset( offset ).all()
 
+    def approval_card_ids_used( self, card_id: uuid.UUID ) -> set:
+        """
+        The cited card id as a one-element set if an event already carries it, else an empty set.
+
+        It is the single-use check for an un-park card. The event trail is the record, so no
+        second table can drift from it. A card is used when any event, on any row, names it.
+
+        Requires:
+            - card_id is the UUID of the card the caller cited
+
+        Ensures:
+            - returns { str( card_id ) } when at least one event names it, else an empty set
+            - reads the trail in SQL, one round trip, and writes nothing
+        """
+        found = (
+            self.session.query( func.count( TaskEvent.id ) )
+                .filter( TaskEvent.receipt_refs[ "approval_card" ].astext == str( card_id ) )
+                .scalar()
+        ) or 0
+        return { str( card_id ) } if found else set()
+
     def count_admissions_since( self, actor: str, since: datetime ) -> int:
         """
         Count the rows this caller has admitted out of the holding area since `since`.
