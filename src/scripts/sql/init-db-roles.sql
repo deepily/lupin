@@ -31,7 +31,7 @@
 -- boot-time migrations need once it no longer connects as the superuser.
 --
 -- rollback=1 (optional, CUTOVER ONLY, never with reassign) is the reassign in reverse: every object
--- in public that lupin_app owns goes back to lupin_dev, and nothing else is run. No password
+-- in public that lupin_app owns goes back to lupin_dev (the schema itself to pg_database_owner), and nothing else is run. No password
 -- variable is needed. It does not create, alter or drop a role, reset a password, or grant or
 -- revoke anything; the roles and their grants stay as they were.
 --
@@ -50,7 +50,8 @@ SET log_min_duration_statement = -1;
 -- ---- ROLLBACK ONLY: hand the dev database back to the bootstrap superuser ---------------
 -- The reassign block below in reverse, with the same extension exclusions and the two role names
 -- swapped. It runs before everything else and ends the session, so no role, password or grant
--- statement further down is reached. A test pins that the two blocks differ by the role names only.
+-- statement further down is reached. A test pins that the object statements differ by the role
+-- names only, and pins the two closing statements, which differ on purpose (see below).
 \if :{?rollback}
   \connect lupin_db_dev
   SET log_statement = 'none';
@@ -75,8 +76,15 @@ SET log_min_duration_statement = -1;
    WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND p.prokind IN ( 'f', 'p' )
      AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e' )
   \gexec
-  ALTER SCHEMA public OWNER TO lupin_dev;
-  SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() ) \gexec
+  -- The schema and the database are moved back only when lupin_app owns them now. The live public
+  -- schema is owned by pg_database_owner (Mr. Radio, measured in both databases), so that is where
+  -- it returns; the database returns to lupin_dev. A rollback with no prior reassign changes neither.
+  SELECT 'ALTER SCHEMA public OWNER TO pg_database_owner'
+   WHERE EXISTS ( SELECT FROM pg_namespace n JOIN pg_roles o ON o.oid = n.nspowner WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' )
+  \gexec
+  SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() )
+   WHERE EXISTS ( SELECT FROM pg_database d JOIN pg_roles o ON o.oid = d.datdba WHERE d.datname = current_database() AND o.rolname = 'lupin_app' )
+  \gexec
   \quit
 \endif
 

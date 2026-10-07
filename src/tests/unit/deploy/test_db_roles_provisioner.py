@@ -200,17 +200,49 @@ def test_a_rollback_and_a_reassign_together_are_refused_before_anything_runs( fi
     assert stopped.value.code == 2 and run.calls == []
 
 
-def test_the_rollback_block_is_the_reassign_block_with_only_the_two_role_names_swapped():
+_ROLLBACK_TAIL = (
+    "SELECT 'ALTER SCHEMA public OWNER TO pg_database_owner' "
+    "WHERE EXISTS ( SELECT FROM pg_namespace n JOIN pg_roles o ON o.oid = n.nspowner "
+    "WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' ) \\gexec "
+    "SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() ) "
+    "WHERE EXISTS ( SELECT FROM pg_database d JOIN pg_roles o ON o.oid = d.datdba "
+    "WHERE d.datname = current_database() AND o.rolname = 'lupin_app' ) \\gexec"
+)
+
+
+def _split_after_object_statements( joined ):
+    """Split at the third `\\gexec`: relations, types and functions, then the rest."""
+    pieces = joined.split( "\\gexec" )
+    return "\\gexec".join( pieces[ :3 ] ) + "\\gexec", "\\gexec".join( pieces[ 3: ] ).strip()
+
+
+def test_the_rollback_object_statements_are_the_reassign_ones_with_only_the_two_role_names_swapped():
     text      = open( SQL_PATH ).read()
-    reassign  = _block( text, "\\if :{?reassign}" )
-    rollback  = _block( text, "\\if :{?rollback}" )
-    only_here = ( "\\connect lupin_db_dev", "\\quit" )
-    rollback  = [ line for line in rollback if line not in only_here and not line.startswith( "SET log_" ) ]
-    joined_reassign = " ".join( reassign )
-    joined_rollback = " ".join( rollback )
-    assert joined_reassign.count( "\\gexec" ) == 4, "the reassign block no longer has its four generated statements"
-    assert "ALTER SCHEMA public OWNER TO lupin_app;" in joined_reassign
-    assert _swap_roles( joined_rollback ) == joined_reassign
+    reassign  = " ".join( _block( text, "\\if :{?reassign}" ) )
+    rollback  = " ".join( line for line in _block( text, "\\if :{?rollback}" )
+                          if line not in ( "\\connect lupin_db_dev", "\\quit" ) and not line.startswith( "SET log_" ) )
+    assert reassign.count( "\\gexec" ) == 4, "the reassign block no longer has its four generated statements"
+    reassign_objects, reassign_tail = _split_after_object_statements( reassign )
+    rollback_objects, rollback_tail = _split_after_object_statements( rollback )
+    assert "pg_class" in rollback_objects and "pg_type" in rollback_objects and "pg_proc" in rollback_objects
+    assert _swap_roles( rollback_objects ) == reassign_objects
+    assert "ALTER SCHEMA public OWNER TO lupin_app;" in reassign_tail
+
+
+def test_the_rollback_moves_the_schema_and_the_database_only_when_lupin_app_owns_them():
+    text     = open( SQL_PATH ).read()
+    rollback = " ".join( line for line in _block( text, "\\if :{?rollback}" )
+                         if line not in ( "\\connect lupin_db_dev", "\\quit" ) and not line.startswith( "SET log_" ) )
+    _, tail = _split_after_object_statements( rollback )
+    assert tail == _ROLLBACK_TAIL
+    assert "OWNER TO lupin_dev;" not in rollback and "OWNER TO pg_database_owner;" not in rollback, \
+        "an unconditional ownership change is back in the rollback block"
+
+
+def test_the_rollback_block_opens_by_connecting_to_the_dev_database():
+    block = _block( open( SQL_PATH ).read(), "\\if :{?rollback}" )
+    assert block[ 0 ] == "\\connect lupin_db_dev", block[ 0 ]
+    assert [ line for line in block if line.startswith( "\\connect" ) ] == [ "\\connect lupin_db_dev" ]
 
 
 def test_the_rollback_block_touches_no_role_password_or_grant_and_ends_the_session():
