@@ -88,3 +88,5 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[small-agents-core]] — seven small agents that answer one voice or text request each, inline on the queue's consumer thread. `cosa.agents` (calculator), `cosa.rest.v2`, `cosa.utils.util_code_runner`
 - [[mcp-session-spawn-and-reap]] — the four MCP tools a manager seat uses to start, list and end Claude Code seats. `lupin_mcp` (session_spawner, reap_memento, self_respin_core)
 - [[session-transcript-console]] — showing another seat's transcript as display blocks: a REST backlog plus a live WebSocket tail, admin accounts only. `cosa.rest` (cc_transcript_mapper, cc_transcript_tailer), `cosa.rest.routers` (cc_transcript, websocket)
+- [[doc-viewer]] — serving repo files and the `io/` folder to the browser by `path=<project>/<rel>`, and admin upload into them. `cosa.rest.routers` (docs_files, io_files, _scope_registry), `cosa.rest` (upload_size_guard), `cosa.config` (docview_manifest)
+- [[system-admin-and-stats]] — the small routers that report on the server, steer it, and map clean URLs to pages. `cosa.rest.routers` (system, mode, stats, multiplexer_config, pages, websocket_admin)
