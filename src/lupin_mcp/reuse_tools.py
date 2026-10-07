@@ -417,6 +417,22 @@ def parse_answer( response ):
         return None
 
 
+def usage_of( response ):
+    """
+    Read the token counts one Jev response reports.
+
+    Ensures:
+        - returns ( input_tokens, output_tokens ) when the response carries a usage mapping holding both
+          as whole numbers of at least zero (a bool is not one), else None
+    """
+    try:
+        u = response[ "usage" ]
+        pair = ( u[ "input_tokens" ], u[ "output_tokens" ] )
+    except ( KeyError, TypeError ):
+        return None
+    return pair if all( isinstance( n, int ) and not isinstance( n, bool ) and n >= 0 for n in pair ) else None
+
+
 def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
     """
     Ask Jev about every entry.
@@ -428,7 +444,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           id is never read from the cache, because a later run may have filled it
     Ensures:
         - returns { answers, failed, not_reached, calls, cache_hits, attempts_answered, attempts_failed,
-          failed_attempts }: answers are { id, probabilities }, failed is the list of ids whose call failed
+          failed_attempts, tokens_in, tokens_out, usage_missing }: answers are { id, probabilities }, failed is the list of ids whose call failed
           after RETRIES or was cut off by the budget after at least one attempt, in entry order
         - not_reached lists the ids no HTTP attempt was made for because the call budget was spent
         - an unreached id is neither answered nor failed, so decide() reports it under `missing`
@@ -436,6 +452,9 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           HTTP attempts spent on answered and on failed ids, so together they are the sweep's attempts
         - once the budget is spent, later entries are refused before any HTTP and cache hits are still served
         - every successful live response is cached by request hash
+        - tokens_in and tokens_out sum the usage Jev reported on the live answered calls of this sweep; a cache
+          hit adds nothing, a failed call has no response to read, and a live answer whose usage is absent or
+          not two whole numbers adds nothing and is counted in usage_missing
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
     """
@@ -470,6 +489,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
 
     answers, failed, not_reached, failed_attempts = [], [], [], []
     spent = { "answered": 0, "failed": 0 }
+    used  = { "in": 0, "out": 0, "missing": 0 }
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
         for rid, resp, how, attempts in pool.map( one, entries ):
             if how == "failed":
@@ -478,9 +498,14 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
             if how == "not_reached": not_reached.append( rid ); continue
             stats[ "hits" if how == "hit" else "calls" ] += 1
             spent[ "answered" ] += attempts
+            if how == "call":
+                tokens = usage_of( resp )
+                if tokens is None: used[ "missing" ] += 1
+                else: used[ "in" ] += tokens[ 0 ]; used[ "out" ] += tokens[ 1 ]
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
-             "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts }
+             "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
+             "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ] }
 
 
 def module_of( file ):
@@ -686,9 +711,10 @@ def _shortlist_view( rows, by_id ):
 
 
 def _stage( name, sw, asked ):
-    """Ensures: returns one stage's counts: entries asked, how they split, and HTTP attempts."""
+    """Ensures: returns one stage's counts, HTTP attempts and reported tokens."""
     return { "stage": name, "entries": asked, "answered": len( sw[ "answers" ] ), "failed": len( sw[ "failed" ] ),
-             "not_checked": len( sw[ "not_reached" ] ), "attempts": sw[ "attempts_answered" ] + sw[ "attempts_failed" ] }
+             "not_checked": len( sw[ "not_reached" ] ), "attempts": sw[ "attempts_answered" ] + sw[ "attempts_failed" ],
+             "tokens_in": sw[ "tokens_in" ], "tokens_out": sw[ "tokens_out" ], "usage_missing": sw[ "usage_missing" ] }
 
 
 def _choose_pages( answers, policy ):
@@ -785,7 +811,9 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
                        "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ],
                        "attempts": sw[ "attempts_answered" ] + sw[ "attempts_failed" ], "attempts_answered": sw[ "attempts_answered" ],
                        "attempts_failed": sw[ "attempts_failed" ], "failed_attempts": sw[ "failed_attempts" ], "call_budget": ctx.call_budget,
-                       "route": routed[ "route" ], "stages": routed[ "stages" ], "attempts_total": sum( st[ "attempts" ] for st in routed[ "stages" ] ) } }
+                       "route": routed[ "route" ], "stages": routed[ "stages" ], "attempts_total": sum( st[ "attempts" ] for st in routed[ "stages" ] ),
+                       "tokens_in": sum( st[ "tokens_in" ] for st in routed[ "stages" ] ), "tokens_out": sum( st[ "tokens_out" ] for st in routed[ "stages" ] ),
+                       "usage_missing": sum( st[ "usage_missing" ] for st in routed[ "stages" ] ) } }
     return store_receipt( ctx, rec ) if write else rec
 
 

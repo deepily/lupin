@@ -51,6 +51,10 @@ TypeScript and Dart entries are never covered, so only the full sweep reaches th
 that a page can be asked about; they do not shape its coverage. One call budget spans every stage, so a
 spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
 `stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.
+`stats.tokens_in` and `stats.tokens_out` sum the `usage` that Jev reported on each live answered call, across
+every stage; each stage entry carries its own pair. A cache hit adds nothing, and a failed call has no response
+to read. A live answer with no `usage`, or one that is not two whole numbers, adds nothing and is counted in
+`stats.usage_missing`. A receipt stored before this tally has none of these keys and still replays.
 
 ## Verdict
 
