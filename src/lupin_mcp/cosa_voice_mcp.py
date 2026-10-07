@@ -5010,19 +5010,7 @@ def task_correlate(
     authority       : str = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key.
-
-    Cross-session respawn adoption (Phase-2 design C5/ruling #4): when a
-    successor session inherits an item, ADOPT it by re-keying it onto your own
-    harness id instead of forking a duplicate. The server appends an audited
-    `re-correlated` event (R3) and REJECTS terminal items (no re-keying closed
-    history) — this tool does NOT pre-check that; a 422 carries the server's
-    words verbatim.
-
-    Example:
-        # Adopt the inherited item onto this session's harness id:
-        task_correlate(task_id="<uuid>",
-                       correlation_key="cc-task:<my-stable-sid>:<harness-id>")
+    **[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key. When a successor session inherits an item, ADOPT it by re-keying it onto your own harness id instead of forking a duplicate. The server appends an audited `re-correlated` event and REJECTS terminal items (no re-keying closed history); this tool does not pre-check that, and a 422 carries the server's words verbatim.
 
     Args:
         task_id: The item's UUID
@@ -5030,11 +5018,12 @@ def task_correlate(
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 404
-        carries "task {id} not found" verbatim under "detail"; a 422 (terminal
-        item / bad authority) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: a 404 carries "task {id} not found" verbatim under "detail"; a 422 (terminal item / bad authority) carries the server's detail verbatim.
 
     `actor` is not a parameter: it is stamped from the session bridge.
+
+    Example:
+        task_correlate(task_id="<uuid>", correlation_key="cc-task:<my-stable-sid>:<harness-id>")    # adopt the inherited item onto this session's harness id
     """
     refusal = _refuse_borrowed_identity( "task_correlate" )
     if refusal is not None: return refusal
@@ -5058,47 +5047,23 @@ def task_reassign(
     authority         : str             = "manager_relay",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona.
-
-    The manager's handoff primitive (design §4.2): pull a worker off a queue and
-    hand their in-flight work to another persona. Changes OWNERSHIP ONLY — it can
-    NEVER change `status` (the store walls PATCH off from the state machine,
-    design D4). If the handoff should also re-queue the item, that is a SEPARATE
-    `task_transition`. The server is the single normalization + audit seam: it
-    canonicalizes the new owner to the owed-query key (so the new owner's
-    `task_query(owner_persona=…)` finds the row — the 2026-06-18 false-idle
-    guard) and appends one `patched` event carrying your `reason`.
-
-    A non-empty `reason` is REQUIRED here at the verb (the manager's "why" for the
-    handoff) — a blank reason is rejected before any server round-trip.
-
-    Examples:
-        # Hand Tiffany's in-flight item to Marcus, manager unchanged:
-        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
-                      reason="Tiffany pulled onto the P0 arbiter fix")
-
-        # Reassign AND move it under a new chasing manager:
-        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
-                      new_manager="tiberius",
-                      reason="lane handoff — Tiberius now chasing")
+    **[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona: the manager's handoff primitive, to pull a worker off a queue and hand their in-flight work to another persona. Changes OWNERSHIP ONLY; it can NEVER change `status`. If the handoff should also re-queue the item, that is a SEPARATE `task_transition`. The server canonicalizes the new owner to the owed-query key (so the new owner's `task_query(owner_persona=…)` finds the row) and appends one `patched` event carrying your `reason`. A non-empty `reason` is REQUIRED here at the verb; a blank one is rejected before any server round-trip.
 
     Args:
         task_id: The item's UUID
-        new_owner_persona: The handoff target (server normalizes to canonical key)
+        new_owner_persona: The handoff target (server normalizes to the canonical key)
         reason: Non-empty justification for the handoff (stamps the audit event)
-        new_manager: Optional new accountable_manager; when omitted the chasing
-            manager is left UNCHANGED (design Q6)
+        new_manager: Optional new accountable_manager; when omitted the chasing manager is left UNCHANGED
         authority: standing | user_direct | manager_relay (default "manager_relay")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict:
-        {"status": "error", "reason": "empty_reason"} when `reason` is blank
-        (verb-enforced, no round-trip); a 404 carries "task {id} not found"
-        verbatim; a 422 (terminal item / bad authority) carries the server's
-        detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: {"status": "error", "reason": "empty_reason"} when `reason` is blank (verb-enforced, no round-trip); a 404 carries "task {id} not found" verbatim; a 422 (terminal item / bad authority) carries the server's detail verbatim.
 
-    `actor` is not a parameter: it is stamped from the session bridge, so the
-    handoff is auditable to the real session that issued it.
+    `actor` is not a parameter: it is stamped from the session bridge, so the handoff is auditable to the real session that issued it.
+
+    Examples:
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus", reason="Tiffany pulled onto the P0 arbiter fix")    # hand an in-flight item to another persona, manager unchanged
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus", new_manager="tiberius", reason="lane handoff — Tiberius now chasing")    # reassign and move it under a new chasing manager
     """
     refusal = _refuse_borrowed_identity( "task_reassign" )
     if refusal is not None: return refusal
@@ -5126,52 +5091,23 @@ def task_amend(
     authority : str             = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Append an amendment to a task-store item's body.
+    **[SELF-DISCLOSURE]** Append an amendment to a task-store item's body: the durable home for a LIVE item whose scope is legitimately reframed mid-flight, instead of leaving the current spec in scratchpad checklists, code comments or transition reasons, where a successor rehydrating from the store never sees it. APPEND-ONLY: the original body is preserved verbatim and your note lands below a persona-stamped, UTC-timestamped divider, so the amendment history reads inline. Reach for it when you would otherwise rewrite a body but must keep the prior spec.
 
-    The durable-record seam for a LIVE item whose scope is legitimately reframed
-    mid-flight (Krishna's 2026-07-02 friction): instead of leaving the current
-    spec in scratchpad checklists / code comments / transition reasons — where a
-    successor rehydrating from the store never sees it — append it to the item's
-    DURABLE body. APPEND-ONLY: the original body is preserved verbatim and your
-    note lands below a persona-stamped + UTC-timestamped divider, so the full
-    amendment history reads inline. This is NOT a destructive edit — reach for it
-    when you would otherwise rewrite a body but must keep the prior spec.
-
-    A TERMINAL item is ALLOWED (Rick's ruling 2026-08-02): amend is the ONE write
-    verb the store accepts on a done/dropped row — the durable home for a gate
-    verdict written AFTER a worker self-closes their own row. On a terminal row
-    the block is marked a post-terminal addendum (`[post-terminal addendum · … ·
-    added after close, not a reopening]`) and the audit event is stamped
-    'amended_post_terminal', so a reader tells at a glance it arrived after the
-    close; status is NOT moved (a closed row stays closed — transition / edit /
-    correlate remain refused on it). The server still REJECTS a blank note and a
-    bad authority — this tool does NOT pre-check those; a 422 carries the server's
-    words verbatim.
-
-    Example:
-        # Record a manager-ruled scope reframe on a live item:
-        task_amend(task_id="<uuid>",
-                   note="SCOPE REFRAME (Rick 2026-07-02): scheduler-port -> "
-                        "request-initiation subscriber. Prior spec below stands "
-                        "as history.",
-                   reason="4f14d38f manager ruling on cited evidence")
+    A TERMINAL item is ALLOWED: amend is the ONE write verb the store accepts on a done/dropped row, the durable home for a gate verdict written AFTER a worker self-closes their own row. On a terminal row the block is marked a post-terminal addendum (`[post-terminal addendum · ... · added after close, not a reopening]`) and the audit event is stamped 'amended_post_terminal'; status is NOT moved (a closed row stays closed; transition / edit / correlate remain refused on it). The server REJECTS a blank note and a bad authority, and this tool does not pre-check them; a 422 carries the server's words verbatim.
 
     Args:
         task_id: The item's UUID
         note: The amendment text to append (server validates 1..4000 + non-blank)
-        reason: Optional justification stamping the audit event; when omitted the
-            event records an auto-marker naming the appended length. The event
-            transition is 'amended' on a live row, 'amended_post_terminal' on a
-            terminal one
+        reason: Optional justification stamping the audit event; when omitted the event records an auto-marker naming the appended length. The event transition is 'amended' on a live row, 'amended_post_terminal' on a terminal one
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict — a 404
-        carries "task {id} not found" verbatim under "detail"; a 422 (blank note /
-        bad authority) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: a 404 carries "task {id} not found" verbatim under "detail"; a 422 (blank note / bad authority) carries the server's detail verbatim.
 
-    `actor` is not a parameter: it is stamped from the session bridge, so the
-    amendment is auditable to the real session.
+    `actor` is not a parameter: it is stamped from the session bridge, so the amendment is auditable to the real session.
+
+    Example:
+        task_amend(task_id="<uuid>", note="SCOPE REFRAME (Rick 2026-07-02): scheduler-port -> request-initiation subscriber. Prior spec below stands as history.", reason="4f14d38f manager ruling on cited evidence")    # record a manager-ruled scope reframe on a live item
     """
     refusal = _refuse_borrowed_identity( "task_amend" )
     if refusal is not None: return refusal
@@ -5269,59 +5205,24 @@ def task_edit(
     authority : str             = "standing",
 ) -> dict:
     """
-    **[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a
-    task-store item.
+    **[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a task-store item: `title` · `body` · `priority` · `gate_class` · `urgency`. Most often used to DEMOTE a mis-inflated `priority`. A thin wrapper over `PATCH /api/tasks/{id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit event). Value validation stays server-side.
 
-    The last-mile "change field X to value Y" seam (design §4) — most concretely,
-    DEMOTE a mis-inflated `priority`. A thin MCP wrapper over `PATCH /api/tasks/
-    {id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit
-    event). Value validation stays server-side (Pydantic + `validate_patch`).
-
-    EDITABLE (5 fields) — pass any subset in `updates`:
-        title · body · priority · gate_class · urgency
-
-    REFUSED at the MCP layer — OWNER fields `owner_persona` · `accountable_manager`
-    → use `task_reassign` (the single owner-change path, with a mandatory reason).
-    Editing owner via a bare `task_edit` would be a reason-free reassignment
-    backdoor; a raw PATCH would accept them, so this refusal is MCP-side.
-
-    REFUSED by the server (`extra="forbid"` → 422) — invariant-bearing fields; use
-    `task_transition`, which moves the coupled fields together:
-        status · blocked_by · next_chase_ts · park_reason ·
-        park_reason_captured_at · receipt_refs · correlation_key
-
-    A bad enum (`priority` not P0–P5 — WIDENED from P0–P3 on 2026-09-07, see
-    VALID_PRIORITIES in task_store_rules.py, the single decider — `gate_class` not
-    none/manager/operator,
-    `urgency` not urgent/normal/low) or empty `title` → 422 from the server, no
-    row mutation. Terminal (done/dropped) items are rejected server-side.
-
-    Examples:
-        # Demote a mis-inflated priority (the C7 P1-inflation fix):
-        task_edit(task_id="<uuid>", updates={"priority": "P3"},
-                  reason="over-inflated at mint; not user-blocking")
-
-        # Multi-field atomic edit in one txn/event:
-        task_edit(task_id="<uuid>",
-                  updates={"title": "Retitled", "urgency": "low"})
+    REFUSED at the MCP layer: owner fields `owner_persona` and `accountable_manager`; use `task_reassign` (the single owner-change path, with a mandatory reason). REFUSED by the server (`extra="forbid"`, 422): `status` · `blocked_by` · `next_chase_ts` · `park_reason` · `park_reason_captured_at` · `receipt_refs` · `correlation_key`; use `task_transition`, which moves the coupled fields together. A bad enum (`priority` not P0–P5, `gate_class` not none/manager/operator, `urgency` not urgent/normal/low) or an empty `title` is a 422 with no row mutation. Terminal (done/dropped) items are rejected server-side.
 
     Args:
         task_id: The item's UUID
-        updates: Dict of {field: value} to overwrite — non-empty; owner keys are
-            refused with a pointer to task_reassign, invariant keys 422 server-side
-        reason: Optional justification stamping the 'patched' audit event; when
-            omitted the event records the field delta
+        updates: Dict of {field: value} to overwrite; non-empty. Owner keys are refused with a pointer to task_reassign; invariant keys 422 server-side
+        reason: Optional justification stamping the 'patched' audit event; when omitted the event records the field delta
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
-        { item, event } (server 200 body) verbatim, or an error dict:
-        {"reason": "empty_updates"} when `updates` is empty/not-a-dict (verb-
-        enforced, no round-trip); {"reason": "owner_field_refused"} → task_reassign;
-        a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad
-        enum / empty title / terminal item) carries the server's detail verbatim.
+        { item, event } (server 200 body) verbatim, or an error dict: {"reason": "empty_updates"} when `updates` is empty or not a dict (verb-enforced, no round-trip); {"reason": "owner_field_refused"} → task_reassign; a 404 carries "task {id} not found" verbatim; a 422 (invariant field / bad enum / empty title / terminal item) carries the server's detail verbatim.
 
-    `actor` is not a parameter: it is stamped from the session bridge, last, so an
-    `updates` "actor" key cannot shadow it.
+    `actor` is not a parameter: it is stamped from the session bridge, last, so an `updates` "actor" key cannot shadow it.
+
+    Examples:
+        task_edit(task_id="<uuid>", updates={"priority": "P3"}, reason="over-inflated at mint; not user-blocking")    # demote a mis-inflated priority
+        task_edit(task_id="<uuid>", updates={"title": "Retitled", "urgency": "low"})    # multi-field atomic edit in one txn/event
     """
     refusal = _refuse_borrowed_identity( "task_edit" )
     if refusal is not None: return refusal
