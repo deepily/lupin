@@ -244,6 +244,16 @@ result = await strategist.commit_and_pr_multi(
 commit successfully. `commit_hashes` comes back with fewer entries than clusters, and
 `error` is set to the first failure message. Callers decide whether to proceed.
 
+**Trust 3 and above needs a push, and the real `GitOps` cannot push.** After the N commits
+the strategist pushes once, through `git_ops.push_branch( slug )`, and only then says
+"Pushed N commit(s)" and calls `create_pr`. The real `GitOps` has no `push_branch`: it has
+`commit_and_push`, which needs files and pushes on every call. With no `push_branch`, or
+when it fails, nothing is pushed, so the result is `git_strategy = "commit_only"`, `pr_url = None`
+and `error` names the cause (for no `push_branch`: "git_ops has no push_branch: nothing was
+pushed, so no PR was opened"). The commits stay on the new local branch, `create_pr` is not
+called, and the original branch is checked out again. Until `GitOps` gains `push_branch`, a
+real TFE run at trust 3 and above ends `commit_only`.
+
 ### Never raises
 
 Both entry points wrap all `GitOps` calls in try/except. Failures surface via the
