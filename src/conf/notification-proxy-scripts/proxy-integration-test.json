@@ -73,6 +73,12 @@
             "arg_name"         : "confirmation",
             "response_types"   : [ "yes_no" ],
             "agents"           : [ "crud" ]
+        },
+        {
+            "card_id"        : "document_choice",
+            "answer"         : "__first_option__",
+            "response_types" : [ "multiple_choice" ],
+            "_comment"       : "The DOCUMENT CHOICE CARD, keyed on the card's own id rather than its wording (row a1420538), the same generic entry every other file-arg profile carries. This profile answers the describe ask, so the expeditor can also put the choice card to it: the card appears when 2..cap documents match the request, and a run that reaches it with no entry waits out the ask and expires (row a362fc8b, #8). __first_option__ picks the first listed document; the options are discovered at run time, so no fixed label would hold."
         }
     ]
 }

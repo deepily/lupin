@@ -1644,7 +1644,7 @@ class TestMultiSenderIntegration:
         with open( path, "r" ) as f:
             script = json.load( f )
 
-        query_entries = [ e for e in script[ "entries" ] if e[ "arg_name" ] == "query" ]
+        query_entries = [ e for e in script[ "entries" ] if e.get( "arg_name" ) == "query" ]
         assert len( query_entries ) >= 1, "No query entries found"
 
     def test_integration_script_has_crud_entries( self ):
