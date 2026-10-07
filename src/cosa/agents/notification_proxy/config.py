@@ -140,6 +140,9 @@ TEST_PROFILES = {
     "presentation_gates" : {
         "description"             : "Auto-approve presentation generator orchestrator gates 1-4 (Phase D live E2E)",
     },
+    "research_to_presentation_gates" : {
+        "description"             : "Auto-approve research-to-presentation orchestrator gates (live E2E)",
+    },
     "research_to_presentation" : {
         "description"             : "Auto-answer for research-to-presentation chained workflow",
         "query"                   : "artificial intelligence safety 2026",
