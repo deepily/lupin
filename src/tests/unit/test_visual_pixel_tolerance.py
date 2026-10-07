@@ -90,7 +90,7 @@ def test_shade_noise_of_seven_on_a_third_of_the_pixels_passes_all_three():
     assert _all_three( _noisy( CARD, top=7, share=0.36 ), CARD ) == { "height": True, "aa_scatter": True, "content_shift": True }
 
 
-@pytest.mark.parametrize( "delta", [ ( 12, 12, 12 ), ( 20, 20, 20 ), ( 40, 0, 0 ) ], ids=[ "grey-12", "grey-20", "red-40" ] )
+@pytest.mark.parametrize( "delta", [ ( 8, 8, 8 ), ( 12, 12, 12 ), ( 20, 20, 20 ), ( 40, 0, 0 ) ], ids=[ "grey-8", "grey-12", "grey-20", "red-40" ] )
 def test_a_block_moved_past_the_tolerance_fails_all_three( delta ):
     changed = _moved( CARD, ( 40, 50, 60, 70 ), delta )
     assert _all_three( changed, CARD ) == { "height": False, "aa_scatter": False, "content_shift": False }

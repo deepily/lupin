@@ -44,7 +44,8 @@ from pixelmatch.contrib.PIL import pixelmatch
 # The comparators therefore default to 0.03, the one tolerance for the whole gate: it forgives
 # a grey shift of up to 7 shades (the 1-shade dither swap seen on 36% of a card's pixels, largest
 # difference 7 of 255) and still fails a block moved 12 shades. A blue-only drift of up to 23
-# shades is forgiven too. The structural rules (height delta, shift, isolated scatter) stay as they were.
+# shades, red up to 14 and green up to 11, is forgiven too. The structural rules (height delta,
+# shift, isolated scatter) stay as they were.
 PIXEL_THRESHOLD = 0.03
 
 

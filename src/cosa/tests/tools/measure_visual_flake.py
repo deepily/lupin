@@ -180,7 +180,7 @@ def measure(                                        # pragma: no cover - straigh
     actual_png           : bytes,
     golden_png           : bytes,
     *,
-    threshold            : float = 0.0,
+    threshold            : "float | None" = None,
     max_shift            : int   = 1,
     max_height_delta     : int   = 1,
     max_isolated_cluster : int   = 2,
@@ -198,11 +198,15 @@ def measure(                                        # pragma: no cover - straigh
         - actual_png and golden_png are valid PNG byte strings
     Ensures:
         - returns the FlakeVerdict from classify_visual_flake over both results
+        - threshold None means the gate's own PIXEL_THRESHOLD, so triage counts what the gate counts
     """
     from tests.e2e_ui.visual_height_tolerance import (
+        PIXEL_THRESHOLD,
         compare_pngs_aa_scatter_tolerant,
         compare_pngs_content_shift_tolerant,
     )
+
+    if threshold is None: threshold = PIXEL_THRESHOLD
 
     cs = compare_pngs_content_shift_tolerant(
         actual_png, golden_png,
@@ -244,7 +248,7 @@ def main( argv=None ) -> int:                       # pragma: no cover - CLI/IO 
     )
     parser.add_argument( "--actual", required=True, help="path to the ACTUAL (freshly-captured) PNG" )
     parser.add_argument( "--golden", required=True, help="path to the GOLDEN (committed baseline) PNG" )
-    parser.add_argument( "--threshold",            type=float, default=0.0 )
+    parser.add_argument( "--threshold",            type=float, default=None, help="per-pixel colour distance; default is the gate's PIXEL_THRESHOLD" )
     parser.add_argument( "--max-shift",            type=int,   default=1 )
     parser.add_argument( "--max-height-delta",     type=int,   default=1 )
     parser.add_argument( "--max-isolated-cluster", type=int,   default=2 )
