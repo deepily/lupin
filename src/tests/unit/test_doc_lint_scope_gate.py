@@ -72,6 +72,18 @@ def test_one_planted_finding_exits_one_and_names_the_file_line_and_rule( repo ):
     assert text.endswith( "DOCLINT GATE FAILED: 1 findings in 1 of 2 files.\n" )
 
 
+def test_two_findings_in_one_file_count_as_one_failed_file_and_two_errors( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/app/loud.py", '"""\nThis module must NEVER change.\n\nIt is NOT optional.\n"""\n' )
+    _git( repo, "add", "src" )
+
+    code, text = _run( repo )
+
+    assert code == scope_gate.EXIT_FINDINGS
+    assert "Total Tests: 2\nPassed: 1\nFailed: 1\nErrors: 2\n" in text
+    assert text.endswith( "DOCLINT GATE FAILED: 2 findings in 1 of 2 files.\n" )
+
+
 def test_a_finding_in_a_held_or_test_file_does_not_fail_the_gate( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _write( repo, "src/lupin_mcp/tool.py", LOUD )
