@@ -140,7 +140,7 @@ async def judge_claims( claims, new_text, design_text, judge_model, escalation_m
 
 async def finish_judgements( claims, first, new_text, design_text, escalation_model, first_reasons=None, query_fn=None ):
     """
-    Turn a first-pass verdict per claim into final judgements: escalate the uncertain, fail closed.
+    Turn first-pass verdicts into final judgements: escalate the uncertain, fail closed.
 
     Requires:
         - first holds one verdict word per claim, in claim order, from any first-pass judge

@@ -127,7 +127,7 @@ def classify_quote( quote, old_text, bounded=True ):
           in the original text when the quote occurs there, else None, so a discarded claim keeps
           its stretch
         - bounded: a quote under MIN_QUOTE_WORDS or MIN_QUOTE_CHARS is TOO_FEW_WORDS or TOO_FEW_CHARS;
-          one under the LONG_ floors that occurs more than once is AMBIGUOUS; one over MAX_QUOTE_CHARS
+          one under the LONG_ floors that occurs more than once is `AMBIGUOUS`; one over MAX_QUOTE_CHARS
           is TOO_LONG; one over MAX_QUOTE_SHARE of a text of two or more sentences or lines is SHARE_CAP
         - not bounded: the LONG_ floors apply and nothing else is checked
         - a quote that is blank, or that does not occur, is never verified
@@ -330,7 +330,7 @@ def enclosing_sentences( old_text, runs ):
 
 async def _ask( old_text, model, query_fn, quoted_from=None, on_unreadable=None, attempt="first" ):
     """
-    Make one extractor call on a text and verify its quotes against quoted_from (default: the text).
+    Make one extractor call and verify its quotes against quoted_from (default: the text).
 
     Requires:
         - on_unreadable is None or a callable taking ( attempt, raw, error ), where raw is the reply text
@@ -369,9 +369,9 @@ async def extract_claims( old_text, model, query_fn=None, on_unreadable=None ):
           kept quote afterwards is returned in flags as ( start, end ), for a person
         - flag_words holds the word count of each flagged run, in the order of flags
         - an unreadable reply to that second call leaves its runs flagged; a failed call raises
-        - an unreadable FIRST reply is asked for once more (retry_calls is 1); if the retry is unreadable too,
+        - an unreadable first reply is asked for once more (retry_calls is 1); if the retry is unreadable too,
           the result has parse_failed True, no claims and the whole old text in flags, so the pair is flagged
-          for a person and never passed; a run does not die on one reply (row 35d38e9f)
+          for a person and never passed; a run does not die on one reply
         - on_unreadable, when given, receives ( attempt, raw, error ) for every unreadable reply, so the cause can be read
         - longest_quote_share is the longest verified quote as a share of the old text, so a
           reader can see when one quote carries most of it

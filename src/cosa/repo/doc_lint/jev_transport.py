@@ -84,7 +84,12 @@ def parse_answer( text, model ):
 
 
 def has_key( environ=None ):
-    """Ensures: returns True when the key variable is set to a non-empty value; the value is never returned."""
+    """
+    Report whether the key variable is set to a non-empty value.
+
+    Ensures:
+        - returns True when it is set; the value is never returned
+    """
     return bool( ( os.environ if environ is None else environ ).get( KEY_VARIABLE ) )
 
 

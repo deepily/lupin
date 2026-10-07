@@ -2,11 +2,11 @@
 The history class of the claim check: a tag, never an excuse.
 
 A claim taken from the old docstring that looks like history is tagged. The class is the "may go"
-column of planning-is-prompting workflow/docstring-content.md section 2: dates; row, ticket, commit
+column of planning-is-prompting workflow/docstring-content.md section 2. It covers dates; row, ticket, commit
 and session ids; provenance; incident figures and one-off measurements; historical narrative,
 including the story of a rejected alternative.
 
-The tag changes no count. Every claim the judge calls absent is still lost; the report lists the
+The tag changes no count. Every claim the judge calls absent is still lost. The report lists the
 tagged ones apart, with a count, so a person can read them and decide. No claim is excused here.
 
 It is a post-filter on claims the judge already called absent. It is not part of the extractor or the
@@ -14,7 +14,7 @@ judge, because a change to either prompt would void every ledgered verdict. The 
 so no ledger key moves and no model is called.
 
 A claim is tagged when its claim text carries a history marker. The quote is never searched for
-history: it is a stretch of the old docstring and often ends in a citation or a date that the claim
+history. It is a stretch of the old docstring and often ends in a citation or a date that the claim
 does not state. What else the claim says does not matter, because a tag excuses nothing and the
 reader sees every tagged claim in the report. Any reason or behaviour marker in the claim text or in
 its quote keeps a claim untagged.

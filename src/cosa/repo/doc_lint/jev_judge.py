@@ -53,7 +53,7 @@ def verdict_for( noul, t_lo, t_hi ):
 
 
 def build_state( new_text, design_text ):
-    """Return the state sent to Jev: the new docstring, plus the design document when there is one."""
+    """Return the state sent to Jev: the new docstring, plus the design document if any."""
     state = { "new_text": new_text }
     if design_text is not None: state[ "design_doc" ] = design_text
     return state
