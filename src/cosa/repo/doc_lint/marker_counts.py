@@ -131,6 +131,7 @@ def caps_words( text, words=None ):
           CAPS_WORD_EXCEPTIONS
         - words inside quotes or backticks, with a digit, next to an underscore or hyphen, are skipped
         - a word that follows an identifier and a dot with no space, as in TaskType.BOUNDED, is a code member and is skipped
+        - both of those checks read only the text before the word on its own line, so the cost grows with line length and not with the page
         - a capitalised word after a period and a space is still read as prose
         - a word that follows a command-line option and a space, as in `--json OUT`, is the option's placeholder and is skipped
         - a word after a bare double dash and a space is still read as prose, and so is a capitalised word after a plain word
@@ -147,8 +148,9 @@ def caps_words( text, words=None ):
         before = text[ m.start() - 1 ] if m.start() > 0 else ""
         after  = text[ m.end() ] if m.end() < len( text ) else ""
         if before in ( "_", "-" ) or after in ( "_", "-" ): continue
-        if before == "." and MEMBER_ACCESS.search( text[ : m.start() ] ) is not None: continue
-        if before in ( " ", "\t" ) and OPTION_ARGUMENT.search( text[ : m.start() ] ) is not None: continue
+        line_head = text[ text.rfind( "\n", 0, m.start() ) + 1 : m.start() ]
+        if before == "." and MEMBER_ACCESS.search( line_head ) is not None: continue
+        if before in ( " ", "\t" ) and OPTION_ARGUMENT.search( line_head ) is not None: continue
         if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
         if word.lower() in words: found.append( word )
     return found

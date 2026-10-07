@@ -431,8 +431,10 @@ def test_an_all_lowercase_prose_line_with_an_equals_sign_is_skipped_as_a_chosen_
 
 
 def test_caps_words_skips_the_placeholder_after_a_command_line_option():
+    words = WORDS | { "name", "out" }
     usage = "        [--allow-thread NAME]... [--json OUT] [--quiet]\n        prog -o OUT --level NOT"
-    assert mc.caps_words( usage, WORDS ) == []
+    assert mc.caps_words( usage, words ) == []
+    assert mc.caps_words( "the NAME and the OUT are loud", words ) == [ "NAME", "OUT" ]
 
 
 def test_caps_words_still_flags_prose_that_does_not_follow_an_option():
@@ -441,3 +443,13 @@ def test_caps_words_still_flags_prose_that_does_not_follow_an_option():
 
 def test_caps_words_skips_a_capitalised_word_right_after_an_option_name_as_a_chosen_limit():
     assert mc.caps_words( "pass --force NOT twice", WORDS ) == []
+
+
+def test_caps_words_cost_does_not_grow_with_the_length_of_the_text_before_each_word():
+    import time
+    text  = "\n".join( "pass --json OUT and call TaskType.NOT here" for _ in range( 3200 ) )
+    start = time.perf_counter()
+    found = mc.caps_words( text, WORDS )
+    spent = time.perf_counter() - start
+    assert found == []
+    assert spent < 0.5
