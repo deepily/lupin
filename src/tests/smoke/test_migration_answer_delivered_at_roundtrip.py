@@ -18,13 +18,13 @@ things that can ONLY be proven on a real Postgres:
      middle term is what stops a machine default being served as an answer).
 
 What it proves:
-  1. empty DB → ``alembic upgrade head`` reaches 3da5c0d1eee6; notifications
+  1. empty DB → ``alembic upgrade 3da5c0d1eee6`` reaches that revision; notifications
      gains ``answer_delivered_at`` (TIMESTAMPTZ, NULLable) and
      ``idx_notifications_answer_owed`` exists AND is ``indisvalid``, over
      (sender_persona, responded_at) with the owed predicate.
-  2. ``downgrade -1`` drops BOTH cleanly and returns the chain to the prior head
+  2. ``downgrade -1`` drops BOTH cleanly and returns the chain to the prior revision
      38e025169a73 (guards the symmetric concurrent-drop downgrade path).
-  3. re-``upgrade head`` re-adds idempotently (the guarded add_column / create_index
+  3. re-``upgrade 3da5c0d1eee6`` re-adds idempotently (the guarded add_column / create_index
      re-run path the auto-migrate startup hits on an already-migrated DB).
 
 Venue: :7999-eligible (AI-discretionary). Creates and DROPS its OWN uniquely-named
@@ -51,8 +51,10 @@ from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
 
 
-_HEAD_REVISION = "3da5c0d1eee6"
-_PRIOR_HEAD    = "38e025169a73"
+# The revision this file proves. It is NOT the chain head: later migrations sit above it, so the
+# test upgrades to this revision by name and asks for "-1" from there.
+_REVISION_UNDER_TEST = "3da5c0d1eee6"
+_PRIOR_REVISION      = "38e025169a73"
 
 _COLUMN_NAME = "answer_delivered_at"
 _INDEX_NAME  = "idx_notifications_answer_owed"
@@ -153,23 +155,23 @@ def _owed_index_row( url ):
 
 def test_answer_delivered_at_migration_roundtrip( throwaway_db_url ):
     """
-    Empty DB → upgrade head → answer_delivered_at (TIMESTAMPTZ NULL) + a VALID
-    partial owed index exist; downgrade -1 → both gone, prior head; re-upgrade
-    head → idempotent re-add.
+    Empty DB → upgrade to the revision → answer_delivered_at (TIMESTAMPTZ NULL) + a VALID
+    partial owed index exist; downgrade -1 → both gone, prior revision; re-upgrade
+    to the revision → idempotent re-add.
     """
     config = build_alembic_config( database_url=throwaway_db_url )
 
-    # ── 1) upgrade head on an empty DB (pure migration path, NO create_all) ────
-    command.upgrade( config, "head" )
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    # ── 1) upgrade to the revision on an empty DB (pure migration path, NO create_all) ────
+    command.upgrade( config, _REVISION_UNDER_TEST )
+    assert _current_rev( throwaway_db_url ) == _REVISION_UNDER_TEST
 
     col = _answer_delivered_at_column( throwaway_db_url )
-    assert col is not None, "after upgrade head, notifications.answer_delivered_at must exist"
+    assert col is not None, "after the upgrade, notifications.answer_delivered_at must exist"
     assert col[ "nullable" ] is True, "answer_delivered_at must be NULLable"
     assert "TIMESTAMP" in str( col[ "type" ] ).upper(), f"must be a TIMESTAMPTZ, got {col['type']!r}"
 
     idx = _owed_index_row( throwaway_db_url )
-    assert idx is not None, "after upgrade head, idx_notifications_answer_owed must exist"
+    assert idx is not None, "after the upgrade, idx_notifications_answer_owed must exist"
     indisvalid, indisready, indexdef = idx
     # The load-bearing assertion: CONCURRENTLY left a VALID, READY index.
     assert indisvalid is True, "idx_notifications_answer_owed must be indisvalid (CONCURRENTLY completed)"
@@ -179,9 +181,9 @@ def test_answer_delivered_at_migration_roundtrip( throwaway_db_url ):
         f"partial predicate must be the owed predicate, got: {indexdef}"
     )
 
-    # ── 2) downgrade -1 → prior head, BOTH column and index dropped cleanly ─────
+    # ── 2) downgrade -1 → prior revision, BOTH column and index dropped cleanly ─────
     command.downgrade( config, "-1" )
-    assert _current_rev( throwaway_db_url ) == _PRIOR_HEAD
+    assert _current_rev( throwaway_db_url ) == _PRIOR_REVISION
     assert _answer_delivered_at_column( throwaway_db_url ) is None, (
         "after downgrade, answer_delivered_at must be gone"
     )
@@ -189,9 +191,9 @@ def test_answer_delivered_at_migration_roundtrip( throwaway_db_url ):
         "after downgrade, idx_notifications_answer_owed must be gone"
     )
 
-    # ── 3) re-upgrade head → idempotent re-add (the guarded re-run path) ────────
-    command.upgrade( config, "head" )
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    # ── 3) re-upgrade to the revision → idempotent re-add (the guarded re-run path) ────────
+    command.upgrade( config, _REVISION_UNDER_TEST )
+    assert _current_rev( throwaway_db_url ) == _REVISION_UNDER_TEST
     assert _answer_delivered_at_column( throwaway_db_url ) is not None
     reidx = _owed_index_row( throwaway_db_url )
     assert reidx is not None and reidx[ 0 ] is True, "re-upgrade must rebuild a valid index"
