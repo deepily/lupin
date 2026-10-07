@@ -537,7 +537,8 @@ class PresentationRenderOnlySmokeTest( InteractiveSmokeTest ):
         abs_path = recorded
         if not os.path.isabs( abs_path ):
             import cosa.utils.util as cu
-            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+            # job.py records pptx_path relative to io/ (it strips the io_base prefix).
+            abs_path = os.path.join( cu.get_project_root(), "io", recorded.lstrip( "/" ) )
 
         verdict = verify_presentation_deck( abs_path )
         if verdict:
