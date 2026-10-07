@@ -55,6 +55,18 @@ case "$hooks_path" in
 esac
 mkdir -p "$HOOKS_DIR" || { echo "install-git-hooks: could not create $HOOKS_DIR" >&2; exit 2; }
 
+# 2b. a linked worktree shares the main checkout's hooks folder, so a link made from here would
+# point every worktree's hooks at this one tree, and dangle once this tree is removed.
+git_dir="$( env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE -u GIT_CEILING_DIRECTORIES \
+    git -c "safe.directory=$ROOT" -C "$ROOT" rev-parse --absolute-git-dir 2>/dev/null )" || git_dir=""
+common_dir="$( env -u GIT_DIR -u GIT_COMMON_DIR -u GIT_WORK_TREE -u GIT_CEILING_DIRECTORIES \
+    git -c "safe.directory=$ROOT" -C "$ROOT" rev-parse --git-common-dir 2>/dev/null )" || common_dir=""
+case "$common_dir" in /*) ;; *) common_dir="$ROOT/$common_dir" ;; esac
+if [ "$( readlink -f "$git_dir" )" != "$( readlink -f "$common_dir" )" ]; then
+    echo "install-git-hooks: REFUSED — $ROOT is a linked worktree, and its hooks folder is shared with the main checkout. Run this from the main checkout. Nothing was changed." >&2
+    exit 2
+fi
+
 # 3. look before touching anything: a blocked hook without --replace stops the whole run.
 blocked=0
 for i in "${!HOOK_NAMES[@]}"; do

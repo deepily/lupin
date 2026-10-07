@@ -129,6 +129,7 @@ src/scripts/install-git-hooks.sh            # --replace moves a file in the way 
 
 It makes the two links and no others, honours `core.hooksPath`, and is safe to re-run. Exit 0 is both right,
 1 is something in the way, 2 is a checkout that predates the hook or is not a git tree.
+It refuses a linked worktree, whose hooks folder is shared; run it from the main checkout.
 `lupin-vm.sh install-hooks` runs it on the VM without a deploy.
 
 Fallback, if the installer is missing: a person runs these in the clone's main checkout. A Claude seat

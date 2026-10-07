@@ -164,6 +164,39 @@ def test_unmakeable_hooks_folder_exits_2( tmp_path ):
     assert r.returncode == 2 and "could not create" in r.stderr
 
 
+# ── a hooks folder that cannot be written ────────────────────────────────────
+
+needs_non_root = pytest.mark.skipif( os.geteuid() == 0, reason="root ignores a read-only folder, so the write cannot fail" )
+
+
+@needs_non_root
+def test_a_failed_move_aside_exits_2_and_keeps_the_file( tmp_path ):
+    """Kills the mutant that lets the move-aside failure branch fall through to the link."""
+    repo = _scratch( tmp_path )
+    ( _hooks_dir( repo ) / "pre-commit" ).write_text( "mine\n" )
+    _hooks_dir( repo ).chmod( 0o555 )
+    try:
+        r = _run( repo, "--replace" )
+        assert r.returncode == 2 and "could not move" in r.stderr
+        assert ( _hooks_dir( repo ) / "pre-commit" ).read_text() == "mine\n"
+    finally:
+        _hooks_dir( repo ).chmod( 0o755 )
+
+
+@needs_non_root
+def test_a_failed_link_exits_2_and_says_which_hook( tmp_path ):
+    """Kills the mutant that lets the link failure branch report success."""
+    repo = _scratch( tmp_path )
+    _hooks_dir( repo ).chmod( 0o555 )
+    try:
+        r = _run( repo )
+        assert r.returncode == 2 and "could not link" in r.stderr and "pre-commit" in r.stderr
+        assert not ( _hooks_dir( repo ) / "pre-commit" ).is_symlink()
+        assert "both hooks are links" not in r.stdout
+    finally:
+        _hooks_dir( repo ).chmod( 0o755 )
+
+
 # ── refusals that make no link ───────────────────────────────────────────────
 
 @pytest.mark.parametrize( "missing", [ "pre-commit-chain.sh", "pre-push-chain.sh" ] )
@@ -182,6 +215,38 @@ def test_not_a_git_tree_exits_2( tmp_path ):
     r    = _run( repo )
     assert r.returncode == 2 and "not a git tree" in r.stderr
     assert not ( repo / ".git" ).exists() and not ( repo / "hooks" ).exists()
+
+
+# ── a linked worktree shares the main checkout's hooks folder ────────────────
+
+def _listing( folder ):
+    return sorted( ( p.name, os.readlink( p ) if p.is_symlink() else p.read_text(), p.lstat().st_mtime_ns ) for p in folder.iterdir() )
+
+
+@pytest.mark.parametrize( "args", [ [], [ "--replace" ] ] )
+def test_a_linked_worktree_is_refused_and_the_shared_hooks_folder_is_untouched( tmp_path, args ):
+    repo = _scratch( tmp_path )
+    git  = [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str( repo ) ]
+    subprocess.run( [ *git, "add", "-A" ], check=True )
+    subprocess.run( [ *git, "commit", "-q", "-m", "scratch" ], check=True )
+    linked = tmp_path / "linked"
+    subprocess.run( [ *git, "worktree", "add", "-q", "--detach", str( linked ) ], check=True )
+    ( _hooks_dir( repo ) / "pre-push" ).write_text( "mine\n" )
+    before = _listing( _hooks_dir( repo ) )
+    r      = _run( linked, *args )
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "linked worktree" in r.stderr and "main checkout" in r.stderr
+    assert _listing( _hooks_dir( repo ) ) == before
+    assert not ( linked / "hooks" ).exists()
+
+
+def test_the_main_checkout_of_a_repository_with_a_linked_worktree_still_installs( tmp_path ):
+    repo = _scratch( tmp_path )
+    git  = [ "git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str( repo ) ]
+    subprocess.run( [ *git, "add", "-A" ], check=True )
+    subprocess.run( [ *git, "commit", "-q", "-m", "scratch" ], check=True )
+    subprocess.run( [ *git, "worktree", "add", "-q", "--detach", str( tmp_path / "linked" ) ], check=True )
+    assert _run( repo ).returncode == 0
 
 
 # ── nothing can point a link elsewhere ───────────────────────────────────────
