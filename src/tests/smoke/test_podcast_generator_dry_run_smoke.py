@@ -180,10 +180,9 @@ def quick_smoke_test():
         # Test 4: Verify response structure
         # ═══════════════════════════════════════════════════════════════════════
         print( "\nTest 4: Verifying response structure..." )
-        # NO queue_position. The v2 response carries none and is not being widened for one:
-        # a place in the queue changes as the queue moves, so a number frozen at the instant
-        # of submission was stale the moment it was printed. A job card learns its real place
-        # from the queue websocket events.
+        # queue_position is NOT required here. AskResponse carries it (v2_ask.py), but it is the
+        # todo queue's size right after the push: a snapshot at submit time, null when nothing
+        # was queued. A job card learns its real place from the queue websocket events.
         required_keys = [ "status", "job_id" ]
         for key in required_keys:
             if key not in data:
