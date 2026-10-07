@@ -127,3 +127,23 @@ def test_an_unreadable_proc_listing_refuses_the_sweep( tmp_path, monkeypatch ):
     out, drained = _reconcile( tmp_path, tree )
     assert drained == [], "when nobody can be proven absent, the tree stays"
     assert _skipped_reasons( out ) == [ "process_cwd_unknown" ]
+
+
+def test_the_proc_scan_runs_once_per_poll_however_many_trees_there_are( tmp_path ):
+    trees, drained, scans = [ _tree( tmp_path, name=f"tree-{n}" ) for n in range( 3 ) ], [], []
+
+    def drain( path, **k ):
+        drained.append( path )
+        return { "removed": False }
+
+    def cwds():
+        scans.append( 1 )
+        return { str( trees[ 1 ] / "src" ) }
+
+    records = [ { "path": str( t ), "is_main": False, "locked": False, "branch": "refs/heads/x" } for t in trees ]
+    out = wr.reconcile_worktrees( project_root=str( tmp_path ), run=_git_stub, now=NOW, list_fn=lambda: records,
+                                  drain_fn=drain, age_fn=lambda p: 100.0, cwds_fn=cwds )
+
+    assert len( scans ) == 1, "one /proc scan per poll, shared by every tree"
+    assert drained == [ str( trees[ 0 ] ), str( trees[ 2 ] ) ]
+    assert _skipped_reasons( out ) == [ "process_cwd_inside" ]
