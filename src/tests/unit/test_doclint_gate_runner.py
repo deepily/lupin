@@ -47,9 +47,21 @@ def repo( tmp_path ):
     return tmp_path
 
 
-def _run( repo, *args ):
+def _run_split( repo, *args ):
     done = subprocess.run( [ "bash", str( repo / "src" / "tests" / "run-doclint-gate.sh" ), *args ], capture_output=True, text=True, timeout=120 )
-    return done.returncode, done.stdout + done.stderr
+    return done.returncode, done.stdout, done.stderr
+
+
+def _run( repo, *args ):
+    code, out, err = _run_split( repo, *args )
+    return code, out + err
+
+
+def _stub_gate( repo, body ):
+    """Replace the lint package with a stub whose scope_gate module runs the given body."""
+    os.unlink( repo / "src" / "cosa" )
+    for rel in ( "src/cosa/__init__.py", "src/cosa/repo/__init__.py", "src/cosa/repo/doc_lint/__init__.py" ): _write( repo, rel, "" )
+    _write( repo, "src/cosa/repo/doc_lint/scope_gate.py", body )
 
 
 def test_a_clean_tree_exits_zero_and_prints_the_file_count( repo ):
@@ -85,6 +97,38 @@ def test_the_population_is_tracked_swept_files_only( repo ):
 
     assert code == 0
     assert text.split() == [ "src/app/a.py" ]
+
+
+def test_a_listing_that_fails_exits_nonzero( repo ):
+    shutil.rmtree( repo / ".git" )
+
+    code, text = _run( repo, "--list" )
+
+    assert code != 0
+    assert "git ls-files failed" in text
+
+
+def test_a_last_line_that_only_resembles_a_verdict_is_refused( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _stub_gate( repo, 'import sys\nif __name__ == "__main__":\n    print( "DOCLINT GATE EXPLODED: no check ran" )\n    sys.exit( 1 )\n' )
+
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "REFUSING: the gate exited 1 without a verdict line. Nothing was checked." in text
+
+
+def test_what_the_gate_writes_to_standard_error_is_in_the_printed_report( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _stub_gate( repo, 'if __name__ == "__main__": raise ValueError( "boom" )\n' )
+
+    code, out, err = _run_split( repo )
+
+    assert code == 2
+    assert "ValueError: boom" in out
+    assert "ValueError: boom" not in err
 
 
 def test_no_swept_file_refuses_rather_than_passing( repo ):
