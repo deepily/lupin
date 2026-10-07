@@ -438,33 +438,33 @@ else
         exit 1
     fi
 
-    # ── Install the 8 CC hooks from the canonical in-repo template ────
-    # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json,
-    # overwriting ONLY the "hooks" key and preserving every other setting.
+    # ── Install the CC hooks from the canonical in-repo template ──────
+    # Merges src/conf/claude-code-hooks.json into ~/.claude/settings.json by way of
+    # src/scripts/lib/merge_cc_hooks.py, replacing ONLY the "hooks" key and preserving
+    # every other setting. The helper REFUSES, and leaves settings untouched, when the
+    # settings hold a hook command the template does not know (row ea27d263): a plain
+    # replace used to delete live guard hooks and leave only a .bak copy. Opt in to the
+    # overwrite with LUPIN_INSTALL_FORCE_HOOKS=1; the .bak copy is still made first.
     # Commands are $LUPIN_ROOT / $PLANNING_IS_PROMPTING_ROOT relative, so the
     # SAME template ports to any host where those env vars are exported.
     HOOKS_TEMPLATE="$LUPIN_ROOT/src/conf/claude-code-hooks.json"
-    echo "  Installing CC hooks (SessionStart, Stop, PreToolUse, ... 8 total)..."
+    HOOKS_MERGER="$LUPIN_ROOT/src/scripts/lib/merge_cc_hooks.py"
+    echo "  Installing CC hooks (SessionStart, Stop, PreToolUse, ... 8 event types)..."
     if [ ! -f "$HOOKS_TEMPLATE" ]; then
         warn_check "Hooks template missing: $HOOKS_TEMPLATE (skipping hook install)"
     else
         mkdir -p "$HOME/.claude"
-        [ -f "$SETTINGS_FILE" ] && cp "$SETTINGS_FILE" "$SETTINGS_FILE.bak-$(date +%s)"
-        if python3 -c "
-import json, os, sys
-tmpl = json.load( open( '$HOOKS_TEMPLATE' ) )[ 'hooks' ]
-cfg  = '$SETTINGS_FILE'
-existing = {}
-if os.path.exists( cfg ):
-    try:    existing = json.load( open( cfg ) )
-    except Exception: existing = {}
-existing[ 'hooks' ] = tmpl
-json.dump( existing, open( cfg, 'w' ), indent=2 )
-print( '  ✓ installed', len( tmpl ), 'hook event-types ->', cfg )
-"; then
+        FORCE_HOOKS_ARG=""
+        [ "${LUPIN_INSTALL_FORCE_HOOKS:-0}" = "1" ] && FORCE_HOOKS_ARG="--force"
+        # `set -e` is on: capture the exit code with `||`, or a refusal would end the whole install.
+        HOOKS_RC=0
+        python3 "$HOOKS_MERGER" "$SETTINGS_FILE" "$HOOKS_TEMPLATE" $FORCE_HOOKS_ARG || HOOKS_RC=$?
+        if [ "$HOOKS_RC" -eq 0 ]; then
             pass_check "CC hooks installed (8/8)"
+        elif [ "$HOOKS_RC" -eq 3 ]; then
+            warn_check "CC hook install REFUSED: $SETTINGS_FILE holds hook commands the template lacks (listed above). Settings left untouched. Add them to $HOOKS_TEMPLATE, or re-run with LUPIN_INSTALL_FORCE_HOOKS=1 (a .bak copy is kept)."
         else
-            warn_check "CC hook install failed — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
+            warn_check "CC hook install failed (exit $HOOKS_RC) — merge $HOOKS_TEMPLATE into $SETTINGS_FILE manually"
         fi
     fi
 
