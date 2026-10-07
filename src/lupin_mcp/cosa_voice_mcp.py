@@ -3104,6 +3104,18 @@ def _arm_respin_wake_watch( spawn_result, manager_persona, fired_at ):
         logger.warning( f"[spawn] re-spin wake watch not armed: {e}" )
 
 
+def _retire_reaped_seat_tree( session_name, cwd ):
+    """
+    Adapt the spawner's ( session_name, cwd ) call to retire_seat_worktree( path, seat_name ).
+
+    Ensures:
+        - returns retire_seat_worktree's outcome for the seat's own tree
+        - the cwd goes in as the path and the session name as the seat, in that order
+    """
+    from cosa.agents.shared import seat_teardown
+    return seat_teardown.retire_seat_worktree( cwd, session_name )
+
+
 @mcp.tool
 def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None, respin_personas: Optional[ List[ str ] ] = None ) -> dict:
     """
@@ -3183,7 +3195,6 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # SEAT TEARDOWN (row 129cc96b, P3) → wire the LIVE teardown so a reaped seat's own
     # tree and merged branch go with it, instead of waiting hours for the janitor. It
     # keeps and reports any tree holding uncommitted or unmerged work.
-    from cosa.agents.shared import seat_teardown
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -3194,7 +3205,7 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
         respin_personas=respin_personas, memento_coord_fn=memento_coord,
         memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe,
-        seat_teardown_fn=seat_teardown.retire_seat_worktree )
+        seat_teardown_fn=_retire_reaped_seat_tree )
 
 
 @mcp.tool
