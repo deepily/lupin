@@ -62,3 +62,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
 - [[presentation-visual-renderers]] — phase 7: replacing each VISUAL marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
 - [[podcast-generation]] — turning a research document into a two-host script and one MP3 per language. `cosa.agents.podcast_generator` (orchestrator)
+- [[fix-expediter-bfe]] — the bug-fix expediter: takes one dead queue job and tries to fix the code that killed it. `cosa.agents.bug_fix_expediter`
+- [[fix-expediter-tfe]] — the test-fix expediter: clusters one finished suite's failures, fixes them and queues a rerun. `cosa.agents.test_fix_expediter` (cluster, resume_resolver)
+- [[fix-shared-primitives]] — the coder and tester retry loop, the git step and the plan and report writers both expediters use. `cosa.agents.shared` (fix_executor)
+- [[swe-team-orchestrator]] — the SWE team job: a Lead splits a task, a Coder builds each piece, a Tester checks it. `cosa.agents.swe_team` (agent_definitions)
+- [[scheduled-test-suite]] — the test suite runner as a queue job, its scheduling and attestation. `cosa.agents.test_suite` (job, attestation, v2_client)
