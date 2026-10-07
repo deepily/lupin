@@ -7,7 +7,7 @@ pins:
   - cosa.agents.shared.worktree_context.WorktreeContext@f26451f4ff
   - cosa.agents.shared.seat_teardown.retire_seat_worktree@ec2c282603
   - cosa.agents.shared.worktree_reaper.drain_then_remove@7a42533c79
-  - cosa.agents.shared.worktree_reaper.reconcile_worktrees@8dbfbd4352
+  - cosa.agents.shared.worktree_reaper.reconcile_worktrees@d7ff867a1c
   - cosa.agents.shared.worktree_reaper.sweep_merged_branches@02e1d8c83d
   - cosa.agents.shared.worktree_refusal_ledger.report_refusals@08e4b0b1dd
   - cosa.agents.shared.worktree_straggler_tickets.sync_straggler_tickets@197e32f45b
@@ -32,7 +32,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 
 ## Reaper and janitor
 - `drain_then_remove` puts a detached HEAD on a `wt-rescue/` branch and commits a dirty tree as a WIP commit. It then runs `git worktree remove`, and refuses on ignored files unless given an evacuation root. The same three classes (artifacts, run output, mirrored mementos) are exempt there.
-- `reconcile_worktrees` supplies that root, `io/worktree-evacuated`. It skips the main tree, trees outside the sandbox, non-seat locks, live seats and recently active trees.
+- `reconcile_worktrees` supplies that root, `io/worktree-evacuated`. It skips the main tree, trees outside the sandbox, non-seat locks, live seats, trees a live process has as its cwd, and recently active trees.
 - An unmerged branch is archived under `refs/archive/<date>/`. Archive refs and evacuation folders older than 14 days are deleted.
 - The janitor ships on, with a 6 hour age threshold and the repos `lupin`, `lupin-mobile` and `planning-is-prompting`. It runs each poll.
 - `report_refusals` records refused trees in `io/worktree-janitor/refused.json`. `sync_straggler_tickets` opens a P3 task after 24 hours of refusal.
