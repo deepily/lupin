@@ -617,6 +617,37 @@ class TestChangePassword( unittest.IsolatedAsyncioTestCase ):
         mock_log.assert_called_once()
 
 
+class TestChangePasswordTokenType( unittest.IsolatedAsyncioTestCase ):
+    """
+    Tests that change_password accepts an access token and refuses a refresh token.
+
+    Real signed tokens, no decode mock: a mock that ignores its arguments cannot tell the types apart.
+
+    Ensures:
+        - A refresh token raises 401 and never reaches the password update
+        - An access token reaches the password update
+    """
+
+    async def test_a_refresh_token_is_refused_before_the_password_update( self ):
+        from cosa.rest.jwt_service import create_refresh_token
+        refresh = create_refresh_token( "uid-1", "alice@example.com" )
+        with patch( "cosa.rest.routers.auth.update_user_password", return_value=( True, "" ) ) as update, \
+             patch( "cosa.rest.routers.auth.log_auth_event" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await change_password( _ns( current_password="old", new_password="new" ), authorization=f"Bearer {refresh}" )
+        self.assertEqual( ctx.exception.status_code, 401 )
+        update.assert_not_called()
+
+    async def test_an_access_token_reaches_the_password_update( self ):
+        from cosa.rest.jwt_service import create_access_token
+        access = create_access_token( "uid-1", "alice@example.com", [ "user" ] )
+        with patch( "cosa.rest.routers.auth.update_user_password", return_value=( True, "" ) ) as update, \
+             patch( "cosa.rest.routers.auth.log_auth_event" ):
+            resp = await change_password( _ns( current_password="old", new_password="new" ), authorization=f"Bearer {access}" )
+        self.assertEqual( resp.message, "Password changed successfully" )
+        update.assert_called_once()
+
+
 class TestRequestVerification( unittest.IsolatedAsyncioTestCase ):
     """
     Tests for the request_verification endpoint ( authenticated via injected user dict ).

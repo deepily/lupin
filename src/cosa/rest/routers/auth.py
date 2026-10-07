@@ -637,7 +637,7 @@ async def change_password( request: ChangePasswordRequest, authorization: Option
     token = authorization.replace( "Bearer ", "" )
 
     try:
-        payload = decode_and_validate_token( token )
+        payload = decode_and_validate_token( token, expected_type="access" )
         user_id = payload.get( "sub" )  # JWT standard: "sub" = subject (user_id)
 
         if not user_id:
