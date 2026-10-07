@@ -11,7 +11,7 @@ pins:
   - cosa.repo.symindex.spec.spec_for@dcc9afbd88
   - cosa.repo.symindex.paths.default_out_dir@f298ce42ab
   - cosa.repo.symindex.wiki_lint.queue@e0e0d92208
-  - lupin_mcp.reuse_tools.prepare@6730c049ff
+  - lupin_mcp.reuse_tools.prepare@f9dcbbdae1
 ---
 # Symbol index
 
@@ -27,8 +27,8 @@ pins:
 
 ## Symbols and pins
 - A symbol is a class, function or method. Python names starting with `_` and nested helpers are not public, but `__init__` is. `__all__` is ignored.
-- TypeScript symbols are top-level functions and classes, their public methods, constructors, getters and setters, and a `const` set to an arrow or function expression. Interfaces and types are not listed.
-- A Python pin is the first 10 hex of a hash of the syntax tree with docstrings removed. Comments and whitespace do not change it, and any code change does.
+- TypeScript symbols are top-level functions and classes, their public methods, constructors, getters and setters. A top-level `const`, `let` or `var` set to an arrow or function expression is also listed. Interfaces and types are not listed.
+- A Python pin is the first 10 hex of a hash of the syntax tree with docstrings removed. Comments and whitespace do not change it, and an edit that changes the tree does.
 - The `pin_algorithm` string joins the Python version and a hash of the extractor code. It adds the TypeScript version for a tree with JavaScript or TypeScript, and the Dart parser's for Dart.
 - `lint` has seven kinds: `stale`, `dangling`, `unindexed`, `orphan`, `orphan_package`, `pin_algorithm_changed` and `pin_algorithm_missing`. An `orphan` is a public symbol in a documented package that no page pins.
 - `orphan_package` is one finding with a count for a package that has no page. A changed or missing `pin_algorithm` switches `stale` off for every page.
