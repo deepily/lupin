@@ -2110,34 +2110,14 @@ def ask_yes_no(
     human_only: bool = False
 ) -> str:
     """
-    Ask a yes/no question and get the user's response as a string.
+    Ask a yes/no question and get the user's response as a string. A convenience wrapper for quick binary decisions, with a third "Neither" escape hatch for when the question itself needs re-framing. The user may attach a qualifying comment to any answer via the UI.
 
-    Convenience wrapper for quick binary decisions, with a third "Neither"
-    escape hatch for cases where the question itself needs re-framing.
-    The user may optionally attach a qualifying comment to any answer via the UI.
+    Returns an annotated string: "yes", "no" or "neither", optionally suffixed with "[comment: ...]", and PREFIXED with "[default used] " (the same prefix `converse` uses) when the value is a substituted default rather than something the user chose. On ANY non-answer (timeout, expiry, user offline, transport error, server error, request-validation failure) it returns the default PREFIXED with "[default used] ": this verb has no error shape, and a bare default would be indistinguishable from a keypress. A genuine keypress is returned CLEAN. A prefixed value is NOT a ruling: do not treat it as authorization. On "neither", treat the response as a signal that the question needs re-framing, not as a soft yes or no: read the comment (if present) and ask a clearer follow-up.
 
     Requires:
         - question is a non-empty string
-        - default is "yes" or "no" (Neither is never a default — it requires
-          an explicit user click)
+        - default is "yes" or "no" (Neither is never a default; it requires an explicit user click)
         - timeout_seconds is a positive integer
-
-    Ensures:
-        - returns one of:
-          * "yes", "no", "neither"
-          * "yes [comment: ...]", "no [comment: ...]", "neither [comment: ...]"
-        - on ANY non-answer — timeout, expiry, user offline, transport error,
-          server error, or a request-validation failure — returns the default
-          PREFIXED with "[default used] ". It is deliberately NOT bare, because
-          a bare default is indistinguishable from a keypress (row e5f21fff) and
-          this verb has no error shape at all: every failure mode lands on the
-          same return. The prefix matches `converse`, and this verb's contract
-          already promises an ANNOTATED string (see the qualifier form above)
-        - a genuine keypress is returned CLEAN, with no prefix — that is what
-          makes the prefix mean something
-        - On "neither", Claude should treat the response as a signal that the
-          question needs re-framing rather than as a soft yes or no — read the
-          comment (if present) and ask a clearer follow-up question
 
     Args:
         question: The yes/no question to ask
@@ -2146,22 +2126,11 @@ def ask_yes_no(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: Default False. True sends a spoken `question` over the
-            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
-            which has no length limit, not in speech.
-
-    Returns:
-        Annotated string: one of "yes", "no", "neither", optionally suffixed
-        with "[comment: ...]", and PREFIXED with "[default used] " when the value
-        is a substituted default rather than something the user chose.
-
-        ⚠️ A prefixed value is NOT a ruling. Do not treat it as authorization.
+        override_size_limitation: Default False. True sends a spoken `question` over the length cap (configured, default 500) knowingly; detail belongs in `abstract`, which has no length limit, not in speech.
 
     Examples:
         response = ask_yes_no("Delete the old backups?")
-        # response == "yes" or "no" or "neither"
-        # or with qualifier: "yes [comment: only the March ones]"
-        # or signaling re-frame: "neither [comment: ambiguous which backups]"
+        # "yes", "no" or "neither"; with a qualifier: "yes [comment: only the March ones]"; signaling re-frame: "neither [comment: ambiguous which backups]"
     """
     logger.debug( f"ask_yes_no() called: {question[:50]}..." )
 
@@ -2237,105 +2206,32 @@ def ask_multiple_choice(
     override_size_limitation: bool = False
 ) -> dict:
     """
-    Ask multiple-choice questions and get user's selection(s).
+    Ask multiple-choice questions and get the user's selection(s). Presents questions with options via TTS and UI; supports single-select (radio buttons) and multi-select (checkboxes), and the user can give a custom "Other" answer.
 
-    Presents questions with options via TTS and UI. Supports both single-select
-    (radio buttons) and multi-select (checkboxes) questions. Users can select
-    from predefined options or provide custom "Other" answers.
+    READ `answered` BEFORE TREATING THE RESULT AS A DECISION. The result is {"answers": {...}, "default_used": bool, "answered": bool}, and both flags are ALWAYS present. `default_used` is True when the user TIMED OUT (your `default` was substituted) and when the user was OFFLINE (the server substituted, returning through the success branch). Reading `answers` while ignoring `answered` turns silence into consent.
+
+    `default` covers a TIMEOUT, not an absent user: an offline user gets a 503 from the FIRST ask whether or not you passed a default, because the offline path is decided server-side against a `response_default` this verb does not send (`ask_yes_no` plumbs it). So do NOT use `default` to leave a walkthrough running with nobody at the desk; it will stop on the first question.
+
+    Returns:
+        dict with answers keyed by header, plus the provenance of those answers:
+        {"answers": {"Auth method": "OAuth", "Features": ["Dark mode", "Notifications"]}, "default_used": False, "answered": True}
 
     Args:
-        questions: List of question objects matching Claude Code's AskUserQuestion format:
-            [
-                {
-                    "question": "Which auth method?",
-                    "header": "Auth method",
-                    "multiSelect": false,
-                    "options": [
-                        {"label": "OAuth", "description": "Use OAuth2 flow"},
-                        {"label": "JWT", "description": "Use JWT tokens"}
-                    ]
-                }
-            ]
+        questions: List of question objects in Claude Code's AskUserQuestion format: {"question": "Which auth method?", "header": "Auth method", "multiSelect": false, "options": [{"label": "OAuth", "description": "Use OAuth2 flow"}, {"label": "JWT", "description": "Use JWT tokens"}]}
         timeout_seconds: How long to wait for response (1-600, default 120)
         priority: "low", "medium", "high", or "urgent"
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        default: Optional dict keyed by question header. When provided, a timeout
-            returns ``{"answers": <default>, "default_used": True,
-            "answered": False}`` instead of the error dict. It is DELIBERATELY
-            NOT the same shape as a successful response — that identity was the
-            defect (row e5f21fff): an unanswered question read as a ruling, and
-            five ratified decisions carry a permanent provenance caveat because
-            of it. Keys must match question headers;
-            values must be option labels (string for single-select, list of
-            strings for multi-select). Validated at call time; mismatches
-            return an error dict before the notification fires.
-            Backward-compat: ``default=None`` preserves the legacy timeout
-            return ``{"error": "timeout - no response received", "timeout": True}``.
-        override_size_limitation: Default False. True sends a spoken `question` over the
-            length cap (configured, default 500) knowingly; detail belongs in `abstract`,
-            which has no length limit, not in speech.
-
-    Returns:
-        dict with answers keyed by header, PLUS the provenance of those answers:
-        {
-            "answers": {
-                "Auth method": "OAuth",
-                "Features": ["Dark mode", "Notifications"]
-            },
-            "default_used": False,   # True => nobody chose this; it was substituted
-            "answered":     True     # the affirmative twin, so the common check reads positive
-        }
-
-        ⚠️ READ `answered` BEFORE TREATING THIS AS A DECISION. Both keys are
-        ALWAYS present, including an explicit "default_used": False on a genuine
-        selection — an absent key would leave you unable to tell a real answer
-        from an older server that never sent the field. `default_used` is True
-        when the user TIMED OUT (the caller's `default` was substituted here) and
-        when the user was OFFLINE (the server substituted, and that path returns
-        through the success branch, not the timeout one).
-
-        This is a DETECTION aid, not prevention: reading `answers` while ignoring
-        `answered` still turns silence into consent.
+        default: Optional dict keyed by question header. On timeout the result is {"answers": <default>, "default_used": True, "answered": False} instead of the error dict; it is deliberately NOT the same shape as a real answer. Keys must match question headers; values must be option labels (a string for single-select, a list of strings for multi-select). Validated at call time: a mismatch returns an error dict before the notification fires. `default=None` keeps the legacy timeout return {"error": "timeout - no response received", "timeout": True}.
+        override_size_limitation: Default False. True sends a spoken `question` over the length cap (configured, default 500) knowingly; detail belongs in `abstract`, which has no length limit, not in speech.
 
     Examples:
-        # Single question, single select
-        result = ask_multiple_choice([{
-            "question": "Which database should we use?",
-            "header": "Database",
-            "multiSelect": False,
-            "options": [
-                {"label": "PostgreSQL", "description": "Relational database"},
-                {"label": "MongoDB", "description": "Document database"}
-            ]
-        }])
-        # Returns: {"answers": {"Database": "PostgreSQL"}}
+        result = ask_multiple_choice([{"question": "Which database should we use?", "header": "Database", "multiSelect": False, "options": [{"label": "PostgreSQL", "description": "Relational database"}, {"label": "MongoDB", "description": "Document database"}]}])
+        # {"answers": {"Database": "PostgreSQL"}, "default_used": False, "answered": True}
 
-        # Multiple questions
-        result = ask_multiple_choice([
-            {"question": "Which framework?", "header": "Framework", "multiSelect": False,
-             "options": [{"label": "FastAPI"}, {"label": "Flask"}]},
-            {"question": "Which features?", "header": "Features", "multiSelect": True,
-             "options": [{"label": "Auth"}, {"label": "Caching"}]}
-        ])
-
-        # With timeout default. ⚠️ IT COVERS A TIMEOUT, NOT AN ABSENT USER.
-        # An offline user gets a 503 from the FIRST ask whether or not you passed
-        # a default, because the offline path is decided server-side against a
-        # `response_default` this verb does not send — ask_yes_no plumbs it, this
-        # one does not. So do NOT reach for this pattern to leave a walkthrough
-        # running with nobody at the desk; it will stop on the first question.
-        result = ask_multiple_choice(
-            questions=[{
-                "question":    "Which database should we use?",
-                "header":      "Database",
-                "multiSelect": False,
-                "options":     [{"label": "PostgreSQL"}, {"label": "MongoDB"}]
-            }],
-            default={"Database": "PostgreSQL"}
-        )
-        # On timeout returns: {"answers": {"Database": "PostgreSQL"}}
+        result = ask_multiple_choice(questions=[{"question": "Which database should we use?", "header": "Database", "multiSelect": False, "options": [{"label": "PostgreSQL"}, {"label": "MongoDB"}]}], default={"Database": "PostgreSQL"})
+        # on timeout: {"answers": {"Database": "PostgreSQL"}, "default_used": True, "answered": False}
     """
     # Validate BEFORE logging. `len( questions )` on the line above this guard
     # raised TypeError for a null/unsized argument, so the guard right below it
