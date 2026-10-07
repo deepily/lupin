@@ -873,6 +873,8 @@ def replay_impl( rid, ctx ):
         - returns { status, receipt_id, stored, frozen, head, differences } on success
         - the frozen re-run reads only cached Jev answers, so it is deterministic; it tests the receipt
           (its inputs reproduce its result), not the model
+        - the frozen re-run follows the receipt's route: a page route re-asks the stored pages and covered
+          entries from the cache, and a receipt with no route is a plain sweep of every entry
         - the HEAD re-run uses the current tree and the current index, and tests whether the code or
           the model still agrees
         - a damaged or absent input returns { status: "error", error: <NAME> } and no verdict:
@@ -894,9 +896,12 @@ def replay_impl( rid, ctx ):
         if hard or not entries:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
         else:
-            sw = sweep( ctx, need, entries, frozen=True, template=stored[ "prompt_template" ], model=stored[ "model" ] )
-            d  = vd.decide( sw[ "answers" ], [ e[ "id" ] for e in entries ], [], set( stored[ "flags" ] ), stored[ "policy" ] )
-            fz = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
+            route = stored[ "route" ] if "route" in stored else "full"           # a receipt from before page-first has no route
+            plan  = stored[ "pages" ] if route in ( "pages", "pages_then_full" ) else None
+            pt    = stored[ "page_prompt_template" ] if "page_prompt_template" in stored else None
+            d     = _route( ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
+                            template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ] )[ "d" ]
+            fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         head = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else None, write=False )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
