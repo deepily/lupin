@@ -28,7 +28,7 @@ Git worktrees are made for each spawned seat and for each BFE or TFE job. They a
 - `retire_seat_worktree` keeps the tree if it is the main one or lacks this seat's lock. It also keeps it if the seat is still alive after the wait, 10 seconds by default and 120 from the SessionEnd hook. It keeps it with uncommitted work, an unmerged branch, or other ignored files. Build artifacts, mirrored mementos and the tree's own run output do not count: `tmp/`, `io/test-suite/`, `io/swe-team/`, `io/claude_code_hooks/`, `src/docs/index/`, `.claude-session.md`.
 - Otherwise it unlocks and runs `git worktree remove` without force, re-locking on failure. A seat tree is detached, so usually there is no branch. A merged, unprotected branch is deleted with `git branch -d`.
 - The SessionEnd hook runs it detached for a seat under `.claude/worktrees/`, but not on clear or compact.
-- `dismiss_sessions` is meant to call it after a reap. It passes the session name and the directory in the wrong order, so that door keeps the tree without a notice (store id 74c1bf37-a3b3-4c3a-90db-5a5f05dcd084).
+- `dismiss_sessions` calls it after a reap, through an adapter that puts the seat's directory first and its session name second.
 
 ## Reaper and janitor
 - `drain_then_remove` puts a detached HEAD on a `wt-rescue/` branch and commits a dirty tree as a WIP commit. It then runs `git worktree remove`, and refuses on ignored files unless given an evacuation root. The same three classes (artifacts, run output, mirrored mementos) are exempt there.
