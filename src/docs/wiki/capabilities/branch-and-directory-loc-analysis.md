@@ -32,7 +32,7 @@ Counts lines of code two ways: what a branch changed against a base (`BranchChan
 
 ## Daily deltas: `git_loc_delta`
 - `python -m cosa.repo.run_git_loc_delta` buckets `git log --numstat` rows by committer date and file type. Modes: today (default), `--since/--until`, `--branch`. `--all-branches` is refused with `--branch`.
-- The log is read with `--no-merges` unless `--include-merges` is given. With the flag, merge commits are listed, but `git log --numstat` prints no file rows for a merge, so the line totals do not change. Binary files are skipped.
+- The log is read with `--no-merges` unless `--include-merges` is given. With the flag the log adds `--diff-merges=first-parent`, so a merge counts what it brought in over its first parent. Lines already counted on the merged branch count again. Binary files are skipped.
 - A commit count is the size of a SHA set. The per-(date, file type) `commits` column overlaps and must not be summed.
 
 ## Not this tool
