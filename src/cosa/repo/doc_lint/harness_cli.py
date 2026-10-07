@@ -222,6 +222,10 @@ def run_after_checks( args, config, query_fn, agy_runner ):
         print( f"REFUSED: {model_transport.AGY_STOP}; the ledger is bound to the binary the run began with, so rerun with a new --ledger", file=sys.stderr )
         print( f"the failure the run raised was {type( e ).__name__}: {e}", file=sys.stderr )
         return 2
+    except BaseException:
+        # A Ctrl-C or an exit request reaches here and not the clause above. Worker threads still waiting out a 503 stop waiting.
+        model_transport.AGY_WAKE.set()
+        raise
     report  = harness_report.build_report( results, config, judge_prompt_version=judge_version, jev_run=backend is not None )
     report[ "pairs_sha" ] = pairs_sha
     report[ "transport" ] = args.transport

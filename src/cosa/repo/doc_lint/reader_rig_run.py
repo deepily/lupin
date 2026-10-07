@@ -344,6 +344,7 @@ async def score_question( text, question, config, run, ledger, query_fn, salvage
           salvaged is { score, raw } when that attempt's grader reply was cut down to its score object, else None
         - returns ( None, { step, error, raws }, None ) when every attempt failed: the step and error of the last
           attempt, and raws holding the raw reply of every attempt, each cut to RAW_LIMIT characters
+        - a ModelUnavailableError ends the attempts at once, and is reported as the last attempt
         - a retry is a real call, charged to the cap; a reader answer cached after it parsed is not asked again
         - a score read from the ledger, not from a call made now, reports no salvage
 
@@ -358,6 +359,7 @@ async def score_question( text, question, config, run, ledger, query_fn, salvage
         except ( reader_rig.ReaderParseError, model_transport.ModelCallError ) as e:
             error = f"{type( e ).__name__}: {e}"
             raws.append( tracker.raw[ :RAW_LIMIT ] )
+            if isinstance( e, model_transport.ModelUnavailableError ): break
     return None, { "step": tracker.step, "error": error, "raws": raws }, None
 
 

@@ -1339,3 +1339,29 @@ def test_a_bad_strata_mix_is_refused_naming_what_is_wrong( bad, match, tmp_path,
 
 def test_the_boundary_shares_zero_and_one_are_accepted():
     assert s.strata_mix_of( { "strata_mix": { "S": 1, "M": 0, "L": 0 } } ) == { "S": 1, "M": 0, "L": 0 }
+
+
+def test_d_a_failed_call_is_asked_again_once( planned ):
+    tmp_path, shared = planned
+    base, plain = tmp_path / "out", Writer( fail_nth=( 2, ) )
+    assert s.main( write_args( base, shared, max_fail="99" ), query_fn=plain ) == 0
+    assert len( plain.seen ) == n_tasks( base ) + 1                                   # the second task's call failed and was asked again
+
+
+def test_d_an_unavailable_model_is_not_asked_again_and_the_task_is_dropped_with_its_reason( planned, capsys ):
+    tmp_path, shared = planned
+    base = tmp_path / "out"
+
+    class Gone( Writer ):
+        async def __call__( self, prompt, options ):
+            if len( self.seen ) + 1 in self.fail_nth:
+                self.seen.append( ( options.model, prompt ) )
+                raise mt.ModelUnavailableError( "service down" )
+            async for message in super().__call__( prompt, options ): yield message
+
+    gone = Gone( fail_nth=( 2, ) )
+    assert s.main( write_args( base, shared, max_fail="99" ), query_fn=gone ) == 6
+    err   = capsys.readouterr().err
+    drops = [ r for r in ledger_of( base ) if r.get( "dropped" ) ]
+    assert len( gone.seen ) == n_tasks( base ) and len( drops ) == 1                  # no second call for the unavailable task
+    assert drops[ 0 ][ "reason" ] == "service down" and err.count( "writer call failed for " ) == 1

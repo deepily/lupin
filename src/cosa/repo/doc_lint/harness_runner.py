@@ -300,14 +300,21 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_
           pair never makes a call a twin has finished
         - once one pair fails, pairs not yet started are skipped, every pair in flight finishes (its ledger
           rows are kept), and then the failure of the earliest pair in input order is raised
+        - a stop signal left from an earlier run is cleared first, and a pair's failure sets it, so a call
+          waiting out a 503 in another pair gives up at once
 
     Raises:
         - ValueError if parallel is below 1
         - whatever run_pair raises
     """
     if parallel < 1: raise ValueError( f"parallel must be 1 or more, got {parallel}" )
+    model_transport.AGY_WAKE.clear()
     if parallel == 1:
-        return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
+        try:
+            return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
+        except Exception:
+            model_transport.AGY_WAKE.set()
+            raise
     slots  = asyncio.Semaphore( parallel )
     twins  = {}
     errors = {}
@@ -322,6 +329,7 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_
                     outcome = await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable )
                 except Exception as e:
                     errors[ index ] = e
+                    model_transport.AGY_WAKE.set()
         return outcome
 
     results = await asyncio.gather( *[ one( i, pair ) for i, pair in enumerate( pairs ) ] )

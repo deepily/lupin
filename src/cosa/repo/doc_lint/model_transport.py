@@ -12,6 +12,7 @@ prompt version, so a row made under another profile can never be replayed.
 """
 
 import asyncio
+import atexit
 import contextlib
 import contextvars
 import datetime
@@ -91,7 +92,28 @@ AGY_STOP = None
 # Three waits make four tries at the most. A 130-pair run was ended seven times by this answer
 # in half an hour, and each time the next attempt, 45 seconds or more later, went through.
 AGY_UNAVAILABLE_WAITS = ( 15, 45, 90 )
-AGY_SLEEP             = time.sleep
+
+# Set when the run is stopping, so a call waiting out a 503 gives up at once and not after the wait.
+AGY_WAKE = threading.Event()
+
+
+def _agy_wait( seconds ):
+    """
+    Wait out a 503, or stop waiting early when AGY_WAKE is set.
+
+    Requires:
+        - seconds is a number of seconds, zero or more
+
+    Ensures:
+        - returns True when AGY_WAKE was set before or during the wait, else False after the full wait
+    """
+    return AGY_WAKE.wait( seconds )
+
+
+AGY_SLEEP = _agy_wait
+
+# The per-process directory that holds every agy call's scratch directory; None until the first call.
+AGY_SCRATCH_PARENT = None
 
 # The agent every agy call runs as: a custom agent with no tools, written into the call's scratch
 # directory, where agy looks for it. The Claude path runs with tools=[]; this is the same rule for agy.
@@ -122,8 +144,9 @@ AGY_RESIDUAL_CONTEXT = [ "agy's own framing around the custom agent, about 3,400
 AGY_USAGE_FIELDS = ( "input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens" )
 
 # Tokens agy reported, summed per model id for this process. Calls run in worker threads.
-AGY_USAGE       = {}
-_AGY_USAGE_LOCK = threading.Lock()
+AGY_USAGE         = {}
+_AGY_USAGE_LOCK   = threading.Lock()
+_AGY_SCRATCH_LOCK = threading.Lock()
 
 # The plan for the model calls made under a record_calls() block, one per context (an asyncio task has its own),
 # so pairs in flight at once cannot write into each other's tally. It is kept here, and not passed down through
@@ -173,6 +196,10 @@ def record_calls( plan=( ( "call", "default" ), ) ):
 
 class ModelCallError( Exception ):
     """A model call returned nothing usable or raised."""
+
+
+class ModelUnavailableError( ModelCallError ):
+    """The service stayed unavailable, or a stop cut the wait; retrying cannot help."""
 
 
 class CallBudgetExceeded( Exception ):
@@ -316,7 +343,7 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
         - runner, when given, stands in for subprocess.run in tests, for the version call and every model call
 
     Ensures:
-        - later calls to complete go to agy, and the token tally starts empty
+        - later calls to complete go to agy, the token tally starts empty and a stop signal left in AGY_WAKE is cleared
         - the version is read first and the fingerprint second, because asking agy for its
           version can start its updater
         - returns the ledger binding: the binary's path, size, modification time and version, then
@@ -333,6 +360,7 @@ def configure_agy( agy_bin=agy_runtime.DEFAULT_AGY_BIN, runner=None ):
         pin     = agy_runtime.binary_fingerprint( agy_bin )
     except agy_runtime.AgyCallError as e:
         raise ValueError( f"agy binary {agy_bin!r} is not usable: {e}" ) from e
+    AGY_WAKE.clear()
     TRANSPORT   = "agy"
     AGY_BIN     = agy_bin
     AGY_PIN     = pin
@@ -429,10 +457,12 @@ def _agy_call( model, prompt, timeout_seconds ):
         - an AgyUnavailable is tried again after each wait in AGY_UNAVAILABLE_WAITS, in a new
           scratch directory each time; no other failure is tried again here
         - each wait is announced by one line on standard error, naming the model, the try and the wait
+        - a wait that AGY_SLEEP reports as cut short, as AGY_WAKE does, ends the tries at once
         - the caller's budget is not charged again: complete charges before calling this
 
     Raises:
-        - ModelCallError naming the number of tries when every try was answered unavailable
+        - ModelUnavailableError, a ModelCallError, naming the number of tries when every try was answered
+          unavailable, or saying the wait was cut short by a stop
         - whatever _agy_call_once raises otherwise
     """
     waits = list( AGY_UNAVAILABLE_WAITS )
@@ -444,10 +474,47 @@ def _agy_call( model, prompt, timeout_seconds ):
             return text, time.monotonic() - started
         except agy_runtime.AgyUnavailable as e:
             if not waits:
-                raise ModelCallError( f"model call to {model} failed, unavailable on each of {tries} tries: {e}" ) from e
+                raise ModelUnavailableError( f"model call to {model} failed, unavailable on each of {tries} tries: {e}" ) from e
             wait = waits.pop( 0 )
             print( f"agy unavailable (model {model}), try {tries - len( waits ) - 1} of {tries}; waiting {wait}s", file=sys.stderr )
-            AGY_SLEEP( wait )
+            if AGY_SLEEP( wait ):
+                raise ModelUnavailableError( f"model call to {model} stopped waiting for the service, the wait was cut short by a stop after try {tries - len( waits ) - 1} of {tries}: {e}" ) from e
+
+
+def _scratch_parent():
+    """
+    Return the per-process directory for the agy call directories, made on first use.
+
+    Requires:
+        - nothing; threads may call it together
+
+    Ensures:
+        - the same directory every time within the process, named agy-run-*, so a sweep of one run's
+          leftovers cannot reach the calls in flight of another run
+        - an exit hook removes it when it is empty
+
+    Raises:
+        - OSError if the directory cannot be made
+    """
+    global AGY_SCRATCH_PARENT
+    with _AGY_SCRATCH_LOCK:
+        if AGY_SCRATCH_PARENT is None:
+            AGY_SCRATCH_PARENT = tempfile.mkdtemp( prefix="agy-run-" )
+            atexit.register( _remove_scratch_parent )
+        return AGY_SCRATCH_PARENT
+
+
+def _remove_scratch_parent():
+    """
+    Remove the scratch parent directory when nothing is left in it.
+
+    Ensures:
+        - a parent that still holds anything, is already gone, or was never made is left alone
+        - never raises
+    """
+    if AGY_SCRATCH_PARENT is None: return
+    try: os.rmdir( AGY_SCRATCH_PARENT )
+    except OSError: pass
 
 
 def _agy_call_once( model, prompt, timeout_seconds ):
@@ -476,12 +543,12 @@ def _agy_call_once( model, prompt, timeout_seconds ):
           the agent definition, or if the scratch directory cannot be made or listed, or the agent
           definition cannot be written or read back
         - AgyUnavailable if agy answered that the service is unavailable, for _agy_call to try again
-        - AgyBinaryChanged if the binary differs from the pin; it is not a ModelCallError, so a
+        - AgyBinaryChanged if the binary differs from the pin, which also sets AGY_WAKE; it is not a ModelCallError, so a
           caller that retries failed calls does not retry under another binary
     """
     global AGY_STOP
     try:
-        scratch = tempfile.mkdtemp( prefix="agy-call-" )
+        scratch = tempfile.mkdtemp( prefix="agy-call-", dir=_scratch_parent() )
     except OSError as e:
         raise ModelCallError( f"model call to {model} could not make its scratch directory: {e}" ) from e
     try:
@@ -499,7 +566,9 @@ def _agy_call_once( model, prompt, timeout_seconds ):
         except agy_runtime.AgyCallError as e:
             raise ModelCallError( f"model call to {model} failed: {e}" ) from e
         except agy_runtime.AgyBinaryChanged as e:
-            if AGY_STOP is None: AGY_STOP = str( e )
+            if AGY_STOP is None:
+                AGY_STOP = str( e )
+                AGY_WAKE.set()
             raise
         try:
             holds = _scratch_entries( scratch )

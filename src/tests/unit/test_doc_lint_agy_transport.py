@@ -6,6 +6,7 @@ Isolation contract:
       except two tests that start a shell script written under tmp_path.
     - The binary that is fingerprinted is a file under tmp_path, never the installed agy.
     - Every test ends with the transport back on Claude, no budget and an empty token tally.
+    - No test makes a directory in the shared temporary directory: the scratch parent is pointed at tmp_path.
 """
 
 import asyncio
@@ -105,6 +106,15 @@ def claude_again_afterwards():
     mt.configure_claude()
     mt.set_budget( None, {} )
     mt.AGY_USAGE.clear()
+    mt.AGY_WAKE.clear()
+
+
+@pytest.fixture( autouse=True )
+def scratch_parent_in_tmp_path( tmp_path, monkeypatch ):
+    """Scratch directories go under tmp_path, so none lands in /tmp beside a real run."""
+    parent = tmp_path / "agy-run-scratch"
+    parent.mkdir()
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", str( parent ) )
 
 
 @pytest.fixture
@@ -434,7 +444,7 @@ def test_a_scratch_directory_that_cannot_be_made_is_a_model_call_error_and_agy_i
     fake = FakeAgy( answer="ok" )
     mt.configure_agy( agy_bin, runner=fake )
 
-    def no_room( prefix ): raise OSError( 28, "No space left on device" )
+    def no_room( prefix, dir=None ): raise OSError( 28, "No space left on device" )
     monkeypatch.setattr( mt.tempfile, "mkdtemp", no_room )
 
     with pytest.raises( mt.ModelCallError, match="model call to m could not make its scratch directory: .*No space left on device" ):
@@ -612,8 +622,8 @@ def test_a_capped_model_is_charged_once_for_a_call_that_was_tried_again( agy_bin
         complete( "m", "s", "u" )
 
 
-def test_the_real_sleep_is_what_waits_by_default():
-    assert mt.AGY_SLEEP is time.sleep
+def test_the_default_wait_is_the_interruptible_one():
+    assert mt.AGY_SLEEP is mt._agy_wait
 
 
 def test_an_agent_definition_left_as_bytes_that_are_not_text_is_a_model_call_error( agy_bin ):
@@ -1019,3 +1029,315 @@ def test_the_harness_still_refuses_a_judge_that_is_the_writer_under_agy( tmp_pat
 
     assert "REFUSED" in capsys.readouterr().err
     assert fake.calls == []
+
+
+# ---- row 40db25ad: the 503 wait, the retry multiplication, the scratch parent, the guards ----------
+
+def test_three_unavailable_answers_print_the_line_for_each_of_the_three_waits_in_full( agy_bin, monkeypatch, capsys ):
+    waits  = []
+    runner = Unavailable( 3, FakeAgy( answer="the answer" ) )
+    monkeypatch.setattr( mt, "AGY_SLEEP", waits.append )
+    mt.configure_agy( agy_bin, runner=runner )
+
+    assert complete( "m", "s", "u" ) == "the answer"
+
+    assert waits == [ 15, 45, 90 ]
+    assert capsys.readouterr().err == (
+        "agy unavailable (model m), try 1 of 4; waiting 15s\n"
+        "agy unavailable (model m), try 2 of 4; waiting 45s\n"
+        "agy unavailable (model m), try 3 of 4; waiting 90s\n"
+    )
+
+
+def test_the_default_wait_returns_false_when_it_runs_out_and_true_at_once_after_a_wake():
+    mt.AGY_WAKE.clear()
+    started = time.monotonic()
+    assert mt._agy_wait( 0.01 ) is False
+    mt.AGY_WAKE.set()
+    assert mt._agy_wait( 30 ) is True
+    assert time.monotonic() - started < 5
+
+
+def test_a_wake_during_a_call_cuts_the_next_wait_short_and_ends_the_retries( agy_bin ):
+    class Waking( Unavailable ):
+        def __call__( self, argv, **kwargs ):
+            if argv[ 1: ] != [ "--version" ]: mt.AGY_WAKE.set()
+            return super().__call__( argv, **kwargs )
+
+    waking = Waking( 99, FakeAgy( answer="never reached" ) )
+    mt.configure_agy( agy_bin, runner=waking )
+    mt.AGY_WAKE.clear()    # configure_agy clears; the call below is the one that sets it
+
+    started = time.monotonic()
+    with pytest.raises( mt.ModelUnavailableError, match="cut short by a stop" ) as raised:
+        complete( "m", "s", "u" )
+
+    assert isinstance( raised.value, mt.ModelCallError )
+    assert isinstance( raised.value.__cause__, agy_runtime.AgyUnavailable )
+    assert len( waking.cwds ) == 1
+    assert time.monotonic() - started < 5
+
+
+def test_a_wait_that_is_not_cut_short_goes_on_to_the_next_try( agy_bin, monkeypatch ):
+    monkeypatch.setattr( mt, "AGY_SLEEP", lambda seconds: False )
+    runner = Unavailable( 1, FakeAgy( answer="ok" ) )
+    mt.configure_agy( agy_bin, runner=runner )
+
+    assert complete( "m", "s", "u" ) == "ok"
+    assert len( runner.cwds ) == 2
+
+
+def test_tries_all_answered_unavailable_raise_the_unavailable_error_which_is_still_a_model_call_error( agy_bin, monkeypatch ):
+    monkeypatch.setattr( mt, "AGY_SLEEP", lambda seconds: None )
+    mt.configure_agy( agy_bin, runner=Unavailable( 99, FakeAgy( answer="never reached" ) ) )
+
+    with pytest.raises( mt.ModelUnavailableError, match="unavailable on each of 4 tries" ) as raised:
+        complete( "m", "s", "u" )
+
+    assert isinstance( raised.value, mt.ModelCallError )
+    assert issubclass( mt.ModelUnavailableError, mt.ModelCallError )
+
+
+def test_a_plain_failure_is_not_the_unavailable_error( agy_bin ):
+    mt.configure_agy( agy_bin, runner=FakeAgy( exit_code=3 ) )
+
+    with pytest.raises( mt.ModelCallError ) as raised:
+        complete( "m", "s", "u" )
+
+    assert not isinstance( raised.value, mt.ModelUnavailableError )
+
+
+def test_the_first_binary_change_wakes_the_waiting_calls( agy_bin ):
+    def change_the_binary( cwd ): open( agy_bin, "ab" ).write( b"# changed\n" )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="x", on_call=change_the_binary ) )
+    mt.AGY_WAKE.clear()
+    with pytest.raises( agy_runtime.AgyBinaryChanged ):
+        complete( "m", "s", "u" )
+
+    assert mt.AGY_STOP is not None
+    assert mt.AGY_WAKE.is_set()
+
+
+def test_configure_agy_clears_a_wake_left_by_an_earlier_run( agy_bin ):
+    mt.AGY_WAKE.set()
+    mt.configure_agy( agy_bin, runner=FakeAgy() )
+
+    assert not mt.AGY_WAKE.is_set()
+
+
+def test_the_calls_scratch_directories_are_made_inside_one_parent_that_is_not_a_bare_call_directory( agy_bin ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    complete( "m", "s", "u" )
+    complete( "m", "s", "u" )
+
+    parents = { os.path.dirname( c[ "cwd" ] ) for c in fake.calls }
+    assert len( parents ) == 1
+    parent = parents.pop()
+    assert parent == mt.AGY_SCRATCH_PARENT == mt._scratch_parent()
+    assert not os.path.basename( parent ).startswith( "agy-call-" )
+    assert all( os.path.basename( c[ "cwd" ] ).startswith( "agy-call-" ) for c in fake.calls )
+
+
+def test_a_sweep_of_the_call_prefix_in_the_shared_temporary_directory_reaches_no_call_in_flight( agy_bin ):
+    import glob, tempfile
+    swept = []
+    fake  = FakeAgy( answer="ok", on_call=lambda cwd: swept.extend( glob.glob( os.path.join( tempfile.gettempdir(), "agy-call-*" ) ) ) )
+    mt.configure_agy( agy_bin, runner=fake )
+
+    complete( "m", "s", "u" )
+
+    assert len( fake.calls ) == 1
+    assert fake.calls[ 0 ][ "cwd" ] not in swept                                   # the sweep, run while the call is in flight, cannot see it
+    assert not os.path.dirname( fake.calls[ 0 ][ "cwd" ] ) == tempfile.gettempdir()
+
+
+def test_the_scratch_parent_is_made_once_per_process_under_the_run_prefix( monkeypatch ):
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", None )
+    made = []
+    real = mt.tempfile.mkdtemp
+    monkeypatch.setattr( mt.tempfile, "mkdtemp", lambda **kw: made.append( kw ) or real( **kw ) )
+    registered = []
+    monkeypatch.setattr( mt.atexit, "register", registered.append )
+
+    first  = mt._scratch_parent()
+    second = mt._scratch_parent()
+    try:
+        assert first == second == mt.AGY_SCRATCH_PARENT
+        assert os.path.isdir( first ) and os.path.basename( first ).startswith( "agy-run-" )
+        assert made == [ { "prefix" : "agy-run-" } ]
+        assert registered == [ mt._remove_scratch_parent ]
+    finally:
+        os.rmdir( first )
+
+
+def test_the_exit_hook_removes_an_empty_parent_and_leaves_a_non_empty_one( tmp_path, monkeypatch ):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", str( empty ) )
+    mt._remove_scratch_parent()
+    assert not empty.exists()
+
+    held = tmp_path / "held"
+    ( held / "agy-call-x" ).mkdir( parents=True )
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", str( held ) )
+    mt._remove_scratch_parent()
+    assert held.exists() and ( held / "agy-call-x" ).exists()
+
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", str( tmp_path / "gone" ) )
+    mt._remove_scratch_parent()           # already removed: no error
+
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", None )
+    mt._remove_scratch_parent()           # never made: nothing to do
+
+
+def test_a_scratch_parent_that_cannot_be_made_is_a_model_call_error_and_agy_is_not_called( agy_bin, monkeypatch ):
+    fake = FakeAgy( answer="ok" )
+    mt.configure_agy( agy_bin, runner=fake )
+    monkeypatch.setattr( mt, "AGY_SCRATCH_PARENT", None )
+
+    def refuse( **kw ): raise OSError( "disk full" )
+
+    monkeypatch.setattr( mt.tempfile, "mkdtemp", refuse )
+
+    with pytest.raises( mt.ModelCallError, match="could not make its scratch directory: disk full" ):
+        complete( "m", "s", "u" )
+
+    assert fake.calls == []
+
+
+# ---- the guards: what the orchestration README says about a 503, and what the code does -------------
+
+def readme_row():
+    path = os.path.join( os.path.dirname( agy_runtime.__file__ ), "..", "README.md" )
+    rows = [ line for line in open( path, encoding="utf-8" ) if "`AgyUnavailable`" in line ]
+    assert len( rows ) == 1
+    return rows[ 0 ]
+
+
+def run_with_stderr( agy_bin, tmp_path, stderr, stdout="", returncode=1 ):
+    calls = []
+
+    def runner( argv, **kwargs ):
+        calls.append( argv )
+        return Done( returncode=returncode, stdout=stdout, stderr=stderr )
+
+    with pytest.raises( agy_runtime.AgyCallError ) as raised:
+        agy_runtime.run_agy( "p", model="m", workspace_dir=str( tmp_path ), agy_bin=agy_bin, runner=runner )
+    return raised.value, calls
+
+
+def test_the_readme_claim_about_a_503_is_what_the_code_does( agy_bin, tmp_path ):
+    row = readme_row()
+    assert f"`{agy_runtime.UNAVAILABLE_MARK}`" in row
+    assert "a subclass" in row and "`AgyCallError`" in row
+    assert "`run_agy` itself does not retry" in row
+    assert issubclass( agy_runtime.AgyUnavailable, agy_runtime.AgyCallError )
+
+    error, calls = run_with_stderr( agy_bin, tmp_path, "error: UNAVAILABLE " + agy_runtime.UNAVAILABLE_MARK + ": try later\n" )
+
+    assert type( error ) is agy_runtime.AgyUnavailable
+    assert len( calls ) == 1
+
+
+def test_the_503_mark_is_matched_on_the_standard_error_tail_only( agy_bin, tmp_path ):
+    mark = agy_runtime.UNAVAILABLE_MARK
+    tail = agy_runtime.STDERR_TAIL_CHARS
+
+    error, _ = run_with_stderr( agy_bin, tmp_path, "boom\n", stdout="error " + mark )
+    assert type( error ) is agy_runtime.AgyCallError                               # in standard output: not unavailable
+
+    error, _ = run_with_stderr( agy_bin, tmp_path, "x" * 5000 + mark )
+    assert type( error ) is agy_runtime.AgyUnavailable                             # in the last lines of standard error
+
+    error, _ = run_with_stderr( agy_bin, tmp_path, mark + "x" * tail )
+    assert type( error ) is agy_runtime.AgyCallError                               # early in a long standard error, outside the tail
+
+    error, _ = run_with_stderr( agy_bin, tmp_path, mark + "x" * ( tail - len( mark ) ) )
+    assert type( error ) is agy_runtime.AgyUnavailable                             # the first characters still inside the tail
+
+    error, _ = run_with_stderr( agy_bin, tmp_path, "error " + mark, returncode=0 )
+    assert type( error ) is agy_runtime.AgyCallError                               # a zero exit never reaches the mark; the missing result is the failure
+
+
+# ---- the wake: who sets it and who clears it ------------------------------------------------------
+
+PAIR_A = { "id" : "a", "old" : "x", "new" : "y", "design" : None }
+PAIR_B = { "id" : "b", "old" : "p", "new" : "q", "design" : None }
+
+
+@pytest.mark.parametrize( "parallel", [ 1, 2 ] )
+def test_run_all_clears_a_wake_left_over_from_an_earlier_run_before_any_pair_starts( monkeypatch, parallel ):
+    mt.AGY_WAKE.set()
+    seen = []
+
+    async def pair_stand_in( pair, *args, **kwargs ):
+        seen.append( mt.AGY_WAKE.is_set() )
+        return pair[ "id" ]
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+    assert asyncio.run( hn.run_all( [ PAIR_A, PAIR_B ], None, None, parallel=parallel ) ) == [ "a", "b" ]
+    assert seen == [ False, False ] and not mt.AGY_WAKE.is_set()
+
+
+@pytest.mark.parametrize( "parallel", [ 1, 2 ] )
+def test_run_all_wakes_waiting_calls_when_a_pair_fails( monkeypatch, parallel ):
+    async def pair_stand_in( pair, *args, **kwargs ):
+        raise RuntimeError( "pair a broke" )
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+    with pytest.raises( RuntimeError, match="pair a broke" ):
+        asyncio.run( hn.run_all( [ PAIR_A, PAIR_B ], None, None, parallel=parallel ) )
+
+    assert mt.AGY_WAKE.is_set()
+
+
+def test_a_pair_in_flight_sees_the_wake_when_another_pair_fails_and_still_finishes( monkeypatch ):
+    seen = []
+
+    async def pair_stand_in( pair, *args, **kwargs ):
+        if pair[ "id" ] == "a":
+            await asyncio.sleep( 0.01 )
+            raise RuntimeError( "pair a broke" )
+        await asyncio.sleep( 0.1 )
+        seen.append( mt.AGY_WAKE.is_set() )
+        return "finished"
+
+    monkeypatch.setattr( hn, "run_pair", pair_stand_in )
+
+    with pytest.raises( RuntimeError, match="pair a broke" ):
+        asyncio.run( hn.run_all( [ PAIR_A, PAIR_B ], None, None, parallel=2 ) )
+
+    assert seen == [ True ]
+
+
+def test_a_keyboard_interrupt_during_the_run_wakes_waiting_calls_and_propagates( tmp_path, monkeypatch ):
+    write_pairs( tmp_path )
+
+    async def interrupted( *args, **kwargs ):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr( hn, "run_all", interrupted )
+    mt.AGY_WAKE.clear()
+
+    with pytest.raises( KeyboardInterrupt ):
+        cli.main( cli_args( tmp_path ), query_fn=lambda *a, **k: None )
+
+    assert mt.AGY_WAKE.is_set()
+
+
+def test_a_binary_change_seen_after_a_peer_already_recorded_the_stop_keeps_the_first_reason( agy_bin ):
+    def peer_stops_then_binary_changes( cwd ):
+        mt.AGY_STOP = "peer reason"
+        open( agy_bin, "ab" ).write( b"# changed\n" )
+
+    mt.configure_agy( agy_bin, runner=FakeAgy( answer="x", on_call=peer_stops_then_binary_changes ) )
+
+    with pytest.raises( agy_runtime.AgyBinaryChanged ):
+        complete( "m", "s", "u" )
+
+    assert mt.AGY_STOP == "peer reason"

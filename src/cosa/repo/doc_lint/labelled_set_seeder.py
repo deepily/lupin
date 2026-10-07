@@ -809,7 +809,7 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *,
         - the ledger's rows must agree on model and prompt hash with each other and with now, or ValueError
         - the first pending task is a canary: one call, no retry; if it fails, CanaryFailed is raised with the reason and
           no ledger row is written for it
-        - every other failed call prints its reason to stderr; a failed or empty call is retried once; still failing, the task is
+        - every other failed call prints its reason to stderr; a failed or empty call is retried once, except a ModelUnavailableError, which is not; still failing, the task is
           recorded as dropped with the last reason (first 300 characters) on its row
         - after max_consecutive_failures dropped tasks in a row, TooManyFailures is raised
         - every row records cli_path and cli_version
@@ -839,6 +839,7 @@ async def run_writer( tasks, model, ledger_path, outputs_path, query_fn=None, *,
                 called += 1
                 reason = str( e )[ :REASON_CHARS ]
                 print( f"writer call failed for {task[ 'task_id' ]}: {reason}", file=sys.stderr )
+                if isinstance( e, model_transport.ModelUnavailableError ): break      # the transport already tried every wait; asking again only waits again
         if canary and text is None: raise CanaryFailed( f"the first call failed ({task[ 'task_id' ]}): {reason}", called, dropped )
         canary = False
         with open( ledger_path, "a", encoding="utf-8" ) as f:

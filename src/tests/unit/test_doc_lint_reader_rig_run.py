@@ -751,3 +751,14 @@ def test_strict_grader_refuses_what_salvage_would_take( repo ):
     old, _  = report[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
     assert code == 3 and report[ "strict_grader" ] is True and report[ "overall" ][ "salvaged" ] == 0
     assert old[ "step" ] == "grader" and old[ "raws" ] == [ REASON + '{"score": 1}' ] * 3 and len( models.by( GRADER ) ) == 3
+
+
+def test_a_model_call_error_is_retried_the_full_attempts_but_an_unavailable_model_is_not( repo ):
+    out = str( repo[ "tmp" ] / "gone.json" )
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ model_transport.ModelCallError( "blip" ) ] * 3 ), **{ "--runs": "1", "--out": out } )
+    assert code == 3 and len( models.by( READER ) ) == 3
+
+    code, models = run( repo, [ QB1 ], FakeModels( reader_script=[ model_transport.ModelUnavailableError( "service down" ) ] * 3 ), **{ "--runs": "1", "--out": out } )
+    old, _ = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
+    assert code == 3 and len( models.by( READER ) ) == 1
+    assert old[ "step" ] == "reader" and old[ "error" ] == "ModelUnavailableError: service down" and old[ "raws" ] == [ "" ]

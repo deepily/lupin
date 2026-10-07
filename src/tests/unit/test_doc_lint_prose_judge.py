@@ -348,3 +348,31 @@ def test_a_quote_must_clear_the_word_minimum_and_the_character_minimum_on_its_ow
     assert pj.locate_line( "a b c", item ) is None
     assert pj.locate_line( "Supercalifragilistic", item ) is None
     assert pj.locate_line( "marker is here.", item ) == 1
+
+
+# ---- row 40db25ad: an unavailable model is not retried by the caller ---------------------------
+
+def counting_failure( make_error ):
+    class Failing:
+        calls = 0
+        async def __call__( self, prompt, options ):
+            self.calls += 1
+            raise make_error()
+            yield
+    return Failing()
+
+
+def test_a_plain_model_call_error_is_still_retried_once():
+    model  = counting_failure( lambda: mt.ModelCallError( "blip" ) )
+    result = run( pj.judge_prose( [ TABLE ], CONFIG, query_fn=model ) )
+    assert model.calls == 2 and result.unjudged == 1
+    assert result.findings[ 0 ].message.startswith( "Table: not judged after two tries: " )
+
+
+def test_an_unavailable_model_is_not_retried_and_the_item_is_unjudged_with_the_cause_named():
+    model  = counting_failure( lambda: mt.ModelUnavailableError( "service down" ) )
+    result = run( pj.judge_prose( [ TABLE ], CONFIG, query_fn=model ) )
+    row = result.findings[ 0 ]
+    assert model.calls == 1 and result.unjudged == 1
+    assert ( row.rule, row.path, row.line ) == ( "prose-unjudged", "pkg/mod.py", TABLE[ "first_line" ] )
+    assert row.message == "Table: not judged, the model was unavailable: service down"

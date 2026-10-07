@@ -226,7 +226,8 @@ async def judge_prose( items, config, ledger=None, query_fn=None ):
         - a bad config raises even when items is empty
         - one bad reply or one failed call never aborts the sweep: the item is tried twice, and
           if it still fails it becomes a "prose-unjudged" finding on its first line, so it is
-          neither a silent clean nor an abort
+          neither a silent clean nor an abort. A ModelUnavailableError is not tried again: the
+          item becomes that finding after the first try, with the cause named
         - with a ledger, a finished item is not judged again, and an unjudged item is not
           stored, so a rerun retries it
         - the ledger holds no path and no absolute line: a replay rebuilds each finding from the
@@ -247,19 +248,25 @@ async def judge_prose( items, config, ledger=None, query_fn=None ):
             findings  += [ Finding( item[ "path" ], item[ "first_line" ] + offset, rule, f"{item[ 'name' ]}: {reason}" ) for offset, rule, reason in stored[ "findings" ] ]
             discarded += stored[ "discarded" ]
             continue
+        judged, unavailable = False, False
         for attempt in ( 1, 2 ):
             try:
                 found, dropped = await judge_item( item, config, query_fn=query_fn )
+            except model_transport.ModelUnavailableError as e:
+                failure, unavailable = e, True
+                break
             except ( ProseParseError, model_transport.ModelCallError ) as e:
                 failure = e
                 continue
             findings  += found
             discarded += dropped
             if ledger is not None: ledger.put( key, { "findings": [ [ f.line - item[ "first_line" ], f.rule, f.message.split( ": ", 1 )[ 1 ] ] for f in found ], "discarded": dropped } )
+            judged = True
             break
-        else:
+        if not judged:
             unjudged += 1
-            findings.append( Finding( item[ "path" ], item[ "first_line" ], "prose-unjudged", f"{item[ 'name' ]}: not judged after two tries: {failure}" ) )
+            why = "not judged, the model was unavailable" if unavailable else "not judged after two tries"
+            findings.append( Finding( item[ "path" ], item[ "first_line" ], "prose-unjudged", f"{item[ 'name' ]}: {why}: {failure}" ) )
     return ProseResult( sorted( findings, key=lambda f: ( f.path, f.line, f.rule ) ), discarded, unjudged )
 
 
