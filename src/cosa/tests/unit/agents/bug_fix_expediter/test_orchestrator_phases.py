@@ -460,6 +460,16 @@ class TestVoiceGateDiagnosis( unittest.TestCase ):
         self.assertEqual( ctx.exception.phase, BFEPhase.DIAGNOSING.value )
         self.assertIsInstance( ctx.exception.cause, RuntimeError )
 
+    def test_unreachable_from_the_gate_passes_through_unwrapped_at_diagnosis( self ):
+        # The dispatcher now raises VoiceGateUnreachableError itself. Wrapping it
+        # again would bury the real cause one level down.
+        orch = _orch()
+        err = VoiceGateUnreachableError( "confirmation", RuntimeError( "ws down" ) )
+        self.ci.ask_confirmation.side_effect = err
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_diagnosis( _diag(), vio_mod, self.ci ) )
+        self.assertIs( ctx.exception, err )
+
     def test_unreachable_is_not_reported_as_a_timeout( self ):
         # The two are distinct events and the record must be able to say which.
         # Collapsing them is the same "cannot distinguish" defect the gate had.
@@ -599,6 +609,14 @@ class TestVoiceGateProposal( unittest.TestCase ):
         with self.assertRaises( VoiceGateUnreachableError ) as ctx:
             _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
         self.assertEqual( ctx.exception.phase, BFEPhase.PROPOSING.value )
+
+    def test_unreachable_from_the_gate_passes_through_unwrapped_at_proposal( self ):
+        orch = _orch()
+        err = VoiceGateUnreachableError( "confirmation", RuntimeError( "ws down" ) )
+        self.ci.ask_confirmation.side_effect = err
+        with self.assertRaises( VoiceGateUnreachableError ) as ctx:
+            _run( orch._voice_gate_proposal( [ _fix( confidence=0.9 ) ], vio_mod, self.ci ) )
+        self.assertIs( ctx.exception, err )
 
     def test_control_a_working_gate_still_returns_the_approved_fix( self ):
         # Control: if the refusal test above passed because the gate refuses

@@ -492,6 +492,29 @@ class TestExecuteLive( unittest.TestCase ):
             out = _run( o._execute_live( MagicMock() ) )
         self.assertIn( "cancelled", out )
 
+    def test_gate_error_after_decomposition_stops_the_task_instead_of_proceeding( self ):
+        # Before the dispatcher stopped answering with the default, a broken gate
+        # here answered "yes" and the whole subtask plan ran unapproved.
+        from cosa.agents.test_fix_expediter.state import VoiceGateUnreachableError
+        o = _mk_orch()
+        gate = AsyncMock( side_effect=VoiceGateUnreachableError( "confirmation", RuntimeError( "x" ) ) )
+        delegate = AsyncMock()
+        with _LiveFixture( self, o ), \
+             patch.object( o, "_decompose_task", AsyncMock( return_value=[ self._spec() ] ) ), \
+             patch.object( o, "_gated_confirmation", gate ), \
+             patch.object( o, "_delegate_task", delegate ):
+            with self.assertRaises( VoiceGateUnreachableError ):
+                _run( o._execute_live( MagicMock() ) )
+        delegate.assert_not_awaited()
+
+    def test_gated_confirmation_lets_a_gate_error_propagate( self ):
+        from cosa.agents.test_fix_expediter.state import VoiceGateUnreachableError
+        o = _mk_orch()
+        team_io = MagicMock()
+        team_io.ask_confirmation = AsyncMock( side_effect=VoiceGateUnreachableError( "confirmation", RuntimeError( "x" ) ) )
+        with self.assertRaises( VoiceGateUnreachableError ):
+            _run( o._gated_confirmation( "Proceed?", "lead", "yes", 60, None, team_io ) )
+
     def test_happy_path_verify_passes_first_iteration( self ):
         o = _mk_orch( enable_checkins=False )
         with _LiveFixture( self, o ), \
