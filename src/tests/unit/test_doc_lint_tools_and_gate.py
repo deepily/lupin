@@ -722,3 +722,294 @@ def test_a_file_that_is_not_utf8_is_not_handed_to_ruff_or_markdownlint( repo, mo
     _stage( repo, { "src/lupin_mcp/ok.py": "x = 1\n", "docs/ok.md": "fine\n" } )
     rc, _ = _gate( repo )
     assert rc == 0 and seen == { "ruff": [ "src/lupin_mcp/ok.py" ], "md": [ "docs/ok.md" ] }
+
+
+# ---- the counted scope -----------------------------------------------------------------------
+
+from cosa.repo.doc_lint import counts
+
+TABLE = counts.TABLE_PATH
+CLEAN = _doc( "Return the thing." )
+ONE   = _doc( "This is NOT fine." )                                  # one caps finding
+TWO   = _doc( "This is NOT fine and NEVER good." )                   # two caps findings
+TIC   = _doc( "At the end of the day it works." )                    # one tic finding
+
+
+@pytest.fixture
+def stamped( repo ):
+    for rel in counts.STAMP_FILES:
+        full = repo / rel
+        if not full.exists():
+            full.parent.mkdir( parents=True, exist_ok=True )
+            full.write_text( f"stamp file {rel}\n", encoding="utf-8" )
+    return repo
+
+
+def _table( repo, files, stamp=None ):
+    text = counts.table_text( files, stamp if stamp is not None else counts.rules_stamp( str( repo ) ) )
+    ( repo / TABLE ).parent.mkdir( parents=True, exist_ok=True )
+    ( repo / TABLE ).write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", TABLE )
+
+
+def _base( repo, files, table, stamp=None ):
+    """Commit the files and the table as the base the next commit is judged against."""
+    _stage( repo, files )
+    _table( repo, table, stamp )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+
+
+def test_the_counted_scope_without_a_table_is_reported_not_checked_and_refuses_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert "WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" in text
+    assert "counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table absent" in text
+
+
+def test_with_no_counted_file_staged_and_no_table_there_is_nothing_to_warn_about( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/a.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "no count table" not in text and "table absent" in text
+
+
+def test_a_counted_file_that_rises_above_its_entry_is_refused_with_the_count_and_the_findings( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( stamped )
+    assert rc == 3
+    assert "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1); reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>" in text
+    assert "[doc-lint]   src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in text and "[doc-lint]   src/lupin_mcp/a.py:5: caps: ALL-CAPS word NEVER" in text
+    assert "1 over" in text and "table ok" in text and "1 refusals, commit REFUSED" in text
+
+
+def test_a_counted_file_at_or_below_its_entry_is_allowed( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/tests/t.py": TWO }, { "src/tests/t.py": 2 } )
+    _stage( stamped, { "src/tests/t.py": TWO + "\nx = 1\n" } )                       # flat
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 files checked, 1 at or below their count, 0 over" in text
+    _stage( stamped, { "src/tests/t.py": CLEAN } )                                   # fell, the table not lowered
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_new_counted_file_starts_at_zero( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/new_a.py": ONE } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/new_a.py: 1 findings, the count table allows 0 (+1)" in text
+    _git( stamped, "reset", "-q", "--hard" )
+    _stage( stamped, { "src/tests/new_b.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_rule_swap_at_a_flat_count_is_allowed( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": TIC } )                                 # one caps finding became one tic finding
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "1 at or below their count" in text
+
+
+def test_a_renamed_counted_file_keeps_its_entry_and_a_rise_in_it_is_refused( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    body = "".join( f"value_{i} = {i}\n" for i in range( 40 ) )                         # enough shared text for git to see a rename
+    _base( stamped, { "src/lupin_mcp/old.py": TWO + body }, { "src/lupin_mcp/old.py": 2 } )
+    _git( stamped, "mv", "src/lupin_mcp/old.py", "src/lupin_mcp/new.py" )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+    _stage( stamped, { "src/lupin_mcp/new.py": _doc( "This is NOT fine and NEVER good and NOT again." ) + body } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/new.py: 3 findings, the count table allows 2 (+1)" in text
+
+
+def test_a_copy_of_a_counted_file_inherits_nothing( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/old.py": TWO }, { "src/lupin_mcp/old.py": 2 } )
+    _stage( stamped, { "src/lupin_mcp/copy.py": TWO } )                              # old.py stays, so this is an addition
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/copy.py: 2 findings, the count table allows 0 (+2)" in text
+
+
+def test_a_waiver_lowers_a_counted_files_count_and_is_counted( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": _doc( "This is NOT fine.  doc-lint: waive caps -- quoted from the standard" ) } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 files checked, 1 at or below their count, 0 over, 1 waivers honoured" in text
+    _stage( stamped, { "src/tests/t.py": _doc( "This is NOT fine.  doc-lint: waive caps" ) } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/t.py: 1 findings, the count table allows 0" in text
+
+
+def test_the_refusal_shows_ten_findings_with_the_touched_ones_first_and_says_how_many_more( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    words = [ "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER", "NOT", "NEVER" ]
+    old   = "def f():\n    \"\"\"\n    Return it.\n\n" + "".join( f"    This is {w} line {i}.\n" for i, w in enumerate( words ) ) + "    \"\"\"\n"
+    _base( stamped, { "src/tests/t.py": old }, { "src/tests/t.py": 12 } )
+    _stage( stamped, { "src/tests/t.py": old[ : -len( "    \"\"\"\n" ) ] + "    This is NOT last.\n    \"\"\"\n" } )
+    rc, text = _gate( stamped )
+    shown = [ ln for ln in text.split( "\n" ) if ln.startswith( "[doc-lint]   src/tests/t.py:" ) ]
+    assert rc == 3 and len( shown ) == gate.SHOWN_FINDINGS and shown[ 0 ] == "[doc-lint]   src/tests/t.py:17: caps: ALL-CAPS word NOT"
+    assert "[doc-lint]   and 3 more" in text and "13 findings, the count table allows 12 (+1)" in text
+
+
+def test_a_counted_file_that_is_not_utf8_counts_as_one_finding( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage_bytes( stamped, "src/tests/t.py", LATIN_1.replace( b" NOT", b"" ) )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/tests/t.py: 1 findings, the count table allows 0 (+1)" in text and "not-utf-8" in text
+    _git( stamped, "reset", "-q", "--hard" )
+    _base( stamped, { "src/pkg/keep2.py": CLEAN }, { "src/tests/t.py": 1 } )
+    _stage_bytes( stamped, "src/tests/t.py", LATIN_1.replace( b" NOT", b"" ) )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_markdown_and_other_files_are_not_in_the_counted_scope( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "history.md": "This is NOT fine.\n", "TODO.md": "NEVER mind.\n", "src/tests/data.txt": "NOT\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "0 files checked, 0 at or below their count, 0 over" in text
+
+
+def test_a_staged_table_that_raises_an_entry_or_adds_one_is_refused( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )
+    _table( stamped, { "src/lupin_mcp/a.py": 2 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: src/lupin_mcp/a.py raised from 1 to 2; the table may only fall" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 1, "src/lupin_mcp/b.py": 1 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: src/lupin_mcp/b.py raised from 0 to 1; the table may only fall" in text
+
+
+def test_a_staged_table_that_lowers_or_deletes_an_entry_is_allowed_and_is_the_allowance_for_the_commit( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": TWO, "src/lupin_mcp/b.py": ONE }, { "src/lupin_mcp/a.py": 2, "src/lupin_mcp/b.py": 1 } )
+    _stage( stamped, { "src/lupin_mcp/a.py": ONE, "src/lupin_mcp/b.py": CLEAN } )
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )                                   # a lowered, b deleted
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "2 at or below their count" in text
+    _stage( stamped, { "src/lupin_mcp/a.py": _doc( "This is NOT fine and NEVER bad." ) } )   # the file now rises against the staged entry
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text
+
+
+def test_a_regenerated_table_under_a_new_stamp_may_raise_when_it_equals_the_census( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _stage( stamped, { "src/lupin_mcp/a.py": TWO } )
+    _table( stamped, { "src/lupin_mcp/a.py": 2 } )                                   # the stamp is now the current one
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+
+
+def test_a_regenerated_table_that_does_not_equal_the_census_is_refused_and_the_problems_are_named( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 }, stamp="oldstamp" )
+    _table( stamped, { "src/lupin_mcp/a.py": 5 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: a regenerated table must equal a census of the staged tree under the current rules" in text
+    assert "[doc-lint]   src/lupin_mcp/a.py: table 5, census 1" in text and "table stale" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 1 }, stamp="notcurrent" )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "is not the current" in text
+
+
+def test_a_regenerated_table_with_many_problems_shows_ten_and_counts_the_rest( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    files = { f"src/lupin_mcp/f{i:02d}.py": ONE for i in range( 12 ) }
+    _base( stamped, files, {}, stamp="oldstamp" )
+    _table( stamped, {} )                                                            # the census holds 12 files the table lacks
+    rc, text = _gate( stamped )
+    assert rc == 3 and "[doc-lint]   and 2 more" in text and text.count( "table 0, census 1" ) == gate.SHOWN_FINDINGS
+
+
+def test_the_first_table_is_allowed_only_when_it_equals_the_census( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/lupin_mcp/a.py": ONE } )
+    _table( stamped, { "src/lupin_mcp/a.py": 1 } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "table regenerated" in text
+    _table( stamped, { "src/lupin_mcp/a.py": 0 + 3 } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "a regenerated table must equal a census" in text
+
+
+def test_a_table_cut_under_other_rules_refuses_a_commit_that_stages_a_counted_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {}, stamp="oldstamp" )
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and "REFUSED: the count table was cut under other rules (stamp oldstamp, now " in text and "table stale" in text
+    assert "python -m cosa.repo.doc_lint.counts --write" in text
+    _git( stamped, "reset", "-q", "--hard" )
+    _stage( stamped, { "history.md": "A note.\n", "src/pkg/other.py": CLEAN } )     # no counted file staged
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table stale" in text
+
+
+def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_only_warns( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/keep.py": CLEAN, TABLE: "garbage" } )
+    rc, text = _gate( stamped )
+    assert rc == 3 and f"REFUSED {TABLE}: the staged table is malformed: table is not JSON" in text and "table malformed" in text
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "[doc-lint] WARNING: the count table at HEAD is malformed" in text and "table malformed" in text
+
+
+def test_staged_counted_reads_paths_renames_and_the_table_with_odd_names( stamped ):
+    shared = "".join( f"value_{i} = {i}\n" for i in range( 40 ) )
+    _stage( stamped, { "src/tests/old name.py": CLEAN + shared, "src/pkg/swept.py": "swept = 1\n", "src/tests/unï.py": "other = 2\n" } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _git( stamped, "mv", "src/tests/old name.py", "src/tests/new name.py" )
+    _stage( stamped, { "src/pkg/swept2.py": "swept = 3\n", "src/lupin_mcp/b.py": "unrelated = 4\n", TABLE: "{}", "notes.md": "x\n" } )
+    paths, renamed, table_staged = gate.staged_counted( str( stamped ) )
+    assert paths == [ "src/lupin_mcp/b.py", "src/tests/new name.py" ] and renamed == { "src/tests/new name.py": "src/tests/old name.py" } and table_staged is True
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_counted( str( stamped / "nope" ) )
+
+
+def test_staged_counted_without_a_table_or_a_rename_says_so( stamped ):
+    _stage( stamped, { "src/tests/t.py": CLEAN } )
+    assert gate.staged_counted( str( stamped ) ) == ( [ "src/tests/t.py" ], {}, False )
+    assert gate.staged_counted( str( stamped ) )[ 0 ] and gate.head_table_text( str( stamped ) ) is None
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    assert gate.head_table_text( str( stamped ) ) is None
+    _base( stamped, { "src/pkg/a.py": CLEAN }, { "src/tests/t.py": 1 } )
+    assert counts.parse_table( gate.head_table_text( str( stamped ) ) ).files == { "src/tests/t.py": 1 }
+
+
+def test_a_crash_in_the_counted_check_still_allows_the_commit_with_the_loud_line( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( stamped, { "src/pkg/keep.py": CLEAN }, {} )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    monkeypatch.setattr( gate.counts, "rules_stamp", lambda root: ( _ for _ in () ).throw( OSError( "rule file gone" ) ) )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: OSError: rule file gone" in text
+
+
+def test_the_real_chain_refuses_a_counted_file_that_rises_and_allows_one_that_does_not( repo ):
+    stamped = repo                                                                     # the rule files come from the linked tree
+    os.symlink( os.path.join( cu.get_project_root(), "src", "cosa" ), stamped / "src" / "cosa" )
+    _stage( stamped, { "src/tests/t.py": ONE } )
+    _table( stamped, { "src/tests/t.py": 1 } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _stage( stamped, { "src/tests/t.py": TWO } )
+    res = _run_chain( stamped, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED src/tests/t.py: 2 findings, the count table allows 1 (+1)" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
+    _stage( stamped, { "src/tests/t.py": ONE + "\nx = 1\n" } )
+    res = _run_chain( stamped, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    assert res.returncode == 0 and "counted scope: 1 files checked, 1 at or below their count" in res.stderr

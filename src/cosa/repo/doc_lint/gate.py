@@ -6,17 +6,22 @@ doc_lint rules and prints the findings to stderr. It exits 0 on its own crash to
 The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 
-Two refusals break warn mode, and both exit REFUSAL_EXIT.
+Three refusals break warn mode, and all exit REFUSAL_EXIT.
 
 1. The swept scope, defined once in swept_scope.is_swept. A staged Python file for which it is True is refused when its docstring
    lint holds any finding on any line, touched or not, from any rule. The refusal names the file,
    line, rule, the text and where that text belongs. A finding is waived by a same-line marker,
    "doc-lint: waive <rule> -- <reason>". The reason needs a word of three letters or more.
    A marker without one waives nothing. A swept file that does not parse, or is not UTF-8, is refused and cannot be waived.
-2. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
+2. The counted scope: every other tracked Python file. Its finding count may not rise above its entry
+   in the committed count table (counts.TABLE_PATH), and a new file starts at zero. A staged table may
+   not raise an entry, except in the one commit that regenerates it under changed rules. A table cut
+   under other rules refuses a commit that stages a counted file. With no table anywhere the scope is
+   reported as not checked. The same waiver marker lowers a count.
+3. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
-Every run prints the denominator: files checked, docstrings checked, findings, waivers honoured.
+Every run prints the denominator for both scopes: files checked, docstrings or counts, waivers honoured.
 Everything else stays warn mode: findings on staged lines are printed and the commit goes through.
 """
 
@@ -27,6 +32,7 @@ import sys
 import traceback
 
 from . import comment_lint, docstring_lint, md_lint
+from . import counts
 from .changed_ranges import changed_line_ranges, filter_findings
 from .cli import in_scope
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
@@ -41,6 +47,7 @@ REFUSAL_EXIT      = 3
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
 TEXT_LIMIT       = 120
+SHOWN_FINDINGS   = 10
 HISTORY_HOME      = {
     "dated-banner"     : "the commit message or the Decisions Log",
     "iso-date"         : "the commit message or the Decisions Log",
@@ -90,6 +97,154 @@ def swept_refusal_line( finding, source_line, state ):
         f"fix: {FIX_HOME.get( finding.rule, 'plain wording that states what the code does' )}; "
         f"to waive, end the line with: doc-lint: waive {finding.rule} -- <reason>{note}"
     )
+
+
+def staged_counted( root ):
+    """
+    List the staged counted Python files, with their renames and whether the table is staged.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( paths, renamed_from, table_staged )
+        - paths holds every added, copied, modified or renamed .py file that is not swept, with no in_scope filter
+        - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
+        - table_staged is True when counts.TABLE_PATH is among the staged files
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--name-status", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    tokens = res.stdout.decode( "utf-8", "replace" ).split( "\0" )
+    paths, renamed_from, table_staged, i = [], {}, False, 0
+    while i < len( tokens ) and tokens[ i ]:
+        status = tokens[ i ]
+        if status[ 0 ] == "R":
+            old, new, i = tokens[ i + 1 ], tokens[ i + 2 ], i + 3
+            renamed_from[ new ] = old
+        else:
+            new, i = tokens[ i + 1 ], i + 2
+        if new == counts.TABLE_PATH: table_staged = True
+        if new.endswith( ".py" ) and not is_swept( new ): paths.append( new )
+    return paths, renamed_from, table_staged
+
+
+def head_table_text( root ):
+    """
+    Read the count table as the last commit has it.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns the text, or None when HEAD has no table or there is no HEAD yet
+
+    Raises:
+        - nothing
+    """
+    res = subprocess.run( [ "git", "-C", root, "show", f"HEAD:{counts.TABLE_PATH}" ], capture_output=True )
+    return res.stdout.decode( "utf-8", "replace" ) if res.returncode == 0 else None
+
+
+def counted_refusal( path, result, allowed, ranges ):
+    """
+    Format the refusal for a counted file whose count rose above its entry.
+
+    Requires:
+        - result is a counts.FileCount with result.count above allowed
+        - ranges is the staged diff's changed-line map
+
+    Ensures:
+        - returns one string: a header line, then up to SHOWN_FINDINGS findings with the touched ones first
+        - the header names the count, the entry, and how to waive
+
+    Raises:
+        - nothing
+    """
+    touched = filter_findings( result.findings, ranges )
+    ordered = touched + [ f for f in result.findings if f not in touched ]
+    lines   = [
+        f"[doc-lint] REFUSED {path}: {result.count} findings, the count table allows {allowed} (+{result.count - allowed}); "
+        f"reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>"
+    ]
+    lines += [ f"[doc-lint]   {f.path}:{f.line}: {f.rule}: {f.message}" for f in ordered[ : SHOWN_FINDINGS ] ]
+    if len( ordered ) > SHOWN_FINDINGS: lines.append( f"[doc-lint]   and {len( ordered ) - SHOWN_FINDINGS} more" )
+    return "\n".join( lines )
+
+
+def counted_check( root, ranges ):
+    """
+    Hold the staged counted files to the count table.
+
+    Requires:
+        - root is a git working tree
+        - ranges is the staged diff's changed-line map
+
+    Ensures:
+        - returns ( refusals, warnings, stats ); each refusal is one printable string, stats is the denominator
+        - stats holds files, at_or_below, over, waivers and table, where table is ok, stale, absent, regenerated or malformed
+        - with no table at HEAD and none staged, nothing is refused and the scope is reported as not checked
+        - a staged table that raises an entry above HEAD is refused, unless it carries a new stamp
+        - a new stamp must equal the stamp of the rule files now and the table must equal a census of the index
+        - a table whose stamp is not the current one refuses a commit that stages a counted file
+        - a counted file above its allowance is refused; a renamed file inherits its old entry; a new file has none
+
+    Raises:
+        - RuntimeError from git when a listing or read fails
+        - OSError when a rule file cannot be read
+    """
+    paths, renamed_from, table_staged = staged_counted( root )
+    stats    = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "absent" }
+    refusals = []
+    warnings = []
+    head_text = head_table_text( root )
+    try:
+        head = counts.parse_table( head_text ) if head_text is not None else None
+    except counts.TableError as err:
+        stats[ "table" ] = "malformed"
+        return [], [ f"[doc-lint] WARNING: the count table at HEAD is malformed ({err}), the counted scope was NOT checked" ], stats
+    try:
+        staged = counts.parse_table( staged_source( root, counts.TABLE_PATH ) ) if table_staged else None
+    except counts.TableError as err:
+        stats[ "table" ] = "malformed"
+        return [ f"[doc-lint] REFUSED {counts.TABLE_PATH}: the staged table is malformed: {err}" ], [], stats
+    table = staged if staged is not None else head
+    if table is None:
+        if paths: warnings.append( "[doc-lint] WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" )
+        return refusals, warnings, stats
+    current = counts.rules_stamp( root )
+    if staged is not None and ( head is None or staged.stamp != head.stamp ):
+        found, _walked = counts.census( root, read=lambda p: staged_source( root, p ) )
+        problems       = counts.check_table( staged, found, current )
+        stats[ "table" ] = "regenerated" if not problems else "stale"
+        if problems:
+            shown = [ f"[doc-lint]   {line}" for line in problems[ : SHOWN_FINDINGS ] ]
+            if len( problems ) > SHOWN_FINDINGS: shown.append( f"[doc-lint]   and {len( problems ) - SHOWN_FINDINGS} more" )
+            refusals.append( "\n".join( [ f"[doc-lint] REFUSED {counts.TABLE_PATH}: a regenerated table must equal a census of the staged tree under the current rules" ] + shown ) )
+        return refusals, warnings, stats
+    if staged is not None:
+        for path, old, new in counts.table_raises( staged.files, head.files ):
+            refusals.append( f"[doc-lint] REFUSED {counts.TABLE_PATH}: {path} raised from {old} to {new}; the table may only fall" )
+    stats[ "table" ] = "ok" if table.stamp == current else "stale"
+    if stats[ "table" ] == "stale":
+        if paths: refusals.append( f"[doc-lint] REFUSED: the count table was cut under other rules (stamp {table.stamp}, now {current}); regenerate it with python -m cosa.repo.doc_lint.counts --write and stage it with the rule change" )
+        return refusals, warnings, stats
+    for path in paths:
+        try:
+            result = counts.file_count( path, staged_source( root, path ), root )
+        except UnicodeDecodeError as err:
+            result = counts.unreadable_count( path, err )
+        allowed = counts.allowance( path, table.files, renamed_from )
+        stats[ "files" ]   += 1
+        stats[ "waivers" ] += result.waivers
+        if result.count > allowed:
+            stats[ "over" ] += 1
+            refusals.append( counted_refusal( path, result, allowed, ranges ) )
+        else:
+            stats[ "at_or_below" ] += 1
+    return refusals, warnings, stats
 
 
 def git_toplevel( start ):
@@ -281,6 +436,9 @@ def collect( root ):
             elif f not in refusals:
                 refusals.append( f )
                 lines_out.append( swept_refusal_line( f, lines[ f.line - 1 ], state ) )
+    counted_refusals, counted_warnings, tally[ "counted" ] = counted_check( root, ranges )
+    lines_out += counted_refusals
+    warnings  += counted_warnings
     kept     = [ f for f in filter_findings( findings, ranges ) if f not in refusals and f not in waived ]
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 
@@ -319,6 +477,8 @@ def main( argv=None, err=None ):
     for f in findings: err.write( f"[doc-lint] {f.path}:{f.line}: {f.rule}: {f.message}\n" )
     for line in refusals: err.write( line + "\n" )
     err.write( f"[doc-lint] swept scope: {tally[ 'files' ]} files checked, {tally[ 'docstrings' ]} docstrings checked, {tally[ 'findings' ]} findings, {tally[ 'waivers' ]} waivers honoured, {tally[ 'unparsed' ]} unparsed, {tally[ 'undecodable' ]} undecodable\n" )
+    c = tally[ "counted" ]
+    err.write( f"[doc-lint] counted scope: {c[ 'files' ]} files checked, {c[ 'at_or_below' ]} at or below their count, {c[ 'over' ]} over, {c[ 'waivers' ]} waivers honoured, table {c[ 'table' ]}\n" )
     if refusals:
         err.write( f"[doc-lint] {len( refusals )} refusals, commit REFUSED\n" )
         return REFUSAL_EXIT

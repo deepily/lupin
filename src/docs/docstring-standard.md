@@ -27,3 +27,15 @@ doc-lint: waive <rule> -- <reason>
 The rule must be the one the refusal named. The reason must hold a word of three letters or more; `-`, `n/a` and `ok` do not count. A marker without a reason waives nothing, and the refusal says so. A marker naming another rule, or sitting on another line, waives nothing. For a one-line docstring the marker can follow the closing quotes.
 
 Use a waiver when the lint is wrong about this text, not to skip the rewrite. The gate prints how many waivers it honoured on every run.
+
+## Files outside the swept scope: a count that only falls
+
+Every other tracked Python file (tests, `rnd`, `src/lupin_mcp`) has a count of docstring-lint findings in `src/conf/doc-lint-counts.json`. A file at zero has no entry.
+
+A staged file whose count is above its entry is refused. The refusal prints the count, the entry and up to ten findings, those on lines you touched first. A new file has no entry, so it starts at zero. A renamed file keeps its entry. A copy does not.
+
+Fix it by rewording what you added, or waive a finding on its own line with the same marker as above. An honoured waiver lowers the count. A flat count passes, and so does a finding of one rule traded for one of another.
+
+The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change: it carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated with `python -m cosa.repo.doc_lint.counts --write`. With no table at all the gate says the scope was not checked.
+
+The run prints `counted scope: N files checked, N at or below their count, N over, N waivers honoured, table ok|stale|absent|regenerated|malformed`.
