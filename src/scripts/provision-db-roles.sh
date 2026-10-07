@@ -10,6 +10,9 @@
 #       --host-pw-file <file> --test-pw-file <file> \
 #       --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
 #
+#   The way back from --reassign (no password files needed, no role or grant touched):
+#   src/scripts/provision-db-roles.sh --psql "<same as above>" --rollback [--apply]
+#
 # ⚠️ NOT RUN AGAINST THE LIVE DATABASE YET. The app's password file is root-owned (a sudo step),
 # and --reassign is a cutover step that needs the app containers recreated first. See
 # io/findings-80513825.md §11 for the order.

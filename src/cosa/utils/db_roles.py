@@ -12,6 +12,12 @@ works around.
 
     python -m cosa.utils.db_roles --app-pw-file F --host-pw-file F --test-pw-file F \\
         --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
+
+`--rollback` is the cutover's way back. It hands every dev-database object that `lupin_app` owns
+back to `lupin_dev` and runs nothing else: no role, password or grant is touched. It reads no
+password file, so the three file options may be left out.
+
+    python -m cosa.utils.db_roles --psql "..." --rollback [--apply]
 """
 
 import argparse
@@ -49,7 +55,7 @@ def read_secret( path ):
     return value
 
 
-def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False ):
+def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False, rollback=False ):
     """
     Build the psql stdin: three password `\\set` lines, an optional reassign line, the SQL.
 
@@ -64,14 +70,17 @@ def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact
         - redact=True replaces each password with "<redacted>" and the SQL with a one-line
           marker, so the text is safe and short to print
         - reassign=True adds the cutover-only ownership transfer
+        - rollback=True gives one `\\set rollback 1` line and the SQL, with no password line, so the three password arguments are ignored
         - ends with a newline
     """
     shown = lambda value: "<redacted>" if redact else value
-    lines = [
-        f"\\set app_pw  '{shown( app_pw )}'",
-        f"\\set host_pw '{shown( host_pw )}'",
-        f"\\set test_pw '{shown( test_pw )}'",
-    ]
+    if rollback: lines = [ "\\set rollback 1" ]
+    else:
+        lines = [
+            f"\\set app_pw  '{shown( app_pw )}'",
+            f"\\set host_pw '{shown( host_pw )}'",
+            f"\\set test_pw '{shown( test_pw )}'",
+        ]
     if reassign: lines.append( "\\set reassign 1" )
     if redact: lines.append( f"-- <{len( sql_text.splitlines() )} lines of init-db-roles.sql follow here on a real run>" )
     else:      lines.append( sql_text.rstrip( "\n" ) )
@@ -86,22 +95,31 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         - without --apply: prints the psql command and the redacted stdin, runs nothing, returns 0
         - with --apply: runs the psql command with the real stdin and returns its exit code
         - a bad password file, or an unreadable SQL file, returns 2 and prints why, before anything runs
+        - with --rollback no password file is read, and --reassign is refused
+        - without --rollback all three password files are required
     """
     parser = argparse.ArgumentParser( description=__doc__.split( "\n\n" )[ 0 ] )
-    parser.add_argument( "--app-pw-file",  required=True )
-    parser.add_argument( "--host-pw-file", required=True )
-    parser.add_argument( "--test-pw-file", required=True )
+    parser.add_argument( "--app-pw-file",  default=None )
+    parser.add_argument( "--host-pw-file", default=None )
+    parser.add_argument( "--test-pw-file", default=None )
     parser.add_argument( "--psql", required=True, help="the whole superuser psql command, connected to lupin_db_dev" )
     parser.add_argument( "--sql", default=None, help="init-db-roles.sql path (default: from LUPIN_ROOT)" )
-    parser.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move dev-database ownership to lupin_app" )
+    direction = parser.add_mutually_exclusive_group()
+    direction.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move dev-database ownership to lupin_app" )
+    direction.add_argument( "--rollback", action="store_true", help="CUTOVER ONLY: move it back to lupin_dev; no role, password or grant changes" )
     parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
     args = parser.parse_args( argv )
 
-    try:
-        app_pw, host_pw, test_pw = ( read_secret( p ) for p in ( args.app_pw_file, args.host_pw_file, args.test_pw_file ) )
-    except ValueError as error:
-        print( f"db_roles: {error}", file=out )
-        return 2
+    app_pw = host_pw = test_pw = None
+    if not args.rollback:
+        pw_files = ( args.app_pw_file, args.host_pw_file, args.test_pw_file )
+        if any( path is None for path in pw_files ):
+            parser.error( "--app-pw-file, --host-pw-file and --test-pw-file are required unless --rollback is given" )
+        try:
+            app_pw, host_pw, test_pw = ( read_secret( path ) for path in pw_files )
+        except ValueError as error:
+            print( f"db_roles: {error}", file=out )
+            return 2
 
     sql_path = args.sql
     if sql_path is None:
@@ -118,10 +136,10 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         print( "db_roles: DRY RUN (nothing was run). Add --apply to run it.", file=out )
         print( "command: " + shlex.join( command ), file=out )
         print( "stdin:", file=out )
-        print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True ), file=out, end="" )
+        print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True, rollback=args.rollback ), file=out, end="" )
         return 0
 
-    stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign )
+    stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, rollback=args.rollback )
     return run_fn( command, input=stdin, text=True ).returncode
 
 

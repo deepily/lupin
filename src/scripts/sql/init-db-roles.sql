@@ -30,6 +30,11 @@
 -- ownership of every dev-database object from lupin_dev to lupin_app, which the app's own
 -- boot-time migrations need once it no longer connects as the superuser.
 --
+-- rollback=1 (optional, CUTOVER ONLY, never with reassign) is the reassign in reverse: every object
+-- in public that lupin_app owns goes back to lupin_dev, and nothing else is run. No password
+-- variable is needed. It does not create, alter or drop a role, reset a password, or grant or
+-- revoke anything; the roles and their grants stay as they were.
+--
 -- IDEMPOTENT: roles are created if absent and their passwords reset each run; grants repeat
 -- harmlessly. Not applied to the live database by anyone yet.
 
@@ -41,6 +46,39 @@
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
 SET log_min_duration_statement = -1;
+
+-- ---- ROLLBACK ONLY: hand the dev database back to the bootstrap superuser ---------------
+-- The reassign block below in reverse, with the same extension exclusions and the two role names
+-- swapped. It runs before everything else and ends the session, so no role, password or grant
+-- statement further down is reached. A test pins that the two blocks differ by the role names only.
+\if :{?rollback}
+  \connect lupin_db_dev
+  SET log_statement = 'none';
+  SET log_min_error_statement = 'panic';
+  SET log_min_duration_statement = -1;
+  SELECT format( 'ALTER %s %I.%I OWNER TO lupin_dev',
+                 CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW'
+                                WHEN 'f' THEN 'FOREIGN TABLE' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
+                 n.nspname, c.relname )
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND c.relkind IN ( 'r', 'p', 'v', 'm', 'f', 'S' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ( 'e', 'a', 'i' ) )
+  \gexec
+  SELECT format( 'ALTER TYPE %I.%I OWNER TO lupin_dev', n.nspname, t.typname )
+    FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace JOIN pg_roles o ON o.oid = t.typowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND t.typtype IN ( 'e', 'd' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e' )
+  \gexec
+  SELECT format( 'ALTER %s %I.%I( %s ) OWNER TO lupin_dev', CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+                 n.nspname, p.proname, pg_get_function_identity_arguments( p.oid ) )
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_roles o ON o.oid = p.proowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND p.prokind IN ( 'f', 'p' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e' )
+  \gexec
+  ALTER SCHEMA public OWNER TO lupin_dev;
+  SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() ) \gexec
+  \quit
+\endif
 
 -- A forgotten variable must stop the run, not set an empty password.
 \if :{?app_pw}
