@@ -340,3 +340,44 @@ def test_a_cut_short_receipt_still_replays_to_uncertain_after_a_later_run_fills_
     assert full[ "verdict" ] == "NEW" and full[ "receipt_id" ] != cut[ "receipt_id" ]
     rep = rt.replay_impl( cut[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
     assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_a_failed_call_receipt_still_replays_to_uncertain_after_a_later_run_answers_the_call( env ):
+    write_wiki( env[ 0 ] )
+    need = "something unrelated [failedfill]"
+    root, data, out = env
+    bad  = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) ) )
+    good = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) ) )          # the same call now succeeds
+    assert bad[ "cause" ] == "CALL_FAILED" and good[ "verdict" ] == "NEW"
+    rep = rt.replay_impl( bad[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
+    assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_a_fetch_similar_receipt_replays( env ):
+    write_wiki( env[ 0 ] )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( FEEDS_TEXT ) )
+    r   = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx )
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "stored" ][ "route" ] == "full" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_a_receipt_with_malformed_answers_replays_to_the_same_verdict( env ):
+    write_wiki( env[ 0 ] )
+    bad  = { "answers": { "fit": { "probabilities": { "reuse": 1, "extend": 1, "unrelated": 1 } } } }
+    need = "something unrelated [malformedreplay]"
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: bad } ) )
+    r    = rt.check_exists_impl( need, ctx )
+    assert r[ "cause" ] == "MALFORMED_ANSWER"
+    rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "frozen" ][ "cause" ] == "MALFORMED_ANSWER" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_a_page_receipt_replays_the_same_after_the_wiki_changes( env ):
+    write_wiki( env[ 0 ] )
+    need = "read an RSS feed [wikichanged]"
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT } ) )
+    r    = rt.check_exists_impl( need, ctx )
+    assert receipt_of( env, r )[ "route" ] == "pages"
+    write_wiki( env[ 0 ], { "other-page": "something else. `cosa.mathx`" }, { "other-page": "cosa.mathx.add@bbbbbbbbbb" }, pages=( "other-page", ) )   # the wiki the receipt used is gone
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "REUSE" and rep[ "differences" ][ "frozen" ] == []
