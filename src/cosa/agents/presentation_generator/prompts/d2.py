@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-D2 Diagram Generation Prompts for Presentation Generator.
+d2 Diagram Generation Prompts for Presentation Generator.
 
-System prompt and prompt builder for generating valid D2 syntax
+System prompt and prompt builder for generating valid d2 syntax
 from natural-language visual descriptions. Used by D2Renderer
-during Phase 7 (Visual Rendering).
+during the visual rendering phase.
 
 Pattern: Same 3-part structure as visual.py (Mermaid prompts)
   - System prompt constant
@@ -76,14 +76,14 @@ OUTPUT FORMAT:
 
 def get_d2_prompt( visual_type: str, visual_description: str, slide_title: str = "" ) -> str:
     """
-    Build user message for D2 diagram generation.
+    Build user message for d2 diagram generation.
 
     Requires:
         - visual_type is "flowchart_d2" or "architecture"
         - visual_description is a non-empty string
 
     Ensures:
-        - Returns a prompt string with context and D2 pattern hint
+        - Returns a prompt string with context and d2 pattern hint
 
     Returns:
         str: User message for Claude API
@@ -105,16 +105,16 @@ def get_d2_prompt( visual_type: str, visual_description: str, slide_title: str =
 
 def _suggest_d2_pattern( description: str ) -> str:
     """
-    Suggest a D2 diagram pattern based on keywords in the description.
+    Suggest a d2 diagram pattern based on keywords in the description.
 
     Requires:
         - description is a string
 
     Ensures:
-        - Returns a D2 pattern description string
+        - Returns a d2 pattern description string
 
     Returns:
-        str: D2 pattern hint (e.g., "containers with nested components")
+        str: d2 pattern hint (e.g., "containers with nested components")
     """
     if not description:
         return DEFAULT_D2_PATTERN
@@ -133,7 +133,7 @@ def _suggest_d2_pattern( description: str ) -> str:
 # =============================================================================
 
 def quick_smoke_test():
-    """Quick smoke test for D2 prompts."""
+    """Quick smoke test for d2 prompts."""
 
     print( "=" * 60 )
     print( "D2 Prompts Smoke Test" )

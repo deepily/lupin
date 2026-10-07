@@ -3,7 +3,7 @@
 Narrative Analysis Prompts for Presentation Generator.
 
 Provides system prompts, prompt builders, and response parsers for the
-narrative extraction phase (Orchestrator Phase 2: Analyze).
+narrative extraction phase (the orchestrator's Analyze step).
 
 The LLM analyzes a source document and classifies its sections into
 narrative arc positions, proposing a slide allocation for each.
@@ -242,7 +242,7 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
           content_summary, arc_position, proposed_slide_count, key_points
 
     Raises:
-        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+        - ValueError (strict fail-loud policy) when the response has no recoverable
           JSON object, the "sections" value is missing / not a list / empty, or
           every entry is a non-dict (zero usable sections). Slide data feeds pptx
           rendering downstream, so an empty/degenerate result is a real defect.

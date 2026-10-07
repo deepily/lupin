@@ -4,7 +4,7 @@ Mermaid Visual Generation Prompts for Presentation Generator.
 
 System prompt and prompt builder for generating valid Mermaid diagram
 syntax from natural-language visual descriptions. Used by MermaidRenderer
-during Phase 7 (Visual Rendering).
+during the visual rendering phase.
 
 Pattern: Same 3-part structure as narrative.py, outline.py, elaboration.py
   - System prompt constant

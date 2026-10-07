@@ -4,7 +4,7 @@ Matplotlib Chart Generation Prompts for Presentation Generator.
 
 System prompt and prompt builder for generating valid, self-contained
 Python plotting code from natural-language chart descriptions. Used by
-MatplotlibRenderer during Phase 7 (Visual Rendering).
+MatplotlibRenderer during the visual rendering phase.
 
 Pattern: Same 3-part structure as visual.py (Mermaid prompts)
   - Chart type hint constants

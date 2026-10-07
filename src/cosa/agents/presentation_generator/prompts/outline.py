@@ -3,7 +3,7 @@
 Outline Generation Prompts for Presentation Generator.
 
 Provides system prompts, prompt builders, and response parsers for the
-outline generation phase (Orchestrator Phase 3: Outline).
+outline generation phase (the orchestrator's Outline step).
 
 The LLM takes narrative sections and generates a slide-by-slide outline
 with assertion-style titles and visual type assignments.
@@ -262,7 +262,7 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
           arc_position, type, title, visual_type, source_hint
 
     Raises:
-        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+        - ValueError (strict fail-loud policy) when the response has no recoverable
           JSON object, the "outline" value is missing / not a list / empty, or
           every entry is a non-dict (zero usable entries).
 

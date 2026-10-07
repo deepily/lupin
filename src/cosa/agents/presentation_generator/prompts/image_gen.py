@@ -4,7 +4,7 @@ Image Generation Prompts for Presentation Generator.
 
 Prompt builder for generating effective Imagen 3 (Nano Banana 2) prompts
 from slide visual descriptions. Used by NanoBananaRenderer during
-Phase 7 (Visual Rendering).
+the visual rendering phase.
 
 Unlike LLM prompts (which have system + user messages), Imagen uses a
 single prompt string. This module constructs that string by combining
