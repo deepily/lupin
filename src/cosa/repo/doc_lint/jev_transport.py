@@ -34,6 +34,11 @@ class JevBudgetSpent( Exception ):
     """The call budget is used up: no further HTTP attempt may be made."""
 
 
+class _Tally( threading.local ):
+    """One thread's running count of the attempts it took, or None when it is not counting."""
+    count = None
+
+
 class CallBudget:
     """
     A ceiling on HTTP attempts to Jev, shared by every thread of one sweep.
@@ -44,11 +49,13 @@ class CallBudget:
     Ensures:
         - take() counts one attempt and returns, or raises JevBudgetSpent without counting when the limit is reached
         - used never exceeds limit, whatever the number of threads
+        - between begin_tally() and end_tally() on one thread, the attempts that thread took are also counted
+          separately, so one entry's attempts can be told from another's
     """
 
     def __init__( self, limit ):
         if type( limit ) is not int or limit < 1: raise ValueError( f"call budget must be a positive integer, got {limit!r}" )
-        self.limit, self.used, self._lock = limit, 0, threading.Lock()
+        self.limit, self.used, self._lock, self._tally = limit, 0, threading.Lock(), _Tally()
 
     def take( self ):
         """Count one attempt, or raise JevBudgetSpent when the limit is already reached."""
@@ -56,6 +63,16 @@ class CallBudget:
             refused = self.used >= self.limit
             if not refused: self.used += 1
         if refused: raise JevBudgetSpent( f"call budget of {self.limit} attempts is spent" )
+        if self._tally.count is not None: self._tally.count += 1
+
+    def begin_tally( self ):
+        """Start counting this thread's attempts from zero."""
+        self._tally.count = 0
+
+    def end_tally( self ):
+        """Stop counting on this thread and return how many attempts it took since begin_tally()."""
+        taken, self._tally.count = self._tally.count, None
+        return taken
 
     @property
     def spent( self ):

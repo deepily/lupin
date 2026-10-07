@@ -410,10 +410,13 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
         - entries are symbol dicts with id, sig and doc
         - when frozen, no transport is used and every answer must already be cached
     Ensures:
-        - returns { answers, failed, not_reached, calls, cache_hits }: answers are { id, probabilities }, failed is the
-          list of ids whose call failed after RETRIES, in entry order
-        - not_reached lists the ids no call was made for, in entry order, because the call budget was spent
+        - returns { answers, failed, not_reached, calls, cache_hits, attempts_answered, attempts_failed,
+          failed_attempts }: answers are { id, probabilities }, failed is the list of ids whose call failed
+          after RETRIES or was cut off by the budget after at least one attempt, in entry order
+        - not_reached lists the ids no HTTP attempt was made for because the call budget was spent
         - an unreached id is neither answered nor failed, so decide() reports it under `missing`
+        - failed_attempts holds { id, attempts } for each failed id; attempts_answered and attempts_failed are the
+          HTTP attempts spent on answered and on failed ids, so together they are the sweep's attempts
         - once the budget is spent, later entries are refused before any HTTP and cache hits are still served
         - every successful live response is cached by request hash
     Raises:
@@ -421,32 +424,45 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
     """
     template, model = template or ctx.template, model or ctx.model
     cache, stats    = JevCache( ctx.data ), { "calls": 0, "hits": 0 }
+    budget          = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) else None
 
     def one( rec ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
         hit  = cache.get( key )
-        if hit is not None: return rec[ "id" ], hit, "hit"
+        if hit is not None: return rec[ "id" ], hit, "hit", 0
         if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
-        last = None
-        for _ in range( RETRIES + 1 ):
-            try:
-                resp = ctx.transport.post( body )
-                cache.put( key, resp )
-                return rec[ "id" ], resp, "call"
-            except jev_transport.JevBudgetSpent:
-                return rec[ "id" ], None, "not_reached"
-            except Exception as e:                                        # any transport error is a failed call, never a verdict
-                last = e
-        return rec[ "id" ], None, "failed"
+        if budget is not None: budget.begin_tally()
+        how, resp, cut_off = "failed", None, False
+        try:
+            for _ in range( RETRIES + 1 ):
+                try:
+                    resp = ctx.transport.post( body )
+                    cache.put( key, resp )
+                    how = "call"
+                    break
+                except jev_transport.JevBudgetSpent:
+                    cut_off = True
+                    break
+                except Exception:                                         # any transport error is a failed call, never a verdict
+                    continue
+        finally:
+            attempts = budget.end_tally() if budget is not None else 0
+        if cut_off and attempts == 0: how = "not_reached"                 # asked nothing: the budget was already spent
+        return rec[ "id" ], resp, how, attempts
 
-    answers, failed, not_reached = [], [], []
+    answers, failed, not_reached, failed_attempts = [], [], [], []
+    spent = { "answered": 0, "failed": 0 }
     with concurrent.futures.ThreadPoolExecutor( max_workers=WORKERS ) as pool:
-        for rid, resp, how in pool.map( one, entries ):
-            if how == "failed": failed.append( rid ); continue
+        for rid, resp, how, attempts in pool.map( one, entries ):
+            if how == "failed":
+                failed.append( rid ); failed_attempts.append( { "id": rid, "attempts": attempts } ); spent[ "failed" ] += attempts
+                continue
             if how == "not_reached": not_reached.append( rid ); continue
             stats[ "hits" if how == "hit" else "calls" ] += 1
+            spent[ "answered" ] += attempts
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
-    return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ] }
+    return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
+             "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts }
 
 
 def l0_lines( wiki_dir ):
@@ -576,12 +592,6 @@ def _shortlist_view( rows, by_id ):
     return out
 
 
-def _attempts( ctx ):
-    """Ensures: returns the HTTP attempts this context's transport has counted, or 0."""
-    budget = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.budget is not None else None
-    return budget.used if budget is not None else 0
-
-
 def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None ):
     """
     Run one sweep-based question end to end and store its receipt.
@@ -589,8 +599,10 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
     Ensures:
         - returns the receipt dict (stored, immutable) with verdict, cause, causes, shortlist, nearest,
           malformed, missing, stats and the inputs the id is computed from
-        - stats names the entries, calls, cache hits, failed, not_checked (entries no call was made for
-          because the budget was spent), attempts (HTTP attempts so far, retries included) and call_budget
+        - stats separates every entry into answered, failed (asked, with its attempts in failed_attempts) or
+          not_checked (never asked because the budget was spent), so entries is their sum
+        - stats.attempts is the sweep's HTTP attempts, retries included, and equals attempts_answered plus
+          attempts_failed, which in turn equals the sum of failed_attempts and the answered entries' attempts
         - a sweep is skipped when NOT_LUPIN_TREE, INDEX_STALE or KEY_UNREADABLE already decides
           UNCERTAIN_READ_SOURCE without one
         - `prepared` is the result of prepare(), when the caller already has it
@@ -600,7 +612,8 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
-    sw   = sweep( ctx, need, entries ) if entries and not hard else { "answers": [], "failed": [], "not_reached": [], "calls": 0, "cache_hits": 0 }
+    sw   = sweep( ctx, need, entries ) if entries and not hard else { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
+                                                                               "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
     expected = [] if hard else [ e[ "id" ] for e in entries ]
     d = vd.decide( sw[ "answers" ], expected, sw[ "failed" ], flags )
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, prompt_template_hash( ctx.template ), d[ "causes" ] ),
@@ -609,8 +622,10 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
             "shortlist": _shortlist_view( d[ "shortlist" ], by_id ), "shortlist_total": d[ "shortlist_total" ],
             "nearest": _shortlist_view( d[ "nearest" ], by_id ), "malformed": d[ "malformed" ], "missing": d[ "missing" ],
-            "stats": { "entries": len( entries ), "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ], "failed": len( sw[ "failed" ] ),
-                       "not_checked": len( sw[ "not_reached" ] ), "attempts": _attempts( ctx ), "call_budget": ctx.call_budget } }
+            "stats": { "entries": len( entries ), "answered": len( sw[ "answers" ] ), "failed": len( sw[ "failed" ] ), "not_checked": len( sw[ "not_reached" ] ),
+                       "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ],
+                       "attempts": sw[ "attempts_answered" ] + sw[ "attempts_failed" ], "attempts_answered": sw[ "attempts_answered" ],
+                       "attempts_failed": sw[ "attempts_failed" ], "failed_attempts": sw[ "failed_attempts" ], "call_budget": ctx.call_budget } }
     return store_receipt( ctx, rec ) if write else rec
 
 
