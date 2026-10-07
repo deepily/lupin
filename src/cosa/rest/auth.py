@@ -83,8 +83,7 @@ async def verify_token(token: str) -> Dict:
     Unified token verification supporting both JWT and mock tokens.
 
     The 'auth mode' setting picks the verifier: 'mock' accepts mock_token_* (development),
-    'jwt' validates real JWT tokens (production). Mode 'firebase' calls `verify_firebase_token`,
-    which calls this function again, so it recurses until the stack gives out.
+    'jwt' validates real JWT tokens (production). Any other mode, 'firebase' included, answers 401.
 
     Requires:
         - token is a non-empty string
@@ -115,9 +114,6 @@ async def verify_token(token: str) -> Dict:
     elif auth_mode == "mock":
         # Mock mode: Legacy mock token support
         return await verify_mock_token( token )
-    elif auth_mode == "firebase":
-        # Firebase mode: Future support
-        return await verify_firebase_token( token )
     else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
