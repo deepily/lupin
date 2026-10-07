@@ -83,7 +83,8 @@ NEEDS_A_DRAINED_QUEUE = pytest.mark.xfail(
 NEEDS_THE_LINEAGE_REPAIR = pytest.mark.xfail(
     strict = True,
     reason = "row 8d4a5a59 — the door drops the suite's parent_id_hash for a fresh random user "
-             "(996dfdb8f), so the job waits behind the monopolizing suite and never completes. "
+             "(996dfdb8f, reason owner_unknown), so the job is not stamped, Gate B defers it behind "
+             "the monopolizing suite, and it never completes. "
              "Stop-gap until the lineage repair lands; strict, so it cannot outlive the repair. "
              "Not the structural drain of row ce29cd20: this test passed on 8267a2c39."
 )
