@@ -99,27 +99,34 @@ def analyze_diff():
 
     current_file = None
     current_type = None
+    in_hunk = False
     in_python_docstring = False
     in_js_multiline_comment = False
 
     for line in diff_lines:
         # Track current file
         if line.startswith('diff --git'):
+            in_hunk = False
             parts = line.split()
             if len(parts) >= 4:
-                current_file = parts[3].lstrip('b/')
+                current_file = parts[3].removeprefix('b/')
                 current_type = get_file_type(current_file)
                 in_python_docstring = False
                 in_js_multiline_comment = False
 
+        # Inside a hunk the first character decides: '+++x' is an added line '++x'
+        is_content = in_hunk and line[:1] in ('+', '-')
+        if line.startswith('@@ '):
+            in_hunk = True
+
         # Skip non-content lines
-        if not line or line.startswith('diff ') or line.startswith('index ') or \
+        if not is_content and (not line or line.startswith('diff ') or line.startswith('index ') or \
            line.startswith('--- ') or line.startswith('+++ ') or \
-           line.startswith('@@ ') or line.startswith('Binary '):
+           line.startswith('@@ ') or line.startswith('Binary ')):
             continue
 
         # Analyze added/removed lines
-        if line.startswith('+') and not line.startswith('+++'):
+        if line.startswith('+') and (in_hunk or not line.startswith('+++')):
             added_line = line[1:]  # Remove the '+' prefix
             stats[current_type]['added'] += 1
 
@@ -158,7 +165,7 @@ def analyze_diff():
                     elif line_type == 'code':
                         js_stats['code'] += 1
 
-        elif line.startswith('-') and not line.startswith('---'):
+        elif line.startswith('-') and (in_hunk or not line.startswith('---')):
             stats[current_type]['removed'] += 1
 
             if current_type == 'python':

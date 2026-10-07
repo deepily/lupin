@@ -172,5 +172,37 @@ class TestAnalyzeDiff( unittest.TestCase ):
         self.assertIn( "Total files:", out )
 
 
+
+class TestAnalyzeDiffPrefixAndPlusText( unittest.TestCase ):
+    """analyze_diff() — path prefix and '++' / '--' text inside a hunk."""
+
+    HEADER = [ "index 111..222 100644", "--- a/{p}", "+++ b/{p}" ]
+
+    def _diff( self, path, body ):
+        head = [ f"diff --git a/{path} b/{path}" ] + [ h.format( p=path ) for h in self.HEADER ]
+        return "\n".join( head + body )
+
+    def test_control_path_without_leading_b_is_python( self ):
+        out = _run_analyze( self._diff( "c.py", [ "@@ -1 +1 @@", "+x = 1" ] ) )
+        self.assertIn( "PYTHON FILES - SOURCE vs DOCUMENTATION", out )
+
+    def test_path_b_dot_py_is_still_python( self ):
+        out = _run_analyze( self._diff( "b.py", [ "@@ -1 +1 @@", "+x = 1" ] ) )
+        self.assertIn( "PYTHON FILES - SOURCE vs DOCUMENTATION", out )
+
+    def test_added_text_starting_plus_plus_is_counted( self ):
+        out = _run_analyze( self._diff( "c.py", [ "@@ -1 +1,2 @@", "+x = 1", "+++y = 2", "+++ z = 3" ] ) )
+        self.assertIn( "Total lines added:   3", out )
+
+    def test_removed_text_starting_minus_minus_is_counted( self ):
+        out = _run_analyze( self._diff( "c.py", [ "@@ -1,3 +1 @@", "-x = 1", "---y = 2", "--- z = 3" ] ) )
+        self.assertIn( "Total lines removed: 3", out )
+
+    def test_file_headers_of_a_second_file_are_not_counted( self ):
+        second = [ "diff --git a/d.py b/d.py", "--- a/d.py", "+++ b/d.py", "@@ -1 +1 @@", "+w = 4" ]
+        out = _run_analyze( self._diff( "c.py", [ "@@ -1 +1 @@", "+x = 1" ] ) + "\n" + "\n".join( second ) )
+        self.assertIn( "Total lines added:   2", out )
+        self.assertIn( "Total lines removed: 0", out )
+
 if __name__ == "__main__":
     unittest.main()
