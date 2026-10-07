@@ -61,7 +61,8 @@ def a_stray_user():
     Insert one unprotected, non-companion user and yield its email.
 
     Requested BEFORE clean_test_db in the test's argument list, so pytest builds this fixture
-    first and the real cleanup then runs over the stray user.
+    first and the real cleanup then runs over the stray user. The insert is read back, so a
+    stray user that never went in cannot make the test pass.
     """
     from cosa.rest.db import database as db_module
     with db_module.engine.begin() as conn:
@@ -70,6 +71,7 @@ def a_stray_user():
             "VALUES ( gen_random_uuid(), :email, 'x', true, true, '[\"user\"]'::jsonb ) "
             "ON CONFLICT ( email ) DO NOTHING"
         ), { "email": STRAY_EMAIL } )
+    assert STRAY_EMAIL in _query_user_emails(), "test setup: the stray user did not insert"
     yield STRAY_EMAIL
 
 

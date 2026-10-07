@@ -32,6 +32,15 @@ def test_the_stray_user_fixture_is_built_before_the_real_cleanup():
         f"clean_test_db would run first and find nothing to clean: {arguments}"
 
 
+def test_the_stray_user_fixture_reads_its_insert_back():
+    fixture = _function( "a_stray_user" )
+    asserts = [ node for node in ast.walk( fixture ) if isinstance( node, ast.Assert ) ]
+    reads   = [ node for node in asserts if "_query_user_emails" in ast.dump( node ) ]
+    assert reads, "a stray user that never went in would let the test pass without testing anything"
+    yields  = [ node.lineno for node in ast.walk( fixture ) if isinstance( node, ast.Yield ) ]
+    assert yields and all( read.lineno < min( yields ) for read in reads ), "the read-back must come before the yield"
+
+
 @pytest.mark.parametrize( "statement", [ "TRUNCATE", "DELETE FROM", "drop_all", "create_all" ] )
 def test_the_test_body_holds_no_copy_of_a_cleanup_statement( statement ):
     body = ast.get_source_segment( open( PATH, encoding="utf-8" ).read(), _function( NAME ) )
