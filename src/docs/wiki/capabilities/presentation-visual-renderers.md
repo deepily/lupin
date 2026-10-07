@@ -28,7 +28,7 @@ Phase 7 of [[presentation-generation]] finds each `<!-- VISUAL: type | descripti
 - With `offline_mode`, no renderer is registered and every type is a placeholder. If the Gemini import or client construction fails, those types are unregistered and fall back the same way; a missing key at `src/conf/keys/gemini` makes `generate_image` return `False`, so the renderer returns `None` and the placeholder is used.
 - `MatplotlibRenderer` runs the generated code in a separate `python3` process with a 30-second timeout and the system temp directory as its working directory. It inherits the environment and has no other restriction. `D2Renderer` needs the `d2` program on `PATH` and gives up after 30 seconds.
 - `GeminiImageClient` budgets per presentation: 1.00 for images (0.067 each) and 5.00 for video (0.20 a second); past the limit it returns `False` and the type falls back. Every image call prints a loud notice to stderr.
-- `VeoRenderer` writes an MP4 and, if `ffmpeg` is on `PATH`, a still frame as a fallback inside the `<video>` tag.
+- `VeoRenderer` writes an MP4. It adds a still-frame `<img>` inside the `<video>` tag only if `ffmpeg` is on `PATH` and the extraction (15-second timeout) leaves the frame file; otherwise the tag holds no image. A deck gets at most `max_videos` (default 5, which the orchestrator keeps): the sixth returns `None` and falls back to a placeholder.
 - `PptxDeckRenderer` embeds raster images only: d2 SVGs and mermaid blocks are a known gap, and those slides keep their text.
 
 ## How to extend
