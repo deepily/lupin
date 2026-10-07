@@ -168,3 +168,65 @@ def test_call_facts_and_ties():
     assert vd.call_facts( _p( 0.0, 0.5, 0.5 ) ) == ( 0.5, 0.5, "extend" )
     p, c, ch = vd.call_facts( _p( 0.1, 0.1, 0.8 ) )
     assert ( math.isclose( p, 0.2 ), c, ch ) == ( True, 0.8, "unrelated" )
+
+
+# ---------------------------------------------------------------------------
+# A strong match wins (Rick's ruling, 2026-10-07)
+# ---------------------------------------------------------------------------
+
+_DOUBTFUL = _p( 0.7, 0.2, 0.1 )                         # p_overlap 0.9, confidence 0.7: doubtful
+_STRONG   = _p( 0.95, 0.03, 0.02 )                      # p_overlap 0.98, confidence 0.95: strong
+
+
+def test_a_strong_match_beats_a_doubtful_one_and_the_doubtful_one_is_listed():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "best", _STRONG ) ] )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "REUSE", None, [] )
+    assert [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]                                  # listed beside the verdict
+    assert [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "best", "weak" ]                         # a doubtful entry is still relevant
+
+
+def test_without_a_strong_match_a_doubtful_one_still_makes_it_uncertain_and_is_listed():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ) ] )
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE" )
+    assert [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]
+
+
+def test_the_strong_bar_is_one_named_constant_for_overlap_and_confidence_inclusive_at_point_nine():
+    assert vd.STRONG_MATCH == 0.9 and vd.POLICY[ "strong" ] is vd.STRONG_MATCH
+    at    = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "at", _p( 0.9, 0.0, 0.1 ) ) ] )          # overlap 0.9 and confidence 0.9
+    below = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "below", _p( 0.88, 0.0, 0.12 ) ) ] )     # overlap 0.88 and confidence 0.88
+    assert at[ "verdict" ] == "REUSE" and below[ "cause" ] == "LOW_CONFIDENCE"
+
+
+def test_a_confident_unrelated_entry_is_not_a_strong_match():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "far", _p( 0.01, 0.01, 0.98 ) ) ] )          # confidence 0.98 but overlap 0.02
+    assert r[ "cause" ] == "LOW_CONFIDENCE"
+
+
+def test_an_unsure_entry_with_high_overlap_is_not_a_strong_match():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "split", _p( 0.5, 0.45, 0.05 ) ) ] )         # overlap 0.95 but confidence 0.5
+    assert r[ "cause" ] == "LOW_CONFIDENCE" and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "split", "weak" ]
+
+
+def test_a_strong_match_does_not_hide_a_failed_call():
+    r = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "best", _STRONG ) ], failed=[ "gone" ] )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED" ] )    # LOW_CONFIDENCE alone is waived
+    assert [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "weak" ]
+
+
+def test_a_strong_extend_match_gives_extend_not_reuse():
+    r = _decide( [ _ans( "ext", _p( 0.02, 0.95, 0.03 ) ), _ans( "unsure", _p( 0.2, 0.7, 0.1 ) ) ] )       # the doubtful entry chose extend too
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "EXTEND", [] ) and [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "unsure" ]
+
+
+def test_a_policy_stored_before_the_rule_never_has_a_strong_match():
+    old = { k: v for k, v in vd.POLICY.items() if k != "strong" }
+    r   = _decide( [ _ans( "weak", _DOUBTFUL ), _ans( "best", _STRONG ) ], policy=old )
+    assert r[ "cause" ] == "LOW_CONFIDENCE"                                                      # a stored receipt replays as it was
+
+
+def test_the_doubtful_list_is_best_first_and_cut_to_the_shortlist_size():
+    rows = [ _ans( f"d{i:02d}", _p( 0.5 + i / 100, 0.0, 0.5 - i / 100 ) ) for i in range( 12 ) ] + [ _ans( "best", _STRONG ) ]
+    r    = _decide( rows )
+    assert len( r[ "doubtful" ] ) == vd.POLICY[ "shortlist" ]
+    assert r[ "doubtful" ][ 0 ][ "p_overlap" ] >= r[ "doubtful" ][ -1 ][ "p_overlap" ]

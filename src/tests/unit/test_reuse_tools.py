@@ -830,3 +830,14 @@ def test_a_refused_sweep_returns_a_verdict_and_receipt_that_never_carry_the_key(
     stored = "".join( p.read_text( encoding="utf-8" ) for p in receipts( env ) )
     out, err = capsys.readouterr()
     assert stored and sentinel not in json.dumps( r ) + stored + out + err
+
+
+def test_a_strong_match_wins_through_check_exists_and_the_receipt_lists_the_doubtful_entry( env ):
+    answers = { FEEDS_TEXT: resp( 0.95, 0.03, 0.02 ), MATHX_TEXT: resp( 0.7, 0.2, 0.1 ) }          # one strong match, one doubtful
+    c, r, path = _healthy( env, answers )
+    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "REUSE", None )
+    assert [ d[ "id" ] for d in r[ "doubtful" ] ] == [ "cosa.mathx.add" ]                          # the caller sees it beside the verdict
+    stored = json.loads( path.read_text( encoding="utf-8" ) )
+    assert [ d[ "id" ] for d in stored[ "doubtful" ] ] == [ "cosa.mathx.add" ] and stored[ "policy" ][ "strong" ] == 0.9
+    back = rt.replay_impl( r[ "receipt_id" ], c )                                                  # the stored receipt replays to the same verdict
+    assert back[ "frozen" ][ "verdict" ] == "REUSE" and back[ "differences" ][ "frozen" ] == []

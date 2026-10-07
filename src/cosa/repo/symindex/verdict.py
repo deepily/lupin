@@ -8,7 +8,9 @@ contributes to a verdict.
 """
 import math
 
-POLICY = { "threshold": 0.5, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02 }
+STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reach this for a strong match to win
+
+POLICY = { "threshold": 0.5, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH }
 
 CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE" )
 ANSWERS = ( "reuse", "extend", "unrelated" )
@@ -72,7 +74,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
         - flags is a set drawn from `CAUSES` naming the pipeline problems already known
           (NOT_LUPIN_TREE, DEPENDENCY_MISSING, INDEX_STALE, KEY_UNREADABLE)
     Ensures:
-        - returns { verdict, cause, causes, shortlist, shortlist_total, nearest, malformed, missing }
+        - returns { verdict, cause, causes, shortlist, shortlist_total, nearest, doubtful, malformed, missing }
         - verdict is `REUSE`, `EXTEND`, `NEW` or `UNCERTAIN_READ_SOURCE`; cause is None unless `UNCERTAIN_READ_SOURCE`
         - causes lists every cause that holds, in the order of `CAUSES`
         - coverage is set equality: CALL_FAILED holds when any call failed or any expected id is
@@ -82,6 +84,11 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
           { id, reason }, and such an answer never reaches a verdict
         - a call is relevant when p_overlap >= threshold and doubtful when p_overlap >= floor
           and confidence < the confidence bar, so unrelated entries never cause uncertainty
+        - a strong match wins: when policy["strong"] is set and some entry has both p_overlap and
+          confidence at or above it, doubtful entries no longer cause LOW_CONFIDENCE and are listed in
+          `doubtful` instead; every other cause still holds. A policy without "strong" (a receipt stored
+          before the rule) never has a strong match, so it replays as it was stored
+        - doubtful lists the doubtful entries best first, cut to policy["shortlist"], whether or not they cause uncertainty
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
           their value, each cut to policy["shortlist"], so a `NEW` verdict still names what to read
     """
@@ -103,8 +110,10 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
     holds     = set( flags )
     if failed or missing:   holds.add( "CALL_FAILED" )
     if malformed:           holds.add( "MALFORMED_ANSWER" )
-    if any( r[ "p_overlap" ] >= policy[ "floor" ] and r[ "confidence" ] < policy[ "confidence" ] for r in rows ): holds.add( "LOW_CONFIDENCE" )
     ordered  = _order( rows )
+    doubtful = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "floor" ] and r[ "confidence" ] < policy[ "confidence" ] ]
+    strong   = "strong" in policy and any( r[ "p_overlap" ] >= policy[ "strong" ] and r[ "confidence" ] >= policy[ "strong" ] for r in rows )
+    if doubtful and not strong: holds.add( "LOW_CONFIDENCE" )
     relevant = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "threshold" ] ]
     causes   = [ c for c in CAUSES if c in holds ]
     if causes:          verdict = "UNCERTAIN_READ_SOURCE"
@@ -117,5 +126,6 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
              "shortlist"       : relevant[ :policy[ "shortlist" ] ],
              "shortlist_total" : len( relevant ),
              "nearest"         : ordered[ :policy[ "shortlist" ] ],
+             "doubtful"        : doubtful[ :policy[ "shortlist" ] ],
              "malformed"       : malformed,
              "missing"         : missing }

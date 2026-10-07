@@ -780,7 +780,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
             "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
             "shortlist": _shortlist_view( d[ "shortlist" ], by_id ), "shortlist_total": d[ "shortlist_total" ],
-            "nearest": _shortlist_view( d[ "nearest" ], by_id ), "malformed": d[ "malformed" ], "missing": d[ "missing" ],
+            "nearest": _shortlist_view( d[ "nearest" ], by_id ), "doubtful": _shortlist_view( d[ "doubtful" ], by_id ), "malformed": d[ "malformed" ], "missing": d[ "missing" ],
             "stats": { "entries": len( routed[ "deciding" ] ), "answered": len( sw[ "answers" ] ), "failed": len( sw[ "failed" ] ), "not_checked": len( sw[ "not_reached" ] ),
                        "calls": sw[ "calls" ], "cache_hits": sw[ "cache_hits" ],
                        "attempts": sw[ "attempts_answered" ] + sw[ "attempts_failed" ], "attempts_answered": sw[ "attempts_answered" ],
@@ -791,7 +791,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
 
 def _public( receipt, extra=None ):
     """Ensures: returns the caller-facing result: the receipt under the name receipt_id plus its verdict fields."""
-    keep = ( "verdict", "cause", "causes", "shortlist", "shortlist_total", "nearest", "malformed", "missing", "index_sha", "stats" )
+    keep = ( "verdict", "cause", "causes", "shortlist", "shortlist_total", "nearest", "doubtful", "malformed", "missing", "index_sha", "stats" )
     out  = { "status": "ok", "tool": receipt[ "tool" ], "receipt_id": receipt[ "id" ] }
     out.update( { k: receipt[ k ] for k in keep } )
     if extra: out.update( extra )

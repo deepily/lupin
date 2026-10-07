@@ -17,7 +17,7 @@ One sweep asks Jev one question per index entry. Each answered call gives probab
 | malformed | the answer is not exactly the three keys, each a finite number in [0, 1], summing to 1 within 0.02; or its id is not an index entry, or is answered twice |
 
 Policy constants, all part of the receipt (see Receipt identity): `T = 0.5` relevance threshold,
-`C = 0.9` confidence bar, `F = 0.3` uncertainty floor, `K = 10` shortlist size, `0.02` sum tolerance.
+`C = 0.9` confidence bar, `F = 0.3` uncertainty floor, `K = 10` shortlist size, `0.02` sum tolerance, `S = 0.9` strong-match bar (`STRONG_MATCH`).
 
 ## Which calls count (B3)
 
@@ -27,6 +27,10 @@ A call is **doubtful** when `p_overlap >= F` and `confidence < C`. An unrelated 
 answers "unrelated 0.85" has `p_overlap = 0.15`: it is neither relevant nor doubtful, so the
 thousands of unrelated entries in a sweep cannot make every query uncertain. Only calls that
 could matter count.
+
+A call is **strong** when `p_overlap >= S` and `confidence >= S`. When any call is strong, doubtful calls
+no longer cause `LOW_CONFIDENCE`; they are listed in `doubtful` beside the verdict instead (Rick's ruling).
+Every other cause still holds. A receipt stored before this rule has no `strong` in its policy and replays as it was.
 
 ## Which entries are asked (page-first)
 
@@ -61,7 +65,7 @@ holds is also listed, in this order, in `causes`.
 | 4 | `KEY_UNREADABLE` | the Jev key file is missing or unreadable | UNCERTAIN_READ_SOURCE |
 | 5 | `CALL_FAILED` | a call failed, or some index entry id is neither answered, failed nor malformed (coverage is checked as set equality, never as a count; an entry the call budget left unasked counts as unanswered, so a spent budget gives this cause and never `NEW`) | UNCERTAIN_READ_SOURCE |
 | 6 | `MALFORMED_ANSWER` | at least one answer is malformed; every malformed answer is dropped and listed with its reason | UNCERTAIN_READ_SOURCE |
-| 7 | `LOW_CONFIDENCE` | at least one call is doubtful | UNCERTAIN_READ_SOURCE |
+| 7 | `LOW_CONFIDENCE` | at least one call is doubtful and no call is strong | UNCERTAIN_READ_SOURCE |
 | 8 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |
 | 9 | none of the above, the shortlist is not empty, no entry has `choice = reuse` | | EXTEND |
 | 10 | none of the above, the shortlist is empty | | NEW |
@@ -90,6 +94,7 @@ expected ids that received no account at all.
 | one entry `reuse 0.6, unrelated 0.4` (confidence 0.6) | UNCERTAIN, cause LOW_CONFIDENCE |
 | one entry `unrelated 0.6, reuse 0.3, extend 0.1` (`p_overlap` 0.4, confidence 0.6) | UNCERTAIN, cause LOW_CONFIDENCE |
 | one entry `unrelated 0.75, reuse 0.2, extend 0.05` (`p_overlap` 0.25, below `F`) | NEW |
+| one entry `reuse 0.95` and one `reuse 0.7, extend 0.2` (confidence 0.7) | REUSE, shortlist of 2, `doubtful` lists the second |
 | one failed call and one doubtful call | UNCERTAIN, cause CALL_FAILED, causes `[CALL_FAILED, LOW_CONFIDENCE]` |
 | one answer `reuse 0.9, extend 0.9, unrelated 0.9` | UNCERTAIN, cause MALFORMED_ANSWER, reason `sum_not_one` |
 | 4 expected ids, answers for 2 of them and 2 unknown ids | UNCERTAIN, causes `[CALL_FAILED, MALFORMED_ANSWER]`, `missing` the 2 unanswered ids |
