@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from cosa.rest import job_history_cleanup as rule
 from tests.helpers import job_history_cleanup
 
 ROOT = os.environ.get( "LUPIN_ROOT", os.getcwd() )
@@ -61,35 +62,35 @@ def test_a_pending_job_scheduled_in_the_future_is_kept_and_every_other_row_is_de
         ( "running-future::u",  "running",   _iso( timedelta( days=1 ) ) ),
         ( "failed::u",          "failed",    None ),
     ] )
-    kept = job_history_cleanup.clean_job_history( conn )
+    kept = rule.clean_job_history( conn )
     assert kept == [ "future::u" ]
     assert [ row[ 0 ] for row in conn.rows ] == [ "future::u" ]
 
 
 def test_the_delete_is_bound_to_exactly_the_kept_ids():
     conn = _Connection( [ ( "a::u", "pending", _iso( timedelta( hours=2 ) ) ), ( "b::u", "completed", None ) ] )
-    job_history_cleanup.clean_job_history( conn )
+    rule.clean_job_history( conn )
     ( _, delete_params ), = [ call for call in conn.seen if call[ 0 ].lstrip().upper().startswith( "DELETE" ) ]
     assert delete_params == { "keep": [ "a::u" ] }
 
 
 def test_an_empty_table_sends_an_empty_keep_list_and_deletes_nothing_it_has_not_got():
     conn = _Connection( [] )
-    assert job_history_cleanup.clean_job_history( conn ) == []
+    assert rule.clean_job_history( conn ) == []
     assert [ params for sql, params in conn.seen if sql.lstrip().upper().startswith( "DELETE" ) ] == [ { "keep": [] } ]
 
 
 def test_the_future_test_is_the_servers_own_predicate( monkeypatch ):
     """Replace the server's test with a constant: the helper must follow it, not a copy."""
     conn = _Connection( [ ( "future::u", "pending", _iso( timedelta( days=1 ) ) ) ] )
-    monkeypatch.setattr( job_history_cleanup, "_is_future_scheduled", lambda scheduled_at: False )
-    assert job_history_cleanup.clean_job_history( conn ) == []
+    monkeypatch.setattr( rule, "_is_future_scheduled", lambda scheduled_at: False )
+    assert rule.clean_job_history( conn ) == []
     assert conn.rows == []
 
 
 def test_the_delete_statement_spares_nothing_but_the_kept_ids():
     conn = _Connection( [ ( "x::u", "pending", _iso( timedelta( days=1 ) ) ) ] )
-    job_history_cleanup.clean_job_history( conn )
+    rule.clean_job_history( conn )
     delete_sql = [ sql for sql, _ in conn.seen if sql.lstrip().upper().startswith( "DELETE" ) ][ 0 ]
     assert "id_hash <> ALL( CAST( :keep AS varchar[] ) )" in delete_sql, delete_sql
 
@@ -125,7 +126,7 @@ def test_the_survival_tests_build_their_rows_before_the_real_cleanup_runs( name 
 
 def test_the_table_is_locked_before_the_kept_ids_are_read():
     conn = _Connection( [ ( "x::u", "pending", _iso( timedelta( days=1 ) ) ) ] )
-    job_history_cleanup.clean_job_history( conn )
+    rule.clean_job_history( conn )
     kinds = [ sql.lstrip().split( None, 1 )[ 0 ].upper() + " " + sql.lstrip().split( None, 2 )[ 1 ].upper() for sql, _ in conn.seen ]
     assert kinds[ :4 ] == [ "SET LOCAL", "LOCK TABLE", "SELECT ID_HASH,", "DELETE FROM" ], kinds
     lock_sql = conn.seen[ 1 ][ 0 ]

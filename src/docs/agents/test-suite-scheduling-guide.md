@@ -143,6 +143,14 @@ seams). Each reset deletes non-protected users and TRUNCATEs the residue tables
 (the `_BETWEEN_SUITE_TRUNCATE_TABLES` superset, which **includes
 `refresh_tokens`**); protected companion rows survive.
 
+`job_history` is not in that truncate. It is cleared by row, with the rule in
+`cosa.rest.job_history_cleanup`, which the two `clean_test_db` fixtures use as well.
+**What survives a seam:** a row that is `pending` and whose `scheduled_at` is still in the
+future, which is a job scheduled behind the sweep and waiting for a restart to restore it.
+**What does not:** a pending row with no, past or unreadable `scheduled_at`; any `running`,
+`completed` or `failed` row, including the sweep's own row. The table is locked for the
+read and the delete, and a lock that cannot be had within 15 seconds fails the reset.
+
 A literal container bounce is impossible here — the sweep runs *inside* the
 test container, so bouncing it would self-kill the job. The reset is therefore
 an **in-process** truncate against the hot-swapped test engine, guarded by the

@@ -1222,7 +1222,7 @@ class TestSuiteJob( AgenticJobBase ):
     # once task_promotion_tickets was added). tables_with_fk_into() and its unit
     # test enforce that.
     _BETWEEN_SUITE_TRUNCATE_TABLES = (
-        "auth_audit_log", "failed_login_attempts", "job_history",
+        "auth_audit_log", "failed_login_attempts",
         "proxy_decisions", "trust_states", "task_items", "task_events",
         "fcm_tokens", "refresh_tokens", "task_promotion_tickets",
     )
@@ -1312,6 +1312,8 @@ class TestSuiteJob( AgenticJobBase ):
         Ensures:
             - on lupin_db_test: non-protected users deleted + residue TRUNCATEd
               (incl. refresh_tokens); protected companion rows survive
+            - job_history keeps its pending rows scheduled in the future (the rule of
+              cosa.rest.job_history_cleanup); every other row goes, the sweep's own included
             - on any other DB: no destructive op; logs the skip
             - a reset failure raises BetweenSuiteResetError and stops the sweep: a
               suite on an unreset database reports on the previous suite's rows, so
@@ -1331,6 +1333,7 @@ class TestSuiteJob( AgenticJobBase ):
         never a destructive op on dev data.
         """
         from cosa.rest.db import database as db_module
+        from cosa.rest.job_history_cleanup import clean_job_history
         from sqlalchemy import text
 
         try:
@@ -1345,8 +1348,10 @@ class TestSuiteJob( AgenticJobBase ):
             with engine.begin() as conn:
                 conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
                 conn.execute( text( f"TRUNCATE TABLE {table_list}" ) )
+                kept = clean_job_history( conn )
             print( f"[TestSuiteJob] ✓ between-suites DB reset ({prev_suite}->{next_suite}): "
-                   f"non-protected users + residue cleared on lupin_db_test ({table_list})" )
+                   f"non-protected users + residue cleared on lupin_db_test ({table_list}); "
+                   f"job_history cleared except {len( kept )} pending job(s) scheduled ahead" )
 
         except Exception as reset_err:
             print( f"[TestSuiteJob] between-suites reset FAILED ({prev_suite}->{next_suite}): {reset_err}" )

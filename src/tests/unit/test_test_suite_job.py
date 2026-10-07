@@ -1165,7 +1165,12 @@ class TestResetStateBetweenSuitesBody:
     def _mock_engine( url ):
         conn = MagicMock()
         executed = [ ]
-        conn.execute.side_effect = lambda stmt: executed.append( str( stmt ) )
+
+        def _record( stmt, params=None ):
+            executed.append( str( stmt ) )
+            return MagicMock( fetchall=MagicMock( return_value=[ ] ) )
+
+        conn.execute.side_effect = _record
         cm = MagicMock()
         cm.__enter__.return_value = conn
         cm.__exit__.return_value  = False
@@ -1227,6 +1232,99 @@ class TestResetStateBetweenSuitesBody:
             job._reset_state_between_suites( "e2e", "integration" )
         truncate = next( sql for sql in executed if "TRUNCATE" in sql )
         assert "task_promotion_tickets" in truncate and "task_items" in truncate
+
+
+class _JobHistoryConnection:
+    """A connection over an in-memory job_history: rows are ( id_hash, status, scheduled_at )."""
+
+    def __init__( self, rows ):
+        self.rows, self.statements = list( rows ), [ ]
+
+    def execute( self, statement, params=None ):
+        sql = str( statement )
+        self.statements.append( sql )
+        head = sql.lstrip().upper()
+        if head.startswith( "SELECT" ):
+            return MagicMock( fetchall=MagicMock( return_value=[ ( i, s ) for i, st, s in self.rows if st == "pending" ] ) )
+        if head.startswith( "DELETE FROM JOB_HISTORY" ):
+            self.rows = [ row for row in self.rows if row[ 0 ] in params[ "keep" ] ]
+        return MagicMock()
+
+
+class TestResetKeepsScheduledJobHistory:
+    """The between-suites reset spares a pending job scheduled ahead.
+
+    A job scheduled behind a sweep is a pending job_history row until the server restarts and
+    restores it. The reset used to truncate the table, so the row was lost at every seam."""
+
+    @staticmethod
+    def _iso( days ):
+        from datetime import datetime, timedelta, timezone
+        return ( datetime.now( timezone.utc ) + timedelta( days=days ) ).isoformat()
+
+    def _reset( self, job, rows ):
+        conn = _JobHistoryConnection( rows )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.return_value = cm
+        with patch( "cosa.rest.db.database.engine", engine ):
+            job._reset_state_between_suites( "e2e", "integration" )
+        return conn
+
+    def test_a_future_pending_row_survives_and_every_other_row_goes( self, job ):
+        conn = self._reset( job, [
+            ( "future::u",  "pending",   self._iso( 1 ) ),
+            ( "past::u",    "pending",   self._iso( -1 ) ),
+            ( "none::u",    "pending",   None ),
+            ( "done::u",    "completed", self._iso( 1 ) ),
+            ( job.id_hash,  "running",   None ),
+        ] )
+        assert [ row[ 0 ] for row in conn.rows ] == [ "future::u" ]
+
+    def test_the_sweeps_own_running_row_is_not_kept_even_with_a_future_time( self, job ):
+        conn = self._reset( job, [ ( job.id_hash, "running", self._iso( 1 ) ), ( "keep::u", "pending", self._iso( 2 ) ) ] )
+        assert [ row[ 0 ] for row in conn.rows ] == [ "keep::u" ]
+
+    def test_job_history_is_not_in_the_truncate_statement( self, job ):
+        conn = self._reset( job, [ ] )
+        truncate = next( sql for sql in conn.statements if "TRUNCATE" in sql )
+        assert "job_history" not in truncate and "refresh_tokens" in truncate
+
+    def test_the_rule_is_the_shared_one_and_runs_on_the_resets_own_connection( self, job ):
+        conn = _JobHistoryConnection( [ ] )
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value  = False
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        engine.begin.return_value = cm
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history", return_value=[ "k::u" ] ) as shared:
+            job._reset_state_between_suites( "e2e", "integration" )
+        shared.assert_called_once_with( conn )
+        engine.begin.assert_called_once()
+
+    def test_a_failure_in_the_job_history_cleanup_stops_the_sweep( self, job ):
+        from cosa.agents.test_suite.job import BetweenSuiteResetError
+        engine, _ = TestResetStateBetweenSuitesBody._mock_engine( "postgresql://u@h/lupin_db_test" )
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history", side_effect=RuntimeError( "lock timeout" ) ):
+            with pytest.raises( BetweenSuiteResetError, match="lock timeout" ):
+                job._reset_state_between_suites( "e2e", "integration" )
+
+    def test_off_the_test_database_the_rule_is_never_called( self, job ):
+        engine, _ = TestResetStateBetweenSuitesBody._mock_engine( "postgresql://u@h/lupin_db_dev" )
+        with patch( "cosa.rest.db.database.engine", engine ), \
+             patch( "cosa.rest.job_history_cleanup.clean_job_history" ) as shared:
+            job._reset_state_between_suites( "e2e", "integration" )
+        shared.assert_not_called()
+
+    def test_the_log_line_says_how_many_pending_jobs_were_kept( self, job, capsys ):
+        self._reset( job, [ ( "a::u", "pending", self._iso( 1 ) ), ( "b::u", "pending", self._iso( 3 ) ) ] )
+        assert "except 2 pending job(s) scheduled ahead" in capsys.readouterr().out
 
 
 class TestTruncateSetIsClosedUnderForeignKeys:
