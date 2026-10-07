@@ -26,6 +26,7 @@
 # src/conf/doc-gate-epoch.txt. A tip that descends from the epoch is checked. A tip that does not
 # descend from it predates the gate: it is pushed, with a loud line, and meets the pyramid gate
 # when it merges. Ancestry cannot be faked by deleting or editing a file in the pushed tree.
+# An orphan root commit does not descend from the epoch, so it is pushed with the same loud line.
 #
 # It fails closed. A hook tree with no gate script or no readable epoch refuses every push. A
 # checked tip with no swept file is refused as unchecked. A deleted ref is not checked.
