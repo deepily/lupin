@@ -113,3 +113,11 @@ test("queue FAILED, audio goes offline and back (connection_offline / connection
   assert.equal(h.audio.state, "connected", "precondition: the audio transport is back");
   assert.equal(h.intervals.pending(), 0, "connection_online from the AUDIO transport thawed a card while the queue socket is failed");
 });
+
+test("audio goes offline while the queue is connected (connection_offline path): the countdown should keep running", () => {
+  const h = setup();
+  h.audio.send({ type: "network_offline" });
+  assert.equal(h.audio.state, "offline", "precondition: audio is offline");
+  assert.equal(h.queue.state, "connected", "precondition: queue is connected");
+  assert.equal(h.intervals.pending(), 1, "connection_offline from the AUDIO transport froze a card whose queue socket is fine");
+});
