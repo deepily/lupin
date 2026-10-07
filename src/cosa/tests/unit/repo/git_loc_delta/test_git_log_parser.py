@@ -78,6 +78,7 @@ class TestBuildCommand:
         """Ensures: include_merges=True omits the --no-merges flag."""
         cmd = GitLogParser( include_merges=True )._build_command()
         assert "--no-merges" not in cmd
+        assert "--diff-merges=first-parent" in cmd     # numstat prints no rows for a merge without it
 
     def test_all_branches_appends_branches_flag( self ):
         """

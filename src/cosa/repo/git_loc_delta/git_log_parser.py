@@ -39,7 +39,8 @@ class GitLogParser:
     Walks `git log --numstat` output and yields per-file LoC changes.
 
     Binary files (numstat rows starting with `-\t-\t`) are skipped silently.
-    Merge commits are excluded by default (controlled by `include_merges`).
+    Merge commits are excluded by default. With `include_merges` a merge counts what it brought in
+    over its first parent, so lines already counted on the merged branch are counted again.
     """
 
     def __init__(
@@ -95,6 +96,7 @@ class GitLogParser:
             - Always uses --date=short for stable ISO date parsing
             - Custom --pretty marker `COMMIT|<sha>|<cd>|<aE>` distinguishes commit rows
             - all_branches appends `--branches` (union of local branch refs)
+            - include_merges appends `--diff-merges=first-parent` (git 2.31 or newer), else `--no-merges`
 
         Date basis:
             The date field is `%cd` (committer date), not `%ad` (author date),
@@ -110,7 +112,9 @@ class GitLogParser:
             "--date=short",
             "--pretty=format:COMMIT|%H|%cd|%aE",
         ]
-        if not self.include_merges:
+        if self.include_merges:
+            cmd.append( "--diff-merges=first-parent" )     # git log --numstat prints no rows for a merge without this
+        else:
             cmd.append( "--no-merges" )
         # Bare ISO dates are pinned to day boundaries here, NOT at the caller —
         # coverage_guard mirrors these flags and must normalize identically or

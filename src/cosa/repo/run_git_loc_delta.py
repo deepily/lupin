@@ -123,7 +123,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-merges",
         action = "store_true",
-        help   = "Include merge commits (default: exclude)",
+        help   = "Count merge commits, each as its diff against the first parent (default: exclude)",
     )
     parser.add_argument(
         "--author",
