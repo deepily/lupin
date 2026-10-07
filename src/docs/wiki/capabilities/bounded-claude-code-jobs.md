@@ -22,7 +22,7 @@ A `ClaudeCodeJob` runs one Claude Code task as a queue job. It rides the CJ Flow
 - A bounded job authenticates to the Claude Code CLI with subscription OAuth, so it adds no per-token charge. It is covered by the fixed plan.
 - The `cost_usd` in a job record is the SDK's estimate of a direct call's cost: telemetry, not a charge.
 - A direct SDK call reads `ANTHROPIC_API_KEY_FIREWALLED` through `get_anthropic_api_key` and is billed per token.
-- The suffixed name keeps the bare `ANTHROPIC_API_KEY` reserved for the CLI, so a process cannot pick the key up by accident.
+- The suffixed name keeps the bare `ANTHROPIC_API_KEY` reserved for the CLI, so `get_anthropic_api_key` callers never pick it up. The generic `llm_client_factory` "anthropic" vendor still reads the bare name.
 
 ## Which path to choose
 Choose a bounded job only when all of these hold; otherwise use the direct SDK and say which failed.
@@ -30,11 +30,11 @@ Choose a bounded job only when all of these hold; otherwise use the direct SDK a
 - The Claude Code tool surface covers what the task needs.
 - One to three seconds of start-up per call is acceptable: at most about 10 calls per second, and latency budgets over 2 seconds.
 - The caller needs no token streaming; a bounded job returns once, on completion.
-- Reference agents: `bug_fix_expediter`, `test_fix_expediter`, `podcast_generator`, `presentation_generator`, `deep_research`. `notification_proxy` and `decision_proxy` stay on the direct SDK.
+- Reference agents on the same subscription path, through in-process `sdk_query` rather than `ClaudeCodeJob`: `bug_fix_expediter`, `test_fix_expediter`, `podcast_generator`, `presentation_generator`, `deep_research`. `notification_proxy` and `decision_proxy` stay on the direct SDK.
 
 ## When to run it
 - Rolling plan limits make batch work compete with interactive sessions, so set `scheduled_at` on any non-interactive bounded job.
 - `scheduled_at` is top-level in the submit request, because `args` is checked against the command's own argument contract.
 - Pick a window when the host is up: 10 a.m. to 1 p.m. Eastern is optimal. Avoid 9 to 11 p.m., the owner's interactive peak.
 - The host is usually off from about 11 PM to 10 in the morning, so a job scheduled then waits for the next boot.
-- A user-clicked job omits `scheduled_at` and runs at once.
+- A user-clicked job omits `scheduled_at` and runs when the queue reaches it.
