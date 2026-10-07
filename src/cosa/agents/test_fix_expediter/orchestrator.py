@@ -615,7 +615,7 @@ class TFEOrchestrator:
         )
 
     # ───────────────────────────────────────────────────────────────
-    # Phase 2-6: stubs (full implementations in steps 9-12)
+    # Phase 2 onward: full implementations (propose, fix, git, validation rerun)
     # ───────────────────────────────────────────────────────────────
 
     # ───────────────────────────────────────────────────────────────
