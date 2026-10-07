@@ -1,65 +1,37 @@
 #!/usr/bin/env python3
 """
-COMMITTED REPRODUCER — first run 2026-05-12, kept so the probe can be re-run.
+Operator reproducer: does the bounded ClaudeCodeJob path bill the Anthropic API?
 
-🔴 THIS FILE WAS DELETED ON 2026-08-31 (c3626795) AND RESTORED ON 2026-09-01 ON
-RICK'S RULING. Read this before deleting it again, because the sentence that got
-it deleted is still in the git history and reads convincingly.
+This is a committed reproducer, not a throwaway. It is kept so the billing answer can
+be checked again whenever the billing path changes. Nothing in code references it, so
+the docs that name it are how an operator finds it. The answer itself is recorded in
+CLAUDE.md under the cost model.
 
-The deletion quoted this docstring's own closing line — "NOT a checked-in test.
-NOT pytest. One-off probe — delete after use." That line was written on the day
-of the first run and is SUPERSEDED. Its own R&D doc says so explicitly:
-
-    src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md
-      line  73 : "written as a throwaway, then promoted to a committed
-                  reproducer; see §8, which is authoritative over this sentence"
-      line 229 : "promoted from 'throwaway' to committed reproducer so future
-                  experimenters can re-run the same probe end-to-end"
-
-⇒ The docstring is now corrected at the source rather than left to contradict
-the doc that supersedes it. That contradiction is exactly what cost this file its
-life once, and a retraction that reaches the conversation but not the artifact is
-no retraction at all.
-
-⚠️ THE DELETION'S OTHER REASONS WERE SOUND AND ARE ANSWERED, not dismissed. No
-CODE references this file — true, and weak for an operator reproducer, because
-the DOC referencing it is how a script like this gets used. The billing question
-IS answered and recorded twice (CLAUDE.md § COST MODEL, and the R&D doc). What
-the file buys is the ability to CHECK that answer again when the billing path
-changes, which is the whole point of a reproducer.
-
-HOW TO RE-RUN IT: R&D doc §8. Requires a live server and the test credentials in
-LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD.
-
---- the original 2026-05-12 header follows, unchanged ---
+It is a one-shot operator script run by hand against a live server. It is not a pytest
+test. It needs the test credentials in LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and
+LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD.
 
 Question being answered:
+    Does the Lupin bounded ClaudeCodeJob path bill against the Anthropic API, via the
+    firewalled ANTHROPIC_API_KEY_FIREWALLED? Or is it covered by the Claude Code Max
+    subscription that the Claude Code CLI uses?
 
-Question being answered:
-    Does the Lupin BOUNDED ClaudeCodeJob path bill against the Anthropic API
-    (via the firewalled ANTHROPIC_API_KEY_FIREWALLED), or is it covered by
-    the Claude Code Max subscription that the Claude Code CLI uses?
-
-Theory under test (Rick):
+Theory under test (the owner's):
     - ANTHROPIC_API_KEY is reserved for the Claude Code CLI (Max subscription).
-    - ANTHROPIC_API_KEY_FIREWALLED is the firewalled key used by *other*
-      agents (Deep Research, notification proxy, decision proxy) that
-      explicitly call the Anthropic SDK.
-    - The bounded ClaudeCodeJob path uses the CLI / Claude Agent SDK auth,
-      NOT the firewalled key, so it should be billed at $0 / covered by Max.
-    - Grep across src/cosa/agents/claude_code/, src/scripts/, src/conf/
-      shows ZERO references to ANTHROPIC_API_KEY or the firewalled name.
+    - ANTHROPIC_API_KEY_FIREWALLED is the firewalled key used by other agents (Deep
+      Research, notification proxy, decision proxy) that call the Anthropic SDK
+      explicitly.
+    - The bounded ClaudeCodeJob path uses the CLI / Claude Agent SDK auth, not the
+      firewalled key, so it should bill at $0 and be covered by Max.
+    - A grep across src/cosa/agents/claude_code/, src/scripts/ and src/conf/ finds no
+      reference to ANTHROPIC_API_KEY or the firewalled name.
 
-Experimental design (Rick):
+Experimental design (the owner's):
     Two clusters of 5 prompts each.
-    - Cluster A: in-repo only (Read/Grep/Write to /tmp). Cheaper if billing on.
-    - Cluster B: web search + synthesis. Expensive if billing on.
-    1-minute spacing between every execution so the credit-balance UI has
-    time to settle and any jump correlates to a specific job.
-
-Not a pytest test — it is a one-shot operator script run by hand against a live
-server. (The original line here read "delete after use"; see the correction at
-the top of this docstring. It is kept ON PURPOSE.)
+    - Cluster A: in-repo only (Read/Grep/Write to /tmp). Cheaper if billing is on.
+    - Cluster B: web search plus synthesis. Expensive if billing is on.
+    There is 1 minute of spacing between every execution, so the credit-balance UI can
+    settle and any jump correlates to a specific job.
 """
 
 import json

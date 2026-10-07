@@ -1,33 +1,34 @@
 """Snapshot-store isolation guard for the CJ Flow v2 paired eval.
 
-WHY THIS EXISTS. The v2 flow writes snapshots back when `v2 snapshot writeback enabled`
-is True (lupin-app.ini). A paired v1-vs-v2 run must NOT let those writes hit a LIVE store
-(the standing no-test-touches-a-live-dev-data-store rule) and must not let one arm's writes
-warm the other arm's cold pass (design §4). This guard enforces that with TWO SEPARATE,
-independent checks — a store is safe to use only when BOTH pass:
+The v2 flow writes snapshots back when `v2 snapshot writeback enabled` is True (lupin-app.ini).
+A paired v1-vs-v2 run must never let those writes hit a live store.
+It must also never let one arm's writes warm the other arm's cold pass.
+Two separate, independent checks enforce this.
+A store is safe to use only when both pass.
 
-  SAFETY (require_isolated_snapshot_table) — is the destination NON-LIVE?
-    FAIL-CLOSED by allowlist membership. The app's live write destination is the
-    FULLY-QUALIFIED (database, table): the database from the app's own get_database_url()
-    and the table from SolutionSnapshot.__tablename__ (what the ORM actually writes
-    through). It is permitted ONLY when that `database.table` is a member of the config
-    allowlist `v2 eval permitted snapshot stores`. Table name alone is NOT enough:
-    `lupin_db_test.solution_snapshots` is isolated from `lupin_db_dev.solution_snapshots`
-    despite the identical table name — the database is half the identity. The old
-    table-name-only predicate got this wrong in BOTH directions (it let a shared-db write
-    through, and it blocked a genuinely isolated different-database write). Fail-closed:
-    an empty/absent allowlist REFUSES — an unproven destination is treated as live.
+Safety (require_isolated_snapshot_table) asks whether the destination is non-live.
+It fails closed by allowlist membership.
+The live write destination is the fully-qualified (database, table).
+The database comes from the app's own get_database_url().
+The table comes from SolutionSnapshot.__tablename__, which is what the ORM actually writes through.
+It is permitted only when that `database.table` is a member of the config allowlist
+`v2 eval permitted snapshot stores`. The table name alone is not enough: the same table name
+in two databases is two stores, so the database is half the identity.
+A table-name-only check would let a shared-database write through.
+It would also block a truly isolated write to a different database.
+An empty or absent allowlist refuses, because an unproven destination is treated as live.
 
-  VALIDITY (require_arms_distinct_and_clean) — is the PAIRING sound?
-    The two arms must write DIFFERENT fully-qualified destinations (so v1's writes cannot
-    warm v2's cold pass — design §4) AND each destination must START CLEAN (empty), because
-    residue from a prior run contaminates the cold baseline exactly as one arm warming the
-    other would. This check shares NO allowlist with SAFETY — it is a cross-arm property,
-    not a membership test.
+Validity (require_arms_distinct_and_clean) asks whether the pairing is sound.
+The two arms must write different fully-qualified destinations, so v1's writes cannot warm
+v2's cold pass. Each destination must also start clean (empty), because residue from a prior
+run contaminates the cold baseline just as one arm warming the other would.
+This check shares no allowlist with safety. It is a cross-arm property, not a membership test.
 
-The two checks are deliberately not merged: a destination can be non-live (SAFETY passes)
-yet shared between the arms or dirty (VALIDITY fails), and vice-versa. Each raises its own
-error with its own message so the paired bridge declines LOUDLY, naming which property failed.
+The two checks are kept apart.
+A destination can be non-live (safety passes) yet shared
+between the arms or dirty (validity fails), and the reverse.
+Each check raises its own error with its own message.
+The paired bridge therefore declines loudly and names which property failed.
 """
 
 from __future__ import annotations
@@ -55,50 +56,47 @@ MEASUREMENT_DB_NAMES = frozenset( { "lupin_db_test", "lupin_db_v1baseline" } )
 
 
 class IsolationNotConfigured( RuntimeError ):
-    """SAFETY failure — the write destination is not a PROVABLY non-live measurement store."""
+    """Safety failure: the write destination is not a provably non-live measurement store."""
 
 
 class PairedTargetsNotIsolated( RuntimeError ):
-    """VALIDITY failure — the two arms' destinations are not DISTINCT-and-CLEAN."""
+    """Validity failure: the two arms' destinations are not distinct and clean."""
 
 
 class ConfigTableMismatch( RuntimeError ):
-    """CONFIG failure — the declared `v2 snapshot table` names a table the ORM never writes.
+    """Config failure: the declared `v2 snapshot table` names a table the ORM never writes.
 
-    The "wired but pointing wrong" defect (Mr Radio, 2026-08-16): a config value that names a
-    table the write-back never reaches would make the per-arm clean-step TRUNCATE the wrong
-    table, leaving the real write target dirty while every check reports clean. Raised loudly so
-    a drifted config cannot silently pass.
+    A config value naming a table the write-back never reaches would make the per-arm
+    clean-step `TRUNCATE` the wrong table. The real write target would stay dirty while every
+    check reports clean. It is raised loudly so a drifted config cannot silently pass.
     """
 
 
 class NotAMeasurementDatabase( RuntimeError ):
-    """SAFETY failure — a destructive clean-step was aimed at a non-measurement database."""
+    """Safety failure: a destructive clean-step was aimed at a non-measurement database."""
 
 
 class PairedCorpusExercisesLeak( RuntimeError ):
-    """CORPUS failure — the corpus routes to an arg-extracting command while the PINNED v1 sha
-    still carries the fallback_defaults leak (bug 8aa89f42, fixed at bf77852b).
+    """Corpus failure: an arg-extracting corpus was paired with a v1 pin that still has the leak.
 
-    THE PREMISE IS DERIVED FROM THE PIN, NOT HARD-CODED (row 297b1fc3, María 2026-08-21): the
-    leak is live at a pin iff bf77852b is NOT an ancestor of it (`pin_carries_leak_fix`). The
-    leak itself: the runtime-argument expeditor hands out a registry entry's OWN
-    fallback_defaults dict, so the first replayed body's extracted arg STICKS as every later
-    body's default for the process life — a cross-body contaminant in a SEQUENTIAL replay, i.e.
-    it corrupts the measurement itself. While the pin was b0735467 (until 2026-08-21) the leak
-    was live and any arg-extracting corpus had to be refused; the 'simple' corpus was safe only
-    because its commands are pure routing and never reach arg extraction.
+    The leak: the runtime-argument expeditor hands out a registry entry's own fallback_defaults
+    dict. The first replayed body's extracted arg then sticks as every later body's default for
+    the process life. In a sequential replay that is a cross-body contaminant, so it corrupts
+    the measurement itself. The fix is LEAK_FIX_SHA.
+    The premise is derived from the pin, not hard-coded.
+    The leak is live at a pin exactly when LEAK_FIX_SHA is not an ancestor of it
+    (`pin_carries_leak_fix`). A pure-routing corpus such as 'simple' is safe at any pin,
+    because its commands never reach arg extraction.
 
-    THE CHOSEN PIN AND ITS COST, so neither this docstring nor the report asserts the other
-    horn's premise: V1_PIN_SHA is 15536409 (row 647f3733 ruling, Cheech agreeing). It carries
-    bf77852b, so the arm is LEAK-FREE and an arg-extracting corpus is ADMITTED — refusing it
-    there would cite a defect that is not present and quietly force the baseline onto 'simple',
-    below the row's own n=60-over-all-commands spec. It ALSO carries the 9805783d request-path
-    refactor, so the measured v1 is the REFACTORED request path, not the one Rick's criteria were
-    written against (the other pin, b0735467, is unrefactored but leaky). The trade was chosen
-    because a leak corrupts what is measured; the refactor is EXPECTED — not yet measured — to
-    change the path's structure, not the numbers reported. Raised loudly, naming the offenders
-    AND the pin.
+    V1_PIN_SHA carries LEAK_FIX_SHA, so the arm is leak-free and an arg-extracting corpus is
+    admitted. Refusing it there would cite a defect that is not present.
+    It would also quietly force the baseline onto 'simple', below the spec of 60 samples
+    over all commands. The pin also carries
+    REQUEST_PATH_REFACTOR_SHA, so the measured v1 is the refactored request path, not the one the
+    criteria were written against. The other candidate pin is unrefactored but leaky. The trade
+    favours the refactored pin because a leak corrupts what is measured. The refactor is expected,
+    not yet measured, to change the path's structure and not the numbers reported.
+    It is raised loudly, naming the offending commands and the pin.
     """
 
 
@@ -107,7 +105,7 @@ class PairedCorpusExercisesLeak( RuntimeError ):
 # ---------------------------------------------------------------------------
 def resolve_write_target() -> str:
     """
-    The TABLE the v2 write-back ORM actually writes through, read live.
+    The table the v2 write-back ORM actually writes through, read live.
 
     Ensures:
         - returns SolutionSnapshot.__tablename__ — the attribute SQLAlchemy routes the
@@ -125,12 +123,9 @@ def require_config_table_matches_write_target(
     """
     Refuse a paired run unless the declared `v2 snapshot table` equals the ORM write target.
 
-    The per-arm clean-step TRUNCATEs the table the ORM writes through; the config key exists so
-    an operator can DECLARE that table, and this cross-check proves the declaration matches
-    reality (SolutionSnapshot.__tablename__). A config naming a table the writes never reach is
-    the "wired but pointing wrong" defect — it would truncate an unrelated table and leave the
-    real destination dirty. The clean-step calls this FIRST so the TRUNCATE identifier is only
-    ever the resolved ORM __tablename__, never a raw config string (no injection surface).
+    The per-arm clean-step runs `TRUNCATE` on the table the ORM writes through.
+    A declared table the writes never reach would be truncated while the real destination
+    stayed dirty, so the declaration is cross-checked against the ORM.
 
     Requires:
         - config_mgr exposes .get( key, default, return_type ).
@@ -140,8 +135,10 @@ def require_config_table_matches_write_target(
     Ensures:
         - returns the write target (the ORM __tablename__) when the declared value equals it,
           after stripping surrounding whitespace.
-        - raises ConfigTableMismatch otherwise, with BOTH values quoted — including the case of
-          an absent/blank declaration (which can never equal a real table name).
+        - the clean-step calls this first, so the `TRUNCATE` identifier is only ever the
+          resolved ORM __tablename__, never a raw config string. That leaves no injection surface.
+        - raises ConfigTableMismatch otherwise, with both values quoted, including the case of
+          an absent or blank declaration (which can never equal a real table name).
 
     Raises:
         - ConfigTableMismatch on any drift between the declared table and the ORM write target.
@@ -161,33 +158,36 @@ def require_config_table_matches_write_target(
 
 def _db_name( db_url: str ) -> str:
     """
-    The database NAME = the PATH component of the connection url, minus its leading '/'.
-    Parsed with urlsplit (mirrors v1_eval_arm._db_name) so a query/fragment '/' can never
-    be mistaken for the db name.
+    The database name: the path component of the connection url, minus its leading '/'.
+
+    It is parsed with urlsplit (as v1_eval_arm._db_name does), so a '/' in the query or
+    fragment can never be mistaken for the db name.
     """
     return urlsplit( db_url ).path.lstrip( "/" )
 
 
 def assert_measurement_db( db_url: Any ) -> None:
     """
-    Refuse a destructive clean-step unless it targets a MEASUREMENT database.
+    Refuse a destructive clean-step unless it targets a measurement database.
 
     The peer of v1_eval_arm.assert_test_db, living here so v2's clean-step reaches it without
-    the v1<->v2 import cycle. A TRUNCATE is irreversible, so this is a HARD precondition: fire
-    LOUD and never proceed on anything but lupin_db_test / lupin_db_v1baseline. The db NAME must
-    match the set EXACTLY (a substring check would let 'lupin_db_test_shadow' smuggle in).
+    the v1<->v2 import cycle. A `TRUNCATE` is irreversible, so this is a hard precondition:
+    it fails loudly and never proceeds on anything but lupin_db_test or lupin_db_v1baseline.
 
     Requires:
-        - db_url is the url of the connection the TRUNCATE will run on (read off
-          connection.engine.url by the caller, never a decoupled arg — the de9c32d0 lesson).
+        - db_url is the url of the connection the `TRUNCATE` will run on, read off
+          connection.engine.url by the caller, never a separate argument. A separate
+          argument could name a different database than the one actually truncated.
 
     Ensures:
         - returns None when db_url is a string whose db name is in MEASUREMENT_DB_NAMES.
-        - raises NotAMeasurementDatabase for any other / missing / non-string target, with the
-          offending value quoted — the caller must not TRUNCATE.
+        - the db name must match the set exactly; a substring check would let
+          'lupin_db_test_shadow' in.
+        - raises NotAMeasurementDatabase for any other, missing or non-string target, with the
+          offending value quoted. The caller must not run `TRUNCATE`.
 
     Raises:
-        - NotAMeasurementDatabase on any non-measurement / missing / non-string target.
+        - NotAMeasurementDatabase on any non-measurement, missing or non-string target.
     """
     if not isinstance( db_url, str ) or _db_name( db_url ) not in MEASUREMENT_DB_NAMES:
         raise NotAMeasurementDatabase(
@@ -199,15 +199,17 @@ def assert_measurement_db( db_url: Any ) -> None:
 
 def resolve_write_database() -> str:   # pragma: no cover - live DB boundary (get_database_url reads env)
     """
-    The DATABASE the app will write to, from the app's own get_database_url() — resolved
-    LIVE, never a constant, so it tracks the running environment (dev/testing/cloud).
+    The database the app will write to, from the app's own get_database_url().
+
+    It is resolved live and never held as a constant, so it tracks the running
+    environment (dev, testing or cloud).
     """
     from cosa.rest.db.database import get_database_url
     return _db_name( get_database_url() )
 
 
 def fully_qualified( database: str, table: str ) -> str:
-    """The `database.table` identity — the unit the SAFETY allowlist is keyed on."""
+    """The `database.table` identity, the unit the safety allowlist is keyed on."""
     return f"{database}.{table}"
 
 
@@ -216,8 +218,8 @@ def parse_permitted_stores( raw: Optional[ str ] ) -> Set[ str ]:
     The permitted-store allowlist as a set of normalized `database.table` strings.
 
     Ensures:
-        - returns an empty set for None or a blank/whitespace-only value (fail-closed:
-          an empty allowlist proves nothing, so SAFETY will refuse).
+        - returns an empty set for None or a blank or whitespace-only value. This fails
+          closed: an empty allowlist proves nothing, so the safety check will refuse.
         - splits on commas and strips each entry; empty entries are dropped.
     """
     if not raw:
@@ -239,21 +241,22 @@ def require_isolated_snapshot_table(
 
     Requires:
         - config_mgr exposes .get( key, default, return_type ) for the v2 keys.
-        - write_target / write_database, when passed, are the table / database the app
+        - write_target and write_database, when passed, are the table and database the app
           writes through (injected for unit tests); when None they are resolved live via
-          resolve_write_target() / resolve_write_database().
+          resolve_write_target() and resolve_write_database().
 
     Ensures:
-        - returns None when writeback is OFF — no write happens, so no destination to guard.
-        - returns the fully-qualified `database.table` when writeback is ON AND that
+        - returns None when writeback is off, since no write happens and there is no
+          destination to guard.
+        - returns the fully-qualified `database.table` when writeback is on and that
           destination is a member of the configured permitted-store allowlist.
         - raises IsolationNotConfigured otherwise, with a distinct message for each cause:
-            (1) the allowlist is empty/absent — the destination cannot be PROVEN non-live
-                (fail-closed), or
-            (2) the destination is not in the allowlist — it may be a live store.
+            (1) the allowlist is empty or absent, so the destination cannot be proven
+                non-live (fail-closed), or
+            (2) the destination is not in the allowlist, so it may be a live store.
 
     Raises:
-        - IsolationNotConfigured on either SAFETY failure.
+        - IsolationNotConfigured on either safety failure.
     """
     writeback = config_mgr.get( "v2 snapshot writeback enabled", default=False, return_type="boolean" )
     if not writeback:
@@ -292,25 +295,24 @@ def require_arms_distinct_and_clean(
     v2_rowcount : int,
 ) -> Tuple[ str, str ]:
     """
-    Refuse a paired run unless the two arms write DIFFERENT destinations that BOTH start empty.
+    Refuse a paired run unless the arms write different destinations that both start empty.
 
     Requires:
-        - v1_target / v2_target are the fully-qualified `database.table` each arm will write
+        - v1_target and v2_target are the fully-qualified `database.table` each arm will write
           (from require_isolated_snapshot_table, or resolved per arm).
-        - v1_rowcount / v2_rowcount are the CURRENT row counts of those destinations (the
+        - v1_rowcount and v2_rowcount are the current row counts of those destinations (the
           paired bridge queries them live; injected in unit tests). A count is the clean-start
-          evidence — 0 means empty.
+          evidence, and 0 means empty.
 
     Ensures:
-        - returns ( v1_target, v2_target ) when they DIFFER and both counts are 0.
+        - returns ( v1_target, v2_target ) when they differ and both counts are 0.
         - raises PairedTargetsNotIsolated with a distinct message for each cause:
-            (a) the two arms share one destination — v1's writes would warm v2's cold pass
-                (design §4), or
-            (b) either destination is non-empty — residue contaminates the cold baseline
-                exactly as cross-arm warming would.
+            (a) the two arms share one destination, so v1's writes would warm v2's cold pass, or
+            (b) either destination is non-empty, so residue contaminates the cold baseline
+                just as cross-arm warming would.
 
     Raises:
-        - PairedTargetsNotIsolated on either VALIDITY failure.
+        - PairedTargetsNotIsolated on either validity failure.
     """
     if v1_target == v2_target:
         raise PairedTargetsNotIsolated(
@@ -337,25 +339,23 @@ def assert_paired_isolation(
     rowcount_fn : Callable[ [ str ], int ],
 ) -> Tuple[ str, str ]:
     """
-    The pre-run VALIDITY step: query each store's LIVE row count, then require distinct-and-clean.
+    Pre-run validity step: query each store's live row count, then require distinct and clean.
 
-    This is the caller require_arms_distinct_and_clean needs — a check with no caller is no
-    check. It separates the pure decision (require_arms_distinct_and_clean) from the live IO
-    (rowcount_fn), so the composition is unit-testable with a fake counter and the bridge
-    supplies count_store_rows for the real run.
-
-    The row count and the SAFETY membership decision key on the SAME fully-qualified
-    `database.table` string — the single identity — so the count can never attest to a
-    different store than the one that was blessed.
+    It is the caller that require_arms_distinct_and_clean needs, since a check nobody calls
+    checks nothing. It separates the pure decision from the live IO (rowcount_fn), so the
+    composition is unit-testable with a fake counter.
 
     Requires:
-        - v1_target / v2_target are the two arms' fully-qualified `database.table` destinations.
-        - rowcount_fn(fully_qualified) returns the current row count of THAT store (live in the
+        - v1_target and v2_target are the two arms' fully-qualified `database.table` destinations.
+        - rowcount_fn(fully_qualified) returns the current row count of that store (live in the
           bridge via count_store_rows, faked in tests).
 
     Ensures:
-        - queries BOTH stores' counts via rowcount_fn and forwards them to
+        - queries both stores' counts via rowcount_fn and forwards them to
           require_arms_distinct_and_clean, returning its ( v1_target, v2_target ) on success.
+        - the count and the safety membership decision key on the same fully-qualified
+          `database.table` string, so a count never attests to a different store than the
+          one that was blessed.
         - raises PairedTargetsNotIsolated (from the inner check) when the arms share a store or
           either store is non-empty.
     """
@@ -368,13 +368,15 @@ def assert_paired_isolation(
 
 def count_store_rows( fully_qualified: str ) -> int:   # pragma: no cover - live DB boundary (real SELECT COUNT)
     """
-    The LIVE row count of a `database.table` store — the bridge's rowcount_fn for the real run.
+    The live row count of a `database.table` store, the bridge's rowcount_fn for the real run.
 
-    Connects to the DATABASE NAMED IN `fully_qualified` (not the app's default engine): it takes
-    get_database_url()'s host/credentials and swaps the db-path to the target database via
-    urlsplit (so a query/fragment cannot smuggle a different db), so the count is OF the exact
-    store the SAFETY check blessed — never a same-named table in a different db. Live boundary (a
-    real SELECT COUNT(*)); the pure composition it feeds (assert_paired_isolation) is unit-tested.
+    It connects to the database named in `fully_qualified`, not the app's default engine.
+    It takes the host and credentials from get_database_url().
+    It swaps the url path to the target database via urlsplit, so a query or fragment
+    cannot smuggle in a different db.
+    The count is therefore of the exact store the safety check blessed, never a same-named
+    table in another db. It runs a real `SELECT COUNT(*)`, so it is a live boundary; the
+    pure composition it feeds (assert_paired_isolation) is the part that is unit-tested.
     """
     from sqlalchemy import create_engine, text
     from cosa.rest.db.database import get_database_url
@@ -393,11 +395,10 @@ def count_store_rows( fully_qualified: str ) -> int:   # pragma: no cover - live
 # ---------------------------------------------------------------------------
 def agentic_command_names() -> Set[ str ]:
     """
-    The router commands that invoke runtime-argument extraction — the fallback_defaults leak site.
+    The router commands that invoke runtime-argument extraction, the leak site.
 
-    Read LIVE from the registry (JOB_ARG_CONTRACTS) rather than a frozen list, so the guard tracks
-    a thirteenth agent the moment someone adds one — detect the contact, do not model a snapshot
-    of it.
+    Read live from the registry (JOB_ARG_CONTRACTS) rather than a frozen list, so the guard
+    tracks a newly added agent at once. It detects the contact instead of modelling a snapshot.
 
     Ensures:
         - returns the set of command keys the runtime-argument expeditor extracts args for.
@@ -440,8 +441,8 @@ def _git_is_ancestor( ancestor: str, descendant: str, repo_root: Optional[ str ]
 
     Ensures:
         - True when `git merge-base --is-ancestor` exits 0, False when it exits 1
-        - raises RuntimeError on any other exit (an unresolvable sha, a missing repo) —
-          NEVER guesses: an unanswerable question must not read as "leak-free" or as "leaky"
+        - raises RuntimeError on any other exit (an unresolvable sha, a missing repo) and
+          never guesses: an unanswerable question must not read as "leak-free" or as "leaky"
     """
     import subprocess
     if repo_root is None:
@@ -459,7 +460,7 @@ def _git_is_ancestor( ancestor: str, descendant: str, repo_root: Optional[ str ]
 
 def pin_carries_leak_fix( pin_sha: str, *, repo_root: Optional[ str ] = None, is_ancestor_fn=None ) -> bool:
     """
-    Does the pinned v1 sha carry the 8aa89f42 leak fix (bf77852b)? — the guard's whole premise.
+    Does the pinned v1 sha carry the fallback_defaults leak fix (LEAK_FIX_SHA)?
 
     Requires:
         - pin_sha is a non-empty sha prefix
@@ -480,26 +481,28 @@ def require_leak_free_corpus( corpus_commands, *, agentic_commands: Optional[ Se
                               pinned_sha: Optional[ str ] = None,
                               pin_carries_fix: Optional[ bool ] = None ) -> Set[ str ]:
     """
-    Refuse a paired run whose corpus routes to an arg-extracting command WHILE the pinned v1
-    sha still carries the fallback_defaults leak (bug 8aa89f42). Pin-aware (row 297b1fc3).
+    Refuse a corpus that routes to an arg-extracting command when the v1 pin has the leak.
+
+    The refusal applies only while the pinned v1 sha still carries the fallback_defaults leak,
+    so it is aware of the pin.
 
     Requires:
         - corpus_commands is an iterable of the router command strings the corpus's utterances
           resolve to (the second element of each (utterance, command) pair from load_corpus).
         - agentic_commands, when given, is the leak-carrying command set (injected in tests);
-          when None it is read LIVE from the registry via agentic_command_names().
-        - pinned_sha, when given, is the v1 pin to judge; when None it is v1_eval_arm.V1_PIN_SHA.
+          when None it is read live from the registry via agentic_command_names().
+        - pinned_sha, when given, is the v1 pin to judge; when None it is this module's V1_PIN_SHA.
         - pin_carries_fix, when given, overrides the git question (injected in tests); when
           None it is pin_carries_leak_fix( pinned_sha ).
 
     Ensures:
-        - returns the corpus_commands as a set, unchanged, when it is DISJOINT from the
-          arg-extracting commands — the leak site is never reached, whatever the pin.
-        - returns the set, unchanged, when it intersects but the pin CARRIES the fix — there
-          is no leak to refuse; refusing would cite a defect that is not present and force
+        - returns the corpus_commands as a set, unchanged, when it is disjoint from the
+          arg-extracting commands, so the leak site is never reached, whatever the pin.
+        - returns the set, unchanged, when it intersects but the pin carries the fix. There
+          is no leak to refuse, and refusing would cite a defect that is not present and force
           the baseline onto a pure-routing corpus below its own spec.
-        - raises PairedCorpusExercisesLeak, NAMING every offending command (sorted) AND the
-          pin, when it intersects and the pin LACKS the fix: the leak would contaminate the
+        - raises PairedCorpusExercisesLeak, naming every offending command (sorted) and the
+          pin, when it intersects and the pin lacks the fix: the leak would contaminate the
           sequential replay.
 
     Raises:

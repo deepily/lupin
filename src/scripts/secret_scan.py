@@ -1,69 +1,34 @@
 """
-Scan the repo — the working tree, any ref, or the whole pushed history — for
-credential VALUES that were committed. Not paths, not field names, not
-placeholders: actual values.
+Scan the working tree, a ref or pushed history for committed credential values.
 
-READ THIS BEFORE YOU TRUST A CLEAN RESULT. A scanner that reports "nothing
-found" is indistinguishable from one that cannot see, and there is no way to
-tell them apart from its output. This one was written after two earlier passes
-missed a credential we already knew about. Its fixture suite
-(src/tests/unit/test_secret_scan.py) plants known positives and fails loudly if
-any of them stops being found — that suite is not optional decoration, it is
-the only reason a number from here means anything. Re-run it after ANY change:
-the original miss was introduced by an ordinary-looking refactor of the
-matching loop and was invisible in the output.
+Reports values only, not paths, field names or placeholders. A clean result looks
+the same as a blind scanner. So src/tests/unit/test_secret_scan.py plants known
+positives and must be re-run after any change to the matching loop.
 
-WHAT AN EARLIER VERSION COULD NOT SEE, each now a fixture:
-  · \\b does not fire between "_" and a letter, so \\b(password)\\b never matched
-    DB_PASSWORD, db_pwd or api_secret — the commonest .env / ini key shape.
-  · A JS/TS declaration (`const apiKey = "..."`) — the key pattern cannot span
-    the space after `const`.
-  · A value on the FOLLOWING lines: a YAML block scalar (`key: >`), a wrapped
-    base64 blob, a PEM block.
-  · A credential inside a URL query string, with no key beside it to match.
-
-WHAT IT STILL CANNOT SEE, stated so a clean run is read correctly:
-  · a bare token in prose with no credential-ish key beside it;
-  · binaries, notebooks, non-UTF8 files, and anything outside the text
-    extensions listed below;
-  · values that only ever lived in gitignored or uncommitted files;
-  · two deliberate precision trades — an all-lowercase value with two or more
-    underscores/hyphens reads as an identifier name, and a value that repeats
-    its own key reads as wiring. Both were the price of a readable list, and
-    both are places a real secret could hide.
-
-SCAN THE REF, NOT THE CHECKOUT. A working-tree copy can be redacted while the
-value is still live on the pushed branch — that alone hid the credential this
-scanner was built for. Use `ref origin/main` or `history`, not `worktree`, when
-the question is what a reader of the public repo can see.
-
-THIS FILE IS THE INVENTORY SWEEP. IT IS NOT THE COMMIT GATE — different entry
-point, different guarantees, and conflating them cost an hour on 2026-08-25
-(row 0adf242e). The gate is src/scripts/pre-commit-secret-scan.py, which reads
-the STAGED DIFF and is CWD-immune because git chdir's to the repo root before
-running any hook. This file walks the tree
-and, until 0adf242e, did so from wherever it was invoked:
-
-    findings from the repo root   256
-    findings from src/            255
-    findings from src/cosa         38
-
-A sweep that covers a fraction of the tree and prints its number anyway is the
-worst available shape, because the clean result is believed precisely because it
-looks like a result. `worktree` mode now anchors ls-files with `git -C <root>`
-and opens each path against that root — the second half matters as much as the
-first, since ls-files emits root-relative paths and opening them from another
-directory raises OSError straight into an `except … continue`, which would have
-turned a coverage hole into a SILENT one. It refuses (exit 2) rather than
-reporting clean when no repo root can be found.
-
-OUTPUT IS MASKED — key, length and a truncated sha256, never the value. A
-report that quotes the secret has spread it further.
-
-Usage:
-    python3 src/scripts/secret_scan.py worktree
-    python3 src/scripts/secret_scan.py ref origin/main
-    python3 src/scripts/secret_scan.py history
+Requires:
+    - mode is worktree, ref followed by a ref name, or history
+Ensures:
+    - output is masked: key, length and a truncated sha256, never the value
+    - earlier misses are now fixtures: a word-boundary test never fires between an
+      underscore and a letter, so `DB_PASSWORD`, db_pwd and api_secret were missed;
+      a JavaScript declaration such as const apiKey; a value on the following lines
+      (YAML block scalar, wrapped base64, PEM block); a credential in a URL query
+    - blind spots: a bare token in prose with no credential-like key beside it;
+      binaries, notebooks, non-UTF8 files and extensions outside the text list;
+      values that only lived in gitignored or uncommitted files
+    - two precision trades can hide a real secret: an all-lowercase value with two
+      or more underscores or hyphens reads as an identifier name, and a value that
+      repeats its own key reads as wiring
+    - scan the ref, not the checkout, to see what the public repo shows: a working
+      copy can be redacted while the pushed branch still holds the value
+    - this is the inventory sweep, not the commit gate; the gate is
+      src/scripts/pre-commit-secret-scan.py, which reads the staged diff and is
+      cwd-immune because git runs hooks from the repo root
+    - worktree mode anchors ls-files with git -C on the repo root and opens each
+      path against that root; ls-files is cwd-scoped, and root-relative paths
+      opened from elsewhere raise OSError that is swallowed, hiding a coverage hole
+    - worktree mode exits 2 when no repo root is found, never reporting clean
+    - usage: python3 src/scripts/secret_scan.py worktree | ref origin/main | history
 """
 
 import hashlib
@@ -133,10 +98,10 @@ _LONG_B64_RUN = re.compile( r"[A-Za-z0-9+/=_\-]{24,}" )
 
 def _carries_key_material( v ):
     """
-    True when the VALUE is itself a credential payload rather than a container.
+    True when the value is itself a credential payload rather than a container.
 
-    The doc-viewer detector blocks these; this scanner used to drop them as "template"
-    or "structure" because they contain braces or brackets (Rachel's F1, measured).
+    The doc-viewer detector blocks these. This scanner once dropped them as
+    "template" or "structure" because they contain braces or brackets.
 
     Requires:
         - v is the stripped value text
@@ -335,7 +300,7 @@ def _is_text_path( p ):
 
 def _batch_read( specs, cwd=None ):
     """
-    Read many blobs in ONE `git cat-file --batch`.
+    Read many blobs in one `git cat-file --batch`.
 
     Requires:
         - specs is a list of rev-parseable object specs, e.g. "origin/main:conf/app.ini"
@@ -370,7 +335,7 @@ def _batch_read( specs, cwd=None ):
 
 def scan_ref( ref, cwd=None ):
     """
-    Scan every text path in a REF — the published surface, not the checkout.
+    Scan every text path in a ref, the published surface rather than the checkout.
 
     Ensures:
         - returns the masked findings list for that ref

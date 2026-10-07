@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Initialize test database for Phase 2.5 integration tests.
+Initialize the test database for the notification-authentication integration tests.
 
 Creates complete authentication schema in test database:
 - users table (and all auth-related tables)

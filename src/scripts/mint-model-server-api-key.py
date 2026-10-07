@@ -1,40 +1,27 @@
 #!/usr/bin/env python3
 """
-Mint the model-server API key (`model-server-api`).
+Mint the model-server API key (`model-server-api`) and write it to a file.
 
-WHY THIS IS NOT `create_service_account.py`
--------------------------------------------
-That script mints a key AND inserts a bcrypt hash into the `api_keys` table,
-because its key is validated against THAT SERVER'S database — per-deployment,
-minted on the target.
+Unlike create_service_account.py, this inserts no api_keys row. The model server has no
+database: it reads one Secret-Manager-mounted file at boot and bcrypt-hashes it in memory.
 
-The model server has **no database**. `lupin_model_server/main.py` reads one
-Secret-Manager-mounted file at boot, bcrypt-hashes it in memory, and compares
-every incoming `X-API-Key` against that single hash. Its authority is a secret
-version, not a table, and the correct value is IDENTICAL on every host.
-
-⇒ An `api_keys` row for this key would imply an authority that does not exist.
-  This script therefore mints a value and writes a file, and does nothing else.
-
-THE DEFECT THIS EXISTS TO END (rows 574fd1dc / 6cc52525)
---------------------------------------------------------
-One file — `notification-api-claude-code-dev` — served both consumers. On the
-dev box their two authorities coincide by accident (dev's key was seeded into
-Secret Manager), so the design flaw was invisible there. On the VM they cannot
-coincide: its key was minted into the VM's own database (right for the Lupin
-API) and was never in Secret Manager (wrong for the model server) — measured
-2026-07-28 as a fingerprint matching NEITHER secret version. `/embeddings/
-generate` returned 100% 401 for ~38h.
-
-Usage:
-    python src/scripts/mint-model-server-api-key.py            # dry run
-    python src/scripts/mint-model-server-api-key.py --apply
-    python src/scripts/mint-model-server-api-key.py --apply --force
-
-Next step (NOT done here — see the R&D doc's rotation ordering):
-    src/scripts/cloud-run-setup-secrets.sh \
-        --secret-name lupin-model-server-api \
-        --key-file    src/conf/keys/model-server-api
+Ensures:
+    - create_service_account.py mints a key and inserts a bcrypt hash into api_keys,
+      because its key is validated against that server's own database, per deployment
+    - the model server compares every incoming X-API-Key against one in-memory hash, so
+      its authority is a secret version, not a table, and the value is identical on every
+      host; an api_keys row would imply an authority that does not exist, so this script
+      mints a value, writes a file, and does nothing else
+    - one file must never serve both the model server and the Lupin API: their authorities
+      coincide only where the dev key was seeded into Secret Manager; on the VM the key
+      lives in that VM's database (right for the Lupin API) and never in Secret Manager
+      (wrong for the model server), so /embeddings/generate answered 401 on every call
+    - usage: python src/scripts/mint-model-server-api-key.py for a dry run, then add
+      --apply to write, and --apply --force to overwrite an existing file
+    - this script does not run the next step, which seeds Secret Manager (follow the
+      rotation ordering in the model-server key decoupling design doc):
+      src/scripts/cloud-run-setup-secrets.sh --secret-name lupin-model-server-api
+      --key-file src/conf/keys/model-server-api
 """
 
 import os
@@ -75,7 +62,7 @@ def generate_model_server_key() -> str:
     Ensures:
         - returns a string matching CK_LIVE_RE
         - uses secrets.token_urlsafe (CSPRNG), never random
-        - the value is NOT written, logged, or retained by this function
+        - the value is not written, logged, or retained by this function
 
     Returns:
         str: the plaintext key, e.g. "ck_live_9x7Kp3mN..."
@@ -96,24 +83,19 @@ def generate_model_server_key() -> str:
 
 def key_fingerprint( plaintext: str ) -> str:
     """
-    Stable, non-reversible identifier for WHICH key this is.
+    Stable, non-reversible identifier for which key this is.
 
-    ⚠️ THE PREDICATE IS LOAD-BEARING AND MUST MATCH THE SERVER'S.
-    `lupin_model_server/main.py` fingerprints `f.read().strip()`, and the client
-    reads via `du.get_api_key()` which also strips (`cosa/utils/util.py:754`).
-    So the comparable value is the STRIPPED one.
-
-    Measured 2026-07-28: hashing this file RAW gives `26f45dbc7276` while the
-    same key STRIPPED gives `26e3c096d4df` — the file carries a trailing
-    newline. Comparing a raw fingerprint against a stripped one manufactures a
-    discrepancy that does not exist, and nearly did during the 574fd1dc
-    investigation. **State the predicate wherever this number is printed.**
+    The predicate must match the server's. lupin_model_server/main.py fingerprints
+    `f.read().strip()`, and the client's du.get_api_key() also strips.
 
     Requires:
         - plaintext is a non-empty string
 
     Ensures:
-        - returns 12 lowercase hex chars — sha256 of the STRIPPED value
+        - returns 12 lowercase hex chars, the sha256 of the stripped value
+        - hashing the raw file would include its trailing newline and give a different
+          digest, so a raw and a stripped fingerprint of one key look like two keys;
+          state the predicate wherever this number is printed
         - is directly comparable to /health's `api_key_fingerprint`
         - never returns any part of the key itself
 
@@ -132,7 +114,7 @@ def key_file_path() -> str:
 
     Ensures:
         - returns <project_root>/src/conf/keys/model-server-api
-        - does NOT create, read, or write the file
+        - does not create, read, or write the file
 
     Returns:
         str: absolute path

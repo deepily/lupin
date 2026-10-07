@@ -1,46 +1,45 @@
 #!/usr/bin/env python3
 """
-Two-sided live probe for the broadcast-ack save (row 4f320c27 S5).
+Two-sided live probe for the saved broadcast acknowledgement.
 
-WHAT IT ASKS. Send ONE real broadcast on Rick's account, then read the SAME ack back
-through both doors and compare them:
+What it asks: send one real broadcast on the owner's account. Then read the same ack
+back through both doors and compare them.
 
-    LEFT  — the in-memory push, as the browser sees it today
+    left  - the in-memory push, as the browser sees it.
             (GET /api/notifications/undelivered, filtered to this broadcast)
-    RIGHT — the SAVED row, through the new per-broadcast read
+    right - the saved row, through the per-broadcast read
             (GET /api/notifications/broadcast-acks/{broadcast_id})
 
-Agreeing on one ack is the whole claim. Two doors that disagree is the finding; two
-doors that agree because neither returned anything is NOT a pass, and the report
-below says so in those words rather than printing a reassuring pair of zeroes.
+The doors must agree on one ack. Two doors that disagree are the finding. Two doors
+that agree because neither returned anything are not a pass, and the report says so
+instead of printing a reassuring pair of zeroes.
 
-🔴 WRITTEN, NOT RUN. This probe sends a real broadcast to every live seat in the
-fleet and every one of them will be interrupted by it. Running it is the operator's
-call, not the author's, and it must not be fired while the fleet is mid-task.
+Written, not run. This probe sends a real broadcast to every live seat in the fleet,
+and each one is interrupted by it. Running it is the operator's call, and it must not
+be fired while the fleet is mid-task.
 
-RUN IT LIKE THIS (one paste, :7999 dev server, from the repo root):
+Run it like this (one paste, :7999 dev server, from the repo root):
 
     export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
     export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
     LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python src/scripts/probe_broadcast_ack_two_sided.py
 
-WHAT "PASS" REQUIRES, stated before any count is taken:
+What a pass requires, stated before any count is taken. The population is the set of
+live CC sessions that the broadcast endpoint itself resolved, reported back as
+`recipients`. That number, not a guess about who is online, is the denominator for
+every count below.
 
-  POPULATION — the live CC sessions the broadcast endpoint itself resolved, which it
-  reports back as `recipients`. That number, not a guess about who is online, is the
-  denominator every count below is read against.
+  1. recipients > 0. A broadcast to nobody produces no acks, and the two empty answers
+     that follow would agree perfectly while proving nothing.
+  2. The right door returns at least one ack for this broadcast. Each carries a
+     broadcast_id equal to the one sent and a non-null session_id. An ack without
+     attribution is the state the saved read was built to fix.
+  3. The left and right doors name the same set of sessions. A session in one and not
+     the other is the defect, whichever side is short.
 
-  1. recipients > 0. A broadcast to nobody produces no acks, and the two empty
-     answers that follow would agree perfectly while proving nothing.
-  2. RIGHT returns at least one ack for this broadcast, each carrying a broadcast_id
-     equal to the one sent and a non-null session_id. Acks with no attribution are
-     exactly the pre-fix state.
-  3. LEFT and RIGHT name the SAME set of sessions. A session in one and not the other
-     is the defect, whichever side is short.
-
-NO CURL. Per the project mandate, every request here goes through `requests`.
-Raw response bodies are printed on ANY failure — a probe that summarises a failure it
-cannot explain sends the next reader back to reproduce it.
+No curl: every request goes through `requests`. Raw response bodies are printed on
+any failure. A summary of a failure the probe cannot explain sends the next reader
+back to reproduce it.
 """
 
 import json
@@ -99,7 +98,7 @@ def _broadcast( headers, broadcast_id ):
 
 
 def _saved_acks( headers, broadcast_id ):
-    """RIGHT — the new per-broadcast read over the SAVED rows."""
+    """Read the saved acks for one broadcast through the per-broadcast endpoint."""
     r = requests.get( f"{BASE_URL}/api/notifications/broadcast-acks/{broadcast_id}",
                       headers=headers, timeout=30 )
     if r.status_code != 200:
@@ -109,15 +108,15 @@ def _saved_acks( headers, broadcast_id ):
 
 def _pushed_acks( headers, broadcast_id ):
     """
-    LEFT — the in-memory push as the browser receives it, observed through the
-    undelivered inbox (which carries `payload` as of S2).
+    Read this broadcast's acks from the undelivered inbox, as the browser gets them.
 
-    ⚠️ NAMED LIMIT, so nobody reads more into a short LEFT than is there: this door
-    shows an ack only while it is still UNDELIVERED. With a browser open on this
-    account the server marks acks delivered immediately and LEFT legitimately reads
-    zero. That is why a LEFT/RIGHT mismatch is reported as a DISAGREEMENT TO CHASE
-    and not as a failure of the saved side — the discriminator between the two
-    explanations is whether a browser was connected, which this probe cannot see.
+    The undelivered inbox carries `payload` on each ack notification.
+
+    Limit: this door shows an ack only while it is still undelivered. With a browser
+    open on this account the server marks acks delivered at once, so this side
+    legitimately reads zero. A mismatch with the saved side is therefore reported as a
+    disagreement to chase, not as a failure of the saved side. Whether a browser was
+    connected tells the two explanations apart, and this probe cannot see that.
     """
     r = requests.get( f"{BASE_URL}/api/notifications/undelivered?limit=200",
                       headers=headers, timeout=30 )

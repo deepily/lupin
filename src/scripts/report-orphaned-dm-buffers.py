@@ -2,21 +2,16 @@
 """
 Report peer DMs that were accepted, buffered, and never delivered to anyone.
 
-WHAT THIS EXISTS FOR (row 298af249). When a session is busy the notification
-listener appends inbound messages to a per-session JSONL buffer, and a hook
-drains that buffer on the session's next turn. If the session ENDS before any
-hook drains it, the messages simply stay on disk. Nobody is told: the sender
-already received `dispatched: true`, and the recipient never existed long enough
-to notice an absence.
+Why it exists: when a session is busy, the notification listener appends inbound
+messages to a per-session JSONL buffer. A hook drains that buffer on the session's
+next turn. If the session ends before any hook drains it, the messages stay on disk.
+Nobody is told. The sender already received `dispatched: true`, and the recipient
+never existed long enough to notice an absence. On one measurement, 45 buffer files
+held 67 such messages, the oldest untouched for nine weeks.
 
-MEASURED 2026-08-30: 45 buffer files were holding 67 such messages, the oldest
-last written 2026-07-02 — nine weeks of mail nobody will ever read, invisible at
-both ends.
-
-THIS REPORTS, IT DOES NOT DELETE. The file on disk is the only surviving copy of
-what a sender said, so a sweeper that tidied it away would convert a findable
-loss into a permanent one — the same trade this row exists to argue against.
-Finding an orphan is this script's job; deciding its fate is a person's.
+This script reports and never deletes. The file on disk is the only surviving copy of
+what a sender said. A sweeper that tidied it away would turn a findable loss into a
+permanent one. Finding an orphan is this script's job. Deciding its fate is a person's.
 
 Usage:
     python3 src/scripts/report-orphaned-dm-buffers.py
@@ -67,7 +62,7 @@ def read_buffer( path ):
 
     Ensures:
         - returns a list of dicts, one per parseable line
-        - a malformed line is SKIPPED, never fatal — one bad line must not hide
+        - a malformed line is skipped, never fatal — one bad line must not hide
           the readable messages sitting beside it in the same file
         - returns [] if the file cannot be read at all
         - never raises
@@ -101,22 +96,8 @@ def is_session_live( session_hash, session_dir, now=None, threshold=LIVE_THRESHO
     """
     Decide whether the session owning a buffer is still running.
 
-    A buffer belonging to a LIVE session is NOT an orphan — it is mail waiting for
-    the next turn, which is the mechanism working. Only a buffer whose owner is
-    gone holds messages nobody will ever read.
-
-    🔴 THE FIRST VERSION OF THIS CHECK COULD ONLY EVER SAY "LIVE", and running it
-    is the only reason that is not still true. It tested for the presence of
-    `cc-listener-<hash>.spawn-lock`. Measured: that file is EMPTY, carries no pid,
-    and survives the session that made it — **44 of 45 dead sessions still had
-    one**. The report came back "1 orphaned message" against a true 67, and it
-    looked like good news. An instrument whose signal is always present cannot
-    fail, and its clean answer is worth nothing.
-
-    What replaced it is FRESHNESS, not presence, over either of the two files a
-    live seat actually touches — its spawn bridge or its listener log. Both are
-    checked because neither alone covers every seat: a session spawned by a
-    manager has a bridge, and a session started another way has only the log.
+    A buffer belonging to a live session is not an orphan: it is mail waiting for the
+    next turn. Only a buffer whose owner is gone holds messages nobody will ever read.
 
     Requires:
         - session_hash is the 8-char id from the buffer filename
@@ -125,9 +106,13 @@ def is_session_live( session_hash, session_dir, now=None, threshold=LIVE_THRESHO
         - threshold is seconds of staleness tolerated
 
     Ensures:
-        - returns True when a spawn bridge OR a listener log for that session was
+        - returns True when a spawn bridge or a listener log for that session was
           modified within `threshold` seconds
         - returns False when both are absent or both are stale
+        - liveness is freshness, not presence: the empty `cc-listener-<hash>.spawn-lock`
+          file carries no pid and survives its session, so testing for it always says live
+        - both files are checked because neither alone covers every seat: a session
+          spawned by a manager has a bridge, and one started another way has only the log
         - never raises
 
     Args:
@@ -160,10 +145,10 @@ def collect_orphans( session_dir=None, min_age_hours=0.0, now_fn=time.time ):
         - now_fn is a 0-arg callable returning epoch seconds
 
     Ensures:
-        - returns one record per orphaned BUFFER carrying session, path, message
+        - returns one record per orphaned buffer carrying session, path, message
           count, age in hours and the distinct senders stranded there
-        - a buffer owned by a LIVE session is excluded — in-flight, not lost
-        - an EMPTY buffer file is excluded: nothing is stranded in it, and
+        - a buffer owned by a live session is excluded — in-flight, not lost
+        - an empty buffer file is excluded: nothing is stranded in it, and
           counting it would inflate the total with files holding no message
         - returns [] when the directory does not exist
         - never raises
@@ -215,7 +200,7 @@ def format_report( orphans ):
         - orphans is the list from collect_orphans
 
     Ensures:
-        - names the TOTAL MESSAGE count, not merely the file count — the file
+        - names the total message count, not merely the file count — the file
           count understates the loss, and the number that matters is how many
           messages nobody will read
         - an empty list renders as an explicit all-clear, because silence and

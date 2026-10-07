@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
 """
-Launch / observe the **Heartbeat Arbiter** consumer (`ArbiterConsumerJob`).
+Launch or observe the Heartbeat Arbiter consumer (`ArbiterConsumerJob`).
 
-The arbiter tails the fleet heartbeat-event stream (`~/.claude/heartbeat-events/`),
-asks commons who's active, builds a fleet view + dependency graph + idle-roster,
-auto-pings blockers, escalates deadlocks, and surfaces a roster to the manager.
+The arbiter tails the fleet heartbeat-event stream (`~/.claude/heartbeat-events/`).
+It asks commons who is active and builds a fleet view, a dependency graph and an
+idle roster. It auto-pings blockers, escalates deadlocks, and surfaces a roster
+to the manager.
 
-Each poll prints a one-line summary so you can watch it work:
+Each poll prints a one-line summary so the run can be watched:
 
     poll #1  sessions=5  edges=1  cycles=0  pings_fired=0  roster=3
 
-SAFETY — defaults to **DRY-RUN**: it reads real fleet state but only *logs* the
-DMs/posts it WOULD send (no real pings hit the fleet). Add `--live` to actually
-ping. Use `--once` for a single observe-poll, or omit it to loop.
+Safe by default: it runs in dry-run mode. It reads real fleet state but only logs
+the DMs and posts it would send, so no real pings reach the fleet. Add `--live`
+to send them. Use `--once` for a single observe-poll, or omit it to loop.
 
-Usage:
+Example:
     python src/scripts/run-heartbeat-arbiter.py --once            # one dry observe-poll, then exit
     python src/scripts/run-heartbeat-arbiter.py                   # dry-run loop (logs intended pings)
-    python src/scripts/run-heartbeat-arbiter.py --live            # REAL: pings the fleet
+    python src/scripts/run-heartbeat-arbiter.py --live            # real: pings the fleet
     python src/scripts/run-heartbeat-arbiter.py --poll-seconds 15 --manager Tiberius
-    python src/scripts/run-heartbeat-arbiter.py --quiet 300 --alive 600   # F3 invariant: quiet < alive
+    python src/scripts/run-heartbeat-arbiter.py --quiet 300 --alive 600   # quiet must be below alive
 
-Config defaults match María's 2026-06-05 ruling: quiet=300s, alive=600s.
+Defaults are quiet=300s and alive=600s.
 """
 import argparse
 import os
@@ -42,9 +43,10 @@ import cosa.utils.util as cu   # EST timestamps (project canonical US/Eastern)
 
 class _DryGateway:
     """
-    Wraps a real ArbiterGateway: `who()` reads for real (so the roster/graph are
-    accurate), but `send_to()` / `post()` only LOG — no real DMs or surface posts
-    hit the fleet. This is the safe observe mode.
+    Wrap a real ArbiterGateway so that only reads are real.
+
+    `who()` reads for real, so the roster and graph are accurate. `send_to()` and
+    `post()` only log, so no real DM or surface post reaches the fleet.
     """
     def __init__( self, inner ):
         self._inner = inner

@@ -65,7 +65,7 @@ class SolutionSnapshotMigrator:
             None
             
         Raises:
-            No exceptions raised during initialization
+            No error is raised during initialization
         """
         self.dry_run = dry_run
         self.create_backup = create_backup

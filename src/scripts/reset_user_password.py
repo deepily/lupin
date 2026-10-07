@@ -42,7 +42,7 @@ def reset_password( email, new_password=None, use_original=False, debug=True ):
 
     Requires:
         - email is a valid registered user email
-        - new_password is provided OR use_original=True
+        - new_password is provided or use_original=True
 
     Ensures:
         - User password is updated in database

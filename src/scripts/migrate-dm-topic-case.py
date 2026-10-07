@@ -1,38 +1,31 @@
 #!/usr/bin/env python3
 """
-One-shot migration script: rename-and-merge legacy DM topic files into the
-post-fix canonical lowercase + sanitized name.
+One-shot migration that renames and merges legacy DM topic files.
 
-Per `src/rnd/v0.1.7/2026.05.17-commons-dm-topic-case-and-truncation/01-design.md`
-§2.2 (Q4 ratified migration option α — active rename + merge, 2026-05-17).
+Design: src/rnd/v0.1.7/2026.05.17-commons-dm-topic-case-and-truncation/01-design.md
 
-**What it does**:
+What it does:
 - Scans `io/commons/dm-*.md` (and `io/commons/archive/dm-*.md`) for case-variant
-  topic files (e.g. `dm-Tiberius.md` alongside `dm-tiberius.md`).
-- Groups variants by canonical name = `_derive_dm_topic`-equivalent (lowercase +
+  topic files, e.g. `dm-Tiberius.md` alongside `dm-tiberius.md`.
+- Groups variants by canonical name, the same as `_derive_dm_topic` (lowercase plus
   unicode-aware sanitization on the persona part).
 - For each group:
-  - **canonical-only**     → no-op (already correctly named)
-  - **variant(s) only**    → rename variant → canonical
-  - **canonical + variants** → merge entries (parse via `_parse_entry_block`,
-    dedupe by `(ts, sender_session_id, body_hash)`, sort by ts, rewrite
-    canonical from scratch, unlink variants)
-- Backs up every file it's about to mutate to
-  `io/commons/.pre-migration-backup/<run-ts>/` BEFORE any destructive op.
-- Supports an explicit ALIAS_MAP for short-form aliases that don't auto-derive
-  (e.g. `dm-radio` → `dm-mr_radio`, since "radio" → "mr radio" isn't reversible).
+  - canonical only: no-op, already correctly named.
+  - variants only: rename the variant to the canonical name.
+  - canonical plus variants: merge entries (parse with `_parse_entry_block`,
+    dedupe by `(ts, sender_session_id, body_hash)`, sort by ts, rewrite the
+    canonical file from scratch, unlink the variants).
+- Copies each file it will change into `io/commons/.pre-migration-backup/<run-ts>/`
+  before any destructive step.
+- Uses ALIAS_MAP for short-form aliases that cannot be derived, e.g. `dm-radio`
+  becomes `dm-mr_radio`, because "radio" to "mr radio" is not reversible.
 
-**Idempotency**: re-running on a clean tree finds zero variants and is a no-op
-(the canonical files just pass through with their natural mtime intact).
+Re-running on a clean tree finds no variants and is a no-op, so canonical files
+keep their mtime. With `--dry-run` it reports what would change and writes nothing.
 
-**Dry-run mode** (`--dry-run`): scans + reports what WOULD change without
-touching disk.
-
-**Venue**: this is a one-shot operational tool, not part of the request path.
-Run from a CoSA-context shell (so PYTHONPATH covers `src/lupin_mcp/`).
-
-Per Rick's Q9 binding rule: 100% coverage on this script — exercised by the
-companion unit test suite in `src/tests/unit/commons/test_migrate_dm_topic_case.py`.
+This is a one-shot operational tool, not part of the request path. Run it from a
+CoSA-context shell so that `src/lupin_mcp/` is on PYTHONPATH. The companion unit
+tests are in `src/tests/unit/commons/test_migrate_dm_topic_case.py`.
 """
 
 import argparse
@@ -84,8 +77,9 @@ def _now_run_ts() -> str:
 
 def _derive_canonical_stem( filename: str ) -> str:
     """
-    Given a `dm-<persona>.md` filename, return the canonical stem AFTER the
-    `dm-` prefix (matching what `_derive_dm_topic` would produce).
+    Return the canonical stem of a `dm-<persona>.md` filename, without `dm-`.
+
+    The result matches what `_derive_dm_topic` would produce.
 
     - `dm-Tiberius.md`   → `tiberius`
     - `dm-Mr Radio.md`   → `mr_radio` (if such a file ever existed)
@@ -112,7 +106,7 @@ def _group_topics_by_canonical( dm_files: List[ Path ] ) -> Dict[ str, List[ Pat
     Group `dm-*.md` files by their canonical stem.
 
     Returns a dict `canonical_stem → [Path, ...]`. Files that share a canonical
-    are case-variants OR alias-targets of each other.
+    are case-variants or alias-targets of each other.
     """
     groups : Dict[ str, List[ Path ] ] = { }
     for path in dm_files:
@@ -128,7 +122,7 @@ def _parse_topic_file( path: Path ) -> Tuple[ dict, List[ dict ] ]:
     """
     Parse a topic file into (frontmatter_dict, [entry_dict, ...]).
 
-    Entries are returned in their on-disk order (NOT sorted yet).
+    Entries are returned in their on-disk order (not sorted yet).
     """
     content = path.read_text( encoding="utf-8" )
     frontmatter, body = _split_frontmatter( content )
@@ -144,7 +138,7 @@ def _entry_dedupe_key( entry: dict ) -> str:
     """
     Build a hash key for entry deduplication.
 
-    Key spans `(ts, sender_session_id, body)` so re-runs OR cross-file
+    Key spans `(ts, sender_session_id, body)` so re-runs or cross-file
     duplicates collapse to one entry. Hashed for size + comparability.
     """
     body_hash = hashlib.sha1( entry.get( "body", "" ).encode( "utf-8" ) ).hexdigest()[ :12 ]
@@ -206,8 +200,9 @@ def migrate_directory(
     backup_root : Optional[ Path ] = None,
 ) -> Dict[ str, int ]:
     """
-    Run the migration over a single commons directory (e.g. `io/commons/` or
-    `io/commons/archive/`).
+    Run the migration over one commons directory.
+
+    The directory is `io/commons/` or `io/commons/archive/`.
 
     Returns a stats dict for the caller to report:
         {

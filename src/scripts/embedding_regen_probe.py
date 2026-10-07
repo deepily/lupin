@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """
-Build a throwaway CLONE of the embedding tables so the regeneration pipeline can
-be exercised end to end without the live tables being written at all.
+Build a throwaway clone of the embedding tables to rehearse regeneration end to end.
 
-The live tables are READ (SELECT) and never written. Everything this script
-creates lives in its own schema (default ``regen_probe``), which can be dropped
-in one statement when the rehearsal is over.
+The live tables are read with `SELECT` and never written. Everything this script creates
+lives in its own schema (default ``regen_probe``), dropped in one statement afterwards.
 
-What it gives you: a small, real sample carrying REAL stale vectors and REAL
-source text, in a schema the regeneration script can be pointed at with
-``--table-prefix=regen_probe.``. That is the difference between testing the
-pipeline and testing a mock of it — the rows have the same text lengths, the
-same norm-1.0 fingerprints, and the same nulls as production.
-
-Run (from repo root, PYTHONPATH=src):
-    python src/scripts/embedding_regen_probe.py status          # what exists now
-    python src/scripts/embedding_regen_probe.py create --rows=500 --apply
-    python src/scripts/embedding_regen_probe.py drop --apply    # clean up
-
-NOTHING happens without --apply. Every command previews its statements first.
-
-Created: 2026-08-02 (Cheech 🌿) · row 5e848dd8
+Ensures:
+    - the sample is small, with real stale vectors and real source text, in a schema the
+      regeneration script can target with ``--table-prefix=regen_probe.``; that tests the
+      pipeline rather than a mock of it, since the rows keep production's text lengths,
+      norm-1.0 fingerprints and nulls
+    - nothing happens without --apply, and every command previews its statements first
+    - run from the repo root with PYTHONPATH=src:
+      python src/scripts/embedding_regen_probe.py status (what exists now),
+      create --rows=500 --apply, and drop --apply (clean up)
 """
 import os
 import sys
@@ -53,12 +46,11 @@ def _shadow_columns( table ):
 
 def _era_predicates( table ):
     """
-    Predicates isolating each embedding era, so a clone samples BOTH.
+    Predicates isolating each embedding era, so a clone samples both.
 
-    The whole table gets regenerated now, so a probe drawn only from the norm-1.0
-    rows would rehearse the run against a quarter of the data it will actually
-    meet — and the OpenAI-era rows are the SHORT ones, so it would also
-    under-measure batch timing and text length. Half from each era.
+    The whole table gets regenerated, so a probe drawn only from the norm-1.0 rows
+    would rehearse a quarter of the data the run will meet. The OpenAI-era rows are
+    the short ones, so it would also under-measure batch timing and text length.
 
     Ensures:
         - returns [(label, sql_predicate), ...] covering the normalized era and
@@ -84,7 +76,7 @@ def build_statements( rows ):
 
     Ensures:
         - returns an ordered list of SQL strings that create the probe schema,
-          clone each table's STRUCTURE, copy a sample spanning BOTH eras, and add
+          clone each table's structure, copy a sample spanning both eras, and add
           the shadow columns the regeneration script writes into
         - every statement addresses the probe schema; the live tables appear
           only inside SELECTs

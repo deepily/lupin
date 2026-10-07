@@ -1,44 +1,29 @@
 #!/usr/bin/env python3
 """
-One-shot migration script: convert legacy `\\n---\\n` entry separators in
-commons topic files to the canonical `\\n<<<__lupin_commons_entry_boundary__>>>\\n`
-separator that doesn't collide with markdown thematic-break syntax.
+One-shot migration of legacy commons entry separators to the canonical one.
 
-Per `src/rnd/v0.1.7/2026.05.18-body-display-truncation-investigation.md`
-§5.2 option α (one-shot migration with header-lookahead disambiguator).
+Converts `\\n---\\n` between entries in commons topic files to the canonical
+`\\n<<<__lupin_commons_entry_boundary__>>>\\n` separator, which does not collide
+with markdown thematic-break syntax.
 
-**Background**: the legacy separator `\\n---\\n` collided with markdown
-thematic-break syntax that appears in entry bodies (section breaks, YAML
-frontmatter, structured reviews). Entries containing internal `---` lines
-were silently truncated on read because `CommonsStore.read()` split the file
-at the FIRST `\\n---\\n` in the body, dropping all subsequent content.
+Why: the legacy separator collided with `---` lines inside entry bodies (section
+breaks, frontmatter, structured reviews). `CommonsStore.read()` split at the first
+`\\n---\\n` in a body and dropped everything after it.
 
-**What it does**:
-- Scans `io/commons/*.md` and `io/commons/archive/**/*.md`
-- For each file, separates frontmatter (untouched — YAML uses `---` legitimately
-  and lives only at the start of the file) from body
-- In the body, finds every `\\n---\\n` and disambiguates:
-  - **Entry boundary** (replace): `\\n---\\n` is IMMEDIATELY followed by a valid
-    entry header `## <ISO-ts> | <persona-name> <persona-icon> #<session-id>`
-  - **Body thematic break** (leave alone): `\\n---\\n` is followed by anything
-    that doesn't match the header pattern
-- Replaces entry-boundary occurrences with the new separator
-- Backs up every file it's about to mutate to
-  `io/commons/.pre-separator-migration-backup/<run-ts>/` BEFORE any destructive
-  op
-- Reconstructs the file with frontmatter + migrated body
+What it does:
+- Scans `io/commons/*.md` and `io/commons/archive/**/*.md`.
+- Leaves frontmatter untouched, since YAML uses `---` legitimately at file start.
+- Replaces a body `\\n---\\n` only when a valid entry header follows it immediately
+  (`## <ISO-ts> | <persona-name> <persona-icon> #<session-id>`).
+- Leaves a `\\n---\\n` followed by anything else alone, as a body thematic break.
+- Copies each file it will change into
+  `io/commons/.pre-separator-migration-backup/<run-ts>/` before any write.
 
-**Idempotency**: re-running on a migrated tree is a no-op. Files where the
-canonical separator is already present (and no remaining entry-boundary
-`\\n---\\n` patterns are found) pass through with their natural mtime intact.
+Re-running on a migrated tree is a no-op, and unchanged files keep their mtime.
+With `--dry-run` it reports what would change and writes nothing.
 
-**Dry-run mode** (`--dry-run`): scans + reports what WOULD change without
-touching disk.
-
-**Venue**: one-shot operational tool. Run with `LUPIN_ROOT` set so PYTHONPATH
-covers `src/lupin_mcp/`.
-
-Per the 100% coverage mandate: companion unit test suite at
+Run it once with `LUPIN_ROOT` set, so that `src/lupin_mcp/` is importable.
+The companion unit tests are in
 `src/tests/unit/commons/test_migrate_commons_entry_separator.py`.
 """
 
@@ -87,9 +72,10 @@ def _now_run_ts() -> str:
 
 def _migrate_body( body: str ) -> Tuple[ str, int ]:
     """
-    Convert legacy entry-boundary `\\n---\\n` occurrences in body to the
-    canonical new separator. Body thematic breaks (`\\n---\\n` NOT followed
-    by an entry header) are left untouched.
+    Replace legacy entry-boundary separators in a body with the canonical one.
+
+    A `\\n---\\n` not followed by an entry header is a body thematic break and
+    is left untouched.
 
     Requires:
         - body is the post-frontmatter body string
@@ -112,13 +98,11 @@ def _migrate_body( body: str ) -> Tuple[ str, int ]:
 
 def _reconstruct_content( original: str, body: str, new_body: str ) -> str:
     """
-    Rebuild the file content with the frontmatter preserved verbatim and the
-    body replaced with `new_body`.
+    Rebuild file content with frontmatter kept verbatim and the body replaced.
 
-    Uses `len(original) - len(body)` to locate the body's offset in the
-    original content — this works uniformly across all `_split_frontmatter`
-    return shapes (valid frontmatter / opener-without-close / no frontmatter
-    at all), avoiding dead reconstruction branches.
+    The body offset is `len(original) - len(body)`. That holds for every
+    `_split_frontmatter` return shape (valid frontmatter, opener without a
+    close, no frontmatter), so no shape needs its own branch.
     """
     frontmatter_section = original[ : len( original ) - len( body ) ]
     return frontmatter_section + new_body
@@ -136,8 +120,8 @@ def _migrate_file( path: Path, dry_run: bool, backup_root: Path ) -> Tuple[ int,
         - returns (n_replaced, mutated)
         - n_replaced is the number of entry-boundary `\\n---\\n` occurrences
           replaced with the new separator
-        - mutated is True only if dry_run is False AND n_replaced > 0
-        - Backup is written to `backup_root/<relative-path>` before any
+        - mutated is True only if dry_run is False and n_replaced > 0
+        - Backup is written to `backup_root/<file-name>` before any
           destructive write
         - Files without legacy entry boundaries are no-ops (mtime preserved)
     """

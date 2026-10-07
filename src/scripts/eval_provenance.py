@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
 """
-The provenance stamp an eval arm attaches to its result — moved out of the paired harness.
+Provenance stamp an eval arm attaches to its result, moved out of the paired harness.
 
-WHY THIS FILE EXISTS, AND WHY IT IS URGENT. `v2_eval` imports `make_provenance` from
-`paired_eval` **at module level** (`from paired_eval import make_provenance`), and
-`paired_eval` is on the V1 excision's delete list (row e2099400 §2). Not a lazy import
-inside a function — a top-level one, so the deletion would not have degraded v2's numbers,
-it would have killed every v2 eval at import time.
+Why this file exists:
+    `v2_eval` imports `make_provenance` from `paired_eval` at module level, and
+    `paired_eval` is on the V1 removal list. The import is top-level, so deleting
+    `paired_eval` would break every v2 eval at import time. A delete list built by
+    naming v1 files misses what v2 still takes from them. Follow the imports instead.
 
-⚠️ THIS IS THE SECOND DEPENDENCY OF EXACTLY THE SHAPE MARÍA FOUND, and it was not in the
-plan's blast radius either. Hers (§6.1) was `load_mappable_commands` reaching into
-`v1_eval_arm` for the routing denominator. The lesson that generalises: the plan's file
-list was assembled by asking *what is v1 apparatus*, and both misses came from the other
-direction — *what does v2 still take FROM it*. A delete list built by naming files is not
-the same as one built by following imports.
+What is here:
+    The field tuple every arm artifact must carry, the stamp builder, and the
+    order-independent sample fingerprint. The fingerprint decides whether two arms
+    measured the same utterances. All three are pure and none is v1-specific.
 
-WHAT IS HERE. Three things, all pure: the field tuple every arm artifact must carry, the
-order-independent sample fingerprint that decides whether two arms measured the same
-utterances, and the stamp builder. None of it is v1-specific — it is the vocabulary of an
-eval ARM, and v2 is one.
-
-⚠️ A MOVE, NOT A REWRITE. Verbatim, so behaviour cannot change under cover of a
-relocation. `paired_eval` re-exports all three, so it and its tests are unchanged until it
-is deleted.
-
-Created: 2026-08-26 (row e2099400 §2 Step 2)
+The code is moved verbatim, so behaviour cannot change under cover of a relocation.
+`paired_eval` re-exports all three, so it and its tests are unchanged until it is deleted.
 """
 
 from __future__ import annotations
@@ -53,10 +43,10 @@ def compute_sample_signature( pairs: Sequence[ Tuple[ str, str ] ] ) -> str:
         - pairs is a sequence of (utterance, expected_command) 2-tuples.
 
     Ensures:
-        - returns the sha256 hex of the SORTED, DEDUPED pair set, so two arms that
+        - returns the sha256 hex of the sorted, deduplicated pair set, so two arms that
           measured the same utterances (in any order) produce the same signature and
           two arms that measured different utterances cannot collide.
-        - binds BOTH the utterance text AND its expected command (a unit separator
+        - binds both the utterance text and its expected command (a unit separator
           between the two keeps "a","bc" distinct from "ab","c").
     """
     encoded = sorted( { f"{utterance}\x1f{command}" for utterance, command in pairs } )
@@ -78,13 +68,13 @@ def make_provenance(
     Requires:
         - arm is "v1" or "v2"; corpus is the corpus name both arms load.
         - seed / n_per_command describe the sampler (None on a limit-based run that
-          did not sample — such an arm can never pair with a seeded one, by design).
+          did not sample — such an arm can never pair with a seeded one).
         - sampled_pairs is the exact (utterance, expected_command) set the arm measured.
-        - git_sha is the sha READ BACK from the server this arm measured — never a
-          constant and never a guess. It is a REQUIRED argument rather than an optional
-          one on purpose: an arm that cannot say which tree it ran on must fail at the
-          stamp, where the caller can still fix it, and not at the report, where a blank
-          is indistinguishable from a legitimate one (row c9b43538).
+        - git_sha is the sha read back from the server this arm measured — never a
+          constant and never a guess. It is a required argument rather than an optional one.
+          An arm that cannot say which tree it ran on must fail at the stamp, where the
+          caller can still fix it. Failing at the report is not acceptable, because a blank
+          there looks like a legitimate value.
 
     Ensures:
         - returns a dict carrying exactly PROVENANCE_FIELDS, with sample_signature
