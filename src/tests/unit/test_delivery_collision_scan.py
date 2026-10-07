@@ -280,6 +280,20 @@ def test_exit_codes_are_three_distinct_answers( scan, repo, case, expected, caps
     assert scan.main( argv + [ "--quiet" ] ) == expected
 
 
+@pytest.mark.parametrize( "phase", [ 0.0, 0.004, 0.0085, 0.5 ] )
+def test_the_vacuous_exit_code_holds_at_every_clock_phase( scan, repo, monkeypatch, phase ):
+    """
+    The vacuous run exits 2 whatever the moment within the second at which the scan starts.
+
+    The clock is pinned `phase` seconds after the branch tip.
+    """
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha" )
+    tip = int( _git( repo, "log", "-1", "--format=%ct", "wt-alpha" ).strip() )
+    monkeypatch.setattr( scan, "time", types.SimpleNamespace( time=lambda: tip + phase ) )
+
+    assert scan.main( [ "--target", "target", "--max-tip-age-days", "0.0000001", "--quiet" ] ) == 2
+
+
 def test_the_scan_states_its_own_denominator( scan, repo, capsys ):
     """
     A guard that cannot state how much it scanned is telling you about its corpus,
