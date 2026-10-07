@@ -28,7 +28,10 @@ The plan raises Shortfall when a floor cannot be met. Each rule has a stated bli
                                 HANGING_CONDITION: a sentence that opens on a subordinator is left with its condition and no main clause.
                                 DROPPED_CONDITION: a clause opening on a subordinator is cut out before ", and" or ", but".
                                 JOINED_CONDITIONS: a comma and a second condition are left running straight on from a first.
+                                UNANSWERED_CONDITION: a sentence-opening condition is left in front of ", and", ", but" or ", so" with its main clause cut.
                                 Over-rejects and misses: see lead_in_rejection.
+    Rule 10 stray_punctuation_rejection  skips a delete whose cut holds more ";." ":." ".." or line-end commas than the original did.
+                                Misses: a stray mark that is not one of these, such as a lone "(" or a quote left open.
 
 Rule 1 (the mechanical check after the writer) and the redraw path live in labelled_set_seeder.py.
 """
@@ -72,6 +75,9 @@ PROTECTED_RES = (
 CODE_RES     = ( re.compile( r"```.*?(?:```|\Z)", re.DOTALL ), re.compile( r"`[^`\n]+`" ) )
 LINK_RE      = re.compile( r"\[[^\[\]\n]+\](?:\([^()\n]*\)|\[[^\[\]\n]*\])?" )
 LIST_ITEM_RE = re.compile( r"(?m)^[ \t]*(?:[-*+•]|\d+[.)])[ \t]+(?=\S)" )
+
+# Rule 10: marks a cut must not leave behind that the original text did not have. A comma before a line break is the tail of a clause.
+STRAY_RES = ( re.compile( r"[;:][.!?]" ), re.compile( r"(?<!\.)\.\.(?!\.)" ), re.compile( r",[ \t]*(?=\n|\Z)" ) )
 
 # Rule 9: words that open a condition, and the conjunctions that join two clauses.
 SUBORDINATORS  = frozenset( "if when unless while although though because once until whenever whereas since after before where wherever whether provided".split() )
@@ -351,7 +357,27 @@ def lead_in_codes( old, span ):
     if lead_words( old[ a:b ] )[ 0 ] in SUBORDINATORS and before.endswith( "," ) and "," not in before[ :-1 ] and not after.strip( EDGE_PUNCT ): codes.append( "HANGING_CONDITION" )
     if lead_words( old[ span[ 0 ]:span[ 1 ] ] )[ 0 ] in SUBORDINATORS and CONJUNCTION_RE.match( after ): codes.append( "DROPPED_CONDITION" )
     if before.endswith( "," ) and lead_words( after )[ :1 ] and lead_words( after )[ 0 ] in SUBORDINATORS and SUBORDINATORS & set( lead_words( before ) ): codes.append( "JOINED_CONDITIONS" )
+    opens_condition = lead_words( old[ a:b ] )[ 0 ] in SUBORDINATORS and before.endswith( "," ) and "," not in before[ :-1 ]
+    if opens_condition and lead_words( old[ span[ 0 ]:span[ 1 ] ] )[ 0 ] not in SUBORDINATORS and CONJUNCTION_RE.match( after ): codes.append( "UNANSWERED_CONDITION" )
     return codes
+
+
+def stray_punctuation_rejection( old, cut ):
+    """
+    Return "STRAY_PUNCTUATION" if a cut holds more stray marks than the original.
+
+    Requires:
+        - cut is old with one span removed and the join repaired
+
+    Ensures:
+        - the marks are ";." ":." and any other ; or : followed by . ! or ?, then "..", then a comma before a line break or at the end of the text
+        - each kind is counted in both texts, so a mark the original already held is not the cut's fault
+        - an ellipsis of three dots is not read as ".."
+
+    Misses:
+        - a stray mark that is not one of these kinds
+    """
+    return "STRAY_PUNCTUATION" if any( len( rx.findall( cut ) ) > len( rx.findall( old ) ) for rx in STRAY_RES ) else None
 
 
 def lead_in_rejection( old, span ):
@@ -370,6 +396,8 @@ def lead_in_rejection( old, span ):
           "returns zero [when the list is empty], and a negative size would break the sort"
         - JOINED_CONDITIONS: the text kept before the span ends on a comma and already holds a subordinator, and the text after the
           span opens on one, so two conditions run together: "... when the form closed itself, [and with zero] when the user cancelled"
+        - UNANSWERED_CONDITION: as HANGING_CONDITION, but a ", and" / ", so" style conjunction follows the span and the span does not
+          open on a subordinator, so the condition has no main clause: "When no key is enrolled, [it returns unavailable], so callers can fall back"
         - the checks run in that order and the first to fire is returned
         - no two can fire on one span, because their conditions on the text after the span exclude each other,
           so the order changes nothing today

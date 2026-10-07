@@ -162,7 +162,7 @@ def test_r4_a_paragraph_that_already_opened_on_a_pronoun_is_not_blamed_on_the_cu
 
 
 def test_r4_delete_candidates_count_the_new_refusals_by_reason_and_keep_none_of_them():
-    old = "Return the count of idle workers. Callers hold the lock for a while, which keeps the figure stable. Callers retry on failure."
+    old = "Return the count of idle workers. Callers hold the lock for a while, which keeps the figure stable. Callers retry on failure. Callers read the count while the pool is open."
     cands, refused = s.delete_candidates( old, SL )
     assert set( refused ) - { "EMPTY", "DANGLING", "NO_VERB", "ORPHAN" }                    # at least one refusal comes from the new rules, counted by code
     assert cands and all( c[ "span" ][ 0 ] >= rules.first_sentence_end( old ) for c in cands )
@@ -956,11 +956,12 @@ def test_r8_a_delete_that_holds_a_whole_code_span_is_kept():
 LISTED = SUMMARY.strip() + "\n\n- keeps the handle open for the reader, which avoids a second login\n- drops the handle when the app is paused, unless a write is running"
 
 
-def test_r8_a_delete_that_removes_the_opening_of_a_list_item_is_refused_and_a_trailing_clause_is_kept():
+def test_r8_a_delete_that_removes_the_opening_of_a_list_item_is_refused_and_a_trailing_clause_is_not():
     assert rules.markup_rejection( LISTED, span_of( LISTED, "drops the handle when the app is paused" ) ) == "LIST_ITEM"
     assert rules.markup_rejection( LISTED, span_of( LISTED, "keeps the handle open for the reader, which avoids a second login" ) ) == "LIST_ITEM"
     assert rules.markup_rejection( LISTED, span_of( LISTED, "unless a write is running" ) ) is None
-    assert "unless a write is running" in delete_spans( LISTED )
+    assert "unless a write is running" not in delete_spans( LISTED )                      # rule 10: the cut leaves "paused," at the end of the text
+    assert "unless a write is running" in delete_spans( LISTED + "." )                    # with a full stop kept, the comma goes and nothing is stray
 
 
 def test_r8_a_delete_that_runs_from_one_line_into_the_next_list_item_is_refused():
@@ -1115,6 +1116,21 @@ def test_r10_a_cut_that_leaves_stray_punctuation_is_refused_and_counted_by_its_c
     assert text not in [ c[ "span_text" ] for c in cands ] and refused.get( "STRAY_PUNCTUATION", 0 ) >= 1
 
 
+DOTS_OLD = "Return the count of idle workers. Callers hold the lock for a while, which keeps the figure stable. Callers retry on failure. Callers read the count while the pool is open."
+
+
+def test_r10_a_whole_sentence_cut_without_its_full_stop_leaves_two_dots_and_is_refused():
+    span = span_in( DOTS_OLD, "Callers retry on failure" )
+    cut  = s.cut_text( DOTS_OLD, span )
+    assert ".." in cut and ".." not in DOTS_OLD and span in s.phrase_units( DOTS_OLD ) and s.span_ok( DOTS_OLD, span, SL )
+    assert s.bad_cut( DOTS_OLD, cut ) is None and rules.delete_rejection( DOTS_OLD, span, cut ) is None
+    assert rules.markup_rejection( DOTS_OLD, span ) is None and rules.lead_in_rejection( DOTS_OLD, span ) is None
+    assert rules.stray_punctuation_rejection( DOTS_OLD, cut ) == "STRAY_PUNCTUATION"
+    cands, refused = s.delete_candidates( DOTS_OLD, SL )
+    assert "Callers retry on failure" not in [ c[ "span_text" ] for c in cands ] and refused[ "STRAY_PUNCTUATION" ] >= 1
+    assert "while the pool is open" in [ c[ "span_text" ] for c in cands ]                  # a clean cut in the same text is still drawn
+
+
 @pytest.mark.parametrize( "cut", [ "Show the list;. Done.", "It has two modes:. Done.", "Shows the card.. Done.", "Callers wait,\n\nDone.", "- never throws,", "Hold the lock!;?" ] )
 def test_r10_each_artifact_is_seen_wherever_it_stands_in_the_text( cut ):
     assert rules.stray_punctuation_rejection( "Show the list. Done.", cut ) == "STRAY_PUNCTUATION"
@@ -1261,7 +1277,7 @@ def test_r9_no_two_checks_fire_on_one_span_so_the_order_of_the_checks_changes_no
                                 assert len( codes ) <= 1, ( old, old[ tokens[ i ].start():end ], codes )
                                 seen.update( codes )
                                 spans += 1
-    assert seen == { "HANGING_CONDITION", "DROPPED_CONDITION", "JOINED_CONDITIONS" } and spans > 20000        # the grid finds every code, so a clean result means something
+    assert seen == { "HANGING_CONDITION", "DROPPED_CONDITION", "JOINED_CONDITIONS", "UNANSWERED_CONDITION" } and spans > 20000        # the grid finds every code, so a clean result means something
 
 
 def test_r9_a_span_both_rule_8_and_rule_9_refuse_is_counted_under_rule_8s_code_only():
