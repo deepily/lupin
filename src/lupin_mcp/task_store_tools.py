@@ -651,6 +651,30 @@ def task_request_impl(
     return task_store_request( "POST", f"/api/tasks/{task_id}/request", api_base_url, api_key, json_body=payload )
 
 
+def task_ask_unpark_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+):
+    """
+    Ask the server to make the card a manager cites to un-park one parked row.
+
+    This is POST /api/tasks/{task_id}/unpark-ask. The row does not move. After the operator
+    answers yes, the manager sends the parked-to-queued transition with the card id as the
+    approval_card receipt.
+
+    Requires:
+        - actor is the bridge-stamped identity, set by the caller and never a tool parameter
+        - task_id is the item's UUID string, which the server validates
+
+    Ensures:
+        - returns { card_id, task_id, expires_at } on success
+        - 403, 404 and 409 surface the server's detail verbatim
+    """
+    return task_store_request( "POST", f"/api/tasks/{task_id}/unpark-ask", api_base_url, api_key, json_body={ "actor": actor } )
+
+
 def task_edit_impl(
     api_base_url,
     api_key,

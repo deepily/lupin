@@ -41,6 +41,7 @@ VERBS = [
     ( "task_correlate",  "task_correlate_impl",  dict( task_id="abc12345", correlation_key="k" ) ),
     ( "task_amend",      "task_amend_impl",      dict( task_id="abc12345", note="n" ) ),
     ( "task_request",    "task_request_impl",    dict( task_id="abc12345", move="admit", reason="r" ) ),
+    ( "task_ask_unpark", "task_ask_unpark_impl", dict( task_id="abc12345" ) ),
 ]
 
 

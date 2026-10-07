@@ -4134,7 +4134,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
 
 
 def _task_store_identity() -> str:
@@ -4621,6 +4621,49 @@ def task_request(
         move             = move,
         reason           = reason,
         deletion_task_id = deletion_task_id,
+    )
+
+
+@mcp.tool
+def task_ask_unpark(
+    task_id : str,
+) -> dict:
+    """
+    Ask Rick to approve un-parking one parked row; the server makes the card.
+
+    This asks and never moves the row. Manager seats only.
+
+    Args:
+        task_id: The parked row's UUID; one row per call
+
+    Returns:
+        { card_id, task_id, expires_at }, or an error dict carrying the server's detail verbatim.
+
+    Next steps:
+      1. Wait. Rick answers the card from his board, and silence refuses.
+      2. After a yes, send task_transition with to_status "queued" and
+         receipt_refs { "approval_card": "<card_id>" }.
+      3. The card covers that one move once. A second use, a no, a default answer or a card made
+         before the park is refused.
+
+    Refused by the server:
+      - 403: you are not a manager
+      - 404: no such row, or the operator's account was not found
+      - 409: the row is not parked, or an unanswered card already exists (its id is in the message)
+
+    The actor is not a parameter: it is stamped from the session bridge.
+
+    Example:
+        task_ask_unpark(task_id="<uuid of a parked row>")
+    """
+    refusal = _refuse_borrowed_identity( "task_ask_unpark" )
+    if refusal is not None: return refusal
+
+    return task_ask_unpark_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id      = task_id,
     )
 
 

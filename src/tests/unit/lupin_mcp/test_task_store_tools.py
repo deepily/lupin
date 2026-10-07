@@ -24,6 +24,7 @@ from lupin_mcp.task_store_tools import (
     task_reassign_impl,
     task_amend_impl,
     task_request_impl,
+    task_ask_unpark_impl,
     task_edit_impl,
     task_query_impl,
     task_get_impl,
@@ -709,6 +710,30 @@ class TestTaskRequestImpl:
                                     task_id="abc", move="admit", reason="r" )
         assert result[ "status" ] == "error"
         assert detail in str( result )
+
+
+class TestTaskAskUnparkImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "card_id": "c-1", "task_id": "abc-def", "expires_at": "2026-10-07T20:15:00+00:00" }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_ask_unpark_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc-def" )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/unpark-ask"
+        assert calls[ "json" ]   == { "actor": "mr radio d54262de" }
+
+    def test_a_409_surfaces_the_waiting_card_verbatim( self, capture_request ):
+        detail = "An un-park card for this row is already waiting for an answer: c-1. Use it, or let it expire."
+        capture_request( FakeResponse( 409, json_body={ "detail": detail } ) )
+        result = task_ask_unpark_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc" )
+        assert result[ "status" ] == "error"
+        assert detail in str( result )
+
+    def test_a_403_for_a_worker_surfaces_verbatim( self, capture_request ):
+        capture_request( FakeResponse( 403, json_body={ "detail": "only a manager may ask" } ) )
+        result = task_ask_unpark_impl( BASE_URL, API_KEY, actor="sam 5a3f00c1", task_id="abc" )
+        assert result[ "status" ] == "error" and "only a manager may ask" in str( result )
 
 
 class TestTaskAmendImpl:

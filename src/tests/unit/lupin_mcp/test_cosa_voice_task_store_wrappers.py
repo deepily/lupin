@@ -453,6 +453,28 @@ class TestTaskRequestWrapper:
         assert "actor" not in inspect.signature( cv.task_request.fn ).parameters
 
 
+class TestTaskAskUnparkWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        # `actor` is the bridge identity, never a tool parameter, for the reason task_request gives.
+        captured = { }
+        monkeypatch.setattr( cv, "task_ask_unpark_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_ask_unpark.fn( task_id="abc-uuid" )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "actor"        : "krishna 38d15e3b",
+            "task_id"      : "abc-uuid",
+        }
+
+    def test_actor_is_not_a_parameter( self ):
+        import inspect
+        assert "actor" not in inspect.signature( cv.task_ask_unpark.fn ).parameters
+
+
 class TestTaskEditWrapper:
 
     def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
