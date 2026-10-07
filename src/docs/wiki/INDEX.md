@@ -83,3 +83,8 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[cosa-voice-mcp-server]] — the FastMCP server a seat uses to speak, ask blocking questions and read or change its session state. `lupin_mcp` (cosa_voice_mcp)
 - [[db-session-and-schema]] — the Postgres engine, session manager, ORM base, boot-time Alembic upgrade and schema drift check. `cosa.rest.db` (database, auto_migrate, schema_drift)
 - [[branch-and-directory-loc-analysis]] — counting lines of code by branch change, by directory and by day. `cosa.repo` (branch_analyzer, directory_analyzer, git_loc_delta)
+- [[claude-code-dispatch]] — `ClaudeCodeDispatcher`: runs one bounded or interactive Claude Code task and returns its result. `cosa.orchestration.claude_code`
+- [[worktree-lifecycle]] — how git worktrees are made for each spawned seat and each BFE or TFE job, and removed by teardown, the reaper and the janitor. `cosa.agents.shared` (seat_teardown, worktree_reaper, worktree_refusal_ledger, worktree_straggler_tickets), `cosa.utils` (seat_worktree, worktree_artifacts)
+- [[small-agents-core]] — seven small agents that answer one voice or text request each, inline on the queue's consumer thread. `cosa.agents` (calculator), `cosa.rest.v2`, `cosa.utils.util_code_runner`
+- [[mcp-session-spawn-and-reap]] — the four MCP tools a manager seat uses to start, list and end Claude Code seats. `lupin_mcp` (session_spawner, reap_memento, self_respin_core)
+- [[session-transcript-console]] — showing another seat's transcript as display blocks: a REST backlog plus a live WebSocket tail, admin accounts only. `cosa.rest` (cc_transcript_mapper, cc_transcript_tailer), `cosa.rest.routers` (cc_transcript, websocket)
