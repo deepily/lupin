@@ -10,7 +10,7 @@ pins:
   - cosa.agents.receptionist_agent.ReceptionistAgent@ae4a283815
   - cosa.agents.calculator.agent.CalculatorAgent@5d4c47e913
   - cosa.agents.calculator.agent.CalculatorAgent.run_code@0b641aec1b
-  - cosa.rest.v2.flow.AskFlow.ask@73da1cd4d3
+  - cosa.rest.v2.flow.AskFlow.ask@57c5527ac0
   - cosa.utils.util_code_runner.assemble_and_run_solution@88a30dccaf
 ---
 # Small agents core
@@ -32,9 +32,9 @@ Seven small agents answer one voice or text request each. All extend `AgentBase`
 - The calculator hands off to a `MathAgent` when the intent will not parse, the operation is unsupported, or a unit is missing or unknown. A bad operand raises `CodeGenerationFailedException`.
 
 ## Routing
-- `AskFlow.ask` checks the question, asks the LLM router for a command, then looks it up. An unknown command goes to the receptionist. The old `TodoFifoQueue.push_job` has no caller.
+- `AskFlow.ask` checks the question, asks the LLM router for a command, then looks it up. An unknown command goes to the receptionist. The old `TodoFifoQueue.push_job` has no caller outside tests.
 - A registry lookup builds math, calculator, datetime, todo, calendar and weather. Calendar and todo become CRUD forks, as shipped. The receptionist comes from the flow's own factory.
 
 ## When code fails
-- With `debug auto` true, as shipped, an iterative debugger tries twice over the models in `llm model keys for debugger`. Only the Development section sets that key; Production is not traced. If both fail the job goes to the dead queue. With it false, `run_code` returns nothing, the formatter still runs, and the job is dead-lettered with the default apology.
+- `debug auto` is true in Baseline, which Production and Development inherit, and Testing inherits Development. When true, an iterative debugger tries twice over the models in `llm model keys for debugger`. Only Development sets that key. If both fail the job goes to the dead queue. With it false, `run_code` returns nothing, the formatter still runs, and the job is dead-lettered with the default apology.
 - The code runs as a plain `python3` child process with a 60 second timeout. There is no sandbox and no import limit.
