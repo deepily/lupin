@@ -134,16 +134,11 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         return "skipped_no_git_ancestor", None
 
 
+# Read the skipped counts, not the written count:
+#     `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
+#     refused to guess for. A run that writes many and skips none on a box with deleted
+#     worktrees would mean clause 3 is not firing.
 def main() -> int:
-    """
-    Entry point: classify every bridge and report the counts.
-
-    Notes:
-        Read the skipped counts, not the written count:
-            `skipped_cwd_missing` and `skipped_no_git_ancestor` count the bridges this script
-            refused to guess for. A run that writes many and skips none on a box with deleted
-            worktrees would mean clause 3 is not firing.
-    """
     parser = argparse.ArgumentParser( description="Backfill sender_id into pre-Option-B bridges." )
     parser.add_argument( "--write",   action="store_true", help="actually modify bridges (default: report only)" )
     # An explicit no-op. Report-only is already the default, but `--dry-run` is what
