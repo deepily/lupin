@@ -103,3 +103,5 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[db-repositories]] — the Postgres repository classes built on one generic base, mapped to the capability that uses each, and the vector search they share. `cosa.rest.db` (repositories, database)
 - [[web-client-task-board-panes]] — the four panes that show the task store: task list, epic board, holding area and finished tasks. `src/lupin_app/static/js/multiplexer/render`
 - [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
+- [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
+- [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
