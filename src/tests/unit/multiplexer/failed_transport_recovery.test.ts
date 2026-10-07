@@ -158,7 +158,7 @@ test( "behaviour: 20 failed reconnects end in failed, and nothing the page can p
   }
 } );
 
-test( "a restart after the retry budget ran out gets a fresh budget: one ordinary close lands in backoff, not failed", { todo: "row 5a8bd0c6: open, the machine keeps attempts at 20 across a restart" }, () => {
+test( "a restart after the retry budget ran out gets a fresh budget: one ordinary close lands in backoff, not failed", () => {
   MockWebSocket.instances = [];
   const transport = createQueueTransport( {
     authManager   : makeAuth(), bus : createEventBusForTesting(), baseUrl : "",
@@ -178,5 +178,36 @@ test( "a restart after the retry budget ran out gets a fresh budget: one ordinar
   } finally {
     transport.stop();
     mock.timers.reset();
+  }
+} );
+
+test( "after a restart the state changes no longer carry the old failure's reason and code", async () => {
+  MockWebSocket.instances = [];
+  const bus    = createEventBusForTesting();
+  const events: { state: string; reason?: string; code?: number }[] = [];
+  bus.on<{ state: string; reason?: string; code?: number }>( "connection_state_change", ( e ) => events.push( e.payload ) );
+  const transport = createQueueTransport( {
+    authManager   : makeAuth(), bus, baseUrl : "",
+    WebSocketCtor : MockWebSocket as unknown as typeof WebSocket,
+  } );
+  try {
+    transport.start( "wise_penguin" );
+    MockWebSocket.instances[0]!.fireOpen();
+    await new Promise( ( r ) => setTimeout( r, 10 ) );
+    MockWebSocket.instances[0]!.receive( JSON.stringify( { type: "auth_success", data: {} } ) );
+    MockWebSocket.instances[0]!.fireClose( 4001, "token expired" );
+    const failed = events.find( ( e ) => e.state === "failed" );
+    assert.equal( failed?.code, 4001, "precondition: the failed event carries the 4001" );
+
+    ( transport as unknown as { csm: { send( e: unknown ): void } } ).csm.send( { type: "restart" } );
+    MockWebSocket.instances[ MockWebSocket.instances.length - 1 ]!.fireClose( 1006, "" );   // an ordinary close after the restart
+    const afterFailed = events.slice( events.indexOf( failed! ) + 1 );
+    assert.ok( afterFailed.length >= 2, "precondition: the restart and the ordinary close each changed state" );
+    for ( const e of afterFailed ) {
+      assert.equal( e.reason, undefined, `the ${ e.state } event after the restart must not carry the old reason` );
+      assert.equal( e.code,   undefined, `the ${ e.state } event after the restart must not carry the old code` );
+    }
+  } finally {
+    transport.stop();
   }
 } );

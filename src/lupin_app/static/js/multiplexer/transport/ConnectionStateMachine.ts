@@ -123,6 +123,11 @@ const connectionMachine = setup({
     // Stash the permanent-auth reason/code so the subscribe() emit can surface
     // them on the `failed` transition. The action is wired ONLY to
     // `permanent_failure` transitions, so `event` is always that variant here.
+    // A restart starts over: the old failure's reason/code must not ride the events that follow it.
+    clearFailure : assign({
+      failureReason : () => undefined,
+      failureCode   : () => undefined,
+    }),
     recordFailure : assign({
       failureReason : ({ event }) => (event as PermanentFailureEvent).reason,
       failureCode   : ({ event }) => (event as PermanentFailureEvent).code,
@@ -186,7 +191,8 @@ const connectionMachine = setup({
     },
     failed : {
       on : {
-        restart : { target: "connecting" },
+        // A restart gets a fresh retry budget and a clean failure record.
+        restart : { target: "connecting", actions: [ "resetAttempts", "clearFailure" ] },
       },
     },
   },
