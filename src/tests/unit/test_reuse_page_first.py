@@ -36,10 +36,10 @@ LINES      = { "feeds-page": FEEDS_LINE, "math-page": MATH_LINE }
 class PageFake:
     """Answers the page and entry questions it was given for one need, and refuses any other."""
 
-    def __init__( self, need, pages=None, entries=None ):
+    def __init__( self, need, pages=None, entries=None, page_instr=PAGE_INSTR ):
         self.need, self.table, self.seen, self.unexpected, self.lock = need, {}, [], [], threading.Lock()
         for text in ( FEEDS_PAGE, MATH_PAGE ):
-            self.table[ key_of( literal_body( need, text, PAGE_INSTR, PAGE_CRIT ) ) ] = ( pages or {} ).get( text, UNREL )
+            self.table[ key_of( literal_body( need, text, page_instr, PAGE_CRIT ) ) ] = ( pages or {} ).get( text, UNREL )
         for text in ALL_TEXTS:
             self.table[ key_of( literal_body( need, text ) ) ] = ( entries or {} ).get( text, UNREL )
 
@@ -87,6 +87,7 @@ def receipt_of( env, r ): return json.loads( next( ( env[ 1 ] / "receipts" ).glo
 def test_scope_of_line_reads_a_module_list_a_bare_package_and_prose():
     assert rt.scope_of_line( "x. `cosa.rest` (fifo_queue, queue_consumer), `cosa.agents.agentic_job_base`" ) == [ "cosa.agents.agentic_job_base", "cosa.rest.fifo_queue", "cosa.rest.queue_consumer" ]
     assert rt.scope_of_line( "x. `cosa.config`" ) == [ "cosa.config" ]
+    assert rt.scope_of_line( "x. `cosa.rest` (auth, and email helpers)" ) == [ "cosa.rest" ]                  # one prose item makes the whole parenthesis prose
     assert rt.scope_of_line( "x. `cosa.rest.db.repositories` (token and api-key repositories)" ) == [ "cosa.rest.db.repositories" ]     # prose, not a module list
     assert rt.scope_of_line( "x. `cosa.rest` (auth, email_*)" ) == [ "cosa.rest.auth", "cosa.rest.email_*" ]
     assert rt.scope_of_line( "`ClaudeCodeDispatcher` runs a task. no package here" ) == []
@@ -241,3 +242,84 @@ def test_a_chosen_page_that_covers_no_indexed_entry_adds_no_covered_stage( env )
     rec = receipt_of( env, r )
     assert rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "chosen" ][ 0 ][ "slug" ] == "empty-page" and rec[ "pages" ][ "covered" ] == []
     assert [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "all" ]
+
+
+def test_frozen_replay_asks_with_the_stored_page_template_not_the_current_one( env ):
+    write_wiki( env[ 0 ] )
+    need = "something unrelated [tamper]"
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) )
+    r    = rt.check_exists_impl( need, ctx )
+    path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
+    rec  = json.loads( path.read_text( encoding="utf-8" ) )
+    rec[ "page_prompt_template" ] = { **rec[ "page_prompt_template" ], "instructions": "a different stored instruction" }
+    path.write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "error" and rep[ "error" ] == "CACHE_MISSING"                                     # the stored text was never asked, so nothing is cached for it
+
+
+def test_the_page_template_is_part_of_the_receipt_id( env, monkeypatch ):
+    write_wiki( env[ 0 ] )
+    need = "something unrelated [pageid]"
+    first = run( env, need, PageFake( need ) )
+    monkeypatch.setattr( rt, "PAGE_TEMPLATE", { **rt.PAGE_TEMPLATE, "instructions": "a changed page instruction" } )
+    second = run( env, need, PageFake( need, page_instr="a changed page instruction" ) )
+    assert first[ "cause" ] is None and second[ "cause" ] is None and first[ "verdict" ] == second[ "verdict" ] == "NEW"
+    assert first[ "receipt_id" ] != second[ "receipt_id" ]
+
+
+def test_a_receipt_cut_short_by_the_budget_replays_to_the_same_uncertain_verdict( env, monkeypatch ):
+    write_wiki( env[ 0 ] )
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
+    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
+    need = "something unrelated [cutshort]"
+    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], call_budget=4 )
+    r   = rt.check_exists_impl( need, ctx )
+    assert r[ "stats" ][ "not_checked" ] == 1 and r[ "cause" ] == "CALL_FAILED"
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
+
+
+class FailsOnServe( PageFake ):
+    """A fake whose call for lupin_mcp.tool.serve always fails, as a dropped connection would."""
+
+    def answer( self, body ):
+        if body[ "state" ][ "candidate" ] == SERVE_TEXT: raise OSError( "connection dropped" )
+        return super().answer( body )
+
+    post = answer
+
+
+def test_a_receipt_with_a_failed_call_replays_to_the_same_uncertain_verdict( env ):
+    write_wiki( env[ 0 ] )
+    need = "something unrelated [failedcall]"
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FailsOnServe( need, { FEEDS_PAGE: CHOSEN } ) )
+    r    = rt.check_exists_impl( need, ctx )
+    assert r[ "cause" ] == "CALL_FAILED" and r[ "stats" ][ "failed" ] == 1
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
+
+
+def test_fetch_similar_sweeps_every_entry_and_never_asks_a_page( env ):
+    write_wiki( env[ 0 ] )
+    fake = PageFake( FEEDS_TEXT )                                                                              # the symbol's own text is the need
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=fake )
+    r    = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx )
+    assert r[ "status" ] == "ok" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
+    assert sorted( fake.seen ) == sorted( [ MATHX_TEXT, SERVE_TEXT ] ) and fake.unexpected == []
+
+
+def test_a_receipt_cut_short_inside_the_page_stage_replays_without_the_unasked_page( env, monkeypatch ):
+    write_wiki( env[ 0 ] )
+    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
+    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
+    need = "something unrelated [pagecut]"
+    fake = PageFake( need )
+    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], call_budget=1 )                                # one attempt: one page asked, the other never
+    r   = rt.check_exists_impl( need, ctx )
+    rec = receipt_of( env, r )
+    assert len( rec[ "pages" ][ "skipped" ] ) == 1 and r[ "cause" ] == "CALL_FAILED"
+    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []

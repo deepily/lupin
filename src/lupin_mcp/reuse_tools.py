@@ -417,13 +417,14 @@ def parse_answer( response ):
         return None
 
 
-def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
+def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
     """
     Ask Jev about every entry.
 
     Requires:
         - entries are symbol dicts with id, sig and doc
-        - when frozen, no transport is used and every answer must already be cached
+        - when frozen, no transport is used and every answer must already be cached, except the ids in
+          `gaps`, a mapping of id to "failed" or "not_reached" taken from the receipt being replayed
     Ensures:
         - returns { answers, failed, not_reached, calls, cache_hits, attempts_answered, attempts_failed,
           failed_attempts }: answers are { id, probabilities }, failed is the list of ids whose call failed
@@ -445,7 +446,10 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
         hit  = cache.get( key )
         if hit is not None: return rec[ "id" ], hit, "hit", 0
-        if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
+        if frozen:
+            kind = gaps[ rec[ "id" ] ] if gaps is not None and rec[ "id" ] in gaps else None
+            if kind is None: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
+            return rec[ "id" ], None, kind, 0                                  # the live run never got an answer for it either
         if budget is not None: budget.begin_tally()
         how, resp, cut_off = "failed", None, False
         try:
@@ -542,7 +546,14 @@ def page_candidates( wiki_dir, symbols ):
 
 
 def pages_digest( pages ):
-    """Ensures: returns "" for no pages, else a sha1 over each page's slug and scope."""
+    """
+    A hash of the pages a question may be routed through.
+
+    Ensures:
+        - returns "" for no pages, else a sha1 over each page's slug and scope
+        - scope is a function of the index line, which index_sha already hashes, so dropping it changes
+          nothing today; it is kept because an edit to the scope parser would otherwise reuse an old receipt
+    """
     return sha( canonical( [ [ p[ "slug" ], p[ "scope" ] ] for p in pages ] ) ) if pages else ""
 
 
@@ -691,13 +702,14 @@ def _choose_pages( answers, policy ):
     return sorted( chosen, key=lambda c: ( -c[ "p_overlap" ], c[ "slug" ] ) )[ :MAX_PAGES ]
 
 
-def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=None, page_template=None, model=None, policy=vd.POLICY ):
+def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=None, page_template=None, model=None, policy=vd.POLICY, gaps=None ):
     """
     Decide one question: ask the pages, sweep what they cover, then fall back to every entry.
 
     Requires:
         - entries are the sendable index entries; pages are page_candidates() dicts (slug, text, scope)
-        - when frozen, plan is the stored { asked, chosen, covered } and every answer must already be cached
+        - when frozen, plan is the stored { asked, chosen, covered, skipped } and every answer must already be
+          cached, except the ids in `gaps` and the pages the plan lists as skipped
     Ensures:
         - with no pages, one sweep of every entry decides (route "full")
         - otherwise the page stage asks one question per page and chooses at most MAX_PAGES at the policy floor; the
@@ -713,20 +725,22 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
     if pages:
         asked = [ { "id": p[ "slug" ], "sig": "", "doc": p[ "text" ] } for p in pages ] if plan is None else \
                 [ { "id": a[ "slug" ], "sig": "", "doc": a[ "text" ] } for a in plan[ "asked" ] ]
-        sa = sweep( ctx, need, asked, frozen=frozen, template=page_template or PAGE_TEMPLATE, model=model )
+        gaps = { **( gaps or {} ), **( { s: "not_reached" for s in plan[ "skipped" ] } if plan is not None else {} ) }
+        sa = sweep( ctx, need, asked, frozen=frozen, template=page_template or PAGE_TEMPLATE, model=model, gaps=gaps )
         stages.append( _stage( "pages", sa, len( asked ) ) )
         chosen  = _choose_pages( sa[ "answers" ], policy )
         wanted  = { c[ "slug" ] for c in chosen }
         covered = [ e for e in entries if e[ "id" ] in set( plan[ "covered" ] ) ] if plan is not None else \
                   [ e for e in entries if any( in_scope( e[ "file" ], p[ "scope" ] ) for p in pages if p[ "slug" ] in wanted ) ]
-        plan_out = { "asked": [ { "slug": a[ "id" ], "text": a[ "doc" ] } for a in asked ], "chosen": chosen, "covered": [ e[ "id" ] for e in covered ] }
+        plan_out = { "asked": [ { "slug": a[ "id" ], "text": a[ "doc" ] } for a in asked ], "chosen": chosen, "covered": [ e[ "id" ] for e in covered ],
+                     "skipped": sorted( sa[ "not_reached" ] + sa[ "failed" ] ) if plan is None else plan[ "skipped" ] }
         if covered:
-            sb = sweep( ctx, need, covered, frozen=frozen, template=template, model=model )
+            sb = sweep( ctx, need, covered, frozen=frozen, template=template, model=model, gaps=gaps )
             stages.append( _stage( "covered", sb, len( covered ) ) )
             db = vd.decide( sb[ "answers" ], [ e[ "id" ] for e in covered ], sb[ "failed" ], flags, policy )
             if db[ "shortlist_total" ] > 0:
                 return { "route": "pages", "sw": sb, "d": db, "deciding": covered, "stages": stages, "plan": plan_out }
-    sw = sweep( ctx, need, entries, frozen=frozen, template=template, model=model )
+    sw = sweep( ctx, need, entries, frozen=frozen, template=template, model=model, gaps=gaps )
     stages.append( _stage( "all", sw, len( entries ) ) )
     d  = vd.decide( sw[ "answers" ], [ e[ "id" ] for e in entries ], sw[ "failed" ], flags, policy )
     return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out }
@@ -749,21 +763,22 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
         - with write=False nothing is stored (used by replay at HEAD)
     """
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
+    pages = ctx.pages if tool == "check_exists" else []                    # fetch_similar lists neighbours, so it sweeps every entry
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
     if entries and not hard:
-        routed = _route( ctx, need, entries, ctx.pages, flags )
+        routed = _route( ctx, need, entries, pages, flags )
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
         routed = { "route": "none", "sw": none, "d": vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None }
     sw, d, plan = routed[ "sw" ], routed[ "d" ], routed[ "plan" ]
-    template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if ctx.pages else "" )
+    template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ] ),
             "tool": tool, "tool_version": TOOL_VERSION, "query": query, "index_sha": sha_, "model": ctx.model,
             "policy": vd.POLICY, "prompt_template_hash": template_hash, "prompt_template": ctx.template,
-            "page_prompt_template": PAGE_TEMPLATE if ctx.pages else None, "route": routed[ "route" ], "pages": plan,
+            "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
             "shortlist": _shortlist_view( d[ "shortlist" ], by_id ), "shortlist_total": d[ "shortlist_total" ],
             "nearest": _shortlist_view( d[ "nearest" ], by_id ), "malformed": d[ "malformed" ], "missing": d[ "missing" ],
@@ -875,6 +890,8 @@ def replay_impl( rid, ctx ):
           (its inputs reproduce its result), not the model
         - the frozen re-run follows the receipt's route: a page route re-asks the stored pages and covered
           entries from the cache, and a receipt with no route is a plain sweep of every entry
+        - an entry the stored receipt lists as missing or failed is not required in the cache, so a receipt
+          cut short by the call budget or by failed calls replays to the same uncertain verdict
         - the HEAD re-run uses the current tree and the current index, and tests whether the code or
           the model still agrees
         - a damaged or absent input returns { status: "error", error: <NAME> } and no verdict:
@@ -899,8 +916,9 @@ def replay_impl( rid, ctx ):
             route = stored[ "route" ] if "route" in stored else "full"           # a receipt from before page-first has no route
             plan  = stored[ "pages" ] if route in ( "pages", "pages_then_full" ) else None
             pt    = stored[ "page_prompt_template" ] if "page_prompt_template" in stored else None
+            gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ f[ "id" ]: "failed" for f in stored[ "stats" ][ "failed_attempts" ] } }
             d     = _route( ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
-                            template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ] )[ "d" ]
+                            template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         head = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else None, write=False )
     except ReuseError as e:
