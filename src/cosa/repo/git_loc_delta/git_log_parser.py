@@ -96,7 +96,7 @@ class GitLogParser:
             - Always uses --date=short for stable ISO date parsing
             - Custom --pretty marker `COMMIT|<sha>|<cd>|<aE>` distinguishes commit rows
             - all_branches appends `--branches` (union of local branch refs)
-            - include_merges appends `--diff-merges=first-parent` (git 2.31 or newer), else `--no-merges`
+            - include_merges appends `--diff-merges=first-parent`, which older git than 2.31 rejects with GitCommandError; otherwise `--no-merges` is appended
 
         Date basis:
             The date field is `%cd` (committer date), not `%ad` (author date),
