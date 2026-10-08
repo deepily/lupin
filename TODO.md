@@ -16,6 +16,28 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-07 night to 10-08 (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `7f9ad619`, `5de42f73`, `a0105e01`; crew Maya · Pocholo)
+
+**Rick ruled** (cards answered by keypress unless marked voice):
+
+- **The wake-proof marker after a self re-spin: write it** (card `k7rd91hx2`, about 22:24 EDT on 2026-10-07: "Write it (Recommended)"). The wake message arrives as pasted text; the ruling covers the marker only.
+- **Build the per-run suite token, on the test and dev servers only** (card, about 22:27 EDT: "Yes, test and dev servers only (Recommended)"). Row `8d4a5a59`. Landed as `ea925ae5f`.
+- **Land the scheduled-jobs fix** (same card: "Yes, land it (Recommended)"). Row `a80630a4`, option a. Landed inside Cheech's build 04, `f89e7b944`.
+- **Automate the database role provisioning** (same card, typed: "open a ticket and make sure that this gets automated"). Ticket `efdcf9c3`. He ran the provisioner on `lupin_db_test` himself at about 22:27 EDT.
+- **"80513825: Yes"** (voice, about 22:51 EDT). Read by Mr. Radio as: land the Python half of the env step. It is not a ruling on the cutover date, the `.env` lines, the compose commit or the VM step.
+- **No push tonight; the box stays on** (Cheech's relay of Rick, about 22:40 EDT).
+- **Rows approved in bulk** after broadcast `6fa6f791`: 14 of my rows read queued at 23:40 EDT.
+
+**Mr. Radio's calls** (made without Rick, each open to his reversal):
+
+- **The marks fix landed on one sample, and it did not hold.** `074283ad7` took the drain mark off two waiter tests after one passing run; the next run on main failed both. Row `b47d82f1` owned the reds.
+- **The two waiters wait for the jobs ahead of them, not a fixed 30 seconds.** Chosen over a non-strict mark and over seeding the cache. Commits `c45240957`, `af86ec513`, `ebdb51c47`. Open risk: the queue depth also counts jobs the monopolize hold defers.
+- **The real-Postgres rollback test is a dev-venue file.** It runs its own container in about 22 s and skips where there is no docker socket. It has no gate run.
+- **No hand removal of worktrees.** Sixteen trees inventoried, all clean; the janitor sweeps them.
+- **Row `4aaa6281`**: the janitor's archived branch is the compose cutover commit `7564e8bf8`, kept off main on purpose and pinned under `refs/keep/mr-radio/`.
+
+**Open with Rick** (one card at 10:15 EDT on 2026-10-08): the design pick for `efdcf9c3` (A recommended); the option for `d03c5592`; the cutover date and scope for `80513825`; the VM steps for `9e0ba25d` and `ea27d263`; his word on the token widening and the loud 403 for `8d4a5a59`; approval of `867ab3a3`, `80535f46`, `0fcb3fd2`; the push.
+
 ## 📚 DECISIONS LOG 2026-10-06 to 10-07 (Cheech 🌿 `e281ef6f`; crew Rachel · Rio · John · Chloé · Tiberius · Krishna · Sam) — docs sweep, six trains
 
 **Rick ruled** (voice unless marked; recorded on row `51cd818b` unless another row is named):
