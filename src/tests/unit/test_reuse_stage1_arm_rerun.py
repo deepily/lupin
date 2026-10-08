@@ -68,9 +68,8 @@ def test_the_stopped_run_stays_on_the_ledger_and_in_its_file_as_incomplete( env 
 
 
 def test_the_rerun_reads_none_of_the_stopped_runs_answers( env ):
-    env.standin = { "die_after": 1 }                                             # one question answered and cached, the others lost
-    first = st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000 )
-    assert first[ "state" ] == "incomplete" and len( sent( env ) ) >= 2
+    first = st.run_arm( env, 1, "single1", NEED, THREE, 500 )                    # the ceiling lets one question through, and its answer is cached
+    assert first[ "stop_reason" ] == "ceiling" and len( first[ "answers" ] ) == 1 and len( sent( env ) ) == 1
     env.standin, before = {}, len( sent( env ) )
     again = st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt=2, reason="the transport died" )
     assert again[ "cache_hits" ] == 0 and len( sent( env ) ) - before == 3 and again[ "state" ] == "complete"
@@ -98,13 +97,29 @@ def test_an_arm_may_be_run_a_third_time_while_each_attempt_before_it_stopped( en
     assert third[ "run_name" ] == "s1-q1-single1-a3" and third[ "state" ] == "complete"
 
 
-def test_an_arm_whose_first_attempt_raised_may_be_run_again( env ):
+def test_an_arm_stopped_for_a_wrong_model_is_never_run_again_because_it_would_be_paid_for_twice( env ):
+    env.standin = { "served": "jev-other" }
+    assert st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000 )[ "stop_reason" ] == "model_mismatch"
+    count, rows = len( sent( env ) ), env.ledger.path.read_bytes()
+    with pytest.raises( st.DriverRefused, match="model_mismatch" ): st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000, attempt=2, reason="try again" )
+    assert len( sent( env ) ) == count and env.ledger.path.read_bytes() == rows and not ( env.results_dir / "s1-q1-single1-a2.json" ).exists()
+
+
+def test_only_an_arm_stopped_by_its_ceiling_is_run_again( env ):
     def boom( budget ): raise RuntimeError( "disk full" )
+    good = env.transport_factory
     env.transport_factory = boom
     with pytest.raises( RuntimeError ): st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000 )
     assert result( env, "s1-q1-single1" )[ "state" ] == "error"
-    env.transport_factory = lambda budget: Standin( budget )
-    assert st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000, attempt=2, reason="the disk was cleared" )[ "state" ] == "complete"
+    env.transport_factory = good
+    with pytest.raises( st.DriverRefused, match="only an arm stopped by its ceiling" ): st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000, attempt=2, reason="the disk was cleared" )
+    assert not ( env.results_dir / "s1-q1-single1-a2.json" ).exists()
+
+
+def test_an_arm_that_spent_its_attempts_is_not_run_again_either( env ):
+    first = st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt_limit=1 )
+    assert first[ "stop_reason" ] == "attempts" and first[ "state" ] == "incomplete"
+    with pytest.raises( st.DriverRefused, match="stopped for attempts" ): st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt=2, reason="again" )
 
 
 def test_a_gated_arm_is_rerun_the_same_way_once_the_canary_is_approved( env ):
@@ -121,6 +136,13 @@ def test_a_rerun_still_needs_the_attempt_before_it_and_a_reason( env ):
     stop_single1( env )
     with pytest.raises( st.DriverRefused, match="reason" ): st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000, attempt=2 )
     assert sent( env ) == []
+
+
+def test_the_rerun_indexes_are_these_numbers():
+    assert { st.retry_index( arm, n ) for arm in st.ARMS for n in ( 2, 3 ) } == set( range( 15, 45 ) )
+    assert [ st.retry_index( "canary", n ) for n in ( 2, 3 ) ] == [ 15, 16 ]
+    assert [ st.retry_index( "pack10", n ) for n in ( 2, 3 ) ] == [ 17, 18 ] and [ st.retry_index( "single1", n ) for n in ( 2, 3 ) ] == [ 41, 42 ]
+    assert [ st.retry_index( "single2", n ) for n in ( 2, 3 ) ] == [ 43, 44 ]
 
 
 def test_every_arm_and_attempt_has_a_run_index_no_other_arm_shares():
