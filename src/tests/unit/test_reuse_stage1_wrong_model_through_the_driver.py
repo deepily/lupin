@@ -57,6 +57,19 @@ def test_a_wrong_model_canary_is_tripped_by_name_by_the_driver_and_the_analysis_
     assert check[ "agrees" ] and check[ "analysis_only" ] == [] and check[ "driver_only" ] == []
 
 
+def test_the_analysis_trips_the_name_on_the_stop_alone_as_the_driver_does_not_on_a_row_error_without_it( env ):
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    rec    = read( env, "s1-q1-canary" ); rec[ "stop_reason" ] = None
+    assert any( r[ "error" ] == "ModelMismatch" for r in rec[ "rows" ] ) and "model_mismatch" not in an.check_canary( rec, report )[ "tripped" ]
+
+
+def test_a_canary_that_another_model_did_not_answer_does_not_trip_the_name( env ):
+    env.transport_factory = lambda budget, **kw: Standin( budget, served=None, **kw )
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    check  = an.check_canary( read( env, "s1-q1-canary" ), report )
+    assert "model_mismatch" not in report[ "tripped" ] and "model_mismatch" not in check[ "tripped" ] and check[ "agrees" ]
+
+
 def test_the_command_over_a_wrong_model_canary_folder_stops_and_asks_and_prints_no_disagreement( env, capsys ):
     st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
     assert an.main( [ str( env.results_dir ) ] ) == 0

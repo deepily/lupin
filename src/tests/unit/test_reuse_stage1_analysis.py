@@ -667,7 +667,7 @@ def test_a_row_with_output_but_no_input_usage_is_skipped_rather_than_crashing_th
 def test_the_canary_trips_on_missing_usage_and_on_an_unfinished_arm_in_the_drivers_order():
     arm, can = _canary( [ _row( tokens_in=None, tokens_out=None ) ] ); arm[ "state" ] = "incomplete"
     assert an.check_canary( arm, can )[ "tripped" ] == [ "usage_missing", "incomplete" ]
-    assert an.CANARY_TRIPS == ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "incomplete", "nothing_measured" )
+    assert an.CANARY_TRIPS == ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "model_mismatch", "incomplete", "nothing_measured" )
 
 
 @pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] } ] )

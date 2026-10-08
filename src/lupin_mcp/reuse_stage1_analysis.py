@@ -179,7 +179,7 @@ def flips( ref, other, ids, cut ):
 
 
 PASS_THREE_SIZE = 200                                         # the probe placements are run in a pack of this size, so they gate only this size
-CANARY_TRIPS    = ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "incomplete", "nothing_measured" )
+CANARY_TRIPS    = ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "model_mismatch", "incomplete", "nothing_measured" )
 
 
 def _spent( arm ):
@@ -398,7 +398,8 @@ def check_canary( arm, canary ):
         - returns { tripped, output_per_entry, unverifiable, agrees, analysis_only, driver_only, failed, unasked, not_reached }
         - tripped lists, in the order of CANARY_TRIPS: output tokens per entry above the stop figure, usage above
           a row's reserve, any refusal (a refused row, an HTTP 422, or a refused total), an answered row with no
-          usage, an unfinished arm, and an arm that sent no request
+          usage, a stop because another model answered, an unfinished arm, and an arm that sent no request
+        - model_mismatch reads the arm's stop reason alone, as the driver does, so a row error without that stop does not trip it
         - unverifiable counts answered rows that reported no usage, which only a person can read
         - agrees compares tripped with the driver's own list, and the two other lists name the differences
     """
@@ -410,7 +411,7 @@ def check_canary( arm, canary ):
         if r[ "reserve_tokens" ] is not None and r[ "tokens_in" ] + r[ "tokens_out" ] > r[ "reserve_tokens" ]: over_reserve = True
     unverifiable = sum( 1 for r in rows if r[ "status" ] == "answered" and ( r[ "tokens_in" ] is None or r[ "tokens_out" ] is None ) )
     flags = { "output_per_entry_over_60": any( x > OUTPUT_PER_ENTRY_STOP for x in out_per ), "usage_over_reserve": over_reserve, "refusal": refused,
-              "usage_missing": unverifiable > 0, "incomplete": arm[ "state" ] != "complete" or bool( arm[ "failed" ] or arm[ "unasked" ] or arm[ "not_reached" ] ),
+              "usage_missing": unverifiable > 0, "model_mismatch": arm[ "stop_reason" ] == "model_mismatch", "incomplete": arm[ "state" ] != "complete" or bool( arm[ "failed" ] or arm[ "unasked" ] or arm[ "not_reached" ] ),
               "nothing_measured": not any( r[ "attempts" ] > 0 for r in rows ) }
     tripped = [ t for t in CANARY_TRIPS if flags[ t ] ]
     driver  = list( canary[ "tripped" ] )
