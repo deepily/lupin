@@ -10,8 +10,8 @@ pins:
   - cosa.rest.v2.executor.make_executor@0ac07563f3
   - cosa.rest.v2.pending.PendingRequests@5eace53fc7
   - cosa.rest.v2.near_match_guard.quantities_differ@b58fa386e0
-  - cosa.rest.routers.v2_ask.v2_submit@72d9cfe688
-  - cosa.rest.routers.v2_ask.vet_parent_id_hash@89e2ade028
+  - cosa.rest.routers.v2_ask.v2_submit@3b33933089
+  - cosa.rest.routers.v2_ask.vet_parent_id_hash@9e7a61093e
 ---
 # V2 ask flow
 

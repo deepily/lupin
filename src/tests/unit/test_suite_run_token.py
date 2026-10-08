@@ -180,3 +180,41 @@ def test_a_non_ascii_or_oversized_token_is_refused_before_it_is_hashed( odd, mon
     monkeypatch.setattr( srt, "_digest", lambda t: hashed.append( len( t ) ) or real( t ) )
     assert srt.check( PARENT, odd, _active( PARENT ), now=1 ) == ( False, srt.REASON_MISMATCH )
     assert hashed == [ ]
+
+
+class _Mgr:
+    value = None
+    def __init__( self, env_var_name ): self.env_var_name = env_var_name
+    def get( self, key, default=None, return_type=None ):
+        assert key == srt.TOKEN_ENABLED_KEY and return_type == "boolean"
+        return default if self.value is None else self.value
+
+
+@pytest.mark.parametrize( "configured, expected", [ ( None, False ), ( False, False ), ( True, True ) ] )
+def test_the_switch_reads_the_ini_key_and_defaults_to_off( configured, expected, monkeypatch ):
+    _Mgr.value = configured
+    monkeypatch.setattr( srt, "ConfigurationManager", _Mgr )
+    assert srt.token_enabled() is expected
+
+
+BLOCK_CLI_ARGS = ( "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini "
+                   "config_block_id=Lupin:+{block}" )
+
+
+@pytest.mark.parametrize( "block, expected", [
+    ( "Production",  False ),
+    ( "Baseline",    False ),
+    ( "Development", True ),
+    ( "Testing",     True ),
+    ( "Testing-GCS", True ),
+] )
+def test_the_shipped_ini_switches_the_token_on_only_for_test_and_dev_servers( block, expected, monkeypatch ):
+    """The real ConfigurationManager over the shipped INI, one block at a time."""
+    from cosa.config.configuration_manager import ConfigurationManager
+    monkeypatch.setenv( "LUPIN_CONFIG_MGR_CLI_ARGS", BLOCK_CLI_ARGS.format( block=block ) )
+    ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
+    try:
+        assert srt.token_enabled() is expected
+    finally:
+        monkeypatch.undo()
+        ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )

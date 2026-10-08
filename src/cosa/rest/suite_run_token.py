@@ -21,6 +21,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+from cosa.config.configuration_manager import ConfigurationManager
+
 TOKEN_ENV_NAME      = "LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN"
 TOKEN_HEADER        = "X-Lupin-Lineage-Token"
 TOKEN_HEADER_MAX    = 256
@@ -34,6 +36,18 @@ REASON_NOT_ACTIVE   = "not_active_monopolizer"
 
 _lock  = threading.Lock()
 _store = { }
+
+
+def token_enabled() -> bool:
+    """
+    Whether this server issues and accepts a per-run suite token.
+
+    Ensures:
+        - returns False when the INI key is absent, which is the case in Baseline and Production
+        - is read per call, so the job and the vet cannot disagree about the switch
+    """
+    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return bool( config_mgr.get( TOKEN_ENABLED_KEY, default=False, return_type="boolean" ) )
 
 
 def _digest( token: str ) -> str:

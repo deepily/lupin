@@ -428,15 +428,8 @@ def _test_account_email() -> Optional[ str ]:
 
 
 def _suite_token_enabled() -> bool:
-    """
-    Whether this server accepts a per-run suite token as proof of lineage.
-
-    Ensures:
-        - returns False when the INI key is absent, which is the case in Baseline and Production
-        - is read per call, and only when a request actually presents a token
-    """
-    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    return bool( config_mgr.get( suite_run_token.TOKEN_ENABLED_KEY, default=False, return_type="boolean" ) )
+    """Whether this server accepts a per-run suite token; the job reads the same switch."""
+    return suite_run_token.token_enabled()
 
 
 def _active_monopolizer_id() -> Optional[ str ]:
@@ -484,7 +477,7 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
         - reason is "not_owner" or "owner_unknown" (no job_history row for the parent), or, when a
           token was presented to a server that accepts one and failed, the token's own reason:
           token_unknown, token_mismatch, token_expired, not_active_monopolizer or
-          token_check_failed (the slot reader raised).
+          token_check_failed (the switch or the slot reader raised).
         - a failed token never blocks the owner check: an owner presenting a bad token is honoured.
         - the refusal is never silent: one log line names caller and parent, both repr()'d and
           length-capped (a caller-supplied id cannot forge or flood log lines).
@@ -494,14 +487,16 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     test_account = _test_account_email()
     if test_account is not None and user_email.strip().lower() == test_account: return parent_id_hash, None
     token_reason = None
-    if lineage_token is not None and _suite_token_enabled():
+    if lineage_token is not None:
         try:
-            honoured, token_reason = suite_run_token.check( parent_id_hash, lineage_token, _active_monopolizer_id )
+            if _suite_token_enabled():
+                honoured, token_reason = suite_run_token.check( parent_id_hash, lineage_token, _active_monopolizer_id )
+                if honoured: return parent_id_hash, None
         except Exception as error:
-            # A reader that cannot answer must not become a 500, nor skip the owner check below.
+            # An unreadable switch or a slot reader that cannot answer fails closed: the token
+            # is refused, the owner check below still runs, and the caller never sees a 500.
             print( f"[v2-lineage] suite token check failed: {type( error ).__name__}" )
-            honoured, token_reason = False, "token_check_failed"
-        if honoured: return parent_id_hash, None
+            token_reason = "token_check_failed"
     owner = _job_owner_id( parent_id_hash )
     if owner is not None and str( owner ) == str( user_id ): return parent_id_hash, None
     reason = token_reason or ( "owner_unknown" if owner is None else "not_owner" )

@@ -179,6 +179,17 @@ def test_a_slot_reader_that_raises_drops_the_token_but_still_runs_the_owner_chec
     assert queue.pushed[ -1 ].spawned_by_id_hash == PARENT, "the owner is honoured even when the reader is broken"
 
 
+def test_a_switch_that_cannot_be_read_fails_closed_to_the_owner_check( queue, tmp_path, run, monkeypatch, capsys ):
+    def unreadable(): raise OSError( "ini unreadable" )
+    monkeypatch.setattr( v2_ask, "_suite_token_enabled", unreadable )
+    _submit_with( _client( queue, tmp_path, _user() ), run[ "token" ] )
+    assert _stamp( queue ) is None
+    assert _dropped( tmp_path ) == [ "'ts-parentjob':token_check_failed" ]
+    assert "suite token check failed: OSError" in capsys.readouterr().out
+    _submit_with( _client( queue, tmp_path, _user( uid=OWNER_UID ) ), run[ "token" ] )
+    assert queue.pushed[ -1 ].spawned_by_id_hash == PARENT
+
+
 def test_the_reason_word_stays_in_the_trace_and_out_of_the_http_body( queue, tmp_path, run ):
     body = _submit_with( _client( queue, tmp_path, _user() ), "wrong" )
     assert "token_" not in json.dumps( body )
@@ -229,19 +240,9 @@ def test_an_oversized_header_is_a_dropped_claim_not_a_422( run ):
 
 # ── the two readers the vet uses ────────────────────────────────────────────
 
-class _Mgr:
-    value = None
-    def __init__( self, env_var_name ): pass
-    def get( self, key, default=None, return_type=None ):
-        assert key == srt.TOKEN_ENABLED_KEY and return_type == "boolean"
-        return default if self.value is None else self.value
-
-
-@pytest.mark.parametrize( "configured, expected", [ ( None, False ), ( False, False ), ( True, True ) ] )
-def test_the_switch_reads_the_ini_key_and_defaults_to_off( configured, expected, monkeypatch ):
-    _Mgr.value = configured
-    monkeypatch.setattr( v2_ask, "ConfigurationManager", _Mgr )
-    assert v2_ask._suite_token_enabled() is expected
+def test_the_vet_switch_is_the_modules_switch( monkeypatch ):
+    monkeypatch.setattr( srt, "token_enabled", lambda: "sentinel" )
+    assert v2_ask._suite_token_enabled() == "sentinel"
 
 
 def _fake_main( monkeypatch, queue ):
