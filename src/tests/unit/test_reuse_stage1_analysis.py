@@ -203,3 +203,381 @@ def test_real_answers_read_through_the_real_reader_give_the_counts_the_live_chec
     assert len( an.boundary_ids( a ) ) == 33                                                   # every in-band answer is in the sample
     assert sum( .40 <= o <= .60 for o in a[ "overlaps" ].values() ) == 15
     assert a[ "status" ] == "clean"
+
+
+# --- a whole question, built by hand --------------------------------------------------------------------------------------
+
+def _names( n, prefix="e" ): return [ f"{prefix}{k:03d}" for k in range( n ) ]
+
+
+def _base( n_boundary=100, n_other=20 ):
+    """Ensures: returns n_boundary entries at 0.5 and n_other far outside the band at 0.05."""
+    return { **{ i: 0.5 for i in _names( n_boundary ) }, **{ i: 0.05 for i in _names( n_other, "o" ) } }
+
+
+def _moved( base, shift=0.0, down=(), up=() ):
+    """Ensures: returns base moved by shift, the ids in down at 0.49 and those in up at 0.51."""
+    out = { i: round( min( 1.0, max( 0.0, o + shift ) ), 6 ) for i, o in base.items() }
+    out.update( { i: 0.49 for i in down } ); out.update( { i: 0.51 for i in up } )
+    return out
+
+
+def _probe( question, probe_id, placement, neighbours, overlap, base ):
+    """Ensures: returns a pack-of-200 probe arm in which the probe entry has the given overlap."""
+    name = f"probe-{placement}-{'random' if neighbours == 'random' else 'near'}"
+    rec  = _arm( name, { **base, probe_id: overlap }, question=question, size=200 )
+    rec[ "probe" ] = { "id": probe_id, "placement": placement, "neighbours": neighbours }
+    return rec
+
+
+def _probes( question, probe_id, base, overlap=None ):
+    """Ensures: returns the six probe arms, at the probe's single value unless overlap is given."""
+    o = base[ probe_id ] if overlap is None else overlap
+    return [ _probe( question, probe_id, p, n, o, base ) for p in an.PROBE_PLACEMENTS for n in an.PROBE_NEIGHBOURS ]
+
+
+def _question( question=1, base=None, noise=0.0, packs=None, probes=True, probe_shift=0.0 ):
+    """
+    Build the arms of one question.
+
+    Ensures:
+        - returns single1, single2 moved by noise, one pack arm per size in packs, and six probes
+        - packs maps a size to the keyword arguments of _moved
+    """
+    base = _base() if base is None else base
+    recs = [ _arm( "single1", base, question=question ), _arm( "single2", _moved( base, noise ), question=question ) ]
+    for size, kw in ( { 10: {}, 50: {}, 200: {} } if packs is None else packs ).items():
+        recs.append( _arm( f"pack{size}", _moved( base, **kw ), question=question, size=size ) )
+    if probes: recs += _probes( question, "e000", base, None if not probe_shift else base[ "e000" ] + probe_shift )
+    return recs
+
+
+# --- the noise floor -----------------------------------------------------------------------------------------------------
+
+def test_a_noise_below_the_minimum_reads_as_the_minimum():
+    nf = an.noise_floor( an.read_stage( _question( noise=0.001 ) ) )
+    assert ( nf[ "measured" ], nf[ "floor" ], nf[ "state" ] ) == ( 0.001, 0.02, "ok" )
+
+
+def test_a_noise_above_the_minimum_is_the_floor():
+    nf = an.noise_floor( an.read_stage( _question( noise=0.03 ) ) )
+    assert ( nf[ "measured" ], nf[ "floor" ] ) == ( 0.03, 0.03 )
+
+
+def test_the_noise_floor_pools_the_differences_of_every_question_run():
+    one = _question( 1, noise=0.0 ); two = _question( 2, noise=0.04 )
+    nf  = an.noise_floor( an.read_stage( one + two ) )
+    assert nf[ "n" ] == 240 and nf[ "measured" ] == 0.04                       # 120 entries a question; half the pooled differences are 0.04
+
+
+def test_the_noise_floor_is_inconclusive_when_a_single_run_is_missing_or_not_clean():
+    recs = [ r for r in _question() if r[ "arm" ] != "single2" ]
+    assert an.noise_floor( an.read_stage( recs ) )[ "state" ] == "inconclusive"
+    recs = _question(); recs[ 0 ][ "failed" ] = [ "e000" ]
+    assert an.noise_floor( an.read_stage( recs ) )[ "state" ] == "inconclusive"
+
+
+# --- pass 1: the per-entry difference ------------------------------------------------------------------------------------
+
+def test_pass_one_holds_when_the_99th_percentile_difference_equals_the_floor_and_fails_just_above():
+    ok  = an.pass_one( an.read_stage( _question( packs={ 10: { "shift": 0.02 } } ) ), 10, 0.02 )
+    bad = an.pass_one( an.read_stage( _question( packs={ 10: { "shift": 0.020001 } } ) ), 10, 0.02 )
+    assert ( ok[ "state" ], ok[ "p99" ] ) == ( "pass", 0.02 ) and bad[ "state" ] == "fail"
+
+
+def test_pass_one_reads_the_99th_percentile_so_one_wild_entry_in_a_hundred_does_not_fail_it_but_the_maximum_shows_it():
+    base = { i: 0.05 for i in _names( 100 ) }
+    pack = _moved( base ); pack[ "e000" ] = 0.9
+    recs = [ _arm( "single1", base ), _arm( "pack10", pack, size=10 ) ]
+    r = an.pass_one( an.read_stage( recs ), 10, 0.02 )
+    assert ( r[ "state" ], r[ "p99" ], r[ "max" ], r[ "n" ] ) == ( "pass", 0.0, 0.85, 100 )
+
+
+def test_pass_one_pools_the_differences_of_the_questions():
+    st = an.read_stage( _question( 1, packs={ 10: {} } ) + _question( 2, packs={ 10: { "shift": 0.05 } } ) )
+    r  = an.pass_one( st, 10, 0.02 )
+    assert ( r[ "n" ], r[ "p99" ], r[ "state" ] ) == ( 240, 0.05, "fail" )
+
+
+def test_pass_one_is_invalid_when_the_pack_arm_was_stopped_and_inconclusive_when_it_is_partial_or_absent():
+    inv = _question( packs={ 10: {} } ); inv[ 2 ][ "state" ], inv[ 2 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.pass_one( an.read_stage( inv ), 10, 0.02 )[ "state" ] == "invalid"
+    par = _question( packs={ 10: {} } ); par[ 2 ][ "failed" ] = [ "e001" ]
+    assert an.pass_one( an.read_stage( par ), 10, 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_one( an.read_stage( _question( packs={ 50: {} } ) ), 10, 0.02 )[ "state" ] == "inconclusive"
+
+
+# --- pass 2: flips at the threshold on boundary entries --------------------------------------------------------------------
+
+def test_pass_two_allows_the_noise_floors_flips_plus_one_and_fails_one_more():
+    noise = _question( noise=0.0 )
+    noise[ 1 ] = _arm( "single2", _moved( _base(), down=[ "e001", "e002" ] ) )                          # two flips between the singles
+    three = an.pass_two( an.read_stage( noise[ :2 ] + [ _arm( "pack10", _moved( _base(), down=[ "e003", "e004", "e005" ] ), size=10 ) ] ), 10 )
+    four  = an.pass_two( an.read_stage( noise[ :2 ] + [ _arm( "pack10", _moved( _base(), down=[ "e003", "e004", "e005", "e006" ] ), size=10 ) ] ), 10 )
+    assert ( three[ "pack_flips" ], three[ "noise_flips" ], three[ "state" ] ) == ( 3, 2, "pass" )
+    assert ( four[ "pack_flips" ], four[ "state" ] ) == ( 4, "fail" )
+
+
+def test_pass_two_counts_flips_only_on_boundary_entries():
+    recs = [ _arm( "single1", _base() ), _arm( "single2", _base() ), _arm( "pack10", _moved( _base(), up=[ "o000", "o001", "o002" ] ), size=10 ) ]
+    r = an.pass_two( an.read_stage( recs ), 10 )
+    assert ( r[ "pack_flips" ], r[ "noise_flips" ], r[ "state" ] ) == ( 0, 0, "pass" )
+
+
+def test_pass_two_pools_the_flips_of_the_questions():
+    q1 = _question( 1, packs={ 10: { "down": [ "e001" ] } } ); q2 = _question( 2, packs={ 10: { "down": [ "e001", "e002" ] } } )
+    r  = an.pass_two( an.read_stage( q1 + q2 ), 10 )
+    assert ( r[ "pack_flips" ], r[ "boundary" ] ) == ( 3, 200 )
+
+
+def test_pass_two_is_invalid_or_inconclusive_with_its_arms():
+    inv = _question( packs={ 10: {} } ); inv[ 2 ][ "state" ], inv[ 2 ][ "stop_reason" ] = "incomplete", "ledger"
+    assert an.pass_two( an.read_stage( inv ), 10 )[ "state" ] == "invalid"
+    assert an.pass_two( an.read_stage( _question( packs={ 50: {} } ) ), 10 )[ "state" ] == "inconclusive"
+
+
+# --- pass 3: the probe entry ---------------------------------------------------------------------------------------------
+
+def test_pass_three_holds_when_all_six_placements_are_within_the_floor_and_fails_when_one_is_not():
+    ok  = an.pass_three( an.read_stage( _question( probe_shift=0.02 ) ), 0.02 )
+    bad = an.pass_three( an.read_stage( _question( probe_shift=0.020001 ) ), 0.02 )
+    assert ( ok[ "state" ], ok[ "placements" ], ok[ "worst" ] ) == ( "pass", 6, 0.02 ) and bad[ "state" ] == "fail"
+
+
+def test_pass_three_is_inconclusive_when_a_placement_is_missing_or_the_probe_has_no_single_value():
+    recs = _question(); recs.pop()
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_three( an.read_stage( _question( probes=False ) ), 0.02 )[ "state" ] == "inconclusive"
+    recs = _question(); recs[ 0 ] = _arm( "single1", { k: v for k, v in _base().items() if k != "e000" } )
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "inconclusive"
+
+
+def test_pass_three_is_invalid_when_a_probe_arm_was_stopped():
+    recs = _question(); recs[ -1 ][ "state" ], recs[ -1 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.pass_three( an.read_stage( recs ), 0.02 )[ "state" ] == "invalid"
+
+
+def test_pass_three_wants_each_of_the_six_placements_exactly_once_per_question():
+    recs = _question(); recs[ -1 ] = _probe( 1, "e000", "first", "random", 0.5, _base() ); recs[ -1 ][ "run_name" ] = "other"
+    with pytest.raises( ValueError, match="twice|placement" ):
+        an.pass_three( an.read_stage( recs ), 0.02 )
+
+
+def test_pass_three_pools_the_questions_and_reports_the_worst_difference():
+    r = an.pass_three( an.read_stage( _question( 1 ) + _question( 2, probe_shift=0.01 ) ), 0.02 )
+    assert ( r[ "placements" ], r[ "worst" ], r[ "state" ] ) == ( 12, 0.01, "pass" )
+
+
+# --- all the passes, and the default pack size ---------------------------------------------------------------------------
+
+def test_with_every_pass_met_the_default_is_the_largest_size_and_the_verdict_names_it():
+    rep = an.evaluate( an.read_stage( _question() ) )
+    assert ( rep[ "sizes" ][ 10 ][ "state" ], rep[ "sizes" ][ 50 ][ "state" ], rep[ "sizes" ][ 200 ][ "state" ] ) == ( "pass", "pass", "pass" )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( 200, "default pack size 200" )
+    assert rep[ "boundary_pooled" ] == 100 and rep[ "boundary_by_question" ] == { 1: 100 }
+
+
+def test_the_default_is_the_largest_size_that_passes_even_when_a_larger_one_fails():
+    rep = an.evaluate( an.read_stage( _question( packs={ 10: {}, 50: {}, 200: { "shift": 0.1 } } ) ) )
+    assert ( rep[ "sizes" ][ 200 ][ "state" ], rep[ "default_size" ] ) == ( "fail", 50 )
+
+
+def test_a_failed_probe_fails_only_the_size_the_probe_was_run_at():
+    rep = an.evaluate( an.read_stage( _question( probe_shift=0.1 ) ) )
+    assert ( rep[ "sizes" ][ 10 ][ "state" ], rep[ "sizes" ][ 50 ][ "state" ], rep[ "sizes" ][ 200 ][ "state" ] ) == ( "pass", "pass", "fail" )
+    assert rep[ "default_size" ] == 50
+
+
+def test_fewer_than_ninety_pooled_boundary_entries_turn_a_pass_into_inconclusive_never_a_pass():
+    rep = an.evaluate( an.read_stage( _question( base=_base( 89 ) ) ) )
+    assert rep[ "boundary_pooled" ] == 89
+    assert all( rep[ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( None, "inconclusive" )
+    assert an.evaluate( an.read_stage( _question( base=_base( 90 ) ) ) )[ "default_size" ] == 200
+
+
+def test_a_fail_still_reads_fail_when_the_boundary_count_is_short():
+    rep = an.evaluate( an.read_stage( _question( base=_base( 89 ), packs={ 10: { "shift": 0.1 }, 50: {}, 200: {} } ) ) )
+    assert rep[ "sizes" ][ 10 ][ "state" ] == "fail" and rep[ "sizes" ][ 50 ][ "state" ] == "inconclusive"
+
+
+def test_when_no_size_passes_the_decision_is_to_stop_and_ask():
+    rep = an.evaluate( an.read_stage( _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) ) )
+    assert ( rep[ "default_size" ], rep[ "decision" ] ) == ( None, "stop and ask: no pack size passes" )
+
+
+def test_an_invalid_arm_anywhere_means_stop_and_ask_even_if_another_size_passes():
+    recs = _question(); recs[ 4 ][ "state" ], recs[ 4 ][ "stop_reason" ] = "incomplete", "ceiling"          # pack200
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "sizes" ][ 200 ][ "state" ] == "invalid" and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_an_unfinished_size_beside_a_pass_names_the_pass_and_lists_the_unresolved_size():
+    recs = [ r for r in _question() if r[ "arm" ] != "pack200" ]
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert ( rep[ "default_size" ], rep[ "unresolved_larger" ] ) == ( 50, [ 200 ] )
+
+
+def test_a_noise_floor_that_cannot_be_measured_makes_every_size_inconclusive():
+    rep = an.evaluate( an.read_stage( [ r for r in _question() if r[ "arm" ] != "single2" ] ) )
+    assert all( rep[ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES ) and rep[ "decision" ] == "inconclusive"
+
+
+# --- the rules that stop the stage ---------------------------------------------------------------------------------------
+
+def _spend( question, tokens, arm="single1" ):
+    """Ensures: returns a tiny clean arm of the question that settled the given tokens."""
+    rec = _arm( arm, { "a": 0.1 }, question=question ); rec[ "totals" ][ "spent_tokens" ] = tokens
+    return rec
+
+
+def _with_boundary( question, n ):
+    """Ensures: returns a clean single1 arm holding n boundary entries."""
+    return _arm( "single1", { f"q{question}b{k:03d}": 0.5 for k in range( n ) }, question=question )
+
+
+def test_spend_above_fifteen_million_after_question_one_stops_the_stage_and_exactly_fifteen_million_does_not():
+    over  = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_001, "single2" ) ] ) )
+    exact = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_000, "single2" ) ] ) )
+    assert ( over[ "stop" ], over[ "findings" ][ 0 ][ "rule" ] ) == ( True, "spend_after_question_1" )
+    assert exact[ "stop" ] is False and exact[ "spent_by_question" ] == { 1: 15_000_000 }
+
+
+def test_the_spend_of_an_arm_without_a_settled_figure_is_its_reported_tokens():
+    rec = _spend( 1, None ); rec[ "totals" ][ "tokens_in" ], rec[ "totals" ][ "tokens_out" ] = 15_000_000, 1
+    assert an.stop_rules( an.read_stage( [ rec ] ) )[ "stop" ] is True
+
+
+def test_fewer_than_fifty_pooled_boundary_entries_after_question_two_stops_before_question_three():
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 29 ) ] ) )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 30 ) ] ) )
+    assert ( short[ "stop" ], short[ "pooled_boundary" ], short[ "next_step" ] ) == ( True, 49, "stop and ask: under 50 pooled boundary entries after question 2" )
+    assert ( ok[ "stop" ], ok[ "next_step" ] ) == ( False, "run question 3" )
+
+
+def test_the_fifty_rule_is_read_only_after_question_two_and_before_question_three():
+    one = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ) )
+    assert one[ "stop" ] is False and one[ "next_step" ] == "run question 2"
+    three = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ), _with_boundary( 2, 3 ), _with_boundary( 3, 90 ) ] ) )
+    assert three[ "stop" ] is False and three[ "next_step" ] == "evaluate"
+
+
+def test_after_question_three_fewer_than_ninety_allows_the_reserve_question_and_ninety_does_not_need_it():
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 29 ) ] ) )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ) ] ) )
+    assert ( short[ "pooled_boundary" ], short[ "next_step" ] ) == ( 89, "run the reserve question" )
+    assert ( ok[ "pooled_boundary" ], ok[ "next_step" ] ) == ( 90, "evaluate" )
+
+
+def test_after_the_reserve_question_fewer_than_ninety_is_inconclusive_and_nothing_more_is_run():
+    st = an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 20 ), _with_boundary( 3, 20 ), _with_boundary( 4, 20 ) ] )
+    r  = an.stop_rules( st )
+    assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 80, "evaluate: inconclusive, under 90 pooled boundary entries" )
+
+
+def test_a_single_run_that_is_not_clean_gives_no_boundary_count_and_the_rule_says_so():
+    bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
+    r   = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ) )
+    assert r[ "next_step" ] == "stop and ask: question 2's single run 1 is not clean" and r[ "stop" ] is True
+
+
+def test_the_stage_total_above_seventy_one_million_is_reported_as_a_breach():
+    r = an.stop_rules( an.read_stage( [ _spend( 1, 71_000_001 ) ] ) )
+    assert any( f[ "rule" ] == "stage_ceiling" for f in r[ "findings" ] ) and r[ "stop" ] is True
+    ok = an.stop_rules( an.read_stage( [ _spend( 1, 14_000_000 ), _spend( 2, 57_000_000 ) ] ) )
+    assert not any( f[ "rule" ] == "stage_ceiling" for f in ok[ "findings" ] ) and ok[ "spent_total" ] == 71_000_000
+
+
+# --- the canary ----------------------------------------------------------------------------------------------------------
+
+def _canary( rows, totals=None, tripped=None ):
+    """Ensures: returns ( arm record, canary record ) for rows given as request dicts."""
+    arm = _arm( "canary", { f"c{k}": 0.1 for k in range( 10 ) }, size=10, rows=rows )
+    if totals: arm[ "totals" ].update( totals )
+    return arm, { "format": "stage1-canary-1", "question": 1, "run_name": "s1-q1-canary", "tripped": [] if tripped is None else tripped, "approved": None }
+
+
+def _row( tokens_out=420, tokens_in=1000, reserve=4000, size=10, status="answered", http_status=None ):
+    return { "request_hash": "h", "size": size, "status": status, "tokens_in": tokens_in, "tokens_out": tokens_out,
+             "reserve_tokens": reserve, "http_status": http_status }
+
+
+def test_sixty_output_tokens_an_entry_is_fine_and_more_trips_the_canary():
+    ok  = an.check_canary( *_canary( [ _row( tokens_out=600 ) ] ) )
+    bad = an.check_canary( *_canary( [ _row( tokens_out=601 ) ] ) )
+    assert ok[ "tripped" ] == [] and bad[ "tripped" ] == [ "output_per_entry_over_60" ]
+    assert bad[ "output_per_entry" ] == [ 60.1 ]
+
+
+def test_usage_equal_to_the_reserve_is_fine_and_one_over_trips_the_canary():
+    ok  = an.check_canary( *_canary( [ _row( tokens_in=3400, tokens_out=600, reserve=4000 ) ] ) )
+    bad = an.check_canary( *_canary( [ _row( tokens_in=3401, tokens_out=600, reserve=4000 ) ] ) )
+    assert ok[ "tripped" ] == [] and bad[ "tripped" ] == [ "usage_over_reserve" ]
+
+
+def test_any_refusal_trips_the_canary_by_status_by_http_422_or_by_the_total():
+    for rows, totals in ( ( [ _row( status="refused" ) ], None ), ( [ _row( http_status=422 ) ], None ), ( [ _row() ], { "refused_422": 1 } ) ):
+        assert an.check_canary( *_canary( rows, totals ) )[ "tripped" ] == [ "refusal" ], rows
+
+
+def test_the_trips_come_in_a_fixed_order_and_a_row_never_sent_is_skipped():
+    r = an.check_canary( *_canary( [ _row( tokens_out=700, tokens_in=9000, status="refused" ), _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached" ) ] ) )
+    assert r[ "tripped" ] == [ "output_per_entry_over_60", "usage_over_reserve", "refusal" ]
+
+
+def test_an_answered_row_without_usage_cannot_be_checked_and_is_listed_for_a_human():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=None ) ] ) )
+    assert r[ "tripped" ] == [] and r[ "unverifiable" ] == 1
+
+
+def test_a_disagreement_with_the_drivers_own_list_is_reported_both_ways():
+    r = an.check_canary( *_canary( [ _row( tokens_out=700 ) ], tripped=[ "refusal" ] ) )
+    assert ( r[ "agrees" ], r[ "analysis_only" ], r[ "driver_only" ] ) == ( False, [ "output_per_entry_over_60" ], [ "refusal" ] )
+    assert an.check_canary( *_canary( [ _row() ] ) )[ "agrees" ] is True
+
+
+def test_the_canary_reports_its_failed_unasked_and_unreached_counts():
+    arm, can = _canary( [ _row() ] ); arm[ "failed" ], arm[ "unasked" ], arm[ "not_reached" ] = [ "a" ], [ "b", "c" ], []
+    r = an.check_canary( arm, can )
+    assert ( r[ "failed" ], r[ "unasked" ], r[ "not_reached" ] ) == ( 1, 2, 0 )
+
+
+# --- the page arm --------------------------------------------------------------------------------------------------------
+
+def _pages( s1, s2, pack ):
+    return [ _arm( "page-single1", s1 ), _arm( "page-single2", s2 ), _arm( "page-pack", pack, size=200 ) ]
+
+
+def test_pages_chosen_the_same_after_packing_pass_and_the_differences_are_reported():
+    base = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
+    r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, 0.01 ), _moved( base, 0.03 ) ) ) )[ 1 ]
+    assert r[ "state" ] == "pass" and r[ "chosen_single1" ] == [ "p1", "p2" ] and r[ "chosen_pack" ] == [ "p1", "p2" ]
+    assert ( r[ "pack_p99" ], r[ "pack_max" ], r[ "noise_p99" ], r[ "noise_max" ] ) == ( 0.03, 0.03, 0.01, 0.01 )
+
+
+def test_a_changed_set_of_chosen_pages_is_a_fail_for_packing_the_page_asks():
+    base = { "p1": 0.9, "p2": 0.31, "p3": 0.1 }
+    r = an.analyze_pages( an.read_stage( _pages( base, base, _moved( base, -0.02 ) ) ) )[ 1 ]
+    assert r[ "state" ] == "fail" and r[ "set_changed_by_packing" ] is True and r[ "chosen_pack" ] == [ "p1" ]
+
+
+def test_a_set_that_changes_between_the_two_single_runs_is_reported_as_noise_not_as_a_fail():
+    base = { "p1": 0.9, "p2": 0.31 }
+    r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, -0.02 ), base ) ) )[ 1 ]
+    assert r[ "state" ] == "pass" and r[ "set_changed_by_noise" ] is True
+
+
+def test_the_chosen_pages_are_the_floor_and_the_cap_of_the_tool_itself():
+    from lupin_mcp import reuse_tools as rt
+    base = { f"p{k:02d}": 0.9 - k / 100 for k in range( rt.MAX_PAGES + 3 ) }
+    r = an.analyze_pages( an.read_stage( _pages( base, base, base ) ) )[ 1 ]
+    assert len( r[ "chosen_single1" ] ) == rt.MAX_PAGES
+
+
+def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questions_are_skipped():
+    recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "failed" ] = [ "p1" ]
+    assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "inconclusive"
+    recs = _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } ); recs[ 2 ][ "state" ], recs[ 2 ][ "stop_reason" ] = "incomplete", "ceiling"
+    assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "invalid"
+    assert an.analyze_pages( an.read_stage( _question() ) ) == {}
+    assert an.analyze_pages( an.read_stage( _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } )[ :2 ] ) )[ 1 ][ "state" ] == "inconclusive"
