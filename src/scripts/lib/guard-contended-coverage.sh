@@ -60,8 +60,8 @@ _guard_cov_requested() {
 
 # The interpreter that runs the checker module. Mirrors _diagnosis_python next door.
 _guard_contention_python() {
-    if [ -n "$LUPIN_DIAGNOSIS_PYTHON" ] && [ -x "$LUPIN_DIAGNOSIS_PYTHON" ]; then
-        echo "$LUPIN_DIAGNOSIS_PYTHON"; return
+    if [ -n "${LUPIN_DIAGNOSIS_PYTHON:-}" ] && [ -x "${LUPIN_DIAGNOSIS_PYTHON:-}" ]; then
+        echo "${LUPIN_DIAGNOSIS_PYTHON:-}"; return
     fi
     local candidate
     for candidate in "$LUPIN_ROOT/.venv/bin/python" "/opt/venv/bin/python"; do

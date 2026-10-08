@@ -173,3 +173,19 @@ def test_a_conftest_import_failure_is_diagnosed_under_the_runners_unset_variable
     assert "unbound variable" not in text and "command not found" not in text, text
     assert "COLLECTION ERROR" in text and "missing module: nothing" in text, text
     assert text.index( "ModuleNotFoundError" ) < text.index( "COLLECTION ERROR" ), "the diagnosis must print after pytest's own output"
+
+
+def test_the_runner_keeps_its_unset_variable_check():
+    """The test above only means something while the runner sets -u, so the option is pinned."""
+    code = [ ln.strip() for ln in open( RUNNER ).read().splitlines() if ln.strip() and not ln.strip().startswith( "#" ) ]
+    options = [ ln for ln in code if ln.startswith( "set -" ) ]
+    assert options and all( flag in options[ 0 ] for flag in ( "u", "pipefail" ) ), options
+
+
+def test_the_contention_guard_finds_its_interpreter_under_the_unset_variable_check():
+    """The guard library carried the same bare read as the wrapper; both must survive -u."""
+    lib  = os.path.join( PROJECT_ROOT, "src", "scripts", "lib", "guard-contended-coverage.sh" )
+    snip = f'set -u; unset LUPIN_DIAGNOSIS_PYTHON; export LUPIN_ROOT="{PROJECT_ROOT}"; source "{lib}"; _guard_contention_python'
+    done = subprocess.run( [ "bash", "-c", snip ], capture_output=True, text=True, timeout=60 )
+    assert done.returncode == 0 and done.stdout.strip().endswith( ( "python", "python3" ) ), ( done.stdout, done.stderr )
+    assert "unbound variable" not in done.stderr
