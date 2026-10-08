@@ -10,6 +10,7 @@ Dependency Rule:
     This module never imports from notification_proxy or swe_team.
 """
 
+import logging
 import time
 
 import requests
@@ -20,11 +21,13 @@ from cosa.agents.decision_proxy.config import (
     DEFAULT_TIMEZONE,
 )
 
+logger = logging.getLogger( __name__ )
+
 SESSIONS_ENDPOINT        = "/api/websocket-sessions"
 SESSIONS_TIMEOUT_SECONDS = 5
 
-# What a feed that cannot answer is taken to mean. False keeps today's behaviour
-# (the proxy answers); True would make the proxy defer to the user on doubt.
+# What a feed that cannot answer is taken to mean. Rick ruled False
+# ("Proxy answers"): the proxy acts as before. True would make it defer on doubt.
 FEED_FAILURE_MEANS_CONNECTED = False
 
 
@@ -32,7 +35,8 @@ def user_connected_or_default( feed_fn ):
     """Ensures: returns the feed's answer as a bool, or the failure value when the feed raises."""
     try:
         return bool( feed_fn() )
-    except Exception:
+    except Exception as e:
+        logger.warning( f"[UserPresence] connectivity feed failed, treating the user as {'connected' if FEED_FAILURE_MEANS_CONNECTED else 'not connected'}: {e}" )
         return FEED_FAILURE_MEANS_CONNECTED
 
 
