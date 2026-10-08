@@ -653,6 +653,15 @@ def test_the_payload_names_the_hook_the_state_the_folder_and_the_remedy_and_noth
     assert "1 finding(s)" in spoken and "| pre-push | DANGLING | /h | /gone |" in abstract
 
 
+@pytest.mark.parametrize( "name", [ "HOME", "USER", "PATH", "LUPIN_API_KEY", "HOOK_LINK_DM", "HOOK_LINK_STATE" ] )
+def test_no_single_environment_variable_reaches_the_payload( monkeypatch, name ):
+    planted = { n: f"zz-probe-{n.lower()}-value" for n in ( "HOME", "USER", "PATH", "LUPIN_API_KEY", "HOOK_LINK_DM", "HOOK_LINK_STATE" ) }
+    monkeypatch.setattr( os, "environ", dict( planted ) )
+    spoken, abstract, direct = hlt.build_payload( [ _f( "pre-push", "DANGLING", "/h", "/gone" ) ], "new or changed findings", False )
+    assert planted[ name ] not in spoken + abstract + direct
+    assert "pre-push" in direct, "the payload was empty, so the absence above proves nothing"
+
+
 def test_a_drill_payload_says_drill_in_all_three_places():
     spoken, abstract, direct = hlt.build_payload( [ _f() ], "x", True )
     assert spoken.startswith( "Drill" ) and abstract.startswith( "**DRILL" ) and direct.startswith( "[DRILL" )
