@@ -337,6 +337,11 @@ Suites that qualify:
   which reads like a :8000 suite and is not one. The scope is transient (`--scope --collect`, dies
   with the command), so nothing persists; it takes about 0.5s; and the only process it kills is the
   allocator it started, inside a cgroup it owns. It needs no monopoly.
+- `src/tests/smoke/test_db_roles_rollback_real_postgres.py` — it starts a Docker container, which
+  reads like a :8000 suite and is not one. The container is a throwaway Postgres reached only by
+  `docker exec`, with a name guard, memory and processor caps, and removal with its volumes at the end, so
+  nothing persists and the real database is refused before any command runs. Both docker tests
+  together took about 12s, and it needs no monopoly.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
