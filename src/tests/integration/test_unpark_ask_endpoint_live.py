@@ -37,7 +37,8 @@ from sqlalchemy import text
 
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import ApiKeyRepository, UserRepository
-from cosa.rest.task_promotion_gate import UNPARK_ASK_TIMEOUT_SECONDS, unpark_ask_payload
+from cosa.rest.user_service import get_user_by_email
+from lupin_cli.notifications.notification_models import resolve_target_user
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 ENDPOINT = f"{BASE_URL}/api/tasks"
@@ -110,6 +111,15 @@ def parked_row( seeded_task_rows, api_headers ):
 
 
 @pytest.fixture
+def operator():
+    """The operator's user id; fails, naming the account, when it is missing."""
+    email = resolve_target_user()
+    user  = get_user_by_email( email )
+    assert user, f"the operator's account {email} is not in the test database, so no un-park card can be sent"
+    return str( user[ "id" ] )
+
+
+@pytest.fixture
 def made_cards():
     """Collects card ids a test caused; removes them from the database afterwards."""
     ids = [ ]
@@ -147,13 +157,15 @@ def test_a_worker_seat_is_refused_and_no_card_is_written( api_headers, parked_ro
     assert _cards_for( parked_row ) == [ ]
 
 
-def test_a_manager_asking_about_an_unknown_row_gets_404( api_headers, manager_actor ):
-    response = _ask( api_headers, uuid.uuid4(), manager_actor )
+def test_a_manager_asking_about_an_unknown_row_gets_404_naming_the_row( api_headers, manager_actor, operator ):
+    """The operator is looked up first, so the row's own text is what tells the two 404s apart."""
+    unknown  = uuid.uuid4()
+    response = _ask( api_headers, unknown, manager_actor )
     assert response.status_code == 404, response.text
-    assert "not found" in response.text
+    assert f"task {unknown} not found" in response.text, response.text
 
 
-def test_a_manager_asking_about_a_row_that_is_not_parked_gets_409_and_no_card( api_headers, seeded_task_rows, manager_actor ):
+def test_a_manager_asking_about_a_row_that_is_not_parked_gets_409_and_no_card( api_headers, seeded_task_rows, manager_actor, operator ):
     row      = seeded_task_rows.create( f"unpark-{uuid.uuid4().hex[ :10 ]}", "Unpark ask live, not parked", created_by="unparkask live" )
     response = _ask( api_headers, row[ "id" ], manager_actor )
     assert response.status_code == 409, response.text
@@ -161,7 +173,7 @@ def test_a_manager_asking_about_a_row_that_is_not_parked_gets_409_and_no_card( a
     assert _cards_for( row[ "id" ] ) == [ ]
 
 
-def test_a_manager_asking_about_a_parked_row_makes_one_card_bound_to_that_row( api_headers, parked_row, manager_actor, made_cards ):
+def test_a_manager_asking_about_a_parked_row_makes_one_card_bound_to_that_row( api_headers, parked_row, manager_actor, made_cards, operator ):
     before   = datetime.now( timezone.utc )
     response = _ask( api_headers, parked_row, manager_actor )
     assert response.status_code == 200, f"{response.status_code} {response.text}"
@@ -171,20 +183,21 @@ def test_a_manager_asking_about_a_parked_row_makes_one_card_bound_to_that_row( a
     assert body[ "task_id" ] == parked_row
     assert isinstance( body[ "pushed" ], bool )
     expires = datetime.fromisoformat( body[ "expires_at" ] )
-    assert before + timedelta( seconds=UNPARK_ASK_TIMEOUT_SECONDS - 60 ) < expires < before + timedelta( seconds=UNPARK_ASK_TIMEOUT_SECONDS + 120 )
+    assert before + timedelta( seconds=540 ) < expires < before + timedelta( seconds=720 ), f"expires_at {expires} is not about ten minutes out"
 
     cards = _cards_for( parked_row )
     assert len( cards ) == 1, f"expected one card for this row, found {len( cards )}"
     card = cards[ 0 ]
     assert str( card[ "id" ] ) == body[ "card_id" ]
-    assert card[ "payload" ] == unpark_ask_payload( parked_row ), "the card must carry the server's binding"
+    assert card[ "payload" ] == { "kind": "unpark_ask", "task_id": parked_row, "move": "parked->queued" }, "the card must carry the server's binding"
+    assert str( card[ "recipient_id" ] ) == operator, "the card must go to the operator"
     assert card[ "response_requested" ] is True
     assert card[ "response_type" ] == "yes_no"
     assert card[ "response_default" ] == "no", "an unanswered card must not approve"
     assert card[ "state" ] in ( "created", "delivered" )
 
 
-def test_a_second_ask_for_the_same_row_and_park_is_refused_and_makes_no_second_card( api_headers, parked_row, manager_actor, made_cards ):
+def test_a_second_ask_for_the_same_row_and_park_is_refused_and_makes_no_second_card( api_headers, parked_row, manager_actor, made_cards, operator ):
     first = _ask( api_headers, parked_row, manager_actor )
     assert first.status_code == 200, f"{first.status_code} {first.text}"
     made_cards.append( first.json()[ "card_id" ] )
