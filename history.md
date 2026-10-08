@@ -19,7 +19,12 @@
 - **Green twice**: `ts-e306a1ae` on `af86ec513` and `ts-d637a534` on `ebdb51c47`, each 465 passed, 0 failed (`integration-20261008-064332.log`, `integration-20261008-070040.log`).
 - **Rows closed with receipts**: `a80630a4`, `315ba9d0`, `e4e02931`, `fae0bc51`, `b2db7be7`, `b47d82f1`.
 - **Dev server bounced** at 03:01 EDT with the sanctioned script, after 42 hours up. The script recreated the container on compose drift. Which fields drifted was not captured.
-- **Not run on tonight's commits**: the coverage gate, typecheck, stylelint, TypeScript, smoke, websocket smoke, the serial bridge guard and both browser halves.
+- **The rest of the pyramid, on `61a8c0044`**: typecheck, stylelint, doclint, websocket smoke (50 of 50) and the serial bridge guard all exit 0 (Maya's runs). Browser half A 463 passed, half B 506 passed, 0 failed (`ts-70fa9a8a`). TypeScript 5,868 pass, 0 fail, coverage 100 (`ts-f6775d6c`).
+- **Smoke red by two** (`ts-a4266e07`, 484 passed): `test_presentation_live_endpoint` and `test_research_to_presentation_live`. The test container's Claude Code login expired on 2026-08-27 (Pocholo measured). That it is the cause is not proven.
+- **Coverage gate exit 0**: total 97.73%, floor 97. The mandate is 100.
+- **Two unit reds, mine, found by the coverage run**: the committed API docs lacked the unpark-ask endpoint and the token header. A dev server 42 hours stale had hidden it until the bounce. Fixed by `becd3af6a`, landed 05:37 EDT.
+- **Whole unit tier on `becd3af6a`**: 32,208 passed, 0 failed (Maya's run).
+- **Row `89771e0f` closed** as well. The growing-tables item was decided as no further build.
 - **Not done**: the push, the backup, the post-games on row `74394bba`.
 - **Files**: history.md, TODO.md; code through fast-forward merges, every commit reviewed by Pocholo.
 
