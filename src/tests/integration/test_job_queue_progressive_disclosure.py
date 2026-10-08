@@ -313,10 +313,11 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
-    # No mark. It XPASSed(strict) once the lineage claim made the drain observable, and the per-run
-    # suite token (row 8d4a5a59) gives a fresh random user that lineage back. The three tests
-    # above and below keep NEEDS_A_DRAINED_QUEUE: they failed in that same run with the lineage
-    # working, so the token is not shown to change them.
+    # No mark on this test, nor on test_done_queue_metadata_includes_session_fields and
+    # test_job_interactions_unauthorized_access below. Each XPASSed(strict) in integration run
+    # ts-c7aea993 on ea925ae5f (log integration-20261008-043410.log, 2026-10-08), after the per-run
+    # suite token (row 8d4a5a59) landed. Only test_job_transitions_todo_to_done above still xfails,
+    # so it alone keeps NEEDS_A_DRAINED_QUEUE. One run: a second green is what keeps these marks off.
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.
@@ -464,7 +465,6 @@ class TestJobQueueProgressiveDisclosure:
         print( f"Queue counts after concurrent submissions: {counts}" )
         assert counts[ "total" ] >= 1, "Expected at least 1 job in queues"
 
-    @NEEDS_A_DRAINED_QUEUE
     def test_done_queue_metadata_includes_session_fields( self, clean_test_db ):
         """
         Verify done queue metadata includes new Session 57 fields.
@@ -505,7 +505,6 @@ class TestJobQueueProgressiveDisclosure:
         print( f"  agent_type: {job[ 'agent_type' ]}" )
         print( f"  has_interactions: {job[ 'has_interactions' ]}" )
 
-    @NEEDS_A_DRAINED_QUEUE
     def test_job_interactions_unauthorized_access( self, clean_test_db ):
         """
         Verify users cannot access other users' job interactions.

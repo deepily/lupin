@@ -1,7 +1,10 @@
 """
 Every done-queue waiter in the integration file carries a strict xfail that names its row.
 
-One waiter, test_job_interactions_endpoint, is repaired by the suite token and carries none.
+Three waiters carry none, because they passed in the first integration run after the suite token landed.
+They are test_job_interactions_endpoint, test_done_queue_metadata_includes_session_fields and
+test_job_interactions_unauthorized_access.
+test_job_transitions_todo_to_done still xfails in that run and keeps the mark.
 
 Inside a monopolize run the suite job holds the slot.
 A job from a user the door does not tie to the suite waits until the suite ends.
@@ -19,7 +22,7 @@ import pytest
 
 PATH = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "tests", "integration", "test_job_queue_progressive_disclosure.py" )
 MARKS = { "NEEDS_A_DRAINED_QUEUE": "ce29cd20" }
-UNMARKED_WAITERS = [ "test_job_interactions_endpoint" ]
+UNMARKED_WAITERS = [ "test_done_queue_metadata_includes_session_fields", "test_job_interactions_endpoint", "test_job_interactions_unauthorized_access" ]
 
 
 def _tree():
@@ -70,12 +73,11 @@ def test_each_mark_is_a_strict_xfail_that_names_its_row( mark, row ):
     assert row in ast.unparse( keywords[ "reason" ] )
 
 
-def test_the_repaired_waiter_is_unmarked_and_the_drain_mark_is_on_the_other_three():
+def test_the_three_repaired_waiters_are_unmarked_and_the_drain_mark_is_on_the_transitions_waiter_alone():
     by_name = { name: marks for name, waits, marks in _tests_and_waiters() if waits }
-    assert by_name[ "test_job_interactions_endpoint" ] == [ ]
-    others = sorted( name for name, marks in by_name.items() if marks == [ "NEEDS_A_DRAINED_QUEUE" ] )
-    assert others == [ "test_done_queue_metadata_includes_session_fields", "test_job_interactions_unauthorized_access",
-                       "test_job_transitions_todo_to_done" ]
+    for name in UNMARKED_WAITERS: assert by_name[ name ] == [ ], f"{name} should carry no mark"
+    marked = sorted( name for name, marks in by_name.items() if marks == [ "NEEDS_A_DRAINED_QUEUE" ] )
+    assert marked == [ "test_job_transitions_todo_to_done" ]
 
 
 def test_the_lineage_stop_gap_mark_is_gone_from_the_file():
