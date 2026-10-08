@@ -101,3 +101,17 @@ def test_the_errors_list_of_an_error_result_is_named_beside_the_text():
     with pytest.raises( Exception ) as raised:
         _call( [ _FakeResultMessage( subtype="error_during_execution", is_error=True, result=None, errors=[ "tool died", "disk full" ] ) ] )
     assert "tool died; disk full" in str( raised.value )
+
+
+def test_an_empty_errors_list_adds_no_errors_suffix():
+    with pytest.raises( Exception ) as raised:
+        _call( [ _FakeResultMessage( subtype="success", is_error=True, result="Credit balance too low", errors=[] ) ] )
+    assert "Credit balance too low" in str( raised.value )
+    assert "(errors:" not in str( raised.value )
+
+
+def test_a_long_errors_list_is_cut_to_500_characters():
+    with pytest.raises( Exception ) as raised:
+        _call( [ _FakeResultMessage( is_error=True, result="r", errors=[ "e" * 5000 ] ) ] )
+    assert "e" * 500 in str( raised.value )
+    assert "e" * 501 not in str( raised.value )
