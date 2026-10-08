@@ -170,9 +170,8 @@ def test_frozen_replay_reads_the_same_answers_from_the_cache_with_no_transport( 
 
 
 def test_frozen_replay_with_an_empty_cache_raises_cache_missing( ctx_for ):
-    with pytest.raises( rt.ReuseError ) as e:
+    with pytest.raises( rt.ReuseError, match="CACHE_MISSING" ):
         sweep( ctx_for( None ), frozen=True )
-    assert e.value.code == "CACHE_MISSING"
 
 
 def test_frozen_replay_never_reads_the_cache_for_an_id_in_gaps( ctx_for ):
@@ -187,3 +186,34 @@ def test_a_plain_call_budget_instead_of_a_token_budget_still_sweeps( ctx_for ):
     budget = jt.CallBudget( 50 )
     out    = sweep( ctx_for( Fake( budget=budget ) ), budget=budget )
     assert len( out[ "answers" ] ) == 8 and budget.used == 3
+
+
+class Breaker:
+    def __init__( self ): self.events = []
+    def answered( self ): self.events.append( "answered" )
+    def refused( self, key ): self.events.append( ( "refused", key ) )
+
+
+def test_the_breaker_hears_one_refusal_for_a_refused_pack_and_all_its_halves( ctx_for ):
+    bad = ENTRIES[ 1 ][ "id" ]
+
+    class Poisoned( Fake ):
+        def post_with_meta( self, body ):
+            if rp.question_key( bad ) in body[ "questions" ]: raise rp.jt.JevConfigError( "Jev refused the request with status 422", 422 )
+            return super().post_with_meta( body )
+
+    breaker = Breaker()
+    out     = sweep( ctx_for( Poisoned() ), size=3, breaker=breaker, workers=4 )
+    refused = [ e for e in breaker.events if e != "answered" ]
+    assert len( refused ) == 1 and refused[ 0 ] == ( "refused", out[ "rows" ][ 0 ][ "request_hash" ] ) and breaker.events.count( "answered" ) == 2
+    assert out[ "failed" ] == [ bad ] and len( out[ "answers" ] ) == 7
+
+
+def test_a_cache_write_that_fails_keeps_the_answer_and_names_the_entry( ctx_for, monkeypatch ):
+    ctx = ctx_for( Fake() )
+
+    def broken( self, key, response ): raise OSError( "disk full" )
+
+    monkeypatch.setattr( rt.JevCache, "put", broken )
+    out = sweep( ctx, ENTRIES[ :2 ], size=2 )
+    assert len( out[ "answers" ] ) == 2 and out[ "cache_write_failed" ] == [ e[ "id" ] for e in ENTRIES[ :2 ] ]

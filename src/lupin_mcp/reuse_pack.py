@@ -5,11 +5,18 @@ One request holds the need once in `state` and one three-way question per candid
 The question is the same one the single-entry path asks; only the packing differs.
 Nothing in this module sends anything.
 """
+import concurrent.futures
+
 from cosa.repo.doc_lint import jev_transport as jt
+from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_tools as rt
 
-SHAPE      = "packed-choice-1"                                # names the body layout; a new layout needs a new name
-KEY_PREFIX = "q_"
+SHAPE           = "packed-choice-1"                           # names the body layout; a new layout needs a new name
+KEY_PREFIX      = "q_"
+WORKERS_MIN     = 4
+WORKERS_MAX     = 8
+WORKERS_DEFAULT = 6
+KEY_MODES       = ( "candidate", "stage1" )
 
 
 def question_key( entry_id ):
@@ -100,7 +107,7 @@ def pack_key( body ):
 def _row( request_hash, entries, parent ):
     """Ensures: returns a request row before the request is sent, with every outcome field empty."""
     return { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
-             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "error": None }
+             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "error": None, "model": None }
 
 
 def _post( transport, body ):
@@ -134,7 +141,9 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     body, qmap = pack_request( entries=entries, need=need, template=template, model=model )
     row        = _row( pack_key( body ), entries, parent )
     response, meta, error, sent = None, None, None, True
-    if budget is not None: budget.open_request( body, len( entries ) ); budget.begin_tally()
+    metered = isinstance( budget, rc.TokenBudget )
+    if metered: budget.open_request( body, len( entries ) )
+    if budget is not None: budget.begin_tally()
     try:
         response, meta = _post( transport, body )
     except Exception as e:                                          # any transport error ends this one request, never the run
@@ -144,13 +153,14 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     row[ "attempts" ] = taken if taken is not None else ( meta[ "attempts" ] if meta is not None else ( 1 if sent else 0 ) )
     if error is None:
         usage = rt.usage_of( response )
-        if budget is not None: budget.close_request( usage )
+        if metered: budget.close_request( usage )
         answered, unasked = pack_answers( response, qmap )
-        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked )
+        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked,
+                    model=response[ "model" ] if isinstance( response, dict ) and "model" in response else None )
         row[ "status" ] = "answered" if answered else "failed"
         if not answered: row[ "error" ] = "NoAnswers"
         return { "answers": [ { "id": i, "probabilities": answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked, "not_reached": [], "rows": [ row ] }
-    if budget is not None: budget.fail_request()
+    if metered: budget.fail_request()
     if isinstance( error, jt.JevConfigError ): row[ "http_status" ] = error.status
     if isinstance( error, jt.JevConfigError ) and error.status == 422:
         row[ "status" ] = "refused"
@@ -165,3 +175,99 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         return { "answers": [], "failed": [], "not_reached": row[ "ids" ], "rows": [ row ] }
     row[ "status" ], row[ "error" ] = "failed", type( error ).__name__
     return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
+
+
+def _check_sweep_args( size, workers, key_mode, run_index ):
+    """Raises: ValueError naming the argument that is out of range."""
+    if type( size ) is not int or size < 1: raise ValueError( f"size must be a positive integer, got {size!r}" )
+    if type( workers ) is not int or not WORKERS_MIN <= workers <= WORKERS_MAX: raise ValueError( f"workers must be an integer from {WORKERS_MIN} to {WORKERS_MAX}, got {workers!r}" )
+    if key_mode not in KEY_MODES: raise ValueError( f"key_mode must be one of {KEY_MODES}, got {key_mode!r}" )
+    if key_mode == "stage1" and ( type( run_index ) is not int or run_index < 1 ): raise ValueError( f"a stage1 sweep needs a run_index of 1 or more, got {run_index!r}" )
+
+
+def _entry_response( probabilities, row ):
+    """Ensures: returns one entry's cached form: the old single answer plus its pack."""
+    return { "answers": { "fit": { "probabilities": probabilities } }, "model": row[ "model" ], "pack": { "request_hash": row[ "request_hash" ], "size": row[ "size" ] } }
+
+
+def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="candidate", run_index=None, template=None, model=None,
+                  frozen=False, gaps=None, budget=None, breaker=None ):
+    """
+    Ask Jev about every entry in packs.
+
+    Requires:
+        - entries are symbol dicts with id, sig and doc; size is the most entries in one request
+        - workers is from WORKERS_MIN to WORKERS_MAX
+        - key_mode "candidate" keys each answer by need and candidate text alone; "stage1" adds the pack size and
+          the run index, so a measurement arm never reads another arm's answers or the production answers
+        - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
+        - breaker, when given, has answered() and refused( key ); it hears one refusal for a refused pack and all its halves
+    Ensures:
+        - returns every key sweep() returns, plus rows (one per HTTP request), requests, unasked and cache_write_failed
+        - answered entries are in entry order; a cache hit costs no request and the misses are packed together
+        - every answered entry is cached on its own, with the pack it came from
+        - failed_attempts holds one { request, ids, attempts } for each request that left entries without an answer
+        - attempts_answered and attempts_failed split the rows' attempts by whether the request was answered
+        - a pack the budget refuses is not reached and no HTTP is made for it
+    Raises:
+        - ValueError for an argument out of range
+        - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an answer is absent or damaged
+    """
+    _check_sweep_args( size, workers, key_mode, run_index )
+    template, model = template or ctx.template, model or ctx.model
+    if budget is None and isinstance( ctx.transport, rt.LiveJevTransport ): budget = ctx.transport.budget
+    cache = rt.JevCache( ctx.data )
+
+    def key_of( rec ):
+        text = rt.entry_text( rec )
+        return candidate_key( need, text, template, model ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model )
+
+    state, misses = {}, []                                          # state maps an entry id to its answer, or to ( "failed" | "not_reached" )
+    for rec in entries:
+        if frozen and gaps is not None and rec[ "id" ] in gaps: state[ rec[ "id" ] ] = gaps[ rec[ "id" ] ]; continue
+        hit = cache.get( key_of( rec ) )
+        if hit is not None: state[ rec[ "id" ] ] = ( "hit", rt.parse_answer( hit ) ); continue
+        if frozen: raise rt.ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key_of( rec )})" )
+        misses.append( rec )
+    by_id  = { rec[ "id" ]: rec for rec in entries }
+    chunks = [ misses[ i:i + size ] for i in range( 0, len( misses ), size ) ]
+
+    def one( chunk ):
+        out = send_pack( ctx.transport, need, chunk, template, model, budget )
+        top, written, unwritten = out[ "rows" ][ 0 ], {}, []
+        if breaker is not None:
+            if top[ "status" ] == "refused": breaker.refused( top[ "request_hash" ] )
+            elif top[ "status" ] == "answered": breaker.answered()
+        row_of = { i: r for r in out[ "rows" ] if r[ "status" ] == "answered" for i in r[ "ids" ] }
+        for a in out[ "answers" ]:
+            try: cache.put( key_of( by_id[ a[ "id" ] ] ), _entry_response( a[ "probabilities" ], row_of[ a[ "id" ] ] ) )
+            except OSError: unwritten.append( a[ "id" ] )
+        return out, unwritten
+
+    with concurrent.futures.ThreadPoolExecutor( max_workers=workers ) as pool:
+        results = list( pool.map( one, chunks ) )
+    rows, unwritten = [], []
+    for out, bad in results:
+        for a in out[ "answers" ]: state[ a[ "id" ] ] = ( "live", a[ "probabilities" ] )
+        for i in out[ "failed" ]: state[ i ] = "failed"
+        for i in out[ "not_reached" ]: state[ i ] = "not_reached"
+        rows += out[ "rows" ]; unwritten += bad
+    for n, r in enumerate( rows ): r[ "index" ] = n
+    answers = [ { "id": rec[ "id" ], "probabilities": state[ rec[ "id" ] ][ 1 ] } for rec in entries if isinstance( state[ rec[ "id" ] ], tuple ) ]
+    failed_attempts = []
+    for r in rows:
+        left = r[ "unasked" ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
+        if left: failed_attempts.append( { "request": r[ "request_hash" ], "ids": left, "attempts": r[ "attempts" ] } )
+    return { "answers": answers,
+             "failed": [ rec[ "id" ] for rec in entries if state[ rec[ "id" ] ] == "failed" ],
+             "not_reached": [ rec[ "id" ] for rec in entries if state[ rec[ "id" ] ] == "not_reached" ],
+             "calls": sum( 1 for v in state.values() if isinstance( v, tuple ) and v[ 0 ] == "live" ),
+             "cache_hits": sum( 1 for v in state.values() if isinstance( v, tuple ) and v[ 0 ] == "hit" ),
+             "attempts_answered": sum( r[ "attempts" ] for r in rows if r[ "status" ] == "answered" ),
+             "attempts_failed": sum( r[ "attempts" ] for r in rows if r[ "status" ] != "answered" ),
+             "failed_attempts": failed_attempts,
+             "tokens_in": sum( r[ "tokens_in" ] or 0 for r in rows ), "tokens_out": sum( r[ "tokens_out" ] or 0 for r in rows ),
+             "usage_missing": sum( 1 for r in rows if r[ "status" ] == "answered" and r[ "tokens_in" ] is None ),
+             "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
+             "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
+             "cache_write_failed": unwritten }
