@@ -27,6 +27,7 @@ Created 2026-05-31 by Rachel 🕊️ (CoSA coverage campaign, TFE lane).
 
 import sys
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -97,6 +98,16 @@ def _sdk_stub( messages ):
         for m in messages:
             yield m
     return _gen
+
+
+def _result_msg( is_error=False, subtype="success", result=None, errors=None, text=None ):
+    m = MagicMock( spec=ResultMessage )
+    m.is_error = is_error
+    m.subtype  = subtype
+    m.result   = result
+    m.errors   = errors
+    if text is not None: m.text = text
+    return m
 
 
 def _assistant( *blocks ):
@@ -244,7 +255,7 @@ class TestDelegateDiagnosis:
             TextBlock( text="world" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                       # unknown message type
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ):
             out = run( o._delegate_to_lead_diagnosis( "prompt" ) )
@@ -279,6 +290,17 @@ class TestDelegateDiagnosis:
 # ============================================================================
 # run_phase2_propose
 # ============================================================================
+class TestDelegateDiagnosisErrorResult:
+    def test_error_result_logs_the_cli_text_and_returns_none( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low", errors=[ "tool died" ] )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_lead_diagnosis( "p" ) ) is None
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text and "tool died" in text
+
+
 class TestPhase2:
     def test_resume_short_circuit_voice_gate_success( self ):
         o = _orch( debug=True )
@@ -408,7 +430,7 @@ class TestDelegateProposal:
             TextBlock( text="]" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                       # unknown message type
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ):
             out = run( o._delegate_to_lead_proposal( "p" ) )
@@ -431,6 +453,17 @@ class TestDelegateProposal:
 # ============================================================================
 # _write_multi_cluster_plan_doc
 # ============================================================================
+class TestDelegateProposalErrorResult:
+    def test_error_result_logs_the_cli_text_and_returns_none( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_lead_proposal( "p" ) ) is None
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text
+
+
 class TestWritePlanDoc:
     def test_single_category_with_evidence( self ):
         o = _orch()
@@ -638,7 +671,7 @@ class TestCoderAndVerify:
             TextBlock( text="done" ),
             MagicMock( spec=RateLimitEvent ),
             MagicMock(),                                                               # unknown message -> 1502->1477
-            MagicMock( spec=ResultMessage, text="result-text" ),
+            _result_msg( text="result-text" ),
         ]
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
              patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ), \
@@ -671,6 +704,25 @@ class TestCoderAndVerify:
              patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
             assert run( o._delegate_to_coder( MagicMock(), "p", MagicMock(), MagicMock() ) ) == ( "", [] )
 
+    def test_coder_error_result_logs_the_cli_text_and_returns_empty( self, caplog ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ err ] ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ), \
+             caplog.at_level( logging.ERROR, logger=orch_mod.logger.name ):
+            assert run( o._delegate_to_coder( MagicMock(), "p", MagicMock(), MagicMock() ) ) == ( "", [] )
+        text = "\n".join( r.getMessage() for r in caplog.records if r.name == orch_mod.logger.name )
+        assert "Your credit balance is too low" in text
+
+    def test_verify_error_result_fails_with_the_cli_text( self ):
+        o = _orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( [ _assistant( TextBlock( text="All tests pass" ) ), err ] ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
+            passed, out = run( o._verify_fix( MagicMock(), _prop(), "co", [], MagicMock(), MagicMock() ) )
+        assert passed is False
+        assert "Your credit balance is too low" in out
+
     def test_verify_unavailable( self ):
         o = _orch()
         with patch.object( orch_mod, "SAFETY_AVAILABLE", False ):
@@ -702,7 +754,7 @@ class TestCoderAndVerify:
             ),
             TextBlock( text=" report" ),       # bare TextBlock message -> 1575
             MagicMock( spec=RateLimitEvent ),  # not last -> 1576->1558
-            MagicMock( spec=ResultMessage ),
+            _result_msg(),
         ]
         run_res = SimpleNamespace( passed=True, passed_count=2, total_tests=2 )
         with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
