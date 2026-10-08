@@ -506,7 +506,7 @@ for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; d
     hook_name="${hook_row%%:*}"; hook_script="${hook_row##*:}"
     # The remedy names the folder this check read, so it is right when core.hooksPath moves it.
     hook_fix="ln -sf $REPO_ROOT/src/scripts/$hook_script $GIT_HOOKS_DIR/$hook_name   # a person runs this; a Claude seat is refused"
-    hook_out="$( pfv_git_hook_status "$GIT_HOOKS_DIR" "$hook_name" "$REPO_ROOT/src/scripts/$hook_script" )"
+    hook_out="$( pfv_git_hook_status "$GIT_HOOKS_DIR" "$hook_name" "$REPO_ROOT/src/scripts/$hook_script" "$REPO_ROOT" )"
     case "${hook_out%%$'\t'*}" in
         MATCH)
             report pass WARN "git hook $hook_name links to src/scripts/$hook_script" ;;
@@ -522,6 +522,15 @@ for hook_row in "pre-commit:pre-commit-chain.sh" "pre-push:pre-push-chain.sh"; d
         WRONG_TARGET)
             report fail WARN "git hook $hook_name links to ${hook_out#*$'\t'}, not to src/scripts/$hook_script" \
                           "$hook_fix" ;;
+        DANGLING)
+            report fail WARN "git hook $hook_name is a dangling link to ${hook_out#*$'\t'} — nothing exists there, so git runs no ${hook_name#pre-} check" \
+                          "$hook_fix" ;;
+        OUTSIDE)
+            report fail WARN "git hook $hook_name links to ${hook_out#*$'\t'}, outside this checkout — it will not follow src/scripts/$hook_script" \
+                          "$hook_fix" ;;
+        NOT_EXECUTABLE)
+            report fail WARN "git hook $hook_name links to src/scripts/$hook_script, which is not executable — git skips it with a warning" \
+                          "chmod +x $REPO_ROOT/src/scripts/$hook_script   # a person runs this; a Claude seat is refused" ;;
         *)
             report unknown WARN "git hook $hook_name could not be read in $GIT_HOOKS_DIR" "$hook_fix" ;;
     esac

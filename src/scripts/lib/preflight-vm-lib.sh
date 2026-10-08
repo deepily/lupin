@@ -1316,20 +1316,36 @@ pfv_config_mgr_args_resolve() {
 
 # ── pfv_git_hook_status ─────────────────────────────────────────────────────
 # Say whether one git hook is a link to the script the repo ships for it.
-#   pfv_git_hook_status <hooks_dir> <hook_name> <script_path>
+#   pfv_git_hook_status <hooks_dir> <hook_name> <script_path> [<checkout_root>]
 # Prints one word and returns: MATCH 0 · NO_SCRIPT 2 (the checkout has no such script, so it
 # predates the hook) · ABSENT 3 · NOT_LINK 4 (a file someone copied; it goes stale on the next
-# update) · WRONG_TARGET 5 (prints the word, a tab, and where the link lands).
+# update) · WRONG_TARGET 5 (prints the word, a tab, and where the link lands) · DANGLING 6 (a link
+# whose target does not exist, or loops; prints the word, a tab, and where it points) · OUTSIDE 7
+# (a link to a different file that lies outside the checkout; prints the word, a tab, where it lands;
+# only when checkout_root is given) · NOT_EXECUTABLE 8 (the right link, but the script has no
+# executable bit, so git skips the hook with a warning).
 # The hook is compared by where it lands, so a relative and an absolute link both pass.
 pfv_git_hook_status() {
-    local hooks_dir="$1" hook="$2" script="$3"
+    local hooks_dir="$1" hook="$2" script="$3" root="${4:-}"
     local path="$hooks_dir/$hook" lands wants
     [ -f "$script" ] || { echo "NO_SCRIPT"; return 2; }
     if [ ! -e "$path" ] && [ ! -L "$path" ]; then echo "ABSENT"; return 3; fi
     [ -L "$path" ] || { echo "NOT_LINK"; return 4; }
+    if [ ! -e "$path" ]; then
+        printf 'DANGLING\t%s\n' "$( readlink -m "$path" 2>/dev/null || readlink "$path" )"; return 6
+    fi
     lands="$( readlink -f "$path" 2>/dev/null || printf '' )"
     wants="$( readlink -f "$script" )"
-    [ "$lands" = "$wants" ] && { echo "MATCH"; return 0; }
+    if [ "$lands" = "$wants" ]; then
+        [ -x "$wants" ] || { echo "NOT_EXECUTABLE"; return 8; }
+        echo "MATCH"; return 0
+    fi
+    if [ -n "$root" ]; then
+        case "$lands/" in
+            "$( readlink -f "$root" )"/*) ;;
+            *) printf 'OUTSIDE\t%s\n' "$lands"; return 7 ;;
+        esac
+    fi
     printf 'WRONG_TARGET\t%s\n' "${lands:-nowhere}"; return 5
 }
 

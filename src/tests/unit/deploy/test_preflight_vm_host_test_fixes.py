@@ -497,7 +497,7 @@ def _hook_status( hooks_dir, hook, script ):
 
 
 def test_hook_status_matches_a_relative_and_an_absolute_link( tmp_path ):
-    script = tmp_path / "src" / "scripts" / "pre-push-chain.sh"; script.parent.mkdir( parents=True ); script.write_text( "#!/bin/sh\n" )
+    script = tmp_path / "src" / "scripts" / "pre-push-chain.sh"; script.parent.mkdir( parents=True ); script.write_text( "#!/bin/sh\n" ); script.chmod( 0o755 )
     hooks  = tmp_path / ".git" / "hooks"; hooks.mkdir( parents=True )
     os.symlink( "../../src/scripts/pre-push-chain.sh", hooks / "pre-push" )
     os.symlink( str( script ), hooks / "pre-commit" )
@@ -507,7 +507,7 @@ def test_hook_status_matches_a_relative_and_an_absolute_link( tmp_path ):
 
 
 def test_hook_status_names_each_way_a_hook_can_be_wrong( tmp_path ):
-    script = tmp_path / "pre-push-chain.sh"; script.write_text( "#!/bin/sh\n" )
+    script = tmp_path / "pre-push-chain.sh"; script.write_text( "#!/bin/sh\n" ); script.chmod( 0o755 )
     other  = tmp_path / "other.sh"; other.write_text( "#!/bin/sh\n" )
     hooks  = tmp_path / "hooks"; hooks.mkdir()
 
@@ -521,7 +521,7 @@ def test_hook_status_names_each_way_a_hook_can_be_wrong( tmp_path ):
     assert _hook_status( hooks, "pre-push", script )               == ( 5, f"WRONG_TARGET\t{other}" )
 
     ( hooks / "pre-push" ).unlink(); os.symlink( str( tmp_path / "dangling.sh" ), hooks / "pre-push" )
-    assert _hook_status( hooks, "pre-push", script )               == ( 5, f"WRONG_TARGET\t{tmp_path / 'dangling.sh'}" )
+    assert _hook_status( hooks, "pre-push", script )               == ( 6, f"DANGLING\t{tmp_path / 'dangling.sh'}" )
 
 
 @pytest.fixture
@@ -551,8 +551,8 @@ def test_B7_a_missing_hook_warns_by_name_with_the_link_command( hooked, hook, sc
     assert "[OK]" in _line( out, f"git hook {kept} links to" )
 
 
-def test_B7_a_hook_that_links_elsewhere_warns_and_names_where( hooked, tmp_path ):
-    other = tmp_path / "other.sh"; other.write_text( "#!/bin/sh\n" )
+def test_B7_a_hook_that_links_to_another_script_in_the_checkout_warns_and_names_where( hooked ):
+    other = f"{ROOT}/src/scripts/pre-commit-chain.sh"
     ( hooked[ "hooks" ] / "pre-push" ).unlink(); os.symlink( str( other ), hooked[ "hooks" ] / "pre-push" )
     out = _run( hooked )
 
@@ -724,3 +724,43 @@ def test_no_compose_remedy_in_the_script_prints_the_container_name():
     assert [ l for l in compose_lines if "$CONTAINER" in l ] == []
     named = [ l for l in compose_lines if "up -d --no-deps" in l ]
     assert len( named ) >= 8 and all( "$SERVICE" in l for l in named )
+
+
+# ── B7: the three states the timed hook check added get their own words ─────────────────────────
+
+def test_B7_a_dangling_hook_says_dangling_not_could_not_be_read( hooked, tmp_path ):
+    ( hooked[ "hooks" ] / "pre-push" ).unlink(); os.symlink( str( tmp_path / "gone.sh" ), hooked[ "hooks" ] / "pre-push" )
+    out = _run( hooked )
+
+    assert "[WARN]" in _line( out, f"git hook pre-push is a dangling link to {tmp_path / 'gone.sh'}" )
+    assert "git hook pre-push could not be read" not in out
+
+
+def test_B7_a_hook_outside_the_checkout_says_outside( hooked, tmp_path ):
+    other = tmp_path / "elsewhere" / "pre-push-chain.sh"; other.parent.mkdir(); other.write_text( "#!/bin/sh\n" )
+    ( hooked[ "hooks" ] / "pre-push" ).unlink(); os.symlink( str( other ), hooked[ "hooks" ] / "pre-push" )
+    out = _run( hooked )
+
+    assert "[WARN]" in _line( out, f"git hook pre-push links to {other}, outside this checkout" )
+
+
+def test_B7_a_right_link_to_a_script_without_the_executable_bit_warns( tmp_path ):
+    script = tmp_path / "src" / "scripts" / "pre-push-chain.sh"; script.parent.mkdir( parents=True ); script.write_text( "#!/bin/sh\n" )
+    hooks  = tmp_path / ".git" / "hooks"; hooks.mkdir( parents=True )
+    os.symlink( str( script ), hooks / "pre-push" )
+
+    r = _lib( f"pfv_git_hook_status '{hooks}' pre-push '{script}' '{tmp_path}'" )
+    assert ( r.returncode, r.stdout.strip() ) == ( 8, "NOT_EXECUTABLE" )
+    script.chmod( 0o755 )
+    r = _lib( f"pfv_git_hook_status '{hooks}' pre-push '{script}' '{tmp_path}'" )
+    assert ( r.returncode, r.stdout.strip() ) == ( 0, "MATCH" )
+
+
+def test_hook_status_without_a_checkout_root_cannot_say_outside( tmp_path ):
+    script = tmp_path / "pre-push-chain.sh"; script.write_text( "#!/bin/sh\n" ); script.chmod( 0o755 )
+    other  = tmp_path / "other.sh"; other.write_text( "#!/bin/sh\n" )
+    hooks  = tmp_path / "hooks"; hooks.mkdir(); os.symlink( str( other ), hooks / "pre-push" )
+
+    assert _hook_status( hooks, "pre-push", script ) == ( 5, f"WRONG_TARGET\t{other}" )
+    r = _lib( f"pfv_git_hook_status '{hooks}' pre-push '{script}' '{tmp_path / 'inside'}'" )
+    assert ( r.returncode, r.stdout.strip() ) == ( 7, f"OUTSIDE\t{other}" )
