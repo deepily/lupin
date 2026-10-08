@@ -230,6 +230,7 @@ A job that lands in the dead window drains late but not silently — `job_persis
 - **Server lifecycle (when does a change land? when do I bounce? which command?)**: See skill `server-lifecycle` — encodes the per-server decision matrix, the restart-vs-`--force-recreate` distinction, the queue-check courtesy, and the `:8000` monopolize-mode protocol. Auto-fires on bounce/restart/refresh/rebuild phrasing including ASR variants ("doctor" → "Docker").
   - `uvicorn --reload` is **off by default on `:7999`**: opt in with `LUPIN_RELOAD`, gated by `reload_enabled()` in `bootstrap_helpers.py`. A watcher took the server down for the whole fleet whenever anyone touched a watched file. **A `.py` change does not go live on its own; both servers need a bounce.** Anybody may bounce `:7999`, within reason, to pick up fresh code.
   - **Use the sanctioned path**: `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner). It posts an **ack-confirmed** warning broadcast so the fleet holds notifications *before* the server dies, restarts the container, and polls `/health`; the **all-clear is emitted by the restarted server's own startup hook**, so it covers every restart path.
+  - **Database grants after a bounce**: `bounce-dev-server.sh` and `preflight-test-container.sh` run `src/scripts/lib/check-db-grants.sh`, which checks that the three database roles hold every grant in `cosa.utils.db_grants`. A red answer is a warning. `LUPIN_DB_GRANTS_REPAIR=on` makes the helper run `db_roles --grants-only --apply` once and check again. It stays off until the one-time apply has been run by hand.
   - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>` — a restart reuses the old values and your change silently does not land. (This is also why re-arming `LUPIN_RELOAD` needs a recreate.)
 
 ## Git repository management
@@ -343,6 +344,10 @@ Suites that qualify:
   nothing persists and the real database is refused before any command runs. The file's three
   docker tests took 21.9s in one run on a loaded host (2026-10-08, at 75235ba4e), and it needs no
   monopoly. Re-time it rather than trusting that figure.
+- `src/tests/smoke/test_db_grants_real_postgres.py` — it reuses the rollback file's throwaway container,
+  so the same reasoning holds: `docker exec` only, a name guard, removal at the end, nothing persists. Its
+  17 docker tests took 63.3s in one run on a loaded host (2026-10-08, on the tree that became 7124d1a00). Re-time it rather than
+  trusting that figure. It needs no monopoly.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only

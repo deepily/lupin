@@ -170,18 +170,33 @@ _VERBS = {
 }
 
 
-def format_report( reports, remedy ):
+def _grouped( problems ):
+    """One ( kind, role, object, "P1, P2" ) per kind, role and object, keeping first-seen order."""
+    order, privileges = [], {}
+    for kind, role, obj, priv in problems:
+        key = ( kind, role, obj )
+        if key not in privileges: order.append( key ); privileges[ key ] = []
+        privileges[ key ].append( priv )
+    return [ ( kind, role, obj, ", ".join( p for p in privileges[ ( kind, role, obj ) ] if p ) ) for kind, role, obj in order ]
+
+
+def format_report( reports, remedy, limit=None ):
     """
     The lines the check prints.
 
     Ensures:
         - one summary line per database, `name: N tables, K roles, M problems`, then one line per problem
+        - with limit, the problems of each database are grouped by role and object and cut after limit lines, with
+          a line saying how many more there are, so a database with no grants at all does not flood a log
         - when any database has a problem, the last line is the remedy
     """
     lines = []
     for report in reports:
         lines.append( f"{report[ 'database' ]}: {report[ 'tables' ]} tables, {report[ 'roles' ]} roles, {len( report[ 'problems' ] )} problems" )
-        lines += [ "  " + _VERBS[ kind ]( role, obj, priv ) for kind, role, obj, priv in report[ "problems" ] ]
+        problems = report[ "problems" ] if limit is None else _grouped( report[ "problems" ] )
+        shown    = problems if limit is None else problems[ :limit ]
+        lines += [ "  " + _VERBS[ kind ]( role, obj, priv ) for kind, role, obj, priv in shown ]
+        if len( shown ) < len( problems ): lines.append( f"  ... and {len( problems ) - len( shown )} more; run db_roles --check for the full list" )
     if not all( report[ "ok" ] for report in reports ): lines.append( remedy )
     return lines
 
@@ -262,10 +277,13 @@ def check_current_database( run_query ):
     return evaluate( current, parse_rows( "\n".join( run_query( build_check_sql( current ) ) ) ) )
 
 
+LOG_LINE_LIMIT = 30
+
+
 def report_lines( report ):
-    """The check's lines for one report, with the repair command when it has a problem."""
+    """The check's lines for one report, cut to a log-sized list, with the repair command."""
     remedy = remedy_for( STANDARD_PSQL, [ report ] )
-    return format_report( [ report ], remedy )
+    return format_report( [ report ], remedy, limit=LOG_LINE_LIMIT )
 
 
 def emit_startup_grants_alarm( debug=False, engine_factory=None ):

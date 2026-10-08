@@ -260,3 +260,29 @@ def test_check_with_another_direction_is_refused_before_anything_runs( other ):
     run = Psql( CLEAN )
     with pytest.raises( SystemExit ): db_roles.main( [ "--psql", "psql", "--check", other ], run_fn=run, out=io.StringIO() )
     assert run.calls == []
+
+
+def _flood():
+    rows = [ ( "lupin_db_test", "tables", "", "27", "" ) ]
+    rows += [ ( "lupin_db_test", "missing", "lupin_app", f"t{i:02d}", p ) for i in range( 40 ) for p in g.ALL_PRIVILEGES ]
+    return g.evaluate( "lupin_db_test", rows )
+
+
+def test_the_full_report_lists_every_problem_and_the_log_form_groups_and_cuts_it():
+    report = _flood()
+    assert len( report[ "problems" ] ) == 280
+    full = g.format_report( [ report ], "r" )
+    assert len( full ) == 282 and "  lupin_app cannot SELECT t00" in full
+    cut = g.report_lines( report )
+    assert len( cut ) == 1 + g.LOG_LINE_LIMIT + 1 + 1, "summary, the limit, the more line, the remedy"
+    assert cut[ 0 ] == "lupin_db_test: 27 tables, 3 roles, 280 problems"
+    assert cut[ 1 ] == "  lupin_app cannot SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER t00"
+    assert cut[ -2 ] == "  ... and 10 more; run db_roles --check for the full list" and cut[ -1 ].startswith( "remedy:" )
+
+
+def test_a_report_within_the_limit_has_no_more_line_and_keeps_its_groups():
+    report = g.evaluate( "lupin_db_test", [ ( "lupin_db_test", "tables", "", "2", "" ), ( "lupin_db_test", "missing", "lupin_app", "t", "DELETE" ),
+                                              ( "lupin_db_test", "missing", "lupin_app", "t", "INSERT" ), ( "lupin_db_test", "norole", "lupin_x", "", "" ) ] )
+    lines = g.report_lines( report )
+    assert lines[ 1: 3 ] == [ "  lupin_app cannot DELETE, INSERT t", "  role lupin_x does not exist" ]
+    assert not any( "more;" in l for l in lines )
