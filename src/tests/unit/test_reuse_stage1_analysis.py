@@ -21,9 +21,12 @@ def _probs( overlap, extend=0.0 ):
     return { "reuse": round( overlap - extend, 6 ), "extend": extend, "unrelated": round( 1.0 - overlap, 6 ) }
 
 
+NO_NAME = object()
+
+
 def _arm( arm, overlaps, question=1, size=1, state="complete", stop_reason=None, run_name=None, **over ):
     """Ensures: returns one arm record in the stage1-arm-1 format answering every id in overlaps."""
-    rec = { "format": "stage1-arm-1", "question": question, "need": "a need", "arm": arm, "run_name": run_name or f"s1-q{question}-{arm}",
+    rec = { "format": "stage1-arm-1", "question": question, "need": "a need", "arm": arm, "run_name": None if run_name is NO_NAME else run_name or f"s1-q{question}-{arm}",
             "run_index": 1, "size": size, "model": "jev-test", "template_hash": "abc", "started_at": "t0", "ended_at": "t1",
             "state": state, "stop_reason": stop_reason, "ceiling_tokens": 1000, "attempt_limit": 8000,
             "entry_ids": list( overlaps ), "answers": [ { "id": i, "probabilities": _probs( o ) } for i, o in overlaps.items() ],
@@ -104,6 +107,12 @@ def test_an_arm_with_a_failed_unasked_or_unreached_entry_is_inconclusive_whateve
     assert an.read_arm( rec )[ "status" ] == "inconclusive"
 
 
+@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] },
+                                    { "state": "incomplete" }, { "stop_reason": "attempts" } ] )
+def test_an_arm_that_lists_a_problem_is_inconclusive_even_when_every_entry_has_an_answer(over):
+    assert an.read_arm( _arm( "single1", { "a": 0.1 }, **over ) )[ "status" ] == "inconclusive"
+
+
 def test_an_arm_with_a_malformed_answer_is_inconclusive():
     rec = _arm( "single1", { "a": 0.1 } ); rec[ "answers" ][ 0 ][ "probabilities" ] = None
     assert an.read_arm( rec )[ "status" ] == "inconclusive"
@@ -139,6 +148,11 @@ def test_the_stage_groups_arms_by_question_and_name():
 def test_the_same_run_name_twice_is_refused():
     with pytest.raises( ValueError, match="run name" ):
         an.read_stage( [ _arm( "single1", { "a": 0.1 } ), _arm( "single2", { "a": 0.1 }, run_name="s1-q1-single1" ) ] )
+
+
+def test_arms_without_a_run_name_such_as_the_old_shape_one_may_repeat_across_questions():
+    st = an.read_stage( [ _arm( "old", { "a": 0.1 }, run_name=NO_NAME ), _arm( "old", { "a": 0.1 }, question=2, run_name=NO_NAME ) ] )
+    assert sorted( st ) == [ 1, 2 ]
 
 
 def test_the_same_arm_twice_for_one_question_is_refused():
