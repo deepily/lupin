@@ -1,9 +1,9 @@
 """
 The wait for a job to reach the done queue is worked out from the queue depth.
 
-Two waiters used to wait a fixed 30 s. Behind 14 cold jobs at 7 to 9 s each, they finished
-after the wait ended. The budget is now the jobs ahead, plus one, times a named ceiling,
-under a cap that fails fast and names the depth.
+Two waiters used to wait a fixed 30 s. In the cold run they had 11 and 8 jobs ahead of them,
+at 7 to 9 s each. Their jobs finished 92 s and 55 s after submit. The budget is now the jobs ahead,
+plus one, times a named ceiling. A cap fails fast and names the depth.
 
 Venue: :7999 (unit, a stubbed /api/busy and the test file's syntax tree, no server).
 """
