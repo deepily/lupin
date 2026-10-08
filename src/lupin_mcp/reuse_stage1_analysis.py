@@ -27,6 +27,8 @@ PACK_SIZES                      = ( 10, 50, 200 )
 PRICE_PER_MILLION               = 0.042
 PROBE_PLACEMENTS                = ( "first", "middle", "last" )
 PROBE_NEIGHBOURS                = ( "random", "near_duplicate" )
+FLOOR                           = 0.3                         # the page floor of the policy
+CONFIDENCE_BAR                  = 0.9                         # an answer is confident from this largest probability
 
 INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422" )
 
@@ -67,6 +69,7 @@ def read_arm( record ):
            or set( overlaps ) != asked or not asked ): status = "inconclusive"
     else: status = "clean"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
+             "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
              "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
              "failed": list( record[ "failed" ] ), "not_reached": list( record[ "not_reached" ] ), "unasked": list( record[ "unasked" ] ),
@@ -79,7 +82,7 @@ def read_stage( records ):
     Read every arm record of the stage and group them.
 
     Ensures:
-        - returns { question: { arm name: arm } }
+        - returns { question: { arm name: arm } }; a retry is keyed by its name and attempt, such as canary-a2
     Raises:
         - ValueError for a run name used twice, or an arm name twice in one question
     """
@@ -90,8 +93,9 @@ def read_stage( records ):
             if arm[ "run_name" ] in names: raise ValueError( f"run name {arm[ 'run_name' ]!r} used twice" )
             names.add( arm[ "run_name" ] )
         by_name = stage.setdefault( arm[ "question" ], {} )
-        if arm[ "arm" ] in by_name: raise ValueError( f"arm {arm[ 'arm' ]!r} given twice for question {arm[ 'question' ]}" )
-        by_name[ arm[ "arm" ] ] = arm
+        key     = arm[ "arm" ] if arm[ "attempt" ] == 1 else f"{arm[ 'arm' ]}-a{arm[ 'attempt' ]}"
+        if key in by_name: raise ValueError( f"arm {key!r} given twice for question {arm[ 'question' ]}" )
+        by_name[ key ] = arm
     return stage
 
 
@@ -139,7 +143,7 @@ def flips( ref, other, ids, cut ):
 
 
 PASS_THREE_SIZE = 200                                         # the probe placements are run in a pack of this size, so they gate only this size
-CANARY_TRIPS    = ( "output_per_entry_over_60", "usage_over_reserve", "refusal" )
+CANARY_TRIPS    = ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "incomplete", "nothing_measured" )
 
 
 def _spent( arm ):
@@ -349,7 +353,8 @@ def check_canary( arm, canary ):
     Ensures:
         - returns { tripped, output_per_entry, unverifiable, agrees, analysis_only, driver_only, failed, unasked, not_reached }
         - tripped lists, in the order of CANARY_TRIPS: output tokens per entry above the stop figure, usage above
-          a row's reserve, and any refusal (a refused row, an HTTP 422, or a refused total)
+          a row's reserve, any refusal (a refused row, an HTTP 422, or a refused total), an answered row with no
+          usage, an unfinished arm, and an arm that sent no request
         - unverifiable counts answered rows that reported no usage, which only a person can read
         - agrees compares tripped with the driver's own list, and the two other lists name the differences
     """
@@ -359,10 +364,13 @@ def check_canary( arm, canary ):
         if r[ "tokens_out" ] is None or r[ "tokens_in" ] is None: continue
         out_per.append( round( r[ "tokens_out" ] / r[ "size" ], 6 ) )
         if r[ "reserve_tokens" ] is not None and r[ "tokens_in" ] + r[ "tokens_out" ] > r[ "reserve_tokens" ]: over_reserve = True
-    flags   = { "output_per_entry_over_60": any( x > OUTPUT_PER_ENTRY_STOP for x in out_per ), "usage_over_reserve": over_reserve, "refusal": refused }
+    unverifiable = sum( 1 for r in rows if r[ "status" ] == "answered" and ( r[ "tokens_in" ] is None or r[ "tokens_out" ] is None ) )
+    flags = { "output_per_entry_over_60": any( x > OUTPUT_PER_ENTRY_STOP for x in out_per ), "usage_over_reserve": over_reserve, "refusal": refused,
+              "usage_missing": unverifiable > 0, "incomplete": arm[ "state" ] != "complete" or bool( arm[ "failed" ] or arm[ "unasked" ] or arm[ "not_reached" ] ),
+              "nothing_measured": not any( r[ "attempts" ] > 0 for r in rows ) }
     tripped = [ t for t in CANARY_TRIPS if flags[ t ] ]
     driver  = list( canary[ "tripped" ] )
-    return { "tripped": tripped, "output_per_entry": out_per, "unverifiable": sum( 1 for r in rows if r[ "status" ] == "answered" and ( r[ "tokens_in" ] is None or r[ "tokens_out" ] is None ) ),
+    return { "tripped": tripped, "output_per_entry": out_per, "unverifiable": unverifiable,
              "agrees": sorted( tripped ) == sorted( driver ), "analysis_only": [ t for t in tripped if t not in driver ], "driver_only": [ t for t in driver if t not in tripped ],
              "failed": len( arm[ "failed" ] ), "unasked": len( arm[ "unasked" ] ), "not_reached": len( arm[ "not_reached" ] ) }
 
@@ -393,3 +401,199 @@ def analyze_pages( stage ):
                      "set_changed_by_packing": changed, "set_changed_by_noise": set( chosen[ 0 ] ) != set( chosen[ 1 ] ),
                      "pack_p99": percentile( pk ), "pack_max": max( pk ), "noise_p99": percentile( nz ), "noise_max": max( nz ) }
     return out
+
+
+def _confidence_flips( ref, other ):
+    """Ensures: returns the ids answered in both arms on opposite sides of the confidence bar."""
+    return [ i for i in ref[ "confidences" ] if i in other[ "confidences" ] and ( ref[ "confidences" ][ i ] >= CONFIDENCE_BAR ) != ( other[ "confidences" ][ i ] >= CONFIDENCE_BAR ) ]
+
+
+def other_boundaries( stage, size ):
+    """
+    Count the flips at the policy's other boundaries, recorded with no pass or fail.
+
+    Ensures:
+        - returns { question: { floor: { pack, noise }, confidence: { pack, noise } } } over every entry answered in both arms
+        - the pack count compares the pack arm with single run 1, and the noise count single run 2 with single run 1
+        - a question is None when its single runs or its pack arm are absent or not clean
+    """
+    out = {}
+    for q in sorted( stage ):
+        s1, s2, pack = stage[ q ].get( "single1" ), stage[ q ].get( "single2" ), stage[ q ].get( f"pack{size}" )
+        if _arms_state( [ s1, s2, pack ] ) is not None: out[ q ] = None; continue
+        ids = list( s1[ "overlaps" ] )
+        out[ q ] = { "floor"     : { "pack": len( flips( s1, pack, ids, FLOOR ) ), "noise": len( flips( s1, s2, ids, FLOOR ) ) },
+                     "confidence": { "pack": len( _confidence_flips( s1, pack ) ), "noise": len( _confidence_flips( s1, s2 ) ) } }
+    return out
+
+
+def _mean( values ): return round( sum( values ) / len( values ), 3 ) if values else None
+
+
+def request_stats( stage ):
+    """
+    Summarise the requests each arm sent.
+
+    Ensures:
+        - returns { question: { arm: { requests_sent, tokens_in_per_request, tokens_out_per_request, tokens_out_per_entry,
+          retried_calls, extra_attempts, usage_missing, retry_statuses } } }
+        - only rows with an attempt count as sent; a sent row without usage counts as missing and stays out of the means
+        - retries are reported as 429 or 529 together, because the transport does not say which
+    """
+    out = {}
+    for q in sorted( stage ):
+        for name, arm in stage[ q ].items():
+            sent  = [ r for r in arm[ "rows" ] if r[ "attempts" ] > 0 ]
+            known = [ r for r in sent if r[ "tokens_in" ] is not None and r[ "tokens_out" ] is not None ]
+            calls = arm[ "transport_calls" ]
+            out.setdefault( q, {} )[ name ] = { "requests_sent": len( sent ), "tokens_in_per_request": _mean( [ r[ "tokens_in" ] for r in known ] ),
+                "tokens_out_per_request": _mean( [ r[ "tokens_out" ] for r in known ] ), "tokens_out_per_entry": _mean( [ r[ "tokens_out" ] / r[ "size" ] for r in known ] ),
+                "retried_calls": sum( 1 for c in calls if c[ "attempts" ] > 1 ), "extra_attempts": sum( c[ "attempts" ] - 1 for c in calls ),
+                "usage_missing": len( sent ) - len( known ), "retry_statuses": "429 or 529, not told apart" }
+    return out
+
+
+def cost_per_search( stage, default_size ):
+    """
+    Price one search at the default pack size.
+
+    Ensures:
+        - the search is the entries asked in packs of that size, plus the page asks packed
+        - returns None when default_size is None
+        - otherwise { question: { entry_tokens, page_tokens, dollars }, mean_dollars } for each question with that pack arm
+        - dollars are tokens over a million at the pinned price, input and output counted at the same rate
+        - page_tokens is zero for a question with no page-pack arm; mean_dollars is None with no such question
+    """
+    if default_size is None: return None
+    out = {}
+    for q in sorted( stage ):
+        pack = stage[ q ].get( f"pack{default_size}" )
+        if pack is None: continue
+        entry, page = _spent( pack ), _spent( stage[ q ][ "page-pack" ] ) if "page-pack" in stage[ q ] else 0
+        out[ q ] = { "entry_tokens": entry, "page_tokens": page, "dollars": round( ( entry + page ) / 1_000_000 * PRICE_PER_MILLION, 6 ) }
+    out[ "mean_dollars" ] = round( sum( v[ "dollars" ] for v in out.values() ) / len( out ), 6 ) if out else None
+    return out
+
+
+def old_shape_report( stage ):
+    """
+    Compare the old-shape arm with single run 1. Reported only.
+
+    Ensures:
+        - compares only the entries that were cache hits
+        - returns { question: { hits, p99, max, boundary_flips, note } } for each question with an old arm
+        - boundary_flips counts the hits among single run 1's boundary entries that cross the threshold
+        - a question is None when its single run 1 is absent or not clean
+    """
+    out = {}
+    for q in sorted( stage ):
+        old = stage[ q ].get( "old" )
+        if old is None: continue
+        s1 = stage[ q ].get( "single1" )
+        if _arms_state( [ s1 ] ) is not None: out[ q ] = None; continue
+        diffs = list( differences( s1, old ).values() )
+        out[ q ] = { "hits": len( old[ "overlaps" ] ), "p99": percentile( diffs ), "max": max( diffs ) if diffs else None,
+                     "boundary_flips": len( flips( s1, old, boundary_ids( s1 ), THRESHOLD ) ), "note": "reported only, no pass or fail" }
+    return out
+
+
+def old_shape_arm( question, data_dir, need, entries ):
+    """
+    Read the old three-way answers for entries from the cache, as an arm record.
+
+    Requires:
+        - entries are symbol dicts with id, sig and doc; data_dir holds the cache the old runs wrote
+    Ensures:
+        - returns a stage1-arm-1 record named "old" with no run name, one entry per request, and no live call
+        - answers hold the cached entries, in order; entries with no cache hit are listed as not reached
+        - state is "complete" only when every entry was a hit
+    """
+    from lupin_mcp import reuse_tools as rt
+    cache, answers, missing = rt.JevCache( data_dir ), [], []
+    for rec in entries:
+        resp = cache.get( rt.request_hash( rt.build_request( need, rt.entry_text( rec ) ) ) )
+        if resp is None: missing.append( rec[ "id" ] )
+        else: answers.append( { "id": rec[ "id" ], "probabilities": rt.parse_answer( resp ) } )
+    zero = { "requests": 0, "calls": 0, "attempts_answered": 0, "attempts_failed": 0, "tokens_in": 0, "tokens_out": 0, "usage_missing": 0,
+             "refused_422": 0, "stopped_by": None, "spent_tokens": 0, "reserved_tokens": 0, "ceiling_refusals": 0 }
+    return { "format": FORMAT, "question": question, "need": need, "arm": "old", "run_name": None, "run_index": None, "size": 1, "model": rt.JEV_MODEL,
+             "template_hash": None, "state": "complete" if not missing else "incomplete", "stop_reason": None, "entry_ids": [ e[ "id" ] for e in entries ],
+             "answers": answers, "failed": [], "not_reached": missing, "unasked": [], "cache_hits": len( answers ), "rows": [], "totals": zero, "transport_calls": [] }
+
+
+def build_report( records, canaries ):
+    """
+    Run every part of the analysis on the arm records.
+
+    Requires:
+        - records are stage1-arm-1 dicts; canaries is a list of ( canary arm record, canary file ) pairs
+    Ensures:
+        - returns { decision, next_step, evaluate, stop_rules, pages, other_boundaries, request_stats, cost, old_shape,
+          canaries, unclean_arms }
+        - decision comes from the passes and next_step from the stop rules
+        - unclean_arms lists every arm that is not clean, with its status and stop reason
+    """
+    stage = read_stage( records )
+    ev    = evaluate( stage )
+    stop  = stop_rules( stage )
+    unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ] }
+                for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
+    return { "decision": ev[ "decision" ], "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ),
+             "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
+             "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
+             "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean }
+
+
+def render( report ):
+    """
+    Write the report as plain text.
+
+    Ensures:
+        - returns a string with the decision, the next step, the boundary count, the noise floor, one block per
+          pack size, each arm that is not clean, each canary, the page arms and the cost
+    """
+    ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
+    lines  = [ "Live packing measurement: analysis", "", f"Decision: {report[ 'decision' ]}", f"Next step: {report[ 'next_step' ]}", "",
+               f"boundary entries pooled: {ev[ 'boundary_pooled' ]} (minimum {MIN_BOUNDARY_POOLED}); by question {ev[ 'boundary_by_question' ]}",
+               f"noise floor: {nf[ 'state' ]}, measured {nf[ 'measured' ]}, used {nf[ 'floor' ]} over {nf[ 'n' ]} entries" ]
+    for size in PACK_SIZES:
+        s = ev[ "sizes" ][ size ]
+        p3 = s[ "pass_three" ]
+        lines.append( f"pack {size}: {s[ 'state' ]}; pass 1 {s[ 'pass_one' ][ 'state' ]} (p99 {s[ 'pass_one' ][ 'p99' ]}, max {s[ 'pass_one' ][ 'max' ]}); "
+                      f"pass 2 {s[ 'pass_two' ][ 'state' ]} (flips {s[ 'pass_two' ][ 'pack_flips' ]} against noise {s[ 'pass_two' ][ 'noise_flips' ]})"
+                      + ( f"; pass 3 {p3[ 'state' ]} ({p3[ 'placements' ]} placements, worst {p3[ 'worst' ]})" if p3 else "" ) )
+    for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
+    for c in report[ "canaries" ]:
+        lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
+    for q, p in report[ "pages" ].items(): lines.append( f"pages, question {q}: {p[ 'state' ]}" )
+    if report[ "cost" ] is not None: lines.append( f"cost per search: mean ${report[ 'cost' ][ 'mean_dollars' ]}" )
+    return "\n".join( lines )
+
+
+def main( argv=None ):
+    """
+    Read a folder of arm and canary files and print the report.
+
+    Ensures:
+        - returns 0 after printing, and 2 when the folder holds no arm file
+    Raises:
+        - ValueError when a canary file has no arm file beside it
+    """
+    import argparse, json, pathlib
+    ap = argparse.ArgumentParser( description=__doc__ )
+    ap.add_argument( "folder" )
+    folder = pathlib.Path( ap.parse_args( argv ).folder )
+    arm_files    = sorted( p for p in folder.glob( "*.json" ) if not p.name.endswith( ".canary.json" ) )
+    canary_files = sorted( folder.glob( "*.canary.json" ) )
+    if not arm_files: print( f"no arm files in {folder}" ); return 2
+    pairs = []
+    for c in canary_files:
+        arm_file = folder / ( c.name[ :-len( ".canary.json" ) ] + ".json" )
+        if not arm_file.exists(): raise ValueError( f"{c.name} has no arm file {arm_file.name} beside it" )
+        pairs.append( ( json.loads( arm_file.read_text() ), json.loads( c.read_text() ) ) )
+    print( render( build_report( [ json.loads( p.read_text() ) for p in arm_files ], pairs ) ) )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit( main() )

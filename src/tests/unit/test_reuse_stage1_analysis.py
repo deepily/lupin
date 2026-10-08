@@ -734,9 +734,9 @@ def test_the_cost_is_none_without_a_default_size_and_the_page_part_is_zero_when_
 
 def test_the_old_shape_report_compares_only_the_entries_that_were_cache_hits():
     s1  = _arm( "single1", { "a": 0.5, "b": 0.5, "c": 0.5, "d": 0.9 } )
-    old = _arm( "old", { "a": 0.5, "b": 0.45, "c": 0.7 }, size=1, run_name=NO_NAME, state="incomplete" )
+    old = _arm( "old", { "a": 0.5, "b": 0.45, "c": 0.4 }, size=1, run_name=NO_NAME, state="incomplete" )
     r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
-    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 3, 0.2, 0.2, 2 )
+    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 3, 0.1, 0.1, 2 )
     assert r[ "note" ] == "reported only, no pass or fail"
 
 
@@ -783,6 +783,7 @@ def test_the_report_names_each_size_with_its_three_numbers_and_each_arm_that_was
     recs = _question(); recs[ 3 ][ "failed" ] = [ "e001" ]
     text = an.render( an.build_report( recs, canaries=[] ) )
     assert "pack 50" in text and "inconclusive" in text and "s1-q1-pack50" in text
+    assert "s1-q1-pack10" not in text and "s1-q1-single1" not in text                       # only arms that are not clean are named
 
 
 def test_a_canary_that_disagrees_with_the_driver_is_listed_in_the_report():
@@ -855,3 +856,24 @@ def test_a_third_attempt_is_a_third_key_and_the_same_attempt_twice_is_refused():
     assert sorted( an.read_stage( recs )[ 1 ] ) == [ "canary", "canary-a2", "canary-a3" ]
     with pytest.raises( ValueError, match="given twice" ):
         an.read_stage( [ recs[ 1 ], dict( recs[ 1 ], run_name="other" ) ] )
+
+
+def test_the_cost_skips_a_question_with_no_pack_arm_of_the_default_size_and_has_no_mean_without_any():
+    a = _arm( "pack200", { "a": 0.1 }, size=200 ); a[ "totals" ][ "spent_tokens" ] = 1_000_000
+    b = _arm( "pack50", { "a": 0.1 }, question=2, size=50 )
+    c = an.cost_per_search( an.read_stage( [ a, b ] ), 200 )
+    assert sorted( c, key=str ) == [ 1, "mean_dollars" ] and c[ "mean_dollars" ] == 0.042
+    assert an.cost_per_search( an.read_stage( [ b ] ), 200 ) == { "mean_dollars": None }
+
+
+def test_the_command_refuses_a_canary_file_with_no_arm_file_beside_it(tmp_path):
+    (tmp_path / "s1-q1-single1.json").write_text( json.dumps( _arm( "single1", { "a": 0.1 } ) ) )
+    (tmp_path / "s1-q1-canary.canary.json").write_text( json.dumps( { "tripped": [], "run_name": "s1-q1-canary" } ) )
+    with pytest.raises( ValueError, match="no arm file" ):
+        an.main( [ str( tmp_path ) ] )
+
+
+def test_an_old_arm_that_shares_no_entry_with_single_run_one_has_no_percentile_and_no_maximum():
+    s1  = _arm( "single1", { "a": 0.5 } ); old = _arm( "old", { "zzz": 0.5 }, run_name=NO_NAME )
+    r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
+    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 1, None, None, 0 )
