@@ -850,3 +850,12 @@ def test_a_canary_that_tripped_for_another_reason_may_still_be_retried( env ):
 
 def test_a_canary_with_the_right_model_does_not_trip_on_it( env ):
     assert "model_mismatch" not in st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )[ "tripped" ]
+
+
+@pytest.mark.parametrize( "standin,ceiling,stop,named", [ ( {}, 1, "ceiling", "nothing_measured" ), ( { "refuse_over": 0 }, 2_000_000, None, "refusal" ) ] )
+def test_a_canary_stopped_for_another_reason_is_not_named_model_mismatch_and_may_be_retried( env, standin, ceiling, stop, named ):
+    env.standin = standin
+    report = st.run_canary( env, 1, NEED, ENTRIES, ceiling )
+    assert read( env, 1, "canary" )[ "stop_reason" ] == stop and named in report[ "tripped" ] and "model_mismatch" not in report[ "tripped" ]
+    env.standin = {}
+    assert st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="the first was stopped by something else" )[ "tripped" ] == []
