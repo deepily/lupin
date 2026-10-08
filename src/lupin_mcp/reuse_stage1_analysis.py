@@ -105,6 +105,7 @@ def read_arm( record ):
     else: status = "clean" if len( lost ) <= limit else "inconclusive"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
              "model": record[ "model" ], "served_model": served, "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
+             "superseded": False, "stands_in_for": [],
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
              "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
              "lost": lost, "lost_limit": limit, "duplicate_ids": dup,
@@ -119,6 +120,9 @@ def read_stage( records ):
 
     Ensures:
         - returns { question: { arm name: arm } }; a retry is keyed by its name and attempt, such as canary-a2
+        - a completed rerun of an arm whose every earlier attempt was stopped by its ceiling takes the arm's plain name
+        - those earlier attempts are keyed <arm>-a<n> and marked superseded; the rerun lists their run names in stands_in_for
+        - any other rerun, and every canary rerun, keeps its own key and replaces nothing
     Raises:
         - ValueError for a run name used twice, or an arm name twice in one question
     """
@@ -129,10 +133,44 @@ def read_stage( records ):
             if arm[ "run_name" ] in names: raise ValueError( f"run name {arm[ 'run_name' ]!r} used twice" )
             names.add( arm[ "run_name" ] )
         by_name = stage.setdefault( arm[ "question" ], {} )
-        key     = arm[ "arm" ] if arm[ "attempt" ] == 1 else f"{arm[ 'arm' ]}-a{arm[ 'attempt' ]}"
+        key     = _attempt_key( arm[ "arm" ], arm[ "attempt" ] )
         if key in by_name: raise ValueError( f"arm {key!r} given twice for question {arm[ 'question' ]}" )
         by_name[ key ] = arm
+    for by_name in stage.values():
+        _stand_in( by_name )
     return stage
+
+
+def _attempt_key( arm, attempt ):
+    """Ensures: returns the arm's name, with -a<attempt> added for a rerun."""
+    return arm if attempt == 1 else f"{arm}-a{attempt}"
+
+
+def _stand_in( by_name ):
+    """
+    Let a completed rerun take the place of the attempts its ceiling stopped.
+
+    Requires:
+        - by_name maps each attempt's key to its arm, as read_stage builds it
+    Ensures:
+        - an arm other than the canary whose attempts run from 1 to n, with the last complete and each earlier one stopped by its ceiling, is regrouped
+        - an earlier attempt that a wrong model answered, or that stopped for another reason, keeps the arm as it was
+        - the last attempt takes the plain name and the earlier ones are marked superseded under their -a<n> keys
+    """
+    for arm in sorted( { a[ "arm" ] for a in by_name.values() } - { "canary" } ):
+        attempts = { a[ "attempt" ]: a for a in by_name.values() if a[ "arm" ] == arm }
+        last     = max( attempts )
+        if last == 1 or sorted( attempts ) != list( range( 1, last + 1 ) ): continue
+        before   = [ attempts[ n ] for n in range( 1, last ) ]
+        if attempts[ last ][ "state" ] != "complete" or any( a[ "stop_reason" ] != "ceiling" or a[ "served_model" ] is not None for a in before ): continue
+        for n in attempts: del by_name[ _attempt_key( arm, n ) ]
+        by_name[ arm ] = { **attempts[ last ], "stands_in_for": [ a[ "run_name" ] for a in before ] }
+        for a in before: by_name[ f"{arm}-a{a[ 'attempt' ]}" ] = { **a, "superseded": True }
+
+
+def _live( by_name ):
+    """Ensures: returns the question's arms that count in the verdict."""
+    return [ a for a in by_name.values() if not a[ "superseded" ] ]
 
 
 def percentile( values, q=PERCENTILE ):
@@ -312,7 +350,7 @@ def pass_three( stage, floor ):
     """
     placements, diffs, states, not_probed = 0, [], [], []
     for q in sorted( stage ):
-        probes = [ a for a in stage[ q ].values() if a[ "probe" ] ]
+        probes = [ a for a in _live( stage[ q ] ) if a[ "probe" ] ]
         if not probes: not_probed.append( q ); continue
         seen = {}
         for a in probes:
@@ -379,6 +417,7 @@ def stop_rules( stage, check_arms=True ):
         - with check_arms, the first question that lacks a required arm names its remaining arms as the next step
         - the arms are checked after the stop findings and an unclean single run 1, and before the rules below
         - a retry such as canary-a2 never stands in for a required arm
+        - spend counts every attempt, a superseded one too; a superseded attempt is not an invalid arm
         - after question 2, fewer than the minimum pooled boundary entries stops before question 3
         - after question 3, fewer than the pooled minimum asks for the reserve question
         - after the reserve question, fewer than the pooled minimum reads inconclusive
@@ -389,7 +428,7 @@ def stop_rules( stage, check_arms=True ):
     if total > STAGE_TOKENS: findings.append( { "rule": "stage_ceiling", "stop": True, "detail": f"stage tokens above {STAGE_TOKENS:,}" } )
     if spent.get( 1, 0 ) > STOP_SPEND_AFTER_QUESTION_1: findings.append( { "rule": "spend_after_question_1", "stop": True, "detail": f"spend after question 1 above {STOP_SPEND_AFTER_QUESTION_1:,} tokens" } )
     unclean = [ q for q in sorted( stage ) if stage[ q ].get( "single1" ) is None or stage[ q ][ "single1" ][ "status" ] != "clean" ]
-    invalid = [ a for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] == "invalid" ]
+    invalid = [ a for q in sorted( stage ) for a in _live( stage[ q ] ) if a[ "status" ] == "invalid" ]
     pooled  = sum( len( boundary_ids( stage[ q ][ "single1" ] ) ) for q in sorted( stage ) if q not in unclean )
     last    = max( stage ) if stage else 0
     stops   = [ f for f in findings if f[ "stop" ] ]
@@ -642,7 +681,7 @@ def build_report( records, canaries ):
         - records are stage1-arm-1 dicts; canaries is a list of ( canary arm record, canary file ) pairs
     Ensures:
         - returns { decision, next_step, evaluate, stop_rules, pages, other_boundaries, request_stats, cost, old_shape,
-          canaries, unclean_arms, lost_by_arm }
+          canaries, unclean_arms, lost_by_arm, superseded_arms }
         - lost_by_arm gives every arm's lost count beside its limit, its stop reason and its cache hits
         - decision comes from the passes and next_step from the stop rules
         - an arm another model answered replaces the decision with a stop that names each such arm and the model that answered
@@ -650,15 +689,16 @@ def build_report( records, canaries ):
         - a next step that already stops and asks keeps its own reason
         - duplicate_ids lists each arm that asked an id more than once; such an arm stops the decision
         - page_arm is the page arm's verdict; a failing or asking page arm turns a decision that did not stop into a stop
-        - unclean_arms lists every arm that is not clean, with its status, stop reason and cache hits
+        - unclean_arms lists every arm that is not clean, with its status, stop reason and cache hits; a superseded attempt is not in it
+        - superseded_arms lists each attempt a completed rerun replaced, with its stop reason, its spend and the run that replaced it
     """
     stage = read_stage( records )
     ev    = evaluate( stage )
     stop  = stop_rules( stage )
     unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ], "cache_hits": a[ "cache_hits" ] }
-                for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
+                for q in sorted( stage ) for a in _live( stage[ q ] ) if a[ "status" ] != "clean" ]
     pg    = page_arm( stage )
-    dups  = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "ids": a[ "duplicate_ids" ] } for q in sorted( stage ) for a in stage[ q ].values() if a[ "duplicate_ids" ] ]
+    dups  = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "ids": a[ "duplicate_ids" ] } for q in sorted( stage ) for a in _live( stage[ q ] ) if a[ "duplicate_ids" ] ]
     decision = ev[ "decision" ]
     if dups and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm asks the same id twice (duplicate_ids)"
     if pg[ "state" ] == "invalid" and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm is invalid"
@@ -672,6 +712,8 @@ def build_report( records, canaries ):
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
              "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
+             "superseded_arms": [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "attempt": a[ "attempt" ], "stop_reason": a[ "stop_reason" ],
+                                    "spent_tokens": _spent( a ), "replaced_by": stage[ q ][ a[ "arm" ] ][ "run_name" ] } for q in sorted( stage ) for a in stage[ q ].values() if a[ "superseded" ] ],
              "lost_by_arm": [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "lost": len( a[ "lost" ] ), "lost_limit": a[ "lost_limit" ], "stop_reason": a[ "stop_reason" ], "cache_hits": a[ "cache_hits" ] }
                               for q in sorted( stage ) for a in stage[ q ].values() ] }
 
@@ -682,7 +724,7 @@ def render( report ):
 
     Ensures:
         - returns a string with the decision, the next step, the boundary count, the noise floor, one block per
-          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary,
+          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each superseded attempt, each canary,
           the requests each arm sent, the other boundaries, the old-shape comparison, the page arm with its questions and the cost per question
     """
     ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
@@ -702,6 +744,7 @@ def render( report ):
         lines.append( f"pass 3 was run at size {PASS_THREE_SIZE} only; sizes 10 and 50 carry no position evidence" )
     for d in report[ "duplicate_ids" ]: lines.append( f"duplicate ids: {d[ 'run_name' ]} asked {', '.join( d[ 'ids' ] )} more than once" )
     for a in report[ "unclean_arms" ]: lines.append( f"not clean: {_arm_label( a )} is {a[ 'status' ]} (" + ( "no cached answers" if _no_cache( a ) else f"stop reason {a[ 'stop_reason' ] or 'none'}" ) + ")" )
+    for a in report[ "superseded_arms" ]: lines.append( f"superseded: {a[ 'run_name' ]} (stop reason {a[ 'stop_reason' ]}, {a[ 'spent_tokens' ]} tokens) replaced by {a[ 'replaced_by' ]}" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
     for q, arms in report[ "request_stats" ].items():

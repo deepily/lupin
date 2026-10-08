@@ -6,7 +6,7 @@ An arm stopped for model mismatch still stops the stage, rerun or not. The earli
 are listed as <arm>-a<n> and counted in spend, but they are not in the verdict. The canary is unchanged.
 """
 from lupin_mcp import reuse_stage1_analysis as an
-from tests.unit.test_reuse_stage1_analysis import _arm
+from tests.unit.test_reuse_stage1_analysis import _arm, _question
 
 IDS = { "a": 0.1, "b": 0.9 }
 
@@ -107,3 +107,12 @@ def test_an_id_asked_twice_in_the_stopped_run_does_not_stop_the_decision():
     twice  = stopped( entry_ids=[ "a", "a", "b" ] )
     report = an.build_report( [ twice, done() ], [] )
     assert report[ "duplicate_ids" ] == [] and not report[ "decision" ].startswith( "stop and ask: an arm asks the same id twice" )
+
+
+def test_a_rerun_probe_arm_counts_once_and_its_stopped_run_does_not_clash_with_it():
+    recs     = _question()
+    probe    = next( r for r in recs if r[ "arm" ] == "probe-first-random" )
+    stopped  = { **probe, "state": "incomplete", "stop_reason": "ceiling", "answers": [], "not_reached": list( probe[ "entry_ids" ] ) }
+    rerun    = { **probe, "run_name": probe[ "run_name" ] + "-a2", "attempt": 2 }
+    result   = an.pass_three( an.read_stage( [ r for r in recs if r is not probe ] + [ stopped, rerun ] ), 0.02 )
+    assert result == an.pass_three( an.read_stage( recs ), 0.02 ) and result[ "placements" ] == 6
