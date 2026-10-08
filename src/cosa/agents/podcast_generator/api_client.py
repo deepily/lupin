@@ -29,6 +29,7 @@ from typing import Optional, Any
 from dataclasses import dataclass
 
 from .config import PodcastConfig
+from cosa.agents.shared.sdk_error_result import raise_error_result
 # D6-LENIENT JSON recovery — single source of truth lives in the parsing module
 from .prompts.script_generation import lenient_json_loads
 
@@ -425,6 +426,7 @@ class PodcastAPIClient:
             elif isinstance( message, TextBlock ):
                 collected.append( message.text )
             elif isinstance( message, ResultMessage ):
+                if message.is_error: raise_error_result( message, f"PodcastAPIClient {call_type}", logger )
                 usage         = message.usage or {}
                 input_tokens  = usage.get( "input_tokens", 0 )
                 output_tokens = usage.get( "output_tokens", 0 )

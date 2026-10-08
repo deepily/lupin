@@ -49,6 +49,7 @@ class _FakeResultMessage:
         self.usage          = usage
         self.total_cost_usd = total_cost_usd
         self.stop_reason    = stop_reason
+        self.is_error       = False
 
 
 def _patch_sdk_types():
