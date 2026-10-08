@@ -550,3 +550,6 @@ class TestSurroundingQuotesAreStripped:
 
     def test_single_quotes_are_left_alone( self ):
         assert _respond_with_answer( "'tis" ) == "'tis"
+
+    def test_a_single_quoted_answer_stays_whole( self ):
+        assert _respond_with_answer( "'no limit'" ) == "'no limit'"
