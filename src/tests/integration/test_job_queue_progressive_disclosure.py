@@ -21,6 +21,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from tests.helpers.done_queue_budget import budget_before_submit
 from tests.helpers.suite_lineage import lineage_request
 
 
@@ -121,6 +122,15 @@ class TestJobQueueProgressiveDisclosure:
             **lineage_request( { "question": question, "websocket_id": websocket_id },
                                { "Authorization": f"Bearer {token}" } )
         )
+
+    def _budget_before_submit( self ):
+        """
+        Jobs ahead of a job submitted now, and the seconds that justifies waiting for it.
+
+        Returns:
+            tuple: ( jobs_ahead, budget_seconds )
+        """
+        return budget_before_submit( BASE_URL )
 
     def _get_queue( self, token, queue_name, user_filter=None ):
         """
@@ -477,7 +487,8 @@ class TestJobQueueProgressiveDisclosure:
         # Setup: Create user
         token, user_id = self._create_user_and_get_token( unique_email( "metadata" ) )
 
-        # Submit and wait for completion
+        # Submit and wait for completion; the wait grows with the jobs queued ahead of this one
+        ahead, budget = self._budget_before_submit()
         response = self._submit_job(
             token,
             "What is 7 + 7?",
@@ -485,8 +496,8 @@ class TestJobQueueProgressiveDisclosure:
         )
         assert response.status_code == 200
 
-        done_jobs = self._wait_for_jobs_in_done_queue( token, 1, timeout_seconds=30 )
-        assert len( done_jobs ) >= 1, "Job did not complete"
+        done_jobs = self._wait_for_jobs_in_done_queue( token, 1, timeout_seconds=budget )
+        assert len( done_jobs ) >= 1, f"Job did not complete in {budget}s with {ahead} jobs ahead of it"
 
         job = done_jobs[ 0 ]
 
@@ -515,7 +526,8 @@ class TestJobQueueProgressiveDisclosure:
         token_a, user_id_a = self._create_user_and_get_token( "owner@test.com" )
         token_b, user_id_b = self._create_user_and_get_token( "attacker@test.com" )
 
-        # User A submits a job
+        # User A submits a job; the wait grows with the jobs queued ahead of it
+        ahead, budget = self._budget_before_submit()
         response = self._submit_job(
             token_a,
             "What is 99 + 99?",
@@ -524,8 +536,8 @@ class TestJobQueueProgressiveDisclosure:
         assert response.status_code == 200
 
         # Wait for job to complete
-        done_jobs = self._wait_for_jobs_in_done_queue( token_a, 1, timeout_seconds=30 )
-        assert len( done_jobs ) >= 1, "Job did not complete"
+        done_jobs = self._wait_for_jobs_in_done_queue( token_a, 1, timeout_seconds=budget )
+        assert len( done_jobs ) >= 1, f"Job did not complete in {budget}s with {ahead} jobs ahead of it"
 
         job_id = done_jobs[ 0 ][ "job_id" ]
 

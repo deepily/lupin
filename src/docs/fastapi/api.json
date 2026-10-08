@@ -9966,6 +9966,90 @@
                 }
             }
         },
+        "/api/tasks/{task_id}/unpark-ask": {
+            "post": {
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Ask the operator to approve un-parking a parked row",
+                "description": "A manager asks; the server makes the card (bound to this row and the move parked to queued, in a field only the server writes), pushes it, and returns its id. After the operator answers yes, the manager cites the id as the approval_card receipt on the parked-to-queued transition. One unanswered card per row and park. Auth: X-API-Key or Bearer JWT, and a manager seat.",
+                "operationId": "ask_to_unpark_api_tasks__task_id__unpark_ask_post",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid",
+                            "title": "Task Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UnparkAskIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/tasks/{task_id}/amend": {
             "post": {
                 "tags": [
@@ -12392,7 +12476,7 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Agents",
-                "description": "List every command the registry knows \u2014 a PURE PROJECTION of REGISTRY.\n\nThe read endpoint the front end was missing (2026.08.22 plan \u00a75.1). The Q&A\ncard's agent list used to be sixteen hand-typed `<option>` tags in\nnotifications.html, one of five hand-maintained lists describing the same set;\nthis door is how that list stops being written by hand.\n\nPURE PROJECTION means: every registry command appears, exactly once, carrying\nits own fields. Nothing is filtered here \u2014 not the two expediters, not the\ncontrol command, not `none`. A client renders what it should render by reading\n`user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door\ndoes not decide that for them, because the moment it filters, the set-equality\nthat proves the door matches the table stops being checkable.\n\nWHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` \u2014 the labels must name the\nagent that will ACTUALLY run, so `todo` reads \"todo (CRUD)\" when the fork is on.\nReading the INI key here would be a FOURTH read of `crud for dataframes agents\nenabled`, and a fourth read is a fourth thing to drift. The flow already holds\nthe value it will itself route with, so the label a user picks and the agent\nthey get cannot disagree. The 503 that comes with the dependency is coherent:\nwhen `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that\ndrives it has nothing to drive.\n\nRequires:\n    - an authenticated user (get_current_user).\n\nEnsures:\n    - `agents` carries one entry per REGISTRY command \u2014 set-equal to REGISTRY,\n      which is the \u00a76 gate 1 assertion.\n    - the CRUD fork is applied exactly as resolve() applies it, by calling\n      resolve() itself rather than reimplementing the fork.\n    - `auto_route` carries the sentinel option, so the page hand-writes no\n      option at all.\n    - never 500s for an unknown-shaped spec: every field read is declared on\n      AgentSpec or on the command's JOB_ARG_CONTRACTS entry.",
+                "description": "List every command the registry knows, as a pure projection of `REGISTRY`.\n\nRequires:\n    - an authenticated user (get_current_user).\n\nEnsures:\n    - `agents` carries one entry per `REGISTRY` command \u2014 set-equal to `REGISTRY`,\n      which is the first gate assertion.\n    - the CRUD fork is applied exactly as resolve() applies it, by calling\n      resolve() itself rather than reimplementing the fork.\n    - `auto_route` carries the sentinel option, so the page hand-writes no\n      option at all.\n    - never 500s for an unknown-shaped spec: every field read is declared on\n      AgentSpec or on the command's JOB_ARG_CONTRACTS entry.\n\nThis is the read endpoint the front end needs. The Q&A card's agent list used to be\nsixteen hand-typed `<option>` tags in notifications.html, one of five hand-maintained\nlists describing the same set. This door is how that list stops being written by hand.\n\nPure projection means every registry command appears exactly once, carrying its own\nfields. Nothing is filtered here, not the two expediters, not the control command and\nnot `none`. A client renders what it should by reading `user_initiable` (the Q&A\ndropdown) or `speakable` (a voice surface). If the door filtered, the set-equality\nthat proves the door matches the table would stop being checkable.\n\nIt depends on the flow because it needs `crud_enabled`. The labels must name the agent\nthat will actually run, so `todo` reads \"todo (CRUD)\" when the fork is on. Reading the\nINI key `crud for dataframes agents enabled` here would be a fourth read, and a fourth\nread is a fourth thing to drift. The flow already holds the value it routes with, so\nthe label a user picks and the agent they get cannot disagree. The 503 that comes with\nthe dependency is coherent. When `v2 flow enabled` is off, /api/v2/submit is off too,\nand a dropdown that drives it has nothing to drive.",
                 "operationId": "v2_agents_api_v2_agents_get",
                 "responses": {
                     "200": {
@@ -12419,17 +12503,40 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Ask",
-                "description": "Route one question through CJ Flow v2 and return the \u00a78 result.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.question is a non-empty string \u2264 4000 chars (Field-validated).\n\nEnsures:\n    - returns AskResponse; never 500 for an agent/replay/router/extract\n      failure \u2014 AskFlow degrades each to the receptionist.\n    - user_id / user_email come from the token, never the client body.",
+                "description": "Route one question through CJ Flow v2 and return the terminal result.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.question is a non-empty string \u2264 4000 chars (Field-validated).\n\nEnsures:\n    - returns AskResponse; never 500 for an agent/replay/router/extract\n      failure \u2014 AskFlow degrades each to the receptionist.\n    - user_id / user_email come from the token, never the client body.",
                 "operationId": "v2_ask_api_v2_ask_post",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "X-Lupin-Lineage-Token",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Lupin-Lineage-Token"
+                        }
+                    }
+                ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/AskRequest"
                             }
                         }
-                    },
-                    "required": true
+                    }
                 },
                 "responses": {
                     "200": {
@@ -12452,12 +12559,7 @@
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "HTTPBearerWith401": []
-                    }
-                ]
+                }
             }
         },
         "/api/v2/ask-audio": {
@@ -12466,7 +12568,7 @@
                     "v2-ask"
                 ],
                 "summary": "Ask Audio",
-                "description": "Transcribe a spoken question and ask it, in one request with a two-part reply.\n\nRequires:\n    - an authenticated user carrying uid + email\n    - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter\n\nEnsures:\n    - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,\n      500 any other failure reading, saving or transcribing the audio, 422 empty speech\n    - a 200 body is NDJSON: a transcript line, then exactly one ask or error line\n    - the ask is started BEFORE the response exists, so a client that disconnects after\n      line 1 does not cancel it; its answer still reaches the session's WebSocket\n    - the uploaded audio is removed on every path\n\nRaises:\n    - HTTPException 401 / 422 / 500 / 503 as above",
+                "description": "Transcribe a spoken question and ask it, in one request with a two-part reply.\n\nRequires:\n    - an authenticated user carrying uid + email\n    - file is audio the transcriber reads; websocket_id, when given, is a query parameter\n\nEnsures:\n    - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,\n      500 any other failure reading, saving or transcribing the audio, 422 empty speech\n    - a 200 body is NDJSON: a transcript line, then exactly one ask or error line\n    - the ask is started before the response exists, so a client that disconnects after\n      line 1 does not cancel it; its answer still reaches the session's WebSocket\n    - the uploaded audio is removed on every path\n\nRaises:\n    - HTTPException 401 / 422 / 500 / 503 as above",
                 "operationId": "ask_audio_api_v2_ask_audio_post",
                 "security": [
                     {
@@ -12549,7 +12651,7 @@
                     "v2-ask"
                 ],
                 "summary": "Transcribe",
-                "description": "Transcribe spoken audio and return the words, asking nothing (row fcebf532).\n\nFor a client that must show the transcript before deciding to send it \u2014 the phone's Quick\nAsk review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so\nit takes no flow dependency and is not behind the `v2 flow enabled` gate.\n\nRequires:\n    - an authenticated user carrying uid + email\n    - file is audio the transcriber reads; its extension (.ogg, .wav, \u2026) picks the decoder\n\nEnsures:\n    - 200 body is { transcription, trace: { stt_ms, upload_bytes } }, the transcript stripped\n    - 401 identity; 422 a missing file part, an empty upload, or no speech recognised;\n      503 with Retry-After on GPU OOM; 500 with one fixed detail for any other failure\n      reading, saving, transcribing or logging \u2014 never the exception text\n    - the uploaded audio is removed on every path, and one io row is written on success\n\nRaises:\n    - HTTPException 401 / 422 / 500 / 503 as above",
+                "description": "Transcribe spoken audio and return the words, asking nothing.\n\nRequires:\n    - an authenticated user carrying uid + email\n    - file is audio the transcriber reads; its extension (.ogg, .wav, \u2026) picks the decoder\n\nEnsures:\n    - 200 body is { transcription, trace: { stt_ms, upload_bytes } }, the transcript stripped\n    - 401 identity; 422 a missing file part, an empty upload, or no speech recognised;\n      503 with Retry-After on GPU OOM; 500 with one fixed detail for any other failure\n      reading, saving, transcribing or logging \u2014 never the exception text\n    - the uploaded audio is removed on every path, and one io row is written on success\n\nRaises:\n    - HTTPException 401 / 422 / 500 / 503 as above\n\nThis serves a client that must show the transcript before deciding to send it, such as\nthe phone's Quick Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with\nthe ask removed, so it takes no flow dependency and is not behind the `v2 flow enabled`\ngate.",
                 "operationId": "transcribe_api_v2_transcribe_post",
                 "requestBody": {
                     "content": {
@@ -12596,17 +12698,40 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Submit",
-                "description": "Run work whose command is already decided \u2014 the door beside /api/v2/ask.\n\nRick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare\nquestion and works out what it is; `submit` takes work whose command the caller has\nalready chosen, so it skips routing and argument extraction entirely.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.command is a non-empty routing command (Field-validated), and\n      request.args carries every argument that command requires.\n\nEnsures:\n    - returns AskResponse; never 500 for a routing or agent failure \u2014 the flow\n      degrades to the receptionist exactly as it does on `ask`.\n    - user_id / user_email come from the token, never the client body.\n    - a command missing arguments comes back status='needs_input' with args_missing\n      filled in, and is NEVER parked: there is no human behind a submit to answer it.\n    - scheduled_at / monopolize / parent_id_hash reach the built job only on the\n      agentic path, which is the only path that builds one; on the other paths the\n      flow records that they were dropped rather than discarding them in silence.",
+                "description": "Run work whose command is already decided \u2014 the door beside /api/v2/ask.\n\nTwo doors survive at v2. `ask` takes a bare question and works out what it is.\n`submit` takes work whose command the caller has already chosen, so it skips routing\nand argument extraction entirely.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.command is a non-empty routing command (Field-validated), and\n      request.args carries every argument that command requires.\n\nEnsures:\n    - returns AskResponse; never 500 for a routing or agent failure \u2014 the flow\n      degrades to the receptionist exactly as it does on `ask`.\n    - user_id / user_email come from the token, never the client body.\n    - a command missing arguments comes back status='needs_input' with args_missing\n      filled in, and is never parked: there is no human behind a submit to answer it.\n    - scheduled_at / monopolize / parent_id_hash reach the built job only on the\n      agentic path, which is the only path that builds one; on the other paths the\n      flow records that they were dropped rather than discarding them in silence.",
                 "operationId": "v2_submit_api_v2_submit_post",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "X-Lupin-Lineage-Token",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Lupin-Lineage-Token"
+                        }
+                    }
+                ],
                 "requestBody": {
+                    "required": true,
                     "content": {
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/SubmitRequest"
                             }
                         }
-                    },
-                    "required": true
+                    }
                 },
                 "responses": {
                     "200": {
@@ -12629,12 +12754,7 @@
                             }
                         }
                     }
-                },
-                "security": [
-                    {
-                        "HTTPBearerWith401": []
-                    }
-                ]
+                }
             }
         },
         "/api/v2/resume": {
@@ -12643,7 +12763,7 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Resume",
-                "description": "Resume a parked v2 flow with the human's answer \u2014 the second turn.\n\nRequires:\n    - an authenticated user (get_current_user).\n    - request.pending_id is a parked id; request.answer is the reply (Field-validated).\n\nEnsures:\n    - returns AskResponse; an expired/unknown pending_id degrades to a\n      needs_input refusal (status='expired'), never a 500.\n    - resume runs OFF the event loop, in a worker thread. It used to run on\n      the loop itself; that is what made /health time out during a call.",
+                "description": "Resume a parked v2 flow with the human's answer \u2014 the second turn.\n\nRequires:\n    - an authenticated user (get_current_user).\n    - request.pending_id is a parked id; request.answer is the reply (Field-validated).\n\nEnsures:\n    - returns AskResponse; an expired/unknown pending_id degrades to a\n      needs_input refusal (status='expired'), never a 500.\n    - resume runs off the event loop, in a worker thread. Running it on the loop\n      itself would make /health time out during a call.",
                 "operationId": "v2_resume_api_v2_resume_post",
                 "requestBody": {
                     "content": {
@@ -12690,7 +12810,7 @@
                     "v2-ask"
                 ],
                 "summary": "V2 Resume Job",
-                "description": "Resume a stalled job from its saved checkpoint and queue the new job.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.resume_from names a stalled job with a checkpoint, by id_hash,\n      `tfe-` id, plan document path, or description.\n\nEnsures:\n    - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the\n      factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);\n      everything else goes through the TFE resolver (the old\n      `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`\n      answer with candidates and NO job pushed).\n    - returns status='resumed' with the new job id and its resume phase, and\n      queue_position = the todo queue's size right after the push.\n    - the model / thinking-effort overrides reach the reconstructed job; None\n      overrides are ignored.\n\nRaises:\n    - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,\n      or cannot be reconstructed \u2014 and, on the direct path, when the caller does not own\n      the job and is not an admin (the same text, so a refusal never reveals existence).",
+                "description": "Resume a stalled job from its saved checkpoint and queue the new job.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.resume_from names a stalled job with a checkpoint, by id_hash,\n      `tfe-` id, plan document path, or description.\n\nEnsures:\n    - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the\n      factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);\n      everything else goes through the TFE resolver (the old\n      `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`\n      answer with candidates and no job pushed).\n    - returns status='resumed' with the new job id and its resume phase, and\n      queue_position = the todo queue's size right after the push.\n    - the model / thinking-effort overrides reach the reconstructed job; None\n      overrides are ignored.\n\nRaises:\n    - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,\n      or cannot be reconstructed \u2014 and, on the direct path, when the caller does not own\n      the job and is not an admin (the same text, so a refusal never reveals existence).",
                 "operationId": "v2_resume_job_api_v2_resume_job_post",
                 "requestBody": {
                     "content": {
@@ -13101,7 +13221,7 @@
                 "additionalProperties": false,
                 "type": "object",
                 "title": "ApprovalSettingsRequest",
-                "description": "One or more approval settings to write. Every field is optional; omitted means\nLEAVE UNCHANGED, which is what makes this a patch rather than a replace.\n\n\ud83d\udd34 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's\nlenient bool coerces the string \"false\", and \"false\" is exactly the value this\nmodule has been bitten by twice \u2014 `bool( \"false\" )` is True, so a lenient model\nwould let a caller switch a gate ON by sending the word \"off\".\n\n\u26a0\ufe0f `extra=\"forbid\"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES\nunknown fields unless told otherwise, so a typo'd key \u2014 `enforcment_active` \u2014 would\nreturn 200 having changed nothing, and the operator would conclude the switch is\nbroken. The alternative (ignore extras, as the rest of this router does) was\nrejected for exactly that reason: a setting ignored in SILENCE is the failure mode\nthis file documents at length."
+                "description": "One or more approval settings to write; an omitted field is left unchanged.\n\nThat makes this a patch rather than a replace. Every field is optional.\n\nThe fields are `StrictBool`, not `bool`, and that is the whole safety of the door.\nPydantic's lenient bool coerces the string \"false\", and `bool( \"false\" )` is True. A\nlenient model would let a caller switch a gate on by sending the word \"off\".\n\n`extra=\"forbid\"` is a choice, not a default. Pydantic ignores unknown fields unless told\notherwise. A typo'd key such as `enforcment_active` would then return 200 having changed\nnothing, and the operator would conclude the switch is broken. The rest of this router\nignores extras. That was rejected here, because a setting ignored in silence is a\nfailure mode this file documents at length."
             },
             "AskRequest": {
                 "properties": {
@@ -13356,7 +13476,7 @@
                     "trace_id"
                 ],
                 "title": "AskResponse",
-                "description": "The \u00a78 terminal result of one v2 request."
+                "description": "The terminal result of one v2 request."
             },
             "AutoRouteOption": {
                 "properties": {
@@ -13383,7 +13503,7 @@
                     "description"
                 ],
                 "title": "AutoRouteOption",
-                "description": "The dropdown's 'no command named \u2014 let the router decide' entry.\n\nCarried in the RESPONSE rather than hand-written into the page, so the front end\nholds no agent list of its own at all \u2014 not even the one legitimate option. See\nregistry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption\nwritten into a guard."
+                "description": "The dropdown's \"no command named, let the router decide\" entry.\n\nIt is carried in the response rather than hand-written into the page. The front end\nthen holds no agent list of its own, not even the one legitimate option. See\nregistry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption\nwritten into a guard."
             },
             "AvailableModesResponse": {
                 "properties": {
@@ -13838,7 +13958,7 @@
                     "thread_id"
                 ],
                 "title": "DmRespondRequest",
-                "description": "POST /api/dm/respond request body \u2014 a threaded peer-DM reply.\n\nIdentical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:\na reply must name the message it answers and the conversation it continues."
+                "description": "POST /api/dm/respond request body: a threaded peer-DM reply.\n\nIdentical to DmSendRequest except `reply_to` and `thread_id` are required.\nA reply must name the message it answers and the conversation it continues."
             },
             "DmSendRequest": {
                 "properties": {
@@ -13947,7 +14067,7 @@
                     "body"
                 ],
                 "title": "DmSendRequest",
-                "description": "POST /api/dm/send request body \u2014 notification-native AI\u2194AI DM.\n\nThe recipient is addressed by persona name (preferred) or explicit session\nid; resolution is same-user scoped. The message body travels INLINE (no\nclaim-check). Threading is carried by `reply_to` (the message being answered)\nand `thread_id` (conversation correlation; defaults to a fresh id server-side\nwhen omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so\nthe recipient can frame it as \"[DM from <persona> <icon>]\"."
+                "description": "POST /api/dm/send request body for a notification-native AI to AI DM.\n\nThe recipient is addressed by persona name (preferred) or explicit session id.\nResolution is same-user scoped. The message body travels inline, with no claim-check.\nThreading is carried by `reply_to` (the message being answered) and `thread_id`\n(conversation correlation, defaulting to a fresh id server-side when omitted).\n`sender_persona` and `sender_icon` carry the sender's identity, so the recipient can\nframe it as \"[DM from <persona> <icon>]\"."
             },
             "EmbedBatchRequest": {
                 "properties": {
@@ -14109,7 +14229,7 @@
                     "cap"
                 ],
                 "title": "FleetSizeCapIn",
-                "description": "Body for PUT /api/arbiter/fleet-size-cap \u2014 the one number the operator is setting.\n\n`ge=1` is declared here rather than hand-rolled in the handler, so a nonsense\nvalue is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT\ndeclared here and cannot be: the ceiling is `cc session fleet size cap maximum`,\nread at call time, so the handler checks it against the live key."
+                "description": "Body for PUT /api/arbiter/fleet-size-cap, the one number the operator is setting.\n\n`ge=1` is declared here rather than hand-rolled in the handler, so Pydantic refuses\na nonsense value with a 422 naming the field. The upper bound is not declared here\nand cannot be. The ceiling is `cc session fleet size cap maximum`, read at call time,\nso the handler checks it against the live key."
             },
             "FleetSnapshotIn": {
                 "properties": {
@@ -14177,7 +14297,7 @@
                 "additionalProperties": false,
                 "type": "object",
                 "title": "FlowRatioSettingsRequest",
-                "description": "A PATCH of the operator's ratio controls. Every field is optional.\n\n\u26a0\ufe0f OMITTING A FIELD LEAVES IT ALONE \u2014 it does not reset it. An operator dragging the\nthreshold slider must not silently revert a window someone else set, so this is a\npartial update rather than a replace."
+                "description": "A PATCH of the operator's ratio controls. Every field is optional.\n\nOmitting a field leaves it alone and does not reset it. An operator dragging the\nthreshold slider must not silently revert a window someone else set, so this is a\npartial update rather than a replace."
             },
             "HTTPValidationError": {
                 "properties": {
@@ -14288,7 +14408,7 @@
                     "disabled"
                 ],
                 "title": "ManagerPullRequest",
-                "description": "A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.\n\n\ud83d\udd34 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING \"true\", and\n`bool( \"false\" )` is True \u2014 so a lenient field would let a caller sending \"false\"\nswitch the toggle ON while believing they had turned it off. That is the exact\ndefect this endpoint exists to make unreachable, and accepting it here would put it\nback one layer up. The reader still PARSES strings, deliberately, for the operator\nwho hand-edits the file; nothing should ever ARRIVE as one."
+                "description": "A flip of the operator's manager-pull toggle. One field, and it is required.\n\nThe field is `StrictBool`, not `bool`. Pydantic's lenient bool accepts the string \"true\",\nand `bool( \"false\" )` is True. A lenient field would let a caller sending \"false\" switch\nthe toggle on while believing they had turned it off. This endpoint exists to make that\ndefect unreachable, and accepting it here would put it back one layer up. The reader still\nparses strings, for the operator who hand-edits the file, but nothing should ever arrive\nas one."
             },
             "ModeChangeResponse": {
                 "properties": {
@@ -14438,7 +14558,7 @@
                     "tts_preview_fraction"
                 ],
                 "title": "MultiplexerConfigResponse",
-                "description": "Display-tuning values for the multiplexer front-end.\n\nField names use snake_case to match server convention. Keys here become\nproperties on the JSON object that `boot.ts` reads via\n`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20."
+                "description": "Display-tuning values for the multiplexer front-end.\n\nField names use snake_case to match server convention. Keys here become\nproperties on the JSON object that `boot.ts` reads via\n`configureMetaDisplayCap(serverConfig)`."
             },
             "PeerQueueResponse": {
                 "properties": {
@@ -14541,7 +14661,7 @@
                     "vote"
                 ],
                 "title": "PredictionVoteRequest",
-                "description": "Body for POST /api/notify/prediction-vote/{notification_id}.\n\nThe client supplies the hint context it is voting on. `question` and `response_type`\nare OPTIONAL because the endpoint authoritatively resolves them from the persisted\nnotification when the client omits them (the notification.message IS persisted; the\nprediction hint's predicted_value is NOT, so the client must supply predicted_value)."
+                "description": "Body for POST /api/notify/prediction-vote/{notification_id}.\n\nThe client supplies the hint context it is voting on. `question` and `response_type`\nare optional. The endpoint resolves them from the persisted notification when the client\nomits them, because notification.message is persisted. The prediction hint's\npredicted_value is not persisted, so the client must supply predicted_value."
             },
             "PushPauseRequest": {
                 "properties": {
@@ -14770,7 +14890,7 @@
                     "actor"
                 ],
                 "title": "RequestFileIn",
-                "description": "A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).\n\n`move` is validated for membership in the lifecycle module, for the reason\n`RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it\nis recorded beside the authenticated identity and confers nothing on its own."
+                "description": "A manager's request that the operator promote or demote one row.\n\n`move` is validated for membership in the lifecycle module, for the reason\n`RequestVerdictIn` gives. `actor` carries the session id the manager check reads. It\nis recorded beside the authenticated identity and confers nothing on its own."
             },
             "RequestPasswordResetRequest": {
                 "properties": {
@@ -14829,7 +14949,7 @@
                     "verdict"
                 ],
                 "title": "RequestVerdictIn",
-                "description": "The operator's answer to a pending promote/demote request.\n\n`verdict` is validated for MEMBERSHIP in the lifecycle module rather than here \u2014 a\nsecond copy of the legal set is a second thing to keep in sync, and the refusal it\nproduces there already explains why 'pending' is not a verdict."
+                "description": "The operator's answer to a pending promote/demote request.\n\n`verdict` is validated for membership in the lifecycle module and not here. A second copy\nof the legal set is a second thing to keep in sync. The refusal it produces there\nalready explains why 'pending' is not a verdict."
             },
             "ResetPasswordResponse": {
                 "properties": {
@@ -15454,7 +15574,7 @@
                     "command"
                 ],
                 "title": "SubmitRequest",
-                "description": "Request body for POST /api/v2/submit \u2014 work whose command is already decided.\n\n`question` is OPTIONAL here and required on `ask`, which is the whole difference\nbetween the two doors. `ask` is handed prose and has to work out what it means;\n`submit` is handed the answer to that question up front, so the text is only carried\nalong for the record and for anything downstream that shows the user what ran.\n\nTHE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are\ntop-level fields rather than keys inside `args`. `args` is checked against the\ncommand's own argument contract, so a scheduling instruction put in there would have\nto be written into some agent's contract as though the agent took it \u2014 and no agent\ndoes. Each retiring door declared these same three on its own request model and set\nthem on the job after building it; they arrive here for the same reason and are\npassed on only when the caller actually set one."
+                "description": "Request body for POST /api/v2/submit \u2014 work whose command is already decided.\n\n`question` is optional here and required on `ask`, which is the whole difference\nbetween the two doors. `ask` is handed prose and has to work out what it means.\n`submit` is handed the answer up front. The text is only carried along for the\nrecord and for anything downstream that shows the user what ran.\n\nThe last three fields are queue directives, not arguments. That is why they are\ntop-level fields rather than keys inside `args`. `args` is checked against the\ncommand's own argument contract. A scheduling instruction put there would have to be\nwritten into some agent's contract as though the agent took it, and no agent does.\nEach retiring door declared these same three on its own request model. They arrive\nhere for the same reason, and are passed on only when the caller actually set one."
             },
             "TaskAmendIn": {
                 "properties": {
@@ -15498,7 +15618,7 @@
                     "actor"
                 ],
                 "title": "TaskAmendIn",
-                "description": "Body for POST /api/tasks/{id}/amend (Phase 2.2 \u2014 append-only body amendment).\n\nAppends a persona-stamped + UTC-timestamped block to a NON-terminal item's\nbody WITHOUT rewriting the existing text \u2014 the durable-record seam for a\nlive item whose scope is legitimately reframed mid-flight (Krishna's\n2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend\ncan NEVER lose prior spec history. `note` is the text appended; `reason`\nstamps the audit event (mirrors the PATCH reason discipline), falling back to\nan auto-marker when absent. `actor`/`authority` stamp the event, not the item."
+                "description": "Body for POST /api/tasks/{id}/amend, an append-only body amendment.\n\nIt appends a persona-stamped, UTC-timestamped block to the body of a non-terminal item\nwithout rewriting the existing text. This is the durable-record seam for a live item whose\nscope is legitimately reframed mid-flight. It differs from PATCH `body`, which overwrites,\nbecause an amend can never lose prior spec history. `note` is the text appended. `reason`\nstamps the audit event, mirroring the PATCH reason discipline, and falls back to an\nauto-marker when absent. `actor` and `authority` stamp the event, not the item."
             },
             "TaskCorrelateIn": {
                 "properties": {
@@ -15528,7 +15648,7 @@
                     "actor"
                 ],
                 "title": "TaskCorrelateIn",
-                "description": "Body for POST /api/tasks/{id}/correlate (Phase 2 \u2014 cross-session respawn\nadoption: re-stamp an item's correlation_key onto a successor session's\nharness task id instead of forking a duplicate item).\n\nTerminal items are rejected in the handler (no re-keying closed history);\nauthority enum membership is validated there too (one rules home)."
+                "description": "Body for POST /api/tasks/{id}/correlate, the cross-session respawn adoption seam.\n\nIt re-stamps an item's correlation_key onto a successor session's harness task id instead of\nforking a duplicate item. The handler rejects terminal items, so closed history is never\nre-keyed. It also validates the authority enum there, so the rules live in one place."
             },
             "TaskCreateIn": {
                 "properties": {
@@ -15676,7 +15796,7 @@
                     "created_by"
                 ],
                 "title": "TaskCreateIn",
-                "description": "Create body for POST /api/tasks.\n\nCreation DEFAULTS to status=queued (the creation event stamps \"->queued\");\nenum membership for item_class/gate_class/priority/authority is validated\nby task_store_rules.validate_create in the handler (one rules home, not\nper-layer duplication).\n\nONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be\n\"blocked\", minting an already-blocked row in a single call. A blocked mint\ncarries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware \u2014 a\npersona blocker requires it), enforced by rules.validate_create_status which\nREUSES the same ->blocked invariant a transition applies. A blocked mint is\nadditionally MANAGER-ONLY (guarded in the handler via is_manager_figure).\n`status` is otherwise whitelisted to queued|blocked \u2014 done/dropped/parked/\nclaimed/in_progress/review are NOT mintable.\n\n\u26a0\ufe0f BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed\n2026-09-11, row 2d786391). With the holding default ON, an omitted status mints\n`not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403\nunless the row is P0 or the caller is the operator's validated login \u2014 see\n`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is\ntherefore retired; the manager guard below still covers the two paths that pass."
+                "description": "Create body for POST /api/tasks.\n\nCreation defaults to status=queued, and the creation event stamps \"->queued\". The handler\nvalidates enum membership for item_class, gate_class, priority and authority through\n`task_store_rules.validate_create`. The rules live in one place and are not duplicated\nper layer.\n\n`status` may also be \"blocked\", which mints an already-blocked row in one call. A blocked\nmint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona\nblocker requires. `rules.validate_create_status` enforces both and reuses the same\n`->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in\nthe handler through `is_manager_figure`. `status` is otherwise limited to queued or blocked.\nThe statuses done, dropped, parked, claimed, in_progress and review are not mintable.\n\nThe create door narrows both paragraphs above. With the holding default on, an omitted\nstatus mints `not_approved`. An explicit live status (queued or blocked) is refused with 403\nunless the row is P0 or the caller is the operator's validated login. See\n`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is therefore\nretired, and the manager guard still covers the two paths that pass."
             },
             "TaskPatchIn": {
                 "properties": {
@@ -15792,7 +15912,7 @@
                     "actor"
                 ],
                 "title": "TaskPatchIn",
-                "description": "Body for PATCH /api/tasks/{id} (Phase 2.1 \u2014 item-field edit).\n\nEdits the mutable presentation/ownership fields of a NON-terminal item.\n`status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /\n`correlation_key` are DELIBERATELY ABSENT \u2014 they ride the transition oracle\n(validate_transition) and the /correlate seam, NEVER an item-PATCH.\n`extra='forbid'` makes that a HARD wire-level invariant: naming any of them\nis a 422, not a silent drop (reviewer ruling 2026-06-15 \u2014 PATCH can never\nbypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not\nthe item \u2014 `reason` is NOT an editable field (the manager-supplied \"why\" for\na reassignment); when absent the event records the auto-generated field delta."
+                "description": "Body for PATCH /api/tasks/{id}, an item-field edit.\n\nIt edits the mutable presentation and ownership fields of a non-terminal item. `status`,\n`blocked_by`, `next_chase_ts`, `receipt_refs` and `correlation_key` are left out of this body.\nThey ride the transition oracle (`validate_transition`) and the /correlate\nseam, never an item PATCH. `extra='forbid'` makes that a hard wire-level invariant, because\nnaming any of them is a 422 and not a silent drop. PATCH can therefore never bypass the\noracle. `actor`, `authority` and `reason` stamp the audit event, not the item. `reason` is\nnot an editable field. It is the manager-supplied \"why\" for a reassignment, and when absent\nthe event records the auto-generated field delta."
             },
             "TaskTransitionIn": {
                 "properties": {
@@ -15990,6 +16110,23 @@
                 ],
                 "title": "TrustModeUpdateRequest",
                 "description": "Request body for updating trust mode at runtime."
+            },
+            "UnparkAskIn": {
+                "properties": {
+                    "actor": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1,
+                        "title": "Actor"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "actor"
+                ],
+                "title": "UnparkAskIn",
+                "description": "Body for POST /api/tasks/{id}/unpark-ask, a manager asking for the operator's approval.\n\nThe row id comes from the path and never from the body. A caller cannot ask about one row\nand have the card bound to another. `actor` is the declared persona and session id, which\nfinds the manager session and words the card."
             },
             "UnregisterTokenRequest": {
                 "properties": {

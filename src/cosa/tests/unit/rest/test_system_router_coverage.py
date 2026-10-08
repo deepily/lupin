@@ -167,7 +167,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
 
     Ensures:
         - drop_table=True clears the pgvector rows
-        - a DB error is caught (clear note) without failing the reset
+        - a DB error is caught (clear note); the reset still runs but the answer is status error
         - drop_table=False skips the clear block entirely
         - an outer exception returns the error response shape
     """
@@ -221,7 +221,7 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "status" ], "success" )
         self.assertTrue( result[ "table_dropped" ] )
 
-    async def test_postgres_backend_clear_error_swallowed( self ):
+    async def test_postgres_backend_clear_error_is_reported_not_swallowed( self ):
         cfg, pe_cls, get_pe = self._common_patches()
 
         def boom_get_db():
@@ -234,8 +234,12 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
              patch( "builtins.print" ), \
              patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
             result = await reset_prediction_engine( drop_table=True )
-        self.assertEqual( result[ "status" ], "success" )      # non-fatal
+        self.assertEqual( result[ "status" ], "error" )        # a failed clear is not a success
+        self.assertIn( "pg down", result[ "message" ] )
+        self.assertIn( "not cleared", result[ "message" ] )
         self.assertFalse( result[ "table_dropped" ] )
+        self.assertEqual( result[ "prediction_table" ], "prediction_decisions" )
+        pe_cls.reset.assert_called_once()                      # the singleton was still reset
 
 
 class TestWebsocketSessionsFalsyUser( unittest.IsolatedAsyncioTestCase ):

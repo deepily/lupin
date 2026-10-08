@@ -661,7 +661,8 @@ def clean_test_db():
         conn.execute( text( "DELETE FROM users WHERE NOT is_protected" ) )
         conn.execute( text(
             "TRUNCATE TABLE auth_audit_log, failed_login_attempts, "
-            "proxy_decisions, trust_states, refresh_tokens"
+            "proxy_decisions, trust_states, "
+            "task_items, task_events, task_promotion_tickets, fcm_tokens, refresh_tokens"
         ) )
         clean_job_history( conn )   # keeps pending jobs scheduled in the future (row a80630a4)
 

@@ -24,7 +24,7 @@ import os
 from typing import Generator
 
 from cosa.rest.postgres_models import Base
-from cosa.utils.dotenv_password import seed_db_password_from_dotenv, seed_db_password_from_file
+from cosa.utils.dotenv_password import reselect_seeded_login, seed_db_password_from_dotenv, seed_db_password_from_file
 
 
 _CLOUD_BACKED_TRUTHY = ( "1", "true", "yes", "on" )
@@ -249,6 +249,8 @@ def swap_database( new_env: str ) -> str:
 
     Ensures:
         - LUPIN_ENV is updated
+        - a DB_USER and DB_PASSWORD that get_database_url seeded from .env are chosen again for
+          the new environment; an exported DB_USER or DB_PASSWORD is left alone
         - engine, SessionLocal, ScopedSession are recreated
         - Old engine is disposed (connections released)
         - Returns the new database URL (password masked)
@@ -259,6 +261,10 @@ def swap_database( new_env: str ) -> str:
     global engine, SessionLocal, ScopedSession
 
     os.environ[ "LUPIN_ENV" ] = new_env
+
+    # The login was picked at the first call, from the LUPIN_ENV of that moment. Pick it again
+    # for the environment being moved to, unless the caller exported DB_USER or DB_PASSWORD.
+    reselect_seeded_login()
 
     # Dispose old engine (releases connection pool)
     engine.dispose()

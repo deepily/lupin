@@ -30,6 +30,10 @@ already worked.
 
 import os
 
+# What seed_db_password_from_dotenv put into os.environ, by name. It lets reselect_seeded_login
+# tell a login this module chose from one the caller exported.
+_SEEDED = { }
+
 
 def seed_db_password_from_dotenv( root=None ):
     """
@@ -117,14 +121,60 @@ def seed_db_password_from_dotenv( root=None ):
     password = found.get( prefix + "PASSWORD" )
     if password:
         os.environ[ "DB_PASSWORD" ] = password
+        _SEEDED[ "DB_PASSWORD" ]    = password
         # THE PASSWORD AND THE LOGIN NAME TRAVEL TOGETHER. A role's password paired with the
         # superuser's default name fails to authenticate with an error that names the password,
         # so a missing USER key falls back to the role the SQL creates (init-db-roles.sql).
         # An exported DB_USER still wins.
         if not os.environ.get( "DB_USER" ):
             os.environ[ "DB_USER" ] = found.get( prefix + "USER" ) or ( "lupin_test" if testing else "lupin_host" )
+            _SEEDED[ "DB_USER" ]    = os.environ[ "DB_USER" ]
         return
-    if "POSTGRES_PASSWORD" in found: os.environ[ "DB_PASSWORD" ] = found[ "POSTGRES_PASSWORD" ]
+    if "POSTGRES_PASSWORD" in found:
+        os.environ[ "DB_PASSWORD" ] = found[ "POSTGRES_PASSWORD" ]
+        _SEEDED[ "DB_PASSWORD" ]    = found[ "POSTGRES_PASSWORD" ]
+
+
+def reselect_seeded_login( root=None ):
+    """
+    Choose the login again for the current LUPIN_ENV, if this module chose the old one.
+
+    The login is picked once, at the first call, from whatever LUPIN_ENV said then. A process
+    that later moves to another environment (swap_database) would keep the first role.
+
+    Requires:
+        - LUPIN_ENV already holds the environment being moved to
+        - root, if given, is the directory seed_db_password_from_dotenv should search from
+
+    Ensures:
+        - changes nothing, and returns False, when DB_USER or DB_PASSWORD was exported or changed
+          since this module set it, or when this module set nothing
+        - otherwise clears the seeded values and seeds again, so the role matches LUPIN_ENV, and
+          returns True
+        - puts the previous login back, and returns False, when the second seeding finds nothing
+          or finds only a password that would replace a role login with the superuser's name
+        - never raises
+    """
+    if not _SEEDED: return False
+    for key in ( "DB_USER", "DB_PASSWORD" ):
+        if key in os.environ and _SEEDED.get( key ) != os.environ[ key ]: return False
+
+    previous = { key: os.environ[ key ] for key in ( "DB_USER", "DB_PASSWORD" ) if key in os.environ }
+    for key in previous: del os.environ[ key ]
+    _SEEDED.clear()
+
+    seed_db_password_from_dotenv( root )
+    # A role login that is replaced by a bare password (no DB_USER) would fall back to the
+    # superuser's name, so that counts as finding none.
+    lost_role = "DB_USER" in previous and "DB_USER" not in os.environ
+    if os.environ.get( "DB_PASSWORD" ) and not lost_role: return True
+
+    for key in ( "DB_USER", "DB_PASSWORD" ): os.environ.pop( key, None )
+    _SEEDED.clear()
+
+    os.environ.update( previous )
+    _SEEDED.update( previous )
+    return False
 
 
 def seed_db_password_from_file():

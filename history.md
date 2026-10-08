@@ -8,6 +8,26 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.07 night to 10.08 - Session 4afec3b4 (Claude Code 5de42f73, then a0105e01 after a self re-spin at 01:26 EDT; Mr. Radio 🦉, manager; crew Maya 🌻 author, Pocholo 📣 reviewer, both Sonnet) | Suite token, env step and three more rows landed; two waiter reds caused, fixed and green twice
+
+- **Landed, not pushed**: the suite token, `c7aa949c5` to `ea925ae5f` at 00:19 EDT (8 commits, row `8d4a5a59`). A marks fix, `ea925ae5f` to `7474fecbf` at 01:00 EDT. A 23-commit stack, `a70f40ceb` to `af86ec513` at 02:26 EDT. A docstring fix, `ebdb51c47`, at 02:44 EDT.
+- **The stack holds**: the Python half of the env step (row `80513825`), the live unpark test and the real-Postgres rollback test (row `389761b2`), three follow-ups for row `89771e0f`, and the waiters fix (row `b47d82f1`).
+- **Gate on `af86ec513`** (Maya's runs): unit 32,208 passed, 0 failed; cosa 9,514 passed, 0 failed. The whole unit tier was not re-run on `ebdb51c47`, which changes three docstring lines.
+- **Two reds on main, mine**: `test_done_queue_metadata_includes_session_fields` and `test_job_interactions_unauthorized_access` passed in `ts-c7aea993` and failed in `ts-bf9fd99c` and `ts-5d99ead3`.
+- **Cause, measured by Pocholo**: a cold snapshot cache made each job a 7 to 9 s agent run. The waiters had 11 and 8 jobs ahead and finished 92 s and 55 s after submit. The wait was a fixed 30 s.
+- **Fix**: each waiter reads the queue depth and waits that many jobs plus one, times 20 s, under a 600 s cap.
+- **Green twice**: `ts-e306a1ae` on `af86ec513` and `ts-d637a534` on `ebdb51c47`, each 465 passed, 0 failed (`integration-20261008-064332.log`, `integration-20261008-070040.log`).
+- **Rows closed with receipts**: `a80630a4`, `315ba9d0`, `e4e02931`, `fae0bc51`, `b2db7be7`, `b47d82f1`.
+- **Dev server bounced** at 03:01 EDT with the sanctioned script, after 42 hours up. The script recreated the container on compose drift. Which fields drifted was not captured.
+- **The rest of the pyramid, on `61a8c0044`**: typecheck, stylelint, doclint, websocket smoke (50 of 50) and the serial bridge guard all exit 0 (Maya's runs). Browser half A 463 passed, half B 506 passed, 0 failed (`ts-70fa9a8a`). TypeScript 5,868 pass, 0 fail, coverage 100 (`ts-f6775d6c`).
+- **Smoke red by two** (`ts-a4266e07`, 484 passed): `test_presentation_live_endpoint` and `test_research_to_presentation_live`. The test container's Claude Code login expired on 2026-08-27 (Pocholo measured). That it is the cause is not proven.
+- **Coverage gate exit 0**: total 97.73%, floor 97. The mandate is 100.
+- **Two unit reds, mine, found by the coverage run**: the committed API docs lacked the unpark-ask endpoint and the token header. A dev server 42 hours stale had hidden it until the bounce. Fixed by `becd3af6a`, landed 05:37 EDT.
+- **Whole unit tier on `becd3af6a`**: 32,208 passed, 0 failed (Maya's run).
+- **Row `89771e0f` closed** as well. The growing-tables item was decided as no further build.
+- **Not done**: the push, the backup, the post-games on row `74394bba`.
+- **Files**: history.md, TODO.md; code through fast-forward merges, every commit reviewed by Pocholo.
+
 ### 2026.10.07 evening - Session 4afec3b4 (Claude Code 7f9ad619; Mr. Radio 🦉, manager; crew Maya 🌻 author, Pocholo 📣 reviewer, both Sonnet, re-spun 20:08 to 20:10 EDT) | Six lines landed in 23 plus 3 commits; two integration reds found and fixed; integration green
 
 - **Landed, not pushed**: `5785c22c0` to `7849dc1e1` at 19:35 EDT, 23 commits (a 20-commit assembly `808a9bb45`, then `69d871f80`, `d8cb3bff7`, `7849dc1e1`); `7849dc1e1` to `f7faf9a8f` at 20:06 EDT, 3 commits (`6fbfb6e95`, `702f8f023`, `f7faf9a8f`). The assembly holds the picture tolerance 0.03 (row `a0d081da`), the un-park on a server-made card (row `9dde52ef`), train 2 (rows `315ba9d0`, `e4e02931`, `b2db7be7`), `db_roles --rollback` and the test-database fixes (row `80513825`).
