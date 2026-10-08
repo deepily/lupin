@@ -409,6 +409,7 @@ def analyze_pages( stage ):
         - returns { question: { state, chosen_single1, chosen_single2, chosen_pack, set_changed_by_packing,
           set_changed_by_noise, pack_p99, pack_max, noise_p99, noise_max } } for each question with any page arm
         - the chosen pages are those the tool itself chooses at the policy floor, capped as the tool caps them
+        - only the pages answered in all three arms are read, so an entry lost within the limit never raises
         - state is "fail" when packing changes the set of chosen pages, "pass" when it does not, and "invalid"
           or "inconclusive" with its arms; a change between the two single runs is reported as noise only
     """
@@ -420,7 +421,8 @@ def analyze_pages( stage ):
         s1, s2, pack = ( stage[ q ].get( n ) for n in names )
         bad = _arms_state( [ s1, s2, pack ] )
         if bad is not None: out[ q ] = { "state": bad }; continue
-        chosen = [ [ c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in a[ "entry_ids" ] ], vd.POLICY ) ] for a in ( s1, s2, pack ) ]
+        common = [ i for i in s1[ "entry_ids" ] if all( i in a[ "probabilities" ] for a in ( s1, s2, pack ) ) ]
+        chosen = [ [ c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) ] for a in ( s1, s2, pack ) ]
         pk, nz = list( differences( s1, pack ).values() ), list( differences( s1, s2 ).values() )
         changed = set( chosen[ 0 ] ) != set( chosen[ 2 ] )
         out[ q ] = { "state": "fail" if changed else "pass", "chosen_single1": chosen[ 0 ], "chosen_single2": chosen[ 1 ], "chosen_pack": chosen[ 2 ],
