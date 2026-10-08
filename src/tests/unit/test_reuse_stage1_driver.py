@@ -172,6 +172,22 @@ def test_a_packed_arm_is_never_held_below_the_floor_by_its_small_entry_count( en
     assert out[ "attempt_cap" ] == out[ "attempt_limit" ] == rt.CALL_BUDGET_CAP == env.made[ -1 ].budget.limit
 
 
+def test_the_context_is_handed_the_arms_own_cap_not_the_default( env, monkeypatch ):
+    seen = []
+    built = rt.ReuseContext
+    def spy( *a, **kw ): seen.append( kw.get( "call_budget_cap" ) ); return built( *a, **kw )
+    monkeypatch.setattr( rt, "ReuseContext", spy )
+    monkeypatch.setattr( rt, "CALL_BUDGET_CAP", 5 )
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :20 ], 5_000_000 )
+    assert seen == [ 22 ]
+
+
+@pytest.mark.parametrize( "bad", [ rt.CALL_BUDGET_CAP - 1, "8000", True, 8000.0, None ] )
+def test_a_context_cap_below_the_floor_or_not_an_integer_is_refused( env, bad ):
+    with pytest.raises( rt.ReuseError ) as caught: rt.ReuseContext( env.root, env.data, call_budget=100, call_budget_cap=bad )      # a small budget, so only the cap check can refuse
+    assert caught.value.name == "BAD_BUDGET"
+
+
 def test_the_tool_path_keeps_the_floor_as_its_hard_ceiling( env ):
     with pytest.raises( rt.ReuseError ) as caught: rt.ReuseContext( env.root, env.data, call_budget=rt.CALL_BUDGET_CAP + 1 )
     assert caught.value.name == "BAD_BUDGET"
