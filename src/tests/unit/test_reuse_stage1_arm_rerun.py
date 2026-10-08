@@ -110,8 +110,9 @@ def test_an_arm_whose_first_attempt_raised_may_be_run_again( env ):
 def test_a_gated_arm_is_rerun_the_same_way_once_the_canary_is_approved( env ):
     st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
     st.approve_canary( env, 1, "maria", "read it" )
-    assert st.run_arm( env, 1, "pack10", NEED, ENTRIES[ :10 ], 1 )[ "state" ] == "incomplete"
-    again = st.run_arm( env, 1, "pack10", NEED, ENTRIES[ :10 ], 1_000_000, attempt=2, reason="ceiling" )
+    ten = ENTRIES[ 10:20 ]                                                       # not the canary's ten, whose answers pack10 would read from the cache
+    assert st.run_arm( env, 1, "pack10", NEED, ten, 1 )[ "state" ] == "incomplete"
+    again = st.run_arm( env, 1, "pack10", NEED, ten, 1_000_000, attempt=2, reason="ceiling" )
     assert again[ "run_name" ] == "s1-q1-pack10-a2" and again[ "state" ] == "complete"
 
 
@@ -131,6 +132,8 @@ def test_every_arm_and_attempt_has_a_run_index_no_other_arm_shares():
 
 
 def test_two_arms_of_one_size_do_not_read_each_others_reruns( env ):
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    st.approve_canary( env, 1, "maria", "read it" )
     stop_single1( env )
     st.run_arm( env, 1, "single1", NEED, TWO, 1_000_000, attempt=2, reason="again" )
     st.run_arm( env, 1, "single2", NEED, TWO, 1 )

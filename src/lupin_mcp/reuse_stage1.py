@@ -26,8 +26,8 @@ FORMAT           = "stage1-arm-1"
 CANARY_FORMAT    = "stage1-canary-1"
 QUESTIONS        = ( 1, 2, 3, 4 )
 CANARY_SIZE      = 10
-MAX_ATTEMPTS     = 3                                             # the canary may be run, and retried twice; no other arm is retried
-RETRY_INDEX      = { 2: 15, 3: 16 }                              # a retry asks again: its run index is free of every arm's, so it reads no earlier answer
+MAX_ATTEMPTS     = 3                                             # an arm may be run, and run again twice
+RETRY_INDEX      = { 2: 15, 3: 16 }                              # the canary's reruns: their run index is free of every arm's, so they read no earlier answer
 OUTPUT_LIMIT     = rc.OUTPUT_TOKENS_PER_ENTRY
 UNGATED          = ( "single1", "canary" )                       # the arms that may run before a canary is approved
 PLACEMENTS       = ( "first", "middle", "last" )
@@ -36,6 +36,23 @@ PROBE_KEYS       = frozenset( ( "id", "placement", "neighbours" ) )
 ARMS             = { "single1": ( 1, 1 ), "single2": ( 2, 1 ), "canary": ( 3, CANARY_SIZE ), "pack10": ( 3, 10 ), "pack50": ( 4, 50 ), "pack200": ( 5, 200 ),
                      "page-single1": ( 6, 1 ), "page-single2": ( 7, 1 ), "page-pack": ( 8, 200 ) }
 ARMS.update( { f"probe-{place}-{near}": ( 9 + 3 * ( near == "near" ) + PLACEMENTS.index( place ), 200 ) for near in NEIGHBOURS for place in PLACEMENTS } )
+
+_OTHER_ARMS = sorted( arm for arm in ARMS if arm != "canary" )
+
+
+def retry_index( arm, attempt ):
+    """
+    Give an arm's attempt the run index its cache keys use.
+
+    Ensures:
+        - returns the arm's own run index for attempt 1
+        - returns, for a rerun, an index no other arm or attempt uses, so a rerun reads none of the answers before it
+        - the canary keeps the indexes it has run under, 15 and 16; every other arm's reruns follow from 17
+    """
+    if attempt == 1: return ARMS[ arm ][ 0 ]
+    if arm == "canary": return RETRY_INDEX[ attempt ]
+    return 17 + 2 * _OTHER_ARMS.index( arm ) + attempt - 2
+
 
 
 class StageRefused( Exception ):
@@ -156,20 +173,24 @@ def _require_approved( env, question ):
 
 def _check_attempt( env, question, arm, attempt, reason ):
     """
-    Check a retry against the rules that let only the canary run again.
+    Check a rerun against the rules that let a stopped arm run again.
 
     Raises:
-        - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a retry of any arm but the canary,
-          a retry without a reason or a first attempt with one, a retry with no attempt before it,
-          a retry after any attempt was approved, or a retry after an attempt tripped on model_mismatch
+        - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a rerun without a reason or a first attempt with one,
+          or a rerun with no attempt before it
+        - ValueError for a rerun of an arm with an attempt that completed
+        - ValueError for a canary rerun after any attempt was approved, or after an attempt tripped on model_mismatch
     """
     if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise DriverRefused( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
     if attempt == 1:
         if reason is not None: raise DriverRefused( "a first attempt has no reason; only a retry gives one" )
         return
-    if arm != "canary": raise DriverRefused( f"only the canary may be retried, not {arm!r}" )
     if not isinstance( reason, str ) or not reason.strip(): raise DriverRefused( "a retry needs a named reason" )
     if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise DriverRefused( f"attempt {attempt} has no earlier attempt to follow" )
+    if arm != "canary":
+        done = [ n for n in range( 1, attempt ) if json.loads( ( env.results_dir / f"{run_name( question, arm, n )}.json" ).read_text() )[ "state" ] == "complete" ]
+        if done: raise DriverRefused( f"{arm!r} of question {question} already completed as attempt {done[ 0 ]}; it is not run again" )
+        return
     reports = _canary_reports( env, question )
     if any( report[ "approved" ] is not None for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} is already approved" )
     if any( "model_mismatch" in report[ "tripped" ] for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} tripped on model_mismatch; it is not retried" )
@@ -220,7 +241,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - question is 1 to 4 and arm is one of the arm names
         - entries are symbol dicts; for a probe arm they are one pack with the probe at its position
         - ceiling_tokens is what this arm may spend, and fits in what the stage has left
-        - attempt is 1 for every arm; only the canary may be run again, as attempt 2 or 3, with a reason
+        - attempt is 1 for a first run; a stopped arm may be run again as attempt 2 or 3, with a reason; an arm that completed may not
     Ensures:
         - nothing is sent and no ledger row is written when any check below refuses
         - the sweep keys its answers by pack size and run index, so no two arms share an answer
@@ -248,7 +269,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     _check_probe( arm, probe, entries )
     _check_ready( env, entries )
     name, ( index, size ) = run_name( question, arm, attempt ), ARMS[ arm ]
-    index    = RETRY_INDEX.get( attempt, index )
+    index    = retry_index( arm, attempt )
     template = rt.PAGE_TEMPLATE if arm.startswith( "page-" ) else rt.PROMPT_TEMPLATE
     record   = { "format": FORMAT, "question": question, "need": need, "arm": arm, "run_name": name, "run_index": index, "size": size, "model": env.model,
                  "template_hash": rt.prompt_template_hash( template ), "started_at": env.clock(), "ceiling_tokens": ceiling_tokens, "attempt_cap": attempt_cap, "attempt_limit": attempt_limit,
