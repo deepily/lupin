@@ -988,10 +988,10 @@ def test_an_id_listed_as_lost_that_the_arm_never_asked_about_still_counts():
     assert an.read_arm( rec )[ "lost" ] == [ "ghost" ]
 
 
-def test_an_arm_that_ran_out_of_attempts_is_judged_by_its_lost_entries_not_by_the_stop():
-    ok  = _lossy( 400, 2, state="incomplete", stop_reason="attempts" ); ok[ "not_reached" ] = ok.pop( "failed" ) and [ f"e{k:05d}" for k in range( 2 ) ]; ok[ "failed" ] = []
-    bad = _lossy( 400, 3, state="incomplete", stop_reason="attempts" )
-    assert an.read_arm( ok )[ "status" ] == "clean" and an.read_arm( bad )[ "status" ] == "inconclusive"
+def test_an_arm_that_ran_out_of_attempts_stays_inconclusive_whatever_its_lost_count():
+    few  = _lossy( 400, 1, state="incomplete", stop_reason="attempts" )
+    none = _lossy( 400, 0, state="incomplete", stop_reason="attempts" )
+    assert an.read_arm( few )[ "status" ] == an.read_arm( none )[ "status" ] == "inconclusive"
 
 
 def test_an_incomplete_arm_with_no_named_stop_is_inconclusive_however_few_entries_were_lost():
@@ -1027,6 +1027,58 @@ def test_the_report_prints_the_lost_count_and_the_limit_beside_each_other_for_ev
     assert "s1-q1-single1: lost 0 of limit 0" in text and "s1-q1-pack200: lost 0 of limit 0" in text and "s1-q1-page-pack: lost 0 of limit 0" in text
     lossy = an.render( an.build_report( [ _lossy( 7705, 40, size=1, run_name="s1-q1-single1" ) ], canaries=[] ) )
     assert "s1-q1-single1: lost 40 of limit 38" in lossy
+
+
+# --- the arms the real driver writes: R1 applies to an arm that attempted every entry and has no stop reason ------------------
+
+def _driver_arm( name ):
+    """Ensures: returns an arm that run_arm wrote on a stand-in transport."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / f"stage1-driver-arm-{name}.json" ).read_text() )
+
+
+def test_the_driver_marks_an_arm_with_a_lost_entry_incomplete_with_no_stop_reason():
+    for name, lost in ( ( "lost-1-of-200", 1 ), ( "lost-2-of-200", 2 ) ):
+        rec = _driver_arm( name )
+        assert ( rec[ "state" ], rec[ "stop_reason" ], len( rec[ "failed" ] ), rec[ "not_reached" ], len( rec[ "entry_ids" ] ) ) == ( "incomplete", None, lost, [], 200 )
+
+
+def test_a_real_driver_arm_that_lost_one_of_two_hundred_reads_clean_under_the_limit_of_one():
+    arm = an.read_arm( _driver_arm( "lost-1-of-200" ) )
+    assert ( arm[ "status" ], len( arm[ "lost" ] ), arm[ "lost_limit" ] ) == ( "clean", 1, 1 )
+
+
+def test_a_real_driver_arm_that_lost_two_of_two_hundred_reads_inconclusive_over_the_limit():
+    arm = an.read_arm( _driver_arm( "lost-2-of-200" ) )
+    assert ( arm[ "status" ], len( arm[ "lost" ] ), arm[ "lost_limit" ] ) == ( "inconclusive", 2, 1 )
+
+
+def test_a_real_driver_arm_that_ran_out_of_attempts_is_inconclusive_though_one_entry_was_lost():
+    rec = _driver_arm( "attempts-spent-1-lost" )
+    assert ( rec[ "state" ], rec[ "stop_reason" ], len( rec[ "failed" ] ), len( rec[ "not_reached" ] ) ) == ( "incomplete", "attempts", 1, 50 )
+    assert an.read_arm( rec )[ "status" ] == "inconclusive"
+
+
+def test_an_incomplete_driver_arm_with_every_entry_answered_stays_inconclusive():
+    rec = _driver_arm( "lost-1-of-200" )
+    missing = rec[ "failed" ][ 0 ]
+    rec[ "answers" ].append( { "id": missing, "probabilities": rec[ "answers" ][ 0 ][ "probabilities" ] } ); rec[ "failed" ] = []
+    arm = an.read_arm( rec )
+    assert ( arm[ "lost" ], arm[ "status" ] ) == ( [], "inconclusive" )
+
+
+def test_any_other_stop_reason_leaves_the_arm_inconclusive_however_few_were_lost():
+    for reason in ( "attempts", "a_stop_nobody_named" ):
+        rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = reason
+        assert an.read_arm( rec )[ "status" ] == "inconclusive", reason
+    for reason in an.INVALID_STOPS:
+        rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = reason
+        assert an.read_arm( rec )[ "status" ] == "invalid", reason
+
+
+def test_the_report_counts_a_real_clean_driver_arm_in_and_prints_its_lost_entry_beside_the_limit():
+    rep = an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] )
+    assert rep[ "unclean_arms" ] == [] and rep[ "lost_by_arm" ][ 0 ][ "lost" ] == 1 and rep[ "lost_by_arm" ][ 0 ][ "lost_limit" ] == 1
+    assert "s1-q1-single1: lost 1 of limit 1" in an.render( rep )
 
 
 # --- ruling R2: pass 3 and a question with no probes -------------------------------------------------------------------------
