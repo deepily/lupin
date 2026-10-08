@@ -36,6 +36,17 @@ TABLE_RULES = tuple(
   + [ ( TEST_DB, TEST_ROLE, p, "all",    "",            True ) for p in ALL_PRIVILEGES ]
 )
 
+SEQUENCE_PRIVILEGES = ( "USAGE", "SELECT", "UPDATE" )
+
+# ( database, role, privilege ): every public sequence must grant it. A table with a serial column cannot take
+# an insert without it, so a gap here fails as "permission denied for sequence" and not as a missing table grant.
+SEQUENCE_RULES = tuple(
+    [ ( DEV_DB,  APP_ROLE,  p ) for p in SEQUENCE_PRIVILEGES ]
+  + [ ( DEV_DB,  HOST_ROLE, p ) for p in SEQUENCE_PRIVILEGES ]
+  + [ ( TEST_DB, APP_ROLE,  p ) for p in SEQUENCE_PRIVILEGES ]
+  + [ ( TEST_DB, TEST_ROLE, p ) for p in SEQUENCE_PRIVILEGES ]
+)
+
 # ( database, role, expected ): may the role CONNECT to the database
 CONNECT_RULES = (
     ( DEV_DB,  APP_ROLE,  True ), ( DEV_DB,  HOST_ROLE, True ), ( DEV_DB,  TEST_ROLE, False ),
@@ -52,7 +63,8 @@ def databases():
 
 def roles_of( database ):
     """The roles the matrix names for one database."""
-    return sorted( { r[ 1 ] for r in TABLE_RULES if r[ 0 ] == database } | { r[ 1 ] for r in CONNECT_RULES if r[ 0 ] == database } )
+    return sorted( { r[ 1 ] for r in TABLE_RULES if r[ 0 ] == database } | { r[ 1 ] for r in CONNECT_RULES if r[ 0 ] == database }
+                   | { r[ 1 ] for r in SEQUENCE_RULES if r[ 0 ] == database } )
 
 
 def build_check_sql( database ):
@@ -72,25 +84,35 @@ def build_check_sql( database ):
         f"( '{role}', '{priv}', '{scope}', '{table}', {str( expected ).lower()} )"
         for db, role, priv, scope, table, expected in TABLE_RULES if db == database )
     connects = ",\n    ".join( f"( '{role}', {str( expected ).lower()} )" for db, role, expected in CONNECT_RULES if db == database )
-    for word in [ r[ 1 ] for r in TABLE_RULES ] + [ r[ 2 ] for r in TABLE_RULES ] + [ r[ 4 ] for r in TABLE_RULES ]:
+    sequences = ",\n    ".join( f"( '{role}', '{priv.lower()}' )" for db, role, priv in SEQUENCE_RULES if db == database )
+    for word in [ r[ 1 ] for r in TABLE_RULES ] + [ r[ 2 ] for r in TABLE_RULES ] + [ r[ 4 ] for r in TABLE_RULES ] + [ r[ 1 ] for r in SEQUENCE_RULES ]:
         assert _SAFE.match( word.lower() ), f"unsafe word in the matrix: {word!r}"
     return f"""WITH wanted( role, priv, scope, tname, expected ) AS ( VALUES
     {values}
 ), connects( role, expected ) AS ( VALUES
     {connects}
+), wanted_seq( role, priv ) AS ( VALUES
+    {sequences}
 ), tabs AS (
   SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE n.nspname = 'public' AND c.relkind IN ( 'r', 'p' )
+), seqs AS (
+  SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND c.relkind = 'S'
 ), present AS ( SELECT rolname FROM pg_roles )
 SELECT current_database() || '|tables||' || count(*) || '|' FROM tabs
 UNION ALL
-SELECT current_database() || '|norole|' || r.role || '||' FROM ( SELECT DISTINCT role FROM wanted UNION SELECT role FROM connects ) r
+SELECT current_database() || '|norole|' || r.role || '||' FROM ( SELECT DISTINCT role FROM wanted UNION SELECT role FROM connects UNION SELECT role FROM wanted_seq ) r
  WHERE r.role NOT IN ( SELECT rolname FROM present )
 UNION ALL
 SELECT current_database() || '|' || CASE WHEN w.expected THEN 'missing' ELSE 'unexpected' END || '|' || w.role || '|' || t.relname || '|' || w.priv
   FROM wanted w
   JOIN tabs t ON w.scope = 'all' OR ( w.scope = 'only' AND t.relname = w.tname ) OR ( w.scope = 'except' AND t.relname <> w.tname )
  WHERE CASE WHEN w.role IN ( SELECT rolname FROM present ) THEN has_table_privilege( w.role, t.oid, w.priv ) <> w.expected ELSE false END
+UNION ALL
+SELECT current_database() || '|missing|' || q.role || '|' || s.relname || '|' || upper( q.priv )
+  FROM wanted_seq q CROSS JOIN seqs s
+ WHERE CASE WHEN q.role IN ( SELECT rolname FROM present ) THEN NOT has_sequence_privilege( q.role, s.oid, q.priv ) ELSE false END
 UNION ALL
 SELECT current_database() || '|' || CASE WHEN k.expected THEN 'missing' ELSE 'unexpected' END || '|' || k.role || '|' || current_database() || '|CONNECT'
   FROM connects k

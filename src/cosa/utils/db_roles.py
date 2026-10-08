@@ -30,7 +30,10 @@ databases and compares the answer with the matrix in `cosa.utils.db_grants`. Eac
 with the one repair command.
 Exit 0 is clean, 1 is a gap or a database with no tables, 2 is a check that could not run.
 
-    python -m cosa.utils.db_roles --psql "..." --check
+    python -m cosa.utils.db_roles --psql "..." --check [--database lupin_db_test]
+
+A login that may connect to one database only, such as lupin_test or lupin_host, names it with `--database`.
+Without it the check asks both and exits 2 for the one that login cannot reach.
 """
 
 import argparse
@@ -128,10 +131,12 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     direction.add_argument( "--check", action="store_true", help="read-only: list every missing or unexpected privilege; exit 1 when there is one" )
     direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges only; no role or password is touched" )
     parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
+    parser.add_argument( "--database", action="append", choices=db_grants.databases(), help="with --check: check only this database (repeatable)" )
     args = parser.parse_args( argv )
 
+    if args.database and not args.check: parser.error( "--database is only meaningful with --check" )
     if args.check:
-        code, lines = db_grants.check_with_psql( args.psql, run_fn )
+        code, lines = db_grants.check_with_psql( args.psql, run_fn, which=args.database )
         for line in lines: print( line, file=out )
         return code
 

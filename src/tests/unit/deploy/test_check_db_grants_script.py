@@ -65,9 +65,9 @@ def test_a_clean_database_exits_zero_and_asks_once_without_repairing( stub ):
     assert stub.calls() == [ "check" ]
 
 
-def test_a_red_check_without_repair_exits_one_and_repairs_nothing( stub ):
+def test_a_red_check_without_repair_exits_three_and_repairs_nothing( stub ):
     done = _helper( stub( "red" ) )
-    assert done.returncode == 1 and "lupin_host cannot INSERT widgets" in done.stdout
+    assert done.returncode == 3 and "lupin_host cannot INSERT widgets" in done.stdout
     assert stub.calls() == [ "check" ]
 
 
@@ -75,6 +75,15 @@ def test_a_red_check_with_repair_repairs_once_checks_again_and_exits_zero( stub 
     done = _helper( stub( "red" ), "--repair" )
     assert done.returncode == 0 and "repaired" in done.stdout
     assert stub.calls() == [ "check", "repair", "check" ]
+
+
+def test_repair_when_enabled_repairs_only_with_the_switch_on( stub ):
+    off = _helper( stub( "red" ), "--repair-when-enabled" )
+    assert off.returncode == 3 and stub.calls() == [ "check" ]
+    on = _helper( stub( "red", LUPIN_DB_GRANTS_REPAIR="on" ), "--repair-when-enabled" )
+    assert on.returncode == 0 and stub.calls() == [ "check", "check", "repair", "check" ]
+    other = _helper( stub( "red", LUPIN_DB_GRANTS_REPAIR="yes" ), "--repair-when-enabled" )
+    assert other.returncode == 3, "only the word on enables the repair"
 
 
 def test_a_repair_that_changes_nothing_exits_one_and_says_still_red( stub ):
@@ -156,10 +165,10 @@ def test_a_bounce_with_the_check_skipped_never_asks( stub ):
 
 # ── the preflight script's probe ─────────────────────────────────────────────
 
-def test_the_preflight_script_has_the_grants_probe_before_its_summary_and_repairs_only_when_told():
-    text = open( PREFLIGHT ).read()
+def test_the_preflight_script_calls_the_helper_before_its_summary_and_lets_the_helper_decide_the_repair():
+    text  = open( PREFLIGHT ).read()
     probe = text.index( "# ── 7. Database grants" )
     assert probe < text.index( "# ── Summary" )
-    assert "lib/check-db-grants.sh" in text[ probe: ]
-    assert 'grants_args=( --repair )' in text[ probe: ] and 'LUPIN_DB_GRANTS_REPAIR:-off' in text[ probe: ]
+    assert "lib/check-db-grants.sh" in text[ probe: ] and "--repair-when-enabled" in text[ probe: ]
+    assert "--repair )" not in text[ probe: ], "the probe repairs without asking the helper"
     assert subprocess.run( [ "bash", "-n", PREFLIGHT ] ).returncode == 0

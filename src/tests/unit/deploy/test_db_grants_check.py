@@ -39,6 +39,22 @@ def _privileges( text ):
     return g.ALL_PRIVILEGES if text.strip().upper() == "ALL" else tuple( p.strip().upper() for p in text.split( "," ) )
 
 
+def _sequences_from_the_sql():
+    found = set()
+    for database, text in _statements():
+        grant = re.match( r"GRANT (.+?) ON ALL SEQUENCES IN SCHEMA public TO (.+);$", text )
+        if grant:
+            privileges = g.SEQUENCE_PRIVILEGES if grant.group( 1 ) == "ALL" else tuple( p.strip() for p in grant.group( 1 ).split( "," ) )
+            found.update( ( database, role.strip(), p ) for role in grant.group( 2 ).split( "," ) for p in privileges )
+    return found
+
+
+def test_the_sequence_rules_and_the_sql_describe_the_same_grants():
+    sql = _sequences_from_the_sql()
+    assert sql, "the instrument read no sequence grants from the SQL"
+    assert sql == set( g.SEQUENCE_RULES )
+
+
 def _matrix_from_the_sql():
     """( table grants, connect grants, host bars ) as the SQL states them."""
     tables, connects, barred = {}, set(), set()
@@ -89,6 +105,12 @@ def test_the_check_query_names_the_roles_and_the_guarded_table_of_its_database()
     dev, test = g.build_check_sql( g.DEV_DB ), g.build_check_sql( g.TEST_DB )
     assert "'lupin_host', 'SELECT', 'only', 'approval_settings', true" in dev
     assert "lupin_host" in test and "'lupin_host', 'SELECT'" not in test, "the host role has no table rule in the test database"
+
+
+def test_the_check_query_asks_about_sequences_as_well_as_tables():
+    text = g.build_check_sql( g.TEST_DB )
+    assert "has_sequence_privilege" in text and "relkind = 'S'" in text
+    assert "( 'lupin_test', 'usage' )" in text
 
 
 def test_a_database_outside_the_matrix_is_refused():
@@ -210,6 +232,27 @@ def test_check_runs_with_no_password_file_no_sql_file_and_no_apply():
 def test_check_returns_the_exit_code_of_the_check():
     run = Psql( CLEAN + "lupin_db_dev|missing|lupin_app|widgets|SELECT\n" )
     assert db_roles.main( [ "--psql", "psql", "--check" ], run_fn=run, out=io.StringIO() ) == 1
+
+
+def test_check_with_a_database_option_asks_only_that_database():
+    run = Psql( "lupin_db_test|tables||2|\n" )
+    code = db_roles.main( [ "--psql", "psql -U lupin_test -d lupin_db_test", "--check", "--database", "lupin_db_test" ], run_fn=run, out=io.StringIO() )
+    script = run.calls[ 0 ][ 1 ]
+    assert code == 0 and "\\connect lupin_db_test" in script and "\\connect lupin_db_dev" not in script
+
+
+def test_a_database_option_may_be_given_twice_and_keeps_its_order():
+    run = Psql( CLEAN )
+    db_roles.main( [ "--psql", "psql", "--check", "--database", "lupin_db_test", "--database", "lupin_db_dev" ], run_fn=run, out=io.StringIO() )
+    script = run.calls[ 0 ][ 1 ]
+    assert script.index( "\\connect lupin_db_test" ) < script.index( "\\connect lupin_db_dev" )
+
+
+def test_a_database_option_outside_the_matrix_or_without_check_is_refused():
+    run = Psql( CLEAN )
+    with pytest.raises( SystemExit ): db_roles.main( [ "--psql", "psql", "--check", "--database", "lupin_db_other" ], run_fn=run, out=io.StringIO() )
+    with pytest.raises( SystemExit ): db_roles.main( [ "--psql", "psql", "--grants-only", "--database", "lupin_db_test" ], run_fn=run, out=io.StringIO() )
+    assert run.calls == []
 
 
 @pytest.mark.parametrize( "other", [ "--reassign", "--rollback", "--grants-only" ] )

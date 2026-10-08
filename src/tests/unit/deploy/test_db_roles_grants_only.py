@@ -147,3 +147,38 @@ def test_the_dev_defaults_name_the_recipients_the_matrix_gives():
     assert re.search( r"FOR ROLE lupin_dev IN SCHEMA public GRANT ALL ON TABLES\s+TO lupin_app;", lines )
     assert re.search( r"FOR ROLE lupin_dev IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;", lines )
     assert "lupin_test" not in re.sub( r"FOR ROLE lupin_test", "", lines ), "lupin_test is a recipient in the dev database, where it has no right to connect"
+
+
+ALL_       = "ALL"
+HOST_TABLES = "SELECT, INSERT, UPDATE, DELETE"
+HOST_SEQS   = "USAGE, SELECT, UPDATE"
+EXPECTED_DEFAULTS = {
+    ( "lupin_db_dev",  "lupin_dev",  "TABLES" )    : { "lupin_app": ALL_, "lupin_host": HOST_TABLES },
+    ( "lupin_db_dev",  "lupin_dev",  "SEQUENCES" ) : { "lupin_app": ALL_, "lupin_host": HOST_SEQS },
+    ( "lupin_db_dev",  "lupin_test", "TABLES" )    : { "lupin_app": ALL_, "lupin_host": HOST_TABLES },
+    ( "lupin_db_dev",  "lupin_test", "SEQUENCES" ) : { "lupin_app": ALL_, "lupin_host": HOST_SEQS },
+    ( "lupin_db_dev",  "lupin_app",  "TABLES" )    : { "lupin_host": HOST_TABLES },
+    ( "lupin_db_dev",  "lupin_app",  "SEQUENCES" ) : { "lupin_host": HOST_SEQS },
+    ( "lupin_db_test", "lupin_dev",  "TABLES" )    : { "lupin_app": ALL_, "lupin_test": ALL_ },
+    ( "lupin_db_test", "lupin_dev",  "SEQUENCES" ) : { "lupin_app": ALL_, "lupin_test": ALL_ },
+    ( "lupin_db_test", "lupin_test", "TABLES" )    : { "lupin_app": ALL_ },
+    ( "lupin_db_test", "lupin_test", "SEQUENCES" ) : { "lupin_app": ALL_ },
+    ( "lupin_db_test", "lupin_app",  "TABLES" )    : { "lupin_test": ALL_ },
+    ( "lupin_db_test", "lupin_app",  "SEQUENCES" ) : { "lupin_test": ALL_ },
+}
+
+
+def _defaults_from_the_sql():
+    found = {}
+    for database in ( "lupin_db_dev", "lupin_db_test" ):
+        for statement in _default_privilege_lines( database ):
+            text = re.sub( r"\s+", " ", statement )
+            match = re.match( r"ALTER DEFAULT PRIVILEGES FOR ROLE (\w+) IN SCHEMA public GRANT (.+?) ON (TABLES|SEQUENCES) TO (.+);$", text )
+            assert match, f"a default-privilege statement this test cannot read: {text}"
+            for recipient in ( r.strip() for r in match.group( 4 ).split( "," ) ):
+                found.setdefault( ( database, match.group( 1 ), match.group( 3 ) ), {} )[ recipient ] = match.group( 2 )
+    return found
+
+
+def test_the_default_privileges_name_each_creator_each_object_kind_each_recipient_and_its_rights():
+    assert _defaults_from_the_sql() == EXPECTED_DEFAULTS

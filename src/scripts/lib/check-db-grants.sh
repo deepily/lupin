@@ -4,12 +4,15 @@
 #
 # Runs `python -m cosa.utils.db_roles --check` through the docker exec psql. With --repair, a red check is
 # followed by one `--grants-only --apply` and a second check. The repair needs no password and no root, only
-# the same superuser login a seat already reaches with docker exec.
+# the same superuser login a seat already reaches with docker exec. With --repair-when-enabled the repair
+# runs only when LUPIN_DB_GRANTS_REPAIR=on, which stays off until the one-time apply has been run by hand.
 #
-# Usage:  check-db-grants.sh [--repair]
-# Exit:   0 = clean (or repaired) · 1 = still red · 2 = the check could not run, which is not a pass
+# Usage:  check-db-grants.sh [--repair | --repair-when-enabled]
+# Exit:   0 = clean (or repaired) · 1 = still red after a repair attempt · 2 = the check could not run,
+#         which is not a pass · 3 = red, and no repair was attempted
 #
 # Environment:
+#   LUPIN_DB_GRANTS_REPAIR  on enables --repair-when-enabled; anything else leaves it check-only
 #   DB_GRANTS_PSQL    the psql command, default: docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev
 #   DB_GRANTS_PYTHON  the interpreter, default: the tree's .venv, then python3
 #
@@ -21,7 +24,8 @@ REPAIR=0
 for arg in "$@"; do
     case "$arg" in
         --repair) REPAIR=1 ;;
-        -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --repair-when-enabled) [ "${LUPIN_DB_GRANTS_REPAIR:-off}" = "on" ] && REPAIR=1 ;;
+        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "check-db-grants.sh: unknown argument $arg" >&2; exit 2 ;;
     esac
 done
@@ -43,7 +47,7 @@ if [ "$rc" -ne 1 ]; then
     echo "check-db-grants: the check could not run (exit ${rc}); grants were not verified" >&2
     exit 2
 fi
-if [ "$REPAIR" -ne 1 ]; then exit 1; fi
+if [ "$REPAIR" -ne 1 ]; then exit 3; fi
 
 echo "check-db-grants: repairing with --grants-only --apply"
 if ! roles --grants-only --apply; then

@@ -326,25 +326,21 @@ if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
     else
         log "OK: $CONTAINER healthy in ${elapsed}s — ${HEALTH_CONSECUTIVE} consecutive health checks. The server's startup hook emits the all-clear."
     fi
-    # The database roles' grants: check, and with LUPIN_DB_GRANTS_REPAIR=on repair once and check again. The
-    # server is already up, so this never undoes the bounce: a red answer is reported, and sets the exit code
-    # only when the repair was on and the roles are still short. LUPIN_DB_GRANTS_CHECK=skip turns the step off
-    # (tests that stub docker set it). The repair stays off until the one-time apply has been run by hand.
+    # The database roles' grants: check, and repair once when LUPIN_DB_GRANTS_REPAIR=on (off until the one-time
+    # apply has been run by hand). The server is already up, so this never undoes the bounce: a red answer is
+    # reported, and it sets the exit code only after a repair attempt that left the roles short.
+    # LUPIN_DB_GRANTS_CHECK=skip turns the step off (tests that stub docker set it).
     if [ "${LUPIN_DB_GRANTS_CHECK:-on}" != "skip" ]; then
-        grants_args=(); [ "${LUPIN_DB_GRANTS_REPAIR:-off}" = "on" ] && grants_args=( --repair )
         grants_rc=0
-        grants_out="$( "${SCRIPT_DIR}/lib/check-db-grants.sh" ${grants_args[@]+"${grants_args[@]}"} 2>&1 )" || grants_rc=$?
+        grants_out="$( "${SCRIPT_DIR}/lib/check-db-grants.sh" --repair-when-enabled 2>&1 )" || grants_rc=$?
         if [ "$grants_rc" -ne 0 ] || [ "$QUIET" -eq 0 ]; then echo "$grants_out"; fi
-        if [ "$grants_rc" -eq 1 ] && [ "${LUPIN_DB_GRANTS_REPAIR:-off}" = "on" ]; then
-            echo "ERROR: $CONTAINER is healthy but the database roles still lack grants after a repair." >&2
-            exit 1
-        fi
-        if [ "$grants_rc" -eq 1 ]; then
-            echo "WARNING: the database roles lack grants; the remedy line above repairs them (set LUPIN_DB_GRANTS_REPAIR=on to repair on bounce)." >&2
-        fi
-        if [ "$grants_rc" -eq 2 ]; then
-            echo "WARNING: the database grants could not be checked; run src/scripts/lib/check-db-grants.sh by hand." >&2
-        fi
+        case "$grants_rc" in
+            0) ;;
+            1) echo "ERROR: $CONTAINER is healthy but the database roles still lack grants after a repair." >&2
+               exit 1 ;;
+            3) echo "WARNING: the database roles lack grants; the remedy line above repairs them (LUPIN_DB_GRANTS_REPAIR=on repairs on bounce)." >&2 ;;
+            *) echo "WARNING: the database grants could not be checked; run src/scripts/lib/check-db-grants.sh by hand." >&2 ;;
+        esac
     fi
     exit 0
 fi

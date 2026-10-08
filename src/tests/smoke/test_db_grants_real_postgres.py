@@ -115,6 +115,9 @@ def test_a_table_made_by_any_creating_role_after_the_run_is_already_granted( sto
         _psql_as( stocked, creator, database, f"CREATE TABLE {table} ( id serial PRIMARY KEY );" )
         for role, privilege in recipients:
             assert _asks( stocked, database, table, role, privilege ), f"{role} cannot {privilege} a table {creator} made in {database}"
+            # An insert uses the serial column's sequence, so this fails with "permission denied for sequence"
+            # when the sequence default privilege is missing, which has_table_privilege cannot see.
+            _psql_as( stocked, role, database, f"INSERT INTO {table} DEFAULT VALUES;" )
         _psql_as( stocked, creator, database, f"INSERT INTO {table} DEFAULT VALUES;" )
     # the dev database gives lupin_test nothing, whoever made the table
     assert not _asks( stocked, "lupin_db_dev", "fresh_lupin_dev", "lupin_test", "SELECT" )
@@ -122,12 +125,12 @@ def test_a_table_made_by_any_creating_role_after_the_run_is_already_granted( sto
 
 # ── --check ──────────────────────────────────────────────────────────────────
 
-def _check( box, database="lupin_db_dev" ):
+def _check( box, database="lupin_db_dev", login=SUPERUSER, *extra ):
     """The real `db_roles --check` against the throwaway container; returns the finished process."""
     assert ROOT, "LUPIN_ROOT is not set, so the check would run from the wrong tree"
     _assert_marker( box )
-    psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d {database}"
-    args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--check" ]
+    psql = f"docker exec -i {box[ 'name' ]} psql -U {login} -d {database}"
+    args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--check", *extra ]
     env  = _clean_env( LUPIN_ROOT=ROOT, PYTHONPATH=os.path.join( ROOT, "src" ) )
     return subprocess.run( args, capture_output=True, text=True, timeout=120, env=env, cwd=ROOT )
 
@@ -213,3 +216,30 @@ def test_a_plain_login_gets_the_same_answer_as_the_superuser( stocked, tmp_path 
     assert as_plain == as_super, "a plain login saw something other than the superuser"
     report = db_grants.evaluate( "lupin_db_test", db_grants.parse_rows( as_plain ) )
     assert report[ "problems" ] == [ ( "missing", "lupin_app", "widgets", "DELETE" ) ]
+
+
+@needs_docker
+def test_check_names_a_sequence_a_role_cannot_use( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "lupin_db_dev", "REVOKE ALL ON SEQUENCE widgets_id_seq FROM lupin_app;\n" )
+    done = _check( stocked )
+    lines = done.stdout.splitlines()
+    assert done.returncode == 1
+    assert all( f"  lupin_app cannot {p} widgets_id_seq" in lines for p in ( "USAGE", "SELECT", "UPDATE" ) )
+    assert _grants_only( stocked ).returncode == 0 and _check( stocked ).returncode == 0
+
+
+@needs_docker
+@pytest.mark.parametrize( "login, database", [ ( "lupin_test", "lupin_db_test" ), ( "lupin_host", "lupin_db_dev" ), ( "lupin_app", "lupin_db_dev" ) ] )
+def test_a_plain_login_checks_its_own_database_with_the_database_option( stocked, tmp_path, login, database ):
+    _provision( stocked, tmp_path )
+    done = _check( stocked, database, login, "--database", database )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.splitlines() == [ f"{database}: {3 if database == 'lupin_db_dev' else 2} tables, 3 roles, 0 problems" ]
+
+
+@needs_docker
+def test_a_login_that_cannot_reach_a_database_gets_exit_two_without_the_database_option( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    done = _check( stocked, "lupin_db_test", "lupin_test" )
+    assert done.returncode == 2 and "CONNECT privilege" in done.stdout
