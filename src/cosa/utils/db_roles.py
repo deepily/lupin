@@ -13,8 +13,8 @@ works around.
     python -m cosa.utils.db_roles --app-pw-file F --host-pw-file F --test-pw-file F \\
         --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
 
-`--rollback` is the cutover's way back. It hands every dev-database object that `lupin_app` owns
-back to `lupin_dev` and runs nothing else: no role, password or grant is touched. It reads no
+`--rollback` is the cutover's way back. It hands every object that `lupin_app` owns in the test and dev
+databases back to `lupin_dev`. It runs nothing else: no role, password or grant is touched. It reads no
 password file, so the three file options may be left out.
 
     python -m cosa.utils.db_roles --psql "..." --rollback [--apply]
@@ -126,7 +126,7 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     parser.add_argument( "--psql", required=True, help="the whole superuser psql command, connected to lupin_db_dev" )
     parser.add_argument( "--sql", default=None, help="init-db-roles.sql path (default: from LUPIN_ROOT)" )
     direction = parser.add_mutually_exclusive_group()
-    direction.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move dev-database ownership to lupin_app" )
+    direction.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move ownership in the dev and test databases to lupin_app" )
     direction.add_argument( "--rollback", action="store_true", help="CUTOVER ONLY: move it back to lupin_dev; no role, password or grant changes" )
     direction.add_argument( "--check", action="store_true", help="read-only: list every missing or unexpected privilege; exit 1 when there is one" )
     direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges only; no role or password is touched" )
