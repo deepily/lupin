@@ -1284,6 +1284,66 @@ def test_the_per_question_page_lines_say_what_changed_and_leave_the_verdict_to_t
     assert "pages, question 1: chosen set changed by packing yes, by noise yes" in text and "pages, question 2: chosen set changed by packing no, by noise no" in text
 
 
+# --- a repeated id: the wiki index listed two pages twice --------------------------------------------------------------------
+
+def _duplicate_pages():
+    """Ensures: returns the three page arms the driver wrote over a list that repeats one page."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / "stage1-driver-duplicate-page-arms.json" ).read_text() )
+
+
+def test_the_driver_asked_the_repeated_page_twice_in_the_one_each_runs_and_refused_the_pack():
+    single1, single2, pack = _duplicate_pages()
+    assert [ r[ "entry_ids" ].count( "page.03" ) for r in ( single1, single2, pack ) ] == [ 2, 2, 2 ]
+    assert [ a[ "id" ] for a in single1[ "answers" ] ].count( "page.03" ) == 2 and ( pack[ "state" ], pack[ "stop_reason" ] ) == ( "error", "error: ValueError" )
+
+
+def test_an_arm_that_asked_an_id_twice_is_invalid_with_the_id_named_and_does_not_raise():
+    arm = an.read_arm( _duplicate_pages()[ 0 ] )
+    assert ( arm[ "status" ], arm[ "duplicate_ids" ] ) == ( "invalid", [ "page.03" ] )
+    assert sorted( arm[ "overlaps" ] ) == sorted( set( _duplicate_pages()[ 0 ][ "entry_ids" ] ) )
+
+
+def test_an_arm_with_no_repeated_id_has_an_empty_duplicate_list():
+    assert an.read_arm( _driver_arm( "lost-1-of-200" ) )[ "duplicate_ids" ] == []
+
+
+def test_an_id_answered_twice_that_was_asked_once_is_still_refused():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "answers" ].append( dict( rec[ "answers" ][ 0 ] ) )
+    with pytest.raises( ValueError, match = "answered twice" ): an.read_arm( rec )
+
+
+def test_the_report_names_the_duplicate_condition_for_each_arm_and_does_not_crash():
+    rep = an.build_report( _duplicate_pages(), canaries=[] )
+    assert rep[ "duplicate_ids" ] == [ { "run_name": "s1-q1-page-single1", "question": 1, "arm": "page-single1", "ids": [ "page.03" ] },
+                                       { "run_name": "s1-q1-page-single2", "question": 1, "arm": "page-single2", "ids": [ "page.03" ] },
+                                       { "run_name": "s1-q1-page-pack", "question": 1, "arm": "page-pack", "ids": [ "page.03" ] } ]
+    text = an.render( rep )
+    assert "duplicate ids: s1-q1-page-single1 asked page.03 more than once" in text and "duplicate ids: s1-q1-page-single2 asked page.03 more than once" in text
+    assert rep[ "page_arm" ][ "state" ] == "invalid"
+
+
+def test_a_repeated_id_turns_the_decision_into_a_stop_that_names_the_condition():
+    rep = an.build_report( _duplicate_pages(), canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm asks the same id twice (duplicate_ids)"
+
+
+def test_a_repeated_id_in_an_entry_arm_keeps_the_invalid_arm_stop_and_still_names_the_condition():
+    rec = _arm( "single1", { "a": 0.1, "b": 0.2 } ); rec[ "entry_ids" ] = [ "a", "b", "a" ]; rec[ "answers" ].append( { "id": "a", "probabilities": rec[ "answers" ][ 0 ][ "probabilities" ] } )
+    rep = an.build_report( [ rec ], canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "duplicate_ids" ][ 0 ][ "ids" ] == [ "a" ]
+
+
+def test_a_page_arm_that_is_invalid_for_another_reason_also_stops_the_decision():
+    recs = _driver_pages( "same" ); recs[ 2 ][ "stop_reason" ] = "ceiling"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "invalid" and rep[ "duplicate_ids" ] == [] and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_report_with_no_repeated_id_prints_no_duplicate_line():
+    text = an.render( an.build_report( _driver_pages( "same" ), canaries=[] ) )
+    assert "duplicate ids" not in text
+
+
 # --- ruling R2: pass 3 and a question with no probes -------------------------------------------------------------------------
 
 def test_a_question_with_no_probe_arms_is_skipped_and_named_as_not_probed():
