@@ -56,6 +56,8 @@ class TokenBudget( jt.CallBudget ):
           the whole reserve as spent when the response had no usage
         - a refusal for the ceiling is counted in ceiling_refusals, apart from any failure
         - the attempt limit still applies; an attempt it refuses releases the reserve it took
+        - the ceiling bounds reserves; a response that reports more than its reserve is charged in full, so read
+          the canary's output tokens against 60 per entry before the ceiling is trusted
         - with a ledger, the run is admitted when the budget is built, every settled charge is appended to the
           ledger, and the ledger is read again before each attempt: an unreadable ledger or a total past the
           account limit refuses the attempt with no HTTP and sets stop_reason

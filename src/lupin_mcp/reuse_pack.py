@@ -131,7 +131,8 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         - a 422 splits the pack in half and resends each half, the larger half second; a 422 on one entry
           fails that entry
         - an attempt refused by the budget before any HTTP leaves the pack not reached
-        - any other error fails every entry of the pack, and the row keeps the error class and HTTP status
+        - any other error fails every entry of the pack; the row keeps the error class, and the HTTP status
+          for a refused key or request (a JevConfigError), which is the only error that carries one
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
           refused or not_reached, its attempts, its reported tokens and the ids it asked about
     Raises:

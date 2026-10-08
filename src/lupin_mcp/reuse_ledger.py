@@ -197,6 +197,22 @@ class AccountLedger:
             if run not in self._summary( self._rows( f ) )[ 2 ]: raise ValueError( f"run {run!r} never began" )
             self._append( f, { "kind": "spend", "run": run, "tokens": tokens } )
 
+    def close_run( self, run, by, why ):
+        """
+        Close a run that never ended, such as a dead process's, so it counts at its spend.
+
+        Requires:
+            - by and why are non-empty strings saying who closed it and for what reason
+        Raises:
+            - ValueError for a missing by or why, a run that never began, or a run already closed
+        """
+        if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise ValueError( "by and why must say who closed the run and why" )
+        with self._locked() as f:
+            runs = self._summary( self._rows( f ) )[ 2 ]
+            if run not in runs: raise ValueError( f"run {run!r} never began" )
+            if runs[ run ][ "closed" ]: raise ValueError( f"run {run!r} is already closed" )
+            self._append( f, { "kind": "end", "run": run, "by": by, "why": why } )
+
     def end_run( self, run ):
         """Ensures: appends an end row, so the run counts at what it spent."""
         with self._locked() as f:
