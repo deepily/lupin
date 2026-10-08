@@ -294,6 +294,20 @@ def test_a_gated_arm_before_the_canary_is_approved_gives_the_one_line_through_th
     assert "the canary of question 1 is not approved" in capsys.readouterr().err
 
 
+def test_an_approve_after_a_tripped_canary_gives_the_one_line_through_the_real_command( scratch, capsys, monkeypatch ):
+    served = rr.StandIn.post_with_meta
+    def other_model( self, body ):
+        response, meta = served( self, body )
+        return dict( response, model="jev-9.9.9-other" ), meta
+    monkeypatch.setattr( rr.StandIn, "post_with_meta", other_model )
+    run( scratch, "ledger-init" )
+    run( scratch, "canary", "--question", "2", "--ceiling", "2000000" ); capsys.readouterr()
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "approve", "--question", "2", "--by", "x", "--why", "y" ]
+    assert rr.cli( argv, loader=loader ) == 2
+    seen = capsys.readouterr()
+    assert seen.out == "" and seen.err.strip().splitlines() == [ "refused (CanaryTripped): the canary tripped: model_mismatch, incomplete" ]
+
+
 def test_a_command_that_works_returns_its_own_code_through_cli( scratch ):
     run( scratch, "ledger-init" )
     argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "status" ]
