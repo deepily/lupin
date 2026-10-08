@@ -172,3 +172,11 @@ def test_every_combination_of_env_keys_never_ends_on_a_wider_login_than_it_found
     assert login() == in_testing
     swap( "development" )
     assert login() == back_in_development
+
+
+def test_with_nothing_seeded_the_reselect_changes_nothing_and_returns_false( swap, tmp_path ):
+    """A process this module never seeded must not gain a login at swap time."""
+    assert dotenv_password._SEEDED == { }
+    assert dotenv_password.reselect_seeded_login( root=str( tmp_path ) ) is False
+    assert "DB_USER" not in os.environ and "DB_PASSWORD" not in os.environ
+    assert dotenv_password._SEEDED == { }
