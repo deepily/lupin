@@ -320,17 +320,29 @@ class LivePipelineTestBase:
             - Returns dict suitable for requests.post( json=... )
 
         Override this in subclasses with different payload shapes.
+        """
+        return {
+            "question"     : scenario[ "query" ],
+            "websocket_id" : ws_id,
+        }
+
+    def _with_tier_lineage( self, payload ):
+        """
+        Add the tier's id to a payload as parent_id_hash, unless the payload already has one.
 
         Inside a monopolizing test-suite job the runner exports its own id as
         LUPIN_TEST_MONOPOLIZE_PARENT_ID. Sending it as parent_id_hash makes the queue
         consumer admit this job through the monopoly hold instead of deferring it as foreign.
+
+        Requires:
+            - payload is the dict an override of get_submit_payload returned
+
+        Ensures:
+            - returns payload unchanged when the variable is unset or empty
+            - returns payload unchanged when it already carries parent_id_hash
         """
-        payload = {
-            "question"     : scenario[ "query" ],
-            "websocket_id" : ws_id,
-        }
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-        if parent_id: payload[ "parent_id_hash" ] = parent_id
+        if parent_id and "parent_id_hash" not in payload: payload[ "parent_id_hash" ] = parent_id
         return payload
 
     def get_submit_headers( self, headers, ws_id ):
@@ -442,7 +454,7 @@ class LivePipelineTestBase:
             timeout = scenario.get( "timeout", self.DEFAULT_TIMEOUT )
 
         endpoint    = self.get_submit_endpoint()
-        payload     = self.get_submit_payload( scenario, ws_id )
+        payload     = self._with_tier_lineage( self.get_submit_payload( scenario, ws_id ) )
         req_headers = self.get_submit_headers( headers, ws_id )
 
         # Submit
