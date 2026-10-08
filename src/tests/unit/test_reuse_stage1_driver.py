@@ -48,7 +48,7 @@ class Standin:
         response = { "answers": { key: { "probabilities": dict( PROBS ) } for key in body[ "questions" ] }, "model": body[ "model" ] if self.served is None else self.served }
         if self.drop_last: response[ "answers" ].popitem()                                      # one question the response leaves out
         if self.usage: response[ "usage" ] = { "input_tokens": self.usage_in, "output_tokens": self.out * len( body[ "questions" ] ) }
-        return response, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 3 }
+        return response, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 3, "attempt_log": [ { "status": 200, "request_ids": {} } ] }
 
 
 @pytest.fixture

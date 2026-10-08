@@ -727,11 +727,19 @@ def _sent( tin, tout, attempts=1 ):
 
 def test_request_statistics_count_only_requests_that_were_sent_and_their_mean_tokens():
     rows = [ _sent( 1000, 400 ), _sent( 2000, 600 ), { "request_hash": "n", "size": 10, "status": "not_reached", "attempts": 0, "tokens_in": None, "tokens_out": None } ]
-    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[ { "attempts": 1 }, { "attempts": 3 } ] )
+    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[ { "attempts": 1, "attempt_log": [ { "status": 200 } ] },
+                                                                                  { "attempts": 3, "attempt_log": [ { "status": 429 }, { "status": 529 }, { "status": 200 } ] } ] )
     st   = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
     assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_request" ] ) == ( 2, 1500.0, 500.0 )
     assert ( st[ "retried_calls" ], st[ "extra_attempts" ], st[ "usage_missing" ] ) == ( 1, 2, 0 )
-    assert st[ "tokens_out_per_entry" ] == 50.0 and st[ "retry_statuses" ] == "429 or 529, not told apart"
+    assert st[ "tokens_out_per_entry" ] == 50.0 and ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 1, 1 ) and "retry_statuses" not in st
+
+
+def test_the_429_and_529_counts_come_from_the_attempt_log_and_other_statuses_count_in_neither():
+    calls = [ { "attempts": 4, "attempt_log": [ { "status": 429 }, { "status": 429 }, { "status": 500 }, { "status": 200 } ] },
+              { "attempts": 3, "attempt_log": [ { "status": 529 }, { "status": 529 }, { "status": 529 } ] } ]
+    st    = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=[ _sent( 1000, 400 ) ], transport_calls=calls ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 2, 3 )
 
 
 def test_request_statistics_count_a_sent_request_without_usage_as_missing_and_leave_it_out_of_the_means():
@@ -1427,17 +1435,22 @@ def test_the_arm_check_can_be_left_off_to_read_the_rules_alone():
 
 # --- the text report prints every figure the report computes (the rehearsal's tokens, retries, other boundaries, old shape, cost) ------------
 
-REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429 or 529, not told apart"
+REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429s {a}, 529s {b}"
 
 
 def test_the_report_prints_the_tokens_per_request_of_a_real_driver_arm():
     text = an.render( an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] ) )
-    assert REQUEST_LINE.format( r=0, e=0 ) in text
+    assert REQUEST_LINE.format( r=0, e=0, a=0, b=0 ) in text
 
 
 def test_the_report_prints_the_retried_calls_and_the_extra_attempts_of_a_driver_arm_with_one_call_tried_three_times():
     rec = _driver_arm( "lost-1-of-200" ); rec[ "transport_calls" ][ 0 ][ "attempts" ] = 3
-    assert REQUEST_LINE.format( r=1, e=2 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
+    assert REQUEST_LINE.format( r=1, e=2, a=0, b=0 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_the_429_and_529_counts_of_a_driver_arm_whose_one_call_was_refused_by_each_in_turn():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "transport_calls" ][ 0 ].update( attempts=3, attempt_log=[ { "status": 429 }, { "status": 529 }, { "status": 200 } ] )
+    assert REQUEST_LINE.format( r=1, e=2, a=1, b=1 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
 
 
 def _flipping_complete( question=1, scale=1 ):
