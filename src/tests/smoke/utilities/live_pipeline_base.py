@@ -320,11 +320,18 @@ class LivePipelineTestBase:
             - Returns dict suitable for requests.post( json=... )
 
         Override this in subclasses with different payload shapes.
+
+        Inside a monopolizing test-suite job the runner exports its own id as
+        LUPIN_TEST_MONOPOLIZE_PARENT_ID. Sending it as parent_id_hash makes the queue
+        consumer admit this job through the monopoly hold instead of deferring it as foreign.
         """
-        return {
+        payload = {
             "question"     : scenario[ "query" ],
             "websocket_id" : ws_id,
         }
+        parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
+        if parent_id: payload[ "parent_id_hash" ] = parent_id
+        return payload
 
     def get_submit_headers( self, headers, ws_id ):
         """
