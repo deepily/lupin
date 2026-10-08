@@ -172,6 +172,8 @@ def _parser():
         if name == "arm":
             p.add_argument( "--arm", choices=ARM_NAMES, required=True )
             p.add_argument( "--attempt-limit", type=int )
+            p.add_argument( "--attempt", type=int, default=1 )
+            p.add_argument( "--reason" )
         if name == "approve":
             p.add_argument( "--by", required=True )
             p.add_argument( "--why", required=True )
@@ -214,7 +216,7 @@ def main( argv=None, loader=None ):
         if args.arm in PACK_ARMS: arm_entries, probe = entries, None
         elif args.arm.startswith( "page-" ): arm_entries, probe = pages, None
         else: chosen = _probe_arm( env, args.question, entries, args.arm ); arm_entries, probe = chosen[ "entries" ], chosen[ "probe" ]
-        print( _summary( s1.run_arm( env, args.question, args.arm, NEEDS[ args.question ], arm_entries, args.ceiling, attempt_limit=args.attempt_limit, probe=probe ) ) )
+        print( _summary( s1.run_arm( env, args.question, args.arm, NEEDS[ args.question ], arm_entries, args.ceiling, attempt_limit=args.attempt_limit, probe=probe, attempt=args.attempt, reason=args.reason ) ) )
     elif args.command == "probe-plan":
         built = sp.build_probe_plan( entries, _single_run( env, args.question ) )
         print( f"probe plan written: {sp.write_probe_plan( env, built )}  probe {built[ 'plan' ][ 'probe_id' ]}" )
