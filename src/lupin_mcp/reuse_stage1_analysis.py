@@ -224,6 +224,11 @@ def _arm_label( arm ):
     return arm[ "run_name" ] or f"question {arm[ 'question' ]} {arm[ 'arm' ]}"
 
 
+def _no_cache( arm ):
+    """Ensures: returns True for an old-shape arm that read no cached answer."""
+    return arm[ "arm" ] == "old" and arm[ "cache_hits" ] == 0
+
+
 def noise_floor( stage ):
     """
     Measure the noise floor: single run 1 against single run 2, pooled over the questions run.
@@ -638,19 +643,19 @@ def build_report( records, canaries ):
     Ensures:
         - returns { decision, next_step, evaluate, stop_rules, pages, other_boundaries, request_stats, cost, old_shape,
           canaries, unclean_arms, lost_by_arm }
-        - lost_by_arm gives every arm's lost count beside its limit and its stop reason
+        - lost_by_arm gives every arm's lost count beside its limit, its stop reason and its cache hits
         - decision comes from the passes and next_step from the stop rules
         - an arm another model answered replaces the decision with a stop that names each such arm and the model that answered
         - a decision that stops and asks turns a next step that runs more into "stop and ask: see the decision above"
         - a next step that already stops and asks keeps its own reason
         - duplicate_ids lists each arm that asked an id more than once; such an arm stops the decision
         - page_arm is the page arm's verdict; a failing or asking page arm turns a decision that did not stop into a stop
-        - unclean_arms lists every arm that is not clean, with its status and stop reason
+        - unclean_arms lists every arm that is not clean, with its status, stop reason and cache hits
     """
     stage = read_stage( records )
     ev    = evaluate( stage )
     stop  = stop_rules( stage )
-    unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ] }
+    unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ], "cache_hits": a[ "cache_hits" ] }
                 for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
     pg    = page_arm( stage )
     dups  = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "ids": a[ "duplicate_ids" ] } for q in sorted( stage ) for a in stage[ q ].values() if a[ "duplicate_ids" ] ]
@@ -667,7 +672,7 @@ def build_report( records, canaries ):
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
              "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
-             "lost_by_arm": [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "lost": len( a[ "lost" ] ), "lost_limit": a[ "lost_limit" ], "stop_reason": a[ "stop_reason" ] }
+             "lost_by_arm": [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "lost": len( a[ "lost" ] ), "lost_limit": a[ "lost_limit" ], "stop_reason": a[ "stop_reason" ], "cache_hits": a[ "cache_hits" ] }
                               for q in sorted( stage ) for a in stage[ q ].values() ] }
 
 
@@ -690,13 +695,13 @@ def render( report ):
         lines.append( f"pack {size}: {s[ 'state' ]}; pass 1 {s[ 'pass_one' ][ 'state' ]} (p99 {s[ 'pass_one' ][ 'p99' ]}, max {s[ 'pass_one' ][ 'max' ]}); "
                       f"pass 2 {s[ 'pass_two' ][ 'state' ]} (flips {s[ 'pass_two' ][ 'pack_flips' ]} against noise {s[ 'pass_two' ][ 'noise_flips' ]})"
                       + ( f"; pass 3 {p3[ 'state' ]} ({p3[ 'placements' ]} placements, worst {p3[ 'worst' ]})" if p3 else "" ) )
-    for a in report[ "lost_by_arm" ]: lines.append( f"{_arm_label( a )}: lost {a[ 'lost' ]} of limit {a[ 'lost_limit' ]}, stop reason {a[ 'stop_reason' ] or 'none'}" )
+    for a in report[ "lost_by_arm" ]: lines.append( f"{_arm_label( a )}: " + ( "no cached answers" if _no_cache( a ) else f"lost {a[ 'lost' ]} of limit {a[ 'lost_limit' ]}, stop reason {a[ 'stop_reason' ] or 'none'}" ) )
     p3 = ev[ "sizes" ][ PASS_THREE_SIZE ][ "pass_three" ]
     for q in p3[ "not_probed" ]: lines.append( f"not probed: question {q}" )
     if ev[ "default_size" ] is not None:
         lines.append( f"pass 3 was run at size {PASS_THREE_SIZE} only; sizes 10 and 50 carry no position evidence" )
     for d in report[ "duplicate_ids" ]: lines.append( f"duplicate ids: {d[ 'run_name' ]} asked {', '.join( d[ 'ids' ] )} more than once" )
-    for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
+    for a in report[ "unclean_arms" ]: lines.append( f"not clean: {_arm_label( a )} is {a[ 'status' ]} (" + ( "no cached answers" if _no_cache( a ) else f"stop reason {a[ 'stop_reason' ] or 'none'}" ) + ")" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
     for q, arms in report[ "request_stats" ].items():
