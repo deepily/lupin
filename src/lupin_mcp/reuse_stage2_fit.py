@@ -27,6 +27,9 @@ BINS      = 10
 ROW_KEYS  = ( "member", "candidate", "label", "provides", "coverage", "score", "p_overlap", "malformed", "unasked" )
 
 
+TIE_RULES     = ( "tie-break: every tie goes to the end that says reuse less often: reuse cut highest, threshold highest, floor and coverage lowest. "
+                  "Floor and coverage are left at lowest because they change only the extend verdict, so their cautious end is not settled. All pending Rick's confirmation." )
+TIE_RULES_OLD = "tie-break: every tie goes to the end that says reuse less often: cut highest. All pending Rick's confirmation."
 NOT_BINDING = "the false-reuse rate does not bind at any cut; the cut is not determined by it"
 
 
@@ -204,7 +207,7 @@ def _best( policies, rows, rate ):
 
     Ensures:
         - returns { chosen, table, feasible, tied }; tied is how many points share the most twins
-        - a tie goes to the highest reuse cut, the most cautious, then to the lowest threshold, floor and coverage
+        - a tie goes to the highest reuse cut, then the highest threshold, then the lowest floor and coverage
     Raises:
         - NoFeasiblePolicy naming the lowest false-reuse rate any policy reached
     """
@@ -218,7 +221,7 @@ def _best( policies, rows, rate ):
         raise NoFeasiblePolicy( f"no grid point keeps false reuse within {rate}; the lowest reachable rate is {lowest}" )
     top  = max( t[ "figures" ][ "twins_on_shortlist" ] for t in ok )
     tied = [ t for t in ok if t[ "figures" ][ "twins_on_shortlist" ] == top ]
-    best = max( tied, key=lambda t: ( t[ "policy" ][ "reuse" ], -t[ "policy" ][ "threshold" ], -t[ "policy" ][ "floor" ], -t[ "policy" ][ "coverage" ] ) )
+    best = max( tied, key=lambda t: ( t[ "policy" ][ "reuse" ], t[ "policy" ][ "threshold" ], -t[ "policy" ][ "floor" ], -t[ "policy" ][ "coverage" ] ) )
     return { "chosen": best[ "policy" ], "table": table, "feasible": len( ok ), "tied": len( tied ) }
 
 
@@ -232,7 +235,7 @@ def fit_policy( rows, halves, rate, grid=GRID ):
     Ensures:
         - returns { chosen, table, feasible }; the table lists every point tried, ordered by threshold, reuse, floor, coverage
         - the chosen point has the most twins on the shortlist among those within the rate
-        - a tie goes to the highest reuse cut, then to the lowest threshold, floor and coverage
+        - a tie goes to the highest reuse cut, then the highest threshold, then the lowest floor and coverage
         - a point whose floor is above its reuse cut is never tried
     Raises:
         - ValueError for a bad rate or grid, no rows, an unknown member, or a row of the check half
@@ -352,6 +355,7 @@ def render( rep ):
         - a chosen value on the edge of its grid gets a warning line
         - a rate that binds at no cut gets a warning line with the condition text
         - a tie of more than one point gets a line with its size and the way it was broken
+        - the tie-break rules are stated once in words, tie or not
     """
     lines = [ f"Threshold fit ({rep[ 'format' ]})", "", f"false-reuse rate allowed: {rep[ 'rate' ]}" + ( " (placeholder)" if rep[ "placeholder" ] else "" ),
               "grid: " + "; ".join( f"{k} {min( v )} to {max( v )} ({len( v )} values)" for k, v in rep[ "grid" ].items() ), GRID_NOTE,
@@ -359,6 +363,7 @@ def render( rep ):
               f"rows: fit {rep[ 'counts' ][ 'fit' ][ 'rows' ]}, check {rep[ 'counts' ][ 'check' ][ 'rows' ]}; points within the rate: {rep[ 'fit' ][ 'feasible' ]} of {len( rep[ 'fit' ][ 'table' ] )}",
               f"chosen on the fit half: {rep[ 'chosen' ]}", f"  {rep[ 'on_fit' ]}", f"same policy on the check half: {rep[ 'chosen' ]}", f"  {rep[ 'on_check' ]}" ]
     if not rep[ "rate_binds" ]: lines.append( f"warning: {NOT_BINDING}" )
+    lines.append( TIE_RULES_OLD if "cut" in rep[ "chosen" ] else TIE_RULES )
     if rep[ "tied" ] > 1: lines.append( f"tie: {rep[ 'tied' ]} points within the rate tied on twins on the shortlist; the highest {'cut' if 'cut' in rep[ 'chosen' ] else 'reuse cut'} among them was chosen" )
     for e in rep[ "edges" ]: lines.append( f"warning: the chosen {e[ 'key' ]} {e[ 'value' ]} is the {e[ 'edge' ]} value of its grid; widen the grid before reading it" )
     for half in ( "fit", "check" ):
