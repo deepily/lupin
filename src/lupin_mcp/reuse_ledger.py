@@ -13,7 +13,7 @@ import pathlib
 import time
 
 PRICE_PER_MILLION_USD = 0.042                                 # the pinned input price; output is counted at the same price
-ACCOUNT_LIMIT_USD     = 19.31                                 # authorised for the reuse work; changes only by a dated edit in plan 11.5
+ACCOUNT_LIMIT_USD     = 40.00                                 # Rick raised the Jev account to about 44 dollars; was 19.31
 STAGE1_CEILING_TOKENS = 71_000_000                            # three dollars at the price above, rounded down (plan 11.1)
 LEDGER_NAME           = "jev-spend-ledger.jsonl"
 
