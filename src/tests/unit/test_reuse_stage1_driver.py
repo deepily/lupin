@@ -425,3 +425,114 @@ def test_a_retried_request_is_counted_in_the_canary( env ):
             return response, { **meta, "attempts": 2 }
     env.transport_factory = lambda budget: Retried( budget )
     assert st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )[ "attempts_over_one" ] == 1
+
+
+def tripped_canary( env, attempt=1, reason=None, out=90 ):
+    """Run a canary that trips on output tokens; returns its report."""
+    env.standin = { "out_per_entry": out }
+    return st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=attempt, reason=reason )
+
+
+def test_a_canary_retry_is_a_new_run_with_its_own_files_and_the_first_is_kept( env ):
+    tripped_canary( env )
+    first = [ ( env.results_dir / name ).read_bytes() for name in ( "s1-q1-canary.json", "s1-q1-canary.canary.json" ) ]
+    env.standin = {}
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="the transport timed out on the first attempt" )
+    assert report[ "run_name" ] == "s1-q1-canary-a2" and report[ "attempt" ] == 2 and report[ "tripped" ] == []
+    assert report[ "retry_reason" ] == "the transport timed out on the first attempt"
+    assert [ ( env.results_dir / name ).read_bytes() for name in ( "s1-q1-canary.json", "s1-q1-canary.canary.json" ) ] == first
+    assert ( env.results_dir / "s1-q1-canary-a2.json" ).exists() and ( env.results_dir / "s1-q1-canary-a2.canary.json" ).exists()
+
+
+def test_the_results_file_names_its_attempt_and_the_reason( env ):
+    tripped_canary( env )
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="retry after a fix" )
+    assert read( env, 1, "canary" )[ "attempt" ] == 1 and read( env, 1, "canary" )[ "retry_reason" ] is None
+    out = json.loads( ( env.results_dir / "s1-q1-canary-a2.json" ).read_text() )
+    assert out[ "attempt" ] == 2 and out[ "retry_reason" ] == "retry after a fix" and out[ "run_name" ] == "s1-q1-canary-a2"
+
+
+def test_every_attempts_spend_counts_on_the_ledger_and_the_stage( env ):
+    tripped_canary( env )
+    tripped_canary( env, attempt=2, reason="second look" )
+    one, two = ( json.loads( ( env.results_dir / n ).read_text() )[ "totals" ][ "spent_tokens" ] for n in ( "s1-q1-canary.json", "s1-q1-canary-a2.json" ) )
+    assert one == two == 500 + 900
+    assert env.ledger.held_by_prefix( "s1-" ) == one + two and st.stage_remaining( env.ledger ) == 71_000_000 - one - two
+
+
+def test_a_retry_that_would_pass_the_stage_cap_is_refused_before_any_send( env ):
+    tripped_canary( env )
+    env.ledger.begin_run( "s1-q9-dead", 70_000_000 )
+    sent = len( bodies( env ) )
+    with pytest.raises( st.StageRefused ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="again" )
+    assert len( bodies( env ) ) == sent
+
+
+def test_a_fourth_attempt_is_refused_and_so_is_any_attempt_out_of_range( env ):
+    tripped_canary( env )
+    tripped_canary( env, attempt=2, reason="r2" )
+    tripped_canary( env, attempt=3, reason="r3" )
+    sent = len( bodies( env ) )
+    for bad in ( 4, 0, -1, "2", True, None, 2.0 ):
+        with pytest.raises( ValueError, match="attempt" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=bad, reason="r4" )
+    assert len( bodies( env ) ) == sent and env.ledger.held_by_prefix( "s1-" ) == 3 * 1400
+
+
+def test_a_retry_needs_a_named_reason_and_a_first_attempt_has_none( env ):
+    tripped_canary( env )
+    for reason in ( None, "", "   ", 5 ):
+        with pytest.raises( ValueError, match="reason" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason=reason )
+    with pytest.raises( ValueError, match="reason" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=1, reason="not a retry" )
+    assert len( bodies( env ) ) == 1
+
+
+def test_a_retry_needs_the_attempt_before_it( env ):
+    with pytest.raises( ValueError, match="no earlier attempt" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="r" )
+    tripped_canary( env )
+    with pytest.raises( ValueError, match="no earlier attempt" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=3, reason="r" )
+    assert len( bodies( env ) ) == 1
+
+
+def test_a_canary_already_approved_is_not_retried( env ):
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "ok" )
+    with pytest.raises( ValueError, match="already approved" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="just in case" )
+
+
+def test_a_retry_after_an_attempt_that_raised_is_allowed( env, monkeypatch ):
+    real = rp.sweep_packed
+    monkeypatch.setattr( rp, "sweep_packed", lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "disk full" ) ) )
+    with pytest.raises( RuntimeError ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    monkeypatch.setattr( rp, "sweep_packed", real )
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="the first attempt died on a full disk" )
+    assert report[ "tripped" ] == [] and read( env, 1, "canary" )[ "state" ] == "error"
+
+
+def test_only_the_canary_may_be_retried( env ):
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    with pytest.raises( ValueError, match="canary" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000, attempt=2, reason="again" )
+    assert len( bodies( env ) ) == 2
+
+
+def test_approval_goes_to_the_latest_attempt_and_opens_the_gate( env ):
+    tripped_canary( env )
+    env.standin = {}
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="fixed" )
+    st.approve_canary( env, 1, "maria", "second attempt read" )
+    assert json.loads( ( env.results_dir / "s1-q1-canary-a2.canary.json" ).read_text() )[ "approved" ][ "by" ] == "maria"
+    assert json.loads( ( env.results_dir / "s1-q1-canary.canary.json" ).read_text() )[ "approved" ] is None
+    st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
+
+
+def test_an_earlier_tripped_attempt_cannot_be_approved_by_naming_it( env ):
+    tripped_canary( env )
+    env.standin = {}
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="fixed" )
+    with pytest.raises( st.CanaryTripped ): st.approve_canary( env, 1, "maria", "ok", attempt=1 )
+    with pytest.raises( st.CanaryNotApproved, match="attempt 3" ): st.approve_canary( env, 1, "maria", "ok", attempt=3 )
+    with pytest.raises( st.CanaryNotApproved ): st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
+
+
+def test_a_tripped_latest_attempt_blocks_approval_though_an_earlier_one_was_clean( env ):
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )                       # clean and never read
+    tripped_canary( env, attempt=2, reason="the clean one was never read" )
+    with pytest.raises( st.CanaryTripped ): st.approve_canary( env, 1, "maria", "ok" )
