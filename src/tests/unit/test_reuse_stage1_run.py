@@ -298,3 +298,9 @@ def test_a_command_that_works_returns_its_own_code_through_cli( scratch ):
     run( scratch, "ledger-init" )
     argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "status" ]
     assert rr.cli( argv, loader=loader ) == 0
+
+
+@pytest.mark.parametrize( "code", [ 0, 2, 3 ] )
+def test_cli_returns_whatever_code_main_returns( monkeypatch, code ):
+    monkeypatch.setattr( rr, "main", lambda argv=None, loader=None: code )
+    assert rr.cli( [ "report" ] ) == code
