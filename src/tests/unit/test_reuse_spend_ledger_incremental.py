@@ -138,3 +138,18 @@ def test_two_instances_in_one_process_take_turns_and_agree_on_every_total( ledge
     assert ledger.snapshot() == other.snapshot() == ( 100_000, 60_000 )
     with pytest.raises( rl.AccountLimitReached ):
         other.begin_run( "c", 40_001 )
+
+
+def test_a_line_that_is_not_utf8_refuses_the_ledger_with_its_line_number( ledger ):
+    with ledger.path.open( "ab" ) as f: f.write( b"\xff\xfe\n" )
+    with pytest.raises( rl.LedgerUnreadable, match="line 2 is not JSON" ):
+        ledger.total()
+
+
+def test_an_empty_file_has_no_limit_row_however_often_it_is_read( tmp_path ):
+    path = tmp_path / "empty.jsonl"
+    path.write_text( "", encoding="utf-8" )
+    led = rl.AccountLedger( path )
+    for _ in range( 2 ):
+        with pytest.raises( rl.LedgerUnreadable, match="limit" ):
+            led.total()

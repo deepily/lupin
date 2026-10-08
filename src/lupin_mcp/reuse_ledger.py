@@ -9,6 +9,7 @@ import contextlib
 import fcntl
 import json
 import math
+import os
 import pathlib
 import time
 
@@ -16,6 +17,7 @@ PRICE_PER_MILLION_USD = 0.042                                 # the pinned input
 ACCOUNT_LIMIT_USD     = 40.00                                 # Rick raised the Jev account to about 44 dollars; was 19.31
 STAGE1_CEILING_TOKENS = 71_000_000                            # three dollars at the price above, rounded down (plan 11.1)
 LEDGER_NAME           = "jev-spend-ledger.jsonl"
+ANCHOR_BYTES          = 256                                   # the last bytes read, compared on the next read to catch a rewrite in place
 
 
 class LedgerUnreadable( Exception ):
@@ -71,12 +73,14 @@ class AccountLedger:
         - total() counts an open run at the larger of its ceiling and its spend, a closed run at its spend
         - begin_run() reads and appends under one lock, so two processes cannot both be admitted past the limit
         - the latest limit row is the account limit; earlier ones stay in the file
+        - each call parses only the rows appended since the last read of this instance, under the same lock
     Raises:
         - LedgerUnreadable for a missing file, a line that is not a JSON object, a bad row, or no limit row
     """
 
     def __init__( self, path ):
         self.path = pathlib.Path( path )
+        self._forget()
 
     @classmethod
     def create( cls, path, limit_tokens, by, why ):
@@ -113,36 +117,77 @@ class AccountLedger:
         except OSError as e:
             raise LedgerUnreadable( f"{self.path}: {e}" ) from e
 
-    def _rows( self, f ):
-        f.seek( 0 )
-        rows = []
-        for n, line in enumerate( f.read().splitlines(), 1 ):
-            if not line.strip(): continue
-            try: row = json.loads( line )
-            except ValueError as e: raise LedgerUnreadable( f"line {n} is not JSON" ) from e
-            if not isinstance( row, dict ) or row.get( "kind" ) not in ( "limit", "begin", "spend", "end" ):
-                raise LedgerUnreadable( f"line {n} is not a ledger row" )
-            if row[ "kind" ] != "end" and not _whole( row.get( "tokens" ) ):
-                raise LedgerUnreadable( f"line {n} has no whole token count" )
-            if row[ "kind" ] != "limit" and not isinstance( row.get( "run" ), str ):
-                raise LedgerUnreadable( f"line {n} names no run" )
-            rows.append( row )
-        return rows
+    def _forget( self, identity=None ):
+        """Ensures: nothing of the file is remembered but its ( device, inode ), when given."""
+        self._identity, self._offset, self._anchor, self._line_no = identity, 0, b"", 0
+        self._limit, self._runs = None, {}
+
+    def _unchanged_before_offset( self, raw ):
+        """Ensures: True when the bytes just before the read offset are the bytes read last time."""
+        if not self._anchor: return True
+        raw.seek( self._offset - len( self._anchor ) )
+        return raw.read( len( self._anchor ) ) == self._anchor
 
     @staticmethod
-    def _summary( rows ):
-        """Ensures: returns ( limit, total, runs ); LedgerUnreadable when no limit row exists."""
-        limits = [ r[ "tokens" ] for r in rows if r[ "kind" ] == "limit" ]
-        if not limits: raise LedgerUnreadable( "the ledger has no limit row" )
-        runs = {}
-        for r in rows:
-            if r[ "kind" ] == "limit": continue
-            run = runs.setdefault( r[ "run" ], { "ceiling": 0, "spent": 0, "closed": False } )
-            if r[ "kind" ] == "begin": run[ "ceiling" ] = r[ "tokens" ]
-            elif r[ "kind" ] == "spend": run[ "spent" ] += r[ "tokens" ]
-            else: run[ "closed" ] = True
-        total = sum( r[ "spent" ] if r[ "closed" ] else max( r[ "ceiling" ], r[ "spent" ] ) for r in runs.values() )
-        return limits[ -1 ], total, runs
+    def _row_of( n, chunk ):
+        """Ensures: returns the checked row on line n, or None for a blank line."""
+        try: line = chunk.decode( "utf-8" )
+        except UnicodeDecodeError as e: raise LedgerUnreadable( f"line {n} is not JSON" ) from e
+        if not line.strip(): return None
+        try: row = json.loads( line )
+        except ValueError as e: raise LedgerUnreadable( f"line {n} is not JSON" ) from e
+        if not isinstance( row, dict ) or row.get( "kind" ) not in ( "limit", "begin", "spend", "end" ):
+            raise LedgerUnreadable( f"line {n} is not a ledger row" )
+        if row[ "kind" ] != "end" and not _whole( row.get( "tokens" ) ):
+            raise LedgerUnreadable( f"line {n} has no whole token count" )
+        if row[ "kind" ] != "limit" and not isinstance( row.get( "run" ), str ):
+            raise LedgerUnreadable( f"line {n} names no run" )
+        return row
+
+    def _fold( self, row ):
+        """Ensures: the row is counted in the remembered limit and runs."""
+        if row[ "kind" ] == "limit":
+            self._limit = row[ "tokens" ]
+            return
+        run = self._runs.setdefault( row[ "run" ], { "ceiling": 0, "spent": 0, "closed": False } )
+        if row[ "kind" ] == "begin": run[ "ceiling" ] = row[ "tokens" ]
+        elif row[ "kind" ] == "spend": run[ "spent" ] += row[ "tokens" ]
+        else: run[ "closed" ] = True
+
+    def _state( self, f ):
+        """
+        Read what was appended since the last read and fold it in.
+
+        Requires:
+            - f is the open ledger file, held under the exclusive lock
+        Ensures:
+            - returns ( limit, total, runs ) for the whole file
+            - only bytes past the remembered offset are parsed; the file is read again from the start when it
+              was replaced, shrank, or no longer holds the bytes read last time
+            - the offset moves past a row only after the row was checked and counted, so a refused line is
+              refused again until it is repaired and no row is ever counted twice
+        Raises:
+            - LedgerUnreadable for a line that is not JSON, not a ledger row, has no whole token count or names
+              no run, and when no limit row exists
+        """
+        raw, stat = f.buffer, os.fstat( f.fileno() )
+        if ( stat.st_dev, stat.st_ino ) != self._identity or stat.st_size < self._offset or not self._unchanged_before_offset( raw ):
+            self._forget( ( stat.st_dev, stat.st_ino ) )
+        raw.seek( self._offset )
+        tail, start = raw.read(), 0
+        while start < len( tail ):
+            end   = tail.find( b"\n", start )
+            end   = len( tail ) if end == -1 else end + 1
+            chunk = tail[ start:end ]
+            row   = self._row_of( self._line_no + 1, chunk )
+            if row is not None: self._fold( row )
+            self._line_no += 1
+            self._offset  += len( chunk )
+            self._anchor   = ( self._anchor + chunk )[ -ANCHOR_BYTES: ]
+            start          = end
+        if self._limit is None: raise LedgerUnreadable( "the ledger has no limit row" )
+        total = sum( r[ "spent" ] if r[ "closed" ] else max( r[ "ceiling" ], r[ "spent" ] ) for r in self._runs.values() )
+        return self._limit, total, self._runs
 
     def _append( self, f, row ):
         f.write( json.dumps( { **row, "at": time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }, sort_keys=True ) + "\n" )
@@ -150,7 +195,7 @@ class AccountLedger:
 
     def snapshot( self ):
         """Ensures: returns ( account limit, total ) as one read."""
-        with self._locked() as f: limit, total, _ = self._summary( self._rows( f ) )
+        with self._locked() as f: limit, total, _ = self._state( f )
         return limit, total
 
     def total( self ):
@@ -167,7 +212,7 @@ class AccountLedger:
         Raises:
             - LedgerUnreadable as snapshot does
         """
-        with self._locked() as f: runs = self._summary( self._rows( f ) )[ 2 ]
+        with self._locked() as f: runs = self._state( f )[ 2 ]
         return sum( r[ "spent" ] if r[ "closed" ] else max( r[ "ceiling" ], r[ "spent" ] ) for name, r in runs.items() if name.startswith( prefix ) )
 
     def limit_tokens( self ):
@@ -185,7 +230,7 @@ class AccountLedger:
         """
         self._check_limit( tokens )
         with self._locked() as f:
-            self._summary( self._rows( f ) )
+            self._state( f )
             f.write( json.dumps( self._limit_row( tokens, by, why ), sort_keys=True ) + "\n" )
             f.flush()
 
@@ -200,7 +245,7 @@ class AccountLedger:
             - ValueError when the run name was used before
         """
         with self._locked() as f:
-            limit, total, runs = self._summary( self._rows( f ) )
+            limit, total, runs = self._state( f )
             if run in runs:
                 raise ValueError( f"run {run!r} already began in this ledger" )
             if total + ceiling_tokens > limit:
@@ -210,7 +255,7 @@ class AccountLedger:
     def spend( self, run, tokens ):
         """Ensures: appends one settled attempt's tokens; ValueError for a run that never began."""
         with self._locked() as f:
-            if run not in self._summary( self._rows( f ) )[ 2 ]:
+            if run not in self._state( f )[ 2 ]:
                 raise ValueError( f"run {run!r} never began" )
             self._append( f, { "kind": "spend", "run": run, "tokens": tokens } )
 
@@ -225,7 +270,7 @@ class AccountLedger:
         """
         if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise ValueError( "by and why must say who closed the run and why" )
         with self._locked() as f:
-            runs = self._summary( self._rows( f ) )[ 2 ]
+            runs = self._state( f )[ 2 ]
             if run not in runs:
                 raise ValueError( f"run {run!r} never began" )
             if runs[ run ][ "closed" ]:
@@ -235,6 +280,6 @@ class AccountLedger:
     def end_run( self, run ):
         """Ensures: appends an end row, so the run counts at what it spent."""
         with self._locked() as f:
-            if run not in self._summary( self._rows( f ) )[ 2 ]:
+            if run not in self._state( f )[ 2 ]:
                 raise ValueError( f"run {run!r} never began" )
             self._append( f, { "kind": "end", "run": run } )
