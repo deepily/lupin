@@ -27,11 +27,11 @@
 --     psql -v ON_ERROR_STOP=1 -f init-db-roles.sql        (variables set by \set lines on stdin)
 --
 -- Variables: app_pw, host_pw, test_pw (required). reassign=1 (optional, CUTOVER ONLY) hands
--- ownership of every dev-database object from lupin_dev to lupin_app, which the app's own
+-- ownership of every object in lupin_db_dev and lupin_db_test from lupin_dev to lupin_app, which the app's own
 -- boot-time migrations need once it no longer connects as the superuser.
 --
--- rollback=1 (optional, CUTOVER ONLY, never with reassign) is the reassign in reverse: every object
--- in public that lupin_app owns goes back to lupin_dev (the schema itself to pg_database_owner), and nothing else is run. No password
+-- rollback=1 (optional, CUTOVER ONLY, never with reassign) is the reassign in reverse, in lupin_db_test and then in
+-- lupin_db_dev: every object in public that lupin_app owns goes back to lupin_dev (the schema itself to pg_database_owner), and nothing else is run. No password
 -- variable is needed. It does not create, alter or drop a role, reset a password, or grant or
 -- revoke anything; the roles and their grants stay as they were.
 --
@@ -51,11 +51,51 @@ SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
 SET log_min_duration_statement = -1;
 
--- ---- ROLLBACK ONLY: hand the dev database back to the bootstrap superuser ---------------
--- The reassign block below in reverse, with the same extension exclusions and the two role names
+-- ---- ROLLBACK ONLY: hand both databases back to the bootstrap superuser ---------------
+-- The reassign blocks below in reverse, with the same extension exclusions and the two role names
 -- swapped. It runs before everything else and ends the session, so no role, password or grant
 -- statement further down is reached. A test pins that the object statements differ by the role
 -- names only, and pins the two closing statements, which differ on purpose (see below).
+-- Two blocks, one per database: lupin_db_test first, then lupin_db_dev.
+-- Test database. The DO check comes first, so a missing lupin_db_test stops the rollback before
+-- anything has moved and the dev block below never runs on a half-finished state.
+\if :{?rollback}
+  DO $$ BEGIN IF NOT EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_db_test' ) THEN
+    RAISE EXCEPTION 'init-db-roles.sql: database lupin_db_test does not exist'; END IF; END $$;
+  \connect lupin_db_test
+  SET log_statement = 'none';
+  SET log_min_error_statement = 'panic';
+  SET log_min_duration_statement = -1;
+  SELECT format( 'ALTER %s %I.%I OWNER TO lupin_dev',
+                 CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW'
+                                WHEN 'f' THEN 'FOREIGN TABLE' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
+                 n.nspname, c.relname )
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND c.relkind IN ( 'r', 'p', 'v', 'm', 'f', 'S' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ( 'e', 'a', 'i' ) )
+  \gexec
+  SELECT format( 'ALTER TYPE %I.%I OWNER TO lupin_dev', n.nspname, t.typname )
+    FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace JOIN pg_roles o ON o.oid = t.typowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND t.typtype IN ( 'e', 'd' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e' )
+  \gexec
+  SELECT format( 'ALTER %s %I.%I( %s ) OWNER TO lupin_dev', CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+                 n.nspname, p.proname, pg_get_function_identity_arguments( p.oid ) )
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_roles o ON o.oid = p.proowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' AND p.prokind IN ( 'f', 'p' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e' )
+  \gexec
+  -- The schema and the database are moved back only when lupin_app owns them now. The live public
+  -- schema is owned by pg_database_owner (Mr. Radio, measured in both databases), so that is where
+  -- it returns; the database returns to lupin_dev. A rollback with no prior reassign changes neither.
+  SELECT 'ALTER SCHEMA public OWNER TO pg_database_owner'
+   WHERE EXISTS ( SELECT FROM pg_namespace n JOIN pg_roles o ON o.oid = n.nspowner WHERE n.nspname = 'public' AND o.rolname = 'lupin_app' )
+  \gexec
+  SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() )
+   WHERE EXISTS ( SELECT FROM pg_database d JOIN pg_roles o ON o.oid = d.datdba WHERE d.datname = current_database() AND o.rolname = 'lupin_app' )
+  \gexec
+\endif
+-- Dev database. This block ends the session.
 \if :{?rollback}
   \connect lupin_db_dev
   SET log_statement = 'none';
@@ -188,7 +228,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUE
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT USAGE, SELECT, UPDATE          ON SEQUENCES TO lupin_host;
 
--- ---- CUTOVER ONLY: hand the dev database to the app role --------------------------------
+-- ---- CUTOVER ONLY: hand the dev database to the app role (the test database has its own block at the end) ----
 -- NOT `REASSIGN OWNED BY lupin_dev`: that fails ("required by the database system"), because the
 -- bootstrap superuser owns catalog objects. Each user object is moved by name instead, and an
 -- object an extension owns (the pgvector type and functions in public) is left alone.
@@ -231,3 +271,30 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev  IN SCHEMA public GRANT ALL ON TABLE
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev  IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app, lupin_test;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON TABLES    TO lupin_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app;
+
+-- ---- CUTOVER ONLY: hand the test database to the app role ---------------------------------
+-- Same statements as the dev block above. Without them lupin_db_test stays owned by lupin_dev, and a
+-- migration run as lupin_app on the test server fails with 'must be owner of table'.
+\if :{?reassign}
+  SELECT format( 'ALTER %s %I.%I OWNER TO lupin_app',
+                 CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW'
+                                WHEN 'f' THEN 'FOREIGN TABLE' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
+                 n.nspname, c.relname )
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_dev' AND c.relkind IN ( 'r', 'p', 'v', 'm', 'f', 'S' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ( 'e', 'a', 'i' ) )
+  \gexec
+  SELECT format( 'ALTER TYPE %I.%I OWNER TO lupin_app', n.nspname, t.typname )
+    FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace JOIN pg_roles o ON o.oid = t.typowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_dev' AND t.typtype IN ( 'e', 'd' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e' )
+  \gexec
+  SELECT format( 'ALTER %s %I.%I( %s ) OWNER TO lupin_app', CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+                 n.nspname, p.proname, pg_get_function_identity_arguments( p.oid ) )
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_roles o ON o.oid = p.proowner
+   WHERE n.nspname = 'public' AND o.rolname = 'lupin_dev' AND p.prokind IN ( 'f', 'p' )
+     AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e' )
+  \gexec
+  ALTER SCHEMA public OWNER TO lupin_app;
+  SELECT format( 'ALTER DATABASE %I OWNER TO lupin_app', current_database() ) \gexec
+\endif

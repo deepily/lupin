@@ -150,6 +150,28 @@ def _block( text, opener ):
     return [ line.strip() for line in lines[ start + 1:end ] if line.strip() and not line.strip().startswith( "--" ) ]
 
 
+def _blocks( text, opener ):
+    """Every block that starts with the opener line, each as its code lines (comments removed)."""
+    lines, found = text.splitlines(), []
+    for start, line in enumerate( lines ):
+        if line.strip() != opener: continue
+        end = next( i for i in range( start + 1, len( lines ) ) if lines[ i ].strip() == "\\endif" )
+        found.append( [ l.strip() for l in lines[ start + 1:end ] if l.strip() and not l.strip().startswith( "--" ) ] )
+    return found
+
+
+def _rollback_block( text, database ):
+    """The rollback block that connects to one database."""
+    found = [ b for b in _blocks( text, "\\if :{?rollback}" ) if f"\\connect {database}" in b ]
+    assert len( found ) == 1, f"expected one rollback block for {database}, found {len( found )}"
+    return found[ 0 ]
+
+
+def _object_lines( block ):
+    """A rollback block without its connect, settings, quit and missing-database check."""
+    return [ line for line in block if not line.startswith( ( "\\connect", "\\quit", "SET log_", "DO $$", "RAISE EXCEPTION" ) ) ]
+
+
 def _swap_roles( text ):
     return text.replace( "lupin_dev", "\0" ).replace( "lupin_app", "lupin_dev" ).replace( "\0", "lupin_app" )
 
@@ -216,11 +238,11 @@ def _split_after_object_statements( joined ):
     return "\\gexec".join( pieces[ :3 ] ) + "\\gexec", "\\gexec".join( pieces[ 3: ] ).strip()
 
 
-def test_the_rollback_object_statements_are_the_reassign_ones_with_only_the_two_role_names_swapped():
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db_test" ] )
+def test_the_rollback_object_statements_are_the_reassign_ones_with_only_the_two_role_names_swapped( database ):
     text      = open( SQL_PATH ).read()
     reassign  = " ".join( _block( text, "\\if :{?reassign}" ) )
-    rollback  = " ".join( line for line in _block( text, "\\if :{?rollback}" )
-                          if line not in ( "\\connect lupin_db_dev", "\\quit" ) and not line.startswith( "SET log_" ) )
+    rollback  = " ".join( _object_lines( _rollback_block( text, database ) ) )
     assert reassign.count( "\\gexec" ) == 4, "the reassign block no longer has its four generated statements"
     reassign_objects, reassign_tail = _split_after_object_statements( reassign )
     rollback_objects, rollback_tail = _split_after_object_statements( rollback )
@@ -229,28 +251,52 @@ def test_the_rollback_object_statements_are_the_reassign_ones_with_only_the_two_
     assert "ALTER SCHEMA public OWNER TO lupin_app;" in reassign_tail
 
 
-def test_the_rollback_moves_the_schema_and_the_database_only_when_lupin_app_owns_them():
-    text     = open( SQL_PATH ).read()
-    rollback = " ".join( line for line in _block( text, "\\if :{?rollback}" )
-                         if line not in ( "\\connect lupin_db_dev", "\\quit" ) and not line.startswith( "SET log_" ) )
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db_test" ] )
+def test_the_rollback_moves_the_schema_and_the_database_only_when_lupin_app_owns_them( database ):
+    rollback = " ".join( _object_lines( _rollback_block( open( SQL_PATH ).read(), database ) ) )
     _, tail = _split_after_object_statements( rollback )
     assert tail == _ROLLBACK_TAIL
     assert "OWNER TO lupin_dev;" not in rollback and "OWNER TO pg_database_owner;" not in rollback, \
         "an unconditional ownership change is back in the rollback block"
 
 
-def test_the_rollback_block_opens_by_connecting_to_the_dev_database():
-    block = _block( open( SQL_PATH ).read(), "\\if :{?rollback}" )
-    assert block[ 0 ] == "\\connect lupin_db_dev", block[ 0 ]
-    assert [ line for line in block if line.startswith( "\\connect" ) ] == [ "\\connect lupin_db_dev" ]
+def test_the_reassign_runs_in_both_databases_with_the_same_statements():
+    text   = open( SQL_PATH ).read()
+    blocks = _blocks( text, "\\if :{?reassign}" )
+    assert len( blocks ) == 2, f"expected one reassign block per database, found {len( blocks )}"
+    assert blocks[ 0 ] == blocks[ 1 ] and sum( line.count( "\\gexec" ) for line in blocks[ 1 ] ) == 4
+    openers = [ i for i in range( len( text ) ) if text.startswith( "\\if :{?reassign}\n", i ) ]
+    dev, test = text.rindex( "\\connect lupin_db_dev\nSET" ), text.index( "\\connect lupin_db_test\nSET log_statement = 'none';\nSET log_min_error_statement = 'panic';\nSET log_min_duration_statement = -1;\n\nGRANT" )
+    assert dev < openers[ 0 ] < test < openers[ 1 ], "each reassign block must run after the connect to its own database"
+
+
+def test_the_test_database_rolls_back_first_and_a_missing_one_stops_the_rollback_before_anything_moves():
+    text  = open( SQL_PATH ).read()
+    first = _blocks( text, "\\if :{?rollback}" )[ 0 ]
+    assert first[ 0 ].startswith( "DO $$" ) and "database lupin_db_test does not exist" in first[ 1 ]
+    assert first[ 2 ] == "\\connect lupin_db_test" and "\\quit" not in first
+    openers = [ i for i in range( len( text ) ) if text.startswith( "\\if :{?rollback}\n", i ) ]
+    assert len( openers ) == 2
+    assert openers[ 0 ] < text.index( "\\connect lupin_db_test\n", openers[ 0 ] ) < openers[ 1 ] < text.index( "\\connect lupin_db_dev\n", openers[ 1 ] )
+    assert "\\connect lupin_db_dev" not in "\n".join( text[ openers[ 0 ]:openers[ 1 ] ].splitlines() ), "the dev connect sits inside the test block"
+
+
+def test_the_rollback_blocks_connect_to_their_own_database_only():
+    text = open( SQL_PATH ).read()
+    for database in ( "lupin_db_dev", "lupin_db_test" ):
+        block = _rollback_block( text, database )
+        assert [ line for line in block if line.startswith( "\\connect" ) ] == [ f"\\connect {database}" ]
+        assert block.index( f"\\connect {database}" ) == ( 0 if database == "lupin_db_dev" else 2 )
 
 
 def test_the_rollback_block_touches_no_role_password_or_grant_and_ends_the_session():
     text     = open( SQL_PATH ).read()
-    rollback = "\n".join( _block( text, "\\if :{?rollback}" ) ).upper()
+    blocks   = _blocks( text, "\\if :{?rollback}" )
+    rollback = "\n".join( line for block in blocks for line in block ).upper()
     for word in ( "GRANT", "REVOKE", "CREATE ROLE", "ALTER ROLE", "DROP ROLE", "PASSWORD", "DEFAULT PRIVILEGES", "REASSIGN OWNED" ):
         assert word not in rollback, f"the rollback block mentions {word}"
-    assert rollback.rstrip().endswith( "\\QUIT" ), "the rollback block must end the session so nothing below it runs"
+    assert blocks[ -1 ][ -1 ] == "\\quit", "the last rollback block must end the session so nothing below it runs"
+    assert all( "\\quit" not in block for block in blocks[ :-1 ] ), "an earlier rollback block ends the session before the dev half runs"
     code   = "\n".join( line for line in text.splitlines() if not line.strip().startswith( "--" ) )
     opener = code.index( "\\if :{?rollback}" )
     for later in ( "CREATE ROLE", "ALTER ROLE", "GRANT ", "REVOKE ", ":{?app_pw}" ):

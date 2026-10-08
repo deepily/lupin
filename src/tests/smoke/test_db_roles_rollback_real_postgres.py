@@ -310,16 +310,17 @@ def _snapshot( box ):
     """Owners, roles with password hashes, default privileges and the extension owner."""
     name = box[ "name" ]
     return {
-        "dev_owners"   : _psql( name, "lupin_db_dev",  OWNERS_SQL ),
-        "test_owners"  : _psql( name, "lupin_db_test", OWNERS_SQL ),
-        "roles"        : _psql( name, "postgres",      ROLES_SQL ),
-        "dev_defacl"   : _psql( name, "lupin_db_dev",  DEFACL_SQL ),
-        "test_defacl"  : _psql( name, "lupin_db_test", DEFACL_SQL ),
-        "vector_owner" : _psql( name, "lupin_db_dev",  EXT_SQL ),
+        "dev_owners"        : _psql( name, "lupin_db_dev",  OWNERS_SQL ),
+        "test_owners"       : _psql( name, "lupin_db_test", OWNERS_SQL ),
+        "roles"             : _psql( name, "postgres",      ROLES_SQL ),
+        "dev_defacl"        : _psql( name, "lupin_db_dev",  DEFACL_SQL ),
+        "test_defacl"       : _psql( name, "lupin_db_test", DEFACL_SQL ),
+        "vector_owner"      : _psql( name, "lupin_db_dev",  EXT_SQL ),
+        "test_vector_owner" : _psql( name, "lupin_db_test", EXT_SQL ),
     }
 
 
-def _provision( box, tmp_path, *flags, database="lupin_db_dev" ):
+def _provision( box, tmp_path, *flags, database="lupin_db_dev", expect_ok=True ):
     """Run the real provisioner against the throwaway container; returns the finished process."""
     assert ROOT, "LUPIN_ROOT is not set, so the provisioner would run from the wrong tree"
     _assert_marker( box )
@@ -335,7 +336,7 @@ def _provision( box, tmp_path, *flags, database="lupin_db_dev" ):
         args += [ "--app-pw-file", files[ "app" ], "--host-pw-file", files[ "host" ], "--test-pw-file", files[ "test" ] ]
     env = _clean_env( LUPIN_ROOT=ROOT, PYTHONPATH=os.path.join( ROOT, "src" ) )
     done = subprocess.run( args, capture_output=True, text=True, timeout=120, env=env, cwd=ROOT )
-    assert done.returncode == 0, f"provisioner {flags} failed: {done.stdout[ -500: ]} {done.stderr[ -500: ]}"
+    if expect_ok: assert done.returncode == 0, f"provisioner {flags} failed: {done.stdout[ -500: ]} {done.stderr[ -500: ]}"
     return done
 
 
@@ -344,7 +345,8 @@ def stocked( throwaway ):
     """The throwaway server with the same objects in both databases, and vector in dev."""
     for database in ( "lupin_db_dev", "lupin_db_test" ):
         _psql( throwaway[ "name" ], database, FIXTURE_SQL )
-    _psql( throwaway[ "name" ], "lupin_db_dev", VECTOR_SQL )
+    for database in ( "lupin_db_dev", "lupin_db_test" ):
+        _psql( throwaway[ "name" ], database, VECTOR_SQL )
     return throwaway
 
 
@@ -372,6 +374,10 @@ def test_a_rollback_after_a_reassign_returns_every_owner_and_touches_no_role( st
     assert any( line == "rel|r|widgets|lupin_app" for line in reassigned ), "the reassign did not move the table; the rollback has nothing to undo"
     assert "schema|public|lupin_app" in reassigned and "database|lupin_db_dev|lupin_app" in reassigned
     assert s2[ "vector_owner" ].strip() == SUPERUSER, "the reassign must leave extension objects alone"
+    assert s2[ "test_vector_owner" ].strip() == SUPERUSER, "the reassign must leave extension objects alone in the test database too"
+    moved_test = _owners( s2[ "test_owners" ] )
+    assert "rel|r|widgets|lupin_app" in moved_test, "the reassign left the test database tables with lupin_dev"
+    assert "schema|public|lupin_app" in moved_test and "database|lupin_db_test|lupin_app" in moved_test
 
     _provision( stocked, tmp_path, "--rollback" )
     s3 = _snapshot( stocked )
@@ -381,7 +387,9 @@ def test_a_rollback_after_a_reassign_returns_every_owner_and_touches_no_role( st
     assert s3[ "dev_owners" ] == s0[ "dev_owners" ], "the rollback did not return every owner in the dev database"
     assert "schema|public|pg_database_owner" in _owners( s3[ "dev_owners" ] )
     assert f"database|lupin_db_dev|{SUPERUSER}" in _owners( s3[ "dev_owners" ] )
-    for key in ( "roles", "dev_defacl", "test_defacl", "test_owners", "vector_owner" ):
+    assert s3[ "test_owners" ] == s0[ "test_owners" ], "the rollback did not return every owner in the test database"
+    assert f"database|lupin_db_test|{SUPERUSER}" in _owners( s3[ "test_owners" ] )
+    for key in ( "roles", "dev_defacl", "test_defacl", "vector_owner", "test_vector_owner" ):
         assert s3[ key ] == s2[ key ], f"the rollback changed {key}"
     assert s4 == s3, "a second rollback changed something"
     assert _changed( s0, s1, "roles"), "the provisioner created no roles, so the role comparison above proves nothing"
@@ -415,3 +423,15 @@ def test_a_rollback_started_on_another_database_still_returns_the_dev_owners( st
     _provision( stocked, tmp_path, "--reassign" )
     _provision( stocked, tmp_path, "--rollback", database="postgres" )
     assert _owners( _snapshot( stocked )[ "dev_owners" ] ) == before, "the rollback acted on the database it started in, not lupin_db_dev"
+
+
+@needs_docker
+def test_a_rollback_with_no_test_database_stops_before_it_moves_anything( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _provision( stocked, tmp_path, "--reassign" )
+    before = _owners( _snapshot( stocked )[ "dev_owners" ] )
+    _psql( stocked[ "name" ], "postgres", "DROP DATABASE lupin_db_test;\n" )
+    done = _provision( stocked, tmp_path, "--rollback", expect_ok=False )
+
+    assert done.returncode != 0 and "database lupin_db_test does not exist" in done.stdout + done.stderr
+    assert _owners( _psql( stocked[ "name" ], "lupin_db_dev", OWNERS_SQL ) ) == before, "the dev half ran although the test database was missing"

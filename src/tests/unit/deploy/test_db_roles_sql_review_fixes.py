@@ -38,16 +38,19 @@ def test_the_log_quieting_statements_come_before_the_first_password_is_used():
 
 @pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db_test" ] )
 def test_every_connect_is_followed_by_the_quieting_statements(database):
-    sql  = _sql()
-    tail = sql[ sql.index( f"\\connect {database}\n" ) + len( f"\\connect {database}\n" ): ]
-    head = tail[ :len( "".join( QUIET ) ) + 10 ]
-    for statement in QUIET:
-        assert statement in head, f"{statement} missing right after \\connect {database}"
+    sql    = _sql()
+    marker = f"\\connect {database}\n"
+    starts = [ i + len( marker ) for i in range( len( sql ) ) if sql.startswith( marker, i ) ]
+    assert len( starts ) >= 2, f"expected the grants connect and a rollback connect for {database}"
+    for start in starts:
+        head = sql[ start:start + len( "".join( QUIET ) ) + 10 ]
+        for statement in QUIET:
+            assert statement in head, f"{statement} missing right after a \\connect {database}"
 
 
 def test_the_test_database_is_checked_before_any_role_is_created():
     sql = _sql()
-    assert 0 < sql.index( "datname = 'lupin_db_test'" ) < sql.index( "format( 'CREATE ROLE" )
+    assert 0 < sql.index( "datname = 'lupin_db_test' ) AS has_test_db" ) < sql.index( "format( 'CREATE ROLE" )
     assert "database lupin_db_test does not exist" in sql
 
 
