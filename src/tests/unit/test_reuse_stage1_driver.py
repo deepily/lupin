@@ -31,8 +31,9 @@ class Standin:
     `refuse_over` raises a 422 for a body with more questions. `die_after` raises a JevCallError from that request on.
     """
 
-    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None ):
+    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None, drop_last=False ):
         self.budget, self.out, self.usage_in, self.refuse_over, self.die_after, self.usage, self.hook = budget, out_per_entry, usage_in, refuse_over, die_after, usage, hook
+        self.drop_last = drop_last
         self.bodies, self.lock = [], threading.Lock()
 
     def post_with_meta( self, body ):
@@ -44,6 +45,7 @@ class Standin:
         if self.die_after is not None and n > self.die_after: raise jt.JevCallError( "down" )
         if self.refuse_over is not None and len( body[ "questions" ] ) > self.refuse_over: raise jt.JevConfigError( "Jev refused the request with status 422", 422 )
         response = { "answers": { key: { "probabilities": dict( PROBS ) } for key in body[ "questions" ] }, "model": body[ "model" ] }
+        if self.drop_last: response[ "answers" ].popitem()                                      # one question the response leaves out
         if self.usage: response[ "usage" ] = { "input_tokens": self.usage_in, "output_tokens": self.out * len( body[ "questions" ] ) }
         return response, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 3 }
 
@@ -690,3 +692,45 @@ def test_two_separate_drivers_on_one_ledger_file_cannot_both_be_admitted_against
     release.set()
     for t in threads: t.join( 10 )
     assert sorted( finished ) == [ "ran", "refused" ]
+
+
+SOME = "some"          # at least one; the stand-in's timing decides how many
+
+
+def stop_ledger( env ): return lambda n: env.ledger.set_limit( 10, "peer", "another run spent the account" ) if n == 3 else None
+
+
+@pytest.mark.parametrize( "ending,arm,count,ceiling,limit,standin,want", [
+    ( "every entry answered",       "single1", 5,  5_000_000, None, {},                    ( "complete",   None,              5,    0,    0,    0 ) ),
+    ( "failed but all attempted",   "single1", 5,  5_000_000, None, { "die_after": 2 },    ( "incomplete", None,              2,    3,    0,    0 ) ),
+    ( "attempt cap hit",            "single1", 25, 5_000_000, 10,   {},                    ( "incomplete", "attempts",        10,   0,    15,   0 ) ),
+    ( "ceiling reached",            "single1", 25, 6_000,     None, {},                    ( "incomplete", "ceiling",         SOME, 0,    SOME, 0 ) ),
+    ( "consecutive 422",            "single1", 12, 5_000_000, 50,   { "refuse_over": 0 },  ( "incomplete", "consecutive_422", 0,    SOME, SOME, 0 ) ),
+    ( "response left one unasked",  "canary",  10, 2_000_000, None, { "drop_last": True }, ( "incomplete", None,              9,    1,    0,    1 ) ) ] )
+def test_each_ending_of_an_arm_writes_its_state_stop_reason_and_where_the_lost_ids_are_listed( env, ending, arm, count, ceiling, limit, standin, want ):
+    env.standin = standin
+    st.run_arm( env, 1, arm, NEED, ENTRIES[ :count ], ceiling, attempt_limit=limit )
+    out  = read( env, 1, arm )
+    got  = ( out[ "state" ], out[ "stop_reason" ], len( out[ "answers" ] ), len( out[ "failed" ] ), len( out[ "not_reached" ] ), len( out[ "unasked" ] ) )
+    for have, expected in zip( got, want ): assert have == expected or ( expected == SOME and have > 0 ), ( ending, got, want )
+    lost = [ a[ "id" ] for a in out[ "answers" ] ] + out[ "failed" ] + out[ "not_reached" ]
+    assert sorted( lost ) == sorted( out[ "entry_ids" ] ), ending                  # every entry is answered, failed or not reached, and only one of them
+    assert set( out[ "unasked" ] ) <= set( out[ "failed" ] ), ending               # an unasked id is also listed under failed
+    assert ( out[ "state" ] == "complete" ) == ( not out[ "failed" ] and not out[ "not_reached" ] ), ending
+
+
+def test_the_ending_that_raised_writes_state_error_and_lists_nothing( env, monkeypatch ):
+    monkeypatch.setattr( rp, "sweep_packed", lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
+    with pytest.raises( RuntimeError, match="boom" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :5 ], 5_000_000 )
+    out = read( env, 1, "single1" )
+    assert ( out[ "state" ], out[ "stop_reason" ] ) == ( "error", "error: RuntimeError" )
+    assert out[ "answers" ] == out[ "failed" ] == out[ "not_reached" ] == out[ "unasked" ] == [] and len( out[ "entry_ids" ] ) == 5       # nothing listed, though five were asked
+
+
+def test_a_ledger_that_ran_out_mid_arm_writes_ledger_and_lists_the_rest_not_reached( env ):
+    env.standin = { "hook": stop_ledger( env ) }
+    st.run_arm( env, 1, "single1", NEED, ENTRIES, 5_000_000, attempt_limit=50 )
+    out = read( env, 1, "single1" )
+    lost = [ a[ "id" ] for a in out[ "answers" ] ] + out[ "failed" ] + out[ "not_reached" ]
+    assert ( out[ "state" ], out[ "stop_reason" ] ) == ( "incomplete", "ledger" ) and out[ "not_reached" ] and out[ "unasked" ] == []
+    assert sorted( lost ) == sorted( out[ "entry_ids" ] )
