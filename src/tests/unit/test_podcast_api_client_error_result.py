@@ -59,7 +59,7 @@ def test_an_error_result_is_logged_with_the_cli_text_and_the_call_type( caplog )
     with caplog.at_level( logging.ERROR, logger=ac.logger.name ):
         with pytest.raises( Exception ):
             _call( [ ERROR ] )
-    assert any( "Your credit balance is too low" in r.getMessage() and "script" in r.getMessage() for r in caplog.records )
+    assert any( "Your credit balance is too low" in r.getMessage() and "script" in r.getMessage() and r.name == ac.logger.name for r in caplog.records )
 
 
 def test_an_error_result_with_no_text_still_raises_and_says_none():
