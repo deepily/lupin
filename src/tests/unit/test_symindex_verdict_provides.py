@@ -268,19 +268,7 @@ def test_coverage_exactly_a_half_under_the_floor_is_uncertain_while_just_under_i
     assert ( under[ "verdict" ], under[ "causes" ] ) == ( "NEW", [] )
 
 
-def test_nothing_answered_beside_an_unknown_flag_is_still_not_new():
-    r = vd.decide_provides( [], [], [], { "NOT_A_CAUSE" } )
-    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED" ] )
 
-
-def test_nothing_answered_beside_a_low_confidence_flag_is_still_not_new():
-    r = vd.decide_provides( [], [], [], { "LOW_CONFIDENCE" } )
-    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED" ] )      # the name is not a caller flag, so it is dropped
-
-
-def test_a_low_confidence_caller_flag_beside_a_below_floor_answer_is_dropped_and_the_verdict_is_new():
-    r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { "LOW_CONFIDENCE" } )
-    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "NEW", None, [] )
 
 
 def test_an_all_malformed_sweep_gives_the_malformed_cause_alone():
@@ -294,12 +282,21 @@ def test_empty_answers_with_a_pipeline_flag_give_only_that_flag():
     assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "INDEX_STALE" ] )
 
 
-def test_a_caller_cannot_name_a_gap_cause_as_a_flag():
-    r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { "CALL_FAILED", "MALFORMED_ANSWER" } )
-    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "NEW", [] )
-
 
 @pytest.mark.parametrize( "flag", [ "NOT_LUPIN_TREE", "DEPENDENCY_MISSING" ] )
 def test_each_pipeline_flag_beside_a_below_floor_answer_gives_uncertain_with_that_cause(flag):
     r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { flag } )
     assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", flag, [ flag ] )
+
+
+@pytest.mark.parametrize( "flag", [ "LOW_CONFIDENCE", "CALL_FAILED", "MALFORMED_ANSWER", "NOT_A_CAUSE", "" ] )
+def test_a_flag_outside_the_four_pipeline_flags_raises_naming_it_and_is_never_dropped(flag):
+    for answers in ( [], [ _a( "x", 0.1 ) ] ):
+        with pytest.raises( ValueError, match=repr( flag ) ):
+            vd.decide_provides( answers, [ "x" ], [], { flag } )
+
+
+def test_the_first_bad_flag_in_sorted_order_is_the_one_named():
+    with pytest.raises( ValueError, match="'A_BAD'" ):
+        vd.decide_provides( [], [], [], { "Z_BAD", "A_BAD", "INDEX_STALE" } )
+
