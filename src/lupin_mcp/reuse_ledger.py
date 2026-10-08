@@ -13,6 +13,9 @@ import pathlib
 import time
 
 PRICE_PER_MILLION_USD = 0.042                                 # the pinned input price; output is counted at the same price
+ACCOUNT_LIMIT_USD     = 19.31                                 # authorised for the reuse work; changes only by a dated edit in plan 11.5
+STAGE1_CEILING_TOKENS = 71_000_000                            # three dollars at the price above, rounded down (plan 11.1)
+LEDGER_NAME           = "jev-spend-ledger.jsonl"
 
 
 class LedgerUnreadable( Exception ):
@@ -33,6 +36,23 @@ def usd_to_tokens( usd, price_per_million=PRICE_PER_MILLION_USD ):
         - returns the dollars over the price, in tokens, rounded down
     """
     return math.floor( usd / price_per_million * 1_000_000 )
+
+
+ACCOUNT_LIMIT_TOKENS = usd_to_tokens( ACCOUNT_LIMIT_USD )
+
+
+def ledger_path( index_root ):
+    """
+    Locate the one ledger file of the repository that index_root belongs to.
+
+    Requires:
+        - index_root is a repository root, or a worktree of one
+    Ensures:
+        - returns <fleet data root>/jev-spend-ledger.jsonl, the same path from every worktree and the main tree
+        - does not read LUPIN_ROOT and does not create the file
+    """
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+    return pathlib.Path( fleet_data_root( pathlib.Path( index_root ) ) ) / LEDGER_NAME
 
 
 def _whole( value ):
