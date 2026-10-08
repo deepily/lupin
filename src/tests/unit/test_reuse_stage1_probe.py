@@ -204,3 +204,20 @@ def test_the_plan_of_each_question_draws_with_that_questions_seed( question, see
 def test_the_four_seeds_draw_four_different_random_sets():
     sets = [ tuple( sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 }, question=k ) )[ "plan" ][ "random_ids" ] ) for k in ( 1, 2, 3, 4 ) ]
     assert len( set( sets ) ) == 4
+
+
+def test_an_identifier_splits_at_every_underscore_and_dot_into_words():
+    assert sp.jaccard( "parse_rss_feed", "parse rss feed" ) == 1 and sp.jaccard( "feeds.parse_rss", "feeds parse rss" ) == 1
+
+
+def test_the_plan_overlap_is_the_probes_own_not_the_first_answers():
+    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e08": 0.9, "e07": 0.52 } ) )[ "plan" ]
+    assert plan[ "probe_id" ] == "e07" and plan[ "probe_overlap" ] == pytest.approx( 0.52 )
+
+
+def test_a_real_difference_of_a_ten_thousandth_beats_the_lower_id():
+    assert sp.choose_probe( single1( { "a": 0.5004, "z": 0.4997 } ) ) == "z"
+
+
+def test_exactly_one_hundred_ninety_nine_others_are_enough_for_a_pack():
+    assert len( sp.random_neighbours( catalogue( 200 ), "e10", 1 ) ) == 199 and len( sp.similar_neighbours( catalogue( 200 ), "e10" ) ) == 199
