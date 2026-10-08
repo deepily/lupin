@@ -5,6 +5,7 @@ A 422 refuses that one request (plan 9.2). It is never posted again, and the nex
 A door that refuses everything must cost five posts, not one per index entry. After five refusals in a row,
 with no answered request between them, the sweep stops, counts the rest unasked, and the receipt says why.
 Until the first answer, and while a refusal is unanswered, posts go one at a time so the stop is exact.
+Only an answered request clears the streak. A failure that is not a 422, such as a 500, neither counts nor clears it.
 
 The sweep is driven over a live transport with a scripted door. No case reaches Jev.
 """
@@ -114,3 +115,18 @@ def test_an_unanswered_refusal_after_an_answer_puts_posts_back_in_single_file( e
     door = Door( [ 200, 422 ], pause=0.03 )
     sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 8 ) )
     assert door.posts == 6 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422" and len( sw[ "not_reached" ] ) == 2
+
+
+def test_failures_that_are_not_a_422_never_trip_the_breaker( env ):
+    door = Door( [ 500 ] )
+    sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 6 ) )
+    assert door.posts == 6 * ( rt.RETRIES + 1 ) and len( sw[ "failed" ] ) == 6
+    assert sw[ "refused_422" ] == 0 and sw[ "stopped_by" ] is None and sw[ "not_reached" ] == []
+
+
+def test_a_failure_that_is_not_a_422_between_refusals_neither_counts_nor_clears_the_streak( env ):
+    statuses = [ 422, 500, 500, 500, 422, 422, 422, 422 ]                     # the 500 entry is posted three times, then four more refusals
+    door     = Door( statuses )
+    sw       = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 8 ) )
+    assert door.posts == 8 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422"
+    assert len( sw[ "failed" ] ) == 6 and len( sw[ "not_reached" ] ) == 2
