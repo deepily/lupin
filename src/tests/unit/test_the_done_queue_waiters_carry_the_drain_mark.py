@@ -51,7 +51,7 @@ def test_the_file_has_tests_and_four_of_them_wait_on_the_done_queue():
     ]
 
 
-def test_every_test_that_waits_on_the_done_queue_carries_the_mark():
+def test_the_waiters_without_the_drain_mark_are_exactly_the_three_named_ones():
     unmarked = sorted( name for name, waits, marks in _tests_and_waiters() if waits and not set( marks ) & set( MARKS ) )
     assert unmarked == UNMARKED_WAITERS, f"waits on the done queue without the drain mark: {unmarked}"
 
