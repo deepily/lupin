@@ -60,6 +60,7 @@ import requests
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import ApiKeyRepository, UserRepository
 from lupin_cli.claude_code.hooks.lib.task_store_client import query_owed
+from tests.helpers.park_window import check_park_silence
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 ENDPOINT = f"{BASE_URL}/api/tasks"
@@ -261,11 +262,12 @@ class TestAC6ParkExpireRejoin:
         baseline = _owed_count( store_settings, api_key, persona )
         assert baseline == 1, f"fixture not isolated — expected exactly 1 owed row, got {baseline}"
 
-        chase = datetime.now( timezone.utc ) + timedelta( seconds=EXPIRY_WINDOW_SECONDS )
+        set_at = time.monotonic()
+        chase  = datetime.now( timezone.utc ) + timedelta( seconds=EXPIRY_WINDOW_SECONDS )
         _park( api_key, row[ "id" ], chase, "AC6: bounded silence, self-expiring" )
 
         during = _owed_count( store_settings, api_key, persona )
-        assert during == 0, f"park bought NO silence — owed count still {during}"
+        check_park_silence( during, time.monotonic() - set_at, EXPIRY_WINDOW_SECONDS )
 
         # No write happens here. Only time passes.
         time.sleep( EXPIRY_WINDOW_SECONDS + 2 )
