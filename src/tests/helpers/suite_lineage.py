@@ -12,6 +12,8 @@ That keeps it out of the locals pytest renders, where only the redaction layer s
 
 import os
 
+import pytest
+
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
 
 PARENT_ENV_NAME = "LUPIN_TEST_MONOPOLIZE_PARENT_ID"
@@ -51,3 +53,21 @@ def sweep_state( environ: dict = None ) -> str:
     if not environ.get( PARENT_ENV_NAME ): return "outside"
     if not environ.get( TOKEN_ENV_NAME ): return "missing_token"
     return "ready"
+
+
+MISSING_TOKEN_MESSAGE = ( "The sweep exported its parent id but no per-run token, so the token was not issued "
+                          "(switch off, or the issue failed). A test about the token must not hide this." )
+
+
+def require_sweep( environ: dict = None ) -> None:
+    """
+    Skip outside a sweep, fail inside one that has no token, return when both are exported.
+
+    Ensures:
+        - outside a sweep raises the pytest skip exception
+        - a parent id without a token raises the pytest failure, with MISSING_TOKEN_MESSAGE
+        - with both exported returns None
+    """
+    state = sweep_state( environ )
+    if state == "outside": pytest.skip( "Needs a sweep that exported the parent id" )
+    if state == "missing_token": pytest.fail( MISSING_TOKEN_MESSAGE, pytrace=False )

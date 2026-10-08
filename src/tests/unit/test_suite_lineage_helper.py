@@ -15,7 +15,7 @@ import pytest
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
 import ast
 
-from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request, sweep_state
+from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request, require_sweep, sweep_state
 
 BODY    = { "question": "q" }
 HEADERS = { "Authorization": "Bearer t" }
@@ -100,14 +100,27 @@ def _token_file_tree():
     return ast.parse( open( path, encoding="utf-8" ).read() )
 
 
-def test_the_token_file_fails_not_skips_when_the_parent_is_set_and_the_token_is_not():
+def test_outside_a_sweep_the_requirement_skips():
+    with pytest.raises( pytest.skip.Exception ):
+        require_sweep( { } )
+
+
+def test_a_parent_without_a_token_fails_with_the_message_and_does_not_skip():
+    with pytest.raises( pytest.fail.Exception ) as raised:
+        require_sweep( { PARENT_ENV_NAME: "ts-abc" } )
+    assert "no per-run token" in str( raised.value )
+
+
+def test_with_both_exported_the_requirement_returns_none():
+    assert require_sweep( { PARENT_ENV_NAME: "ts-abc", TOKEN_ENV_NAME: "tok" } ) is None
+
+
+def test_the_token_file_fixture_only_calls_the_requirement():
     fixture = [ n for n in ast.walk( _token_file_tree() ) if isinstance( n, ast.FunctionDef )
                 and n.name == "_sweep_exported_what_this_file_needs" ]
     assert len( fixture ) == 1
-    calls = [ ast.unparse( n.func ) for n in ast.walk( fixture[ 0 ] ) if isinstance( n, ast.Call ) ]
-    assert "sweep_state" in calls and "pytest.fail" in calls and "pytest.skip" in calls
-    fails = [ n for n in ast.walk( fixture[ 0 ] ) if isinstance( n, ast.Call ) and ast.unparse( n.func ) == "pytest.fail" ]
-    assert "missing_token" in ast.unparse( fixture[ 0 ] ) and len( fails ) == 1
+    calls = [ ast.unparse( n.func ) for stmt in fixture[ 0 ].body for n in ast.walk( stmt ) if isinstance( n, ast.Call ) ]
+    assert calls == [ "require_sweep" ], "the state-to-action mapping lives in the helper, where it is tested"
 
 
 def test_every_request_in_the_token_file_carries_the_sixty_second_timeout():

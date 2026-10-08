@@ -20,21 +20,17 @@ import requests
 
 import cosa.utils.util as cu
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
-from tests.helpers.suite_lineage import lineage_request, sweep_state
+from tests.helpers.suite_lineage import lineage_request, require_sweep
 
 from .conftest import BASE_URL
 
 REQUEST_TIMEOUT = 60
-MISSING_TOKEN   = ( "The sweep exported its parent id but no per-run token, so the token was not issued "
-                    "(switch off, or the issue failed). This file exists to prove the token works." )
 
 
 @pytest.fixture( autouse=True )
 def _sweep_exported_what_this_file_needs():
     """Skip outside a sweep; inside one without a token, fail instead of hiding."""
-    state = sweep_state()
-    if state == "outside": pytest.skip( "Needs a sweep that exported the parent id" )
-    if state == "missing_token": pytest.fail( MISSING_TOKEN, pytrace=False )
+    require_sweep()
 
 
 def _fresh_user_token():
