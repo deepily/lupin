@@ -274,6 +274,7 @@ class CommonsStore:
                     f.write( _frontmatter_block( topic, False, ts ) )
                 f.write( ENTRY_SEPARATOR )
                 f.write( entry_text )
+                f.flush()                                                  # the entry must be in the file before the lock is released
             finally:
                 fcntl.flock( f.fileno(), fcntl.LOCK_UN )
 
