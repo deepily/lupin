@@ -909,6 +909,21 @@ class TestPhase5:
         assert out[ "branch_name" ] == "fix/x"
         assert o.commit_hashes == [ "h1" ]
 
+    @pytest.mark.parametrize( "flag", [ True, False ] )
+    def test_the_push_flag_reaches_the_strategist( self, flag ):
+        o = _orch()
+        self._setup( o )
+        o.config.push_fix_branch_enabled = flag
+        strategist = MagicMock()
+        strategist.commit_and_pr_multi = AsyncMock( return_value={
+            "git_strategy": None, "branch_name": None, "commit_hashes": [],
+            "pr_url": None, "error": None,
+        } )
+        with patch( "cosa.agents.bug_fix_expediter.git_ops.GitOps", MagicMock() ), \
+             patch( "cosa.agents.shared.git_strategist.GitStrategist", return_value=strategist ):
+            run( o.run_phase5_git() )
+        assert strategist.commit_and_pr_multi.call_args.kwargs[ "push_enabled" ] is flag
+
     def test_normal_with_error_summary( self ):
         o = _orch()
         self._setup( o )
