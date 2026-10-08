@@ -2,7 +2,7 @@
 capability: scheduled-test-suite
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - cosa.agents.test_suite.job.TestSuiteJob@be0711f847
+  - cosa.agents.test_suite.job.TestSuiteJob@e2b360d963
   - cosa.agents.test_suite.job.TestSuiteJob.do_all@e22090c710
   - cosa.agents.test_suite.job.unknown_suite_names@9f548f8b52
   - cosa.agents.test_suite.job.BetweenSuiteResetError@d5be6190f9
@@ -20,6 +20,7 @@ pins:
 - A refused submit is HTTP 200 with `status` `failed` and the cause in `error`. Only `status` `waiting` on a 2xx answer counts as accepted.
 - `unknown_suite_names` lists names that are not keys of `SUITE_SCRIPTS`. `e2e_ui` is a directory, not a suite.
 - `all` expands to `ALL_SUITE_COMPONENTS`: typecheck, stylelint, doclint, unit, cosa, coverage, typescript, smoke, websocket, integration, e2e_a, e2e_b. Duplicates are dropped, first one wins.
+- A server in a container refuses a request naming `unit`, and `all` there leaves it out and says `unit: not run here, host tier`.
 - The job always runs with `monopolize=True`, because the scripts swap the database config.
 
 ## Running
