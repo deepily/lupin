@@ -116,6 +116,31 @@ else
     remedy "docker rm -f ${CONTAINER} && docker compose up -d ${CONTAINER}"
 fi
 
+# ── 5b. Claude Code login not expired ────────────────────────────────────
+# Row d7c018d6. The container keeps its own Claude Code login. Once it expires every Claude Code job
+# in the container fails, and the only cause the SDK reports is the word "success" (measured 2026-10-07:
+# the file was last written 2026-08-26 and its token ran out 2026-08-27). Section 5 above checks that the
+# file exists and nothing more. This reads the expiry field and nothing else: the one-line python in the
+# container prints that number, never a token, and no Claude Code CLI call is made, because a call would
+# refresh the login and hide the cause.
+login_expires_ms="$(run_cmd docker exec "${CONTAINER}" python3 -c "import json; print( json.load( open( '/home/rruiz/.claude/.credentials.json' ) )[ 'claudeAiOauth' ][ 'expiresAt' ] )" 2>/dev/null)"
+login_verdict="$(python3 "$(dirname "${BASH_SOURCE[0]}")/lib/claude_login_expiry.py" "${login_expires_ms}")"
+login_status="${login_verdict%% *}"
+login_detail="${login_verdict#* }"
+case "$login_status" in
+    valid)
+        say_ok "claude login in ${CONTAINER} expires ${login_detail}"
+        ;;
+    expired)
+        say_fail "claude login in ${CONTAINER} expired ${login_detail}; every Claude Code job there fails until it is renewed"
+        remedy "docker exec -it ${CONTAINER} claude /login   (needs a browser login by the account owner)"
+        ;;
+    *)
+        say_fail "claude login expiry in ${CONTAINER} could not be read (${login_detail})"
+        remedy "docker exec -it ${CONTAINER} claude /login   (needs a browser login by the account owner), then run this again"
+        ;;
+esac
+
 # ── 5c. Session bridge mount resolves a live persona ─────────────────────
 # The task request door resolves a requester's persona from the host's session bridges
 # (Sword of Damocles, row ab8c5728). No mount means every pledged admit request 403s.

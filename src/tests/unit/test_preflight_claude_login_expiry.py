@@ -102,20 +102,27 @@ def _preflight( tmp_path, expires="", fail=False ):
     return done.stdout, log
 
 
+def _login_line( out ):
+    return next( l for l in out.splitlines() if "claude login" in l )
+
+
 def test_an_expired_login_fails_the_preflight_with_the_remedy_in_words( tmp_path ):
     out, _ = _preflight( tmp_path, expires=EXPIRED )
-    assert "[FAIL]" in out and "claude login" in out and "expired" in out and _iso( EXPIRED ) in out, out
+    line = _login_line( out )
+    assert "[FAIL]" in line and "expired" in line and _iso( EXPIRED ) in line, out
     assert "docker exec -it fake-test claude /login" in out and "browser" in out, out
 
 
 def test_an_unreadable_login_fails_the_preflight_with_the_same_remedy( tmp_path ):
     out, _ = _preflight( tmp_path, fail=True )
-    assert "[FAIL]" in out and "could not be read" in out and "docker exec -it fake-test claude /login" in out, out
+    line = _login_line( out )
+    assert "[FAIL]" in line and "could not be read" in line, out
+    assert "docker exec -it fake-test claude /login" in out, out
 
 
 def test_a_valid_login_passes_the_check_and_prints_its_expiry( tmp_path ):
     out, _ = _preflight( tmp_path, expires=FAR_AHEAD )
-    line = next( l for l in out.splitlines() if "claude login" in l )
+    line = _login_line( out )
     assert "[OK]" in line and _iso( FAR_AHEAD ) in line, out
 
 
