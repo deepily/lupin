@@ -1423,3 +1423,102 @@ def test_a_spend_stop_and_an_unclean_single_run_come_before_the_remaining_arms()
 
 def test_the_arm_check_can_be_left_off_to_read_the_rules_alone():
     assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ), check_arms=False )[ "next_step" ] == "run question 2"
+
+
+# --- the text report prints every figure the report computes (the rehearsal's tokens, retries, other boundaries, old shape, cost) ------------
+
+REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429 or 529 not told apart"
+
+
+def test_the_report_prints_the_tokens_per_request_of_a_real_driver_arm():
+    text = an.render( an.build_report( [ _driver_arm( "lost-1-of-200" ) ], canaries=[] ) )
+    assert REQUEST_LINE.format( r=0, e=0 ) in text
+
+
+def test_the_report_prints_the_retried_calls_and_the_extra_attempts_of_a_driver_arm_with_one_call_tried_three_times():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "transport_calls" ][ 0 ][ "attempts" ] = 3
+    assert REQUEST_LINE.format( r=1, e=2 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def _flipping_complete():
+    """
+    Build a question whose pack200 moves two far entries across the floor.
+
+    Ensures:
+        - each pack arm carries a spend of one million tokens
+    """
+    recs = _complete()
+    pack = next( r for r in recs if r[ "arm" ] == "pack200" )
+    for a in pack[ "answers" ]:
+        if a[ "id" ] in ( "o000", "o001" ): a[ "probabilities" ] = _probs( 0.35 )
+    for r in recs:
+        if r[ "arm" ] in ( "pack10", "pack50", "pack200" ): r[ "totals" ][ "spent_tokens" ] = 1_000_000          # the default size is whichever pack passes, so each carries the spend
+    next( r for r in recs if r[ "arm" ] == "page-pack" )[ "totals" ][ "spent_tokens" ] = 500_000
+    return recs
+
+
+def test_the_report_prints_the_other_boundaries_for_every_pack_size_and_question():
+    text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
+    assert "other boundaries, pack 200, question 1: floor flips 2 by packing against 0 by noise; confidence flips 2 by packing against 0 by noise" in text
+    assert "other boundaries, pack 10, question 1: floor flips 0 by packing against 0 by noise; confidence flips 0 by packing against 0 by noise" in text
+    assert "other boundaries, pack 50, question 1: floor flips 0 by packing" in text
+
+
+def test_a_question_whose_other_boundaries_cannot_be_read_says_not_measured():
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "pack50" )[ "failed" ] = [ "e001" ]
+    assert "other boundaries, pack 50, question 1: not measured" in an.render( an.build_report( recs, canaries=[] ) )
+
+
+def test_the_report_prints_the_old_shape_comparison_beside_its_note():
+    old = _arm( "old", { **{ i: 0.5 for i in _names( 10 ) }, "e000": 0.52, "e001": 0.49 }, size=1, run_name=NO_NAME )
+    text = an.render( an.build_report( _complete() + [ old ], canaries=[] ) )
+    assert "old shape, question 1: 10 cached hits, p99 0.02, max 0.02, 1 boundary flips (reported only, no pass or fail)" in text
+
+
+def test_an_old_shape_arm_beside_an_unclean_single_run_says_not_measured():
+    old = _arm( "old", { "e000": 0.5 }, size=1, run_name=NO_NAME )
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "single1" )[ "failed" ] = [ "e001" ]
+    assert "old shape, question 1: not measured" in an.render( an.build_report( recs + [ old ], canaries=[] ) )
+
+
+def test_the_report_prints_each_questions_cost_and_the_mean_when_it_has_one():
+    text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
+    assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text and "cost per search: mean $0.063" in text
+
+
+def test_the_report_prints_no_cost_line_when_no_pack_size_passes():
+    recs = _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) + _extra_arms( 1, _base() )
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "cost, question" not in text and "cost per search" not in text
+
+
+# --- the decision and the next step never disagree about stopping ---------------------------------------------------------------------------
+
+def _no_size_passes():
+    """Ensures: returns a question in which every pack size moves its entries by 0.1."""
+    return _question( packs={ 10: { "shift": 0.1 }, 50: { "shift": 0.1 }, 200: { "shift": 0.1 } } ) + _extra_arms( 1, _base() )
+
+
+def test_a_decision_that_stops_and_asks_never_sits_above_a_next_step_that_runs_more():
+    rep = an.build_report( _no_size_passes(), canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: no pack size passes" and rep[ "stop_rules" ][ "next_step" ] == "run question 2"
+    assert rep[ "next_step" ] == "stop and ask: see the decision above"
+    assert "Next step: stop and ask: see the decision above" in an.render( rep ) and "run question 2" not in an.render( rep )
+
+
+def test_an_invalid_arm_decision_also_turns_the_next_step_into_a_stop():
+    recs = _complete(); next( r for r in recs if r[ "arm" ] == "pack200" )[ "state" ] = "incomplete"; next( r for r in recs if r[ "arm" ] == "pack200" )[ "stop_reason" ] = "ceiling"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "next_step" ] == "stop and ask: see the decision above"
+
+
+def test_a_next_step_that_already_stops_keeps_its_own_reason_beside_a_stopping_decision():
+    recs = _complete(); pack = next( r for r in recs if r[ "arm" ] == "pack200" ); pack[ "state" ], pack[ "stop_reason" ] = "incomplete", "ceiling"
+    next( r for r in recs if r[ "arm" ] == "single1" )[ "totals" ][ "spent_tokens" ] = 72_000_000
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask" ) and rep[ "next_step" ] == "stop and ask: stage tokens above 71,000,000"
+
+
+def test_a_decision_that_does_not_stop_leaves_the_next_step_as_the_rules_wrote_it():
+    rep = an.build_report( _question(), canaries=[] )
+    assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == rep[ "stop_rules" ][ "next_step" ]
