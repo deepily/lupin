@@ -571,3 +571,91 @@ def test_the_third_attempt_can_be_approved_and_opens_the_gate( env ):
     st.approve_canary( env, 1, "maria", "third attempt read" )
     assert json.loads( ( env.results_dir / "s1-q1-canary-a3.canary.json" ).read_text() )[ "approved" ][ "by" ] == "maria"
     st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
+
+
+def ledger_kinds( env ): return [ json.loads( line )[ "kind" ] for line in env.ledger.path.read_text().splitlines() ]
+
+
+def test_an_entry_with_no_id_raises_before_the_ledger_is_touched( env ):
+    before = env.ledger.path.read_text()
+    with pytest.raises( KeyError ): st.run_arm( env, 1, "single1", NEED, [ ENTRIES[ 0 ], { "sig": "()", "doc": "no id" } ], 1_000_000 )
+    assert env.ledger.path.read_text() == before and env.made == [] and not env.results_dir.exists()
+
+
+def test_a_clock_that_fails_at_the_start_raises_before_the_ledger_is_touched( env ):
+    def dead(): raise RuntimeError( "clock gone" )
+    env.clock = dead
+    before = env.ledger.path.read_text()
+    with pytest.raises( RuntimeError, match="clock gone" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    assert env.ledger.path.read_text() == before and st.stage_remaining( env.ledger ) == 71_000_000
+
+
+def test_a_clock_that_fails_at_the_end_still_closes_the_run( env ):
+    calls = []
+    def clock():
+        calls.append( 1 )
+        if len( calls ) > 1: raise RuntimeError( "clock gone" )
+        return "2026-10-08T00:00:00-0400"
+    env.clock = clock
+    with pytest.raises( RuntimeError, match="clock gone" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    assert ledger_kinds( env )[ -1 ] == "end" and st.stage_remaining( env.ledger ) == 71_000_000 - 2 * ( 500 + 40 )
+
+
+def test_an_interrupt_inside_the_arm_is_recorded_closed_and_passed_on( env, monkeypatch ):
+    monkeypatch.setattr( rp, "sweep_packed", lambda *a, **k: ( _ for _ in () ).throw( KeyboardInterrupt() ) )
+    with pytest.raises( KeyboardInterrupt ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    out = read( env, 1, "single1" )
+    assert out[ "state" ] == "error" and out[ "stop_reason" ] == "error: KeyboardInterrupt" and out[ "totals" ][ "requests" ] == 0 and ledger_kinds( env )[ -1 ] == "end"
+
+
+def test_the_canarys_output_per_entry_divides_by_the_entries_it_asked_not_by_ten( env ):
+    env.standin = { "out_per_entry": 70 }
+    report = st.run_canary( env, 1, NEED, ENTRIES[ :8 ], 2_000_000 )
+    assert report[ "output_tokens_per_entry" ] == [ 70 ] and "output_per_entry_over_60" in report[ "tripped" ]
+
+
+class Budgeted:
+    """Just enough of a budget for _stop_reason."""
+
+    def __init__( self, stop_reason=None, ceiling_refusals=0 ): self.stop_reason, self.ceiling_refusals = stop_reason, ceiling_refusals
+
+
+def test_when_several_things_stopped_an_arm_the_ledger_comes_first_then_the_breaker_then_the_ceiling_then_the_attempts():
+    sweep = { "stopped_by": "consecutive_422", "not_reached": [ "x" ] }
+    assert st._stop_reason( sweep, Budgeted( "ledger unreadable", 3 ) ) == "ledger"
+    assert st._stop_reason( sweep, Budgeted( None, 3 ) ) == "consecutive_422"
+    assert st._stop_reason( { **sweep, "stopped_by": None }, Budgeted( None, 3 ) ) == "ceiling"
+    assert st._stop_reason( { **sweep, "stopped_by": None }, Budgeted( None, 0 ) ) == "attempts"
+    assert st._stop_reason( { "stopped_by": None, "not_reached": [] }, Budgeted() ) is None
+
+
+def test_two_arms_started_at_once_cannot_both_be_admitted_against_a_stage_that_holds_one( env, monkeypatch ):
+    real, finished, lock, release = st.stage_remaining, [], threading.Lock(), threading.Event()
+    def slow_check( ledger ):
+        left = real( ledger )
+        threading.Event().wait( 0.05 )                                         # a window between the check and the admission
+        return left
+    monkeypatch.setattr( st, "stage_remaining", slow_check )
+    env.standin = { "hook": lambda n: release.wait( 5 ) }                      # an admitted arm waits in its first request
+    def go( slot ):
+        try: st.run_arm( env, slot, "single1", NEED, ENTRIES[ :2 ], 50_000_000 ); result = "ran"
+        except st.StageRefused: result = "refused"
+        with lock: finished.append( result )
+    threads = [ threading.Thread( target=go, args=( slot, ) ) for slot in ( 1, 2 ) ]
+    for t in threads: t.start()
+    for _ in range( 60 ):                                                      # the refused one finishes while the admitted one waits
+        if finished: break
+        threading.Event().wait( 0.05 )
+    release.set()
+    for t in threads: t.join( 10 )
+    assert sorted( finished ) == [ "ran", "refused" ]
+
+
+def test_a_canary_file_that_is_approved_but_tripped_unlocks_nothing( env ):
+    env.standin = { "out_per_entry": 90 }
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    path   = env.results_dir / "s1-q1-canary.canary.json"
+    report = json.loads( path.read_text() )
+    report[ "approved" ] = { "by": "someone", "why": "edited by hand", "at": "now" }
+    path.write_text( json.dumps( report ) )
+    with pytest.raises( st.CanaryNotApproved ): st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
