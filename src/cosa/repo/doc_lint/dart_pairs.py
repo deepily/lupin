@@ -33,7 +33,7 @@ OWNER_REGEX  = re.compile( r"^(?:(?:abstract|base|sealed|final|interface|mixin)\
 UNNAMED_EXTENSION = re.compile( r"^extension\s+on\b" )
 OPERATOR_REGEX = re.compile( r"\boperator\s*([^\s(]+)" )
 LIBRARY_REGEX = re.compile( r"^(?:library|part|import|export)\b" )
-DIRECTIVE_REGEX = re.compile( r"^(?:[a-z][\w-]*:(?!//)|dart format (?:on|off)\b)" )
+DIRECTIVE_REGEX = re.compile( r"^(?:[a-z][\w-]*:(?!//)(?:\S+|\s+[\w.=/-]+(?:\s*,\s*[\w.=/-]+)*\s*)$|dart format (?:on|off)\b)" )
 MARKER_REGEX = re.compile( r"^[A-Z]{2,}(?:\([^)]*\))?(?::|\s*$)" )
 HEAD_STOP    = re.compile( r"[({}=;,]|=>" )
 MODIFIERS    = frozenset( "static final const late external abstract covariant factory async sync base sealed interface".split() )
@@ -313,35 +313,56 @@ def comment_prose( run ):
 
     Ensures:
         - a line is a directive when, after the markers, it is a lowercase word glued to a colon (not a URL)
-          or a dart format on or off switch; it is dropped wherever it sits
+          followed by one unbroken token or by a comma-separated list of identifiers, or is a dart format on
+          or off switch; "returns: the cached value" has words after the colon, so it is prose and is kept;
+          a directive is dropped wherever it sits
         - a line is a marker when it is a word of two or more capitals, an optional owner in parentheses, and
           a colon or the end of the line; it and every later line of the run are dropped
-        - returns the remaining lines, markers removed and normalized by block_text, or an empty string
+        - returns ( text, dropped ): text is the remaining lines normalized by block_text, or an empty string;
+          dropped is [ { "line", "reason" } ] in run order, reason "directive", "marker" or "after_marker"
 
     Raises:
         - nothing
     """
-    kept = []
+    kept, dropped, marked = [], [], False
     for line in run:
         text = re.sub( r"^\s*//\s?", "", line )
-        if MARKER_REGEX.match( text.strip() ): break
-        if DIRECTIVE_REGEX.match( text.strip() ): continue
-        kept.append( text )
-    return block_text( "\n".join( kept ) )
+        if marked: dropped.append( { "line": text.strip(), "reason": "after_marker" } )
+        elif MARKER_REGEX.match( text.strip() ): dropped.append( { "line": text.strip(), "reason": "marker" } ); marked = True
+        elif DIRECTIVE_REGEX.match( text.strip() ): dropped.append( { "line": text.strip(), "reason": "directive" } )
+        else: kept.append( text )
+    return block_text( "\n".join( kept ) ), dropped
 
 
 def plain_comments( source ):
     """
-    Map each declaration to the plain // comment directly above it.
+    Map each declaration to the prose of the plain // comment directly above it.
 
     Requires:
         - source is Dart text
 
     Ensures:
-        - returns { symbol: text } for a run of // lines (not ///) that ends on the line just above the
+        - returns { symbol: text } for each symbol of plain_comment_runs whose text is not empty
+
+    Raises:
+        - nothing
+    """
+    return { symbol: text for symbol, ( text, _ ) in plain_comment_runs( source ).items() if text }
+
+
+def plain_comment_runs( source ):
+    """
+    Map each declaration to its plain // comment, and the lines dropped from it.
+
+    Requires:
+        - source is Dart text
+
+    Ensures:
+        - returns { symbol: ( text, dropped ) } for a run of // lines (not ///) that ends on the line just above the
           declaration or just above its annotations; a blank line in between means no comment
         - text has the // markers and one leading space removed and is normalized by block_text
-        - tool directives and task markers are not text (see comment_prose); a run of nothing else is no comment
+        - tool directives and task markers are not text but are listed in dropped (see comment_prose); a run of
+          nothing else has the text ""
         - a run above anything that is not a member-level declaration is ignored
 
     Raises:
@@ -360,8 +381,7 @@ def plain_comments( source ):
         following = lines[ end + 1 ].strip() if end + 1 < len( lines ) else ""
         if following and not following.startswith( "///" ):
             symbol = by_line.get( _skip_annotations( lines, end + 1 ) )
-            prose  = comment_prose( lines[ index : end + 1 ] )
-            if symbol is not None and prose: out.setdefault( symbol, prose )
+            if symbol is not None: out.setdefault( symbol, comment_prose( lines[ index : end + 1 ] ) )
         index = end + 1
     return out
 
@@ -395,7 +415,7 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     Ensures:
         - returns ( pairs, report ), pairs in ( file, symbol ) order
         - a pair is one doc block found at old_rev with at least min_words words and a block of the same
-          file and symbol at new_rev; its row is { id, file, symbol, old, new, new_kind, linked_doc, changed },
+          file and symbol at new_rev; its row is { id, file, symbol, old, new, new_kind, new_dropped, linked_doc, changed },
           id being "file::symbol", linked_doc None and changed False for a pair kept only by include_unchanged
         - when the symbol has no doc block at new_rev but its declaration is still there, the old block pairs
           with the plain // comment directly above it (new_kind "plain_comment") or with "" (new_kind "none");
@@ -404,7 +424,8 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
         - the report counts what was not paired and why, so a drop is never silent:
           files_old, files_new, files_only_old, files_only_new, blocks_old, blocks_new, eligible_old,
           below_min_words, dropped_file_deleted, dropped_symbol_gone, dropped_unchanged, paired_plain_comment,
-          paired_no_comment, pairs, and the two file lists
+          paired_no_comment, pairs, dropped_comment_lines (by reason), pairs_with_dropped_comment_lines, and the two file lists
+        - each pair row carries new_dropped: [ { line, reason } ] for the comment lines comment_prose left out, empty for a doc pair
 
     Raises:
         - RuntimeError from git when a listing fails
@@ -415,19 +436,20 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
     report = { "files_old" : len( old_files ), "files_new" : len( new_files ), "files_only_old" : only_old, "files_only_new" : only_new,
                "blocks_old" : 0, "blocks_new" : 0, "eligible_old" : 0, "below_min_words" : 0,
                "dropped_file_deleted" : 0, "dropped_symbol_gone" : 0, "dropped_unchanged" : 0,
-               "paired_plain_comment" : 0, "paired_no_comment" : 0, "pairs" : 0 }
+               "paired_plain_comment" : 0, "paired_no_comment" : 0, "pairs" : 0,
+               "dropped_comment_lines" : { "directive" : 0, "marker" : 0, "after_marker" : 0 }, "pairs_with_dropped_comment_lines" : 0 }
     new_blocks = { path : extract_blocks( _show( root, new_rev, path ) or "" ) for path in new_files }
     report[ "blocks_new" ] = sum( len( blocks ) for blocks in new_blocks.values() )
     pairs, left_behind = [], {}
 
     def what_is_left( path, symbol ):
-        """Ensures: returns ( text, kind ) for a symbol with no doc block now, or None if it is gone."""
+        """Ensures: returns ( text, kind, dropped ) for a symbol with no doc block, or None if gone."""
         if path not in left_behind:
             source = _show( root, new_rev, path ) or ""
-            left_behind[ path ] = ( plain_comments( source ), { s for s, _ in declarations( source ) } )
-        plain, declared = left_behind[ path ]
-        if symbol in plain: return plain[ symbol ], "plain_comment"
-        return ( "", "none" ) if symbol in declared else None
+            left_behind[ path ] = ( plain_comment_runs( source ), { s for s, _ in declarations( source ) } )
+        runs, declared = left_behind[ path ]
+        if symbol in runs: return runs[ symbol ][ 0 ], "plain_comment" if runs[ symbol ][ 0 ] else "none", runs[ symbol ][ 1 ]
+        return ( "", "none", [] ) if symbol in declared else None
 
     for path in old_files:
         old_blocks = extract_blocks( _show( root, old_rev, path ) or "" )
@@ -441,19 +463,21 @@ def build_pairs( root, old_rev, new_rev, prefix=DEFAULT_PREFIX, min_words=30, in
             if path not in new_blocks:
                 report[ "dropped_file_deleted" ] += 1
                 continue
-            if symbol in new_by_symbol: new_text, kind = new_by_symbol[ symbol ], "doc"
+            if symbol in new_by_symbol: new_text, kind, dropped = new_by_symbol[ symbol ], "doc", []
             else:
                 left = what_is_left( path, symbol )
                 if left is None:
                     report[ "dropped_symbol_gone" ] += 1
                     continue
-                new_text, kind = left
+                new_text, kind, dropped = left
             changed = squash( old_text ) != squash( new_text )
             if not changed and not include_unchanged:
                 report[ "dropped_unchanged" ] += 1
                 continue
             if kind != "doc": report[ "paired_plain_comment" if kind == "plain_comment" else "paired_no_comment" ] += 1
-            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "new_kind" : kind, "linked_doc" : None, "changed" : changed } )
+            for entry in dropped: report[ "dropped_comment_lines" ][ entry[ "reason" ] ] += 1
+            if dropped: report[ "pairs_with_dropped_comment_lines" ] += 1
+            pairs.append( { "id" : f"{path}::{symbol}", "file" : path, "symbol" : symbol, "old" : old_text, "new" : new_text, "new_kind" : kind, "new_dropped" : dropped, "linked_doc" : None, "changed" : changed } )
     report[ "pairs" ] = len( pairs )
     return pairs, report
 

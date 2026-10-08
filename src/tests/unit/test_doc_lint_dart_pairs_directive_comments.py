@@ -45,3 +45,17 @@ def test_a_member_left_with_only_a_directive_is_paired_with_an_empty_text_not_th
     pairs, report = dp.build_pairs( root, old, new )
     assert [ ( p[ "old" ], p[ "new" ], p[ "new_kind" ] ) for p in pairs ] == [ ( LONG, "", "none" ) ]
     assert report[ "paired_no_comment" ] == 1 and report[ "paired_plain_comment" ] == 0
+
+
+@pytest.mark.parametrize( "line", [ "returns: the cached value, or null.", "note: only used by the roster.", "default: 5 retries", "used by: the router", "See also: foo" ] )
+def test_prose_with_words_after_a_lowercase_colon_is_kept( line ):
+    assert dp.plain_comments( _member( line ) ) == { "A._h": line }
+
+
+@pytest.mark.parametrize( "line", [ "a: b", "HTTP: retries stay bounded.", "NOTE: kept for the roster.", "WARNING: not thread safe", "OK" ] )
+def test_a_line_that_has_the_shape_of_a_directive_or_marker_is_dropped_even_when_it_is_prose( line ):
+    assert dp.plain_comments( _member( line ) ) == {}
+
+
+def test_a_wrapped_line_that_is_only_an_acronym_ends_the_text_and_drops_its_continuation():
+    assert dp.plain_comments( _member( "Opens the pane.", "API", "calls the server" ) ) == { "A._h": "Opens the pane." }
