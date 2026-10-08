@@ -3,6 +3,7 @@ Sending one pack: answers read by presence, a 422 splits it, every entry account
 
 Plan 10.3 b to d. A stand-in transport answers from a script and records each body it was sent.
 """
+import json
 import threading
 
 import pytest
@@ -156,3 +157,31 @@ def test_a_transport_that_only_has_post_is_used_and_the_row_has_no_http_meta():
 def test_an_empty_pack_is_refused():
     with pytest.raises( ValueError, match="empty" ):
         rp.send_pack( Fake(), NEED, [] )
+
+
+def test_a_live_transport_on_a_plain_call_budget_is_refused_by_the_sender_and_posts_nothing( monkeypatch ):
+    posts = []
+    live  = rt.LiveJevTransport( post_fn=lambda *a: posts.append( a ), environ={ jt.KEY_VARIABLE: "k" }, budget=jt.CallBudget( 50 ) )
+    with pytest.raises( rt.ReuseError, match="BAD_SPEND_LIMIT" ):
+        rp.send_pack( live, NEED, ENTRIES[ :2 ] )
+    assert posts == []
+
+
+def test_a_live_transport_with_no_budget_at_all_is_refused_by_the_sender_too():
+    posts = []
+    live  = rt.LiveJevTransport( post_fn=lambda *a: posts.append( a ), environ={ jt.KEY_VARIABLE: "k" } )
+    with pytest.raises( rt.ReuseError, match="BAD_SPEND_LIMIT" ):
+        rp.send_pack( live, NEED, ENTRIES[ :2 ] )
+    assert posts == []
+
+
+def test_a_live_transport_on_a_token_budget_is_sent_through_and_charged():
+    budget = rc.TokenBudget( 10, 1_000_000 )
+
+    def post( url, headers, body, timeout ):
+        keys = json.loads( body )[ "questions" ]
+        return 200, json.dumps( { "answers": { k: { "probabilities": dict( PROBS ) } for k in keys }, "model": rt.JEV_MODEL, "usage": { "input_tokens": 50, "output_tokens": 10 } } )
+
+    live = rt.LiveJevTransport( post_fn=post, environ={ jt.KEY_VARIABLE: "k" }, budget=budget, sleep_fn=lambda s: None )
+    out  = rp.send_pack( live, NEED, ENTRIES[ :2 ], budget=budget )
+    assert len( out[ "answers" ] ) == 2 and budget.spent_tokens == 60

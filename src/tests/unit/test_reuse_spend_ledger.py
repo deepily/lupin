@@ -303,3 +303,11 @@ def test_spending_or_ending_a_run_that_never_began_is_refused( ledger ):
         ledger.spend( "ghost", 5 )
     with pytest.raises( ValueError, match="never began" ):
         ledger.end_run( "ghost" )
+
+
+def test_a_run_whose_ceiling_exactly_fills_the_limit_is_admitted_and_one_token_more_is_refused( ledger ):
+    ledger.begin_run( "a", 60_000 )
+    ledger.begin_run( "b", 40_000 )
+    assert ledger.total() == ledger.limit_tokens() == 100_000
+    with pytest.raises( rl.AccountLimitReached ):
+        ledger.begin_run( "c", 1 )

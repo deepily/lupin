@@ -260,3 +260,54 @@ def test_a_packed_context_built_by_hand_without_a_ceiling_or_ledger_is_refused_b
     ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10 )
     r = rt.check_exists_impl( "read an RSS feed", ctx )
     assert r[ "status" ] == "error" and r[ "error" ] == "BAD_SPEND_LIMIT" and posts == []
+
+
+def test_a_context_built_from_the_environment_is_single_use( monkeypatch, env ):
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "71000000" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", "r" )
+    assert rt.context_from_environment( env[ 0 ] ).single_use is True
+
+
+def test_a_context_that_is_not_single_use_leaves_its_run_open_at_the_ceiling( monkeypatch, env, tmp_path ):
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    need = "read an RSS feed [open]"
+    led  = rl.AccountLedger.create( tmp_path / "ledger.jsonl", limit_tokens=100_000_000, by="t", why="fixture" )
+    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
+                            token_ceiling=71_000_000, run_name="stage1-a", ledger=led, single_use=False )
+    monkeypatch.setattr( jt, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( PackedFake( need ).post_with_meta( json.loads( body ) )[ 0 ] ) ) )
+    assert rt.check_exists_impl( need, ctx )[ "status" ] == "ok" and led.total() == 71_000_000
+
+
+def test_the_ledger_path_variable_names_the_ledger_and_without_it_the_fleet_path_is_used( monkeypatch, env, tmp_path ):
+    monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "71000000" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", "r" )
+    monkeypatch.setenv( "LUPIN_REUSE_LEDGER_PATH", str( tmp_path / "mine.jsonl" ) )
+    assert str( rt.context_from_environment( env[ 0 ] ).ledger.path ) == str( tmp_path / "mine.jsonl" )
+    monkeypatch.delenv( "LUPIN_REUSE_LEDGER_PATH" )
+    assert rt.context_from_environment( env[ 0 ] ).ledger.path == rl.ledger_path( env[ 0 ] )
+
+
+def test_the_request_shape_is_part_of_the_receipt_id():
+    args = ( "check_exists", "need", "a" * 40, rt.JEV_MODEL, { "threshold": 0.5 }, "b" * 12, [], "2" )
+    ids  = { rt.receipt_id( *args, request_shape=shape ) for shape in ( None, "packed-choice-1", "packed-choice-2" ) }
+    assert len( ids ) == 3
+
+
+def test_a_packed_context_with_a_ceiling_and_a_run_name_but_no_ledger_is_refused( monkeypatch, env ):
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    posts = []
+    monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
+                           token_ceiling=1_000_000, run_name="r", ledger=None )
+    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    assert r[ "status" ] == "error" and r[ "error" ] == "BAD_SPEND_LIMIT" and posts == []
+
+
+def test_a_run_name_the_ledger_already_holds_is_refused_as_a_ledger_error_not_a_crash( monkeypatch, env, tmp_path ):
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    posts = []
+    monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
+    led = rl.AccountLedger.create( tmp_path / "ledger.jsonl", limit_tokens=100_000_000, by="t", why="fixture" )
+    led.begin_run( "stage1-a", 10 )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10,
+                           token_ceiling=1_000_000, run_name="stage1-a", ledger=led )
+    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    assert r[ "status" ] == "error" and r[ "error" ] == "SPEND_LEDGER" and posts == []

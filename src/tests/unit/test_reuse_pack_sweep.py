@@ -202,3 +202,24 @@ def test_a_cache_write_that_fails_keeps_the_answer_and_names_the_entry( ctx_for,
 def test_a_pack_size_that_is_not_a_positive_integer_is_refused( ctx_for, size ):
     with pytest.raises( ValueError, match="size" ):
         sweep( ctx_for( Fake() ), size=size )
+
+
+def test_a_live_transport_on_a_plain_call_budget_is_refused_before_any_http( ctx_for, monkeypatch ):
+    from cosa.repo.doc_lint import jev_transport as jt
+    posts = []
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    live = rt.LiveJevTransport( post_fn=lambda *a: posts.append( a ), budget=jt.CallBudget( 50 ) )
+    with pytest.raises( rt.ReuseError, match="BAD_SPEND_LIMIT" ):
+        sweep( ctx_for( live ) )
+    assert posts == []
+
+
+def test_a_live_transport_on_a_token_budget_is_allowed_and_a_frozen_sweep_needs_no_budget( ctx_for, monkeypatch ):
+    from cosa.repo.doc_lint import jev_transport as jt
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    sweep( ctx_for( Fake() ) )                                                                           # fills the cache
+    live = rt.LiveJevTransport( post_fn=lambda *a: ( _ for _ in () ).throw( AssertionError( "no HTTP when frozen" ) ), budget=jt.CallBudget( 50 ) )
+    assert len( sweep( ctx_for( live ), frozen=True )[ "answers" ] ) == 8
+    budget = rc.TokenBudget( 50, 10_000_000 )
+    ok     = rt.LiveJevTransport( post_fn=lambda url, headers, body, timeout: ( 200, "{}" ), budget=budget )
+    assert sweep( ctx_for( ok ) )[ "cache_hits" ] == 8                                                   # all hits: nothing is posted, nothing is refused
