@@ -341,12 +341,13 @@ Suites that qualify:
 - `src/tests/smoke/test_db_roles_rollback_real_postgres.py` — it starts a Docker container, which
   reads like a :8000 suite and is not one. The container is a throwaway Postgres reached only by
   `docker exec`, with a name guard, memory and processor caps, and removal with its volumes at the end, so
-  nothing persists and the real database is refused before any command runs. The file's three
-  docker tests took 21.9s in one run on a loaded host (2026-10-08, at 75235ba4e), and it needs no
+  nothing persists and the real database is refused before any command runs. The file's five
+  docker tests skip without docker (19 passed, 5 skipped with docker hidden); with docker the whole
+  file, 24 tests, took 28.4s in one run (2026-10-08, at 9e9cfbce7). It needs no
   monopoly. Re-time it rather than trusting that figure.
 - `src/tests/smoke/test_db_grants_real_postgres.py` — it reuses the rollback file's throwaway container,
   so the same reasoning holds: `docker exec` only, a name guard, removal at the end, nothing persists. Its
-  17 docker tests took 63.3s in one run on a loaded host (2026-10-08, on the tree that became 7124d1a00). Re-time it rather than
+  17 docker tests all skip without docker and took 59.3s with it in one run (2026-10-08, at 9e9cfbce7). Re-time it rather than
   trusting that figure. It needs no monopoly.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
