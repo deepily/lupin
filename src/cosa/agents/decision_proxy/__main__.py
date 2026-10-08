@@ -31,6 +31,7 @@ from cosa.agents.decision_proxy.config import (
 )
 from cosa.agents.decision_proxy.listener import DecisionListener
 from cosa.agents.decision_proxy.responder import DecisionResponder
+from cosa.agents.decision_proxy.user_presence import responder_presence_kwargs
 from cosa.agents.decision_proxy.voice_io import notify
 
 
@@ -192,7 +193,12 @@ async def main():
         dry_run    = args.dry_run,
         debug      = args.debug,
         verbose    = args.verbose,
-        enabled    = proxy_enabled
+        enabled    = proxy_enabled,
+        **responder_presence_kwargs(
+            config_mgr, args.host, args.port,
+            lambda: listener.authorization,       # read at each fetch; the listener is built below
+            args.session_id
+        )
     )
 
     # Load domain profile
