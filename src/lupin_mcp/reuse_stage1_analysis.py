@@ -219,23 +219,35 @@ def _combine( states ):
     return "pass"
 
 
+def _arm_label( arm ):
+    """Ensures: returns the arm's run name, or its question and arm name when it has none."""
+    return arm[ "run_name" ] or f"question {arm[ 'question' ]} {arm[ 'arm' ]}"
+
+
 def noise_floor( stage ):
     """
     Measure the noise floor: single run 1 against single run 2, pooled over the questions run.
 
     Ensures:
-        - returns { measured, floor, max, n, state }
-        - state is "invalid" if any single run was stopped, "inconclusive" if any is absent or not clean,
+        - returns { measured, floor, max, n, state, left_out }
+        - a question with an invalid single run is left out of the pool and the rest still pools; left_out names those invalid arms
+        - state is "invalid" if every question run was left out, "inconclusive" if a question kept is missing a single run or has one that is not clean,
           else "ok"
         - measured is the 99th percentile of the pooled differences, and floor is the larger of it and the minimum
         - measured, floor and max are None unless state is "ok"
     """
-    arms = [ a for q in sorted( stage ) for a in ( stage[ q ].get( "single1" ), stage[ q ].get( "single2" ) ) ]
-    bad  = _arms_state( arms )
-    if bad is not None: return { "measured": None, "floor": None, "max": None, "n": 0, "state": bad }
-    diffs = [ d for q in sorted( stage ) for d in differences( stage[ q ][ "single1" ], stage[ q ][ "single2" ] ).values() ]
+    left_out, kept = [], []
+    for q in sorted( stage ):
+        pair    = ( stage[ q ].get( "single1" ), stage[ q ].get( "single2" ) )
+        invalid = [ a for a in pair if a is not None and a[ "status" ] == "invalid" ]
+        if invalid: left_out += [ _arm_label( a ) for a in invalid ]
+        else: kept.append( q )
+    bad = _arms_state( [ a for q in kept for a in ( stage[ q ].get( "single1" ), stage[ q ].get( "single2" ) ) ] )
+    if not kept and left_out: bad = "invalid"
+    if bad is not None: return { "measured": None, "floor": None, "max": None, "n": 0, "state": bad, "left_out": left_out }
+    diffs = [ d for q in kept for d in differences( stage[ q ][ "single1" ], stage[ q ][ "single2" ] ).values() ]
     measured = percentile( diffs )
-    return { "measured": measured, "floor": max( measured, NOISE_FLOOR_MIN ), "max": max( diffs ), "n": len( diffs ), "state": "ok" }
+    return { "measured": measured, "floor": max( measured, NOISE_FLOOR_MIN ), "max": max( diffs ), "n": len( diffs ), "state": "ok", "left_out": left_out }
 
 
 def pass_one( stage, size, floor ):
@@ -645,7 +657,7 @@ def build_report( records, canaries ):
     if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
     wrong = [ a for q in sorted( stage ) for a in stage[ q ].values() if a[ "served_model" ] is not None ]
-    if wrong: decision = "stop and ask: " + "; ".join( f"{a[ 'run_name' ] or 'question ' + str( a[ 'question' ] ) + ' ' + a[ 'arm' ]} was answered by {a[ 'served_model' ]}, not {a[ 'model' ]}" for a in wrong ) + "; Rick decides whether another model is acceptable"
+    if wrong: decision = "stop and ask: " + "; ".join( f"{_arm_label( a )} was answered by {a[ 'served_model' ]}, not {a[ 'model' ]}" for a in wrong ) + "; Rick decides whether another model is acceptable"
     next_step = stop[ "next_step" ]
     if decision.startswith( "stop and ask" ) and not next_step.startswith( "stop and ask" ): next_step = "stop and ask: see the decision above"
     return { "decision": decision, "next_step": next_step, "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg, "duplicate_ids": dups,
@@ -668,14 +680,14 @@ def render( report ):
     ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
     lines  = [ "Live packing measurement: analysis", "", f"Decision: {report[ 'decision' ]}", f"Next step: {report[ 'next_step' ]}", "",
                f"boundary entries pooled: {ev[ 'boundary_pooled' ]} (minimum {MIN_BOUNDARY_POOLED}); by question {ev[ 'boundary_by_question' ]}",
-               f"noise floor: {nf[ 'state' ]}, measured {nf[ 'measured' ]}, used {nf[ 'floor' ]} over {nf[ 'n' ]} entries" ]
+               f"noise floor: {nf[ 'state' ]}, measured {nf[ 'measured' ]}, used {nf[ 'floor' ]} over {nf[ 'n' ]} entries" + ( f"; left out: {', '.join( nf[ 'left_out' ] )}" if nf[ "left_out" ] else "" ) ]
     for size in PACK_SIZES:
         s = ev[ "sizes" ][ size ]
         p3 = s[ "pass_three" ]
         lines.append( f"pack {size}: {s[ 'state' ]}; pass 1 {s[ 'pass_one' ][ 'state' ]} (p99 {s[ 'pass_one' ][ 'p99' ]}, max {s[ 'pass_one' ][ 'max' ]}); "
                       f"pass 2 {s[ 'pass_two' ][ 'state' ]} (flips {s[ 'pass_two' ][ 'pack_flips' ]} against noise {s[ 'pass_two' ][ 'noise_flips' ]})"
                       + ( f"; pass 3 {p3[ 'state' ]} ({p3[ 'placements' ]} placements, worst {p3[ 'worst' ]})" if p3 else "" ) )
-    for a in report[ "lost_by_arm" ]: lines.append( f"{a[ 'run_name' ] or 'question ' + str( a[ 'question' ] ) + ' ' + a[ 'arm' ]}: lost {a[ 'lost' ]} of limit {a[ 'lost_limit' ]}, stop reason {a[ 'stop_reason' ] or 'none'}" )
+    for a in report[ "lost_by_arm" ]: lines.append( f"{_arm_label( a )}: lost {a[ 'lost' ]} of limit {a[ 'lost_limit' ]}, stop reason {a[ 'stop_reason' ] or 'none'}" )
     p3 = ev[ "sizes" ][ PASS_THREE_SIZE ][ "pass_three" ]
     for q in p3[ "not_probed" ]: lines.append( f"not probed: question {q}" )
     if ev[ "default_size" ] is not None:
