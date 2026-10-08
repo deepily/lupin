@@ -121,7 +121,7 @@ def test_backoff_keeps_doubling_through_the_third_wait():
 
 def test_retries_are_bounded_and_the_last_failure_does_not_sleep():
     sleeps, calls = [], []
-    with pytest.raises( jev_transport.JevCallError, match="still answered status 429 after 4 calls" ):
+    with pytest.raises( jev_transport.JevCallError, match="still answered a retry status" ):
         ask( scripted_post( [ 429 ] * 10, calls ), sleeps )
     assert len( calls ) == jev_transport.MAX_ATTEMPTS == 4
     assert len( sleeps ) == jev_transport.MAX_ATTEMPTS - 1
@@ -137,8 +137,8 @@ def test_a_refused_key_or_request_is_a_configuration_error_and_not_retried( stat
 
 def test_any_other_status_is_a_call_error_without_retry():
     calls = []
-    with pytest.raises( jev_transport.JevCallError, match="status 404" ):
-        ask( scripted_post( [ 404 ], calls ) )
+    with pytest.raises( jev_transport.JevCallError, match="status 500" ):
+        ask( scripted_post( [ 500 ], calls ) )
     assert len( calls ) == 1
 
 
@@ -296,8 +296,8 @@ def test_confident_claims_never_reach_the_escalation_model():
 
 
 def test_a_jev_outage_on_one_claim_escalates_that_claim_alone():
-    sent     = []
-    post     = lambda url, headers, body, timeout: ( sent.append( 1 ), ( 200, reply( 0.95 ) ) if len( sent ) == 1 else ( 500, "boom" ) )[ 1 ]    # one answer, then an outage that outlasts the retries
+    outcomes = iter( [ ( 200, reply( 0.95 ) ), ( 500, "boom" ) ] )
+    post     = lambda url, headers, body, timeout: next( outcomes )
     calls    = []
     result   = run( [ STATED, DROPPED ], "text", post=post, answers={ DROPPED.text: "present" }, calls=calls )
     assert [ j.verdict for j in result.judgements ] == [ "present", "present" ]
@@ -501,7 +501,7 @@ def test_complete_is_false_when_any_claim_has_no_jev_answer():
 def outage_then_ok_post( calls ):
     def post( url, headers, body, timeout ):
         calls.append( 1 )
-        return ( 400, "boom" ) if len( calls ) <= 2 else ( 200, reply( haystack_noul( body ) ) )
+        return ( 500, "boom" ) if len( calls ) <= 2 else ( 200, reply( haystack_noul( body ) ) )
     return post
 
 

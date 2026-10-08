@@ -119,7 +119,7 @@ def test_the_last_failed_attempt_does_not_sleep_and_other_statuses_are_not_retri
     with pytest.raises( jev_transport.JevCallError ):
         send( [ ( 429, "x", { "Retry-After": "1" } ) ], sleeps )
     assert len( sleeps ) == jev_transport.MAX_ATTEMPTS - 1
-    for status, error in ( ( 400, jev_transport.JevCallError ), ( 401, jev_transport.JevConfigError ) ):
+    for status, error in ( ( 500, jev_transport.JevCallError ), ( 401, jev_transport.JevConfigError ) ):
         sleeps = []
         with pytest.raises( error ): send( [ ( status, "x", { "Retry-After": "9" } ) ], sleeps )
         assert sleeps == []

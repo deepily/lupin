@@ -30,6 +30,7 @@ def send( replies, **kw ):
     """Ensures: returns ( outcome, calls, sleeps ); outcome is the result or the error."""
     calls, sleeps = [], []
     kw.setdefault( "random_fn", lambda: 0.5 )                                    # jitter factor exactly 1
+    kw.setdefault( "transient", True )
     try:
         out = jt.send_with_meta( b"{}", post_fn=door( replies, calls ), sleep_fn=sleeps.append, environ=ENV, **kw )
     except Exception as e:
