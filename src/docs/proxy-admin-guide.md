@@ -4,7 +4,7 @@
 >
 > **Pages covered**: `/app/admin/proxy-dashboard` and `/app/admin/proxy-ratify`
 >
-> **Last Updated**: 2026-02-23
+> **Last Updated**: 2026-10-08
 >
 > **See Also**: [End-to-End Trust Proxy Overview](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) — full conceptual walkthrough from cold start to autonomous predictions
 
@@ -116,6 +116,49 @@ admin manually resets it.
 | **TRIPPED** (Open) | Red dot | Too many rejections — proxy stopped acting in this category |
 | **COOLDOWN** | Yellow dot | Recovery period after a trip |
 
+### Active Hours and Deferral
+
+When you are at your desk, the proxy should not answer for you. Before it posts an
+automatic answer, it asks whether you are available. It defers to you only when all of
+these hold:
+
+1. The strategy decided to **act** and has an answer to post. Shadow, suggest and defer
+   decisions post nothing, so nothing changes for them.
+2. The time is inside your **active hours**, read in your timezone.
+3. You have a live session. The server lists one for your user id, other than the
+   proxy's own login.
+
+When it defers, no answer is posted. The question stays in your notifications, as for any
+other deferred decision. The Trust Dashboard shows the **defer** badge and the reason
+`user available (active hours, connected); the proxy would have answered: ...`. The stored
+decision keeps the answer the proxy would have given. The statistics count these as
+`decisions_deferred_to_user`.
+
+| `lupin-app.ini` key | Meaning | Shipped value |
+|---------------------|---------|---------------|
+| `decision proxy active hours start` | Hour (0-23) your active hours begin | `09` |
+| `decision proxy active hours end` | Hour (0-23) they end; the end hour itself is outside | `22` |
+| `decision proxy timezone` | IANA timezone the hours are read in | `America/Chicago` |
+| `decision proxy human user id` | The server user id of **you**, the person the proxy defers to | empty |
+
+**It is off until you name yourself.** With `decision proxy human user id` empty, the
+proxy has no one to defer to. It answers exactly as before. To turn it on, set the key to
+your user id (the `user_id` your browser session shows in `GET /api/websocket-sessions`).
+Then restart the decision proxy process, because the keys are read at start.
+
+**If the server cannot be asked**, the proxy treats you as away and answers as before. That
+covers a failed or timed-out sessions request and an unreadable reply. It writes one
+warning to its log: `[UserPresence] connectivity feed failed, treating the user as not
+connected: <cause>`. This is the ruling "Proxy answers". It is one constant,
+`FEED_FAILURE_MEANS_CONNECTED` in `decision_proxy/user_presence.py`. Setting it `True`
+would make the proxy defer on doubt. The sessions answer is reused for 10 seconds, so a
+connection that opens or closes can take that long to be seen.
+
+**Limit.** Only the Decision Proxy process consults this. The SWE team orchestrator asks
+the same strategy in-process. At an `act` decision it still auto-approves without checking
+hours or connection. That is recorded as a finding in
+`io/tmp/2026.10.08-john-smartrouter-wiring-plan.md`.
+
 ---
 
 ## 3. The Morning Coffee Workflow
@@ -137,6 +180,8 @@ sequenceDiagram
         alt High trust / High confidence
             Proxy->>Job: Act autonomously
             Proxy->>Proxy: Log decision (not_required)
+        else High trust, but you are at your desk (active hours, connected)
+            Proxy->>Job: Defer: no answer posted, the question waits for you
         else Low trust / Low confidence
             Proxy->>Proxy: Queue for ratification (pending)
             Proxy->>Job: Defer or suggest
@@ -416,7 +461,7 @@ the message: **"No pending decisions. All caught up!"**
 | **shadow** | Gray (`#e2e8f0`) | Dark gray (`#4a5568`) | Observed only, no action taken |
 | **suggest** | Light blue (`#bee3f8`) | Blue (`#2b6cb0`) | Suggestion queued for approval |
 | **act** | Light green (`#c6f6d5`) | Green (`#276749`) | Proxy acted autonomously |
-| **defer** | Light yellow (`#fefcbf`) | Dark yellow (`#975a16`) | Deferred to human (question forwarded) |
+| **defer** | Light yellow (`#fefcbf`) | Dark yellow (`#975a16`) | Deferred to human (question forwarded): a tripped breaker, an ambiguous case, or you being available (see [Active Hours and Deferral](#active-hours-and-deferral)) |
 
 ### Trust Level Badges
 

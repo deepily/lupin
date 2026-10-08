@@ -37,4 +37,4 @@ The decision proxy answers questions that ask for a response, on the user's beha
 - A trip starts a cooldown. Under the default count model it also demotes the category; the `beta` and `blr` models read lifetime totals that a trip leaves alone. After the cooldown, the breaker stops reporting a trip, but `check` reads the same lifetime counters, so a category still over the threshold trips again.
 
 ## Smart router
-- `DecisionResponder` builds a `SmartRouter`, but nothing calls its `should_defer_to_user`, so active hours and connectivity change no answer. Delete this section when row 7ddfa3b9-4645-4073-a69b-ee9bba57eab2 closes.
+- `DecisionResponder` asks `SmartRouter` before posting an automatic answer. In active hours, with the named human connected, it posts nothing and records a defer. The feed is `user_presence.sessions_feed`; a failing feed reads as not connected. The SWE orchestrator does not consult the router.
