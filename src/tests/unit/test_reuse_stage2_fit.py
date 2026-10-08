@@ -367,8 +367,9 @@ def test_a_rate_that_rules_out_even_one_grid_point_binds_and_the_text_stays_sile
 def test_the_old_question_gets_the_same_condition():
     rows  = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.1 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
     split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    near  = [ rows[ 0 ], _row( "m", "a", False, None, None, p_overlap = 0.3 ), rows[ 2 ] ]                  # a non-twin that crosses the cut of 0.2 only
     free  = ft.old_report( rows, split, 0.5, cuts = ( 0.2, 0.4, 0.6 ) )
-    tight = ft.old_report( rows, split, 0.0, cuts = ( 0.2, 0.4, 0.6 ) )
+    tight = ft.old_report( near, split, 0.0, cuts = ( 0.2, 0.4, 0.6 ) )
     assert free[ "rate_binds" ] is False and ft.NOT_BINDING in ft.render( free )
     assert tight[ "rate_binds" ] is True and ft.NOT_BINDING not in ft.render( tight )
 

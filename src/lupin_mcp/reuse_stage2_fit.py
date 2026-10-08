@@ -27,6 +27,9 @@ BINS      = 10
 ROW_KEYS  = ( "member", "candidate", "label", "provides", "coverage", "score", "p_overlap", "malformed", "unasked" )
 
 
+NOT_BINDING = "the false-reuse rate does not bind at any cut; the cut is not determined by it"
+
+
 class NoFeasiblePolicy( ValueError ):
     """No grid point keeps false reuse within the allowed rate."""
 
@@ -302,7 +305,8 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
     Requires:
         - split is the record the split module writes; rate is the allowed false-reuse rate
     Ensures:
-        - returns { format, rate, placeholder, grid, edges, counts, fit, chosen, on_fit, on_check, reliability }
+        - returns { format, rate, placeholder, grid, edges, rate_binds, counts, fit, chosen, on_fit, on_check, reliability }
+        - rate_binds is false when every grid point keeps false reuse within the rate
         - edges names each chosen value that sits on the edge of its grid
         - on_check is the chosen policy read on the check half, which the fit never saw
     """
@@ -310,7 +314,7 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
     check_rows( rows )
     fit_rows, other = split_rows( rows, halves )
     fit = fit_policy( fit_rows, halves, rate, grid )
-    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": grid, "edges": edges( fit[ "chosen" ], grid ),
+    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": grid, "edges": edges( fit[ "chosen" ], grid ), "rate_binds": fit[ "feasible" ] < len( fit[ "table" ] ),
              "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( fit_rows, fit[ "chosen" ] ), "on_check": evaluate( other, fit[ "chosen" ] ),
              "reliability": { "fit": reliability( fit_rows ), "check": reliability( other ) } }
@@ -330,7 +334,7 @@ def old_report( rows, split, rate, cuts=OLD_CUTS, placeholder=False ):
     fit_rows, other = split_rows( rows, halves )
     fit    = fit_old( fit_rows, halves, rate, cuts )
     policy = _old_policy( fit[ "chosen" ][ "cut" ] )
-    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": { "cut": tuple( sorted( cuts ) ) }, "edges": edges( fit[ "chosen" ], { "cut": cuts } ),
+    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": { "cut": tuple( sorted( cuts ) ) }, "edges": edges( fit[ "chosen" ], { "cut": cuts } ), "rate_binds": fit[ "feasible" ] < len( fit[ "table" ] ),
              "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( _old_view( fit_rows ), policy ), "on_check": evaluate( _old_view( other ), policy ),
              "reliability": { "fit": reliability( fit_rows, "p_overlap" ), "check": reliability( other, "p_overlap" ) } }
@@ -343,12 +347,14 @@ def render( rep ):
     Ensures:
         - returns a string with the allowed rate, the grid and its note, the group counts, the chosen policy on both halves and both reliability tables
         - a chosen value on the edge of its grid gets a warning line
+        - a rate that binds at no cut gets a warning line with the condition text
     """
     lines = [ f"Threshold fit ({rep[ 'format' ]})", "", f"false-reuse rate allowed: {rep[ 'rate' ]}" + ( " (placeholder)" if rep[ "placeholder" ] else "" ),
               "grid: " + "; ".join( f"{k} {min( v )} to {max( v )} ({len( v )} values)" for k, v in rep[ "grid" ].items() ), GRID_NOTE,
               f"groups: fit {rep[ 'counts' ][ 'fit' ][ 'groups' ]}, check {rep[ 'counts' ][ 'check' ][ 'groups' ]}",
               f"rows: fit {rep[ 'counts' ][ 'fit' ][ 'rows' ]}, check {rep[ 'counts' ][ 'check' ][ 'rows' ]}; points within the rate: {rep[ 'fit' ][ 'feasible' ]} of {len( rep[ 'fit' ][ 'table' ] )}",
               f"chosen on the fit half: {rep[ 'chosen' ]}", f"  {rep[ 'on_fit' ]}", f"same policy on the check half: {rep[ 'chosen' ]}", f"  {rep[ 'on_check' ]}" ]
+    if not rep[ "rate_binds" ]: lines.append( f"warning: {NOT_BINDING}" )
     for e in rep[ "edges" ]: lines.append( f"warning: the chosen {e[ 'key' ]} {e[ 'value' ]} is the {e[ 'edge' ]} value of its grid; widen the grid before reading it" )
     for half in ( "fit", "check" ):
         rel = rep[ "reliability" ][ half ]
