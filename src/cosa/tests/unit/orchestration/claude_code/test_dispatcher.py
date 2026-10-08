@@ -724,6 +724,15 @@ def test_run_bounded_error_result_names_the_cli_text_when_stderr_is_empty( lupin
     assert "Unknown error" not in res.error
 
 
+def test_run_bounded_error_result_with_exit_zero_is_a_failure( lupin_root, monkeypatch ):
+    """Behaviour change: an error result on exit 0 was success=True; it is now a failure."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=0, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 0
+    assert "Your credit balance is too low" in res.error
+
+
 def test_run_bounded_error_result_names_the_errors_list( lupin_root, monkeypatch ):
     d = _make_dispatcher( on_message=lambda tid, data: None )
     line = b'{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool died","disk full"]}\n'
