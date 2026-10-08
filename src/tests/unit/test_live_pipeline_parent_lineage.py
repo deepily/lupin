@@ -7,7 +7,8 @@ The variable is LUPIN_TEST_MONOPOLIZE_PARENT_ID.
 The queue consumer defers any job the monopolizer did not spawn.
 A smoke that sends no tag therefore waits out its whole timeout in the todo queue.
 
-There are two layers: the payload the base class builds, and the consumer's admission of the job it becomes.
+The base class applies the tag where it submits, after get_submit_payload returns, so an override cannot miss it.
+There are two layers: the body the base class posts, and the consumer's admission of the job it becomes.
 The second layer runs the real executor stamp and the real consumer thread with a real monopolizing parent.
 It fails when the tag is dropped anywhere on the way.
 """
@@ -22,6 +23,7 @@ from cosa.rest.routers import v2_ask
 from cosa.rest.v2.executor import QueuedExecutor, Work
 from cosa.rest.v2.trace import StageTrace
 from cosa.tests.unit.rest import test_monopolize_lineage_inprocess as lineage
+import tests.smoke.utilities.live_pipeline_base as lpb
 from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 
 ENV      = "LUPIN_TEST_MONOPOLIZE_PARENT_ID"
@@ -34,26 +36,50 @@ class _Harness( LivePipelineTestBase ):
         pass
 
 
-def _payload():
-    return _Harness().get_submit_payload( SCENARIO, "wise penguin" )
+class _UntaggedOverride( _Harness ):
+    """An override that builds its own payload and knows nothing about lineage."""
+    def get_submit_payload( self, scenario, ws_id ):
+        return { "question": scenario[ "query" ], "websocket_id": ws_id, "speak": False }
 
 
-def test_the_payload_carries_the_tier_id_as_parent_id_hash_when_the_tier_sets_it():
-    with patch.dict( os.environ, { ENV: "ts-abc123" } ):
-        assert _payload() == { "question": "what is 2 plus 2", "websocket_id": "wise penguin", "parent_id_hash": "ts-abc123" }
+class _SelfTaggedOverride( _Harness ):
+    """An override that already tags its payload with its own value."""
+    def get_submit_payload( self, scenario, ws_id ):
+        return { "question": scenario[ "query" ], "websocket_id": ws_id, "parent_id_hash": "own-value" }
+
+
+def _posted_body( harness, tier_id ):
+    """Run the base class's submit and return the JSON body it posted."""
+    env = { k: v for k, v in os.environ.items() if k != ENV }
+    if tier_id is not None: env[ ENV ] = tier_id
+    seen = {}
+    def _post( url, json=None, headers=None, timeout=None ):
+        seen[ "json" ] = json
+        raise RuntimeError( "stop after the body is captured" )
+    with patch.dict( os.environ, env, clear=True ), patch.object( lpb.requests, "post", _post ):
+        harness._submit_and_wait( SCENARIO, { "Authorization": "Bearer t" }, "wise penguin" )
+    return seen[ "json" ]
+
+
+def test_the_posted_body_carries_the_tier_id_as_parent_id_hash_when_the_tier_sets_it():
+    assert _posted_body( _Harness(), "ts-abc123" ) == { "question": "what is 2 plus 2", "websocket_id": "wise penguin", "parent_id_hash": "ts-abc123" }
 
 
 @pytest.mark.parametrize( "value", [ None, "" ] )
-def test_the_payload_is_unchanged_when_no_tier_set_the_id( value ):
-    env = { k: v for k, v in os.environ.items() if k != ENV }
-    if value is not None: env[ ENV ] = value
-    with patch.dict( os.environ, env, clear=True ):
-        assert _payload() == { "question": "what is 2 plus 2", "websocket_id": "wise penguin" }
+def test_the_posted_body_is_unchanged_when_no_tier_set_the_id( value ):
+    assert _posted_body( _Harness(), value ) == { "question": "what is 2 plus 2", "websocket_id": "wise penguin" }
 
 
-def test_the_ask_door_accepts_the_payload_the_base_class_builds():
-    with patch.dict( os.environ, { ENV: "ts-abc123" } ):
-        assert v2_ask.AskRequest( **_payload() ).parent_id_hash == "ts-abc123"
+def test_an_override_that_knows_nothing_about_lineage_is_tagged_too():
+    assert _posted_body( _UntaggedOverride(), "ts-abc123" ) == { "question": "what is 2 plus 2", "websocket_id": "wise penguin", "speak": False, "parent_id_hash": "ts-abc123" }
+
+
+def test_an_override_that_tags_its_own_payload_keeps_its_value():
+    assert _posted_body( _SelfTaggedOverride(), "ts-abc123" )[ "parent_id_hash" ] == "own-value"
+
+
+def test_the_ask_door_accepts_the_body_the_base_class_posts():
+    assert v2_ask.AskRequest( **_posted_body( _Harness(), "ts-abc123" ) ).parent_id_hash == "ts-abc123"
 
 
 class _TodoShim:
@@ -76,10 +102,7 @@ class TestHarnessChildAdmission( lineage.TestMonopolizeLineageInProcess ):
 
     def _ask_as_the_harness( self, label, do_all, parent_id ):
         """Queue the job the ask door would build for this payload."""
-        env = { k: v for k, v in os.environ.items() if k != ENV }
-        if parent_id is not None: env[ ENV ] = parent_id
-        with patch.dict( os.environ, env, clear=True ):
-            request = v2_ask.AskRequest( **_payload() )
+        request = v2_ask.AskRequest( **_posted_body( _Harness(), parent_id ) )
         trace = StageTrace( trace_dir="/tmp/unused" )
         if request.parent_id_hash: trace.set( "parent_id_hash", request.parent_id_hash )
         job = lineage._ProbeJob( label, do_all )
