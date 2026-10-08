@@ -100,15 +100,23 @@ def _token_file_tree():
     return ast.parse( open( path, encoding="utf-8" ).read() )
 
 
+def _outcome_of( environ ):
+    """The exception require_sweep raises for this environment, or None when it returns."""
+    try:
+        require_sweep( environ )
+    except BaseException as outcome:
+        return outcome
+    return None
+
+
 def test_outside_a_sweep_the_requirement_skips():
-    with pytest.raises( pytest.skip.Exception ):
-        require_sweep( { } )
+    assert type( _outcome_of( { } ) ) is pytest.skip.Exception
 
 
 def test_a_parent_without_a_token_fails_with_the_message_and_does_not_skip():
-    with pytest.raises( pytest.fail.Exception ) as raised:
-        require_sweep( { PARENT_ENV_NAME: "ts-abc" } )
-    assert "no per-run token" in str( raised.value )
+    outcome = _outcome_of( { PARENT_ENV_NAME: "ts-abc" } )
+    assert type( outcome ) is pytest.fail.Exception, f"expected a failure, got {type( outcome ).__name__}"
+    assert "no per-run token" in str( outcome )
 
 
 def test_with_both_exported_the_requirement_returns_none():
