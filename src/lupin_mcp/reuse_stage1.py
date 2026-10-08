@@ -232,7 +232,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     Raises:
         - ValueError for a question, arm or probe out of range, a run name used before, workers out of range or a repeated entry id
         - KeyMissing for the live transport with no key; this and the ValueErrors above open no ledger run and spend no name
-        - ReuseError BAD_BUDGET for an attempt limit above the arm's cap: its entries plus ten percent, never below the 8,000 floor
+        - ReuseError BAD_BUDGET for an attempt limit above the arm's cap: its entries plus ten percent, never below the 9,000 floor
         - StageRefused when the ceiling passes what the stage has left
         - CanaryNotApproved for any arm but the first single run before the canary is approved
         - LedgerUnreadable or AccountLimitReached from the ledger
