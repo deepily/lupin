@@ -44,11 +44,12 @@ import os
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.engine import make_url
 
 from alembic import command
 
-from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 
 
 # The revision this file proves. It is NOT the chain head: later migrations sit above it, so the
@@ -73,8 +74,7 @@ def _server_url():
     against a separate uniquely-named THROWAWAY database, never lupin_db_test.
     Returns the URL OBJECT (carries the REAL password); callers must NOT str() it.
     """
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 def _maintenance_engine( server_url ):
@@ -91,11 +91,8 @@ def throwaway_db_url():
     """
     server_url = _server_url()
     try:
-        eng = _maintenance_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{_THROWAWAY_DB}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping DB-backed migration round-trip: {e}" )
 

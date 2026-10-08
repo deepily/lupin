@@ -30,13 +30,14 @@ import os
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.engine import make_url
 
 from alembic import command
 from alembic.script import ScriptDirectory
 
-from cosa.rest.db import database as db_module
 from cosa.rest.db import auto_migrate
 from cosa.rest.db.auto_migrate import build_alembic_config, run_migrations_to_head
+import tests.helpers.template_database as td
 
 
 # The historical create_all bootstrap-stamp point — down_revision of the culprit
@@ -66,8 +67,7 @@ def _server_url():
     Returns the SQLAlchemy URL OBJECT (carries the REAL password); never
     ``str()`` it (that masks the password as '***' and breaks auth).
     """
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 def _maintenance_engine( server_url ):
@@ -91,11 +91,8 @@ def throwaway_db_url( request ):
     server_url = _server_url()
     db_name    = f"tiffany_idem_{os.getpid()}_{_sanitize( request.node.name )}"
     try:
-        eng = _maintenance_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{db_name}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{db_name}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), db_name )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), db_name )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping create_all idempotency regression: {e}" )
 

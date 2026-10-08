@@ -27,11 +27,12 @@ import os
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.engine import make_url
 
 from alembic import command
 
-from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 
 
 _REVISION       = "53835fd51f1a"   # the migration under test (stable id, not "head")
@@ -43,8 +44,7 @@ _THROWAWAY_DB   = f"cheech_i3_rt_{os.getpid()}"
 def _server_url():
     """Borrow the test server's host/port/credentials; the round-trip runs against
     a separate throwaway DB, never lupin_db_test."""
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 def _maintenance_engine( server_url ):
@@ -55,11 +55,8 @@ def _maintenance_engine( server_url ):
 def throwaway_db_url():
     server_url = _server_url()
     try:
-        eng = _maintenance_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{_THROWAWAY_DB}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping DB-backed i3 round-trip: {e}" )
 
