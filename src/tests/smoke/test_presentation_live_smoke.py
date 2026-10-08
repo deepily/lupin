@@ -569,11 +569,12 @@ class PresentationLiveSmokeTest( InteractiveSmokeTest ):
             return { "ok": False, "detail": "no pptx_path recorded — deck never exported (yaml-only completion)" }
 
         # The recorded path may be io-relative (job.artifacts) or absolute
-        # (job.pptx_path). Resolve to absolute against the project root.
+        # (job.pptx_path). job.py records the relative form by stripping the
+        # "{root}/io/" prefix, so put that same prefix back.
         abs_path = recorded
         if not os.path.isabs( abs_path ):
             import cosa.utils.util as cu
-            abs_path = os.path.join( cu.get_project_root(), recorded.lstrip( "/" ) )
+            abs_path = os.path.join( cu.get_project_root(), "io", recorded.lstrip( "/" ) )
 
         verdict = verify_presentation_deck( abs_path )
         if verdict:
