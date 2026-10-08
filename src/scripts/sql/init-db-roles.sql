@@ -176,6 +176,17 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public
     GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO lupin_host;
+-- A table is owned by the login that ran the migration: lupin_dev today, lupin_test for the integration tier,
+-- lupin_app after the cutover (measured on a throwaway server, all 27 tables each time). So every creator
+-- carries the grants. lupin_test cannot connect to this database; its lines are here so the three creators match.
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev IN SCHEMA public GRANT ALL ON TABLES    TO lupin_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev IN SCHEMA public GRANT USAGE, SELECT, UPDATE          ON SEQUENCES TO lupin_host;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON TABLES    TO lupin_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT USAGE, SELECT, UPDATE          ON SEQUENCES TO lupin_host;
 
 -- ---- CUTOVER ONLY: hand the dev database to the app role --------------------------------
 -- NOT `REASSIGN OWNED BY lupin_dev`: that fails ("required by the database system"), because the
@@ -216,3 +227,7 @@ GRANT ALL ON ALL TABLES    IN SCHEMA public TO lupin_app, lupin_test;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO lupin_app, lupin_test;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public GRANT ALL ON TABLES    TO lupin_test;
 ALTER DEFAULT PRIVILEGES FOR ROLE lupin_app IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_test;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev  IN SCHEMA public GRANT ALL ON TABLES    TO lupin_app, lupin_test;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_dev  IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app, lupin_test;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON TABLES    TO lupin_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUENCES TO lupin_app;

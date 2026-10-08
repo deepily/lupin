@@ -111,3 +111,39 @@ def test_grants_only_with_another_direction_is_refused_before_anything_runs( sql
     with pytest.raises( SystemExit ):
         db_roles.main( [ "--psql", "psql", "--sql", sql_file, "--grants-only", other, "--apply" ], run_fn=run, out=io.StringIO() )
     assert run.calls == []
+
+
+# ── default privileges: every role that creates tables carries the grants ────
+
+CREATORS = ( "lupin_dev", "lupin_test", "lupin_app" )
+
+
+def _default_privilege_lines( database ):
+    """The default-privilege statements that run for one database, each joined onto one line."""
+    section, current, open_statement = {}, None, None
+    for line in active_lines( _sql(), { "grants_only" } ):
+        if line.startswith( "\\connect " ): current = line.split()[ 1 ]
+        if open_statement is None and line.startswith( "ALTER DEFAULT PRIVILEGES" ): open_statement = []
+        if open_statement is not None:
+            open_statement.append( line.strip() )
+            if line.rstrip().endswith( ";" ):
+                section.setdefault( current, [] ).append( " ".join( open_statement ) )
+                open_statement = None
+    return section.get( database, [] )
+
+
+@pytest.mark.parametrize( "database", [ "lupin_db_dev", "lupin_db_test" ] )
+@pytest.mark.parametrize( "creator", CREATORS )
+@pytest.mark.parametrize( "kind", [ "TABLES", "SEQUENCES" ] )
+def test_every_table_creating_role_has_default_privileges_in_both_databases( database, creator, kind ):
+    lines = _default_privilege_lines( database )
+    assert lines, f"no default privileges found for {database}; the instrument found nothing"
+    mine = [ l for l in lines if f"FOR ROLE {creator} " in l and re.search( rf"ON\s+{kind}\b", l ) ]
+    assert mine, f"{creator} has no default grant on {kind} in {database}"
+
+
+def test_the_dev_defaults_name_the_recipients_the_matrix_gives():
+    lines = " ".join( _default_privilege_lines( "lupin_db_dev" ) )
+    assert re.search( r"FOR ROLE lupin_dev IN SCHEMA public GRANT ALL ON TABLES\s+TO lupin_app;", lines )
+    assert re.search( r"FOR ROLE lupin_dev IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO lupin_host;", lines )
+    assert "lupin_test" not in re.sub( r"FOR ROLE lupin_test", "", lines ), "lupin_test is a recipient in the dev database, where it has no right to connect"
