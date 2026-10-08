@@ -74,5 +74,7 @@ def test_a_rerun_never_takes_the_template_mark_off_outside_the_drop_block():
     end   = sql.index( "\\endif", start )
     outside = sql[ :start ] + sql[ end: ]
     code = "\n".join( ln for ln in outside.splitlines() if not ln.lstrip().startswith( "--" ) )
-    assert not re.search( r"IS_TEMPLATE\s+false", code, re.IGNORECASE ), "a re-run unmarks the template, so a clone can be refused during it"
+    values = re.findall( r"IS_TEMPLATE\s*=?\s*(\w+)", code, re.IGNORECASE )
+    assert values, "no IS_TEMPLATE token found outside the drop block, so this test would pass on nothing"
+    assert all( v.lower() == "true" for v in values ), f"a re-run unmarks the template, so a clone can be refused during it: {values}"
     assert f"CREATE DATABASE {TEMPLATE} IS_TEMPLATE true" in code
