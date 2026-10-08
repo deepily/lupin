@@ -1141,6 +1141,11 @@ def test_packing_that_changes_as_many_questions_as_noise_does_passes():
     assert _page_arm( "noise-two-pack-none" )[ "state" ] == "pass"
 
 
+def test_the_set_rule_alone_can_fail_the_page_arm_when_a_page_crosses_the_floor_by_a_hair():
+    r = _page_arm( "set-only" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "fail", 2, 0, 0.015, 0.02 )
+
+
 def test_the_per_page_difference_is_held_to_the_noise_floor_read_as_at_least_two_hundredths():
     r = _page_arm( "overlap-only" )
     assert ( r[ "state" ], r[ "pack_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "fail", 0, 0.1, 0.02 )
@@ -1149,6 +1154,7 @@ def test_the_per_page_difference_is_held_to_the_noise_floor_read_as_at_least_two
 def test_a_page_arm_with_no_page_near_the_floor_in_any_question_reads_inconclusive_not_pass():
     r = _page_arm( "no-page-near-the-floor" )
     assert ( r[ "state" ], r[ "pack_changes" ], r[ "near_floor_pages" ] ) == ( "inconclusive", 0, 0 )
+    assert "page arm fails" not in an.build_report( _driver_pages( "no-page-near-the-floor" ), canaries=[] )[ "decision" ]
 
 
 def test_a_failing_page_arm_stays_a_fail_when_no_page_is_near_the_floor():
@@ -1159,6 +1165,14 @@ def test_a_failing_page_arm_stays_a_fail_when_no_page_is_near_the_floor():
             if a[ "id" ] == "page.04": a[ "probabilities" ] = { "reuse": 0.1 if rec[ "arm" ] != "page-pack" else 0.9, "extend": 0.0, "unrelated": 0.9 if rec[ "arm" ] != "page-pack" else 0.1 }
     r = an.page_arm( an.read_stage( recs ) )
     assert r[ "near_floor_pages" ] == 0 and r[ "state" ] == "fail"
+    assert "no page lies within" not in an.render( an.build_report( recs, canaries=[] ) )
+
+
+@pytest.mark.parametrize( "edge,expect", [ ( 0.35, 1 ), ( 0.25, 1 ), ( 0.3501, 0 ), ( 0.2499, 0 ) ] )
+def test_the_near_band_includes_both_ends_and_nothing_beyond( edge, expect ):
+    base = { "p0": 0.9, "p1": edge, "p2": 0.05 }
+    r = an.page_arm( an.read_stage( [ _arm( "page-single1", base ), _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )
+    assert r[ "near_floor_pages" ] == expect and r[ "state" ] == ( "pass" if expect else "inconclusive" )
 
 
 def test_a_page_arm_with_an_arm_missing_or_unclean_or_stopped_is_not_judged():
@@ -1175,11 +1189,12 @@ def test_a_stage_with_no_page_arm_reads_inconclusive_with_no_question():
     assert ( r[ "state" ], r[ "questions" ] ) == ( "inconclusive", [] )
 
 
-def test_a_page_lost_within_the_limit_from_one_arm_is_read_over_the_pages_answered_in_all_three():
+@pytest.mark.parametrize( "which", [ "page-single1", "page-single2", "page-pack" ] )
+def test_a_page_lost_within_the_limit_from_any_one_arm_is_read_over_the_pages_answered_in_all_three( which ):
     base = { **{ f"p{k:03d}": 0.05 for k in range( 200 ) }, "p000": 0.9, "p001": 0.31 }
-    def arm( name, size=1 ): return _arm( name, base, size=size )
-    s1 = arm( "page-single1" ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p150" ]; s1[ "failed" ] = [ "p150" ]
-    r  = an.page_arm( an.read_stage( [ s1, arm( "page-single2" ), arm( "page-pack", 200 ) ] ) )
+    arms = { n: _arm( n, base, size=200 if n == "page-pack" else 1 ) for n in an.PAGE_ARMS }
+    arms[ which ][ "answers" ] = [ a for a in arms[ which ][ "answers" ] if a[ "id" ] != "p150" ]; arms[ which ][ "failed" ] = [ "p150" ]
+    r = an.page_arm( an.read_stage( list( arms.values() ) ) )
     assert r[ "state" ] == "pass" and r[ "pack_changes" ] == 0 and r[ "noise_changes" ] == 0 and r[ "questions" ] == [ 1 ] and r[ "near_floor_pages" ] == 1
 
 

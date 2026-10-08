@@ -32,6 +32,9 @@ CONFIDENCE_BAR                  = 0.9                         # an answer is con
 
 INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422" )
 PROBE_PLAN_SUFFIX = "-probe-plan.json"                        # the driver writes one of these beside the arms of a question
+PAGE_ARMS     = ( "page-single1", "page-single2", "page-pack" )
+PAGE_NEAR     = 0.05                                          # a page this close to the floor makes the page arm conclusive
+PAGE_FLOOR    = vd.POLICY[ "floor" ]
 LOST_ONE_IN   = 200                                           # an arm may lose one entry in this many and still be judged
 REQUIRED_ARMS = ( "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
                   "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" )
@@ -434,6 +437,45 @@ def analyze_pages( stage ):
     return out
 
 
+def page_arm( stage ):
+    """
+    Judge packing of the page asks by the plan's rules.
+
+    Requires:
+        - stage comes from read_stage; each question with a page arm has all three page arms
+    Ensures:
+        - returns { state, questions, pack_changes, noise_changes, pack_p99, noise_floor, near_floor_pages }
+        - the counts are None when the arms were not judged: state is then invalid, or inconclusive when one is absent or unclean
+        - pack_changes counts the questions where packing changes the set of chosen pages against the first one-each run
+        - noise_changes counts the questions where the second one-each run does
+        - noise_floor is the 99th percentile of the one-each differences, read as at least the minimum
+        - state is fail when pack_changes passes noise_changes, or when the packed p99 passes the noise floor
+        - state is inconclusive instead of pass when no page lies within the near band of the floor in any question
+        - only the pages answered in all three arms of a question are read
+    """
+    from lupin_mcp import reuse_tools as rt
+    qs   = [ q for q in sorted( stage ) if any( n in stage[ q ] for n in PAGE_ARMS ) ]
+    bad  = _arms_state( [ stage[ q ].get( n ) for q in qs for n in PAGE_ARMS ] )
+    out  = { "state": bad, "questions": qs, "pack_changes": None, "noise_changes": None, "pack_p99": None, "noise_floor": None, "near_floor_pages": None }
+    if bad is not None: return out
+    pack_changes = noise_changes = near = 0
+    pack_diffs, noise_diffs = [], []
+    for q in qs:
+        s1, s2, pack = ( stage[ q ][ n ] for n in PAGE_ARMS )
+        common = [ i for i in s1[ "entry_ids" ] if all( i in a[ "probabilities" ] for a in ( s1, s2, pack ) ) ]
+        sets   = [ { c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) } for a in ( s1, s2, pack ) ]
+        pack_changes += 1 if sets[ 0 ] != sets[ 2 ] else 0
+        noise_changes += 1 if sets[ 0 ] != sets[ 1 ] else 0
+        pack_diffs += [ round( abs( s1[ "overlaps" ][ i ] - pack[ "overlaps" ][ i ] ), 6 ) for i in common ]
+        noise_diffs += [ round( abs( s1[ "overlaps" ][ i ] - s2[ "overlaps" ][ i ] ), 6 ) for i in common ]
+        near += sum( 1 for i in common if round( abs( s1[ "overlaps" ][ i ] - PAGE_FLOOR ), 6 ) <= PAGE_NEAR )
+    floor = max( percentile( noise_diffs ), NOISE_FLOOR_MIN )
+    p99   = percentile( pack_diffs )
+    state = _combine( [ "fail" if pack_changes > noise_changes else "pass", "fail" if p99 > floor else "pass" ] )
+    if state == "pass" and not near: state = "inconclusive"
+    return dict( out, state=state, pack_changes=pack_changes, noise_changes=noise_changes, pack_p99=p99, noise_floor=floor, near_floor_pages=near )
+
+
 def _confidence_flips( ref, other ):
     """Ensures: returns the ids answered in both arms on opposite sides of the confidence bar."""
     return [ i for i in ref[ "confidences" ] if i in other[ "confidences" ] and ( ref[ "confidences" ][ i ] >= CONFIDENCE_BAR ) != ( other[ "confidences" ][ i ] >= CONFIDENCE_BAR ) ]
@@ -563,6 +605,7 @@ def build_report( records, canaries ):
           canaries, unclean_arms, lost_by_arm }
         - lost_by_arm gives every arm's lost count beside its limit and its stop reason
         - decision comes from the passes and next_step from the stop rules
+        - page_arm is the page arm's verdict; a failing page arm turns a decision that did not stop into a stop
         - unclean_arms lists every arm that is not clean, with its status and stop reason
     """
     stage = read_stage( records )
@@ -570,7 +613,10 @@ def build_report( records, canaries ):
     stop  = stop_rules( stage )
     unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ] }
                 for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
-    return { "decision": ev[ "decision" ], "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ),
+    pg    = page_arm( stage )
+    decision = ev[ "decision" ]
+    if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails, so the page asks stay one each"
+    return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg,
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
              "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
@@ -584,7 +630,7 @@ def render( report ):
 
     Ensures:
         - returns a string with the decision, the next step, the boundary count, the noise floor, one block per
-          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary, the page arms and the cost
+          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary, the page arm with its questions and the cost
     """
     ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
     lines  = [ "Live packing measurement: analysis", "", f"Decision: {report[ 'decision' ]}", f"Next step: {report[ 'next_step' ]}", "",
@@ -604,7 +650,15 @@ def render( report ):
     for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
-    for q, p in report[ "pages" ].items(): lines.append( f"pages, question {q}: {p[ 'state' ]}" )
+    pg = report[ "page_arm" ]
+    if pg[ "pack_changes" ] is None: lines.append( f"page arm: {pg[ 'state' ]}" )
+    else:
+        why = f"no page lies within {PAGE_NEAR} of {PAGE_FLOOR} in any question; " if pg[ "state" ] == "inconclusive" and not pg[ "near_floor_pages" ] else ""
+        lines.append( f"page arm: {pg[ 'state' ]}; {why}chosen pages changed by packing on {pg[ 'pack_changes' ]} of {len( pg[ 'questions' ] )} questions against {pg[ 'noise_changes' ]} by noise; "
+                      f"per-page difference p99 {pg[ 'pack_p99' ]} against floor {pg[ 'noise_floor' ]}; pages within {PAGE_NEAR} of {PAGE_FLOOR}: {pg[ 'near_floor_pages' ]}" )
+    for q, p in report[ "pages" ].items():
+        if "set_changed_by_packing" in p: lines.append( f"pages, question {q}: chosen set changed by packing {'yes' if p[ 'set_changed_by_packing' ] else 'no'}, by noise {'yes' if p[ 'set_changed_by_noise' ] else 'no'}" )
+        else: lines.append( f"pages, question {q}: {p[ 'state' ]}" )
     if report[ "cost" ] is not None: lines.append( f"cost per search: mean ${report[ 'cost' ][ 'mean_dollars' ]}" )
     return "\n".join( lines )
 
