@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from zoneinfo import ZoneInfo
 
+from cosa.rest import suite_run_token
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.pytest_args_policy import validate_pytest_args, validate_timeout_against_suite_budget
@@ -483,6 +484,7 @@ class TestSuiteJob( AgenticJobBase ):
         self.dry_run             = dry_run
         self.auto_fix_on_failure = auto_fix_on_failure
         self.env_vars            = self._filter_env_vars( env_vars or {} )
+        self._suite_token        = None  # set per real run by _execute; None when the INI switch is off
 
         # Results (populated after execution)
         self.suite_results = {}
@@ -499,6 +501,10 @@ class TestSuiteJob( AgenticJobBase ):
     # when adding new test-scoped env contracts.
     _ENV_VAR_ALLOWED_PREFIXES = ( "TFE_", "BFE_", "LUPIN_TEST_" )
 
+    # Names only the runner may set. A caller's value is dropped, not overridden later, so a
+    # run with no token issued shows its children no token at all.
+    _ENV_VAR_RESERVED = ( suite_run_token.TOKEN_ENV_NAME, )
+
     @classmethod
     def _filter_env_vars( cls, raw: Dict[ str, str ] ) -> Dict[ str, str ]:
         """Drop keys that don't match the allowlist; coerce values to str."""
@@ -510,7 +516,9 @@ class TestSuiteJob( AgenticJobBase ):
             if not isinstance( k, str ):
                 dropped.append( repr( k ) )
                 continue
-            if any( k.startswith( p ) for p in cls._ENV_VAR_ALLOWED_PREFIXES ):
+            if k in cls._ENV_VAR_RESERVED:
+                dropped.append( k )
+            elif any( k.startswith( p ) for p in cls._ENV_VAR_ALLOWED_PREFIXES ):
                 filtered[ k ] = str( v )
             else:
                 dropped.append( k )
@@ -848,6 +856,10 @@ class TestSuiteJob( AgenticJobBase ):
             if self.debug and suites_to_run != list( self.test_types ):
                 print( f"[TestSuiteJob] Expanded {self.test_types} -> {suites_to_run}" )
 
+            # The lineage token for the children this sweep starts (row 8d4a5a59). Issued after
+            # the preflight, revoked in the finally below on every exit.
+            self._suite_token = self._issue_suite_token( suites_to_run )
+
             # Between-suites reset seams (bug 8bd20375): _between_suite_pairs is
             # the SINGLE source of truth for WHERE the shared-DB reset fires —
             # one (prev, next) per gap. Map each non-first suite to its
@@ -1180,6 +1192,8 @@ class TestSuiteJob( AgenticJobBase ):
             return summary
 
         finally:
+            suite_run_token.revoke( self.id_hash )
+            self._suite_token = None
             voice_io.clear_job_id()
 
     async def _execute_dry_run( self, voice_io, cosa_interface ) -> str:
@@ -1363,6 +1377,32 @@ class TestSuiteJob( AgenticJobBase ):
 
         print( "[TestSuiteJob] ✓ preflight exclusivity PASSED: no non-test inflight agentic "
                "jobs on lupin_db_test" )
+
+    def _issue_suite_token( self, suites_to_run: List[ str ] ) -> Optional[ str ]:
+        """
+        Issue the per-run lineage token for this sweep when the INI switch is on.
+
+        Requires:
+            - suites_to_run is the expanded list of suite names this sweep will run
+
+        Ensures:
+            - returns None when the switch is off, and nothing is stored
+            - otherwise returns a token bound to this job's id, expiring after the sum of the
+              suites' budgets plus the module's slack
+            - a failure to issue is printed and returns None: a missing token costs the children
+              their lineage, and must not end the sweep
+        """
+        try:
+            if not suite_run_token.token_enabled(): return None
+            budget = sum( SUITE_TIMEOUTS_SECONDS.get( s, SUITE_TIMEOUT_DEFAULT_SECONDS ) for s in suites_to_run )
+            return suite_run_token.issue( self.id_hash, budget + suite_run_token.EXPIRY_SLACK_SECONDS )
+        except Exception as error:
+            print( f"[TestSuiteJob] WARNING: suite token not issued ({type( error ).__name__}); children lose their lineage" )
+            return None
+
+    def _suite_token_env( self ) -> Dict[ str, str ]:
+        """The token as a one-entry environment, or empty when none was issued."""
+        return { } if self._suite_token is None else { suite_run_token.TOKEN_ENV_NAME: self._suite_token }
 
     def _reset_state_between_suites( self, prev_suite: str, next_suite: str ) -> None:
         """
@@ -1636,6 +1676,11 @@ class TestSuiteJob( AgenticJobBase ):
                     # The LUPIN_TEST_ prefix is already inside _ENV_VAR_ALLOWED_PREFIXES, so the
                     # plumbing to carry it existed and was simply unused.
                     "LUPIN_TEST_SUITE_JOB_ID" : self.id_hash,
+                    # The per-run lineage token (row 8d4a5a59), also AFTER **self.env_vars so a
+                    # caller cannot replace it. Present only while a token is issued. The name
+                    # keeps a credential word, which is what makes the redaction layer hunt its
+                    # value in test output; a unit test pins that.
+                    **self._suite_token_env(),
                 }
             )
 

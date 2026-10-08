@@ -21,21 +21,11 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from tests.helpers.suite_lineage import lineage_request
+
 
 # Test server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
-
-def _with_lineage( body ):
-    """
-    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
-
-    Under a monopoly hold the queue defers every job that is not the monopolizer's own
-    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
-    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
-    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
-    """
-    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-    return { **body, "parent_id_hash": parent_id } if parent_id else body
 
 
 
@@ -74,21 +64,6 @@ NEEDS_A_DRAINED_QUEUE = pytest.mark.xfail(
              "fix it, and strict=True means an unexpected pass goes RED so the mark "
              "cannot outlive the mechanism it names."
 )
-
-# A stop-gap, not a repair, and not the same cause as the mark above. For this test the drain is
-# observable: it passed in the green run on 8267a2c39. Since 996dfdb8f (row 8d4a5a59) the door drops
-# the suite lineage claim for a fresh random user, so the job waits behind the suite. strict=True:
-# when the lineage repair lands the test XPASSes and the run goes red, which forces the mark off.
-# The other three marked tests hide the same starvation and stay under the mark above (row ce29cd20).
-NEEDS_THE_LINEAGE_REPAIR = pytest.mark.xfail(
-    strict = True,
-    reason = "row 8d4a5a59 — the door drops the suite's parent_id_hash for a fresh random user "
-             "(996dfdb8f, reason owner_unknown), so the job is not stamped, Gate B defers it behind "
-             "the monopolizing suite, and it never completes. "
-             "Stop-gap until the lineage repair lands; strict, so it cannot outlive the repair. "
-             "Not the structural drain of row ce29cd20: this test passed on 8267a2c39."
-)
-
 
 class TestJobQueueProgressiveDisclosure:
     """Integration tests for job queue progressive disclosure UI."""
@@ -143,11 +118,8 @@ class TestJobQueueProgressiveDisclosure:
         """
         return requests.post(
             f"{BASE_URL}/api/v2/ask",
-            json=_with_lineage( {
-                "question": question,
-                "websocket_id": websocket_id
-            } ),
-            headers={ "Authorization": f"Bearer {token}" }
+            **lineage_request( { "question": question, "websocket_id": websocket_id },
+                               { "Authorization": f"Bearer {token}" } )
         )
 
     def _get_queue( self, token, queue_name, user_filter=None ):
@@ -341,9 +313,10 @@ class TestJobQueueProgressiveDisclosure:
             assert job[ "agent_type" ] == "MathAgent", \
                 f"Expected MathAgent, got {job[ 'agent_type' ]}"
 
-    # The mark came off in ad98148cd, after this test XPASSed(strict) in ts-84720dde on 222ba140c.
-    # It carries its own mark since 996dfdb8f: see NEEDS_THE_LINEAGE_REPAIR above.
-    @NEEDS_THE_LINEAGE_REPAIR
+    # No mark. It XPASSed(strict) once the lineage claim made the drain observable, and the per-run
+    # suite token (row 8d4a5a59) gives a fresh random user that lineage back. The three tests
+    # above and below keep NEEDS_A_DRAINED_QUEUE: they failed in that same run with the lineage
+    # working, so the token is not shown to change them.
     def test_job_interactions_endpoint( self, clean_test_db ):
         """
         Verify the /api/get-job-interactions/{job_id} endpoint works.

@@ -1,6 +1,8 @@
 """
 Every done-queue waiter in the integration file carries a strict xfail that names its row.
 
+One waiter, test_job_interactions_endpoint, is repaired by the suite token and carries none.
+
 Inside a monopolize run the suite job holds the slot.
 A job from a user the door does not tie to the suite waits until the suite ends.
 A test waiting for that job fails with a timeout.
@@ -16,7 +18,8 @@ import os
 import pytest
 
 PATH = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "tests", "integration", "test_job_queue_progressive_disclosure.py" )
-MARKS = { "NEEDS_A_DRAINED_QUEUE": "ce29cd20", "NEEDS_THE_LINEAGE_REPAIR": "8d4a5a59" }
+MARKS = { "NEEDS_A_DRAINED_QUEUE": "ce29cd20" }
+UNMARKED_WAITERS = [ "test_job_interactions_endpoint" ]
 
 
 def _tree():
@@ -46,8 +49,8 @@ def test_the_file_has_tests_and_four_of_them_wait_on_the_done_queue():
 
 
 def test_every_test_that_waits_on_the_done_queue_carries_the_mark():
-    unmarked = [ name for name, waits, marks in _tests_and_waiters() if waits and not set( marks ) & set( MARKS ) ]
-    assert unmarked == [ ], f"waits on the done queue without the drain mark: {unmarked}"
+    unmarked = sorted( name for name, waits, marks in _tests_and_waiters() if waits and not set( marks ) & set( MARKS ) )
+    assert unmarked == UNMARKED_WAITERS, f"waits on the done queue without the drain mark: {unmarked}"
 
 
 def test_no_test_that_does_not_wait_carries_the_mark():
@@ -67,9 +70,15 @@ def test_each_mark_is_a_strict_xfail_that_names_its_row( mark, row ):
     assert row in ast.unparse( keywords[ "reason" ] )
 
 
-def test_the_lineage_stop_gap_is_on_the_one_test_it_is_for_and_the_drain_mark_on_the_other_three():
+def test_the_repaired_waiter_is_unmarked_and_the_drain_mark_is_on_the_other_three():
     by_name = { name: marks for name, waits, marks in _tests_and_waiters() if waits }
-    assert by_name[ "test_job_interactions_endpoint" ] == [ "NEEDS_THE_LINEAGE_REPAIR" ]
+    assert by_name[ "test_job_interactions_endpoint" ] == [ ]
     others = sorted( name for name, marks in by_name.items() if marks == [ "NEEDS_A_DRAINED_QUEUE" ] )
     assert others == [ "test_done_queue_metadata_includes_session_fields", "test_job_interactions_unauthorized_access",
                        "test_job_transitions_todo_to_done" ]
+
+
+def test_the_lineage_stop_gap_mark_is_gone_from_the_file():
+    names = { n.id for n in ast.walk( _tree() ) if isinstance( n, ast.Name ) }
+    targets = { t.id for n in ast.walk( _tree() ) if isinstance( n, ast.Assign ) for t in n.targets if isinstance( t, ast.Name ) }
+    assert "NEEDS_THE_LINEAGE_REPAIR" not in names | targets

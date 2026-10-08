@@ -274,12 +274,14 @@ ask and was stopped by the default 15-minute per-file cap, which is why the run 
 | `pytest_args` | `args` | string, shell-style (shlex) parsed | none | Extra pytest args passed through to the script. Unbalanced quotes are refused at submit. `--bg` flag is stripped (harmful for subprocess runs). |
 | `dry_run` | `args` | bool | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds. |
 | `auto_fix_on_failure` | `args` | bool | none | Per-run override for TFE auto-dispatch; omitted uses the INI default. |
-| `env_vars` | `args` | object of strings | none | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+| `env_vars` | `args` | object of strings | none | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). `LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN` is reserved to the runner and dropped from a request. |
 | `scheduled_at` | top-level | ISO datetime string | none (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
 | `websocket_id` | top-level | string | none | WebSocket session ID for notifications. |
 | `parent_id_hash` | top-level | string | none | A monopolizing sweep's id, so Gate B admits its child through the hold. |
 
 ⚠️ **There is no `monopolize` request field.** The job forces monopolize on in its own constructor.
+
+**The per-run lineage token (row 8d4a5a59).** Where `v2 parent stamp token enabled = true` (Development and Testing only), a real sweep issues one secret for its run and exports it to every suite subprocess as `LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN`, beside `LUPIN_TEST_MONOPOLIZE_PARENT_ID`. A test that registers a fresh user sends the id as `parent_id_hash` and the token in the `X-Lupin-Lineage-Token` header (`tests/helpers/suite_lineage.py` does both). The server honours the claim while that run holds the monopoly slot and until the token expires, which is the sum of the sweep's suite budgets plus ten minutes. The sweep revokes the token on every exit. A refused token drops the stamp and names its reason in the trace field `parent_id_hash_dropped`. Any process the suite starts can read the token.
 
 **Response** (a v2 `AskResponse`, the fields that matter):
 

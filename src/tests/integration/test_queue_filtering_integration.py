@@ -9,21 +9,11 @@ import os
 
 import requests
 
+from tests.helpers.suite_lineage import lineage_request
+
 
 # Test server configuration
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
-
-def _with_lineage( body ):
-    """
-    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
-
-    Under a monopoly hold the queue defers every job that is not the monopolizer's own
-    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
-    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
-    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
-    """
-    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-    return { **body, "parent_id_hash": parent_id } if parent_id else body
 
 
 
@@ -50,11 +40,8 @@ class TestQueueFilteringIntegration:
         # LANDING in the queue — it asserts total_jobs >= 0 and validates the filtering
         # response shape, as its own comment below says.
         push_response = requests.post( f"{BASE_URL}/api/v2/ask",
-            json=_with_lineage( {
-                "question": "What is 2+2?",
-                "websocket_id": "test_session_1"
-            } ),
-            headers={"Authorization": f"Bearer {user_token}"}
+            **lineage_request( { "question": "What is 2+2?", "websocket_id": "test_session_1" },
+                               { "Authorization": f"Bearer {user_token}" } )
         )
         assert push_response.status_code == 200
         print( f"Push response: {push_response.json()}" )
@@ -158,11 +145,8 @@ class TestQueueFilteringIntegration:
 
         # Ask as the target user (/api/push retired 2026-08-21).
         requests.post( f"{BASE_URL}/api/v2/ask",
-            json=_with_lineage( {
-                "question": "Target user question",
-                "websocket_id": "target_session"
-            } ),
-            headers={"Authorization": f"Bearer {user_token}"}
+            **lineage_request( { "question": "Target user question", "websocket_id": "target_session" },
+                               { "Authorization": f"Bearer {user_token}" } )
         )
 
         # Get admin token from fixture

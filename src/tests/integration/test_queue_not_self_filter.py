@@ -17,18 +17,7 @@ import time
 
 from .conftest import BASE_URL
 
-
-def _with_lineage( body ):
-    """
-    Tag an /api/v2/ask body with its monopolizing suite job, when there is one.
-
-    Under a monopoly hold the queue defers every job that is not the monopolizer's own
-    child, so an untagged ask sits in `todo` until the suite ends (row 4cbd4858). The suite
-    job exports its id as LUPIN_TEST_MONOPOLIZE_PARENT_ID; `/api/v2/ask` takes it as
-    `parent_id_hash`. Outside a suite the variable is unset and the body is unchanged.
-    """
-    parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-    return { **body, "parent_id_hash": parent_id } if parent_id else body
+from tests.helpers.suite_lineage import lineage_request
 
 
 def register_and_login( email, password ):
@@ -119,8 +108,8 @@ def push_job( token, question, session_id="test_session" ):
     """
     return requests.post(
         f"{BASE_URL}/api/v2/ask",
-        json=_with_lineage( { "question": question, "websocket_id": session_id } ),
-        headers={ "Authorization": f"Bearer {token}" }
+        **lineage_request( { "question": question, "websocket_id": session_id },
+                           { "Authorization": f"Bearer {token}" } )
     )
 
 
