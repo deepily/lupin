@@ -509,3 +509,41 @@ class TestResolveScriptPath:
             path = resolve_script_path( "all_agents" )
         assert path.endswith( "all-agents.json" )
         assert path.startswith( "/root" )
+
+
+def _respond_with_answer( answer ):
+    """Run one open-ended question through a matcher whose model answers `answer`."""
+    xml = (
+        f"<response><matched_entry>1</matched_entry><answer>{answer}</answer>"
+        "<confidence>0.9</confidence><reasoning>r</reasoning></response>"
+    )
+    s, client = _make_matcher()
+    client.run.return_value = xml
+    s._processor.process_template.return_value = "{response_type}{title}{incoming_question}{options_section}{script_entries}"
+    with patch.object( sm, "cu", _patch_cu() ):
+        return s.respond( { "response_type": "open_ended", "message": "budget?", "title": "T" } )
+
+
+class TestSurroundingQuotesAreStripped:
+    """The entry format shows `Answer: "no limit"`, and the model sometimes copies the quotes."""
+
+    def test_one_pair_of_surrounding_double_quotes_is_removed( self ):
+        assert _respond_with_answer( '"no limit"' ) == "no limit"
+
+    def test_a_bare_answer_is_unchanged( self ):
+        assert _respond_with_answer( "no limit" ) == "no limit"
+
+    def test_only_one_pair_is_removed( self ):
+        assert _respond_with_answer( '""no limit""' ) == '"no limit"'
+
+    def test_quotes_inside_the_answer_keep_it_whole( self ):
+        assert _respond_with_answer( '"a" and "b"' ) == '"a" and "b"'
+
+    def test_a_lone_quote_is_unchanged( self ):
+        assert _respond_with_answer( '"no limit' ) == '"no limit'
+
+    def test_an_empty_pair_is_not_turned_into_an_empty_answer( self ):
+        assert _respond_with_answer( '""' ) == '""'
+
+    def test_single_quotes_are_left_alone( self ):
+        assert _respond_with_answer( "'tis" ) == "'tis"
