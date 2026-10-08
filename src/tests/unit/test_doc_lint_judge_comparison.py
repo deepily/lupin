@@ -414,6 +414,33 @@ def test_a_report_that_is_not_from_this_run_is_refused_field_by_field( run, tmp_
     assert jc.check_report_binds( "jev", dict( report, claude_cli_version="2.0" ), "sha", backend.prompt_version, JEV, None ) is None, "an unbound ledger has no binary to compare"
 
 
+def _bound_report( run, tmp_path ):
+    """Return ( report, backend, args ) for check_report_binds, every other field bound."""
+    _, backend, _, _, report = jev_run( run, tmp_path, False )
+    report = dict( report, claude_cli="/x", claude_cli_version="1.0", pairs_sha="sha" )
+    return report, backend, ( "jev", report, "sha", backend.prompt_version, JEV, "claude_cli=/x|version=1.0" )
+
+
+def test_a_report_of_the_current_harness_version_binds( run, tmp_path ):
+    report, backend, args = _bound_report( run, tmp_path )
+    assert report[ "harness_version" ] == hn.HARNESS_VERSION                                 # the real report carries the key, so the tests below start from it
+    assert jc.check_report_binds( *args ) is None
+
+
+@pytest.mark.parametrize( "version", [ 1, 3 ] )
+def test_a_report_of_another_harness_version_is_refused_naming_both_values( run, tmp_path, version ):
+    report, backend, args = _bound_report( run, tmp_path )
+    report[ "harness_version" ] = version
+    with pytest.raises( jc.ReportMismatch, match=f"harness version is {version} in the report and {hn.HARNESS_VERSION} here" ): jc.check_report_binds( *args )
+
+
+def test_a_report_with_no_harness_version_reads_as_version_1_and_does_not_crash( run, tmp_path ):
+    report, backend, args = _bound_report( run, tmp_path )
+    del report[ "harness_version" ]
+    assert "harness_version" not in args[ 1 ] and hn.HARNESS_VERSION != 1                    # a version 1 report has no such key; the current version is not 1
+    with pytest.raises( jc.ReportMismatch, match=f"harness version is 1 in the report and {hn.HARNESS_VERSION} here" ): jc.check_report_binds( *args )
+
+
 def _jev_main_run( run, tmp_path, fail_p5, report_edit=None ):
     ledger, backend, _, _, report = jev_run( run, tmp_path, fail_p5 )
     import hashlib
