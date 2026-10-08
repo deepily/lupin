@@ -133,6 +133,22 @@ def test_the_shortlist_is_cut_to_ten_keeping_every_causal_row_it_can():
     assert len( ft.shortlist( mixed, POLICY, cap = 3 ) ) == 3
 
 
+def test_a_row_exactly_at_the_threshold_is_in_the_pool_and_one_just_under_it_is_not():
+    rows = [ _row( "m", "at", False, 0.5, 0.1 ), _row( "m", "under", False, 0.4999, 0.1 ) ]
+    assert [ r[ "candidate" ] for r in ft.shortlist( rows, POLICY ) ] == [ "at" ]
+
+
+def test_when_more_than_ten_rows_are_causal_the_best_ten_by_provides_stay_not_the_first_ten_by_id():
+    many = [ _row( "m", f"t{k:02d}", True, round( 0.8 + k / 100, 2 ) ) for k in range( 12 ) ] + [ _row( "m", f"x{k}", False, 0.6 ) for k in range( 3 ) ]
+    got  = [ r[ "candidate" ] for r in ft.shortlist( many, POLICY ) ]
+    assert got == [ f"t{k:02d}" for k in range( 11, 1, -1 ) ]
+
+
+def test_exactly_ten_causal_rows_leave_no_room_for_a_row_that_is_not_causal():
+    rows = [ _row( "m", f"c{k}", True, 0.9 ) for k in range( 10 ) ] + [ _row( "m", "x", False, 0.6 ) ]
+    assert len( ft.shortlist( rows, POLICY ) ) == 10 and "x" not in [ r[ "candidate" ] for r in ft.shortlist( rows, POLICY ) ]
+
+
 def test_ranking_is_by_provides_high_to_low_then_candidate_id():
     rows = [ _row( "m", "b", False, 0.6 ), _row( "m", "a", False, 0.6 ), _row( "m", "c", False, 0.9 ) ]
     assert [ r[ "candidate" ] for r in ft.shortlist( rows, { **POLICY, "reuse": 0.95 } ) ] == [ "c", "a", "b" ]
@@ -151,6 +167,11 @@ def test_a_twin_the_run_could_not_use_stays_in_the_count_and_a_malformed_non_twi
     r = ft.evaluate( rows, POLICY )
     assert ( r[ "twins" ], r[ "non_twin_rows" ], r[ "unusable" ], r[ "false_reuse" ] ) == ( 3, 6, 2, 1 )
     assert r[ "false_reuse_rate" ] == round( 1 / 6, 6 )
+
+
+def test_a_non_twin_exactly_at_the_reuse_cut_counts_as_false_reuse_and_one_just_under_does_not():
+    rows = [ _row( "m", "t", True, 0.9 ), _row( "m", "at", False, 0.7 ), _row( "m", "under", False, 0.6999 ) ]
+    assert ft.evaluate( rows, POLICY )[ "false_reuse" ] == 1
 
 
 def test_with_no_twin_rows_or_no_non_twin_rows_the_ratios_are_none_not_zero():
@@ -193,6 +214,11 @@ def test_a_grid_point_with_the_floor_above_the_reuse_cut_is_never_tried():
     assert [ t[ "policy" ][ "reuse" ] for t in r[ "table" ] ] == [ 0.9 ]
 
 
+def test_a_point_with_the_floor_equal_to_the_reuse_cut_is_tried():
+    r = ft.fit_policy( _opt_rows(), HALVES, 1.0, { "reuse": ( 0.3, ), "threshold": ( 0.4, ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
+    assert [ t[ "policy" ][ "reuse" ] for t in r[ "table" ] ] == [ 0.3 ]
+
+
 def test_the_table_lists_every_point_in_a_fixed_order_with_its_figures():
     r = ft.fit_policy( _opt_rows(), HALVES, 0.5, GRID )
     assert [ ( t[ "policy" ][ "threshold" ], t[ "policy" ][ "reuse" ] ) for t in r[ "table" ] ] == [ ( 0.4, 0.7 ), ( 0.4, 0.9 ), ( 0.6, 0.7 ), ( 0.6, 0.9 ) ]
@@ -219,7 +245,7 @@ def test_the_fit_refuses_an_empty_input_and_an_empty_or_out_of_range_grid():
 
 def test_when_no_grid_point_keeps_false_reuse_within_the_rate_it_says_what_was_reachable():
     rows = [ _row( "m", "t", True, 0.9 ), _row( "m", "n", False, 0.95 ) ]
-    with pytest.raises( ft.NoFeasiblePolicy, match = "0.5" ) as caught: ft.fit_policy( rows, HALVES, 0.1, { "reuse": ( 0.7, 0.9 ), "threshold": ( 0.5, ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
+    with pytest.raises( ft.NoFeasiblePolicy, match = "lowest reachable rate is 1.0" ) as caught: ft.fit_policy( rows, HALVES, 0.1, { "reuse": ( 0.7, 0.9 ), "threshold": ( 0.5, ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
     assert isinstance( caught.value, ValueError )
 
 
@@ -238,10 +264,10 @@ def test_a_policy_fitted_on_the_fit_half_is_not_changed_by_what_the_check_half_h
 def test_the_old_question_is_fitted_on_its_own_overlap_with_one_cut():
     rows = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.5 ), _row( "m", "b", False, None, None, p_overlap = 0.8 ),
              _row( "m", "bad", False, None, None, p_overlap = None, malformed = "x" ) ]
-    r = ft.fit_old( rows, HALVES, 0.5, cuts = ( 0.4, 0.6, 0.85 ) )
+    r = ft.fit_old( rows, HALVES, 0.7, cuts = ( 0.4, 0.6, 0.85 ) )
     assert r[ "chosen" ] == { "cut": 0.4 } and r[ "feasible" ] == 3 and [ t[ "policy" ][ "cut" ] for t in r[ "table" ] ] == [ 0.4, 0.6, 0.85 ]
     assert r[ "table" ][ 1 ][ "figures" ][ "twins_on_shortlist" ] == 0 and r[ "table" ][ 0 ][ "figures" ][ "false_reuse" ] == 2
-    assert ft.fit_old( rows, HALVES, 0.0, cuts = ( 0.4, 0.6, 0.85 ) )[ "chosen" ] == { "cut": 0.85 } if False else True
+    assert ft.fit_old( rows, HALVES, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )[ "chosen" ] == { "cut": 0.6 }                # 0.4 breaks the rate, 0.6 and 0.85 find no twin
     with pytest.raises( ft.NoFeasiblePolicy ): ft.fit_old( rows, HALVES, 0.0, cuts = ( 0.4, 0.6 ) )
 
 
@@ -256,10 +282,10 @@ def test_the_reliability_table_bins_provides_and_reports_an_empty_bin_instead_of
     assert ft.reliability( [ _row( "m", "a", True, None, None, p_overlap = 0.95 ) ], key = "p_overlap" )[ "bins" ][ 9 ][ "n" ] == 1
 
 
-def _split_and_rows( n_per_member = 6 ):
-    man   = _manifest()
-    split = ss.split_record( man, hashlib.sha256( b"slice" ).hexdigest(), 20261008 )
-    return man, split
+def test_a_value_just_under_a_bin_edge_in_floating_point_still_lands_in_the_bin_it_names():
+    assert 0.29 * 100 < 29                                                                    # the float product falls short of 29
+    t = ft.reliability( [ _row( "m", "a", True, 0.29 ) ], bins = 100 )
+    assert t[ "bins" ][ 29 ][ "n" ] == 1 and t[ "bins" ][ 28 ][ "n" ] == 0
 
 
 def test_the_report_carries_the_choice_the_check_half_the_reliability_and_the_counts():
