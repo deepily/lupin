@@ -123,3 +123,16 @@ def test_a_router_defer_says_so_in_debug_output( capsys ):
     r, _ = _responder( _result(), connected=True, debug=True )
     _run( r )
     assert "DEFER TO USER" in capsys.readouterr().out
+
+
+def test_outside_active_hours_the_feed_is_not_asked_at_all():
+    r, feed = _responder( _result(), connected=True, now=NIGHT )
+    _run( r )
+    feed.assert_not_called()
+
+
+def test_the_injected_clock_reading_is_what_the_router_is_given():
+    r, _ = _responder( _result(), connected=True )
+    r.smart_router.should_defer_to_user = MagicMock( return_value=False )
+    _run( r )
+    r.smart_router.should_defer_to_user.assert_called_once_with( now=NOON, user_connected=True )
