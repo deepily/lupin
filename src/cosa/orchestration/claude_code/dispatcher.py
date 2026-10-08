@@ -40,13 +40,19 @@ Environment Variables:
 """
 
 import asyncio
+import logging
 import subprocess
 import json
 import os
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, Callable, Any, TypedDict
 from datetime import datetime
+
+from cosa.agents.shared.sdk_error_result import error_result_text, raise_error_result
+
+logger = logging.getLogger( __name__ )
 
 # SDK imports - graceful fallback if not installed
 try:
@@ -378,10 +384,17 @@ class ClaudeCodeDispatcher:
                 # time. The debug read at the top of this block already drained
                 # the stream, so a re-read returns b"" at EOF and every failed
                 # task reported "Unknown error" with the real message dropped.
+                error = stderr_data.decode() if stderr_data else "Unknown error"
+                if final_result and final_result.get( "is_error" ):
+                    # The CLI's own text lives in the result line, not in stderr
+                    error = error_result_text( SimpleNamespace(
+                        subtype=final_result.get( "subtype" ), result=final_result.get( "result" ),
+                        errors=final_result.get( "errors" ) ) )
+                    if stderr_data: error += f"; stderr: {stderr_data.decode()[ :500 ]}"
                 return TaskResult(
                     task_id=task.id,
                     success=False,
-                    error=stderr_data.decode() if stderr_data else "Unknown error",
+                    error=error,
                     exit_code=process.returncode
                 )
 
@@ -476,6 +489,7 @@ Use notify() for progress. Use converse() when you need input."""
 
                         # Capture final result
                         if isinstance( message, ResultMessage ):
+                            if message.is_error: raise_error_result( message, f"ClaudeCodeDispatcher {task.id}", logger )
                             result_data = {
                                 "session_id": message.session_id,
                                 "result": message.result,
