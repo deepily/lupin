@@ -1526,7 +1526,7 @@ def test_a_decision_that_stops_and_asks_never_sits_above_a_next_step_that_runs_m
 def test_an_invalid_arm_decision_also_turns_the_next_step_into_a_stop():
     recs = _complete(); next( r for r in recs if r[ "arm" ] == "pack200" )[ "state" ] = "incomplete"; next( r for r in recs if r[ "arm" ] == "pack200" )[ "stop_reason" ] = "ceiling"
     rep = an.build_report( recs, canaries=[] )
-    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "next_step" ] == "stop and ask: see the decision above"
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid" and rep[ "next_step" ] == "stop and ask: s1-q1-pack200 is invalid (stop reason ceiling)"
 
 
 def test_a_next_step_that_already_stops_keeps_its_own_reason_beside_a_stopping_decision():

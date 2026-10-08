@@ -370,6 +370,7 @@ def stop_rules( stage, check_arms=True ):
         - returns { stop, next_step, findings, pooled_boundary, spent_by_question, spent_total }
         - a finding is { rule, stop, detail }; the rules are the stage ceiling, spend after question 1,
           and a single run 1 that is absent or not clean
+        - an invalid arm of any question stops the stage ahead of a single run 1 that is only not clean, and the next step names that arm and its stop reason
         - with check_arms, the first question that lacks a required arm names its remaining arms as the next step
         - the arms are checked after the stop findings and an unclean single run 1, and before the rules below
         - a retry such as canary-a2 never stands in for a required arm
@@ -383,10 +384,12 @@ def stop_rules( stage, check_arms=True ):
     if total > STAGE_TOKENS: findings.append( { "rule": "stage_ceiling", "stop": True, "detail": f"stage tokens above {STAGE_TOKENS:,}" } )
     if spent.get( 1, 0 ) > STOP_SPEND_AFTER_QUESTION_1: findings.append( { "rule": "spend_after_question_1", "stop": True, "detail": f"spend after question 1 above {STOP_SPEND_AFTER_QUESTION_1:,} tokens" } )
     unclean = [ q for q in sorted( stage ) if stage[ q ].get( "single1" ) is None or stage[ q ][ "single1" ][ "status" ] != "clean" ]
+    invalid = [ a for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] == "invalid" ]
     pooled  = sum( len( boundary_ids( stage[ q ][ "single1" ] ) ) for q in sorted( stage ) if q not in unclean )
     last    = max( stage ) if stage else 0
     stops   = [ f for f in findings if f[ "stop" ] ]
     if stops: stop, step = True, f"stop and ask: {stops[ 0 ][ 'detail' ]}"
+    elif invalid: stop, step = True, f"stop and ask: {_arm_label( invalid[ 0 ] )} is invalid (stop reason {invalid[ 0 ][ 'stop_reason' ]})"
     elif unclean: stop, step = True, f"stop and ask: question {unclean[ 0 ]}'s single run 1 is not clean"
     elif check_arms and any( n not in stage[ q ] for q in sorted( stage ) for n in REQUIRED_ARMS ):
         q = next( q for q in sorted( stage ) if any( n not in stage[ q ] for n in REQUIRED_ARMS ) )
