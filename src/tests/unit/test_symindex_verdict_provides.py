@@ -266,3 +266,8 @@ def test_coverage_exactly_a_half_under_the_floor_is_uncertain_while_just_under_i
     under = _decide( [ _a( "under", 0.1, 0.49 ) ] )
     assert ( at[ "verdict" ], at[ "cause" ], at[ "doubtful" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [] )
     assert ( under[ "verdict" ], under[ "causes" ] ) == ( "NEW", [] )
+
+
+def test_nothing_answered_beside_an_unknown_flag_is_still_not_new():
+    r = vd.decide_provides( [], [], [], { "NOT_A_CAUSE" } )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED" ] )

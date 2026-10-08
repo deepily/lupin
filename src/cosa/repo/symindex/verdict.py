@@ -260,7 +260,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=POLICY_PRO
     holds     = set( flags )
     if failed or missing:   holds.add( "CALL_FAILED" )
     if malformed:           holds.add( "MALFORMED_ANSWER" )
-    if not rows and not holds: holds.add( "CALL_FAILED" )
+    if not rows and not any( c in holds for c in CAUSES ): holds.add( "CALL_FAILED" )      # a flag outside CAUSES is no cause
     ordered  = _provides_order( rows )
     reuse    = [ r for r in ordered if r[ "provides" ] >= policy[ "reuse" ] ]
     banded   = [ r for r in ordered if policy[ "floor" ] <= r[ "provides" ] < policy[ "reuse" ] ]
