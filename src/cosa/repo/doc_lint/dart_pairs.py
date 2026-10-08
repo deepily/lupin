@@ -34,7 +34,7 @@ UNNAMED_EXTENSION = re.compile( r"^extension\s+on\b" )
 OPERATOR_REGEX = re.compile( r"\boperator\s*([^\s(]+)" )
 LIBRARY_REGEX = re.compile( r"^(?:library|part|import|export)\b" )
 DIRECTIVE_REGEX = re.compile( r"^(?:[a-z][\w-]*:(?!//)(?:\S+|\s+[\w.=/-]+(?:\s*,\s*[\w.=/-]+)*\s*)$|dart format (?:on|off)\b)" )
-MARKER_REGEX = re.compile( r"^[A-Z]{2,}(?:\([^)]*\))?(?::|\s*$)" )
+MARKER_REGEX = re.compile( r"^(?:TODO|FIXME|HACK|XXX)(?:\([^)]*\))?(?::|\s*$)" )
 HEAD_STOP    = re.compile( r"[({}=;,]|=>" )
 MODIFIERS    = frozenset( "static final const late external abstract covariant factory async sync base sealed interface".split() )
 MAX_HEAD_LINES = 6
@@ -316,8 +316,10 @@ def comment_prose( run ):
           followed by one unbroken token or by a comma-separated list of identifiers, or is a dart format on
           or off switch; "returns: the cached value" has words after the colon, so it is prose and is kept;
           a directive is dropped wherever it sits
-        - a line is a marker when it is a word of two or more capitals, an optional owner in parentheses, and
-          a colon or the end of the line; it and every later line of the run are dropped
+        - a line is a task marker (work to do on the code) when it starts with `TODO`, `FIXME`, `HACK` or `XXX`, an
+          optional owner in parentheses, and a colon or the end of the line; it and every later line are dropped
+        - the default for any other capitals marker, such as `NOTE:` or `WARNING:`, is to keep it as doc text: a
+          kept line costs the judge one sentence, a dropped one can hide a doc change
         - returns ( text, dropped ): text is the remaining lines normalized by block_text, or an empty string;
           dropped is [ { "line", "reason" } ] in run order, reason "directive", "marker" or "after_marker"
 
