@@ -56,7 +56,9 @@ fi
 JUNIT="$( mktemp )"
 trap 'rm -f "$JUNIT"' EXIT
 
-"$VENV_PYTHON" -m pytest "${FILES[@]}" --junit-xml="$JUNIT" -rs -q -p no:cacheprovider
+# Through the shared wrapper, so a collection error is named and a competing suite is guarded (row 73c6819d).
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest "${FILES[@]}" --junit-xml="$JUNIT" -rs -q -p no:cacheprovider
 PYTEST_RC=$?
 
 REPORT="$( "$VENV_PYTHON" -m cosa.repo.docker_smoke_report "$JUNIT" )"

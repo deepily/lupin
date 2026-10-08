@@ -70,6 +70,8 @@ def tree( tmp_path ):
     ( root / "src" / "scripts" / "lib" ).mkdir( parents=True )
     shutil.copy( RUNNER, root / "src" / "tests" / "run-docker-smoke-gate.sh" )
     shutil.copy( RESOLVER, root / "src" / "scripts" / "lib" / "resolve-venv-pytest.sh" )
+    for lib in ( "pytest-with-diagnosis.sh", "guard-contended-coverage.sh", "report-run-scope.sh" ):
+        shutil.copy( os.path.join( PROJECT_ROOT, "src", "scripts", "lib", lib ), root / "src" / "scripts" / "lib" / lib )
     os.symlink( os.path.join( PROJECT_ROOT, "src", "cosa" ), root / "src" / "cosa" )
     _executable( root / ".venv" / "bin" / "python3", STUB_PYTHON )
     _executable( tmp_path / "bin" / "docker", STUB_DOCKER )
