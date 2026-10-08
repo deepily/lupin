@@ -5,9 +5,10 @@ Store id ee9a69e1-52bb-4b67-9e27-ae127dda7920. A `// ignore: unused_element` or 
 above a member whose `///` block was removed was returned as that member's new text. The claim judge
 would then judge a lint directive as the rewritten docstring.
 
-The rule is a shape, not a word list. A line is a directive or marker, not prose about the member, in three cases.
-It is a lowercase word glued to a colon. It is a `dart format` switch. It is a capitals word and a colon,
-with an optional owner in parentheses.
+The rule is a shape for directives and a short list for task markers. A line is a directive when it is a lowercase
+word glued to a colon, or a `dart format` switch. A line is a task marker when it starts with `TODO`, `FIXME`, `HACK`
+or `XXX`, with an optional owner in parentheses. Any other capitals marker, such as `NOTE:` or `WARNING:`, is doc text and is kept.
+A kept line costs the judge one sentence. A dropped one can hide a doc change.
 
 Seams driven for real: plain_comments over Dart text, and build_pairs over a two-commit git repository.
 """
@@ -22,7 +23,7 @@ def _member( *comment_lines ):
     return "class A {\n" + "".join( f"  // {line}\n" for line in comment_lines ) + "  void _h() {}\n}\n"
 
 
-@pytest.mark.parametrize( "line", [ "coverage:ignore-line", "dart format off", "HACK(rick): remove", "expected_lint: avoid_print", "ignore_for_file: type=lint", "dart format on", "TODO" ] )
+@pytest.mark.parametrize( "line", [ "coverage:ignore-line", "dart format off", "HACK(rick): remove", "FIXME: later", "XXX", "expected_lint: avoid_print", "ignore_for_file: type=lint", "dart format on", "TODO" ] )
 def test_a_directive_or_marker_alone_is_no_comment( line ):
     assert dp.plain_comments( _member( line ) ) == {}
 
@@ -52,10 +53,19 @@ def test_prose_with_words_after_a_lowercase_colon_is_kept( line ):
     assert dp.plain_comments( _member( line ) ) == { "A._h": line }
 
 
-@pytest.mark.parametrize( "line", [ "a: b", "HTTP: retries stay bounded.", "NOTE: kept for the roster.", "WARNING: not thread safe", "OK" ] )
-def test_a_line_that_has_the_shape_of_a_directive_or_marker_is_dropped_even_when_it_is_prose( line ):
+@pytest.mark.parametrize( "line", [ "a: b" ] )
+def test_a_line_that_has_the_shape_of_a_directive_is_dropped_even_when_it_is_prose( line ):
     assert dp.plain_comments( _member( line ) ) == {}
 
 
-def test_a_wrapped_line_that_is_only_an_acronym_ends_the_text_and_drops_its_continuation():
-    assert dp.plain_comments( _member( "Opens the pane.", "API", "calls the server" ) ) == { "A._h": "Opens the pane." }
+@pytest.mark.parametrize( "line", [ "NOTE: kept for the roster.", "WARNING: not thread safe", "HTTP: retries stay bounded.", "RATIONALE: avoids a rebuild.", "OK", "API" ] )
+def test_a_capitals_marker_that_is_not_a_task_marker_is_kept_as_doc_text( line ):
+    assert dp.plain_comments( _member( line ) ) == { "A._h": line }
+
+
+def test_a_bare_url_line_is_prose_not_a_directive():
+    assert dp.plain_comments( _member( "http://example.com/spec" ) ) == { "A._h": "http://example.com/spec" }
+
+
+def test_a_wrapped_line_that_is_only_an_acronym_keeps_its_neighbours():
+    assert dp.plain_comments( _member( "Opens the pane.", "API", "calls the server" ) ) == { "A._h": "Opens the pane.\nAPI\ncalls the server" }

@@ -2,7 +2,7 @@
 dart_pairs names every comment line it drops, in the pair row and in the report.
 
 Store id ee9a69e1-52bb-4b67-9e27-ae127dda7920. The directive rule can drop a prose line by mistake, for
-example `// NOTE: retries twice`. Dropping it silently would hide a real doc change from the judge, the
+example `// FIXME: retries twice`. Dropping it silently would hide a real doc change from the judge, the
 defect of the earlier pairing fix. So each dropped line is listed in the pair with its reason, and the report counts them.
 
 Seams driven for real: build_pairs over a two-commit git repository.
@@ -29,9 +29,9 @@ def test_a_dropped_directive_is_listed_in_the_pair_and_counted_in_the_report( tm
 
 
 def test_a_prose_line_the_rule_drops_by_mistake_is_visible_not_silent( tmp_path ):
-    pairs, report = _pairs( tmp_path, _new( "Helper for the pane.", "NOTE: retries twice" ) )
+    pairs, report = _pairs( tmp_path, _new( "Helper for the pane.", "FIXME: retries twice" ) )
     assert pairs[ 0 ][ "new" ] == "Helper for the pane." and pairs[ 0 ][ "new_kind" ] == "plain_comment"
-    assert pairs[ 0 ][ "new_dropped" ] == [ { "line": "NOTE: retries twice", "reason": "marker" } ]
+    assert pairs[ 0 ][ "new_dropped" ] == [ { "line": "FIXME: retries twice", "reason": "marker" } ]
     assert report[ "dropped_comment_lines" ][ "marker" ] == 1
 
 
