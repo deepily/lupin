@@ -41,8 +41,10 @@ mutates nothing that outlives the test, needs no monopoly, runs in seconds, and 
 rather than fails when Postgres is unreachable.
 """
 
+import inspect
 import os
 import uuid
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -66,6 +68,21 @@ _SESSION_ID   = "f19a8996-2fdc-425d-82bc-0e99f3cd8db2"
 # conversation reads are keyed by sender_id, so the query has to be asked about THIS one.
 _ACK_SENDER   = "claude.code@unknown.deepily.ai#f19a8996"
 _REAL_SENDER  = "claude.code@lupin.deepily.ai#deadbeef"
+
+
+def _today_in_repo_zone( now_utc ):
+    """
+    Return the date string the repository method reads as today.
+
+    Requires:
+        - now_utc is a timezone-aware datetime
+
+    Ensures:
+        - the zone is the method's own default, so this follows the method
+        - the process zone is never consulted
+    """
+    zone = inspect.signature( NotificationRepository.soft_delete_by_date ).parameters[ "timezone_name" ].default
+    return now_utc.astimezone( ZoneInfo( zone ) ).strftime( "%Y-%m-%d" )
 
 
 def _server_url():
@@ -363,7 +380,7 @@ class TestTheStructurALLYImmunePathsAreMeasuredNotAssumed:
         session = db()
         try:
             repo   = NotificationRepository( session )
-            today  = _dt.datetime.now( _dt.timezone.utc ).astimezone().strftime( "%Y-%m-%d" )
+            today  = _today_in_repo_zone( _dt.datetime.now( _dt.timezone.utc ) )
             hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today )
             session.commit()
             assert hidden == 1, (
