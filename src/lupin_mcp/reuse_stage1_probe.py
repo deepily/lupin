@@ -18,6 +18,8 @@ TARGET         = 0.5
 PACK_SIZE      = 200
 NEIGHBOURS     = PACK_SIZE - 1
 POSITIONS      = { "first": 0, "middle": PACK_SIZE // 2, "last": PACK_SIZE - 1 }
+SEED_BASE      = 20261007                                       # the random seed of question k is this plus k (ruling R6)
+QUESTIONS      = ( 1, 2, 3, 4 )
 NEIGHBOUR_RULE = "jaccard-word-tokens-v1"                       # a changed rule needs a new name, so a plan says which one it used
 WORD           = re.compile( r"[a-z0-9]+" )
 
@@ -98,7 +100,20 @@ def similar_neighbours( entries, probe_id, count=NEIGHBOURS ):
     return ranked[ :count ]
 
 
-def build_probe_plan( entries, record, seed ):
+def seed_for( question ):
+    """
+    Give the random-neighbour seed of a question.
+
+    Ensures:
+        - returns 20261007 plus the question number, so no caller chooses a seed
+    Raises:
+        - ValueError for a question that is not 1 to 4
+    """
+    if type( question ) is not int or question not in QUESTIONS: raise ValueError( f"question must be one of {QUESTIONS}, got {question!r}" )
+    return SEED_BASE + question
+
+
+def build_probe_plan( entries, record ):
     """
     Compose the six probe packs and the plan that records how they were made.
 
@@ -106,6 +121,7 @@ def build_probe_plan( entries, record, seed ):
         - entries are the catalogue the single runs were asked about; record is the first single run's results
     Ensures:
         - returns { plan, arms }; arms maps each probe arm name to { entries, probe } for run_arm
+        - the random neighbours are drawn with the question's own seed; the plan takes no seed argument
         - the probe is the same in all six; each neighbour list is fixed across the three places
         - the probe sits at index 0, 100 and 199 of a pack of 200
         - plan holds the question, seed, probe id and overlap, band, target, rule and both neighbour id lists
@@ -113,6 +129,7 @@ def build_probe_plan( entries, record, seed ):
         - ProbeNotFound, or ValueError from the helpers above
     """
     probe_id  = choose_probe( record )
+    seed      = seed_for( record[ "question" ] )
     random_ids, near_ids = random_neighbours( entries, probe_id, seed ), similar_neighbours( entries, probe_id )
     by_id     = { e[ "id" ]: e for e in entries }
     overlap   = next( overlap_of( a[ "probabilities" ] ) for a in record[ "answers" ] if a[ "id" ] == probe_id )
