@@ -92,6 +92,14 @@ def _temperature_to_steer( temperature: float ) -> str:
     return ""
 
 
+def _raise_error_result( message, call_type: str ):
+    """Ensures: logs and raises with the subtype and the CLI's text, cut to 500 characters."""
+    text   = "no text" if not message.result else str( message.result )[ :500 ]
+    reason = f"Claude Code returned an error result: {message.subtype}: {text}"
+    logger.error( f"[PresentationAPIClient] {call_type}: {reason}" )
+    raise RuntimeError( reason )
+
+
 @dataclass
 class APIResponse:
     """
@@ -436,6 +444,7 @@ class PresentationAPIClient:
             elif isinstance( message, TextBlock ):
                 collected.append( message.text )
             elif isinstance( message, ResultMessage ):
+                if message.is_error: _raise_error_result( message, call_type )
                 usage         = message.usage or {}
                 input_tokens  = usage.get( "input_tokens", 0 )
                 output_tokens = usage.get( "output_tokens", 0 )
