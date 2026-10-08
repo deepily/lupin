@@ -3633,6 +3633,34 @@ Phase-2 cross-session respawn adoption: a successor session re-registers its har
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/tasks/{task_id}/unpark-ask`
+
+> **Ask the operator to approve un-parking a parked row**
+
+A manager asks; the server makes the card (bound to this row and the move parked to queued, in a field only the server writes), pushes it, and returns its id. After the operator answers yes, the manager cites the id as the approval_card receipt on the parked-to-queued transition. One unanswered card per row and park. Auth: X-API-Key or Bearer JWT, and a manager seat.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[UnparkAskIn](#unparkaskin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/tasks/{task_id}/amend`
 
 > **Append an amendment to a task-store item's body**
@@ -4463,41 +4491,38 @@ Returns the live DM Quality Judge counters: `count`, the running `total_length_w
 
 > **V2 Agents**
 
-List every command the registry knows — a PURE PROJECTION of REGISTRY.
-
-The read endpoint the front end was missing (2026.08.22 plan §5.1). The Q&A
-card's agent list used to be sixteen hand-typed `<option>` tags in
-notifications.html, one of five hand-maintained lists describing the same set;
-this door is how that list stops being written by hand.
-
-PURE PROJECTION means: every registry command appears, exactly once, carrying
-its own fields. Nothing is filtered here — not the two expediters, not the
-control command, not `none`. A client renders what it should render by reading
-`user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door
-does not decide that for them, because the moment it filters, the set-equality
-that proves the door matches the table stops being checkable.
-
-WHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` — the labels must name the
-agent that will ACTUALLY run, so `todo` reads "todo (CRUD)" when the fork is on.
-Reading the INI key here would be a FOURTH read of `crud for dataframes agents
-enabled`, and a fourth read is a fourth thing to drift. The flow already holds
-the value it will itself route with, so the label a user picks and the agent
-they get cannot disagree. The 503 that comes with the dependency is coherent:
-when `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that
-drives it has nothing to drive.
+List every command the registry knows, as a pure projection of `REGISTRY`.
 
 Requires:
     - an authenticated user (get_current_user).
 
 Ensures:
-    - `agents` carries one entry per REGISTRY command — set-equal to REGISTRY,
-      which is the §6 gate 1 assertion.
+    - `agents` carries one entry per `REGISTRY` command — set-equal to `REGISTRY`,
+      which is the first gate assertion.
     - the CRUD fork is applied exactly as resolve() applies it, by calling
       resolve() itself rather than reimplementing the fork.
     - `auto_route` carries the sentinel option, so the page hand-writes no
       option at all.
     - never 500s for an unknown-shaped spec: every field read is declared on
       AgentSpec or on the command's JOB_ARG_CONTRACTS entry.
+
+This is the read endpoint the front end needs. The Q&A card's agent list used to be
+sixteen hand-typed `<option>` tags in notifications.html, one of five hand-maintained
+lists describing the same set. This door is how that list stops being written by hand.
+
+Pure projection means every registry command appears exactly once, carrying its own
+fields. Nothing is filtered here, not the two expediters, not the control command and
+not `none`. A client renders what it should by reading `user_initiable` (the Q&A
+dropdown) or `speakable` (a voice surface). If the door filtered, the set-equality
+that proves the door matches the table would stop being checkable.
+
+It depends on the flow because it needs `crud_enabled`. The labels must name the agent
+that will actually run, so `todo` reads "todo (CRUD)" when the fork is on. Reading the
+INI key `crud for dataframes agents enabled` here would be a fourth read, and a fourth
+read is a fourth thing to drift. The flow already holds the value it routes with, so
+the label a user picks and the agent they get cannot disagree. The 503 that comes with
+the dependency is coherent. When `v2 flow enabled` is off, /api/v2/submit is off too,
+and a dropdown that drives it has nothing to drive.
 
 
 
@@ -4513,7 +4538,7 @@ Ensures:
 
 > **V2 Ask**
 
-Route one question through CJ Flow v2 and return the §8 result.
+Route one question through CJ Flow v2 and return the terminal result.
 
 Requires:
     - an authenticated user (get_current_user) carrying uid + email.
@@ -4526,6 +4551,11 @@ Ensures:
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| X-Lupin-Lineage-Token |  | False |  |
 
 
 ### 📦 Request Body 
@@ -4548,13 +4578,13 @@ Transcribe a spoken question and ask it, in one request with a two-part reply.
 
 Requires:
     - an authenticated user carrying uid + email
-    - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+    - file is audio the transcriber reads; websocket_id, when given, is a query parameter
 
 Ensures:
     - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
       500 any other failure reading, saving or transcribing the audio, 422 empty speech
     - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
-    - the ask is started BEFORE the response exists, so a client that disconnects after
+    - the ask is started before the response exists, so a client that disconnects after
       line 1 does not cancel it; its answer still reaches the session's WebSocket
     - the uploaded audio is removed on every path
 
@@ -4587,11 +4617,7 @@ Raises:
 
 > **Transcribe**
 
-Transcribe spoken audio and return the words, asking nothing (row fcebf532).
-
-For a client that must show the transcript before deciding to send it — the phone's Quick
-Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
-it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+Transcribe spoken audio and return the words, asking nothing.
 
 Requires:
     - an authenticated user carrying uid + email
@@ -4606,6 +4632,11 @@ Ensures:
 
 Raises:
     - HTTPException 401 / 422 / 500 / 503 as above
+
+This serves a client that must show the transcript before deciding to send it, such as
+the phone's Quick Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with
+the ask removed, so it takes no flow dependency and is not behind the `v2 flow enabled`
+gate.
 
 
 
@@ -4629,9 +4660,9 @@ Raises:
 
 Run work whose command is already decided — the door beside /api/v2/ask.
 
-Rick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare
-question and works out what it is; `submit` takes work whose command the caller has
-already chosen, so it skips routing and argument extraction entirely.
+Two doors survive at v2. `ask` takes a bare question and works out what it is.
+`submit` takes work whose command the caller has already chosen, so it skips routing
+and argument extraction entirely.
 
 Requires:
     - an authenticated user (get_current_user) carrying uid + email.
@@ -4643,13 +4674,18 @@ Ensures:
       degrades to the receptionist exactly as it does on `ask`.
     - user_id / user_email come from the token, never the client body.
     - a command missing arguments comes back status='needs_input' with args_missing
-      filled in, and is NEVER parked: there is no human behind a submit to answer it.
+      filled in, and is never parked: there is no human behind a submit to answer it.
     - scheduled_at / monopolize / parent_id_hash reach the built job only on the
       agentic path, which is the only path that builds one; on the other paths the
       flow records that they were dropped rather than discarding them in silence.
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| X-Lupin-Lineage-Token |  | False |  |
 
 
 ### 📦 Request Body 
@@ -4677,8 +4713,8 @@ Requires:
 Ensures:
     - returns AskResponse; an expired/unknown pending_id degrades to a
       needs_input refusal (status='expired'), never a 500.
-    - resume runs OFF the event loop, in a worker thread. It used to run on
-      the loop itself; that is what made /health time out during a call.
+    - resume runs off the event loop, in a worker thread. Running it on the loop
+      itself would make /health time out during a call.
 
 
 
@@ -4712,7 +4748,7 @@ Ensures:
       factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
       everything else goes through the TFE resolver (the old
       `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
-      answer with candidates and NO job pushed).
+      answer with candidates and no job pushed).
     - returns status='resumed' with the new job id and its resume phase, and
       queue_position = the todo queue's size right after the push.
     - the model / thinking-effort overrides reach the reconstructed job; None
@@ -4830,20 +4866,19 @@ Response for GET /api/v2/agents.
 ## ApprovalSettingsRequest
 
 
-One or more approval settings to write. Every field is optional; omitted means
-LEAVE UNCHANGED, which is what makes this a patch rather than a replace.
+One or more approval settings to write; an omitted field is left unchanged.
 
-🔴 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's
-lenient bool coerces the string "false", and "false" is exactly the value this
-module has been bitten by twice — `bool( "false" )` is True, so a lenient model
-would let a caller switch a gate ON by sending the word "off".
+That makes this a patch rather than a replace. Every field is optional.
 
-⚠️ `extra="forbid"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES
-unknown fields unless told otherwise, so a typo'd key — `enforcment_active` — would
-return 200 having changed nothing, and the operator would conclude the switch is
-broken. The alternative (ignore extras, as the rest of this router does) was
-rejected for exactly that reason: a setting ignored in SILENCE is the failure mode
-this file documents at length.
+The fields are `StrictBool`, not `bool`, and that is the whole safety of the door.
+Pydantic's lenient bool coerces the string "false", and `bool( "false" )` is True. A
+lenient model would let a caller switch a gate on by sending the word "off".
+
+`extra="forbid"` is a choice, not a default. Pydantic ignores unknown fields unless told
+otherwise. A typo'd key such as `enforcment_active` would then return 200 having changed
+nothing, and the operator would conclude the switch is broken. The rest of this router
+ignores extras. That was rejected here, because a setting ignored in silence is a
+failure mode this file documents at length.
 
 
 | Field | Type | Description |
@@ -4874,7 +4909,7 @@ Request body for POST /api/v2/ask.
 ## AskResponse
 
 
-The §8 terminal result of one v2 request.
+The terminal result of one v2 request.
 
 
 | Field | Type | Description |
@@ -4905,10 +4940,10 @@ The §8 terminal result of one v2 request.
 ## AutoRouteOption
 
 
-The dropdown's 'no command named — let the router decide' entry.
+The dropdown's "no command named, let the router decide" entry.
 
-Carried in the RESPONSE rather than hand-written into the page, so the front end
-holds no agent list of its own at all — not even the one legitimate option. See
+It is carried in the response rather than hand-written into the page. The front end
+then holds no agent list of its own, not even the one legitimate option. See
 registry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption
 written into a guard.
 
@@ -5090,10 +5125,10 @@ Request model for admin user deletion.
 ## DmRespondRequest
 
 
-POST /api/dm/respond request body — a threaded peer-DM reply.
+POST /api/dm/respond request body: a threaded peer-DM reply.
 
-Identical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:
-a reply must name the message it answers and the conversation it continues.
+Identical to DmSendRequest except `reply_to` and `thread_id` are required.
+A reply must name the message it answers and the conversation it continues.
 
 
 | Field | Type | Description |
@@ -5112,14 +5147,14 @@ a reply must name the message it answers and the conversation it continues.
 ## DmSendRequest
 
 
-POST /api/dm/send request body — notification-native AI↔AI DM.
+POST /api/dm/send request body for a notification-native AI to AI DM.
 
-The recipient is addressed by persona name (preferred) or explicit session
-id; resolution is same-user scoped. The message body travels INLINE (no
-claim-check). Threading is carried by `reply_to` (the message being answered)
-and `thread_id` (conversation correlation; defaults to a fresh id server-side
-when omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so
-the recipient can frame it as "[DM from <persona> <icon>]".
+The recipient is addressed by persona name (preferred) or explicit session id.
+Resolution is same-user scoped. The message body travels inline, with no claim-check.
+Threading is carried by `reply_to` (the message being answered) and `thread_id`
+(conversation correlation, defaulting to a fresh id server-side when omitted).
+`sender_persona` and `sender_icon` carry the sender's identity, so the recipient can
+frame it as "[DM from <persona> <icon>]".
 
 
 | Field | Type | Description |
@@ -5216,12 +5251,12 @@ Contains:
 ## FleetSizeCapIn
 
 
-Body for PUT /api/arbiter/fleet-size-cap — the one number the operator is setting.
+Body for PUT /api/arbiter/fleet-size-cap, the one number the operator is setting.
 
-`ge=1` is declared here rather than hand-rolled in the handler, so a nonsense
-value is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT
-declared here and cannot be: the ceiling is `cc session fleet size cap maximum`,
-read at call time, so the handler checks it against the live key.
+`ge=1` is declared here rather than hand-rolled in the handler, so Pydantic refuses
+a nonsense value with a 422 naming the field. The upper bound is not declared here
+and cannot be. The ceiling is `cc session fleet size cap maximum`, read at call time,
+so the handler checks it against the live key.
 
 
 | Field | Type | Description |
@@ -5251,7 +5286,7 @@ is coerced to a non-negative int; `sessions` defaults to an empty list.
 
 A PATCH of the operator's ratio controls. Every field is optional.
 
-⚠️ OMITTING A FIELD LEAVES IT ALONE — it does not reset it. An operator dragging the
+Omitting a field leaves it alone and does not reset it. An operator dragging the
 threshold slider must not silently revert a window someone else set, so this is a
 partial update rather than a replace.
 
@@ -5336,14 +5371,14 @@ Contains:
 ## ManagerPullRequest
 
 
-A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.
+A flip of the operator's manager-pull toggle. One field, and it is required.
 
-🔴 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING "true", and
-`bool( "false" )` is True — so a lenient field would let a caller sending "false"
-switch the toggle ON while believing they had turned it off. That is the exact
-defect this endpoint exists to make unreachable, and accepting it here would put it
-back one layer up. The reader still PARSES strings, deliberately, for the operator
-who hand-edits the file; nothing should ever ARRIVE as one.
+The field is `StrictBool`, not `bool`. Pydantic's lenient bool accepts the string "true",
+and `bool( "false" )` is True. A lenient field would let a caller sending "false" switch
+the toggle on while believing they had turned it off. This endpoint exists to make that
+defect unreachable, and accepting it here would put it back one layer up. The reader still
+parses strings, for the operator who hand-edits the file, but nothing should ever arrive
+as one.
 
 
 | Field | Type | Description |
@@ -5412,7 +5447,7 @@ Display-tuning values for the multiplexer front-end.
 
 Field names use snake_case to match server convention. Keys here become
 properties on the JSON object that `boot.ts` reads via
-`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
+`configureMetaDisplayCap(serverConfig)`.
 
 
 | Field | Type | Description |
@@ -5451,9 +5486,9 @@ One-shot peer queue snapshot.
 Body for POST /api/notify/prediction-vote/{notification_id}.
 
 The client supplies the hint context it is voting on. `question` and `response_type`
-are OPTIONAL because the endpoint authoritatively resolves them from the persisted
-notification when the client omits them (the notification.message IS persisted; the
-prediction hint's predicted_value is NOT, so the client must supply predicted_value).
+are optional. The endpoint resolves them from the persisted notification when the client
+omits them, because notification.message is persisted. The prediction hint's
+predicted_value is not persisted, so the client must supply predicted_value.
 
 
 | Field | Type | Description |
@@ -5568,10 +5603,10 @@ Contains:
 ## RequestFileIn
 
 
-A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).
+A manager's request that the operator promote or demote one row.
 
 `move` is validated for membership in the lifecycle module, for the reason
-`RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it
+`RequestVerdictIn` gives. `actor` carries the session id the manager check reads. It
 is recorded beside the authenticated identity and confers nothing on its own.
 
 
@@ -5599,9 +5634,9 @@ Request to send password reset email.
 
 The operator's answer to a pending promote/demote request.
 
-`verdict` is validated for MEMBERSHIP in the lifecycle module rather than here — a
-second copy of the legal set is a second thing to keep in sync, and the refusal it
-produces there already explains why 'pending' is not a verdict.
+`verdict` is validated for membership in the lifecycle module and not here. A second copy
+of the legal set is a second thing to keep in sync. The refusal it produces there
+already explains why 'pending' is not a verdict.
 
 
 | Field | Type | Description |
@@ -5784,18 +5819,17 @@ Requires:
 
 Request body for POST /api/v2/submit — work whose command is already decided.
 
-`question` is OPTIONAL here and required on `ask`, which is the whole difference
-between the two doors. `ask` is handed prose and has to work out what it means;
-`submit` is handed the answer to that question up front, so the text is only carried
-along for the record and for anything downstream that shows the user what ran.
+`question` is optional here and required on `ask`, which is the whole difference
+between the two doors. `ask` is handed prose and has to work out what it means.
+`submit` is handed the answer up front. The text is only carried along for the
+record and for anything downstream that shows the user what ran.
 
-THE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are
+The last three fields are queue directives, not arguments. That is why they are
 top-level fields rather than keys inside `args`. `args` is checked against the
-command's own argument contract, so a scheduling instruction put in there would have
-to be written into some agent's contract as though the agent took it — and no agent
-does. Each retiring door declared these same three on its own request model and set
-them on the job after building it; they arrive here for the same reason and are
-passed on only when the caller actually set one.
+command's own argument contract. A scheduling instruction put there would have to be
+written into some agent's contract as though the agent took it, and no agent does.
+Each retiring door declared these same three on its own request model. They arrive
+here for the same reason, and are passed on only when the caller actually set one.
 
 
 | Field | Type | Description |
@@ -5813,15 +5847,14 @@ passed on only when the caller actually set one.
 ## TaskAmendIn
 
 
-Body for POST /api/tasks/{id}/amend (Phase 2.2 — append-only body amendment).
+Body for POST /api/tasks/{id}/amend, an append-only body amendment.
 
-Appends a persona-stamped + UTC-timestamped block to a NON-terminal item's
-body WITHOUT rewriting the existing text — the durable-record seam for a
-live item whose scope is legitimately reframed mid-flight (Krishna's
-2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend
-can NEVER lose prior spec history. `note` is the text appended; `reason`
-stamps the audit event (mirrors the PATCH reason discipline), falling back to
-an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
+It appends a persona-stamped, UTC-timestamped block to the body of a non-terminal item
+without rewriting the existing text. This is the durable-record seam for a live item whose
+scope is legitimately reframed mid-flight. It differs from PATCH `body`, which overwrites,
+because an amend can never lose prior spec history. `note` is the text appended. `reason`
+stamps the audit event, mirroring the PATCH reason discipline, and falls back to an
+auto-marker when absent. `actor` and `authority` stamp the event, not the item.
 
 
 | Field | Type | Description |
@@ -5835,12 +5868,11 @@ an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
 ## TaskCorrelateIn
 
 
-Body for POST /api/tasks/{id}/correlate (Phase 2 — cross-session respawn
-adoption: re-stamp an item's correlation_key onto a successor session's
-harness task id instead of forking a duplicate item).
+Body for POST /api/tasks/{id}/correlate, the cross-session respawn adoption seam.
 
-Terminal items are rejected in the handler (no re-keying closed history);
-authority enum membership is validated there too (one rules home).
+It re-stamps an item's correlation_key onto a successor session's harness task id instead of
+forking a duplicate item. The handler rejects terminal items, so closed history is never
+re-keyed. It also validates the authority enum there, so the rules live in one place.
 
 
 | Field | Type | Description |
@@ -5855,26 +5887,23 @@ authority enum membership is validated there too (one rules home).
 
 Create body for POST /api/tasks.
 
-Creation DEFAULTS to status=queued (the creation event stamps "->queued");
-enum membership for item_class/gate_class/priority/authority is validated
-by task_store_rules.validate_create in the handler (one rules home, not
-per-layer duplication).
+Creation defaults to status=queued, and the creation event stamps "->queued". The handler
+validates enum membership for item_class, gate_class, priority and authority through
+`task_store_rules.validate_create`. The rules live in one place and are not duplicated
+per layer.
 
-ONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be
-"blocked", minting an already-blocked row in a single call. A blocked mint
-carries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware — a
-persona blocker requires it), enforced by rules.validate_create_status which
-REUSES the same ->blocked invariant a transition applies. A blocked mint is
-additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
-`status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
-claimed/in_progress/review are NOT mintable.
+`status` may also be "blocked", which mints an already-blocked row in one call. A blocked
+mint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona
+blocker requires. `rules.validate_create_status` enforces both and reuses the same
+`->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in
+the handler through `is_manager_figure`. `status` is otherwise limited to queued or blocked.
+The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
 
-⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
-2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
-`not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
-unless the row is P0 or the caller is the operator's validated login — see
-`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
-therefore retired; the manager guard below still covers the two paths that pass.
+The create door narrows both paragraphs above. With the holding default on, an omitted
+status mints `not_approved`. An explicit live status (queued or blocked) is refused with 403
+unless the row is P0 or the caller is the operator's validated login. See
+`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is therefore
+retired, and the manager guard still covers the two paths that pass.
 
 
 | Field | Type | Description |
@@ -5900,17 +5929,16 @@ therefore retired; the manager guard below still covers the two paths that pass.
 ## TaskPatchIn
 
 
-Body for PATCH /api/tasks/{id} (Phase 2.1 — item-field edit).
+Body for PATCH /api/tasks/{id}, an item-field edit.
 
-Edits the mutable presentation/ownership fields of a NON-terminal item.
-`status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /
-`correlation_key` are DELIBERATELY ABSENT — they ride the transition oracle
-(validate_transition) and the /correlate seam, NEVER an item-PATCH.
-`extra='forbid'` makes that a HARD wire-level invariant: naming any of them
-is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
-bypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not
-the item — `reason` is NOT an editable field (the manager-supplied "why" for
-a reassignment); when absent the event records the auto-generated field delta.
+It edits the mutable presentation and ownership fields of a non-terminal item. `status`,
+`blocked_by`, `next_chase_ts`, `receipt_refs` and `correlation_key` are left out of this body.
+They ride the transition oracle (`validate_transition`) and the /correlate
+seam, never an item PATCH. `extra='forbid'` makes that a hard wire-level invariant, because
+naming any of them is a 422 and not a silent drop. PATCH can therefore never bypass the
+oracle. `actor`, `authority` and `reason` stamp the audit event, not the item. `reason` is
+not an editable field. It is the manager-supplied "why" for a reassignment, and when absent
+the event records the auto-generated field delta.
 
 
 | Field | Type | Description |
@@ -6002,6 +6030,21 @@ Request body for updating trust mode at runtime.
 |-------|------|-------------|
 | mode | string |  |
 | domain | string | Domain (currently only 'swe') |
+
+
+## UnparkAskIn
+
+
+Body for POST /api/tasks/{id}/unpark-ask, a manager asking for the operator's approval.
+
+The row id comes from the path and never from the body. A caller cannot ask about one row
+and have the card bound to another. `actor` is the declared persona and session id, which
+finds the manager session and words the card.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| actor | string |  |
 
 
 ## UnregisterTokenRequest
@@ -6223,4 +6266,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.02 16:28:21 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.08 05:36:18 by `src/scripts/generate-api-docs.sh`_
