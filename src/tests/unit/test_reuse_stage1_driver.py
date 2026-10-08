@@ -31,10 +31,10 @@ class Standin:
     `refuse_over` raises a 422 for a body with more questions. `die_after` raises a JevCallError from that request on.
     """
 
-    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None, drop_last=False, transient=False ):
+    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None, drop_last=False, transient=False, served=None ):
         self.transient = transient
         self.budget, self.out, self.usage_in, self.refuse_over, self.die_after, self.usage, self.hook = budget, out_per_entry, usage_in, refuse_over, die_after, usage, hook
-        self.drop_last = drop_last
+        self.drop_last, self.served = drop_last, served
         self.bodies, self.lock = [], threading.Lock()
 
     def post_with_meta( self, body ):
@@ -45,7 +45,7 @@ class Standin:
         if self.hook is not None: self.hook( n )
         if self.die_after is not None and n > self.die_after: raise jt.JevCallError( "down" )
         if self.refuse_over is not None and len( body[ "questions" ] ) > self.refuse_over: raise jt.JevConfigError( "Jev refused the request with status 422", 422 )
-        response = { "answers": { key: { "probabilities": dict( PROBS ) } for key in body[ "questions" ] }, "model": body[ "model" ] }
+        response = { "answers": { key: { "probabilities": dict( PROBS ) } for key in body[ "questions" ] }, "model": body[ "model" ] if self.served is None else self.served }
         if self.drop_last: response[ "answers" ].popitem()                                      # one question the response leaves out
         if self.usage: response[ "usage" ] = { "input_tokens": self.usage_in, "output_tokens": self.out * len( body[ "questions" ] ) }
         return response, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 3 }
@@ -707,7 +707,8 @@ def stop_ledger( env ): return lambda n: env.ledger.set_limit( 10, "peer", "anot
     ( "attempt cap hit",            "single1", 25, 5_000_000, 10,   {},                    ( "incomplete", "attempts",        10,   0,    15,   0 ) ),
     ( "ceiling reached",            "single1", 25, 6_000,     None, {},                    ( "incomplete", "ceiling",         SOME, 0,    SOME, 0 ) ),
     ( "consecutive 422",            "single1", 12, 5_000_000, 50,   { "refuse_over": 0 },  ( "incomplete", "consecutive_422", 0,    SOME, SOME, 0 ) ),
-    ( "response left one unasked",  "canary",  10, 2_000_000, None, { "drop_last": True }, ( "incomplete", None,              9,    1,    0,    1 ) ) ] )
+    ( "response left one unasked",  "canary",  10, 2_000_000, None, { "drop_last": True }, ( "incomplete", None,              9,    1,    0,    1 ) ),
+    ( "another model was served",   "single1", 25, 5_000_000, None, { "served": "jev-9.9.9" }, ( "incomplete", "model_mismatch", 0,    SOME, SOME, 0 ) ) ] )
 def test_each_ending_of_an_arm_writes_its_state_stop_reason_and_where_the_lost_ids_are_listed( env, ending, arm, count, ceiling, limit, standin, want ):
     env.standin = standin
     st.run_arm( env, 1, arm, NEED, ENTRIES[ :count ], ceiling, attempt_limit=limit )
@@ -821,3 +822,31 @@ def test_no_key_on_the_live_transport_also_refuses_a_gated_arm_after_the_canary_
     assert env.ledger.path.read_text() == before and not ( env.results_dir / f"{st.run_name( 1, arm )}.json" ).exists()
     st.run_arm( standin_env( env, tmp_path ), 1, arm, NEED, PAGES if arm.startswith( "page-" ) else ENTRIES[ :5 ], 1_000_000 )          # the name is still free
     assert read( env, 1, arm )[ "state" ] == "complete"
+
+
+def test_a_canary_that_was_served_another_model_trips_by_name( env ):
+    env.standin = { "served": "jev-9.9.9" }
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    assert "model_mismatch" in report[ "tripped" ]
+    assert read( env, 1, "canary" )[ "stop_reason" ] == "model_mismatch" and report[ "approved" ] is None
+
+
+def test_a_canary_that_tripped_on_a_wrong_model_is_never_approved_and_never_retried( env ):
+    env.standin = { "served": "jev-9.9.9" }
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    with pytest.raises( st.CanaryTripped ): st.approve_canary( env, 1, "maria", "read" )
+    env.standin = {}
+    before = env.ledger.path.read_text()
+    with pytest.raises( ValueError, match="model_mismatch" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="try again" )
+    assert env.ledger.path.read_text() == before and not ( env.results_dir / "s1-q1-canary-a2.json" ).exists()          # nothing was opened or written
+
+
+def test_a_canary_that_tripped_for_another_reason_may_still_be_retried( env ):
+    env.standin = { "out_per_entry": 90 }
+    assert "model_mismatch" not in st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )[ "tripped" ]
+    env.standin = {}
+    assert st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="the output limit was crossed" )[ "tripped" ] == []
+
+
+def test_a_canary_with_the_right_model_does_not_trip_on_it( env ):
+    assert "model_mismatch" not in st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )[ "tripped" ]
