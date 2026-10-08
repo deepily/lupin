@@ -134,6 +134,8 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
           fails that entry
         - an attempt refused by the budget before any HTTP leaves the pack not reached
         - a stopped breaker leaves the pack, or the halves not yet sent, not reached with no HTTP
+        - a response whose model is not the one asked for fails every entry as ModelMismatch, keeps the served name in
+          the row, counts its tokens, and stops a given breaker
         - any other error fails every entry of the pack; the row keeps the error class, the attempt log, and the
           last HTTP status when the error carries one (a JevConfigError or a JevCallError)
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
@@ -164,6 +166,12 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     if error is None:
         usage = rt.usage_of( response )
         if metered: budget.close_request( usage )
+        served = response[ "model" ] if isinstance( response, dict ) and "model" in response else None
+        if served != model:                                          # a paid response from another model is not an answer, and nothing after it is asked
+            if meta is not None and "attempt_log" in meta: row[ "attempt_log" ] = meta[ "attempt_log" ]
+            row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, model=served, status="failed", error="ModelMismatch" )
+            if breaker is not None: breaker.mismatched( served )
+            return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
         answered, unasked = pack_answers( response, qmap )
         if meta is not None and "attempt_log" in meta: row[ "attempt_log" ] = meta[ "attempt_log" ]
         row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked,
@@ -225,6 +233,9 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - failed_attempts holds one { request, ids, attempts } for each request that left entries without an answer
         - attempts_answered and attempts_failed split the rows' attempts by whether the request was answered
         - a pack the budget refuses is not reached and no HTTP is made for it
+        - a response that names a model other than the one asked for answers nothing: its entries fail, the row says
+          ModelMismatch and holds the served name, its tokens are counted, and the sweep stops with stopped_by
+          "model_mismatch", every pack not yet sent being not reached
     Raises:
         - ValueError for an argument out of range
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an answer is absent or damaged
@@ -285,7 +296,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
-             "cache_write_failed": unwritten, "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
+             "cache_write_failed": unwritten, "refused_422": breaker.refusals,
+             "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }
 
 
 def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None ):

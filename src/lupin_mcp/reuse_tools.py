@@ -335,12 +335,14 @@ class RefusalBreaker:
           caller that resends the halves of a refused pack under one key makes one refusal of the family
         - answered() clears the streak and marks the breaker answered; it never clears a stop
         - once the streak reaches the limit, stopped stays True
+        - mismatched( served ) stops the breaker at once and records the first model name served that was not the one asked for
         - refusals counts every refused( key ) call, repeats included, and is never cleared
         - every method is safe to call from many threads
     """
 
     def __init__( self, limit ):
         self.limit, self._keys, self.refusals, self.has_answered, self.stopped = limit, set(), 0, False, False
+        self.model_mismatch = None                                       # the first wrong model name served, once one was; "" when the response named none
         self._lock = threading.Lock()
 
     @property
@@ -353,6 +355,12 @@ class RefusalBreaker:
         with self._lock:
             self._keys.add( key ); self.refusals += 1
             if len( self._keys ) >= self.limit: self.stopped = True
+
+    def mismatched( self, served ):
+        """Ensures: stops the breaker and keeps the first wrong model name served."""
+        with self._lock:
+            self.stopped = True
+            if self.model_mismatch is None: self.model_mismatch = "" if served is None else served
 
     def answered( self ):
         """Ensures: clears the streak and marks the breaker answered."""
