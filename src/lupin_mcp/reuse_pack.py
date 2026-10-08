@@ -107,7 +107,7 @@ def pack_key( body ):
 def _row( request_hash, entries, parent ):
     """Ensures: returns a request row before the request is sent, with every outcome field empty."""
     return { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
-             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "error": None, "model": None }
+             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "attempt_log": [], "error": None, "model": None }
 
 
 def _post( transport, body ):
@@ -134,8 +134,8 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
           fails that entry
         - an attempt refused by the budget before any HTTP leaves the pack not reached
         - a stopped breaker leaves the pack, or the halves not yet sent, not reached with no HTTP
-        - any other error fails every entry of the pack; the row keeps the error class, and the HTTP status
-          for a refused key or request (a JevConfigError), which is the only error that carries one
+        - any other error fails every entry of the pack; the row keeps the error class, the attempt log, and the
+          last HTTP status when the error carries one (a JevConfigError or a JevCallError)
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
           refused or not_reached, its attempts, its reported tokens and the ids it asked about
     Raises:
@@ -165,6 +165,7 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         usage = rt.usage_of( response )
         if metered: budget.close_request( usage )
         answered, unasked = pack_answers( response, qmap )
+        if meta is not None and "attempt_log" in meta: row[ "attempt_log" ] = meta[ "attempt_log" ]
         row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked,
                     model=response[ "model" ] if isinstance( response, dict ) and "model" in response else None )
         row[ "status" ] = "answered" if answered else "failed"
@@ -172,7 +173,8 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         elif breaker is not None: breaker.answered()
         return { "answers": [ { "id": i, "probabilities": answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked, "not_reached": [], "rows": [ row ] }
     if metered: budget.fail_request()
-    if isinstance( error, jt.JevConfigError ): row[ "http_status" ] = error.status
+    if isinstance( error, ( jt.JevConfigError, jt.JevCallError ) ):
+        row[ "http_status" ], row[ "attempt_log" ] = error.status, error.attempt_log
     if isinstance( error, jt.JevConfigError ) and error.status == 422:
         row[ "status" ] = "refused"
         if breaker is not None and parent is None: breaker.refused( row[ "request_hash" ] )          # the halves of this pack are one family
@@ -281,6 +283,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "tokens_in": sum( r[ "tokens_in" ] or 0 for r in rows ), "tokens_out": sum( r[ "tokens_out" ] or 0 for r in rows ),
              "usage_missing": sum( 1 for r in rows if r[ "status" ] == "answered" and r[ "tokens_in" ] is None ),
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
+             "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
              "cache_write_failed": unwritten, "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
 

@@ -536,6 +536,26 @@ def usage_of( response ):
     return pair if all( isinstance( n, int ) and not isinstance( n, bool ) and n >= 0 for n in pair ) else None
 
 
+def attempt_counts( logs ):
+    """
+    Count what a set of attempt logs holds.
+
+    Requires:
+        - logs is a list of attempt logs, one per request, each a list of { status, request_ids }
+
+    Ensures:
+        - returns { requests, attempts, n429, n529, timeouts, resets, server_errors, request_ids }
+        - server_errors counts statuses 500 to 599 other than 529, which has its own count; request_ids counts attempts that carried one
+    """
+    attempts = [ a for log in logs for a in log ]
+    status   = lambda a: a[ "status" ]
+    return { "requests": len( logs ), "attempts": len( attempts ), "n429": sum( 1 for a in attempts if status( a ) == 429 ),
+             "n529": sum( 1 for a in attempts if status( a ) == 529 ), "timeouts": sum( 1 for a in attempts if status( a ) == "timeout" ),
+             "resets": sum( 1 for a in attempts if status( a ) == "connection" ),
+             "server_errors": sum( 1 for a in attempts if type( status( a ) ) is int and 500 <= status( a ) <= 599 and status( a ) != 529 ),
+             "request_ids": sum( 1 for a in attempts if a[ "request_ids" ] ) }
+
+
 def transport_summary( calls ):
     """
     Summarise what the transport saw on the live responses of one question.
@@ -585,8 +605,9 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           that was then retried because its cache write failed included; a cache hit adds nothing, a call that
           got no response has nothing to read, and a response whose usage is absent or not two whole numbers
           adds nothing and is counted in usage_missing
-        - transport_calls lists { status, attempts, retry_after, latency_ms, model } for every live response whose
-          transport reported them; a cache hit adds none, and model is the response's own "model" or None
+        - transport_calls lists { status, attempts, retry_after, latency_ms, model, attempt_log, client_version } for every
+          live response whose transport reported them; a cache hit adds none, and model is the response's own "model" or None
+        - attempt_logs holds the attempt log of every live post, a failed one included, in the order the posts finished
         - a 422 is never retried: that entry is posted once and fails, and the next entry still goes; refused_422 counts them
         - BREAKER_422 refusals in a row, with no answered request between them, stop the sweep: stopped_by is
           "consecutive_422" (else None), and every entry not yet asked is not_reached, so the receipt lists it as missing
@@ -603,7 +624,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     cache, stats    = JevCache( ctx.data ), { "calls": 0, "hits": 0 }
     budget          = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) else None
 
-    probe   = threading.Lock()
+    probe        = threading.Lock()
+    attempt_logs = []                                                    # one log per live post, in the order the posts finished
     breaker = RefusalBreaker( BREAKER_422 ) if breaker is None else breaker
 
     def one( rec ):
@@ -629,6 +651,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                 try:
                     # a transport that reports what it saw (the live one) is asked for it; a test fake only answers
                     resp, meta = ctx.transport.post_with_meta( body ) if hasattr( ctx.transport, "post_with_meta" ) else ( ctx.transport.post( body ), None )
+                    if meta is not None and "attempt_log" in meta: attempt_logs.append( meta[ "attempt_log" ] )
                     got.append( ( usage_of( resp ), meta, resp ) )            # Jev answered, so these tokens are spent even if the cache write below fails and the call retries
                     cache.put( key, resp )
                     how = "call"
@@ -637,11 +660,13 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                     cut_off = True
                     break
                 except jev_transport.JevConfigError as e:
+                    if e.attempt_log: attempt_logs.append( e.attempt_log )
                     if e.status == 422:                                   # a refusal of this one request is final: never posted again
                         refused = True
                         break
                     continue
-                except jev_transport.JevCallError:
+                except jev_transport.JevCallError as e:
+                    if e.attempt_log: attempt_logs.append( e.attempt_log )
                     if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.transient: break      # that transport already used its four sends; asking again would multiply them
                     continue
                 except Exception:                                         # any other error, such as a failed cache write, is a failed call, never a verdict
@@ -673,7 +698,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
              "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ], "transport_calls": seen_calls,
-             "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
+             "attempt_logs": attempt_logs, "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
 
 
 def module_of( file ):
@@ -1033,6 +1058,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
                        "tokens_in": sum( st[ "tokens_in" ] for st in routed[ "stages" ] ), "tokens_out": sum( st[ "tokens_out" ] for st in routed[ "stages" ] ),
                        "usage_missing": sum( st[ "usage_missing" ] for st in routed[ "stages" ] ),
                        "transport": transport_summary( [ c for sweep_ in routed[ "sweeps" ] for c in sweep_[ "transport_calls" ] ] ),
+                       "attempt_counts": attempt_counts( [ log for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] ] ),
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if packed:

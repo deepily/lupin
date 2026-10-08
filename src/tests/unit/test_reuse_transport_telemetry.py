@@ -129,13 +129,14 @@ def test_the_last_failed_attempt_does_not_sleep_and_other_statuses_are_not_retri
 
 def test_a_first_try_success_reports_status_one_attempt_no_retry_after_and_its_latency():
     text, meta = send( [ ( 200, "ok" ) ], [], clock_fn=clock( 5.0, 5.0124 ) )
-    assert text == "ok" and meta == { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 12 }
+    assert text == "ok" and meta == { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 12, "attempt_log": [ { "status": 200, "request_ids": {} } ], "client_version": jev_transport.CLIENT_VERSION }
 
 
 def test_a_retried_success_reports_the_attempts_the_largest_retry_after_and_the_last_attempts_latency():
     ticks = clock( 0.0, 9.0, 20.0, 20.5, 30.0, 30.0021 )                                 # three attempts: 9 s, 0.5 s, then 2.1 ms
     _, meta = send( [ ( 429, "x", { "Retry-After": "3" } ), ( 529, "x", { "Retry-After": "8" } ), ( 200, "ok" ) ], [], clock_fn=ticks )
-    assert meta == { "status": 200, "attempts": 3, "retry_after": 8.0, "latency_ms": 2 }
+    assert meta == { "status": 200, "attempts": 3, "retry_after": 8.0, "latency_ms": 2, "client_version": jev_transport.CLIENT_VERSION,
+                    "attempt_log": [ { "status": 429, "request_ids": {} }, { "status": 529, "request_ids": {} }, { "status": 200, "request_ids": {} } ] }
 
 
 def test_the_largest_retry_after_wins_in_either_order():

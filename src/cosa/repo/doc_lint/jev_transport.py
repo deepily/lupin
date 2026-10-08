@@ -10,6 +10,7 @@ import json
 import math
 import os
 import random
+import sys
 import threading
 import time
 import urllib.error
@@ -25,22 +26,25 @@ BACKOFF_SECONDS = 1.0
 JITTER          = 0.25      # each backoff wait is scaled by a factor between 1 - JITTER and 1 + JITTER
 RETRY_AFTER_CAP = 60.0      # the longest wait a retry-after header can ask for; a larger value is still recorded
 TIMEOUT_SECONDS = 60
+CLIENT_VERSION  = "jev_transport/py%d.%d.%d" % sys.version_info[ :3 ]     # recorded with a run; not sent to Jev
 
 
 class JevConfigError( Exception ):
     """Jev cannot be called as configured: no key, or the server refused the key or the request."""
 
-    def __init__( self, message, status=None ):
+    def __init__( self, message, status=None, attempt_log=None ):
         super().__init__( message )
-        self.status = status        # the HTTP status of a refusal (401, 403 or 422), or None when no request was made
+        self.status      = status        # the HTTP status of a refusal (401, 403 or 422), or None when no request was made
+        self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
 
 
 class JevCallError( Exception ):
     """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
 
-    def __init__( self, message, status=None ):
+    def __init__( self, message, status=None, attempt_log=None ):
         super().__init__( message )
-        self.status = status        # the last HTTP status seen, or None when no response came (a timeout or a reset)
+        self.status      = status        # the last HTTP status seen, or None when no response came (a timeout or a reset)
+        self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
 
 
 class JevBudgetSpent( Exception ):
@@ -101,6 +105,25 @@ def _post( url, headers, body, timeout ):
             return response.status, response.read().decode( "utf-8" ), dict( response.headers.items() )
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode( "utf-8", errors="replace" ), dict( e.headers.items() )
+
+
+def request_ids( headers ):
+    """
+    Pick the request-id headers out of a response's headers.
+
+    Ensures:
+        - returns { name: value } for each header whose lower-case name is request-id, ends with -request-id
+          or ends with requestid, the name kept as the response spelled it
+        - returns {} when headers is not a dict
+    """
+    if not isinstance( headers, dict ): return {}
+    return { k: v for k, v in headers.items() if isinstance( k, str ) and ( k.lower() == "request-id" or k.lower().endswith( ( "-request-id", "requestid" ) ) ) }
+
+
+def failure_kind( error ):
+    """Ensures: returns "timeout" for a timeout, bare or inside a URLError, else "connection"."""
+    reason = error.reason if isinstance( error, urllib.error.URLError ) else error
+    return "timeout" if isinstance( reason, TimeoutError ) else "connection"
 
 
 def retry_after_seconds( headers ):
@@ -188,7 +211,9 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
           statuses in TRANSIENT_STATUSES, a timeout and a reset
 
     Ensures:
-        - returns ( text, meta ) for a 200 response; meta is { status, attempts, retry_after, latency_ms }
+        - returns ( text, meta ) for a 200 response; meta is { status, attempts, retry_after, latency_ms, attempt_log,
+          client_version }, where attempt_log holds { status, request_ids } for every attempt in order, the status
+          being "timeout" or "connection" when no response came
         - attempts counts the HTTP attempts this call took, latency_ms is the final attempt's own time in whole
           milliseconds, and retry_after is the largest retry-after (seconds) any attempt saw, or None
         - a retryable status is retried up to MAX_ATTEMPTS calls in all, whatever the mix of causes (with transient,
@@ -196,6 +221,8 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
           (at most RETRY_AFTER_CAP) and BACKOFF_SECONDS doubled each time and scaled by a jitter factor
           between 1 - JITTER and 1 + JITTER, so a retry never comes sooner than the server asked
         - the key appears only in the Authorization header of the request
+
+        - every error this raises after an attempt carries the same attempt_log
 
     Raises:
         - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 403 or 422 (status set)
@@ -213,20 +240,23 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     seen      = None
     failure   = None
     last_status = None
+    log       = []
     for attempt in range( MAX_ATTEMPTS ):
         if budget is not None: budget.take()
         started = clock_fn()
         try:
             reply = post_fn( URL, headers, body, TIMEOUT_SECONDS )
         except OSError as e:
-            if not transient: raise JevCallError( f"call to Jev failed: {type( e ).__name__}" ) from e
+            log.append( { "status": failure_kind( e ), "request_ids": {} } )
+            if not transient: raise JevCallError( f"call to Jev failed: {type( e ).__name__}", None, log ) from e
             last_status, failure = None, e
             if attempt < MAX_ATTEMPTS - 1: sleep_fn( max( 0.0, BACKOFF_SECONDS * 2 ** attempt * ( 1 - JITTER + 2 * JITTER * random_fn() ) ) )
             continue
         latency_ms = int( round( ( clock_fn() - started ) * 1000 ) )
         status, text, reply_headers = reply if len( reply ) == 3 else ( reply[ 0 ], reply[ 1 ], None )
         last_status, failure = status, None
-        if status == 200: return text, { "status": 200, "attempts": attempt + 1, "retry_after": seen, "latency_ms": latency_ms }
+        log.append( { "status": status, "request_ids": request_ids( reply_headers ) } )
+        if status == 200: return text, { "status": 200, "attempts": attempt + 1, "retry_after": seen, "latency_ms": latency_ms, "attempt_log": log, "client_version": CLIENT_VERSION }
         if status in RETRY_STATUSES or ( transient and status in TRANSIENT_STATUSES ):
             asked = retry_after_seconds( reply_headers )
             if asked is not None and ( seen is None or asked > seen ): seen = asked
@@ -234,10 +264,10 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
                 jitter = 1 - JITTER + 2 * JITTER * random_fn()
                 sleep_fn( max( min( asked, RETRY_AFTER_CAP ) if asked is not None else 0.0, BACKOFF_SECONDS * 2 ** attempt * jitter ) )
             continue
-        if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}", status )
-        raise JevCallError( f"Jev answered status {status}", status )
-    if failure is not None: raise JevCallError( f"call to Jev failed after {MAX_ATTEMPTS} sends: {type( failure ).__name__}" ) from failure
-    raise JevCallError( f"Jev still answered a retry status after {MAX_ATTEMPTS} calls (last status {last_status})", last_status )
+        if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}", status, log )
+        raise JevCallError( f"Jev answered status {status}", status, log )
+    if failure is not None: raise JevCallError( f"call to Jev failed after {MAX_ATTEMPTS} sends: {type( failure ).__name__}", None, log ) from failure
+    raise JevCallError( f"Jev still answered a retry status after {MAX_ATTEMPTS} calls (last status {last_status})", last_status, log )
 
 
 def send( body, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None ):

@@ -113,3 +113,14 @@ def test_an_answered_pack_row_and_the_sweep_carry_the_log():
                                                                         "attempt_log": [ { "status": 200, "request_ids": { "request-id": "z" } } ] }
     out = rp.send_pack( Meta(), NEED, ENTRIES[ :2 ] )
     assert out[ "rows" ][ 0 ][ "attempt_log" ] == [ { "status": 200, "request_ids": { "request-id": "z" } } ]
+
+
+def test_a_request_id_header_is_found_by_each_spelling_and_other_headers_are_left_out():
+    out = send( [ ( 200, "ok", { "CF-RequestId": "a", "x-amzn-requestid": "b", "Retry-After": "1", "X-Request-Id-Extra": "no" } ) ] )
+    assert out[ 1 ][ "attempt_log" ][ 0 ][ "request_ids" ] == { "CF-RequestId": "a", "x-amzn-requestid": "b" }
+
+
+@pytest.mark.parametrize( "status, tries", [ ( 500, rt.RETRIES + 1 ), ( 422, 1 ) ] )
+def test_the_plain_sweep_keeps_the_log_of_a_post_that_failed( env, status, tries ):      # noqa: F811
+    sw = rt.sweep( ctx_over( env, Door( [ status ] ) ), N( "q" ), entries( 2 ) )
+    assert len( sw[ "attempt_logs" ] ) == 2 * tries and all( log == [ { "status": status, "request_ids": {} } ] for log in sw[ "attempt_logs" ] )
