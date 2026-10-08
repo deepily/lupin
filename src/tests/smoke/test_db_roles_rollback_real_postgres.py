@@ -3,7 +3,7 @@ db_roles --rollback against a real Postgres, in a container made for the test.
 
 The provisioner is run for real, through docker exec, against a throwaway server.
 Venue: host-side, docker required; the :7999 rubric applies only if a run is timed under two minutes.
-The merge gate's containers have no docker socket, so there the two docker tests skip: read the skip count.
+The merge gate's containers have no docker socket, so there every docker test skips: read the skip count.
 The container is removed afterwards, and a start-of-run sweep removes old leftovers.
 """
 
@@ -19,6 +19,7 @@ The container is removed afterwards, and a start-of-run sweep removes old leftov
 
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -280,6 +281,19 @@ CREATE PROCEDURE do_nothing( x integer ) LANGUAGE sql AS 'SELECT 1';
 
 VECTOR_SQL = "CREATE EXTENSION IF NOT EXISTS vector;\nCREATE TABLE vecs ( id serial PRIMARY KEY, v vector(3) );\n"
 
+# What the stocked fixture puts in each database. The grants file derives its table counts from this,
+# so a change to the stock cannot leave a hand-typed count behind (it did once: a table added to the test
+# database left the grants file expecting two where three were there).
+STOCK_BY_DATABASE = {
+    "lupin_db_dev"  : FIXTURE_SQL + VECTOR_SQL,
+    "lupin_db_test" : FIXTURE_SQL + VECTOR_SQL,
+}
+
+
+def stocked_tables( database ):
+    """The names of the tables the stocked fixture creates in one database, read from its SQL."""
+    return re.findall( r"CREATE TABLE (\w+)", STOCK_BY_DATABASE[ database ] )
+
 OWNERS_SQL = """
 SELECT 'rel|' || c.relkind::text || '|' || c.relname || '|' || o.rolname
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner
@@ -342,11 +356,9 @@ def _provision( box, tmp_path, *flags, database="lupin_db_dev", expect_ok=True )
 
 @pytest.fixture
 def stocked( throwaway ):
-    """The throwaway server with the same objects in both databases, and vector in dev."""
-    for database in ( "lupin_db_dev", "lupin_db_test" ):
-        _psql( throwaway[ "name" ], database, FIXTURE_SQL )
-    for database in ( "lupin_db_dev", "lupin_db_test" ):
-        _psql( throwaway[ "name" ], database, VECTOR_SQL )
+    """The throwaway server with the objects of STOCK_BY_DATABASE in each database."""
+    for database, sql in STOCK_BY_DATABASE.items():
+        _psql( throwaway[ "name" ], database, sql )
     return throwaway
 
 

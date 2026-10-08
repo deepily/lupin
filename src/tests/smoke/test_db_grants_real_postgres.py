@@ -18,7 +18,7 @@ from cosa.utils import db_grants
 
 from test_db_roles_rollback_real_postgres import (   # noqa: F401  (fixtures are used by name)
     ROLES_SQL, ROOT, SUPERUSER, _assert_marker, _clean_env, _docker, _labels_of, _provision, _psql,
-    needs_docker, refuse_unless_throwaway, stocked, throwaway,
+    STOCK_BY_DATABASE, needs_docker, refuse_unless_throwaway, stocked, stocked_tables, throwaway,
 )
 
 
@@ -144,7 +144,9 @@ def test_check_is_clean_after_the_provisioning_and_prints_both_counts( stocked, 
     _provision( stocked, tmp_path )
     done = _check( stocked )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.splitlines() == [ "lupin_db_dev: 3 tables, 3 roles, 0 problems", "lupin_db_test: 2 tables, 3 roles, 0 problems" ]
+    counts = { database: len( stocked_tables( database ) ) for database in STOCK_BY_DATABASE }
+    assert all( counts.values() ), "the fixture stocks no tables, so a count read from it proves nothing"
+    assert done.stdout.splitlines() == [ f"{database}: {counts[ database ]} tables, 3 roles, 0 problems" for database in ( "lupin_db_dev", "lupin_db_test" ) ]
 
 
 @needs_docker
@@ -192,7 +194,9 @@ def test_check_reports_a_connect_right_that_is_wrong_in_either_direction( stocke
 @needs_docker
 def test_check_fails_on_a_database_with_no_tables( stocked, tmp_path ):
     _provision( stocked, tmp_path )
-    _sql_of( stocked, "lupin_db_test", "DROP TABLE widgets, gadgets CASCADE;\n" )
+    names = stocked_tables( "lupin_db_test" )
+    assert names, "the fixture stocks no tables, so dropping them proves nothing"
+    _sql_of( stocked, "lupin_db_test", f"DROP TABLE {', '.join( names )} CASCADE;\n" )
     done = _check( stocked )
     assert done.returncode == 1 and "lupin_db_test: 0 tables, 3 roles, 1 problems" in done.stdout.splitlines()
     assert "  lupin_db_test has no public tables, so nothing was checked" in done.stdout.splitlines()
@@ -235,7 +239,7 @@ def test_a_plain_login_checks_its_own_database_with_the_database_option( stocked
     _provision( stocked, tmp_path )
     done = _check( stocked, database, login, "--database", database )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.splitlines() == [ f"{database}: {3 if database == 'lupin_db_dev' else 2} tables, 3 roles, 0 problems" ]
+    assert done.stdout.splitlines() == [ f"{database}: {len( stocked_tables( database ) )} tables, 3 roles, 0 problems" ]
 
 
 @needs_docker
