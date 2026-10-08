@@ -170,21 +170,21 @@ def test_cache_hits_cost_nothing_and_are_still_served_after_the_budget_is_spent(
 
 
 def test_a_budget_above_the_hard_cap_is_refused_never_clamped( env ):
-    assert rt.CALL_BUDGET_CAP == 8000 and rt.DEFAULT_CALL_BUDGET == 8000
-    make_ctx( env, call_budget=8000 )
-    for bad in ( 8001, 0, -5, "100", True, 2.5 ):
+    assert rt.CALL_BUDGET_CAP == 9000 and rt.DEFAULT_CALL_BUDGET == 9000
+    make_ctx( env, call_budget=9000 )
+    for bad in ( 9001, 0, -5, "100", True, 2.5 ):
         with pytest.raises( rt.ReuseError ) as e: make_ctx( env, call_budget=bad )
         assert e.value.name == "BAD_BUDGET"
 
 
 def test_the_environment_variable_sets_the_budget_and_a_bad_value_is_loud( env, monkeypatch ):
     monkeypatch.delenv( rt.BUDGET_VARIABLE, raising=False )
-    assert rt.context_from_environment( env[ 0 ] ).call_budget == 8000
+    assert rt.context_from_environment( env[ 0 ] ).call_budget == 9000
     monkeypatch.setenv( rt.BUDGET_VARIABLE, "" )
-    assert rt.context_from_environment( env[ 0 ] ).call_budget == 8000
+    assert rt.context_from_environment( env[ 0 ] ).call_budget == 9000
     monkeypatch.setenv( rt.BUDGET_VARIABLE, "250" )
     assert rt.context_from_environment( env[ 0 ] ).call_budget == 250
-    for bad in ( "8001", "0", "-3", "many", "2.5" ):
+    for bad in ( "9001", "0", "-3", "many", "2.5" ):
         monkeypatch.setenv( rt.BUDGET_VARIABLE, bad )
         with pytest.raises( rt.ReuseError ) as e: rt.context_from_environment( env[ 0 ] )
         assert e.value.name == "BAD_BUDGET"

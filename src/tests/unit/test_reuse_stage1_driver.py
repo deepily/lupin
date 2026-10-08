@@ -144,7 +144,7 @@ def test_the_default_attempt_limit_is_the_cap_and_is_what_the_budget_gets( env )
     assert read( env, 1, "single1" )[ "attempt_limit" ] == rt.CALL_BUDGET_CAP == env.made[ 0 ].budget.limit
 
 
-@pytest.mark.parametrize( "entries, cap", [ ( 1, 8000 ), ( 25, 8000 ), ( 7272, 8000 ), ( 7273, 8001 ), ( 7918, 8710 ), ( 10_000, 11_000 ), ( 10_001, 11_002 ) ] )
+@pytest.mark.parametrize( "entries, cap", [ ( 1, 9000 ), ( 25, 9000 ), ( 7918, 9000 ), ( 8181, 9000 ), ( 8182, 9001 ), ( 10_000, 11_000 ), ( 10_001, 11_002 ) ] )
 def test_the_cap_for_an_arm_is_its_entries_plus_ten_percent_rounded_up_and_never_below_the_floor( entries, cap ):
     assert rt.call_budget_cap_for( entries ) == cap
 
@@ -182,7 +182,7 @@ def test_the_context_is_handed_the_arms_own_cap_not_the_default( env, monkeypatc
     assert seen == [ 22 ]
 
 
-@pytest.mark.parametrize( "bad", [ rt.CALL_BUDGET_CAP - 1, "8000", True, 8000.0, None ] )
+@pytest.mark.parametrize( "bad", [ rt.CALL_BUDGET_CAP - 1, "9000", True, 9000.0, None ] )
 def test_a_context_cap_below_the_floor_or_not_an_integer_is_refused( env, bad ):
     with pytest.raises( rt.ReuseError ) as caught: rt.ReuseContext( env.root, env.data, call_budget=100, call_budget_cap=bad )      # a small budget, so only the cap check can refuse
     assert caught.value.name == "BAD_BUDGET"
@@ -191,7 +191,7 @@ def test_a_context_cap_below_the_floor_or_not_an_integer_is_refused( env, bad ):
 def test_the_tool_path_keeps_the_floor_as_its_hard_ceiling( env ):
     with pytest.raises( rt.ReuseError ) as caught: rt.ReuseContext( env.root, env.data, call_budget=rt.CALL_BUDGET_CAP + 1 )
     assert caught.value.name == "BAD_BUDGET"
-    assert rt.ReuseContext( env.root, env.data, call_budget=8710, call_budget_cap=8710 ).call_budget == 8710
+    assert rt.ReuseContext( env.root, env.data, call_budget=9500, call_budget_cap=9500 ).call_budget == 9500
 
 
 def test_a_single_entry_arm_that_runs_out_of_attempts_says_so_and_does_not_raise( env ):
