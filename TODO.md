@@ -36,7 +36,20 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **No hand removal of worktrees.** Sixteen trees inventoried, all clean; the janitor sweeps them.
 - **Row `4aaa6281`**: the janitor's archived branch is the compose cutover commit `7564e8bf8`, kept off main on purpose and pinned under `refs/keep/mr-radio/`.
 
-**Open with Rick** (one card at 10:15 EDT on 2026-10-08): the design pick for `efdcf9c3` (A recommended); the option for `d03c5592`; the cutover date and scope for `80513825`; the VM steps for `9e0ba25d` and `ea27d263`; his word on the token widening and the loud 403 for `8d4a5a59`; approval of `867ab3a3`, `80535f46`, `0fcb3fd2`; the push.
+**Rick ruled, 2026-10-08 morning** (one card, answered before 09:10 EDT; answered true, no default used):
+
+- **Database grants are automated by design A, self-maintaining grants** ("A: self-maintaining grants (Recommended)"). Not chosen: in-app self-heal; a root systemd unit; not yet. Row `efdcf9c3`; design `io/tmp/2026.10.07-pocholo-design-db-provisioning-automation.md`.
+- **The hooks-folder gap gets a timed check outside the seat** ("Timed check outside the seat (Recommended)"). Not chosen: make the folder unwritable; accept and check at deploy. Row `d03c5592`.
+- **The database login cutover is today, after build 07's pyramid, both servers** ("Today, after build 07's pyramid (Recommended)"). Not chosen: dev server only; hold. Rows `80513825`, `4aaa6281`. Steps 2, 3 and 5 of `io/write-ups/2026.10.07-db-login-cutover-list.md` are still his hands.
+- **Rick pushes the working branch himself** ("You push it yourself").
+
+**Rick ruled, second card** (answered before 09:17 EDT on 2026-10-08; answered true, no default used):
+
+- **A refused suite-lineage claim answers a loud 403** ("Build the 403 (Recommended)"). Not chosen: close the row as built. Row `8d4a5a59`.
+- **The three held rows stay held** ("Not now"): `867ab3a3`, `80535f46`, `0fcb3fd2`.
+- **The Claude Code login in the test container: ask him at two o'clock** (typed on the card): "I'll take it home when I get back today in the early afternoon The timer to ask me at 2 o'clock".
+
+**Open with Rick**: the VM steps for `9e0ba25d` and `ea27d263` (being written up before I ask); the login ask at 14:00 EDT; his hands for the cutover steps.
 
 ## 📚 DECISIONS LOG 2026-10-06 to 10-07 (Cheech 🌿 `e281ef6f`; crew Rachel · Rio · John · Chloé · Tiberius · Krishna · Sam) — docs sweep, six trains
 
