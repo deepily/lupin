@@ -517,15 +517,20 @@ def other_boundaries( stage, size ):
 def _mean( values ): return round( sum( values ) / len( values ), 3 ) if values else None
 
 
+def _logged( calls, status ):
+    """Ensures: returns how many logged attempts across the calls ended in the status."""
+    return sum( 1 for c in calls for a in c[ "attempt_log" ] if a[ "status" ] == status )
+
+
 def request_stats( stage ):
     """
     Summarise the requests each arm sent.
 
     Ensures:
         - returns { question: { arm: { requests_sent, tokens_in_per_request, tokens_out_per_request, tokens_out_per_entry,
-          retried_calls, extra_attempts, usage_missing, retry_statuses } } }
+          retried_calls, extra_attempts, usage_missing, attempts_429, attempts_529 } } }
         - only rows with an attempt count as sent; a sent row without usage counts as missing and stays out of the means
-        - retries are reported as 429 or 529 together, because the transport does not say which
+        - attempts_429 and attempts_529 count the attempts in every call's recorded attempt log that ended in that status; any other status counts in neither
     """
     out = {}
     for q in sorted( stage ):
@@ -536,7 +541,8 @@ def request_stats( stage ):
             out.setdefault( q, {} )[ name ] = { "requests_sent": len( sent ), "tokens_in_per_request": _mean( [ r[ "tokens_in" ] for r in known ] ),
                 "tokens_out_per_request": _mean( [ r[ "tokens_out" ] for r in known ] ), "tokens_out_per_entry": _mean( [ r[ "tokens_out" ] / r[ "size" ] for r in known ] ),
                 "retried_calls": sum( 1 for c in calls if c[ "attempts" ] > 1 ), "extra_attempts": sum( c[ "attempts" ] - 1 for c in calls ),
-                "usage_missing": len( sent ) - len( known ), "retry_statuses": "429 or 529, not told apart" }
+                "usage_missing": len( sent ) - len( known ),
+                "attempts_429": _logged( calls, 429 ), "attempts_529": _logged( calls, 529 ) }
     return out
 
 
@@ -682,7 +688,7 @@ def render( report ):
         for name, r in arms.items():
             lines.append( f"requests, question {q} {name}: {r[ 'requests_sent' ]} sent; tokens per request in {r[ 'tokens_in_per_request' ]} out {r[ 'tokens_out_per_request' ]}; "
                           f"out per entry {r[ 'tokens_out_per_entry' ]}; retried calls {r[ 'retried_calls' ]}, extra attempts {r[ 'extra_attempts' ]}; "
-                          f"usage missing {r[ 'usage_missing' ]}; {r[ 'retry_statuses' ]}" )
+                          f"usage missing {r[ 'usage_missing' ]}; 429s {r[ 'attempts_429' ]}, 529s {r[ 'attempts_529' ]}" )
     for size, by_q in report[ "other_boundaries" ].items():
         for q, o in by_q.items():
             if o is None: lines.append( f"other boundaries, pack {size}, question {q}: not measured" ); continue
