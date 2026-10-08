@@ -94,7 +94,8 @@ def _temperature_to_steer( temperature: float ) -> str:
 
 def _raise_error_result( message, call_type: str ):
     """Ensures: logs and raises with the subtype and the CLI's text, cut to 500 characters."""
-    text   = "no text" if not message.result else str( message.result )[ :500 ]
+    text   = str( message.result )[ :500 ] if message.result else "no text"
+    if message.errors: text += f" (errors: {'; '.join( message.errors )[ :500 ]})"
     reason = f"Claude Code returned an error result: {message.subtype}: {text}"
     logger.error( f"[PresentationAPIClient] {call_type}: {reason}" )
     raise RuntimeError( reason )
