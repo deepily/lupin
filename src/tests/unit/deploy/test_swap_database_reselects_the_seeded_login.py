@@ -124,6 +124,18 @@ def test_the_previous_login_is_put_back_when_the_new_environment_finds_none( swa
     assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_host", "hostpw" )
 
 
+def test_a_reselect_that_finds_nothing_returns_false_and_the_next_one_still_works( swap, tmp_path ):
+    """The failure path returns False, and puts back what it needs for a later reselect to run."""
+    ( tmp_path / ".env" ).write_text( _env( LUPIN_HOST_DB_PASSWORD="hostpw" ) )
+    database.get_database_url()
+    swap( "testing" )
+    assert database.reselect_seeded_login() is False
+    assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_host", "hostpw" )
+    ( tmp_path / ".env" ).write_text( _env( LUPIN_HOST_DB_PASSWORD="hostpw", LUPIN_TEST_DB_PASSWORD="testpw" ) )
+    assert database.reselect_seeded_login() is True
+    assert ( os.environ[ "DB_USER" ], os.environ[ "DB_PASSWORD" ] ) == ( "lupin_test", "testpw" )
+
+
 def test_a_superuser_password_seeded_alone_is_chosen_again_too( swap, tmp_path ):
     ( tmp_path / ".env" ).write_text( _env( POSTGRES_PASSWORD="superpw", LUPIN_TEST_DB_PASSWORD="testpw" ) )
     database.get_database_url()
