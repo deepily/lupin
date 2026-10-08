@@ -94,3 +94,11 @@ def test_a_sweep_without_a_breaker_makes_one_from_the_module_limit( env, monkeyp
     door = Door( [ 422 ] )
     sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 6 ) )
     assert door.posts == 3 and sw[ "stopped_by" ] == "consecutive_422"
+
+
+def test_a_refusal_after_a_stop_and_an_answer_leaves_the_breaker_stopped():
+    b = rt.RefusalBreaker( 2 )
+    b.refused( "a" ); b.refused( "b" )
+    b.answered()                                                                # an in-flight post answered after the stop
+    b.refused( "c" )                                                            # and another was refused: one key, below the limit
+    assert b.stopped and b.streak == 1
