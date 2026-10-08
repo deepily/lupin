@@ -119,3 +119,20 @@ def test_each_waiter_reads_the_queue_depth_before_it_submits( name ):
     reads, submits = _calls( function, "_budget_before_submit" ), _calls( function, "_submit_job" )
     assert len( reads ) == 1 and len( submits ) == 1
     assert reads[ 0 ].lineno < submits[ 0 ].lineno
+
+
+def _stores_of_budget( function ):
+    """Every place the function binds the name budget, by any construct."""
+    return [ n for n in ast.walk( function ) if isinstance( n, ast.Name ) and n.id == "budget" and isinstance( n.ctx, ast.Store ) ]
+
+
+@pytest.mark.parametrize( "name", WAITERS )
+def test_budget_is_bound_once_and_only_from_the_queue_depth_read( name ):
+    function = _function( name )
+    assert len( _stores_of_budget( function ) ) == 1, "budget is bound more than once, so a literal could replace the read"
+    assigns = [ n for n in ast.walk( function ) if isinstance( n, ast.Assign )
+                and any( isinstance( t, ast.Tuple ) and any( isinstance( e, ast.Name ) and e.id == "budget" for e in t.elts ) for t in n.targets ) ]
+    assert len( assigns ) == 1
+    value = assigns[ 0 ].value
+    assert isinstance( value, ast.Call ) and isinstance( value.func, ast.Attribute ) and value.func.attr == "_budget_before_submit"
+    assert [ e.id for e in assigns[ 0 ].targets[ 0 ].elts ] == [ "ahead", "budget" ]
