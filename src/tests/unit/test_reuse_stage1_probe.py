@@ -21,9 +21,9 @@ def probs( overlap ):
     return { "reuse": overlap / 2, "extend": overlap / 2, "unrelated": 1 - overlap }
 
 
-def single1( overlaps, failed=(), unasked=(), not_reached=() ):
+def single1( overlaps, failed=(), unasked=(), not_reached=(), question=1 ):
     """A single-run results record whose answers hold the given overlaps."""
-    return { "format": "stage1-arm-1", "arm": "single1", "question": 1,
+    return { "format": "stage1-arm-1", "arm": "single1", "question": question,
              "answers": [ { "id": i, "probabilities": probs( o ) } for i, o in overlaps.items() ],
              "failed": list( failed ), "unasked": list( unasked ), "not_reached": list( not_reached ) }
 
@@ -125,7 +125,7 @@ def test_jaccard_is_over_the_sets_of_lower_case_alphanumeric_words_of_the_entry_
 
 def test_the_six_probe_packs_hold_the_probe_at_the_first_middle_and_last_place_with_fixed_neighbours():
     entries = catalogue( 260 )
-    plan = sp.build_probe_plan( entries, single1( { "e07": 0.5, "e08": 0.9 } ), 11 )
+    plan = sp.build_probe_plan( entries, single1( { "e07": 0.5, "e08": 0.9 } ) )
     assert sorted( plan[ "arms" ] ) == sorted( [ f"probe-{place}-{near}" for place in ( "first", "middle", "last" ) for near in ( "random", "near" ) ] )
     for near in ( "random", "near" ):
         ids = { place: [ e[ "id" ] for e in plan[ "arms" ][ f"probe-{place}-{near}" ][ "entries" ] ] for place in sp.POSITIONS }
@@ -136,7 +136,7 @@ def test_the_six_probe_packs_hold_the_probe_at_the_first_middle_and_last_place_w
 
 
 def test_each_arms_probe_record_is_what_the_driver_checks():
-    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ) )
     for arm, body in plan[ "arms" ].items():
         st._check_probe( arm, body[ "probe" ], body[ "entries" ] )
         assert body[ "probe" ][ "id" ] == "e07"
@@ -145,35 +145,62 @@ def test_each_arms_probe_record_is_what_the_driver_checks():
 
 
 def test_the_plan_records_the_seed_both_neighbour_lists_the_probe_and_the_rule():
-    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.52, "e08": 0.9 } ), 11 )[ "plan" ]
-    assert plan[ "seed" ] == 11 and plan[ "probe_id" ] == "e07" and plan[ "probe_overlap" ] == pytest.approx( 0.52 )
+    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.52, "e08": 0.9 } ) )[ "plan" ]
+    assert plan[ "seed" ] == 20261008 and plan[ "probe_id" ] == "e07" and plan[ "probe_overlap" ] == pytest.approx( 0.52 )
     assert plan[ "band" ] == [ 0.35, 0.65 ] and plan[ "target" ] == 0.5 and plan[ "neighbour_rule" ] == sp.NEIGHBOUR_RULE == "jaccard-word-tokens-v1"
     assert len( plan[ "random_ids" ] ) == len( plan[ "near_ids" ] ) == 199 and plan[ "question" ] == 1
-    assert plan[ "random_ids" ] == sp.random_neighbours( catalogue( 260 ), "e07", 11 ) and plan[ "near_ids" ] == sp.similar_neighbours( catalogue( 260 ), "e07" )
+    assert plan[ "random_ids" ] == sp.random_neighbours( catalogue( 260 ), "e07", 20261008 ) and plan[ "near_ids" ] == sp.similar_neighbours( catalogue( 260 ), "e07" )
     json.dumps( plan )
 
 
 def test_the_plan_is_written_once_beside_the_results_and_never_replaced( tmp_path ):
     env  = st.Stage1Env( tmp_path, tmp_path / "data", rl.AccountLedger.create( tmp_path / "ledger.jsonl", rl.ACCOUNT_LIMIT_TOKENS, "t", "t" ) )
-    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ) )
     path = sp.write_probe_plan( env, plan )
     assert path == env.results_dir / "s1-q1-probe-plan.json" and json.loads( path.read_text() ) == plan[ "plan" ]
     first = path.read_bytes()
-    with pytest.raises( FileExistsError ): sp.write_probe_plan( env, sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 12 ) )
+    with pytest.raises( FileExistsError ): sp.write_probe_plan( env, sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5, "e08": 0.55 } ) ) )
     assert path.read_bytes() == first and not list( env.results_dir.glob( "*.tmp" ) )
 
 
 def test_the_probe_arms_run_through_the_driver_unchanged( tmp_path ):
     """The packs are what run_arm expects: a probe in its place, a pack of 200."""
-    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ) )
     assert all( st.ARMS[ arm ][ 1 ] == len( body[ "entries" ] ) for arm, body in plan[ "arms" ].items() )
     assert all( rt.entry_text( e ) for body in plan[ "arms" ].values() for e in body[ "entries" ] )
 
 
 def test_each_kind_of_pack_holds_its_own_neighbour_list_in_order():
-    built = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    built = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ) )
     for near, listed in ( ( "random", built[ "plan" ][ "random_ids" ] ), ( "near", built[ "plan" ][ "near_ids" ] ) ):
         for place in sp.POSITIONS:
             ids = [ e[ "id" ] for e in built[ "arms" ][ f"probe-{place}-{near}" ][ "entries" ] ]
             assert [ i for i in ids if i != "e07" ] == listed
     assert built[ "plan" ][ "random_ids" ] != built[ "plan" ][ "near_ids" ]
+
+
+def test_the_seed_for_each_question_is_the_rulings_constant_plus_the_question_number():
+    assert [ sp.seed_for( k ) for k in ( 1, 2, 3, 4 ) ] == [ 20261008, 20261009, 20261010, 20261011 ]
+    assert sp.SEED_BASE == 20261007
+
+
+@pytest.mark.parametrize( "question", [ 0, 5, -1, "1", True, None, 1.0 ] )
+def test_a_question_outside_the_four_has_no_seed( question ):
+    with pytest.raises( ValueError, match="question" ): sp.seed_for( question )
+
+
+def test_no_caller_can_pass_a_seed_to_the_plan():
+    with pytest.raises( TypeError ): sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    with pytest.raises( TypeError ): sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), seed=11 )
+
+
+@pytest.mark.parametrize( "question,seed", [ ( 1, 20261008 ), ( 2, 20261009 ), ( 3, 20261010 ), ( 4, 20261011 ) ] )
+def test_the_plan_of_each_question_draws_with_that_questions_seed( question, seed ):
+    built = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 }, question=question ) )
+    assert built[ "plan" ][ "seed" ] == seed and built[ "plan" ][ "question" ] == question
+    assert built[ "plan" ][ "random_ids" ] == sp.random_neighbours( catalogue( 260 ), "e07", seed )
+
+
+def test_the_four_seeds_draw_four_different_random_sets():
+    sets = [ tuple( sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 }, question=k ) )[ "plan" ][ "random_ids" ] ) for k in ( 1, 2, 3, 4 ) ]
+    assert len( set( sets ) ) == 4
