@@ -1098,6 +1098,126 @@ def test_the_report_prints_each_arms_stop_reason_beside_its_lost_count():
     assert rep[ "lost_by_arm" ][ 0 ][ "stop_reason" ] == "attempts"
 
 
+# --- the page arm: plan 11.1 and 11.5 --------------------------------------------------------------------------------------
+
+def _driver_pages( name ):
+    """Ensures: returns the six page arms the driver wrote for one scenario."""
+    return json.loads( ( pathlib.Path( __file__ ).parent / "fixtures" / "stage1-driver-page-arms.json" ).read_text() )[ name ]
+
+
+def _page_arm( name ): return an.page_arm( an.read_stage( _driver_pages( name ) ) )
+
+
+def test_the_page_arm_constants_are_the_plans():
+    assert an.PAGE_ARMS == ( "page-single1", "page-single2", "page-pack" ) and an.PAGE_NEAR == 0.05 and an.PAGE_FLOOR == vd_floor()
+
+
+def vd_floor():
+    from cosa.repo.symindex import verdict as vd
+    return vd.POLICY[ "floor" ]
+
+
+def test_the_driver_wrote_page_arms_that_carry_the_scenario_tables():
+    stage = an.read_stage( _driver_pages( "pack-changes-two" ) )
+    assert sorted( stage ) == [ 1, 2 ] and sorted( stage[ 1 ] ) == [ "page-pack", "page-single1", "page-single2" ]
+    assert ( stage[ 1 ][ "page-single1" ][ "overlaps" ][ "page.04" ], stage[ 1 ][ "page-pack" ][ "overlaps" ][ "page.04" ] ) == ( 0.29, 0.33 )
+    assert all( a[ "status" ] == "clean" for q in stage.values() for a in q.values() )
+
+
+def test_packing_that_changes_no_chosen_page_passes_the_page_arm():
+    r = _page_arm( "same" )
+    assert ( r[ "state" ], r[ "questions" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "pass", [ 1, 2 ], 0, 0, 0.0, 0.02 )
+    assert r[ "near_floor_pages" ] == 4
+
+
+def test_packing_that_changes_the_chosen_pages_on_more_questions_than_noise_does_fails():
+    r = _page_arm( "pack-changes-two" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ] ) == ( "fail", 2, 0 )
+
+
+def test_packing_that_changes_as_many_questions_as_noise_does_passes():
+    r = _page_arm( "noise-one-pack-one" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "noise_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "pass", 1, 1, 0.04, 0.04 )
+    assert _page_arm( "noise-two-pack-none" )[ "state" ] == "pass"
+
+
+def test_the_per_page_difference_is_held_to_the_noise_floor_read_as_at_least_two_hundredths():
+    r = _page_arm( "overlap-only" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "fail", 0, 0.1, 0.02 )
+
+
+def test_a_page_arm_with_no_page_near_the_floor_in_any_question_reads_inconclusive_not_pass():
+    r = _page_arm( "no-page-near-the-floor" )
+    assert ( r[ "state" ], r[ "pack_changes" ], r[ "near_floor_pages" ] ) == ( "inconclusive", 0, 0 )
+
+
+def test_a_failing_page_arm_stays_a_fail_when_no_page_is_near_the_floor():
+    recs = _driver_pages( "pack-changes-two" )
+    for rec in recs:
+        for a in rec[ "answers" ]:
+            if a[ "id" ] == "page.03": a[ "probabilities" ] = { "reuse": 0.9, "extend": 0.0, "unrelated": 0.1 }
+            if a[ "id" ] == "page.04": a[ "probabilities" ] = { "reuse": 0.1 if rec[ "arm" ] != "page-pack" else 0.9, "extend": 0.0, "unrelated": 0.9 if rec[ "arm" ] != "page-pack" else 0.1 }
+    r = an.page_arm( an.read_stage( recs ) )
+    assert r[ "near_floor_pages" ] == 0 and r[ "state" ] == "fail"
+
+
+def test_a_page_arm_with_an_arm_missing_or_unclean_or_stopped_is_not_judged():
+    recs = _driver_pages( "same" )
+    assert an.page_arm( an.read_stage( [ r for r in recs if not ( r[ "question" ] == 2 and r[ "arm" ] == "page-pack" ) ] ) )[ "state" ] == "inconclusive"
+    dirty = _driver_pages( "same" ); dirty[ 0 ][ "failed" ] = [ "page.00", "page.01", "page.02" ]; dirty[ 0 ][ "answers" ] = dirty[ 0 ][ "answers" ][ 3: ]
+    assert an.page_arm( an.read_stage( dirty ) )[ "state" ] == "inconclusive"
+    stopped = _driver_pages( "same" ); stopped[ 2 ][ "stop_reason" ] = "ceiling"
+    assert an.page_arm( an.read_stage( stopped ) )[ "state" ] == "invalid"
+
+
+def test_a_stage_with_no_page_arm_reads_inconclusive_with_no_question():
+    r = an.page_arm( an.read_stage( _question() ) )
+    assert ( r[ "state" ], r[ "questions" ] ) == ( "inconclusive", [] )
+
+
+def test_a_page_lost_within_the_limit_from_one_arm_is_read_over_the_pages_answered_in_all_three():
+    base = { **{ f"p{k:03d}": 0.05 for k in range( 200 ) }, "p000": 0.9, "p001": 0.31 }
+    def arm( name, size=1 ): return _arm( name, base, size=size )
+    s1 = arm( "page-single1" ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p150" ]; s1[ "failed" ] = [ "p150" ]
+    r  = an.page_arm( an.read_stage( [ s1, arm( "page-single2" ), arm( "page-pack", 200 ) ] ) )
+    assert r[ "state" ] == "pass" and r[ "pack_changes" ] == 0 and r[ "noise_changes" ] == 0 and r[ "questions" ] == [ 1 ] and r[ "near_floor_pages" ] == 1
+
+
+def test_the_report_carries_the_page_arm_and_prints_one_line_for_it():
+    rep  = an.build_report( _driver_pages( "noise-one-pack-one" ), canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "pass"
+    text = an.render( rep )
+    assert "page arm: pass; chosen pages changed by packing on 1 of 2 questions against 1 by noise; per-page difference p99 0.04 against floor 0.04; pages within 0.05 of 0.3: 4" in text
+
+
+def test_the_report_says_why_an_inconclusive_page_arm_is_inconclusive():
+    text = an.render( an.build_report( _driver_pages( "no-page-near-the-floor" ), canaries=[] ) )
+    assert "page arm: inconclusive; no page lies within 0.05 of 0.3 in any question" in text
+
+
+def test_a_failing_page_arm_turns_the_decision_into_a_stop_that_goes_back_to_rick():
+    rep = an.build_report( _driver_pages( "pack-changes-two" ), canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "fail" and rep[ "decision" ] == "stop and ask: the page arm fails, so the page asks stay one each"
+    assert an.build_report( _driver_pages( "same" ), canaries=[] )[ "decision" ] != rep[ "decision" ]
+
+
+def test_an_invalid_entry_arm_keeps_its_own_stop_ahead_of_the_page_arm():
+    recs = _driver_pages( "pack-changes-two" )
+    bad  = _question( 1 )[ 0 ]; bad[ "stop_reason" ] = "ceiling"
+    assert an.build_report( recs + [ bad ], canaries=[] )[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_question_whose_page_arms_were_not_judged_prints_its_state_in_place_of_the_changes():
+    recs = [ r for r in _driver_pages( "same" ) if not ( r[ "question" ] == 2 and r[ "arm" ] == "page-pack" ) ]
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "pages, question 2: inconclusive" in text and "pages, question 1: chosen set changed by packing no, by noise no" in text
+
+
+def test_the_per_question_page_lines_say_what_changed_and_leave_the_verdict_to_the_page_arm():
+    text = an.render( an.build_report( _driver_pages( "noise-one-pack-one" ), canaries=[] ) )
+    assert "pages, question 1: chosen set changed by packing yes, by noise yes" in text and "pages, question 2: chosen set changed by packing no, by noise no" in text
+
+
 # --- ruling R2: pass 3 and a question with no probes -------------------------------------------------------------------------
 
 def test_a_question_with_no_probe_arms_is_skipped_and_named_as_not_probed():
