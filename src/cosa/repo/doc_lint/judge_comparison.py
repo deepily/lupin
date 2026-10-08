@@ -269,16 +269,18 @@ def check_report_binds( name, report, pairs_sha, judge_version, judge_model, bin
           ledger's recorded Claude Code binding, or None for an unbound ledger
 
     Ensures:
-        - returns None when the report's pairs sha, judge prompt version and judge model equal these, and, for a
-          bound ledger, its Claude Code path and version equal the binding
+        - returns None when the report's pairs sha, judge prompt version, judge model and harness version equal these,
+          and, for a bound ledger, its Claude Code path and version equal the binding
+        - a report with no harness_version key is a version 1 report and reads as 1
         - the thresholds are not in the report, so a report from a run at other thresholds is not caught here;
           the ledger keys carry them, and a run at other thresholds would have no rows to rebuild from
 
     Raises:
         - ReportMismatch naming the field and both values when one differs
     """
-    seen = { "pairs_sha": report.get( "pairs_sha" ), "judge prompt version": report[ "prompt_versions" ][ "judge" ], "judge model": report[ "models" ][ "judge" ] }
-    want = { "pairs_sha": pairs_sha, "judge prompt version": judge_version, "judge model": judge_model }
+    seen = { "pairs_sha": report.get( "pairs_sha" ), "judge prompt version": report[ "prompt_versions" ][ "judge" ], "judge model": report[ "models" ][ "judge" ],
+             "harness version": report.get( "harness_version", 1 ) }
+    want = { "pairs_sha": pairs_sha, "judge prompt version": judge_version, "judge model": judge_model, "harness version": harness_runner.HARNESS_VERSION }
     if binding is not None:
         seen[ "claude binary" ] = f"claude_cli={report.get( 'claude_cli' )}|version={report.get( 'claude_cli_version' )}"
         want[ "claude binary" ] = binding
