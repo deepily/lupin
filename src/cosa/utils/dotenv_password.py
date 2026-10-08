@@ -35,6 +35,62 @@ import os
 _SEEDED = { }
 
 
+def _read_dotenv_values( root, wanted ):
+    """
+    Read the first non-blank value for each wanted key from the nearest ``.env``.
+
+    Requires:
+        - root is a directory path that may contain a .env or a .git marker
+        - wanted is a tuple of key names
+
+    Ensures:
+        - Looks in the worktree's own .env first, then in the main checkout's .env
+        - Uses the first line for a key as the one that decides, blank or not
+        - Returns a dict holding only the keys whose first value is non-empty
+        - Returns an empty dict when no .env is found or it cannot be read
+        - Never raises
+    """
+    # A worktree has no .env of its own — it is untracked, so it exists only in the main
+    # checkout. In a worktree `.git` is a FILE reading "gitdir: <main>/.git/worktrees/<n>";
+    # that is how we reach the checkout that actually holds it, with no subprocess.
+    candidates = [ os.path.join( root, ".env" ) ]
+    git_marker = os.path.join( root, ".git" )
+    if os.path.isfile( git_marker ):
+        try:
+            gitdir = open( git_marker ).read().split( "gitdir:", 1 )[ 1 ].strip()
+            main   = os.path.dirname( gitdir.split( "/.git/worktrees/" )[ 0 ] + "/.git" )
+            candidates.append( os.path.join( main, ".env" ) )
+        except ( OSError, IndexError ):
+            pass
+
+    dotenv = next( ( c for c in candidates if os.path.isfile( c ) ), None )
+    if dotenv is None: return { }
+
+    found  = { }
+    seen   = set()
+    # THE FIRST LINE FOR A KEY DECIDES, blank or not, which is what the loop that stood here
+    # before row 80513825 did (it returned at the first `POSTGRES_PASSWORD=` line). The
+    # reviewer's three divergences (a duplicate key, a blank line before a value, undecodable
+    # bytes after the key) are tests in test_db_url_unchanged_without_the_new_keys.py.
+    try:
+        # errors="replace": a stray non-UTF-8 byte in a comment must not hide a key on another line.
+        with open( dotenv, errors="replace" ) as fh:
+            for line in fh:
+                line = line.strip()
+                for key in wanted:
+                    if key in seen or not line.startswith( key + "=" ): continue
+                    seen.add( key )
+                    value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
+                    if value: found[ key ] = value
+                if len( seen ) == len( wanted ): break
+    except ( OSError, UnicodeDecodeError ):
+        # Whatever was read before the failure stands, as it did when the loop returned at the
+        # key. An unreadable file reads nothing and so sets nothing. Never raises: this module
+        # is imported by nearly everything at startup.
+        pass
+    return found
+
+
 def seed_db_password_from_dotenv( root=None ):
     """
     Fill a blank DB_PASSWORD from the nearest ``.env``, preferring a role password.
@@ -70,46 +126,9 @@ def seed_db_password_from_dotenv( root=None ):
     # <root>/src/cosa/utils/dotenv_password.py -> <root>
     if root is None: root = os.path.dirname( os.path.dirname( os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
 
-    # A worktree has no .env of its own — it is untracked, so it exists only in the main
-    # checkout. In a worktree `.git` is a FILE reading "gitdir: <main>/.git/worktrees/<n>";
-    # that is how we reach the checkout that actually holds it, with no subprocess.
-    candidates = [ os.path.join( root, ".env" ) ]
-    git_marker = os.path.join( root, ".git" )
-    if os.path.isfile( git_marker ):
-        try:
-            gitdir = open( git_marker ).read().split( "gitdir:", 1 )[ 1 ].strip()
-            main   = os.path.dirname( gitdir.split( "/.git/worktrees/" )[ 0 ] + "/.git" )
-            candidates.append( os.path.join( main, ".env" ) )
-        except ( OSError, IndexError ):
-            pass
-
-    dotenv = next( ( c for c in candidates if os.path.isfile( c ) ), None )
-    if dotenv is None: return
-
     wanted = ( "POSTGRES_PASSWORD", "LUPIN_HOST_DB_USER", "LUPIN_HOST_DB_PASSWORD",
                "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" )
-    found  = { }
-    seen   = set()
-    # THE FIRST LINE FOR A KEY DECIDES, blank or not, which is what the loop that stood here
-    # before row 80513825 did (it returned at the first `POSTGRES_PASSWORD=` line). The
-    # reviewer's three divergences (a duplicate key, a blank line before a value, undecodable
-    # bytes after the key) are tests in test_db_url_unchanged_without_the_new_keys.py.
-    try:
-        # errors="replace": a stray non-UTF-8 byte in a comment must not hide a key on another line.
-        with open( dotenv, errors="replace" ) as fh:
-            for line in fh:
-                line = line.strip()
-                for key in wanted:
-                    if key in seen or not line.startswith( key + "=" ): continue
-                    seen.add( key )
-                    value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
-                    if value: found[ key ] = value
-                if len( seen ) == len( wanted ): break
-    except ( OSError, UnicodeDecodeError ):
-        # Whatever was read before the failure stands, as it did when the loop returned at the
-        # key. An unreadable file reads nothing and so sets nothing. Never raises: this module
-        # is imported by nearly everything at startup.
-        pass
+    found  = _read_dotenv_values( root, wanted )
 
     # ROLE KEYS WIN OVER THE SUPERUSER PASSWORD (row 80513825, the approval-settings guard rail).
     # A seat's `.env` is allowed to carry the credentials of a role that cannot write policy
@@ -209,3 +228,29 @@ def seed_db_password_from_file():
         return
     if value: os.environ[ "DB_PASSWORD" ] = value
     else: print( f"[DB] WARNING: DB_PASSWORD_FILE={path} is empty; DB_PASSWORD stays unset" )
+
+
+def clone_login( root=None ):
+    """
+    Return the test role's login for a throwaway database, or None.
+
+    Requires:
+        - root, if given, is a directory path that may contain a .env or a .git marker
+
+    Ensures:
+        - Returns ( user, password ) from LUPIN_TEST_DB_USER and LUPIN_TEST_DB_PASSWORD in
+          os.environ when the password is non-empty
+        - Otherwise returns them from the same keys in the .env, the user falling back to
+          "lupin_test" when its key is absent
+        - Returns None when no test password is found anywhere
+        - Never raises and never changes os.environ
+    """
+    if root is None: root = os.path.dirname( os.path.dirname( os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
+    password = os.environ.get( "LUPIN_TEST_DB_PASSWORD" )
+    user     = os.environ.get( "LUPIN_TEST_DB_USER" )
+    if not password:
+        found    = _read_dotenv_values( root, ( "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" ) )
+        password = found.get( "LUPIN_TEST_DB_PASSWORD" )
+        user     = user or found.get( "LUPIN_TEST_DB_USER" )
+    if not password: return None
+    return ( user or "lupin_test", password )
