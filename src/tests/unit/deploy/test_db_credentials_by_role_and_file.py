@@ -11,18 +11,32 @@ The two credential routes the approval-settings guard rail (row 80513825) adds:
 key or the wrong venue produces a different password, not the same one.
 """
 
+import json
 import os
+import re
+import subprocess
+import sys
 
 import pytest
 
+import cosa.utils.dotenv_password as dotenv_password
 from cosa.rest.db import database
 from cosa.utils.dotenv_password import seed_db_password_from_dotenv, seed_db_password_from_file
 
 
 @pytest.fixture( autouse=True )
 def clean_env( monkeypatch ):
+    """
+    Start each test with no database login set, and restore the environment afterwards.
+
+    A delete of an absent key records nothing, so the key is set first and then deleted. The seeder
+    writes os.environ directly, and without a recorded absence its DB_USER would outlive the test.
+    The seeder keeps a record of what it set; that dict is replaced for the test and restored after.
+    """
     for key in ( "DB_PASSWORD", "DB_USER", "DB_PASSWORD_FILE", "LUPIN_ENV" ):
-        monkeypatch.delenv( key, raising=False )
+        monkeypatch.setenv( key, "placeholder" )
+        monkeypatch.delenv( key )
+    monkeypatch.setattr( dotenv_password, "_SEEDED", { } )
 
 
 def _dotenv( tmp_path, pairs ):
@@ -174,3 +188,30 @@ def test_get_database_url_reads_the_password_file_before_the_dotenv( tmp_path, m
     monkeypatch.delenv( "LUPIN_CLOUD_BACKED", raising=False )
     url = database.get_database_url()
     assert url.startswith( "postgresql+psycopg2://lupin_app:" + FROM_FILE + "@" )
+
+
+_WATCHER = """
+import json, os
+KEYS = ( "DB_USER", "DB_PASSWORD", "DB_PASSWORD_FILE", "LUPIN_ENV" )
+def _state():
+    import cosa.utils.dotenv_password as module
+    return { **{ k: os.environ.get( k ) for k in KEYS }, "seeded_keys": sorted( module._SEEDED ) }
+def pytest_sessionstart( session ):
+    session.config._before = _state()
+def pytest_sessionfinish( session ):
+    print( "ENVWATCH " + json.dumps( { "before": session.config._before, "after": _state() } ) )
+"""
+
+
+def test_the_file_leaves_the_database_login_as_it_found_it( tmp_path ):
+    """Run this file in a child pytest and compare the login state before and after."""
+    plugin = tmp_path / "envwatch_plugin.py"
+    plugin.write_text( _WATCHER )
+    env = { **os.environ, "PYTHONPATH": os.pathsep.join( [ str( tmp_path ), os.environ[ "PYTHONPATH" ] ] ) }
+    done = subprocess.run( [ sys.executable, "-m", "pytest", __file__, "-q", "-p", "no:cacheprovider", "-p", "envwatch_plugin",
+                             "-k", "not the_file_leaves_the_database_login" ],
+                           capture_output=True, text=True, timeout=300, env=env )
+    found = re.findall( r"ENVWATCH (\{.*\})", done.stdout )
+    assert len( found ) == 1 and done.returncode == 0, done.stdout[ -800: ] + done.stderr[ -400: ]
+    seen = json.loads( found[ 0 ] )
+    assert seen[ "after" ] == seen[ "before" ], f"the file changed the login variables or the seeder record: {seen}"
