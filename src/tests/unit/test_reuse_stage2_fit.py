@@ -365,7 +365,7 @@ def test_the_text_has_no_edge_warning_when_the_choice_is_inside_its_grid():
 
 
 def test_the_old_report_carries_its_cuts_as_the_grid_and_flags_a_choice_on_their_edge():
-    rows = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.1 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
+    rows = [ _row( "m", "t", True, None, None, p_overlap = 0.3 ), _row( "m", "a", False, None, None, p_overlap = 0.1 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
     split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
     rep  = ft.old_report( rows, split, 0.5, cuts = ( 0.2, 0.4, 0.6 ) )
     assert rep[ "grid" ] == { "cut": ( 0.2, 0.4, 0.6 ) } and rep[ "chosen" ] == { "cut": 0.2 } and rep[ "edges" ] == [ { "key": "cut", "value": 0.2, "edge": "lowest" } ]
@@ -387,7 +387,7 @@ def test_a_tie_is_said_in_words_with_its_size_and_the_way_it_was_broken_and_a_un
 def test_the_old_question_says_the_tie_with_its_own_word_for_the_cut():
     split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
     rows  = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.5 ), _row( "m", "b", False, None, None, p_overlap = 0.8 ),
-              _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
+              _row( "m", "bad", False, None, None, malformed = "x" ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
     rep   = ft.old_report( rows, split, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )
     assert rep[ "tied" ] == 2 and rep[ "chosen" ] == { "cut": 0.85 }
     assert "tie: 2 points within the rate tied on twins on the shortlist; the highest cut among them was chosen" in ft.render( rep )

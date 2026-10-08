@@ -202,8 +202,9 @@ def _best( policies, rows, rate ):
     """
     Pick the policy with the most twins on the shortlist among those within the rate.
 
-    Requires:
-        - policies come in the order that settles ties: the first of the best wins
+    Ensures:
+        - returns { chosen, table, feasible, tied }; tied is how many points share the most twins
+        - a tie goes to the highest reuse cut, the most cautious, then to the lowest threshold, floor and coverage
     Raises:
         - NoFeasiblePolicy naming the lowest false-reuse rate any policy reached
     """
@@ -215,10 +216,10 @@ def _best( policies, rows, rate ):
     if not ok:
         lowest = min( ( t[ "figures" ][ "false_reuse_rate" ] for t in table ), default=None )
         raise NoFeasiblePolicy( f"no grid point keeps false reuse within {rate}; the lowest reachable rate is {lowest}" )
-    best = ok[ 0 ]
-    for t in ok[ 1: ]:
-        if t[ "figures" ][ "twins_on_shortlist" ] > best[ "figures" ][ "twins_on_shortlist" ]: best = t
-    return { "chosen": best[ "policy" ], "table": table, "feasible": len( ok ) }
+    top  = max( t[ "figures" ][ "twins_on_shortlist" ] for t in ok )
+    tied = [ t for t in ok if t[ "figures" ][ "twins_on_shortlist" ] == top ]
+    best = max( tied, key=lambda t: ( t[ "policy" ][ "reuse" ], -t[ "policy" ][ "threshold" ], -t[ "policy" ][ "floor" ], -t[ "policy" ][ "coverage" ] ) )
+    return { "chosen": best[ "policy" ], "table": table, "feasible": len( ok ), "tied": len( tied ) }
 
 
 def fit_policy( rows, halves, rate, grid=GRID ):
@@ -230,7 +231,8 @@ def fit_policy( rows, halves, rate, grid=GRID ):
         - rows hold only members of the fit half
     Ensures:
         - returns { chosen, table, feasible }; the table lists every point tried, ordered by threshold, reuse, floor, coverage
-        - the chosen point has the most twins on the shortlist among those within the rate; ties go to the first in the table order
+        - the chosen point has the most twins on the shortlist among those within the rate
+        - a tie goes to the highest reuse cut, then to the lowest threshold, floor and coverage
         - a point whose floor is above its reuse cut is never tried
     Raises:
         - ValueError for a bad rate or grid, no rows, an unknown member, or a row of the check half
@@ -260,14 +262,14 @@ def fit_old( rows, halves, rate, cuts=OLD_CUTS ):
         - rate and rows as for the new question; rows carry the old overlap
     Ensures:
         - returns { chosen: { cut }, table, feasible }; the cut serves as reuse cut and shortlist threshold alike
-        - ties go to the lowest cut
+        - a tie goes to the highest cut, the most cautious
     Raises:
         - the errors of the new question's fit
     """
     _check_rate( rate )
     _check_fit_rows( rows, halves )
     best = _best( [ _old_policy( c ) for c in sorted( cuts ) ], _old_view( rows ), rate )
-    return { "chosen": { "cut": best[ "chosen" ][ "reuse" ] }, "feasible": best[ "feasible" ],
+    return { "chosen": { "cut": best[ "chosen" ][ "reuse" ] }, "feasible": best[ "feasible" ], "tied": best[ "tied" ],
              "table": [ { **t, "policy": { "cut": t[ "policy" ][ "reuse" ] } } for t in best[ "table" ] ] }
 
 
@@ -305,7 +307,8 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
     Requires:
         - split is the record the split module writes; rate is the allowed false-reuse rate
     Ensures:
-        - returns { format, rate, placeholder, grid, edges, rate_binds, counts, fit, chosen, on_fit, on_check, reliability }
+        - returns { format, rate, placeholder, grid, edges, rate_binds, tied, counts, fit, chosen, on_fit, on_check, reliability }
+        - tied is the number of points that shared the most twins on the shortlist
         - rate_binds is false when every grid point keeps false reuse within the rate
         - edges names each chosen value that sits on the edge of its grid
         - on_check is the chosen policy read on the check half, which the fit never saw
@@ -315,7 +318,7 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
     fit_rows, other = split_rows( rows, halves )
     fit = fit_policy( fit_rows, halves, rate, grid )
     return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": grid, "edges": edges( fit[ "chosen" ], grid ), "rate_binds": fit[ "feasible" ] < len( fit[ "table" ] ),
-             "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
+             "tied": fit[ "tied" ], "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( fit_rows, fit[ "chosen" ] ), "on_check": evaluate( other, fit[ "chosen" ] ),
              "reliability": { "fit": reliability( fit_rows ), "check": reliability( other ) } }
 
@@ -335,7 +338,7 @@ def old_report( rows, split, rate, cuts=OLD_CUTS, placeholder=False ):
     fit    = fit_old( fit_rows, halves, rate, cuts )
     policy = _old_policy( fit[ "chosen" ][ "cut" ] )
     return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": { "cut": tuple( sorted( cuts ) ) }, "edges": edges( fit[ "chosen" ], { "cut": cuts } ), "rate_binds": fit[ "feasible" ] < len( fit[ "table" ] ),
-             "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
+             "tied": fit[ "tied" ], "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( _old_view( fit_rows ), policy ), "on_check": evaluate( _old_view( other ), policy ),
              "reliability": { "fit": reliability( fit_rows, "p_overlap" ), "check": reliability( other, "p_overlap" ) } }
 
@@ -348,6 +351,7 @@ def render( rep ):
         - returns a string with the allowed rate, the grid and its note, the group counts, the chosen policy on both halves and both reliability tables
         - a chosen value on the edge of its grid gets a warning line
         - a rate that binds at no cut gets a warning line with the condition text
+        - a tie of more than one point gets a line with its size and the way it was broken
     """
     lines = [ f"Threshold fit ({rep[ 'format' ]})", "", f"false-reuse rate allowed: {rep[ 'rate' ]}" + ( " (placeholder)" if rep[ "placeholder" ] else "" ),
               "grid: " + "; ".join( f"{k} {min( v )} to {max( v )} ({len( v )} values)" for k, v in rep[ "grid" ].items() ), GRID_NOTE,
@@ -355,6 +359,7 @@ def render( rep ):
               f"rows: fit {rep[ 'counts' ][ 'fit' ][ 'rows' ]}, check {rep[ 'counts' ][ 'check' ][ 'rows' ]}; points within the rate: {rep[ 'fit' ][ 'feasible' ]} of {len( rep[ 'fit' ][ 'table' ] )}",
               f"chosen on the fit half: {rep[ 'chosen' ]}", f"  {rep[ 'on_fit' ]}", f"same policy on the check half: {rep[ 'chosen' ]}", f"  {rep[ 'on_check' ]}" ]
     if not rep[ "rate_binds" ]: lines.append( f"warning: {NOT_BINDING}" )
+    if rep[ "tied" ] > 1: lines.append( f"tie: {rep[ 'tied' ]} points within the rate tied on twins on the shortlist; the highest {'cut' if 'cut' in rep[ 'chosen' ] else 'reuse cut'} among them was chosen" )
     for e in rep[ "edges" ]: lines.append( f"warning: the chosen {e[ 'key' ]} {e[ 'value' ]} is the {e[ 'edge' ]} value of its grid; widen the grid before reading it" )
     for half in ( "fit", "check" ):
         rel = rep[ "reliability" ][ half ]
