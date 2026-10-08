@@ -224,11 +224,11 @@ def test_a_known_optimum_is_found_and_the_rate_rules_out_the_values_that_break_i
     assert r[ "feasible" ] == 2 and len( r[ "table" ] ) == 4
 
 
-def test_ties_go_to_the_highest_reuse_cut_then_the_lowest_threshold_floor_and_coverage():
+def test_ties_go_to_the_highest_reuse_cut_then_the_highest_threshold_then_the_lowest_floor_and_coverage():
     r = ft.fit_policy( _opt_rows(), HALVES, 0.5, GRID )
     assert r[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.3, "coverage": 0.5 } and r[ "tied" ] == 2
     both = ft.fit_policy( _opt_rows( 0.7 ), HALVES, 0.0, GRID )
-    assert both[ "chosen" ][ "threshold" ] == 0.4 and both[ "chosen" ][ "reuse" ] == 0.9 and both[ "tied" ] == 2
+    assert both[ "chosen" ][ "threshold" ] == 0.6 and both[ "chosen" ][ "reuse" ] == 0.9 and both[ "tied" ] == 2
     wide = ft.fit_policy( _opt_rows(), HALVES, 0.5, { **GRID, "threshold": ( 0.4, ), "reuse": ( 0.9, ), "floor": ( 0.2, 0.3 ), "coverage": ( 0.3, 0.5 ) } )
     assert wide[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.2, "coverage": 0.3 } and wide[ "tied" ] == 4
 
@@ -391,6 +391,23 @@ def test_the_old_question_says_the_tie_with_its_own_word_for_the_cut():
     rep   = ft.old_report( rows, split, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )
     assert rep[ "tied" ] == 2 and rep[ "chosen" ] == { "cut": 0.85 }
     assert "tie: 2 points within the rate tied on twins on the shortlist; the highest cut among them was chosen" in ft.render( rep )
+
+
+def test_the_report_states_each_tie_break_rule_once_in_words_whether_or_not_a_tie_happened():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rows  = _opt_rows() + [ _row( "k", "t", True, 0.9 ) ]
+    for rate in ( 0.0, 0.5 ):
+        text = ft.render( ft.report( rows, split, rate, GRID ) )
+        assert text.count( ft.TIE_RULES ) == 1 and text.count( "tie-break" ) == 1
+    old = ft.render( ft.old_report( [ _row( "m", "t", True, None, None, p_overlap = 0.3 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ], split, 0.5, cuts = ( 0.2, 0.4 ) ) )
+    assert old.count( ft.TIE_RULES_OLD ) == 1 and ft.TIE_RULES not in old
+
+
+def test_the_tie_break_words_name_the_end_for_each_cut_and_say_why_floor_and_coverage_stay_low():
+    assert ft.TIE_RULES.startswith( "tie-break: every tie goes to the end that says reuse less often" )
+    assert "reuse cut highest" in ft.TIE_RULES and "threshold highest" in ft.TIE_RULES and "floor and coverage lowest" in ft.TIE_RULES
+    assert "only the extend verdict" in ft.TIE_RULES and "pending Rick" in ft.TIE_RULES
+    assert ft.TIE_RULES_OLD.startswith( "tie-break: every tie goes to the end that says reuse less often" ) and "cut highest" in ft.TIE_RULES_OLD and "pending Rick" in ft.TIE_RULES_OLD
 
 
 # --- the second named condition: a rate that binds nowhere -----------------------------------------------------------------
