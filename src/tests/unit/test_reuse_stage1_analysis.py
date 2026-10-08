@@ -1180,6 +1180,23 @@ def test_asking_rick_turns_the_decision_into_a_stop_and_the_text_states_the_ambi
     assert "11.5" in an.PAGE_AMBIGUITY and "set rule" in an.PAGE_AMBIGUITY and "overlap rule" in an.PAGE_AMBIGUITY and "Rick" in an.PAGE_AMBIGUITY
 
 
+def test_the_near_pages_are_counted_in_single_run_one_and_not_in_the_other_runs():
+    r = _page_arm( "near-only-elsewhere" )
+    assert ( r[ "near_floor_pages" ], r[ "set_rule" ], r[ "overlap_rule" ], r[ "state" ] ) == ( 0, "pass", "pass", "inconclusive" )
+    stage = an.read_stage( _driver_pages( "near-only-elsewhere" ) )
+    assert stage[ 1 ][ "page-pack" ][ "overlaps" ][ "page.04" ] == 0.27 and stage[ 1 ][ "page-single1" ][ "overlaps" ][ "page.04" ] == 0.2
+
+
+def test_a_stop_on_an_invalid_entry_arm_outranks_asking_rick_about_the_page_arm():
+    bad = _question( 1 )[ 0 ]; bad[ "stop_reason" ] = "ceiling"
+    rep = an.build_report( _driver_pages( "overlap-only" ) + [ bad ], canaries=[] )
+    assert rep[ "page_arm" ][ "state" ] == "ask_rick" and rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_the_ambiguity_text_says_what_the_interim_rule_does_with_the_overlap_rule():
+    assert "not a pass and not a fail: it asks Rick" in an.PAGE_AMBIGUITY and "set rule alone" in an.PAGE_AMBIGUITY
+
+
 def test_the_ambiguity_is_stated_only_when_the_page_arm_asks_rick():
     for name in ( "same", "pack-changes-two", "no-page-near-the-floor" ):
         assert an.PAGE_AMBIGUITY not in an.render( an.build_report( _driver_pages( name ), canaries=[] ) ), name
@@ -1246,7 +1263,7 @@ def test_the_report_says_why_an_inconclusive_page_arm_is_inconclusive():
 
 def test_a_failing_page_arm_turns_the_decision_into_a_stop_that_goes_back_to_rick():
     rep = an.build_report( _driver_pages( "pack-changes-two" ), canaries=[] )
-    assert rep[ "page_arm" ][ "state" ] == "fail" and rep[ "decision" ] == "stop and ask: the page arm fails, so the page asks stay one each"
+    assert rep[ "page_arm" ][ "state" ] == "fail" and rep[ "decision" ] == "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     assert an.build_report( _driver_pages( "same" ), canaries=[] )[ "decision" ] != rep[ "decision" ]
 
 
