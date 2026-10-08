@@ -256,7 +256,7 @@ def _question( question=1, base=None, noise=0.0, packs=None, probes=True, probe_
 
 def test_a_noise_below_the_minimum_reads_as_the_minimum():
     nf = an.noise_floor( an.read_stage( _question( noise=0.001 ) ) )
-    assert ( nf[ "measured" ], nf[ "floor" ], nf[ "state" ] ) == ( 0.001, 0.02, "ok" )
+    assert ( nf[ "measured" ], nf[ "floor" ], nf[ "state" ], nf[ "max" ] ) == ( 0.001, 0.02, "ok", 0.001 )
 
 
 def test_a_noise_above_the_minimum_is_the_floor():
@@ -358,9 +358,14 @@ def test_pass_three_is_invalid_when_a_probe_arm_was_stopped():
 
 
 def test_pass_three_wants_each_of_the_six_placements_exactly_once_per_question():
-    recs = _question(); recs[ -1 ] = _probe( 1, "e000", "first", "random", 0.5, _base() ); recs[ -1 ][ "run_name" ] = "other"
-    with pytest.raises( ValueError, match="twice|placement" ):
-        an.pass_three( an.read_stage( recs ), 0.02 )
+    recs = _question(); recs[ -1 ] = _probe( 1, "e000", "first", "random", 0.5, _base() )
+    recs[ -1 ][ "arm" ], recs[ -1 ][ "run_name" ] = "probe-extra", "s1-q1-probe-extra"
+    st = an.read_stage( recs )
+    with pytest.raises( ValueError, match="placement .* given twice" ):
+        an.pass_three( st, 0.02 )
+    recs[ -1 ][ "arm" ] = "probe-first-random"
+    with pytest.raises( ValueError, match="given twice" ):
+        an.read_stage( recs )
 
 
 def test_pass_three_pools_the_questions_and_reports_the_worst_difference():
@@ -581,3 +586,47 @@ def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questi
     assert an.analyze_pages( an.read_stage( recs ) )[ 1 ][ "state" ] == "invalid"
     assert an.analyze_pages( an.read_stage( _question() ) ) == {}
     assert an.analyze_pages( an.read_stage( _pages( { "p1": 0.9 }, { "p1": 0.9 }, { "p1": 0.9 } )[ :2 ] ) )[ 1 ][ "state" ] == "inconclusive"
+
+
+# --- cases a mutation showed unguarded -----------------------------------------------------------------------------------
+
+def test_exactly_ninety_pooled_after_the_reserve_question_is_enough_to_evaluate():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ), _arm( "single1", { "far": 0.05 }, question=4 ) ] ) )
+    assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 90, "evaluate" )
+
+
+def test_a_question_whose_single_run_is_not_clean_adds_nothing_to_the_pooled_count():
+    bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ) )[ "pooled_boundary" ] == 20
+    recs = _question() + [ dict( r, question=2, run_name=f"s1-q2-{r[ 'arm' ]}" ) for r in _question() if r[ "arm" ] == "single1" ]
+    recs[ -1 ][ "failed" ] = [ "e000" ]
+    assert an.evaluate( an.read_stage( recs ) )[ "boundary_by_question" ] == { 1: 100 }
+
+
+def test_a_stopped_arm_outranks_a_failed_pass_when_the_size_is_named():
+    recs = _question( packs={ 10: {}, 50: {}, 200: { "shift": 0.1 } } ); recs[ -1 ][ "state" ], recs[ -1 ][ "stop_reason" ] = "incomplete", "ceiling"
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "sizes" ][ 200 ][ "pass_one" ][ "state" ] == "fail" and rep[ "sizes" ][ 200 ][ "pass_three" ][ "state" ] == "invalid"
+    assert rep[ "sizes" ][ 200 ][ "state" ] == "invalid"
+
+
+def test_an_empty_stage_has_no_noise_floor_and_no_decision_to_make():
+    assert an.noise_floor( {} )[ "state" ] == "inconclusive"
+    assert an.evaluate( {} )[ "decision" ] == "inconclusive"
+
+
+def test_a_stopped_single_run_makes_every_size_invalid_and_the_decision_a_stop():
+    recs = _question(); recs[ 1 ][ "state" ], recs[ 1 ][ "stop_reason" ] = "incomplete", "ledger"
+    rep = an.evaluate( an.read_stage( recs ) )
+    assert rep[ "noise_floor" ][ "state" ] == "invalid" and all( rep[ "sizes" ][ s ][ "state" ] == "invalid" for s in an.PACK_SIZES )
+    assert rep[ "decision" ] == "stop and ask: an arm is invalid"
+
+
+def test_a_row_that_was_refused_without_usage_is_not_counted_unverifiable_but_an_answered_one_is():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=None, status="refused" ), _row( tokens_in=None, tokens_out=None ) ] ) )
+    assert r[ "unverifiable" ] == 1
+
+
+def test_a_row_with_output_but_no_input_usage_is_skipped_rather_than_crashing_the_reserve_check():
+    r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=600, reserve=1 ) ] ) )
+    assert r[ "tripped" ] == [] and r[ "output_per_entry" ] == [] and r[ "unverifiable" ] == 1

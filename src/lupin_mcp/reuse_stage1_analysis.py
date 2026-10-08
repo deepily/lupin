@@ -39,7 +39,7 @@ def read_arm( record ):
         - record is a dict in the stage1-arm-1 format
     Ensures:
         - returns the record's identity, its totals, rows and transport calls, plus overlaps, confidences,
-          malformed, and status
+          the valid probabilities, malformed, and status
         - overlaps maps each validly answered id to reuse plus extend rounded to six places
         - malformed maps an answered id whose probabilities are not valid to the reason
         - status is "invalid" when the arm was stopped by the ceiling, the ledger or refusals, or errored
@@ -51,7 +51,7 @@ def read_arm( record ):
     """
     if record.get( "format" ) != FORMAT: raise ValueError( f"expected format {FORMAT!r}, got {record.get( 'format' )!r}" )
     asked = set( record[ "entry_ids" ] )
-    overlaps, confidences, malformed, seen = {}, {}, {}, set()
+    overlaps, confidences, probabilities, malformed, seen = {}, {}, {}, {}, set()
     for a in record[ "answers" ]:
         i = a[ "id" ]
         if i not in asked: raise ValueError( f"answer for {i!r} which the arm did not ask about" )
@@ -60,7 +60,7 @@ def read_arm( record ):
         reason = vd.malformed_reason( a[ "probabilities" ] )
         if reason is not None: malformed[ i ] = reason; continue
         p, conf, _ = vd.call_facts( a[ "probabilities" ] )
-        overlaps[ i ], confidences[ i ] = round( p, 6 ), round( conf, 6 )
+        overlaps[ i ], confidences[ i ], probabilities[ i ] = round( p, 6 ), round( conf, 6 ), a[ "probabilities" ]
     stop = record[ "stop_reason" ]
     if record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
     elif ( stop == "attempts" or record[ "state" ] != "complete" or record[ "failed" ] or record[ "unasked" ] or record[ "not_reached" ]
@@ -68,7 +68,7 @@ def read_arm( record ):
     else: status = "clean"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
-             "overlaps": overlaps, "confidences": confidences, "malformed": malformed,
+             "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
              "failed": list( record[ "failed" ] ), "not_reached": list( record[ "not_reached" ] ), "unasked": list( record[ "unasked" ] ),
              "cache_hits": record[ "cache_hits" ], "totals": record[ "totals" ], "rows": record[ "rows" ],
              "transport_calls": record[ "transport_calls" ], "probe": record.get( "probe" ), "status": status }
@@ -136,3 +136,260 @@ def flips( ref, other, ids, cut ):
         - an overlap equal to the cut counts as above it
     """
     return sorted( i for i in ids if i in ref[ "overlaps" ] and i in other[ "overlaps" ] and ( ref[ "overlaps" ][ i ] >= cut ) != ( other[ "overlaps" ][ i ] >= cut ) )
+
+
+PASS_THREE_SIZE = 200                                         # the probe placements are run in a pack of this size, so they gate only this size
+CANARY_TRIPS    = ( "output_per_entry_over_60", "usage_over_reserve", "refusal" )
+
+
+def _spent( arm ):
+    """
+    Take the tokens an arm spent.
+
+    Ensures:
+        - returns the settled figure, or the reported input plus output when none was settled
+    """
+    t = arm[ "totals" ]
+    return t[ "spent_tokens" ] if t.get( "spent_tokens" ) is not None else ( t.get( "tokens_in" ) or 0 ) + ( t.get( "tokens_out" ) or 0 )
+
+
+def _arms_state( arms ):
+    """
+    Judge a set of arms together.
+
+    Ensures:
+        - returns "invalid" if any arm is invalid
+        - otherwise "inconclusive" if any is absent or not clean
+        - otherwise None
+    """
+    if any( a is not None and a[ "status" ] == "invalid" for a in arms ): return "invalid"
+    if not arms or any( a is None or a[ "status" ] != "clean" for a in arms ): return "inconclusive"
+    return None
+
+
+def _combine( states ):
+    """
+    Take the strongest of several states.
+
+    Ensures:
+        - returns the first present of invalid, fail, inconclusive, and otherwise pass
+    """
+    for s in ( "invalid", "fail", "inconclusive" ):
+        if s in states: return s
+    return "pass"
+
+
+def noise_floor( stage ):
+    """
+    Measure the noise floor: single run 1 against single run 2, pooled over the questions run.
+
+    Ensures:
+        - returns { measured, floor, max, n, state }
+        - state is "invalid" if any single run was stopped, "inconclusive" if any is absent or not clean,
+          else "ok"
+        - measured is the 99th percentile of the pooled differences, and floor is the larger of it and the minimum
+        - measured, floor and max are None unless state is "ok"
+    """
+    arms = [ a for q in sorted( stage ) for a in ( stage[ q ].get( "single1" ), stage[ q ].get( "single2" ) ) ]
+    bad  = _arms_state( arms )
+    if bad is not None: return { "measured": None, "floor": None, "max": None, "n": 0, "state": bad }
+    diffs = [ d for q in sorted( stage ) for d in differences( stage[ q ][ "single1" ], stage[ q ][ "single2" ] ).values() ]
+    measured = percentile( diffs )
+    return { "measured": measured, "floor": max( measured, NOISE_FLOOR_MIN ), "max": max( diffs ), "n": len( diffs ), "state": "ok" }
+
+
+def pass_one( stage, size, floor ):
+    """
+    Pass 1: the 99th percentile of the per-entry difference stays within the floor.
+
+    Ensures:
+        - returns { state, p99, max, n } pooled over the questions run
+        - state is "pass" when p99 is at most floor, "fail" above it, "invalid" or "inconclusive" with its arms
+        - state is "inconclusive" when floor is None
+    """
+    arms = [ a for q in sorted( stage ) for a in ( stage[ q ].get( "single1" ), stage[ q ].get( f"pack{size}" ) ) ]
+    bad  = _arms_state( arms )
+    if bad is not None or floor is None: return { "state": bad or "inconclusive", "p99": None, "max": None, "n": 0 }
+    diffs = [ d for q in sorted( stage ) for d in differences( stage[ q ][ "single1" ], stage[ q ][ f"pack{size}" ] ).values() ]
+    p99   = percentile( diffs )
+    return { "state": "pass" if p99 <= floor else "fail", "p99": p99, "max": max( diffs ), "n": len( diffs ) }
+
+
+def pass_two( stage, size ):
+    """
+    Pass 2: flips at the threshold on boundary entries, pack arm against single run 1.
+
+    Ensures:
+        - returns { state, pack_flips, noise_flips, boundary } pooled over the questions run
+        - state is "pass" when pack_flips is at most noise_flips plus the allowance, "fail" above it
+        - state is "invalid" or "inconclusive" with its arms
+    """
+    arms = [ a for q in sorted( stage ) for a in ( stage[ q ].get( "single1" ), stage[ q ].get( "single2" ), stage[ q ].get( f"pack{size}" ) ) ]
+    bad  = _arms_state( arms )
+    if bad is not None: return { "state": bad, "pack_flips": None, "noise_flips": None, "boundary": 0 }
+    pack_flips = noise_flips = boundary = 0
+    for q in sorted( stage ):
+        s1, s2, pack = stage[ q ][ "single1" ], stage[ q ][ "single2" ], stage[ q ][ f"pack{size}" ]
+        ids = boundary_ids( s1 )
+        boundary    += len( ids )
+        pack_flips  += len( flips( s1, pack, ids, THRESHOLD ) )
+        noise_flips += len( flips( s1, s2, ids, THRESHOLD ) )
+    return { "state": "pass" if pack_flips <= noise_flips + FLIP_ALLOWANCE else "fail", "pack_flips": pack_flips, "noise_flips": noise_flips, "boundary": boundary }
+
+
+def pass_three( stage, floor ):
+    """
+    Pass 3: the probe entry stays within the floor of its single value in six placements.
+
+    Requires:
+        - a question with probe arms has all six placements, each once
+    Ensures:
+        - returns { state, placements, worst } pooled over the questions that have probe arms
+        - state is "pass" when every placement is within floor of single run 1, "fail" when one is not
+        - state is "invalid" when a probe arm was stopped, and "inconclusive" when no question has probes, a
+          question lacks a placement, single run 1 is not clean or lacks the probe, or the arm has no probe answer
+    Raises:
+        - ValueError when one placement is given twice for a question
+    """
+    placements, diffs, states = 0, [], []
+    for q in sorted( stage ):
+        probes = [ a for a in stage[ q ].values() if a[ "probe" ] ]
+        if not probes: continue
+        seen = {}
+        for a in probes:
+            key = ( a[ "probe" ][ "placement" ], a[ "probe" ][ "neighbours" ] )
+            if key in seen: raise ValueError( f"placement {key} given twice for question {q}" )
+            seen[ key ] = a
+        s1 = stage[ q ].get( "single1" )
+        if _arms_state( [ s1 ] + probes ) == "invalid": states.append( "invalid" ); continue
+        if s1 is None or s1[ "status" ] != "clean" or len( seen ) != len( PROBE_PLACEMENTS ) * len( PROBE_NEIGHBOURS ): states.append( "inconclusive" ); continue
+        for a in probes:
+            pid = a[ "probe" ][ "id" ]
+            if pid not in a[ "overlaps" ] or pid not in s1[ "overlaps" ]: states.append( "inconclusive" ); continue
+            placements += 1
+            diffs.append( round( abs( a[ "overlaps" ][ pid ] - s1[ "overlaps" ][ pid ] ), 6 ) )
+    if not states and not diffs: return { "state": "inconclusive", "placements": 0, "worst": None }
+    if floor is None: states.append( "inconclusive" )
+    else: states.append( "pass" if all( d <= floor for d in diffs ) else "fail" )
+    return { "state": _combine( states ), "placements": placements, "worst": max( diffs ) if diffs else None }
+
+
+def evaluate( stage ):
+    """
+    Apply the three passes to each pack size and name the default.
+
+    Ensures:
+        - returns { noise_floor, boundary_by_question, boundary_pooled, sizes, default_size, unresolved_larger, decision }
+        - sizes maps each pack size to { state, pass_one, pass_two, pass_three }; pass 3 gates only the size it was run at
+        - a size that would pass reads inconclusive while fewer than the minimum pooled boundary entries were seen
+        - default_size is the largest size that passes, and unresolved_larger lists larger sizes still inconclusive
+        - decision is "stop and ask: an arm is invalid" if any size is invalid, else the default size, else
+          "inconclusive" if any size is, else "stop and ask: no pack size passes"
+    """
+    nf     = noise_floor( stage )
+    by_q   = { q: len( boundary_ids( stage[ q ][ "single1" ] ) ) for q in sorted( stage ) if stage[ q ].get( "single1" ) and stage[ q ][ "single1" ][ "status" ] == "clean" }
+    pooled = sum( by_q.values() )
+    sizes  = {}
+    for size in PACK_SIZES:
+        p1, p2 = pass_one( stage, size, nf[ "floor" ] ), pass_two( stage, size )
+        p3     = pass_three( stage, nf[ "floor" ] ) if size == PASS_THREE_SIZE else None
+        state  = _combine( [ p1[ "state" ], p2[ "state" ] ] + ( [ p3[ "state" ] ] if p3 else [] ) )
+        if state == "pass" and pooled < MIN_BOUNDARY_POOLED: state = "inconclusive"
+        sizes[ size ] = { "state": state, "pass_one": p1, "pass_two": p2, "pass_three": p3 }
+    passing = [ s for s in PACK_SIZES if sizes[ s ][ "state" ] == "pass" ]
+    default = max( passing ) if passing else None
+    states  = [ sizes[ s ][ "state" ] for s in PACK_SIZES ]
+    if "invalid" in states: decision = "stop and ask: an arm is invalid"
+    elif default is not None: decision = f"default pack size {default}"
+    elif "inconclusive" in states: decision = "inconclusive"
+    else: decision = "stop and ask: no pack size passes"
+    return { "noise_floor": nf, "boundary_by_question": by_q, "boundary_pooled": pooled, "sizes": sizes, "default_size": default,
+             "unresolved_larger": [ s for s in PACK_SIZES if default is not None and s > default and sizes[ s ][ "state" ] == "inconclusive" ],
+             "decision": decision }
+
+
+def stop_rules( stage ):
+    """
+    Read the rules that stop the stage between questions.
+
+    Ensures:
+        - returns { stop, next_step, findings, pooled_boundary, spent_by_question, spent_total }
+        - a finding is { rule, stop, detail }; the rules are the stage ceiling, spend after question 1,
+          and a single run 1 that is absent or not clean
+        - after question 2, fewer than the minimum pooled boundary entries stops before question 3
+        - after question 3, fewer than the pooled minimum asks for the reserve question
+        - after the reserve question, fewer than the pooled minimum reads inconclusive
+    """
+    spent = { q: sum( _spent( a ) for a in stage[ q ].values() ) for q in sorted( stage ) }
+    total = sum( spent.values() )
+    findings = []
+    if total > STAGE_TOKENS: findings.append( { "rule": "stage_ceiling", "stop": True, "detail": f"stage tokens above {STAGE_TOKENS:,}" } )
+    if spent.get( 1, 0 ) > STOP_SPEND_AFTER_QUESTION_1: findings.append( { "rule": "spend_after_question_1", "stop": True, "detail": f"spend after question 1 above {STOP_SPEND_AFTER_QUESTION_1:,} tokens" } )
+    unclean = [ q for q in sorted( stage ) if stage[ q ].get( "single1" ) is None or stage[ q ][ "single1" ][ "status" ] != "clean" ]
+    pooled  = sum( len( boundary_ids( stage[ q ][ "single1" ] ) ) for q in sorted( stage ) if q not in unclean )
+    last    = max( stage ) if stage else 0
+    stops   = [ f for f in findings if f[ "stop" ] ]
+    if stops: stop, step = True, f"stop and ask: {stops[ 0 ][ 'detail' ]}"
+    elif unclean: stop, step = True, f"stop and ask: question {unclean[ 0 ]}'s single run 1 is not clean"
+    elif last <= 1: stop, step = False, "run question 2"
+    elif last == 2 and pooled < STOP_BOUNDARY_AFTER_QUESTION_2: stop, step = True, f"stop and ask: under {STOP_BOUNDARY_AFTER_QUESTION_2} pooled boundary entries after question 2"
+    elif last == 2: stop, step = False, "run question 3"
+    elif last == 3 and pooled < MIN_BOUNDARY_POOLED: stop, step = False, "run the reserve question"
+    elif last >= 4 and pooled < MIN_BOUNDARY_POOLED: stop, step = False, f"evaluate: inconclusive, under {MIN_BOUNDARY_POOLED} pooled boundary entries"
+    else: stop, step = False, "evaluate"
+    return { "stop": stop, "next_step": step, "findings": findings, "pooled_boundary": pooled, "spent_by_question": spent, "spent_total": total }
+
+
+def check_canary( arm, canary ):
+    """
+    Recompute the canary's stop conditions from the arm's own rows.
+
+    Requires:
+        - arm is the canary arm record and canary the driver's canary file, both as dicts
+    Ensures:
+        - returns { tripped, output_per_entry, unverifiable, agrees, analysis_only, driver_only, failed, unasked, not_reached }
+        - tripped lists, in the order of CANARY_TRIPS: output tokens per entry above the stop figure, usage above
+          a row's reserve, and any refusal (a refused row, an HTTP 422, or a refused total)
+        - unverifiable counts answered rows that reported no usage, which only a person can read
+        - agrees compares tripped with the driver's own list, and the two other lists name the differences
+    """
+    rows, out_per, over_reserve, refused = arm[ "rows" ], [], False, bool( arm[ "totals" ].get( "refused_422" ) )
+    for r in rows:
+        if r[ "status" ] == "refused" or r.get( "http_status" ) == 422: refused = True
+        if r[ "tokens_out" ] is None or r[ "tokens_in" ] is None: continue
+        out_per.append( round( r[ "tokens_out" ] / r[ "size" ], 6 ) )
+        if r[ "reserve_tokens" ] is not None and r[ "tokens_in" ] + r[ "tokens_out" ] > r[ "reserve_tokens" ]: over_reserve = True
+    flags   = { "output_per_entry_over_60": any( x > OUTPUT_PER_ENTRY_STOP for x in out_per ), "usage_over_reserve": over_reserve, "refusal": refused }
+    tripped = [ t for t in CANARY_TRIPS if flags[ t ] ]
+    driver  = list( canary[ "tripped" ] )
+    return { "tripped": tripped, "output_per_entry": out_per, "unverifiable": sum( 1 for r in rows if r[ "status" ] == "answered" and ( r[ "tokens_in" ] is None or r[ "tokens_out" ] is None ) ),
+             "agrees": sorted( tripped ) == sorted( driver ), "analysis_only": [ t for t in tripped if t not in driver ], "driver_only": [ t for t in driver if t not in tripped ],
+             "failed": len( arm[ "failed" ] ), "unasked": len( arm[ "unasked" ] ), "not_reached": len( arm[ "not_reached" ] ) }
+
+
+def analyze_pages( stage ):
+    """
+    Read the page arm of each question.
+
+    Ensures:
+        - returns { question: { state, chosen_single1, chosen_single2, chosen_pack, set_changed_by_packing,
+          set_changed_by_noise, pack_p99, pack_max, noise_p99, noise_max } } for each question with any page arm
+        - the chosen pages are those the tool itself chooses at the policy floor, capped as the tool caps them
+        - state is "fail" when packing changes the set of chosen pages, "pass" when it does not, and "invalid"
+          or "inconclusive" with its arms; a change between the two single runs is reported as noise only
+    """
+    from lupin_mcp import reuse_tools as rt
+    out = {}
+    for q in sorted( stage ):
+        names = ( "page-single1", "page-single2", "page-pack" )
+        if not any( n in stage[ q ] for n in names ): continue
+        s1, s2, pack = ( stage[ q ].get( n ) for n in names )
+        bad = _arms_state( [ s1, s2, pack ] )
+        if bad is not None: out[ q ] = { "state": bad }; continue
+        chosen = [ [ c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in a[ "entry_ids" ] ], vd.POLICY ) ] for a in ( s1, s2, pack ) ]
+        pk, nz = list( differences( s1, pack ).values() ), list( differences( s1, s2 ).values() )
+        changed = set( chosen[ 0 ] ) != set( chosen[ 2 ] )
+        out[ q ] = { "state": "fail" if changed else "pass", "chosen_single1": chosen[ 0 ], "chosen_single2": chosen[ 1 ], "chosen_pack": chosen[ 2 ],
+                     "set_changed_by_packing": changed, "set_changed_by_noise": set( chosen[ 0 ] ) != set( chosen[ 1 ] ),
+                     "pack_p99": percentile( pk ), "pack_max": max( pk ), "noise_p99": percentile( nz ), "noise_max": max( nz ) }
+    return out
