@@ -24,6 +24,13 @@ else. It creates no role and resets no password, so it reads no password file an
 It is the repair after a migration or a test created a table the roles cannot yet reach.
 
     python -m cosa.utils.db_roles --psql "..." --grants-only [--apply]
+
+`--check` changes nothing. It asks Postgres what each role may do to every public table of both
+databases and compares the answer with the matrix in `cosa.utils.db_grants`. Each gap is printed
+with the one repair command.
+Exit 0 is clean, 1 is a gap or a database with no tables, 2 is a check that could not run.
+
+    python -m cosa.utils.db_roles --psql "..." --check
 """
 
 import argparse
@@ -31,6 +38,8 @@ import os
 import shlex
 import subprocess
 import sys
+
+from cosa.utils import db_grants
 
 SQL_RELATIVE_PATH = "src/scripts/sql/init-db-roles.sql"
 
@@ -100,10 +109,11 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     Plan or apply the role provisioning.
 
     Ensures:
+        - with --check: reads and prints only, never writes, and returns db_grants.check_with_psql's exit code
         - without --apply: prints the psql command and the redacted stdin, runs nothing, returns 0
         - with --apply: runs the psql command with the real stdin and returns its exit code
         - a bad password file, or an unreadable SQL file, returns 2 and prints why, before anything runs
-        - with --rollback or --grants-only no password file is read, and --reassign is refused
+        - with --check, --rollback or --grants-only no password file is read, and --reassign is refused
         - without either, all three password files are required
     """
     parser = argparse.ArgumentParser( description=__doc__.split( "\n\n" )[ 0 ] )
@@ -115,9 +125,15 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     direction = parser.add_mutually_exclusive_group()
     direction.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move dev-database ownership to lupin_app" )
     direction.add_argument( "--rollback", action="store_true", help="CUTOVER ONLY: move it back to lupin_dev; no role, password or grant changes" )
+    direction.add_argument( "--check", action="store_true", help="read-only: list every missing or unexpected privilege; exit 1 when there is one" )
     direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges only; no role or password is touched" )
     parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
     args = parser.parse_args( argv )
+
+    if args.check:
+        code, lines = db_grants.check_with_psql( args.psql, run_fn )
+        for line in lines: print( line, file=out )
+        return code
 
     app_pw = host_pw = test_pw = None
     if not ( args.rollback or args.grants_only ):

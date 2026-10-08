@@ -1,0 +1,201 @@
+"""
+The expected privilege matrix of the three database roles, and a read-only check of it.
+
+The matrix below is the one place that says who may do what to which table. `init-db-roles.sql`
+grants the same thing; a unit test reads that file and fails when the two disagree. The check asks
+Postgres, with `has_table_privilege` and `has_database_privilege`, so it runs as any login, a
+plain one included, and changes nothing.
+
+A database with no public tables fails the check: a zero is "nothing was checked", not "all good".
+"""
+
+import re
+import shlex
+
+APP_ROLE   = "lupin_app"
+HOST_ROLE  = "lupin_host"
+TEST_ROLE  = "lupin_test"
+DEV_DB     = "lupin_db_dev"
+TEST_DB    = "lupin_db_test"
+
+GUARDED_TABLE = "approval_settings"
+ALL_PRIVILEGES = ( "SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER" )
+HOST_PRIVILEGES = ( "SELECT", "INSERT", "UPDATE", "DELETE" )
+HOST_BARRED     = ( "INSERT", "UPDATE", "DELETE", "TRUNCATE" )
+
+# ( database, role, privilege, scope, table, expected ). scope is "all" tables, "only" the named one,
+# or "except" the named one. expected False means the role must NOT hold the privilege.
+TABLE_RULES = tuple(
+    [ ( DEV_DB,  APP_ROLE,  p, "all",    "",            True ) for p in ALL_PRIVILEGES ]
+  + [ ( DEV_DB,  HOST_ROLE, p, "except", GUARDED_TABLE, True ) for p in HOST_PRIVILEGES ]
+  + [ ( DEV_DB,  HOST_ROLE, "SELECT", "only", GUARDED_TABLE, True ) ]
+  + [ ( DEV_DB,  HOST_ROLE, p, "only",   GUARDED_TABLE, False ) for p in HOST_BARRED ]
+  + [ ( TEST_DB, APP_ROLE,  p, "all",    "",            True ) for p in ALL_PRIVILEGES ]
+  + [ ( TEST_DB, TEST_ROLE, p, "all",    "",            True ) for p in ALL_PRIVILEGES ]
+)
+
+# ( database, role, expected ): may the role CONNECT to the database
+CONNECT_RULES = (
+    ( DEV_DB,  APP_ROLE,  True ), ( DEV_DB,  HOST_ROLE, True ), ( DEV_DB,  TEST_ROLE, False ),
+    ( TEST_DB, APP_ROLE,  True ), ( TEST_DB, TEST_ROLE, True ), ( TEST_DB, HOST_ROLE, False ),
+)
+
+_SAFE = re.compile( r"^[a-z_]*$" )
+
+
+def databases():
+    """The databases the matrix describes, in a fixed order."""
+    return ( DEV_DB, TEST_DB )
+
+
+def roles_of( database ):
+    """The roles the matrix names for one database."""
+    return sorted( { r[ 1 ] for r in TABLE_RULES if r[ 0 ] == database } | { r[ 1 ] for r in CONNECT_RULES if r[ 0 ] == database } )
+
+
+def build_check_sql( database ):
+    """
+    The read-only query that lists what is wrong in one database.
+
+    Requires:
+        - database is named in the matrix
+
+    Ensures:
+        - every output row is `database|kind|role|object|privilege`, kind one of tables, norole,
+          missing, unexpected; the tables row carries the count of public tables in the object column
+        - the query reads catalogs and calls has_*_privilege only
+    """
+    assert database in databases(), f"no privilege matrix for {database}"
+    values = ",\n    ".join(
+        f"( '{role}', '{priv}', '{scope}', '{table}', {str( expected ).lower()} )"
+        for db, role, priv, scope, table, expected in TABLE_RULES if db == database )
+    connects = ",\n    ".join( f"( '{role}', {str( expected ).lower()} )" for db, role, expected in CONNECT_RULES if db == database )
+    for word in [ r[ 1 ] for r in TABLE_RULES ] + [ r[ 2 ] for r in TABLE_RULES ] + [ r[ 4 ] for r in TABLE_RULES ]:
+        assert _SAFE.match( word.lower() ), f"unsafe word in the matrix: {word!r}"
+    return f"""WITH wanted( role, priv, scope, tname, expected ) AS ( VALUES
+    {values}
+), connects( role, expected ) AS ( VALUES
+    {connects}
+), tabs AS (
+  SELECT c.oid, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND c.relkind IN ( 'r', 'p' )
+), present AS ( SELECT rolname FROM pg_roles )
+SELECT current_database() || '|tables||' || count(*) || '|' FROM tabs
+UNION ALL
+SELECT current_database() || '|norole|' || r.role || '||' FROM ( SELECT DISTINCT role FROM wanted UNION SELECT role FROM connects ) r
+ WHERE r.role NOT IN ( SELECT rolname FROM present )
+UNION ALL
+SELECT current_database() || '|' || CASE WHEN w.expected THEN 'missing' ELSE 'unexpected' END || '|' || w.role || '|' || t.relname || '|' || w.priv
+  FROM wanted w
+  JOIN tabs t ON w.scope = 'all' OR ( w.scope = 'only' AND t.relname = w.tname ) OR ( w.scope = 'except' AND t.relname <> w.tname )
+ WHERE CASE WHEN w.role IN ( SELECT rolname FROM present ) THEN has_table_privilege( w.role, t.oid, w.priv ) <> w.expected ELSE false END
+UNION ALL
+SELECT current_database() || '|' || CASE WHEN k.expected THEN 'missing' ELSE 'unexpected' END || '|' || k.role || '|' || current_database() || '|CONNECT'
+  FROM connects k
+ WHERE CASE WHEN k.role IN ( SELECT rolname FROM present ) THEN has_database_privilege( k.role, current_database(), 'CONNECT' ) <> k.expected ELSE false END
+ORDER BY 1;
+"""
+
+
+def parse_rows( text ):
+    """
+    Split the check's output into rows.
+
+    Ensures:
+        - returns a list of ( database, kind, role, object, privilege ) tuples, blank lines skipped
+    Raises:
+        - ValueError naming the line when it does not have five fields
+    """
+    rows = []
+    for line in text.splitlines():
+        if not line.strip(): continue
+        fields = line.strip().split( "|" )
+        if len( fields ) != 5: raise ValueError( f"the check printed a line that is not a result row: {line!r}" )
+        rows.append( tuple( fields ) )
+    return rows
+
+
+def evaluate( database, rows ):
+    """
+    Turn one database's rows into a report.
+
+    Requires:
+        - rows are the parsed rows of build_check_sql( database )
+
+    Ensures:
+        - returns { database, tables, roles, problems, ok }; problems is a list of
+          ( kind, role, object, privilege ) and ok is True only when it is empty
+        - zero public tables is a problem of kind empty, never a pass
+    Raises:
+        - ValueError when the rows hold no tables row for the database, since nothing was checked
+    """
+    mine   = [ r for r in rows if r[ 0 ] == database ]
+    counts = [ r for r in mine if r[ 1 ] == "tables" ]
+    if len( counts ) != 1: raise ValueError( f"{database}: the check returned no table count, so nothing was checked" )
+    tables   = int( counts[ 0 ][ 3 ] )
+    problems = [ ( r[ 1 ], r[ 2 ], r[ 3 ], r[ 4 ] ) for r in mine if r[ 1 ] != "tables" ]
+    if tables == 0: problems.insert( 0, ( "empty", "", database, "" ) )
+    return { "database": database, "tables": tables, "roles": len( roles_of( database ) ), "problems": problems, "ok": not problems }
+
+
+_VERBS = {
+    "missing"    : lambda role, obj, priv: f"{role} cannot {priv} {obj}",
+    "unexpected" : lambda role, obj, priv: f"{role} can {priv} {obj} and must not",
+    "norole"     : lambda role, obj, priv: f"role {role} does not exist",
+    "empty"      : lambda role, obj, priv: f"{obj} has no public tables, so nothing was checked",
+}
+
+
+def format_report( reports, remedy ):
+    """
+    The lines the check prints.
+
+    Ensures:
+        - one summary line per database, `name: N tables, K roles, M problems`, then one line per problem
+        - when any database has a problem, the last line is the remedy
+    """
+    lines = []
+    for report in reports:
+        lines.append( f"{report[ 'database' ]}: {report[ 'tables' ]} tables, {report[ 'roles' ]} roles, {len( report[ 'problems' ] )} problems" )
+        lines += [ "  " + _VERBS[ kind ]( role, obj, priv ) for kind, role, obj, priv in report[ "problems" ] ]
+    if not all( report[ "ok" ] for report in reports ): lines.append( remedy )
+    return lines
+
+
+def remedy_for( psql_command, reports ):
+    """
+    The one command that repairs what the reports found.
+
+    Ensures:
+        - a missing role needs the full provisioning, which needs the password files, so the line says so
+        - anything else is the grants-only run
+    """
+    if any( kind == "norole" for report in reports for kind, *_ in report[ "problems" ] ):
+        return "remedy: a role is missing; run the full provisioning (db_roles with the three password files), which needs root"
+    return f"remedy: python -m cosa.utils.db_roles --psql {shlex.quote( psql_command )} --grants-only --apply"
+
+
+def check_with_psql( psql_command, run_fn, which=None ):
+    """
+    Run the check through a psql command and return ( exit_code, lines ).
+
+    Requires:
+        - psql_command connects to any database as a login that can connect to every database checked
+        - run_fn( command, input, text ) behaves like subprocess.run
+
+    Ensures:
+        - exit 0 when every database is clean, 1 when any has a problem, 2 when psql failed or its
+          output could not be read, which is not a pass
+    """
+    chosen  = tuple( which ) if which else databases()
+    script  = "".join( f"\\connect {db}\n{build_check_sql( db )}" for db in chosen )
+    command = shlex.split( psql_command ) + [ "-v", "ON_ERROR_STOP=1", "-q", "-tA" ]
+    done    = run_fn( command, input=script, text=True, capture_output=True )
+    if done.returncode != 0: return 2, [ f"the check could not run: psql exited {done.returncode}: {done.stderr.strip()[ -300: ]}" ]
+    try:
+        rows    = parse_rows( done.stdout )
+        reports = [ evaluate( db, rows ) for db in chosen ]
+    except ValueError as error:
+        return 2, [ f"the check could not read psql's answer: {error}" ]
+    lines = format_report( reports, remedy_for( psql_command, reports ) )
+    return ( 0 if all( r[ "ok" ] for r in reports ) else 1 ), lines

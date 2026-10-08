@@ -12,6 +12,10 @@ import os
 import subprocess
 import sys
 
+import pytest
+
+from cosa.utils import db_grants
+
 from test_db_roles_rollback_real_postgres import (   # noqa: F401  (fixtures are used by name)
     ROLES_SQL, ROOT, SUPERUSER, _assert_marker, _clean_env, _docker, _labels_of, _provision, _psql,
     needs_docker, refuse_unless_throwaway, stocked, throwaway,
@@ -37,6 +41,7 @@ def test_a_plain_login_can_ask_what_another_role_may_do( stocked, tmp_path ):
     assert _psql_as( stocked, "lupin_test", "lupin_db_test", ask.format( role="lupin_app" ) )  == "t", "lupin_app was granted every table"
     assert _psql_as( stocked, "lupin_test", "lupin_db_test", ask.format( role="lupin_host" ) ) == "f", "lupin_host has no grant in the test database"
     assert _psql_as( stocked, "lupin_host", "lupin_db_dev", ask.format( role="lupin_host" ) ) == "t", "the same question from another login"
+    assert _psql_as( stocked, "lupin_host", "lupin_db_dev", ask.format( role="lupin_test" ) ) == "f", "lupin_test has no grant in the dev database"
 
 
 def _grants_only( box, database="lupin_db_dev" ):
@@ -113,3 +118,98 @@ def test_a_table_made_by_any_creating_role_after_the_run_is_already_granted( sto
         _psql_as( stocked, creator, database, f"INSERT INTO {table} DEFAULT VALUES;" )
     # the dev database gives lupin_test nothing, whoever made the table
     assert not _asks( stocked, "lupin_db_dev", "fresh_lupin_dev", "lupin_test", "SELECT" )
+
+
+# ── --check ──────────────────────────────────────────────────────────────────
+
+def _check( box, database="lupin_db_dev" ):
+    """The real `db_roles --check` against the throwaway container; returns the finished process."""
+    assert ROOT, "LUPIN_ROOT is not set, so the check would run from the wrong tree"
+    _assert_marker( box )
+    psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d {database}"
+    args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--check" ]
+    env  = _clean_env( LUPIN_ROOT=ROOT, PYTHONPATH=os.path.join( ROOT, "src" ) )
+    return subprocess.run( args, capture_output=True, text=True, timeout=120, env=env, cwd=ROOT )
+
+
+def _sql_of( box, database, sql ):
+    return _psql( box[ "name" ], database, sql )
+
+
+@needs_docker
+def test_check_is_clean_after_the_provisioning_and_prints_both_counts( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    done = _check( stocked )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.splitlines() == [ "lupin_db_dev: 3 tables, 3 roles, 0 problems", "lupin_db_test: 2 tables, 3 roles, 0 problems" ]
+
+
+@needs_docker
+def test_check_names_a_grant_that_was_taken_away_and_the_remedy_repairs_it( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "lupin_db_dev",  "REVOKE INSERT ON widgets FROM lupin_host;\n" )
+    _sql_of( stocked, "lupin_db_test", "REVOKE ALL ON gadgets FROM lupin_test;\n" )
+    done = _check( stocked )
+    assert done.returncode == 1
+    lines = done.stdout.splitlines()
+    assert "  lupin_host cannot INSERT widgets" in lines
+    assert "  lupin_test cannot SELECT gadgets" in lines and "  lupin_test cannot TRIGGER gadgets" in lines
+    assert lines[ -1 ].startswith( "remedy: python -m cosa.utils.db_roles --psql " ) and lines[ -1 ].endswith( "--grants-only --apply" )
+    assert _grants_only( stocked ).returncode == 0
+    assert _check( stocked ).returncode == 0, "the remedy line's command did not repair what the check found"
+
+
+@needs_docker
+def test_check_never_misses_a_grant_that_was_never_made( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "lupin_db_test", "CREATE TABLE ungranted ( id int );\nREVOKE ALL ON ungranted FROM lupin_app, lupin_test;\n" )
+    done = _check( stocked )
+    assert done.returncode == 1 and "  lupin_app cannot SELECT ungranted" in done.stdout.splitlines()
+
+
+@needs_docker
+def test_check_reports_a_write_the_host_role_must_not_have_on_approval_settings( stocked, tmp_path ):
+    _sql_of( stocked, "lupin_db_dev", "CREATE TABLE approval_settings ( id int );\n" )
+    _provision( stocked, tmp_path )
+    assert _check( stocked ).returncode == 0, "the provisioning leaves the host role read-only on approval_settings"
+    _sql_of( stocked, "lupin_db_dev", "GRANT UPDATE ON approval_settings TO lupin_host;\n" )
+    done = _check( stocked )
+    assert done.returncode == 1 and "  lupin_host can UPDATE approval_settings and must not" in done.stdout.splitlines()
+
+
+@needs_docker
+def test_check_reports_a_connect_right_that_is_wrong_in_either_direction( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "postgres", "GRANT CONNECT ON DATABASE lupin_db_dev TO lupin_test;\nREVOKE CONNECT ON DATABASE lupin_db_test FROM lupin_test;\n" )
+    lines = _check( stocked ).stdout.splitlines()
+    assert "  lupin_test can CONNECT lupin_db_dev and must not" in lines
+    assert "  lupin_test cannot CONNECT lupin_db_test" in lines
+
+
+@needs_docker
+def test_check_fails_on_a_database_with_no_tables( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "lupin_db_test", "DROP TABLE widgets, gadgets CASCADE;\n" )
+    done = _check( stocked )
+    assert done.returncode == 1 and "lupin_db_test: 0 tables, 3 roles, 1 problems" in done.stdout.splitlines()
+    assert "  lupin_db_test has no public tables, so nothing was checked" in done.stdout.splitlines()
+
+
+@needs_docker
+def test_check_names_the_roles_that_do_not_exist_and_asks_for_the_full_provisioning( stocked ):
+    done = _check( stocked )
+    assert done.returncode == 1
+    assert "  role lupin_app does not exist" in done.stdout.splitlines()
+    assert "full provisioning" in done.stdout.splitlines()[ -1 ]
+
+
+@needs_docker
+def test_a_plain_login_gets_the_same_answer_as_the_superuser( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _sql_of( stocked, "lupin_db_test", "REVOKE DELETE ON widgets FROM lupin_app;\n" )
+    sql = db_grants.build_check_sql( "lupin_db_test" )
+    as_plain = _psql_as( stocked, "lupin_test", "lupin_db_test", sql )
+    as_super = _sql_of( stocked, "lupin_db_test", sql ).strip()
+    assert as_plain == as_super, "a plain login saw something other than the superuser"
+    report = db_grants.evaluate( "lupin_db_test", db_grants.parse_rows( as_plain ) )
+    assert report[ "problems" ] == [ ( "missing", "lupin_app", "widgets", "DELETE" ) ]
