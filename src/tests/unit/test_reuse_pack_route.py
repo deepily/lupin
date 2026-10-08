@@ -251,3 +251,12 @@ def test_a_single_use_context_closes_its_run_in_the_ledger_when_the_question_end
     monkeypatch.setattr( jt, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( PackedFake( need ).post_with_meta( json.loads( body ) )[ 0 ] ) ) )
     r = rt.check_exists_impl( need, ctx )
     assert r[ "status" ] == "ok" and led.total() == 120      # one request, 100 in and 20 out; the closed run counts at what it spent
+
+
+def test_a_packed_context_built_by_hand_without_a_ceiling_or_ledger_is_refused_before_any_http( monkeypatch, env ):
+    monkeypatch.setenv( jt.KEY_VARIABLE, "fake-key" )
+    posts = []
+    monkeypatch.setattr( jt, "_post", lambda *a: posts.append( a ) )
+    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], sweeper=rp.packed_sweeper( 10 ), request_shape=rp.SHAPE, pack_size=10 )
+    r = rt.check_exists_impl( "read an RSS feed", ctx )
+    assert r[ "status" ] == "error" and r[ "error" ] == "BAD_SPEND_LIMIT" and posts == []
