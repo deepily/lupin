@@ -302,7 +302,7 @@ ORDER BY 1;
 
 ROLES_SQL = ( "SELECT rolname || '|' || rolcanlogin || '|' || rolsuper || '|' || rolcreatedb || '|' || coalesce( rolpassword, '' ) "
               "FROM pg_authid WHERE rolname LIKE 'lupin_%' ORDER BY 1;\n" )
-DEFACL_SQL  = "SELECT defaclrole::regrole || '|' || defaclnamespace::regnamespace || '|' || defaclobjtype || '|' || defaclacl FROM pg_default_acl ORDER BY 1;\n"
+DEFACL_SQL  = "SELECT defaclrole::regrole || '|' || defaclnamespace::regnamespace || '|' || defaclobjtype::text || '|' || defaclacl::text FROM pg_default_acl ORDER BY 1;\n"
 EXT_SQL     = "SELECT proowner::regrole FROM pg_proc WHERE proname = 'vector_in';\n"
 
 
