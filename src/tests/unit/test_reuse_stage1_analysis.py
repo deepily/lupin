@@ -1544,3 +1544,84 @@ def test_the_report_prints_one_cost_line_for_each_question_and_the_mean_of_them(
     assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text
     assert "cost, question 2: 2000000 entry tokens + 1000000 page tokens = $0.126" in text
     assert "cost per search: mean $0.0945" in text
+
+
+# --- an arm that another model answered is invalid, and the report stops and asks Rick (R14) ----------------------------------------
+
+def _mismatch_arm( served="jev-other-1.0", stop="model_mismatch", **over ):
+    """
+    Build a real driver arm in which one request was answered by another model.
+
+    Ensures:
+        - starts from the recorded arm that lost one of two hundred, whose one failed row becomes the ModelMismatch row
+        - served is the name that row keeps; None stands for a response that named no model
+    """
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "stop_reason" ] = stop
+    bad = next( r for r in rec[ "rows" ] if r[ "status" ] == "failed" )
+    bad[ "error" ], bad[ "model" ] = "ModelMismatch", served
+    rec.update( over )
+    return rec
+
+
+def test_a_stop_by_model_mismatch_is_invalid_even_when_the_lost_entries_are_within_the_limit():
+    arm = an.read_arm( _mismatch_arm() )
+    assert len( arm[ "lost" ] ) == 1 and arm[ "lost_limit" ] == 1 and arm[ "status" ] == "invalid"
+
+
+def test_a_row_that_failed_as_model_mismatch_makes_the_arm_invalid_with_no_stop_reason_written():
+    assert an.read_arm( _mismatch_arm( stop=None ) )[ "status" ] == "invalid"
+
+
+def test_the_same_arm_with_a_plain_failed_row_and_no_stop_stays_clean():
+    assert an.read_arm( _driver_arm( "lost-1-of-200" ) )[ "status" ] == "clean"
+
+
+def test_an_arm_that_another_model_answered_is_not_judged_by_its_lost_entries():
+    rec = _mismatch_arm(); rec[ "failed" ] = []; rec[ "answers" ].append( { "id": "pkg.mod.fn016", "probabilities": _probs( 0.5 ) } )
+    arm = an.read_arm( rec )
+    assert arm[ "lost" ] == [] and arm[ "status" ] == "invalid"
+
+
+def test_a_second_single_run_that_another_model_answered_leaves_the_noise_floor_invalid_and_pools_nothing():
+    s1  = _arm( "single1", _base() )
+    s2  = _arm( "single2", _base(), stop_reason="model_mismatch", state="incomplete" )
+    nf  = an.noise_floor( an.read_stage( [ s1, s2 ] ) )
+    assert nf == { "measured": None, "floor": None, "max": None, "n": 0, "state": "invalid" }
+
+
+def test_the_decision_names_the_arm_and_the_model_that_answered_and_stops_and_asks():
+    rep = an.build_report( [ _mismatch_arm() ], canaries=[] )
+    assert rep[ "decision" ] == "stop and ask: s1-q1-single1 was answered by jev-other-1.0, not jev-1.13.0; Rick decides whether another model is acceptable"
+    assert rep[ "next_step" ].startswith( "stop and ask" ) and "run question" not in an.render( rep ).split( "Next step:" )[ 1 ].splitlines()[ 0 ]
+
+
+def test_a_response_that_named_no_model_is_reported_as_naming_none():
+    rep = an.build_report( [ _mismatch_arm( served=None ) ], canaries=[] )
+    assert "s1-q1-single1 was answered by no named model, not jev-1.13.0" in rep[ "decision" ]
+
+
+def test_a_stop_with_no_mismatch_row_still_names_the_arm_and_says_another_model_answered():
+    rec = _mismatch_arm(); next( r for r in rec[ "rows" ] if r[ "error" ] == "ModelMismatch" )[ "error" ] = "NoAnswers"
+    assert "s1-q1-single1 was answered by another model, not jev-1.13.0" in an.build_report( [ rec ], canaries=[] )[ "decision" ]
+
+
+def test_a_canary_that_another_model_answered_stops_the_decision_though_no_pass_reads_a_canary():
+    recs = _complete(); can = next( r for r in recs if r[ "arm" ] == "canary" ); can[ "stop_reason" ], can[ "state" ] = "model_mismatch", "incomplete"
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask: s1-q1-canary was answered by another model" ) and rep[ "next_step" ].startswith( "stop and ask" )
+
+
+def test_two_arms_that_another_model_answered_are_both_named_in_the_one_decision():
+    recs = _complete(); a, b = ( next( r for r in recs if r[ "arm" ] == n ) for n in ( "pack10", "pack50" ) )
+    for r in ( a, b ): r[ "stop_reason" ], r[ "state" ] = "model_mismatch", "incomplete"
+    decision = an.build_report( recs, canaries=[] )[ "decision" ]
+    assert "s1-q1-pack10 was answered by another model, not jev-test; s1-q1-pack50 was answered by another model, not jev-test" in decision
+
+
+def test_an_arm_that_another_model_answered_beside_a_failing_size_still_gets_the_mismatch_decision():
+    recs = _no_size_passes(); next( r for r in recs if r[ "arm" ] == "pack200" )[ "stop_reason" ] = "model_mismatch"
+    assert "s1-q1-pack200 was answered by another model" in an.build_report( recs, canaries=[] )[ "decision" ]
+
+
+def test_a_report_with_no_mismatch_keeps_its_decision():
+    assert an.build_report( _question(), canaries=[] )[ "decision" ] == "default pack size 200"
