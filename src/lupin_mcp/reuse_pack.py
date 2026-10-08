@@ -271,3 +271,24 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
              "cache_write_failed": unwritten }
+
+
+def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None ):
+    """
+    Make the sweeper a ReuseContext takes for the packed path.
+
+    Requires:
+        - size and workers are in range for sweep_packed
+    Ensures:
+        - returns a function with sweep's signature that sweeps in packs with the per-candidate cache key
+        - the same function serves the page asks and the entry asks, so both travel through one transport
+    Raises:
+        - ValueError for a size or worker count out of range
+    """
+    _check_sweep_args( size, workers, "candidate", None )
+
+    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+        return sweep_packed( ctx, need, entries, size, workers=workers, key_mode="candidate", template=template, model=model,
+                             frozen=frozen, gaps=gaps, breaker=breaker )
+
+    return sweeper

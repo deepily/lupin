@@ -16,6 +16,7 @@ cosa.repo.doc_lint.jev_transport, the one HTTP path to Jev, and the key comes fr
 variable JEV_API_TOASTER only. A server started without the variable reports KEY_UNREADABLE.
 """
 import concurrent.futures
+import copy
 import fnmatch
 import gzip
 import hashlib
@@ -35,7 +36,14 @@ from cosa.repo.symindex import wiki_lint as wl
 from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_for
 
-TOOL_VERSION = "1"
+TOOL_VERSION = "1"                                              # receipts of the one-request-per-entry path
+PACKED_TOOL_VERSION = "2"                                       # receipts of the packed path; both load until the old path is removed
+TOOL_VERSIONS = ( TOOL_VERSION, PACKED_TOOL_VERSION )
+MAX_PACK_SIZE = 10_000                                          # more than the catalogue holds; the bound only refuses nonsense
+PACK_SIZE_VARIABLE    = "LUPIN_REUSE_JEV_PACK_SIZE"
+CEILING_VARIABLE      = "LUPIN_REUSE_JEV_TOKEN_CEILING"
+RUN_NAME_VARIABLE     = "LUPIN_REUSE_JEV_RUN_NAME"
+LEDGER_VARIABLE       = "LUPIN_REUSE_LEDGER_PATH"
 JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would break replay
 RETRIES      = 2
 BREAKER_422  = 5          # refusals in a row, with no answered request between them, that stop a sweep
@@ -112,7 +120,7 @@ def request_hash( body ):
     return sha( canonical( body ) )
 
 
-def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=() ):
+def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None ):
     """
     Ensures:
         - returns 16 hex characters identifying one question against one set of inputs
@@ -121,9 +129,13 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=() 
         - `causes` (the uncertainty causes that held, empty for a complete answer) is part of the id, so
           an incomplete result, such as a missing key or a failed call, never shadows the complete
           receipt of the same question, and a complete one never hides an incomplete one
+        - the tool version is part of the id (the module's TOOL_VERSION when none is given), and so is the request
+          shape when there is one; with no shape the id is the one the old path has always produced
     """
-    return sha( canonical( { "tool": tool, "tool_version": TOOL_VERSION, "query": query, "index_sha": index_sha,
-                             "model": model, "policy": policy, "prompt_template_hash": template_hash, "causes": list( causes ) } ), 16 )
+    fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
+               "model": model, "policy": policy, "prompt_template_hash": template_hash, "causes": list( causes ) }
+    if request_shape is not None: fields[ "request_shape" ] = request_shape
+    return sha( canonical( fields ), 16 )
 
 
 def write_once( path, data ):
@@ -157,12 +169,16 @@ class ReuseContext:
         - root is the git working-tree root being asked about
         - data is the per-repository data directory (receipts, snapshots, cache, call log)
         - call_budget is an integer from 1 to CALL_BUDGET_CAP: the most HTTP attempts, retries included, one call may make
+        - sweeper is None for the one-request-per-entry path, or a function with sweep's signature for the packed path
+        - a packed context that builds its own live transport also has token_ceiling, run_name and a ledger
+        - single_use closes the run in the ledger when the question ends
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer
     """
 
-    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET ):
+    def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False ):
         if type( call_budget ) is not int or not 1 <= call_budget <= CALL_BUDGET_CAP:
             raise ReuseError( "BAD_BUDGET", f"call budget must be an integer from 1 to {CALL_BUDGET_CAP}, got {call_budget!r}" )
         self.call_budget      = call_budget
@@ -175,6 +191,13 @@ class ReuseContext:
         self.exclude_prefixes = tuple( exclude_prefixes )
         self.template         = template if template is not None else PROMPT_TEMPLATE
         self.model            = model
+        self.pack_size        = pack_size
+        self.sweeper          = sweeper
+        self.request_shape    = request_shape
+        self.token_ceiling    = token_ceiling
+        self.run_name         = run_name
+        self.ledger           = ledger
+        self.single_use       = single_use
 
 
 def context_from_environment( root=None ):
@@ -205,7 +228,38 @@ def context_from_environment( root=None ):
         budget = int( raw ) if raw else DEFAULT_CALL_BUDGET
     except ValueError as e:
         raise ReuseError( "BAD_BUDGET", f"{BUDGET_VARIABLE} must be an integer, got {raw!r}" ) from e
-    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget )
+    return ReuseContext( top, data if data else data_dir( top ), out_dir=out if out else None, call_budget=budget, **_packed_settings( top ) )
+
+
+def _whole_number( text ):
+    """Ensures: returns the int a string holds, or None when it is not a whole number."""
+    try: return int( text )
+    except ValueError: return None
+
+
+def _packed_settings( top ):
+    """
+    Read the packed-path settings from the environment.
+
+    Ensures:
+        - with no pack size set, returns {} and the old path is used
+        - otherwise returns the context arguments for the packed path, single use, with the ledger from
+          LUPIN_REUSE_LEDGER_PATH or the repository's fleet data root
+    Raises:
+        - ReuseError BAD_PACK_SIZE for a pack size that is not a whole number from 1 to MAX_PACK_SIZE
+        - ReuseError BAD_SPEND_LIMIT when a pack size is set without a positive token ceiling and a run name
+    """
+    raw = os.environ.get( PACK_SIZE_VARIABLE )
+    if not raw: return {}
+    from lupin_mcp import reuse_ledger, reuse_pack                             # imported here: both import this module, and the old path needs neither
+    size = _whole_number( raw )
+    if size is None or not 1 <= size <= MAX_PACK_SIZE: raise ReuseError( "BAD_PACK_SIZE", f"{PACK_SIZE_VARIABLE} must be a whole number from 1 to {MAX_PACK_SIZE}, got {raw!r}" )
+    ceiling, run = _whole_number( os.environ.get( CEILING_VARIABLE, "" ) ), os.environ.get( RUN_NAME_VARIABLE )
+    if ceiling is None or ceiling < 1 or not run:
+        raise ReuseError( "BAD_SPEND_LIMIT", f"a packed live run needs {CEILING_VARIABLE} (a positive whole number of tokens) and {RUN_NAME_VARIABLE}" )
+    path = os.environ.get( LEDGER_VARIABLE ) or reuse_ledger.ledger_path( top )
+    return { "pack_size": size, "sweeper": reuse_pack.packed_sweeper( size ), "request_shape": reuse_pack.SHAPE, "token_ceiling": ceiling,
+             "run_name": run, "ledger": reuse_ledger.AccountLedger( path ), "single_use": True }
 
 
 def append_call_log( ctx, session_id, record ):
@@ -769,13 +823,35 @@ def load_receipt( ctx, rid ):
     try:
         r = json.loads( p.read_text( encoding="utf-8" ) )
         ok = _receipt_shape_ok( r )
-        again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ] ) if ok else None
+        again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ],
+                            r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
     if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
-    if r[ "tool_version" ] != TOOL_VERSION or again != rid or r[ "id" ] != rid:
+    if r[ "tool_version" ] not in TOOL_VERSIONS or again != rid or r[ "id" ] != rid:
         raise ReuseError( "RECEIPT_ID_MISMATCH", f"{rid} recomputes to {again}" )
     return r
+
+
+def _live_budget( ctx ):
+    """
+    Build the budget of a live transport.
+
+    Ensures:
+        - the old path gets the attempt cap alone
+        - the packed path gets a TokenBudget on the run's ceiling, and the run is admitted by the ledger first
+    Raises:
+        - ReuseError BAD_SPEND_LIMIT when a packed context has no ceiling, run name or ledger
+        - ReuseError SPEND_LEDGER when the ledger is unreadable, refuses the run, or already holds the run name
+    """
+    if ctx.sweeper is None: return jev_transport.CallBudget( ctx.call_budget )
+    from lupin_mcp import reuse_ceiling, reuse_ledger                          # imported here: both import this module
+    if ctx.token_ceiling is None or not ctx.run_name or ctx.ledger is None:
+        raise ReuseError( "BAD_SPEND_LIMIT", "a packed live run needs a token ceiling, a run name and a ledger" )
+    try:
+        return reuse_ceiling.TokenBudget( ctx.call_budget, ctx.token_ceiling, ledger=ctx.ledger, run=ctx.run_name )
+    except ( reuse_ledger.AccountLimitReached, reuse_ledger.LedgerUnreadable, ValueError ) as e:
+        raise ReuseError( "SPEND_LEDGER", str( e ) ) from e
 
 
 def prepare( ctx ):
@@ -800,7 +876,7 @@ def prepare( ctx ):
     header = sx_build.read_header( gen )
     if header[ "missing_dependencies" ]: flags.add( "DEPENDENCY_MISSING" )
     if ctx.transport is None:
-        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=jev_transport.CallBudget( ctx.call_budget ) )
+        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx ) )
         else: flags.add( "KEY_UNREADABLE" )
     symbols    = sx_build.read_symbols( gen )
     entries, _ = sendable( symbols, ctx.exclude_prefixes )
@@ -837,6 +913,11 @@ def _choose_pages( answers, policy ):
     return sorted( chosen, key=lambda c: ( -c[ "p_overlap" ], c[ "slug" ] ) )[ :MAX_PAGES ]
 
 
+def _sweeper( ctx ):
+    """Ensures: returns the context's packed sweeper, or sweep for the old path."""
+    return ctx.sweeper if ctx.sweeper is not None else sweep
+
+
 def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=None, page_template=None, model=None, policy=vd.POLICY, gaps=None ):
     """
     Decide one question: ask the pages, sweep what they cover, then fall back to every entry.
@@ -861,7 +942,7 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
         asked = [ { "id": p[ "slug" ], "sig": "", "doc": p[ "text" ] } for p in pages ] if plan is None else \
                 [ { "id": a[ "slug" ], "sig": "", "doc": a[ "text" ] } for a in plan[ "asked" ] ]
         gaps = { **( gaps or {} ), **( { s: "not_reached" for s in plan[ "skipped" ] } if plan is not None else {} ) }
-        sa = sweep( ctx, need, asked, frozen=frozen, template=page_template or PAGE_TEMPLATE, model=model, gaps=gaps )
+        sa = _sweeper( ctx )( ctx, need, asked, frozen=frozen, template=page_template or PAGE_TEMPLATE, model=model, gaps=gaps )
         stages.append( _stage( "pages", sa, len( asked ) ) ); swept.append( sa )
         chosen  = _choose_pages( sa[ "answers" ], policy )
         wanted  = { c[ "slug" ] for c in chosen }
@@ -870,18 +951,39 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
         plan_out = { "asked": [ { "slug": a[ "id" ], "text": a[ "doc" ] } for a in asked ], "chosen": chosen, "covered": [ e[ "id" ] for e in covered ],
                      "skipped": sorted( sa[ "not_reached" ] + sa[ "failed" ] ) if plan is None else plan[ "skipped" ] }
         if covered:
-            sb = sweep( ctx, need, covered, frozen=frozen, template=template, model=model, gaps=gaps )
+            sb = _sweeper( ctx )( ctx, need, covered, frozen=frozen, template=template, model=model, gaps=gaps )
             stages.append( _stage( "covered", sb, len( covered ) ) ); swept.append( sb )
             db = vd.decide( sb[ "answers" ], [ e[ "id" ] for e in covered ], sb[ "failed" ], flags, policy )
             if db[ "shortlist_total" ] > 0:
                 return { "route": "pages", "sw": sb, "d": db, "deciding": covered, "stages": stages, "plan": plan_out, "sweeps": swept }
-    sw = sweep( ctx, need, entries, frozen=frozen, template=template, model=model, gaps=gaps )
+    sw = _sweeper( ctx )( ctx, need, entries, frozen=frozen, template=template, model=model, gaps=gaps )
     stages.append( _stage( "all", sw, len( entries ) ) ); swept.append( sw )
     d  = vd.decide( sw[ "answers" ], [ e[ "id" ] for e in entries ], sw[ "failed" ], flags, policy )
     return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out, "sweeps": swept }
 
 
 def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None ):
+    """
+    Run one sweep-based question end to end and store its receipt.
+
+    Ensures:
+        - everything _run_question ensures
+        - a single-use context closes its run in the ledger when the question ends, however it ends
+    """
+    try:
+        return _run_question( ctx, tool, query, need, exclude_id, write, prepared )
+    finally:
+        _finish( ctx )
+
+
+def _finish( ctx ):
+    """Ensures: a single-use context with a token budget closes its ledger run."""
+    if not ctx.single_use or not isinstance( ctx.transport, LiveJevTransport ): return
+    from lupin_mcp import reuse_ceiling                                        # imported here: it imports this module
+    if isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): ctx.transport.budget.end()
+
+
+def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -910,8 +1012,10 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
         routed = { "route": "none", "sw": none, "d": vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None, "sweeps": [] }
     sw, d, plan = routed[ "sw" ], routed[ "d" ], routed[ "plan" ]
     template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
-    rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ] ),
-            "tool": tool, "tool_version": TOOL_VERSION, "query": query, "index_sha": sha_, "model": ctx.model,
+    packed        = ctx.sweeper is not None
+    version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
+    rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ], version, ctx.request_shape if packed else None ),
+            "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
             "policy": vd.POLICY, "prompt_template_hash": template_hash, "prompt_template": ctx.template,
             "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
@@ -927,6 +1031,11 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
                        "transport": transport_summary( [ c for sweep_ in routed[ "sweeps" ] for c in sweep_[ "transport_calls" ] ] ),
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
+    if packed:
+        rec[ "request_shape" ] = ctx.request_shape
+        rec[ "pack_size" ]     = ctx.pack_size
+        rec[ "requests" ]      = [ { "stage": st[ "stage" ], **row } for st, swept_ in zip( routed[ "stages" ], routed[ "sweeps" ] ) for row in swept_[ "rows" ] ]
+        rec[ "stats" ][ "requests" ] = len( rec[ "requests" ] )
     return store_receipt( ctx, rec ) if write else rec
 
 
@@ -1057,8 +1166,12 @@ def replay_impl( rid, ctx ):
             plan  = stored[ "pages" ] if route in ( "pages", "pages_then_full" ) else None
             pt    = stored[ "page_prompt_template" ] if "page_prompt_template" in stored else None
             lost  = stored[ "stats" ][ "failed_attempts" ] if "failed_attempts" in stored[ "stats" ] else []         # a receipt from before the call budget lacks it
-            gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ f[ "id" ]: "failed" for f in lost } }
-            d     = _route( ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
+            ids   = [ i for f in lost for i in ( f[ "ids" ] if "ids" in f else [ f[ "id" ] ] ) ]              # the packed shape lists ids; the old shape names one id
+            gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ i: "failed" for i in ids } }
+            from lupin_mcp import reuse_pack                                                          # imported here: it imports this module
+            frozen_ctx = copy.copy( ctx )
+            frozen_ctx.sweeper = reuse_pack.packed_sweeper( stored[ "pack_size" ] ) if stored[ "tool_version" ] == PACKED_TOOL_VERSION else None    # a receipt replays on the path that wrote it
+            d     = _route( frozen_ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         head = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else None, write=False )
