@@ -723,6 +723,14 @@ class TestCoderAndVerify:
         assert passed is False
         assert "Your credit balance is too low" in out
 
+    def test_verify_clean_result_message_still_passes( self ):
+        o = _orch()
+        msgs = [ _assistant( TextBlock( text="All tests pass" ) ), _result_msg(), MagicMock() ]   # unknown message after the result: loop-back arc
+        with patch.object( orch_mod, "sdk_query", _sdk_stub( msgs ) ), \
+             patch.object( orch_mod, "wrap_prompt_for_streaming", lambda p: p ):
+            passed, out = run( o._verify_fix( MagicMock(), _prop(), "co", [], MagicMock(), MagicMock() ) )
+        assert passed is True
+
     def test_verify_unavailable( self ):
         o = _orch()
         with patch.object( orch_mod, "SAFETY_AVAILABLE", False ):

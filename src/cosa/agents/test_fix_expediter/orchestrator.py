@@ -27,6 +27,7 @@ from typing import Optional
 
 import cosa.utils.util as cu
 
+from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.shared.resume_guard import resume_covers
 from cosa.agents.test_fix_expediter.config import TestFixExpediterConfig
 from cosa.agents.test_fix_expediter.state import (
@@ -509,7 +510,7 @@ class TFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected.append( message.text )
                 elif isinstance( message, ResultMessage ):
-                    pass
+                    if message.is_error: raise_error_result( message, "TFEOrchestrator diagnosis", logger )
                 elif isinstance( message, RateLimitEvent ):
                     logger.warning(
                         f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s"
@@ -791,7 +792,7 @@ class TFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected.append( message.text )
                 elif isinstance( message, ResultMessage ):
-                    pass
+                    if message.is_error: raise_error_result( message, "TFEOrchestrator proposal", logger )
                 elif isinstance( message, RateLimitEvent ):
                     logger.warning(
                         f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s"
@@ -1490,6 +1491,7 @@ class TFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "TFEOrchestrator coder", logger )
                     msg_text = getattr( message, "text", str( message ) )[ :200 ]
                     await self._notify( msg_text, priority="low" )
                 elif isinstance( message, RateLimitEvent ):
@@ -1565,6 +1567,8 @@ class TFEOrchestrator:
                             )
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
+                elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "TFEOrchestrator tester", logger )
                 elif isinstance( message, RateLimitEvent ):
                     logger.warning(
                         f"Rate limited: retry_after={getattr( message, 'retry_after', '?' )}s"
