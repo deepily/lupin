@@ -103,8 +103,17 @@ def test_ac2_build_artifacts_exist():
 # ---------------------------------------------------------------------------
 
 def test_ac3_watch_mode_starts_and_exits():
-    """--watch mode starts esbuild watcher and exits cleanly on SIGINT."""
+    """--watch mode starts esbuild watcher, exits cleanly on SIGINT, and leaves dist/ untouched."""
     assert BUILD_SCRIPT.exists()
+
+    # Start from a known production build, so "untouched" means something: the watcher's
+    # first build is deterministic, and run over an already-dev bundle it would rewrite
+    # the same bytes and the comparison below could not tell.
+    subprocess.run( [ "bash", str( BUILD_SCRIPT ) ], cwd=str( PROJECT_ROOT ), check=True, capture_output=True )
+    before = { p.name: p.read_bytes() for p in DIST_DIR.iterdir() if p.is_file() }
+    assert before[ "boot.js" ] == next( v for k, v in before.items() if re.fullmatch( r"boot\.[0-9a-f]{12}\.js", k ) ), \
+        "precondition: the production build left the stable and hashed bundles identical"
+
     proc = subprocess.Popen(
         [ "bash", str( BUILD_SCRIPT ), "--watch" ],
         stdout=subprocess.PIPE,
@@ -126,6 +135,12 @@ def test_ac3_watch_mode_starts_and_exits():
         if proc.poll() is None:
             proc.kill()
             proc.wait( timeout=5 )
+
+    # Row: this test used to leave an unminified boot.js in the tree it ran in, and the
+    # TypeScript bundle gate then failed on it hours later. The watcher must write elsewhere.
+    after   = { p.name: p.read_bytes() for p in DIST_DIR.iterdir() if p.is_file() }
+    changed = sorted( k for k in set( before ) | set( after ) if before.get( k ) != after.get( k ) )
+    assert changed == [], f"the watcher changed files in dist/multiplexer: {changed}"
 
 
 # ---------------------------------------------------------------------------
