@@ -97,6 +97,86 @@ def test_source_maps_are_not_part_of_the_served_bundle( tmp_path ):
     assert ts.bundle_hash( tmp_path ) == before
 
 
+# --- two builds of one source -------------------------------------------------------------
+
+# Captured 2026-10-08 from two back-to-back runs of build-multiplexer.sh on one tree, 2 s apart: the
+# bundle hash moved, and of the five files only manifest.json differed, in the "built" line alone.
+BOOT_JS      = b"the minified boot, byte-identical across both builds"
+MANIFEST_ONE = b'{\n  "boot.js" : "boot.dd2b044d0b46.js",\n  "hash"    : "dd2b044d0b46",\n  "built"   : "2026-10-08T19:03:23Z"\n}\n'
+MANIFEST_TWO = MANIFEST_ONE.replace( b"19:03:23Z", b"19:03:25Z" )
+
+
+def _build_tree( tmp_path, manifest, extra=None ):
+    files = { "multiplexer/boot.dd2b044d0b46.js": BOOT_JS, "multiplexer/manifest.json": manifest }
+    files.update( extra or { } )
+    return _dist( tmp_path, files )
+
+
+def _rewrite( base, rel, data ):
+    with open( os.path.join( base, rel ), "wb" ) as f: f.write( data )
+
+
+def test_two_builds_of_one_source_that_differ_only_in_the_build_time_hash_alike( tmp_path ):
+    base   = _build_tree( tmp_path, MANIFEST_ONE )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/manifest.json", MANIFEST_TWO )
+    assert MANIFEST_ONE != MANIFEST_TWO, "the pair no longer differs, so the equality below proves nothing"
+    assert ts.bundle_hash( tmp_path ) == before
+
+
+def test_the_stamp_reads_unmoved_across_such_a_rebuild( tmp_path ):
+    base  = _build_tree( tmp_path, MANIFEST_ONE )
+    git   = _git( tmp_path )
+    start = ts.capture_start_bundle( git )
+    _rewrite( base, "multiplexer/manifest.json", MANIFEST_TWO )
+    line  = ts.tree_state_line( git, "abc1234", start )
+    assert "bundle-span=unmoved" in line and "REBUILT" not in line
+
+
+def test_a_changed_pointer_still_moves_the_hash_when_the_build_time_changes_too( tmp_path ):
+    base   = _build_tree( tmp_path, MANIFEST_ONE )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/manifest.json", MANIFEST_TWO.replace( b"dd2b044d0b46.js", b"eeeeeeeeeeee.js" ) )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
+def test_a_changed_hash_field_moves_the_hash( tmp_path ):
+    base   = _build_tree( tmp_path, MANIFEST_ONE )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/manifest.json", MANIFEST_ONE.replace( b'"hash"    : "dd2b044d0b46"', b'"hash"    : "ffffffffffff"' ) )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
+def test_a_changed_script_still_moves_the_hash_under_an_unchanged_manifest( tmp_path ):
+    base   = _build_tree( tmp_path, MANIFEST_ONE )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/boot.dd2b044d0b46.js", BOOT_JS + b" changed" )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
+@pytest.mark.parametrize( "first,second", [ ( b"{not json", b"{not json!" ), ( b'["built", 1]', b'["built", 2]' ) ] )
+def test_a_manifest_that_is_not_a_json_object_is_hashed_as_it_is( tmp_path, first, second ):
+    base   = _build_tree( tmp_path, first )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/manifest.json", second )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
+def test_only_manifest_json_loses_its_build_time( tmp_path ):
+    other  = b'{"built": "2026-10-08T19:03:23Z"}'
+    base   = _build_tree( tmp_path, MANIFEST_ONE, { "multiplexer/other.json": other } )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/other.json", other.replace( b"19:03:23Z", b"19:03:25Z" ) )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
+def test_the_order_of_a_manifests_keys_does_not_move_the_hash( tmp_path ):
+    base   = _build_tree( tmp_path, b'{"boot.js": "boot.x.js", "hash": "x", "built": "t"}' )
+    before = ts.bundle_hash( tmp_path )
+    _rewrite( base, "multiplexer/manifest.json", b'{"hash": "x", "built": "t2", "boot.js": "boot.x.js"}' )
+    assert ts.bundle_hash( tmp_path ) == before
+
+
 # --- the other values --------------------------------------------------------------------
 
 def test_no_dist_directory_is_named_none_not_omitted( tmp_path ):

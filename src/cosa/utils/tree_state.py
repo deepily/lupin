@@ -21,6 +21,7 @@ and already imports `cosa.utils.secret_redaction`.
 Venue: :7999-eligible. Read-only git, no network, no mutation.
 """
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -115,6 +116,34 @@ BUNDLE_REL     = os.path.join( "src", "lupin_app", "static", "dist" )
 BUNDLE_NONE    = "none"
 BUNDLE_UNKNOWN = "UNKNOWN"
 BUNDLE_SERVED_SUFFIXES = ( ".js", ".json" )
+# Each build driver writes the time into manifest.json. Two builds of one source differ in that
+# field alone (measured: boot.js, the hashed boot copy and both harness files were byte-identical),
+# so hashing it made every full e2e half report a rebuild mid-run.
+BUNDLE_MANIFEST_NAME      = "manifest.json"
+BUNDLE_MANIFEST_VOLATILE  = ( "built", )
+
+
+def _served_bytes( name, data ):
+    """
+    The bytes that stand for one served file in the bundle digest.
+
+    Requires:
+        - name is the file's base name; data is its content
+
+    Ensures:
+        - every file but manifest.json is returned as it is
+        - a manifest.json that holds a JSON object comes back without its build timestamp, with sorted
+          keys, so only a changed pointer or hash moves the digest
+        - a manifest.json that is not valid JSON, or not an object, is returned as it is
+    """
+    if name != BUNDLE_MANIFEST_NAME: return data
+    try:
+        parsed = json.loads( data )
+    except ValueError:
+        return data
+    if not isinstance( parsed, dict ): return data
+    for key in BUNDLE_MANIFEST_VOLATILE: parsed.pop( key, None )
+    return json.dumps( parsed, sort_keys=True ).encode()
 
 
 def capture_start_sha( git ):
@@ -193,7 +222,8 @@ def bundle_hash( root ):
         - hashes file content, never mtime: the same bytes rewritten is "unmoved", and new
           bytes under an old mtime is "moved". The digest covers (relative path, content
           sha256) in sorted order, so a new boot.<hash>.js appearing or a harness changing
-          both move it
+          both move it. A manifest.json is hashed without its build timestamp, because two builds of one
+          source differ in that field alone; its pointer and hash fields still count
         - the served set is .js plus the three manifest.json files (nav, console,
           multiplexer). The manifest is the pointer naming which boot.<hash>.js a page loads, so a rebuild moves it even when an old boot file is still on disk, and nothing else is served. .map files are
           never requested by the page and are left out
@@ -211,7 +241,7 @@ def bundle_hash( root ):
                 if not name.endswith( BUNDLE_SERVED_SUFFIXES ): continue
                 full = os.path.join( dirpath, name )
                 with open( full, "rb" ) as handle:
-                    content = hashlib.sha256( handle.read() ).hexdigest()
+                    content = hashlib.sha256( _served_bytes( name, handle.read() ) ).hexdigest()
                 digest.update( f"{os.path.relpath( full, dist )}\0{content}\n".encode() )
     except OSError:
         return BUNDLE_UNKNOWN
