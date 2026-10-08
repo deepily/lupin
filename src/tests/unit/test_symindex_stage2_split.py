@@ -50,6 +50,11 @@ def test_the_groups_do_not_depend_on_the_order_the_manifest_lists_them_in():
     assert s2.twin_groups( a ) == s2.twin_groups( b )
 
 
+def test_the_groups_are_listed_by_first_member_not_in_the_order_the_manifest_gives_them():
+    gs = s2.twin_groups( _m( ( "exact", [ "z", "y" ] ), ( "exact", [ "b", "a" ] ) ) )
+    assert [ g[ "members" ] for g in gs ] == [ [ "a", "b" ], [ "y", "z" ] ]
+
+
 def test_the_real_manifest_slice_reads_as_twelve_groups_seven_of_them_exact():
     gs = s2.twin_groups( json.loads( SLICE.read_text() ) )
     assert ( len( gs ), sum( g[ "stratum" ] == "exact" for g in gs ) ) == ( 12, 7 )
