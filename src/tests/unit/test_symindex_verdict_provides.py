@@ -248,3 +248,9 @@ def test_an_uncertain_verdict_always_carries_a_cause():
     for extra in ( [ _a( "band", 0.5 ) ], [ _a( "odd", 0.1, 0.9 ) ] ):
         r = _decide( extra )
         assert r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and r[ "cause" ] is not None
+
+
+def test_an_integer_too_large_for_a_float_is_not_finite_not_a_crash():
+    a = { "id": "x", "provides": 10 ** 400, "coverage": _cov() }
+    r = vd.decide_provides( [ a ], [ "x" ], [], set() )
+    assert r[ "malformed" ] == [ { "id": "x", "reason": "not_finite" } ]
