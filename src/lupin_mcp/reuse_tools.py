@@ -268,6 +268,43 @@ class LiveJevTransport:
         return self.post_with_meta( body )[ 0 ]
 
 
+class RefusalBreaker:
+    """
+    Stops a sweep after a limit of distinct refused keys in a row.
+
+    Requires:
+        - limit is a positive integer
+
+    Ensures:
+        - refused( key ) counts a refusal; the streak is the number of distinct keys refused since the last answer, so a
+          caller that resends the halves of a refused pack under one key makes one refusal of the family
+        - answered() clears the streak and marks the breaker answered; it never clears a stop
+        - once the streak reaches the limit, stopped stays True
+        - refusals counts every refused( key ) call, repeats included, and is never cleared
+        - every method is safe to call from many threads
+    """
+
+    def __init__( self, limit ):
+        self.limit, self._keys, self.refusals, self.has_answered, self.stopped = limit, set(), 0, False, False
+        self._lock = threading.Lock()
+
+    @property
+    def streak( self ):
+        """Ensures: returns the number of distinct keys refused since the last answer."""
+        with self._lock: return len( self._keys )
+
+    def refused( self, key ):
+        """Ensures: counts one refusal of key; stops the breaker when the streak reaches the limit."""
+        with self._lock:
+            self._keys.add( key ); self.refusals += 1
+            if len( self._keys ) >= self.limit: self.stopped = True
+
+    def answered( self ):
+        """Ensures: clears the streak and marks the breaker answered."""
+        with self._lock:
+            self._keys.clear(); self.has_answered = True
+
+
 class JevCache:
     """
     Jev responses keyed by request hash, content-addressed under <data>/jev-cache.
@@ -469,12 +506,13 @@ def transport_summary( calls ):
              "latency_ms": { "min": times[ 0 ], "max": times[ -1 ], "mean": round( sum( times ) / len( times ) ), "p50": rank( 50 ), "p95": rank( 95 ) } if times else None }
 
 
-def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=None, breaker=None ):
     """
     Ask Jev about every entry.
 
     Requires:
         - entries are symbol dicts with id, sig and doc
+        - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
         - when frozen, no transport is used and every answer must already be cached, except the ids in
           `gaps`, a mapping of id to "failed" or "not_reached" taken from the receipt being replayed; a gap
           id is never read from the cache, because a later run may have filled it
@@ -498,7 +536,11 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
         - BREAKER_422 refusals in a row, with no answered request between them, stop the sweep: stopped_by is
           "consecutive_422" (else None), and every entry not yet asked is not_reached, so the receipt lists it as missing
         - until the first answer, and while a refusal is unanswered, entries are posted one at a time, so a door that
-          refuses everything costs exactly BREAKER_422 posts; after an answer they run in parallel again
+          refuses everything from its first post costs exactly BREAKER_422 posts; after an answer they run in
+          parallel again, so when refusals start later up to `WORKERS` posts are already in flight and the stop can
+          land up to `WORKERS` - 1 posts late (measured: 34 posts, not 5, after a first answer with 32 workers)
+        - only an answered request clears the refusal streak; a failure that is not a 422 (a 500, a timeout) neither
+          counts toward it nor clears it
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
     """
@@ -506,8 +548,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     cache, stats    = JevCache( ctx.data ), { "calls": 0, "hits": 0 }
     budget          = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) else None
 
-    gate, probe = threading.Lock(), threading.Lock()
-    state       = { "answered": False, "streak": 0, "refused": 0, "stopped": False }
+    probe   = threading.Lock()
+    breaker = RefusalBreaker( BREAKER_422 ) if breaker is None else breaker
 
     def one( rec ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
@@ -515,19 +557,16 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
         hit  = cache.get( key )
         if hit is not None: return rec[ "id" ], hit, "hit", 0, []
         if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
-        needs_probe = lambda: not state[ "answered" ] or state[ "streak" ] > 0
-        with gate: serial = needs_probe()
+        needs_probe = lambda: not breaker.has_answered or breaker.streak > 0
         row = None
-        if serial:
+        if needs_probe():
             with probe:                                                  # one at a time while no answer has cleared the refusals
-                with gate: serial = needs_probe()                         # an answer may have come in while this entry waited
-                row = ask( rec, body, key ) if serial else None
+                row = ask( rec, body, key ) if needs_probe() else None    # an answer may have come in while this entry waited
         return row if row is not None else ask( rec, body, key )
 
     def ask( rec, body, key ):
         """Ensures: returns the row for one uncached entry; not_reached once the breaker has stopped."""
-        with gate: stopped = state[ "stopped" ]
-        if stopped: return rec[ "id" ], None, "not_reached", 0, []
+        if breaker.stopped: return rec[ "id" ], None, "not_reached", 0, []
         if budget is not None: budget.begin_tally()
         how, resp, cut_off, got, refused = "failed", None, False, [], False
         try:
@@ -551,11 +590,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                     continue
         finally:
             attempts = budget.end_tally() if budget is not None else 0
-        with gate:
-            if how == "call": state[ "answered" ], state[ "streak" ] = True, 0
-            elif refused:
-                state[ "streak" ] += 1; state[ "refused" ] += 1
-                if state[ "streak" ] >= BREAKER_422: state[ "stopped" ] = True
+        if how == "call": breaker.answered()
+        elif refused: breaker.refused( key )
         if cut_off and attempts == 0: how = "not_reached"                 # asked nothing: the budget was already spent
         return rec[ "id" ], resp, how, attempts, got
 
@@ -579,7 +615,7 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
              "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ], "transport_calls": seen_calls,
-             "refused_422": state[ "refused" ], "stopped_by": "consecutive_422" if state[ "stopped" ] else None }
+             "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
 
 
 def module_of( file ):
