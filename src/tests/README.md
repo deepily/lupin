@@ -552,6 +552,9 @@ not rediscover.
 | 4 | Visual Regression | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
 | 5 | Integration Tests | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
 
+The pyramid also has a host-only step, `docker_smoke` (`./src/tests/run-docker-smoke-gate.sh`), that runs the three
+docker smoke files and counts any skip as a failure. Inside a container those files skip, so run it on the host.
+
 ```bash
 # Complete pre-merge validation sequence
 pytest src/tests/unit/ -v && \

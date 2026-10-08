@@ -71,7 +71,7 @@ done
 # reason: 1.5s of static analysis over every tracked .css file (measured).
 # "doclint" joined with row 2c48c717 (Rick's ruling), third for the same reason:
 # 4.6s of static analysis over every swept-scope Python file's docstrings (measured).
-SUITES=( "typecheck" "stylelint" "doclint" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
+SUITES=( "typecheck" "stylelint" "doclint" "unit" "cosa" "coverage" "typescript" "smoke" "docker_smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
     # The three tsc projects as a blocking gate (row 7bc67019). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
@@ -107,6 +107,9 @@ declare -A SCRIPTS=(
     [coverage]="src/tests/run-coverage-gate.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
+    # The three docker smoke files, on the host, a skip counted as a failure. The smoke step above
+    # runs them too, and inside the merge gate's containers every one of their tests skips there.
+    [docker_smoke]="src/tests/run-docker-smoke-gate.sh"
     [websocket]="src/scripts/run-websocket-smoke-tests.sh"
     [integration]="src/tests/run-integration-tests.sh"
     # ⚠️ THE SLOT IS NAMED `e2e`; THE DIRECTORY IT SWEEPS IS `src/tests/e2e_ui/`.

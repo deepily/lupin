@@ -792,7 +792,7 @@ class TestAllExpansion:
     """
 
     def test_all_components_order( self ):
-        """Canonical pyramid order: typecheck → stylelint → doclint → unit → cosa → coverage → typescript → smoke → websocket → integration → e2e."""
+        """The canonical pyramid order, with docker_smoke right after smoke."""
         # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
         # gate 07a5460d). Before that, `all` ran every Python tier and silently
         # skipped the entire TypeScript suite.
@@ -809,7 +809,7 @@ class TestAllExpansion:
         # so one timeout no longer discards the whole suite's results. Half A before half B.
         # "doclint" joined with row 2c48c717 (Rick's ruling) third: 4.6s of static
         # analysis over every swept-scope Python file's docstrings (measured).
-        assert ALL_SUITE_COMPONENTS == [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+        assert ALL_SUITE_COMPONENTS == [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -841,7 +841,7 @@ class TestAllExpansion:
         # belongs to "all", not to every submission that contains it — deliberately.
         # DO NOT "FIX" THIS. It looks like an oversight and it is a decision.
         assert _expand_all( [ "unit", "all" ] ) == [
-            "unit", "typecheck", "stylelint", "doclint", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b"
+            "unit", "typecheck", "stylelint", "doclint", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b"
         ]
 
         # Caller-supplied duplicates also deduped

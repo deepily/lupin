@@ -19,8 +19,8 @@ pins:
 - The one door is `POST /api/v2/submit` with the command `agent router go to test suite`. `submit_body` builds the request, and `read_reply` reads the answer. The old `/api/test-suite/submit` door answers 410.
 - A refused submit is HTTP 200 with `status` `failed` and the cause in `error`. Only `status` `waiting` on a 2xx answer counts as accepted.
 - `unknown_suite_names` lists names that are not keys of `SUITE_SCRIPTS`. `e2e_ui` is a directory, not a suite.
-- `all` expands to `ALL_SUITE_COMPONENTS`: typecheck, stylelint, doclint, unit, cosa, coverage, typescript, smoke, websocket, integration, e2e_a, e2e_b. Duplicates are dropped, first one wins.
-- A server in a container refuses a request naming `unit`, and `all` there leaves it out and says `unit: not run here, host tier`.
+- `all` expands to `ALL_SUITE_COMPONENTS`: typecheck, stylelint, doclint, unit, cosa, coverage, typescript, smoke, docker_smoke, websocket, integration, e2e_a, e2e_b. Duplicates are dropped, first one wins.
+- A server in a container refuses a request naming `unit` or `docker_smoke`, and `all` there leaves both out and says `unit: not run here, host tier` and the same for `docker_smoke`.
 - The job always runs with `monopolize=True`, because the scripts swap the database config.
 
 ## Running

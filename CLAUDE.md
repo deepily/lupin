@@ -338,6 +338,9 @@ Suites that qualify:
   which reads like a :8000 suite and is not one. The scope is transient (`--scope --collect`, dies
   with the command), so nothing persists; it takes about 0.5s; and the only process it kills is the
   allocator it started, inside a cgroup it owns. It needs no monopoly.
+- `src/tests/smoke/test_credential_mount_shape.py` — it runs throwaway alpine containers on scratch files and
+  reads the compute containers with `docker exec id -u`, so nothing persists and it needs no monopoly.
+  `docker_smoke` runs it on the host with the two files below.
 - `src/tests/smoke/test_db_roles_rollback_real_postgres.py` — it starts a Docker container, which
   reads like a :8000 suite and is not one. The container is a throwaway Postgres reached only by
   `docker exec`, with a name guard, memory and processor caps, and removal with its volumes at the end, so
@@ -417,6 +420,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 |---|---|---|---|
 | Unit | :7999 | `pytest src/tests/unit/` | Fast isolated tests, mocked deps |
 | TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | 336 `*.test.ts` files (`git ls-files '*.test.ts'`, 2026-10-07 at 0ac8ad8ac) under c8 at 100%; ~8-25 min, no server. Runs inside the capped `jstest.slice` cgroup (RSS watchdog 2048 MB fires before the 8 G `MemoryMax`). Every door to it is memory-capped, so `test_types: ["all"]` is safe. ⚠️ A full run can still HANG on leaked transports; an RC=124 is that defect, not memory |
+| Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` | The three docker smoke files; any skip, error or missing file is a failure. Not offered inside a container |
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests, 50 passed in 45 s (a run, not a collect: the runner counts as it goes; 2026-10-07 at 0ac8ad8ac); connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 485 collected, 8 deselected (`pytest src/tests/integration --collect-only -q`, 2026-10-07 at 0ac8ad8ac); **FINAL merge gate**; always `--bg` |
@@ -428,9 +432,9 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: typecheck stylelint doclint unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
+<!-- merge-pyramid-suites: typecheck stylelint doclint unit cosa coverage typescript smoke docker_smoke websocket integration e2e_a e2e_b -->
 All must pass before merging to main, in this order: typecheck → stylelint → doclint → unit → cosa → coverage → typescript →
-smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
+smoke → docker_smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
 e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
 **typecheck runs FIRST because it is the cheapest gate** — the three tsc projects, about 3s of static
@@ -467,18 +471,19 @@ not a pass. `src/scripts/pre-push-chain.sh` runs the same gate on the tip of a p
 | 6 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
 | 7 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
 | 8 | smoke | :7999 |
-| 9 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
-| 10 | websocket smoke | :7999 |
-| 11 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
-| 12 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
-| 13 | **integration — the final gate** | :8000 scheduled |
+| 9 | docker_smoke — `src/tests/run-docker-smoke-gate.sh` — the three docker smoke files on the host, a skip is a failure | :7999, host only |
+| 10 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 11 | websocket smoke | :7999 |
+| 12 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 13 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 14 | **integration — the final gate** | :8000 scheduled |
 
 This table's numbering and membership are guarded by
 `test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in
 `ALL_SUITE_COMPONENTS` appears in a row, and the count is the suites plus the serial bridge guard.
 A new suite therefore needs a row here as well as a marker entry.
 
-The test container does not offer the unit suite (row 2f18ad99): a request naming `unit` is refused with `status: failed` and the cause in `error`, and `all` there runs the pyramid without it and says `unit: not run here, host tier`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 4 says.
+The test container does not offer the unit suite (row 2f18ad99) or `docker_smoke`: a request naming either is refused with `status: failed` and the cause in `error`, and `all` there runs the pyramid without them and says `unit: not run here, host tier` and the same for `docker_smoke`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 4 says, and `docker_smoke` as row 9 says: inside a container the docker files skip, so the smoke step cannot vouch for them.
 
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.

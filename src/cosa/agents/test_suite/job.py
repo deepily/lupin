@@ -43,6 +43,7 @@ SUITE_SCRIPTS = {
     "unit"         : "src/tests/run-unit-tests.sh",
     "typescript"   : "src/tests/run-typescript-tests.sh",   # TS suite under c8 at an enforced 100% threshold (row 36e479ed)
     "smoke"        : "src/tests/run-smoke-tests.sh",
+    "docker_smoke" : "src/tests/run-docker-smoke-gate.sh",   # the three docker smoke files on the host; a skip is a failure. Host only, like unit.
     "smoke_direct" : "src/tests/run-smoke-direct.sh",
     "pytest_direct": "src/tests/run-pytest-direct.sh",    # Arbitrary pytest file (doc 16 follow-up)
     "websocket"    : "src/scripts/run-websocket-smoke-tests.sh",
@@ -114,6 +115,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "stylelint"    : 300,    #  5 min. MEASURED 1.5s wall for 32 files (2026-09-18, row d3d4a18c) — the typecheck gate's reasoning: a static gate that has run for five minutes has hung, and the budget is the only thing that says so.
+    "docker_smoke" : 600,    # 10 min. The three files took about 90s together on a loaded host (28.4s rollback, 59.3s grants); a step that runs for ten minutes has hung.
     "doclint"      : 300,    #  5 min. Measured 4.6s wall for 862 files (row 2c48c717). The typecheck gate's reasoning applies: a static gate that has run for five minutes has hung.
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
@@ -230,13 +232,18 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
 # the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
 # stays registered for a deliberate whole-suite run.
-ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "docker_smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
 # Suites a container does not offer: they run on the host. The unit tier ran inside the :8000 container
 # until it hit its own time limit, and part of it needs what only the host has (the venv at
 # /var/lupin/.venv, systemd-run, the Dart SDK). Rick took it off the container's menu on 2026-10-07.
-HOST_ONLY_SUITES = ( "unit", )
+HOST_ONLY_SUITES = ( "unit", "docker_smoke" )
+# Where each host-only suite runs. The refusal names this command, so each suite has to have its own.
+HOST_COMMANDS    = {
+    "unit"         : "`pytest src/tests/unit/` (or `src/tests/run-unit-tests.sh`)",
+    "docker_smoke" : "`src/tests/run-docker-smoke-gate.sh`",
+}
 NOT_RUN_HERE     = "not run here, host tier"
 
 
@@ -268,8 +275,9 @@ def container_refusal( test_types: List[ str ] ) -> Optional[ str ]:
     asked = [ t for t in test_types if t in HOST_ONLY_SUITES ]
     if not asked: return None
     offered = ", ".join( s for s in SUITE_SCRIPTS if s not in HOST_ONLY_SUITES )
+    how     = "; ".join( f"{t} with {HOST_COMMANDS[ t ]}" for t in asked )
     return ( f"the {', '.join( asked )} suite is not offered through this server's test container: it runs on the host, "
-             f"with `pytest src/tests/unit/` (or `src/tests/run-unit-tests.sh`). Suites offered here: {offered}." )
+             f"{how}. Suites offered here: {offered}." )
 
 
 def suites_left_out( test_types: List[ str ], in_container: bool ) -> Dict[ str, str ]:
@@ -2069,6 +2077,9 @@ class TestSuiteJob( AgenticJobBase ):
         # The doclint gate (row 2c48c717). Its stdout names every
         # finding as file:line: rule, and that is the only record this gate produces.
         "doclint"      : "doclint-gate-latest.log",
+        # The docker smoke step. Its stdout names each skipped test with the reason, and that is the
+        # only record this step produces.
+        "docker_smoke" : "docker-smoke-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
@@ -2546,7 +2557,7 @@ class TestSuiteJob( AgenticJobBase ):
         # Its refusals exit 2 with no summary, so they too read NOT EXECUTED, never PASSED.
         # "doclint" (row 2c48c717) prints the same three lines, and its unit is files too.
         # Its refusals exit 2 or 3 with no summary, so they read not executed, never passed.
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint" ):
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint", "docker_smoke" ):
             return None
         if not stdout:
             return None

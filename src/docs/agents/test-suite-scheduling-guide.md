@@ -59,6 +59,7 @@ TFE — can trigger automated remediation on failure.
 | Type | Script path | Default timeout | Typical runtime | Test count |
 |------|-------------|-----------------|-----------------|------------|
 | `unit` | `src/tests/run-unit-tests.sh` | refused by the test container: it runs on the host | not offered here | `pytest src/tests/unit/` on the host. A request naming `unit` answers `status: failed` with the cause in `error` |
+| `docker_smoke` | `src/tests/run-docker-smoke-gate.sh` | refused by the test container: it runs on the host | not offered here | `src/tests/run-docker-smoke-gate.sh` on the host. The three docker smoke files; a skip, an error or a missing file is a failure. A request naming `docker_smoke` answers `status: failed` with the cause in `error` |
 | `smoke` | `src/tests/run-smoke-tests.sh` | 3600s (60 min) | ~40 min | ~340 tests (excludes destructive `test_proxy_integration.py` — own :8000 venue) |
 | `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | Phase D live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
@@ -96,9 +97,9 @@ file is in neither half or in both. A new e2e test file therefore goes into one 
 manifests, whichever half is lighter.
 
 **The `all` suite**: expands to the curated pyramid in `ALL_SUITE_COMPONENTS`, each leg with its own
-timeout. In a container it runs the pyramid without `unit`, and the result says so:
-`unit: not run here, host tier`, in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
-A pyramid without unit is not the full pyramid, so read that note before reading the verdict.
+timeout. In a container it runs the pyramid without `unit` and `docker_smoke`, and the result says so:
+`unit: not run here, host tier` and `docker_smoke: not run here, host tier`, in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
+A pyramid without them is not the full pyramid, so read that note before reading the verdict.
 The job also tells the coverage gate (`LUPIN_TEST_TIERS_NOT_RUN`), which then answers exit 2, inconclusive,
 because the data file holds no unit tier. Run unit on the host, and run the coverage gate there.
 
