@@ -35,6 +35,10 @@
 -- variable is needed. It does not create, alter or drop a role, reset a password, or grant or
 -- revoke anything; the roles and their grants stay as they were.
 --
+-- grants_only=1 (optional, never with reassign) runs the grants, the REVOKE and the default privileges
+-- and nothing else. It needs no password variable and creates, alters and drops no role, so it needs
+-- no password file and no root. It stops with a named error when one of the three roles is missing.
+--
 -- IDEMPOTENT: roles are created if absent and their passwords reset each run; grants repeat
 -- harmlessly. Not applied to the live database by anyone yet.
 
@@ -88,6 +92,8 @@ SET log_min_duration_statement = -1;
   \quit
 \endif
 
+\if :{?grants_only}
+\else
 -- A forgotten variable must stop the run, not set an empty password.
 \if :{?app_pw}
 \else
@@ -101,6 +107,7 @@ SET log_min_duration_statement = -1;
 \else
   DO $$ BEGIN RAISE EXCEPTION 'init-db-roles.sql: test_pw is not set'; END $$;
 \endif
+\endif
 
 -- ---- precheck: both databases must exist before anything is applied ---------------------
 -- Without this, a missing lupin_db_test fails at the second \connect, after the dev half is applied.
@@ -110,6 +117,16 @@ SELECT EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_db_test' ) AS has
   DO $$ BEGIN RAISE EXCEPTION 'init-db-roles.sql: database lupin_db_test does not exist'; END $$;
 \endif
 
+\if :{?grants_only}
+  SELECT count(*) > 0 AS any, coalesce( string_agg( r, ', ' ORDER BY r ), '' ) AS names
+    FROM ( VALUES ( 'lupin_app' ), ( 'lupin_host' ), ( 'lupin_test' ) ) AS v( r )
+   WHERE NOT EXISTS ( SELECT FROM pg_roles WHERE rolname = r )
+  \gset missing_
+  \if :missing_any
+    \echo init-db-roles.sql: missing roles :missing_names
+    DO $$ BEGIN RAISE EXCEPTION 'init-db-roles.sql: a role is missing, and grants_only does not create roles'; END $$;
+  \endif
+\else
 -- ---- roles -----------------------------------------------------------------------------
 SELECT format( 'CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD %L', r, p )
   FROM ( VALUES ( 'lupin_app', :'app_pw' ), ( 'lupin_host', :'host_pw' ), ( 'lupin_test', :'test_pw' ) ) AS v( r, p )
@@ -124,6 +141,7 @@ SELECT format( 'ALTER ROLE %I PASSWORD %L', r, p )
 -- CREATE DATABASE for a throwaway database. lupin_app and lupin_host keep NOCREATEDB. This is an
 -- ALTER, not part of the CREATE ROLE above, so a role that already exists gets it on a re-apply.
 ALTER ROLE lupin_test CREATEDB;
+\endif
 
 -- ---- who may connect to which database ---------------------------------------------------
 REVOKE CONNECT ON DATABASE lupin_db_dev  FROM PUBLIC;

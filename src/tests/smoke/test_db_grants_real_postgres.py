@@ -8,8 +8,13 @@ Venue: host-side, docker required; the :7999 rubric applies only if a run is tim
 The merge gate's containers have no docker socket, so there the docker tests skip: read the skip count.
 """
 
+import os
+import subprocess
+import sys
+
 from test_db_roles_rollback_real_postgres import (   # noqa: F401  (fixtures are used by name)
-    _docker, _labels_of, _provision, needs_docker, refuse_unless_throwaway, stocked, throwaway,
+    ROLES_SQL, ROOT, SUPERUSER, _assert_marker, _clean_env, _docker, _labels_of, _provision, _psql,
+    needs_docker, refuse_unless_throwaway, stocked, throwaway,
 )
 
 
@@ -32,3 +37,46 @@ def test_a_plain_login_can_ask_what_another_role_may_do( stocked, tmp_path ):
     assert _psql_as( stocked, "lupin_test", "lupin_db_test", ask.format( role="lupin_app" ) )  == "t", "lupin_app was granted every table"
     assert _psql_as( stocked, "lupin_test", "lupin_db_test", ask.format( role="lupin_host" ) ) == "f", "lupin_host has no grant in the test database"
     assert _psql_as( stocked, "lupin_host", "lupin_db_dev", ask.format( role="lupin_host" ) ) == "t", "the same question from another login"
+
+
+def _grants_only( box, database="lupin_db_dev" ):
+    """The real provisioner with --grants-only and no password file; returns the process."""
+    assert ROOT, "LUPIN_ROOT is not set, so the provisioner would run from the wrong tree"
+    _assert_marker( box )
+    psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d {database}"
+    args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--apply", "--grants-only" ]
+    env  = _clean_env( LUPIN_ROOT=ROOT, PYTHONPATH=os.path.join( ROOT, "src" ) )
+    return subprocess.run( args, capture_output=True, text=True, timeout=120, env=env, cwd=ROOT )
+
+
+def _may( box, role, database, table, privilege="SELECT" ):
+    sql = f"SELECT has_table_privilege( '{role}', 'public.{table}', '{privilege}' );"
+    return _psql_as( box, "lupin_test" if database == "lupin_db_test" else "lupin_host", database, sql ) == "t"
+
+
+# ── --grants-only ────────────────────────────────────────────────────────────
+
+@needs_docker
+def test_grants_only_reaches_a_table_made_after_the_roles_and_resets_no_password( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    for database in ( "lupin_db_dev", "lupin_db_test" ):
+        _psql( stocked[ "name" ], database, "CREATE TABLE late_arrival ( id serial PRIMARY KEY );\n" )
+    assert not _may( stocked, "lupin_app", "lupin_db_test", "late_arrival" ), "the setup did not make a table the roles cannot reach"
+    roles_before = _psql( stocked[ "name" ], "postgres", ROLES_SQL )
+
+    done = _grants_only( stocked )
+    assert done.returncode == 0, f"{done.stdout[ -400: ]} {done.stderr[ -400: ]}"
+
+    assert _may( stocked, "lupin_app",  "lupin_db_test", "late_arrival" )
+    assert _may( stocked, "lupin_test", "lupin_db_test", "late_arrival", "DELETE" )
+    assert _may( stocked, "lupin_host", "lupin_db_dev",  "late_arrival", "UPDATE" )
+    assert _psql( stocked[ "name" ], "postgres", ROLES_SQL ) == roles_before, "grants-only changed a role or a password hash"
+
+
+@needs_docker
+def test_grants_only_on_a_server_without_the_roles_fails_and_names_them( stocked ):
+    done = _grants_only( stocked )
+    assert done.returncode != 0
+    text = done.stdout + done.stderr
+    assert "missing roles lupin_app, lupin_host, lupin_test" in text and "grants_only does not create roles" in text
+    assert _psql( stocked[ "name" ], "postgres", "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'lupin_a%' OR rolname LIKE 'lupin_h%' OR rolname LIKE 'lupin_t%';" ).strip() == "0"
