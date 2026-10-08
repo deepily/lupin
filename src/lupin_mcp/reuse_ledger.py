@@ -157,6 +157,19 @@ class AccountLedger:
         """Ensures: returns the tokens the ledger holds against the account."""
         return self.snapshot()[ 1 ]
 
+    def held_by_prefix( self, prefix ):
+        """
+        Count what the runs whose name starts with prefix hold against the account.
+
+        Ensures:
+            - a closed run counts at its spend and an open one at the larger of its ceiling and its spend
+            - returns 0 when no run has that prefix
+        Raises:
+            - LedgerUnreadable as snapshot does
+        """
+        with self._locked() as f: runs = self._summary( self._rows( f ) )[ 2 ]
+        return sum( r[ "spent" ] if r[ "closed" ] else max( r[ "ceiling" ], r[ "spent" ] ) for name, r in runs.items() if name.startswith( prefix ) )
+
     def limit_tokens( self ):
         """Ensures: returns the latest account limit in tokens."""
         return self.snapshot()[ 0 ]
