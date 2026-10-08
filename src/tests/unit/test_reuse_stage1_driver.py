@@ -804,3 +804,14 @@ def test_a_repeated_entry_id_is_refused_before_a_ledger_run_opens( env ):
     assert ENTRIES[ 0 ][ "id" ] in str( raised.value )                                           # it names the id
     assert env.ledger.path.read_text() == before and env.made == [] and not env.results_dir.exists()
     st.run_arm( env, 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )                                  # the name was not spent
+
+
+@pytest.mark.parametrize( "arm", [ "single2", "pack10", "page-single1" ] )
+def test_no_key_on_the_live_transport_also_refuses_a_gated_arm_after_the_canary_is_approved( env, tmp_path, monkeypatch, arm ):
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "read" )
+    monkeypatch.delenv( KEY, raising=False )
+    live, before = live_env( tmp_path, env.ledger ), env.ledger.path.read_text()
+    with pytest.raises( st.KeyMissing, match=KEY ): st.run_arm( live, 1, arm, NEED, PAGES if arm.startswith( "page-" ) else ENTRIES[ :5 ], 1_000_000 )
+    assert env.ledger.path.read_text() == before and not ( env.results_dir / f"{st.run_name( 1, arm )}.json" ).exists()
+    st.run_arm( standin_env( env, tmp_path ), 1, arm, NEED, PAGES if arm.startswith( "page-" ) else ENTRIES[ :5 ], 1_000_000 )          # the name is still free
+    assert read( env, 1, arm )[ "state" ] == "complete"
