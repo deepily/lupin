@@ -72,6 +72,13 @@ TFE — can trigger automated remediation on failure.
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
 `src/cosa/agents/test_suite/job.py`.
 
+**The test-suite live smoke cannot run as, or inside, a suite job**: `src/tests/smoke/test_test_suite_live_pipeline.py`
+submits a test-suite job, which always takes the monopolize slot. Inside any suite job (`smoke`, `smoke_direct`,
+`pytest_direct`) the suite job holds that slot, so the submitted job waits until the suite ends. Every suite job exports
+`LUPIN_TEST_MONOPOLIZE_PARENT_ID`, and the smoke skips when it is set. Run it by hand from a host shell with
+`src/scripts/run-test-suite-live-smoke.sh`. The runner exits 64 unless `cosa.rest.venue_idle --port 8000` exits 0, then
+runs the one file against `:8000` and exits with pytest's status.
+
 **Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is ONE comma-separated
 string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
 because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job

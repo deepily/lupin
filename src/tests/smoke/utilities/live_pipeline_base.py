@@ -69,7 +69,7 @@ class LivePipelineTestBase:
 
     TEST_NAME       = "Live Pipeline"
     SCENARIOS       = []
-    BASE_URL        = "http://localhost:7999"
+    BASE_URL        = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
     DEFAULT_TIMEOUT = 120
     POLL_INTERVAL   = 2
     REQUEST_TIMEOUT = 60

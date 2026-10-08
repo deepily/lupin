@@ -106,7 +106,8 @@ def test_the_pytest_it_starts_does_not_see_a_suite_id( tree, tmp_path ):
 
 def test_the_skip_reason_names_the_runner():
     import tests.smoke.test_test_suite_live_pipeline as smoke
-    assert RUNNER in smoke.TIER_SKIP_REASON and "scheduled run" not in smoke.TIER_SKIP_REASON
+    assert RUNNER in smoke.TIER_SKIP_REASON
+    assert "Run this file as its own scheduled run" not in smoke.TIER_SKIP_REASON
 
 
 def test_the_scheduling_guide_names_the_runner():

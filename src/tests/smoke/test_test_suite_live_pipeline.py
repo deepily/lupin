@@ -16,12 +16,16 @@ Smoke test for Test Suite agent via live pipeline.
    docstring says. Relocating it, or excluding it from the runner the way
    test_proxy_integration.py is excluded, would deselect it from that gate — a change to
    what the gate covers, which is an owner's decision and not a drive-by while clearing a
-   red list. So it stays, it stays red on :7999, and the reason is written here instead of
+   red list. So it stays, it skips inside the tier, and the reason is written here instead of
    being re-derived by the next reader.
 
-   HOW TO RUN IT PROPERLY: submit via the v2 test-suite submit (`agent router go to test suite`) against :8000 on a
-   verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
-   exit 0 = IDLE). Never side-door it via curl or a direct queue push.
+   Inside a suite job it skips. The job it submits is a test-suite job, which always takes the
+   monopolize slot, and every suite job exports LUPIN_TEST_MONOPOLIZE_PARENT_ID. Submitting this
+   file as a scheduled run therefore skips too.
+
+   To run it, use `src/scripts/run-test-suite-live-smoke.sh` from a host shell. It refuses unless
+   `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000` exits 0 (idle), and it points the
+   smoke at :8000 through LUPIN_TEST_BASE_URL. Never side-door it via curl or a direct queue push.
 
 Verifies the full end-to-end pipeline:
   TestSuiteSubmitRequest -> REST endpoint -> TodoFifoQueue -> TestSuiteJob
@@ -59,7 +63,9 @@ from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
 TIER_SKIP_REASON = (
     "This smoke submits a test-suite job, and a test-suite job always takes the monopolize slot. "
     "Inside a tier that slot is held by the tier itself, so the job is deferred until the tier ends "
-    "and can never run as the tier's child. Run this file as its own scheduled run."
+    "and can never run as the tier's child. It cannot run as its own scheduled run either, because every "
+    "suite job exports the tier's id. Run src/scripts/run-test-suite-live-smoke.sh from a host shell: "
+    "it refuses unless :8000 is verified idle."
 )
 
 
