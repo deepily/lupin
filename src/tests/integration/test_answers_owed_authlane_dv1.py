@@ -50,6 +50,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import OperationalError
 
@@ -57,6 +58,7 @@ from alembic import command
 
 from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 from cosa.rest.postgres_models import User, Notification, ApiKey
 from cosa.rest.db.repositories import notification_repository as nr_module
 import cosa.rest.routers.notifications as notif_module
@@ -74,8 +76,7 @@ _ENDPOINT = "/api/notifications/answers-owed"
 
 
 def _server_url():
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 def _maintenance_engine( server_url ):
@@ -96,16 +97,17 @@ def authlane_ctx():
     """
     server_url = _server_url()
     try:
-        eng = _maintenance_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{_THROWAWAY_DB}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping D-V1 auth-lane test: {e}" )
 
     throwaway_url = server_url.set( database=_THROWAWAY_DB ).render_as_string( hide_password=False )
-    command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    try:
+        command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    except BaseException:
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        raise
 
     # ── repoint the global engine so get_db() (endpoint + auth) hits the throwaway ──
     saved = ( db_module.engine, db_module.SessionLocal, db_module.ScopedSession )

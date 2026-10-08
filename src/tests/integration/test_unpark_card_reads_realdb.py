@@ -21,11 +21,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 from cosa.rest.db.repositories.notification_repository import NotificationRepository
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest.postgres_models import Notification, TaskEvent, TaskItem, User
@@ -35,8 +36,7 @@ _THROWAWAY_DB = f"unpark_card_reads_{os.getpid()}"
 
 
 def _server_url():
-    db_module.swap_database( "testing" )
-    return db_module.engine.url
+    return make_url( td.clone_server_url() )
 
 
 def _maintenance_engine( server_url ):
@@ -48,16 +48,17 @@ def live_session():
     """A throwaway database at the newest schema, yielded as a Session and dropped afterwards."""
     server_url = _server_url()
     try:
-        eng = _maintenance_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{_THROWAWAY_DB}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable, skipping the un-park card reads: {e}" )
 
     throwaway_url = server_url.set( database=_THROWAWAY_DB ).render_as_string( hide_password=False )
-    command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    try:
+        command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    except BaseException:
+        td.drop_database( server_url.render_as_string( hide_password=False ), _THROWAWAY_DB )
+        raise
 
     engine  = create_engine( throwaway_url )
     session = sessionmaker( bind=engine )()

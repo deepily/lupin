@@ -64,11 +64,13 @@ import pytest
 import requests
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import OperationalError
 from alembic import command
 
 from cosa.rest.db import database as dbm
 from cosa.rest.db.auto_migrate import build_alembic_config
+import tests.helpers.template_database as td
 from cosa.rest.postgres_models import User, ApiKey
 from cosa.rest.jwt_service import create_access_token
 from cosa.rest.db.database import SessionLocal
@@ -427,20 +429,21 @@ def handback_ctx( tmp_path_factory ):
     api-key, and yield the base subprocess env + connection facts. Drops the DB on
     teardown. SKIPS when Postgres is unreachable.
     """
-    server_url = dbm.engine.url                        # lupin_db_dev — params source ONLY (never written)
+    server_url = make_url( td.clone_server_url() )     # the clone login on the maintenance database; nothing is written there
     db_name    = f"handback_e2e_{os.getpid()}"
 
     try:
-        eng = _maint_engine( server_url )
-        with eng.connect() as conn:
-            conn.execute( text( f'DROP DATABASE IF EXISTS "{db_name}"' ) )
-            conn.execute( text( f'CREATE DATABASE "{db_name}"' ) )
-        eng.dispose()
+        td.drop_database( server_url.render_as_string( hide_password=False ), db_name )
+        td.create_from_template( server_url.render_as_string( hide_password=False ), db_name )
     except OperationalError as e:
         pytest.skip( f"Postgres unreachable — skipping handback e2e: {e}" )
 
     throwaway_url = server_url.set( database=db_name ).render_as_string( hide_password=False )
-    command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    try:
+        command.upgrade( build_alembic_config( database_url=throwaway_url ), "head" )
+    except BaseException:
+        td.drop_database( server_url.render_as_string( hide_password=False ), db_name )
+        raise
 
     # Seed the human owner + api-key DIRECTLY in the throwaway DB. We repoint the
     # in-process engine at the throwaway just for this seed, then restore it — the
