@@ -659,3 +659,10 @@ def test_a_canary_file_that_is_approved_but_tripped_unlocks_nothing( env ):
     report[ "approved" ] = { "by": "someone", "why": "edited by hand", "at": "now" }
     path.write_text( json.dumps( report ) )
     with pytest.raises( st.CanaryNotApproved ): st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
+
+
+@pytest.mark.parametrize( "ceiling", [ "5000", 0, -5, True, 1.5, None ] )
+def test_a_ceiling_that_is_not_a_positive_whole_number_is_refused_before_the_ledger_is_touched( env, ceiling ):
+    before = env.ledger.path.read_text()
+    with pytest.raises( ValueError, match="ceiling" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], ceiling )
+    assert env.ledger.path.read_text() == before and env.made == []

@@ -6,6 +6,8 @@ packs of 10, 50 and 200, the page arms, and six probe arms. The ledger holds the
 counted over the runs named s1-*, so it survives a restart. A human approves the canary before any
 arm but the first single run is paid for. The driver sends nothing itself: the transport is a factory.
 """
+import contextlib
+import fcntl
 import json
 import os
 import pathlib
@@ -117,8 +119,8 @@ def _canary_reports( env, question ):
 
 
 def _require_approved( env, question ):
-    """Raises: CanaryNotApproved unless a canary file of this question holds an approval."""
-    if not any( report[ "approved" ] is not None for _, _, report in _canary_reports( env, question ) ):
+    """Raises: CanaryNotApproved unless a canary file holds an approval and no trip."""
+    if not any( report[ "approved" ] is not None and not report[ "tripped" ] for _, _, report in _canary_reports( env, question ) ):
         raise CanaryNotApproved( f"the canary of question {question} is not approved" )
 
 
@@ -139,6 +141,16 @@ def _check_attempt( env, question, arm, attempt, reason ):
     if not isinstance( reason, str ) or not reason.strip(): raise ValueError( "a retry needs a named reason" )
     if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise ValueError( f"attempt {attempt} has no earlier attempt to follow" )
     if any( report[ "approved" ] is not None for _, _, report in _canary_reports( env, question ) ): raise ValueError( f"the canary of question {question} is already approved" )
+
+
+@contextlib.contextmanager
+def _stage_lock( env ):
+    """Ensures: yields holding a lock beside the ledger, so two drivers cannot admit at once."""
+    lock = env.ledger.path.with_name( env.ledger.path.name + ".stage.lock" )
+    with lock.open( "a" ) as f:
+        fcntl.flock( f, fcntl.LOCK_EX )
+        try: yield
+        finally: fcntl.flock( f, fcntl.LOCK_UN )
 
 
 def _write_json( path, record ):
@@ -199,16 +211,18 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         raise rt.ReuseError( "BAD_BUDGET", f"attempt limit must be an integer from 1 to {rt.CALL_BUDGET_CAP}, got {attempt_limit!r}" )
     if arm not in UNGATED: _require_approved( env, question )
     _check_probe( arm, probe, entries )
-    remaining = stage_remaining( env.ledger )
-    if type( ceiling_tokens ) is int and ceiling_tokens > remaining: raise StageRefused( f"{ceiling_tokens} asked, {remaining} remaining of the stage's {STAGE_TOKENS}" )
     name, ( index, size ) = run_name( question, arm, attempt ), ARMS[ arm ]
-    index = RETRY_INDEX.get( attempt, index )
+    index    = RETRY_INDEX.get( attempt, index )
     template = rt.PAGE_TEMPLATE if arm.startswith( "page-" ) else rt.PROMPT_TEMPLATE
-    budget   = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
     record   = { "format": FORMAT, "question": question, "need": need, "arm": arm, "run_name": name, "run_index": index, "size": size, "model": env.model,
                  "template_hash": rt.prompt_template_hash( template ), "started_at": env.clock(), "ceiling_tokens": ceiling_tokens, "attempt_limit": attempt_limit,
                  "entry_ids": [ e[ "id" ] for e in entries ], "entries_in_index": env.entries_in_index, "probe": probe,
                  "attempt": attempt, "retry_reason": reason }
+    with _stage_lock( env ):                                                      # the check and the admission are one step
+        remaining = stage_remaining( env.ledger )
+        if type( ceiling_tokens ) is int and ceiling_tokens > remaining:  # pragma: no branch -- the lock never swallows this raise
+            raise StageRefused( f"{ceiling_tokens} asked, {remaining} remaining of the stage's {STAGE_TOKENS}" )
+        budget = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
     try:
         ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit )
         sweep = rp.sweep_packed( ctx, need, entries, size, workers=env.workers, key_mode="stage1", run_index=index, template=template, model=env.model, budget=budget )
