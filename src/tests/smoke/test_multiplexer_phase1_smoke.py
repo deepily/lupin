@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -111,7 +112,10 @@ def test_ac3_watch_mode_starts_and_exits( tmp_path ):
     # the same bytes and the comparison below could not tell.
     subprocess.run( [ "bash", str( BUILD_SCRIPT ) ], cwd=str( PROJECT_ROOT ), check=True, capture_output=True )
     before = { p.name: p.read_bytes() for p in DIST_DIR.iterdir() if p.is_file() }
-    assert before[ "boot.js" ] == next( v for k, v in before.items() if re.fullmatch( r"boot\.[0-9a-f]{12}\.js", k ) ), \
+    # The dist directory keeps every earlier hashed bundle, so the current one is the name the
+    # manifest gives, not the first boot.<hash>.js found.
+    hashed_name = json.loads( before[ "manifest.json" ] )[ "boot.js" ]
+    assert before[ "boot.js" ] == before[ hashed_name ], \
         "precondition: the production build left the stable and hashed bundles identical"
 
     proc = subprocess.Popen(
