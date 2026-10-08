@@ -61,11 +61,59 @@ class HeightTolerantResult:
                          (0 when sizes were incompatible and no compare ran).
         tolerated_delta: The height delta that was tolerated (0 when the images
                          were already the same size or the compare was refused).
+        forgiven_pixels: On a pass of compare_pngs_height_tolerant, the pixels that differ
+                         at threshold 0.0 on the compared region but not at the threshold in
+                         force. 0 when none, and -1 when the second count could not be taken.
+                         0 on every other path.
+        compared_width:  Width of the compared region (0 when no compare ran).
+        compared_height: Height of the compared region (0 when no compare ran).
     """
     matched         : bool
     reason          : str
     mismatch_pixels : int
     tolerated_delta : int
+    forgiven_pixels : int = 0
+    compared_width  : int = 0
+    compared_height : int = 0
+
+
+def _forgiven_pixels( crop_a, crop_b, threshold ):
+    """
+    Count the pixels the tolerance forgave: they differ at threshold 0.0 only.
+
+    Requires:
+        - crop_a and crop_b are RGBA images of one size
+        - the comparison at `threshold` has already passed
+
+    Ensures:
+        - returns the mismatch count at threshold 0.0 over the same region
+        - returns 0 when the threshold in force is already 0.0, since nothing was forgiven
+        - returns -1 when the count could not be taken, and never raises, so it cannot turn a pass into a failure
+    """
+    if threshold <= 0.0: return 0
+    try:
+        return pixelmatch( crop_a, crop_b, Image.new( "RGBA", crop_a.size ), threshold=0.0, includeAA=True )
+    except Exception:
+        return -1
+
+
+def forgiven_line( name, result, threshold ):
+    """
+    Say, in one line, how many pixels a passing comparison owed to the tolerance.
+
+    Requires:
+        - result is the HeightTolerantResult of a comparison that passed
+        - threshold is the per-pixel threshold that comparison used
+
+    Ensures:
+        - returns None when no pixel was forgiven, so a clean pass prints nothing
+        - otherwise returns one line naming the snapshot, the count, the region and the threshold
+        - a count of -1 is reported as not counted, never as zero
+    """
+    if result.forgiven_pixels == 0: return None
+    count = "could not be counted" if result.forgiven_pixels < 0 else f"{result.forgiven_pixels} pixel(s) differ at threshold 0.0"
+    return ( f"[height-tolerant-snapshot] {name} passed inside the tolerance: {count} in the compared "
+             f"{result.compared_width}x{result.compared_height} region (threshold in force {threshold})" )
 
 
 def compare_pngs_height_tolerant(
@@ -149,6 +197,9 @@ def compare_pngs_height_tolerant(
             reason          = reason,
             mismatch_pixels = 0,
             tolerated_delta = height_delta,
+            forgiven_pixels = 0 if actual_png == baseline_png else _forgiven_pixels( crop_a, crop_b, threshold ),
+            compared_width  = w_a,
+            compared_height = common_h,
         )
 
     return HeightTolerantResult(

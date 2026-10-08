@@ -34,6 +34,8 @@ _THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
 if _THIS_DIR not in _sys_vt.path:
     _sys_vt.path.insert( 0, _THIS_DIR )
 from visual_height_tolerance import (
+    PIXEL_THRESHOLD,
+    forgiven_line,
     compare_pngs_height_tolerant,
     compare_pngs_structure_only,
     compare_pngs_content_shift_tolerant,
@@ -256,7 +258,7 @@ def assert_snapshot( assert_snapshot ):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def assert_snapshot_height_tolerant( pytestconfig, request ):
+def assert_snapshot_height_tolerant( pytestconfig, request, record_property ):
     """
     A snapshot assertion that tolerates a bounded HEIGHT-only delta.
 
@@ -317,6 +319,10 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
             max_height_delta=max_height_delta,
         )
         if result.matched:
+            line = forgiven_line( name, result, PIXEL_THRESHOLD )
+            if line is not None:
+                print( line )
+                record_property( "tolerance_forgiven", line )
             return
 
         # Save artifacts for triage (parity with the stock fixture's layout).
