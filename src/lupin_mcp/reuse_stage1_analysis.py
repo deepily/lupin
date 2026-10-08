@@ -31,7 +31,8 @@ PROBE_NEIGHBOURS                = ( "random", "near_duplicate" )
 FLOOR                           = 0.3                         # the page floor of the policy
 CONFIDENCE_BAR                  = 0.9                         # an answer is confident from this largest probability
 
-INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422" )
+INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422", "model_mismatch" )
+MODEL_MISMATCH_ERROR = "ModelMismatch"                        # the row error the transport writes when another model answered
 PROBE_PLAN_SUFFIX = "-probe-plan.json"                        # the driver writes one of these beside the arms of a question
 PAGE_ARMS     = ( "page-single1", "page-single2", "page-pack" )
 PAGE_NEAR     = 0.05                                          # a page this close to the floor makes the page arm conclusive
@@ -66,7 +67,9 @@ def read_arm( record ):
           the valid probabilities, malformed, and status
         - overlaps maps each validly answered id to reuse plus extend rounded to six places
         - malformed maps an answered id whose probabilities are not valid to the reason
-        - status is "invalid" when the arm was stopped by the ceiling, the ledger or refusals, or errored
+        - status is "invalid" when the arm was stopped by the ceiling, the ledger, refusals or another model answering, or errored
+        - status is also "invalid" when any row failed as a model mismatch, whatever the stop reason, and the lost-entry limit is not applied
+        - served_model is the model a mismatch row kept, "no named model" when it kept none, "another model" when no row says; None without a mismatch
         - lost lists, sorted, the asked ids without a valid answer plus every id named failed, unasked or not reached
         - lost_limit is the number of entries the arm may lose and still be judged
         - duplicate_ids lists the ids the arm asked more than once; the first answer to each stands and the arm is invalid
@@ -94,11 +97,14 @@ def read_arm( record ):
     stop = record[ "stop_reason" ]
     lost = sorted( ( asked - set( overlaps ) ) | set( record[ "failed" ] ) | set( record[ "unasked" ] ) | set( record[ "not_reached" ] ) )
     limit = lost_limit( len( asked ) )
-    if dup or record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
+    wrong = [ r for r in record[ "rows" ] if r.get( "error" ) == MODEL_MISMATCH_ERROR ]
+    if wrong: served = wrong[ 0 ].get( "model" ) or "no named model"
+    else: served = "another model" if stop == "model_mismatch" else None
+    if dup or wrong or record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
     elif not asked or stop not in ( None, "attempts" ) or ( record[ "state" ] != "complete" and not lost ): status = "inconclusive"
     else: status = "clean" if len( lost ) <= limit else "inconclusive"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
-             "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
+             "model": record[ "model" ], "served_model": served, "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
              "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
              "lost": lost, "lost_limit": limit, "duplicate_ids": dup,
@@ -612,6 +618,7 @@ def build_report( records, canaries ):
           canaries, unclean_arms, lost_by_arm }
         - lost_by_arm gives every arm's lost count beside its limit and its stop reason
         - decision comes from the passes and next_step from the stop rules
+        - an arm another model answered replaces the decision with a stop that names each such arm and the model that answered
         - a decision that stops and asks turns a next step that runs more into "stop and ask: see the decision above"
         - a next step that already stops and asks keeps its own reason
         - duplicate_ids lists each arm that asked an id more than once; such an arm stops the decision
@@ -630,6 +637,8 @@ def build_report( records, canaries ):
     if pg[ "state" ] == "invalid" and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm is invalid"
     if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
+    wrong = [ a for q in sorted( stage ) for a in stage[ q ].values() if a[ "served_model" ] is not None ]
+    if wrong: decision = "stop and ask: " + "; ".join( f"{a[ 'run_name' ] or 'question ' + str( a[ 'question' ] ) + ' ' + a[ 'arm' ]} was answered by {a[ 'served_model' ]}, not {a[ 'model' ]}" for a in wrong ) + "; Rick decides whether another model is acceptable"
     next_step = stop[ "next_step" ]
     if decision.startswith( "stop and ask" ) and not next_step.startswith( "stop and ask" ): next_step = "stop and ask: see the decision above"
     return { "decision": decision, "next_step": next_step, "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg, "duplicate_ids": dups,

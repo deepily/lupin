@@ -1625,3 +1625,14 @@ def test_an_arm_that_another_model_answered_beside_a_failing_size_still_gets_the
 
 def test_a_report_with_no_mismatch_keeps_its_decision():
     assert an.build_report( _question(), canaries=[] )[ "decision" ] == "default pack size 200"
+
+
+def test_the_decision_names_the_first_model_that_answered_wrongly_when_two_rows_carry_the_error():
+    rec = _mismatch_arm( served="jev-other-1.0" ); rec[ "rows" ][ 40 ][ "error" ], rec[ "rows" ][ 40 ][ "model" ] = "ModelMismatch", "jev-third-2.0"             # a later row than the failed one at index 16
+    decision = an.build_report( [ rec ], canaries=[] )[ "decision" ]
+    assert "answered by jev-other-1.0," in decision and "jev-third-2.0" not in decision
+
+
+def test_an_arm_with_no_run_name_is_named_by_its_question_and_arm_in_the_decision():
+    rec = _arm( "single1", _base(), run_name=NO_NAME, stop_reason="model_mismatch", state="incomplete" )
+    assert an.build_report( [ rec ], canaries=[] )[ "decision" ].startswith( "stop and ask: question 1 single1 was answered by another model, not jev-test;" )
