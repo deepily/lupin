@@ -39,6 +39,10 @@
 -- and nothing else. It needs no password variable and creates, alters and drops no role, so it needs
 -- no password file and no root. It stops with a named error when one of the three roles is missing.
 --
+-- The template database lupin_template_vector is made in every run except a rollback, which removes it. It holds
+-- the vector extension, is marked as a template and refuses connections. A test that creates a database clones
+-- it, so the extension needs no superuser at test time. See cosa.utils.db_grants for the check that reports it.
+--
 -- IDEMPOTENT: roles are created if absent and their passwords reset each run; grants repeat
 -- harmlessly. Not applied to the live database by anyone yet.
 
@@ -129,6 +133,11 @@ SET log_min_duration_statement = -1;
   SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() )
    WHERE EXISTS ( SELECT FROM pg_database d JOIN pg_roles o ON o.oid = d.datdba WHERE d.datname = current_database() AND o.rolname = 'lupin_app' )
   \gexec
+  -- The template database goes too. A template cannot be dropped until it is no longer one.
+  SELECT 'ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false'
+   WHERE EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' )
+  \gexec
+  DROP DATABASE IF EXISTS lupin_template_vector;
   \quit
 \endif
 
@@ -298,3 +307,21 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUE
   ALTER SCHEMA public OWNER TO lupin_app;
   SELECT format( 'ALTER DATABASE %I OWNER TO lupin_app', current_database() ) \gexec
 \endif
+
+-- ---- the template database for tests that create databases --------------------------------
+-- Created empty, opened for the extension step, closed again. A superuser cannot connect to a database that
+-- refuses connections, so the flags are loosened for the extension and tightened after. A re-run repeats all of it.
+SELECT 'CREATE DATABASE lupin_template_vector'
+ WHERE NOT EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' )
+\gexec
+ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false ALLOW_CONNECTIONS true;
+\connect lupin_template_vector
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+CREATE EXTENSION IF NOT EXISTS vector;
+\connect lupin_db_test
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE true ALLOW_CONNECTIONS false;

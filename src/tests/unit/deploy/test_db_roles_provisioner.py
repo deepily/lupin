@@ -231,6 +231,13 @@ _ROLLBACK_TAIL = (
     "WHERE d.datname = current_database() AND o.rolname = 'lupin_app' ) \\gexec"
 )
 
+# The dev block, which runs last, also removes the template database the tests clone.
+_TEMPLATE_REMOVAL = (
+    "SELECT 'ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false' "
+    "WHERE EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' ) \\gexec "
+    "DROP DATABASE IF EXISTS lupin_template_vector;"
+)
+
 
 def _split_after_object_statements( joined ):
     """Split at the third `\\gexec`: relations, types and functions, then the rest."""
@@ -255,7 +262,7 @@ def test_the_rollback_object_statements_are_the_reassign_ones_with_only_the_two_
 def test_the_rollback_moves_the_schema_and_the_database_only_when_lupin_app_owns_them( database ):
     rollback = " ".join( _object_lines( _rollback_block( open( SQL_PATH ).read(), database ) ) )
     _, tail = _split_after_object_statements( rollback )
-    assert tail == _ROLLBACK_TAIL
+    assert tail == _ROLLBACK_TAIL + ( " " + _TEMPLATE_REMOVAL if database == "lupin_db_dev" else "" )
     assert "OWNER TO lupin_dev;" not in rollback and "OWNER TO pg_database_owner;" not in rollback, \
         "an unconditional ownership change is back in the rollback block"
 

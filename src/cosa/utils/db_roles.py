@@ -14,20 +14,22 @@ works around.
         --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
 
 `--rollback` is the cutover's way back. It hands every object that `lupin_app` owns in the test and dev
-databases back to `lupin_dev`. It runs nothing else: no role, password or grant is touched. It reads no
-password file, so the three file options may be left out.
+databases back to `lupin_dev`. It also removes the template database. It runs nothing else: no role, password
+or grant is touched. It reads no password file, so the three file options may be left out.
 
     python -m cosa.utils.db_roles --psql "..." --rollback [--apply]
 
-`--grants-only` repeats the grants, the revoke on approval_settings and the default privileges, and nothing
-else. It creates no role and resets no password, so it reads no password file and needs no root.
+`--grants-only` repeats the grants, the revoke on approval_settings and the default privileges, and makes
+the template database if it is missing. Nothing else runs. It creates no role and resets no password, so it reads no password file and needs no root.
 It is the repair after a migration or a test created a table the roles cannot yet reach.
 
     python -m cosa.utils.db_roles --psql "..." --grants-only [--apply]
 
 `--check` changes nothing. It asks Postgres what each role may do to every public table of both
 databases and compares the answer with the matrix in `cosa.utils.db_grants`. Each gap is printed
-with the one repair command.
+with the one repair command. It also reports the template database, `lupin_template_vector`, when it is
+missing, is not a template or accepts connections. Tests that create databases clone it, so the vector
+extension needs no superuser at test time.
 Exit 0 is clean, 1 is a gap or a database with no tables, 2 is a check that could not run.
 
     python -m cosa.utils.db_roles --psql "..." --check [--database lupin_db_test]

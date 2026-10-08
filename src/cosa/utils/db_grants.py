@@ -7,6 +7,10 @@ Postgres, with `has_table_privilege` and `has_database_privilege`, so it runs as
 plain one included, and changes nothing.
 
 A database with no public tables fails the check: a zero is "nothing was checked", not "all good".
+
+The check also asks about the template database the tests clone, `lupin_template_vector`. It is one
+catalog query that needs no connection to the template, which refuses connections. A template
+that is missing, is not marked as a template, or accepts connections is a problem. A clean template adds no line.
 """
 
 import re
@@ -19,6 +23,7 @@ HOST_ROLE  = "lupin_host"
 TEST_ROLE  = "lupin_test"
 DEV_DB     = "lupin_db_dev"
 TEST_DB    = "lupin_db_test"
+TEMPLATE_DB = "lupin_template_vector"
 
 GUARDED_TABLE = "approval_settings"
 ALL_PRIVILEGES = ( "SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER" )
@@ -119,6 +124,41 @@ SELECT current_database() || '|' || CASE WHEN k.expected THEN 'missing' ELSE 'un
  WHERE CASE WHEN k.role IN ( SELECT rolname FROM present ) THEN has_database_privilege( k.role, current_database(), 'CONNECT' ) <> k.expected ELSE false END
 ORDER BY 1;
 """
+
+
+def build_template_sql():
+    """
+    The one query that describes the template database.
+
+    Ensures:
+        - prints exactly one row, `lupin_template_vector|template|<exists>|<is template>|<allows connections>`,
+          each flag as true or false, and false for all three when the database is absent
+        - reads the catalog only, so it needs no privilege on the template itself
+    """
+    return ( f"SELECT '{TEMPLATE_DB}|template|' || ( count(*) > 0 )::text || '|' || coalesce( bool_or( datistemplate ), false )::text"
+             f" || '|' || coalesce( bool_or( datallowconn ), false )::text FROM pg_database WHERE datname = '{TEMPLATE_DB}';\n" )
+
+
+def template_problems( rows ):
+    """
+    What is wrong with the template database, from the rows of a check.
+
+    Requires:
+        - rows come from parse_rows
+
+    Ensures:
+        - returns None when the rows hold no template row, which means it was not asked about
+        - returns a list of sentences, empty when the template exists, is a template and refuses connections
+        - a missing template gives one sentence, since the other two flags then say nothing
+    """
+    mine = [ r for r in rows if r[ 0 ] == TEMPLATE_DB and r[ 1 ] == "template" ]
+    if not mine: return None
+    exists, is_template, allows = ( value == "true" for value in mine[ 0 ][ 2: ] )
+    if not exists: return [ f"{TEMPLATE_DB} does not exist, so a test that creates a database cannot clone it" ]
+    problems = []
+    if not is_template: problems.append( f"{TEMPLATE_DB} is not marked as a template, so a plain login cannot clone it" )
+    if allows:          problems.append( f"{TEMPLATE_DB} accepts connections, so a clone can fail while someone is connected to it" )
+    return problems
 
 
 def parse_rows( text ):
@@ -227,7 +267,7 @@ def check_with_psql( psql_command, run_fn, which=None ):
           output could not be read, which is not a pass
     """
     chosen  = tuple( which ) if which else databases()
-    script  = "".join( f"\\connect {db}\n{build_check_sql( db )}" for db in chosen )
+    script  = "".join( f"\\connect {db}\n{build_check_sql( db )}" for db in chosen ) + build_template_sql()
     command = shlex.split( psql_command ) + [ "-v", "ON_ERROR_STOP=1", "-q", "-tA" ]
     done    = run_fn( command, input=script, text=True, capture_output=True )
     if done.returncode != 0: return 2, [ f"the check could not run: psql exited {done.returncode}: {done.stderr.strip()[ -300: ]}" ]
@@ -236,8 +276,13 @@ def check_with_psql( psql_command, run_fn, which=None ):
         reports = [ evaluate( db, rows ) for db in chosen ]
     except ValueError as error:
         return 2, [ f"the check could not read psql's answer: {error}" ]
-    lines = format_report( reports, remedy_for( psql_command, reports ) )
-    return ( 0 if all( r[ "ok" ] for r in reports ) else 1 ), lines
+    lines    = format_report( reports, remedy_for( psql_command, reports ) )
+    template = template_problems( rows ) or []
+    if template:
+        extra = [ f"{TEMPLATE_DB}: {len( template )} problems" ] + [ "  " + sentence for sentence in template ]
+        if all( r[ "ok" ] for r in reports ): lines = lines + extra + [ remedy_for( psql_command, reports ) ]
+        else:                                 lines = lines[ :-1 ] + extra + lines[ -1: ]
+    return ( 0 if all( r[ "ok" ] for r in reports ) and not template else 1 ), lines
 
 
 # ── the check over an app's own connection ───────────────────────────────────
