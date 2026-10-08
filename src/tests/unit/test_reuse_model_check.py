@@ -24,6 +24,7 @@ class Served( Fake ):
 
     def post_with_meta( self, body ):
         response, meta = super().post_with_meta( body )
+        meta[ "attempt_log" ] = [ { "status": 200, "request_ids": { "request-id": "m" } } ]
         if self.served == "absent": del response[ "model" ]
         else: response[ "model" ] = self.served
         return response, meta
@@ -42,6 +43,7 @@ def test_a_pack_from_another_model_answers_nothing_and_keeps_the_served_name( se
     assert out[ "answers" ] == [] and out[ "failed" ] == row[ "ids" ] and out[ "not_reached" ] == []
     assert row[ "status" ] == "failed" and row[ "error" ] == "ModelMismatch" and row[ "model" ] == ( None if served == "absent" else served )
     assert row[ "tokens_in" ] == 100 and row[ "tokens_out" ] == 20
+    assert row[ "attempt_log" ] == [ { "status": 200, "request_ids": { "request-id": "m" } } ]       # the paid attempt stays in the log
 
 
 def test_the_named_model_is_still_answered():
