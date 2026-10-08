@@ -168,3 +168,9 @@ def test_a_pack_exactly_at_the_limit_is_one_piece_and_one_token_under_it_is_two(
     whole   = rpr.estimate_tokens( rpr.pair_request( NEED, entries )[ 0 ] )
     assert rpr.split_for_size( NEED, entries, limit=whole )[ 0 ] == [ entries ]
     assert len( rpr.split_for_size( NEED, entries, limit=whole - 1 )[ 0 ] ) == 2
+
+
+def test_editing_a_bodys_criteria_leaves_the_template_unchanged():
+    body, qmap = rpr.pair_request( NEED, [ E1 ] )
+    body[ "questions" ][ qmap[ E1[ "id" ] ][ "coverage" ] ][ "criteria" ][ 0 ] = "edited"
+    assert rpr.PAIR_TEMPLATE[ "levels" ][ 0 ] == "Unrelated to the need"
