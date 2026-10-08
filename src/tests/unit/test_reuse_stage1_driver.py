@@ -734,3 +734,73 @@ def test_a_ledger_that_ran_out_mid_arm_writes_ledger_and_lists_the_rest_not_reac
     lost = [ a[ "id" ] for a in out[ "answers" ] ] + out[ "failed" ] + out[ "not_reached" ]
     assert ( out[ "state" ], out[ "stop_reason" ] ) == ( "incomplete", "ledger" ) and out[ "not_reached" ] and out[ "unasked" ] == []
     assert sorted( lost ) == sorted( out[ "entry_ids" ] )
+
+
+KEY = "JEV_API_TOASTER"
+
+
+def live_env( tmp_path, ledger ):
+    """A driver environment on the default (live) transport; nothing here may post."""
+    return st.Stage1Env( tmp_path, tmp_path / "data", ledger, entries_in_index=len( ENTRIES ) )
+
+
+def standin_env( env, tmp_path ):
+    """A second environment on the same ledger, on the stand-in transport."""
+    return st.Stage1Env( tmp_path, tmp_path / "data", env.ledger, transport_factory=lambda budget: Standin( budget ), entries_in_index=len( ENTRIES ) )
+
+
+@pytest.mark.parametrize( "arm", [ "single1", "canary" ] )
+def test_no_key_on_the_live_transport_is_refused_before_a_ledger_run_opens_and_no_name_is_spent( env, tmp_path, monkeypatch, arm ):
+    monkeypatch.delenv( KEY, raising=False )
+    live, before = live_env( tmp_path, env.ledger ), env.ledger.path.read_text()
+    with pytest.raises( st.KeyMissing, match=KEY ): st.run_arm( live, 1, arm, NEED, ENTRIES[ :5 ], 1_000_000 )
+    assert env.ledger.path.read_text() == before and not live.results_dir.exists()          # no begin row, no results file
+    st.run_arm( standin_env( env, tmp_path ), 1, arm, NEED, ENTRIES[ :5 ], 1_000_000 )         # the same name still runs
+    assert read( env, 1, arm )[ "state" ] == "complete"
+
+
+def test_the_canary_without_a_key_is_refused_the_same_way_and_leaves_no_file( env, tmp_path, monkeypatch ):
+    monkeypatch.delenv( KEY, raising=False )
+    live, before = live_env( tmp_path, env.ledger ), env.ledger.path.read_text()
+    with pytest.raises( st.KeyMissing, match=KEY ): st.run_canary( live, 1, NEED, ENTRIES, 1_000_000 )
+    assert env.ledger.path.read_text() == before and not live.results_dir.exists()
+
+
+def test_an_empty_key_counts_as_no_key( env, tmp_path, monkeypatch ):
+    monkeypatch.setenv( KEY, "" )
+    with pytest.raises( st.KeyMissing ): st.run_arm( live_env( tmp_path, env.ledger ), 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+
+
+def test_a_key_on_the_live_transport_lets_the_arm_run( env, tmp_path, monkeypatch ):
+    monkeypatch.setenv( KEY, "not-a-real-key" )
+    monkeypatch.setattr( rt, "LiveJevTransport", Standin )                                           # the live class is never built here
+    st.run_arm( live_env( tmp_path, env.ledger ), 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )
+    assert read( env, 1, "single1" )[ "state" ] == "complete"
+
+
+def test_a_transport_the_caller_supplies_needs_no_key( env, monkeypatch ):
+    monkeypatch.delenv( KEY, raising=False )
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )
+    assert read( env, 1, "single1" )[ "state" ] == "complete"
+
+
+@pytest.mark.parametrize( "workers", [ 3, 9, 32, 0, True, "6", 6.0, None ] )
+def test_workers_outside_four_to_eight_are_refused_before_a_ledger_run_opens( env, workers ):
+    env.workers, before = workers, env.ledger.path.read_text()
+    with pytest.raises( ValueError, match="workers" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )
+    assert env.ledger.path.read_text() == before and env.made == [] and not env.results_dir.exists()
+
+
+@pytest.mark.parametrize( "workers", [ 4, 8 ] )
+def test_the_edges_four_and_eight_workers_run( env, workers ):
+    env.workers = workers
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )
+    assert read( env, 1, "single1" )[ "state" ] == "complete"
+
+
+def test_a_repeated_entry_id_is_refused_before_a_ledger_run_opens( env ):
+    before = env.ledger.path.read_text()
+    with pytest.raises( ValueError, match="repeated" ) as raised: st.run_arm( env, 1, "single1", NEED, [ ENTRIES[ 0 ], ENTRIES[ 1 ], ENTRIES[ 0 ] ], 1_000_000 )
+    assert ENTRIES[ 0 ][ "id" ] in str( raised.value )                                           # it names the id
+    assert env.ledger.path.read_text() == before and env.made == [] and not env.results_dir.exists()
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )                                  # the name was not spent
