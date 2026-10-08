@@ -132,6 +132,34 @@ def _wait_for_test_hook( page, timeout_ms: int = 10_000 ) -> None:
     )
 
 
+# Two ticks plus a margin: the first tick can leave the whole-second text unchanged.
+_COUNTDOWN_TICK_WAIT_MS = 3500
+
+
+def _countdown_changes_from( page, before: str, timeout_ms: int = _COUNTDOWN_TICK_WAIT_MS ) -> bool:
+    """
+    Return True once the first countdown text differs from `before`.
+
+    Requires:
+        - page shows an action-required card with a countdown
+        - before is the text read from it earlier
+
+    Ensures:
+        - returns False when the text is still `before` after timeout_ms
+    """
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        page.wait_for_function(
+            "( before ) => document.querySelector( '.action-required-countdown' )?.textContent !== before",
+            arg=before,
+            timeout=timeout_ms,
+        )
+    except PlaywrightTimeoutError:
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # AC8a — Functional smoke: 3 fixtures render within 500ms; data-phase6-pending ≥3
 # ---------------------------------------------------------------------------
@@ -214,15 +242,14 @@ def test_phase5_functional_smoke():
 
             # AC8a countdown ticks: capture .action-required-countdown text twice
             # 1100ms apart; values must differ.
-            cd_locator = page.locator( '.action-required-countdown' ).first
-            cd_t1 = cd_locator.text_content()
-            time.sleep( 1.1 )
-            cd_t2 = cd_locator.text_content()
+            cd_t1 = page.locator( '.action-required-countdown' ).first.text_content()
             # In Phase 5, the ActionRequiredStore's per-actor setInterval(1000)
             # emits store_action_required_changed { changeKind: "tick" } at 1Hz.
-            # Two samples 1100ms apart MUST observe different values.
-            assert cd_t1 != cd_t2, (
-                f"countdown did not tick: t1={cd_t1!r} t2={cd_t2!r}"
+            # The text shows whole seconds rounded down, so the first tick can
+            # still read 00:59; only the second moves it. Two samples 1100ms
+            # apart can therefore match on a healthy timer. Wait for a change.
+            assert _countdown_changes_from( page, cd_t1 ), (
+                f"countdown did not tick within {_COUNTDOWN_TICK_WAIT_MS}ms: t1={cd_t1!r}"
             )
 
             # AC8a (D-K) + AC10e Phase 6b cascade — Phase 5 originally asserted
@@ -382,3 +409,38 @@ if __name__ == "__main__":
     raise SystemExit(
         pytest.main( [ __file__, "-v", "--tb=short" ] )
     )
+
+
+def test_phase5_countdown_check_fails_when_the_timer_is_stopped():
+    """Control: the tick wait still reports a countdown whose interval was cleared."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch( headless=True, args=["--autoplay-policy=no-user-gesture-required"] )
+        try:
+            context = browser.new_context()
+            seed_multiplexer_auth( context )
+            stub_empty_hydration( context )
+            page = context.new_page()
+            page.goto( PHASE5_PAGE_URL, wait_until="networkidle", timeout=15_000 )
+            _wait_for_test_hook( page )
+            page.evaluate( _INJECT_AR_JS, {
+                "id_hash"          : "fix_ar_stopped",
+                "message"          : "Approve the deploy?",
+                "sender_id"        : "fixture_sender_c",
+                "response_type"    : "yes_no",
+                "response_options" : [ "yes", "no" ],
+                "timeout_seconds"  : 60,
+            } )
+            page.wait_for_selector( '.action-required-countdown', timeout=3000 )
+            stopped = page.evaluate( """() => {
+                const store = window.__multiplexerTestHook.stores.actionRequired;
+                let n = 0;
+                for ( const entry of store.entries.values() ) { clearInterval( entry.intervalId ); n++; }
+                return n;
+            }""" )
+            assert stopped == 1, f"expected to stop one timer, stopped {stopped}"
+            before = page.locator( '.action-required-countdown' ).first.text_content()
+            assert not _countdown_changes_from( page, before, timeout_ms=2500 )
+        finally:
+            browser.close()
