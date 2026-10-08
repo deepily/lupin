@@ -69,3 +69,20 @@ def test_the_helper_runs_after_the_count_it_judges( park_test ):
                and _calls_to( n.value, "_owed_count" ) ]
     assert len( counts ) == 1
     assert counts[ 0 ].lineno < call.lineno
+
+
+def test_the_helper_comes_from_the_helpers_module_and_is_not_redefined_in_the_file():
+    tree     = ast.parse( open( cu.get_project_root() + TEST_PATH ).read() )
+    imported = [ n for n in tree.body if isinstance( n, ast.ImportFrom ) and n.module == "tests.helpers.park_window"
+                 and any( a.name == "check_park_silence" and a.asname is None for a in n.names ) ]
+    defined  = [ n for n in ast.walk( tree ) if isinstance( n, ( ast.FunctionDef, ast.ClassDef ) ) and n.name == "check_park_silence" ]
+    assigned = [ n for n in ast.walk( tree ) if isinstance( n, ast.Assign )
+                 and any( isinstance( t, ast.Name ) and t.id == "check_park_silence" for t in n.targets ) ]
+    assert len( imported ) == 1
+    assert defined == [] and assigned == []
+
+
+def test_the_call_runs_every_time_it_is_not_inside_a_branch_or_handler( park_test ):
+    call = _calls_to( park_test, "check_park_silence" )[ 0 ]
+    top  = [ n for n in park_test.body if isinstance( n, ast.Expr ) and n.value is call ]
+    assert len( top ) == 1, "the call must be a plain statement of the test body, not nested under if, try or with"
