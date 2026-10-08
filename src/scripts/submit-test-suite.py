@@ -16,7 +16,7 @@ Usage:
     submit-test-suite.py --test-types integration --dry-run
     submit-test-suite.py --test-types integration --env LUPIN_TEST_V2_EVAL_LIMIT=20
 
-The test container refuses `--test-types unit`, dry run or not: the unit suite runs on the host with `pytest src/tests/unit/`.
+The test container refuses the unit suite through this door, dry run or not: the unit suite runs on the host with `pytest src/tests/unit/`.
 `--env KEY=VALUE` (repeatable) sets an environment variable for that run's pytest process only.
 The server keeps only names with a test-scoped prefix and drops the rest. Its log line is one
 the submitter never sees, so this script refuses such a name here, before anything is sent.
