@@ -281,15 +281,15 @@ CREATE PROCEDURE do_nothing( x integer ) LANGUAGE sql AS 'SELECT 1';
 VECTOR_SQL = "CREATE EXTENSION IF NOT EXISTS vector;\nCREATE TABLE vecs ( id serial PRIMARY KEY, v vector(3) );\n"
 
 OWNERS_SQL = """
-SELECT 'rel|' || c.relkind || '|' || c.relname || '|' || o.rolname
+SELECT 'rel|' || c.relkind::text || '|' || c.relname || '|' || o.rolname
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_roles o ON o.oid = c.relowner
  WHERE n.nspname = 'public' AND c.relkind IN ( 'r', 'S', 'v', 'm' )
 UNION ALL
-SELECT 'type|' || t.typtype || '|' || t.typname || '|' || o.rolname
+SELECT 'type|' || t.typtype::text || '|' || t.typname || '|' || o.rolname
   FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace JOIN pg_roles o ON o.oid = t.typowner
  WHERE n.nspname = 'public' AND t.typtype IN ( 'e', 'd' )
 UNION ALL
-SELECT 'proc|' || p.prokind || '|' || p.proname || '|' || o.rolname
+SELECT 'proc|' || p.prokind::text || '|' || p.proname || '|' || o.rolname
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_roles o ON o.oid = p.proowner
  WHERE n.nspname = 'public'
    AND NOT EXISTS ( SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e' )
