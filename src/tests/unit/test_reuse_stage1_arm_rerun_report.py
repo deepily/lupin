@@ -103,10 +103,11 @@ def test_a_report_with_no_rerun_lists_no_superseded_arm():
     assert report[ "superseded_arms" ] == [] and "superseded" not in an.render( report )
 
 
-def test_an_id_asked_twice_in_the_stopped_run_does_not_stop_the_decision():
-    twice  = stopped( entry_ids=[ "a", "a", "b" ] )
-    report = an.build_report( [ twice, done() ], [] )
-    assert report[ "duplicate_ids" ] == [] and not report[ "decision" ].startswith( "stop and ask: an arm asks the same id twice" )
+def test_an_id_asked_twice_is_named_once_by_the_run_that_stands_in_and_not_by_the_stopped_one():
+    ids    = [ "a", "a", "b" ]
+    report = an.build_report( [ stopped( entry_ids=ids ), done( entry_ids=ids ) ], [] )
+    assert report[ "duplicate_ids" ] == [ { "run_name": "s1-q1-single1-a2", "question": 1, "arm": "single1", "ids": [ "a" ] } ]
+    assert report[ "decision" ].startswith( "stop and ask" )
 
 
 def test_a_rerun_probe_arm_counts_once_and_its_stopped_run_does_not_clash_with_it():

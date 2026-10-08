@@ -154,6 +154,7 @@ def _stand_in( by_name ):
         - by_name maps each attempt's key to its arm, as read_stage builds it
     Ensures:
         - an arm other than the canary whose attempts run from 1 to n, with the last complete and each earlier one stopped by its ceiling, is regrouped
+        - an earlier attempt must have asked the same entry ids, in the same order, as the last; one that did not keeps the arm as it was
         - an earlier attempt that a wrong model answered, or that stopped for another reason, keeps the arm as it was
         - the last attempt takes the plain name and the earlier ones are marked superseded under their -a<n> keys
     """
@@ -162,7 +163,7 @@ def _stand_in( by_name ):
         last     = max( attempts )
         if last == 1 or sorted( attempts ) != list( range( 1, last + 1 ) ): continue
         before   = [ attempts[ n ] for n in range( 1, last ) ]
-        if attempts[ last ][ "state" ] != "complete" or any( a[ "stop_reason" ] != "ceiling" or a[ "served_model" ] is not None for a in before ): continue
+        if attempts[ last ][ "state" ] != "complete" or any( a[ "stop_reason" ] != "ceiling" or a[ "served_model" ] is not None or a[ "entry_ids" ] != attempts[ last ][ "entry_ids" ] for a in before ): continue
         for n in attempts: del by_name[ _attempt_key( arm, n ) ]
         by_name[ arm ] = { **attempts[ last ], "stands_in_for": [ a[ "run_name" ] for a in before ] }
         for a in before: by_name[ f"{arm}-a{a[ 'attempt' ]}" ] = { **a, "superseded": True }

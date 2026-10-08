@@ -171,7 +171,7 @@ def _require_approved( env, question ):
         raise CanaryNotApproved( f"the canary of question {question} is not approved" )
 
 
-def _check_attempt( env, question, arm, attempt, reason ):
+def _check_attempt( env, question, arm, attempt, reason, entries ):
     """
     Check a rerun against the rules that let a stopped arm run again.
 
@@ -179,6 +179,7 @@ def _check_attempt( env, question, arm, attempt, reason ):
         - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a rerun without a reason or a first attempt with one,
           or a rerun with no attempt before it
         - ValueError for a rerun of an arm with an attempt that completed, or with one that stopped for any reason but its ceiling
+        - ValueError for a rerun whose entries are not, id for id and in order, the entries of the attempt before it
         - ValueError for a canary rerun after any attempt was approved, or after an attempt tripped on model_mismatch
     """
     if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise DriverRefused( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
@@ -193,6 +194,7 @@ def _check_attempt( env, question, arm, attempt, reason ):
         if done: raise DriverRefused( f"{arm!r} of question {question} already completed as attempt {done[ 0 ]}; it is not run again" )
         for n, rec in before.items():
             if rec[ "stop_reason" ] != "ceiling": raise DriverRefused( f"{arm!r} of question {question} attempt {n} stopped for {rec[ 'stop_reason' ]}; only an arm stopped by its ceiling is run again" )
+        if before[ attempt - 1 ][ "entry_ids" ] != [ e[ "id" ] for e in entries ]: raise DriverRefused( f"the entries of this rerun are not the entries of attempt {attempt - 1} of {arm!r}; a rerun asks the same ones" )
         return
     reports = _canary_reports( env, question )
     if any( report[ "approved" ] is not None for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} is already approved" )
@@ -263,7 +265,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     """
     if type( question ) is not int or question not in QUESTIONS: raise DriverRefused( f"question must be one of {QUESTIONS}, got {question!r}" )
     if arm not in ARMS: raise DriverRefused( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
-    _check_attempt( env, question, arm, attempt, reason )
+    _check_attempt( env, question, arm, attempt, reason, entries )
     attempt_cap   = rt.call_budget_cap_for( len( entries ) )
     attempt_limit = attempt_cap if attempt_limit is None else attempt_limit
     if type( attempt_limit ) is not int or not 1 <= attempt_limit <= attempt_cap:
