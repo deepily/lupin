@@ -338,12 +338,14 @@ class LivePipelineTestBase:
             - payload is the dict an override of get_submit_payload returned
 
         Ensures:
-            - returns payload unchanged when the variable is unset or empty
-            - returns payload unchanged when it already carries parent_id_hash
+            - returns a copy; the dict it was given is never written to
+            - the copy equals payload when the variable is unset or empty
+            - the copy equals payload when it already carries parent_id_hash
         """
+        tagged    = dict( payload )
         parent_id = os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" )
-        if parent_id and "parent_id_hash" not in payload: payload[ "parent_id_hash" ] = parent_id
-        return payload
+        if parent_id and "parent_id_hash" not in tagged: tagged[ "parent_id_hash" ] = parent_id
+        return tagged
 
     def get_submit_headers( self, headers, ws_id ):
         """
