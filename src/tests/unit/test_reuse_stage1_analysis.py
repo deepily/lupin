@@ -1689,3 +1689,29 @@ def test_the_decision_names_the_first_model_that_answered_wrongly_when_two_rows_
 def test_an_arm_with_no_run_name_is_named_by_its_question_and_arm_in_the_decision():
     rec = _arm( "single1", _base(), run_name=NO_NAME, stop_reason="model_mismatch", state="incomplete" )
     assert an.build_report( [ rec ], canaries=[] )[ "decision" ].startswith( "stop and ask: question 1 single1 was answered by another model, not jev-test;" )
+
+
+# --- the next step names the arm that is invalid -------------------------------------------------------------------------------------------
+
+def _invalid_canary( question=2, **over ): return _arm( "canary", { "a": 0.1 }, size=10, question=question, stop_reason="model_mismatch", state="incomplete", **over )
+
+
+def test_the_next_step_names_the_invalid_canary_of_a_later_question_not_its_missing_single_run():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _invalid_canary() ] ), check_arms=False )
+    assert r[ "stop" ] is True and r[ "next_step" ] == "stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)"
+
+
+def test_the_next_step_names_an_invalid_single_run_by_its_own_name_and_a_nameless_arm_by_question_and_arm():
+    bad = _with_boundary( 2, 49 ); bad[ "stop_reason" ] = "model_mismatch"
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )[ "next_step" ] == "stop and ask: s1-q2-single1 is invalid (stop reason model_mismatch)"
+    assert an.stop_rules( an.read_stage( [ _invalid_canary( run_name=NO_NAME ) ] ), check_arms=False )[ "next_step" ] == "stop and ask: question 2 canary is invalid (stop reason model_mismatch)"
+
+
+def test_an_invalid_arm_is_named_ahead_of_a_single_run_that_is_only_not_clean():
+    bad = _with_boundary( 1, 3 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ bad, _invalid_canary() ] ), check_arms=False )[ "next_step" ] == "stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)"
+
+
+def test_the_report_over_a_clean_question_one_and_an_invalid_question_two_canary_names_that_canary_in_the_next_step_line():
+    text = an.render( an.build_report( _question( 1 ) + [ _invalid_canary() ], canaries=[] ) )
+    assert "Next step: stop and ask: s1-q2-canary is invalid (stop reason model_mismatch)" in text and "single run 1 is not clean" not in text
