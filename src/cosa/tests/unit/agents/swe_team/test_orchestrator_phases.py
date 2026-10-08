@@ -28,6 +28,15 @@ def _run( coro ):
     return asyncio.run( coro )
 
 
+def _result_msg( is_error=False, subtype="success", result=None, errors=None ):
+    m = MagicMock( spec=orch_mod.ResultMessage )
+    m.is_error = is_error
+    m.subtype  = subtype
+    m.result   = result
+    m.errors   = errors
+    return m
+
+
 def _sdk_stream( *messages ):
     """Return an async-generator function standing in for sdk_query."""
     async def _gen( *args, **kwargs ):
@@ -222,7 +231,7 @@ class TestDelegateTask( unittest.TestCase ):
             _assistant( _text( "done " ), _tool( "Edit", "a.py" ), _tool( "Read", "b.py" ),
                         _tool( "Edit", "" ), _tool( "Edit", "a.py" ), MagicMock() ),
             orch_mod.TextBlock( text="tail" ),
-            MagicMock( spec=orch_mod.ResultMessage ),
+            _result_msg(),
             MagicMock( spec=orch_mod.RateLimitEvent ),
             MagicMock(),
         )
@@ -254,6 +263,18 @@ class TestDelegateTask( unittest.TestCase ):
             with self.assertRaises( SafetyLimitError ):
                 _run( o._delegate_task( self._spec(), 0, MagicMock() ) )
 
+    def test_delegate_error_result_fails_with_the_cli_text( self ):
+        o = _mk_orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low", errors=[ "tool died" ] )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ), \
+             patch.object( o, "_build_agent_options", return_value=MagicMock() ), \
+             patch.object( o, "_emit_state", AsyncMock() ), \
+             patch.object( orch_mod, "notification_hook", AsyncMock() ):
+            result = _run( o._delegate_task( self._spec(), 0, MagicMock() ) )
+        self.assertEqual( result.status, "failure" )
+        self.assertIn( "Your credit balance is too low", result.errors[ 0 ] )
+        self.assertIn( "tool died", result.errors[ 0 ] )
+
     def test_delegate_generic_exception_returns_failure( self ):
         o = _mk_orch()
         def _boom( *a, **k ): raise RuntimeError( "sdk boom" )
@@ -277,6 +298,18 @@ class TestVerifyResult( unittest.TestCase ):
         return DelegationResult( task_index=0, task_title="impl", status="success",
                                  output="did it", files_changed=files or [] )
 
+    def test_verify_error_result_fails_with_the_cli_text( self ):
+        o = _mk_orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ), \
+             patch.object( o, "_build_agent_options", return_value=MagicMock() ), \
+             patch.object( o, "_emit_state", AsyncMock() ), \
+             patch.object( o, "_notify", AsyncMock() ), \
+             patch.object( orch_mod, "notification_hook", AsyncMock() ):
+            vr = _run( o._verify_result( self._spec(), self._coder(), 0, MagicMock() ) )
+        self.assertFalse( vr.passed )
+        self.assertIn( "Your credit balance is too low", vr.tester_output )
+
     def test_verify_pass_no_test_files( self ):
         o = _mk_orch()
         msgs = ( _assistant( _text( "all tests pass" ) ), )
@@ -297,7 +330,7 @@ class TestVerifyResult( unittest.TestCase ):
             _assistant( _text( "pass" ), _tool( "Read", "z.py" ), _tool( "Write", "" ),
                         _tool( "Write", "notes.txt" ), _tool( "Write", "test_foo.py" ), MagicMock() ),
             orch_mod.TextBlock( text=" more" ),
-            MagicMock( spec=orch_mod.ResultMessage ),
+            _result_msg(),
             MagicMock( spec=orch_mod.RateLimitEvent ),
             MagicMock(),
         )
@@ -395,7 +428,7 @@ class TestRedelegate( unittest.TestCase ):
             _assistant( _text( "fixed " ), _tool( "Edit", "a.py" ), _tool( "Read", "z.py" ),
                         _tool( "Edit", "" ), MagicMock() ),
             orch_mod.TextBlock( text="t" ),
-            MagicMock( spec=orch_mod.ResultMessage ),
+            _result_msg(),
             MagicMock( spec=orch_mod.RateLimitEvent ),
             MagicMock(),
         )
@@ -407,6 +440,18 @@ class TestRedelegate( unittest.TestCase ):
              patch.object( orch_mod, "notification_hook", AsyncMock() ):
             result = _run( o._redelegate_with_feedback( self._spec(), 0, self._coder(), "fb", 2, MagicMock() ) )
         self.assertEqual( result.status, "success" )
+
+    def test_redelegate_error_result_fails_with_the_cli_text( self ):
+        o = _mk_orch()
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ), \
+             patch.object( o, "_build_agent_options", return_value=MagicMock() ), \
+             patch.object( o, "_emit_state", AsyncMock() ), \
+             patch.object( o, "_notify", AsyncMock() ), \
+             patch.object( orch_mod, "notification_hook", AsyncMock() ):
+            result = _run( o._redelegate_with_feedback( self._spec(), 0, self._coder(), "fb", 2, MagicMock() ) )
+        self.assertEqual( result.status, "failure" )
+        self.assertIn( "Your credit balance is too low", result.errors[ 0 ] )
 
     def test_redelegate_stop_requested_breaks( self ):
         o = _mk_orch()
