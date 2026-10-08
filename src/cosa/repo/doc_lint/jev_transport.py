@@ -18,7 +18,7 @@ import urllib.request
 URL            = "https://api.typesafe.ai/v1/systemone"
 KEY_VARIABLE   = "JEV_API_TOASTER"
 QUESTION_ID    = "claim_stated"
-RETRY_STATUSES = ( 429, 529 )
+RETRY_STATUSES = ( 429, 529, 500, 502, 503, 504, 408 )
 MAX_ATTEMPTS   = 4
 BACKOFF_SECONDS = 1.0
 JITTER          = 0.25      # each backoff wait is scaled by a factor between 1 - JITTER and 1 + JITTER
@@ -36,6 +36,10 @@ class JevConfigError( Exception ):
 
 class JevCallError( Exception ):
     """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
+
+    def __init__( self, message, status=None ):
+        super().__init__( message )
+        self.status = status        # the last HTTP status seen, or None when no response came (a timeout or a reset)
 
 
 class JevBudgetSpent( Exception ):
@@ -184,7 +188,8 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
         - returns ( text, meta ) for a 200 response; meta is { status, attempts, retry_after, latency_ms }
         - attempts counts the HTTP attempts this call took, latency_ms is the final attempt's own time in whole
           milliseconds, and retry_after is the largest retry-after (seconds) any attempt saw, or None
-        - a 429 or 529 is retried up to MAX_ATTEMPTS calls in all; each wait is the larger of the retry-after
+        - a status in RETRY_STATUSES, a timeout or a reset is retried up to MAX_ATTEMPTS calls in all, whatever the
+          mix of causes; each wait is the larger of the retry-after
           (at most RETRY_AFTER_CAP) and BACKOFF_SECONDS doubled each time and scaled by a jitter factor
           between 1 - JITTER and 1 + JITTER, so a retry never comes sooner than the server asked
         - the key appears only in the Authorization header of the request
@@ -192,7 +197,8 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     Raises:
         - JevConfigError if the key variable is absent or empty (status None), or the server answers 401, 403 or 422 (status set)
         - JevBudgetSpent before any attempt the budget has no room for; no HTTP is made for it
-        - JevCallError if retries run out, the network fails, or any other status is not 200
+        - JevCallError if retries run out or any other status is not 200; its status is the last HTTP status seen,
+          None when the last attempt got no response
     """
     key = ( os.environ if environ is None else environ ).get( KEY_VARIABLE )
     if not key: raise JevConfigError( f"{KEY_VARIABLE} is not set; the Jev judge refuses to run without it" )
@@ -202,15 +208,20 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     clock_fn  = time.monotonic if clock_fn is None else clock_fn
     headers   = { "Authorization": "Bearer " + key, "Content-Type": "application/json" }
     seen      = None
+    failure   = None
+    last_status = None
     for attempt in range( MAX_ATTEMPTS ):
         if budget is not None: budget.take()
         started = clock_fn()
         try:
             reply = post_fn( URL, headers, body, TIMEOUT_SECONDS )
         except OSError as e:
-            raise JevCallError( f"call to Jev failed: {type( e ).__name__}" ) from e
+            last_status, failure = None, e
+            if attempt < MAX_ATTEMPTS - 1: sleep_fn( max( 0.0, BACKOFF_SECONDS * 2 ** attempt * ( 1 - JITTER + 2 * JITTER * random_fn() ) ) )
+            continue
         latency_ms = int( round( ( clock_fn() - started ) * 1000 ) )
         status, text, reply_headers = reply if len( reply ) == 3 else ( reply[ 0 ], reply[ 1 ], None )
+        last_status, failure = status, None
         if status == 200: return text, { "status": 200, "attempts": attempt + 1, "retry_after": seen, "latency_ms": latency_ms }
         if status in RETRY_STATUSES:
             asked = retry_after_seconds( reply_headers )
@@ -220,8 +231,9 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
                 sleep_fn( max( min( asked, RETRY_AFTER_CAP ) if asked is not None else 0.0, BACKOFF_SECONDS * 2 ** attempt * jitter ) )
             continue
         if status in ( 401, 403, 422 ): raise JevConfigError( f"Jev refused the request with status {status}", status )
-        raise JevCallError( f"Jev answered status {status}" )
-    raise JevCallError( f"Jev still answered a retry status after {MAX_ATTEMPTS} calls" )
+        raise JevCallError( f"Jev answered status {status}", status )
+    if failure is not None: raise JevCallError( f"call to Jev failed after {MAX_ATTEMPTS} sends: {type( failure ).__name__}" ) from failure
+    raise JevCallError( f"Jev still answered status {last_status} after {MAX_ATTEMPTS} calls", last_status )
 
 
 def send( body, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None ):

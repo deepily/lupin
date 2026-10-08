@@ -120,13 +120,13 @@ def test_an_unanswered_refusal_after_an_answer_puts_posts_back_in_single_file( e
 def test_failures_that_are_not_a_422_never_trip_the_breaker( env ):
     door = Door( [ 500 ] )
     sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 6 ) )
-    assert door.posts == 6 * ( rt.RETRIES + 1 ) and len( sw[ "failed" ] ) == 6
+    assert door.posts == 6 * jev_transport.MAX_ATTEMPTS and len( sw[ "failed" ] ) == 6      # the transport's four sends are the only retries
     assert sw[ "refused_422" ] == 0 and sw[ "stopped_by" ] is None and sw[ "not_reached" ] == []
 
 
 def test_a_failure_that_is_not_a_422_between_refusals_neither_counts_nor_clears_the_streak( env ):
-    statuses = [ 422, 500, 500, 500, 422, 422, 422, 422 ]                     # the 500 entry is posted three times, then four more refusals
+    statuses = [ 422, 500, 500, 500, 500, 422, 422, 422, 422 ]                # the 500 entry is sent four times, then four more refusals
     door     = Door( statuses )
     sw       = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 8 ) )
-    assert door.posts == 8 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422"
+    assert door.posts == 9 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422"
     assert len( sw[ "failed" ] ) == 6 and len( sw[ "not_reached" ] ) == 2

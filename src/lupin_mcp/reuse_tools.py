@@ -640,7 +640,9 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                         refused = True
                         break
                     continue
-                except Exception:                                         # any transport error is a failed call, never a verdict
+                except jev_transport.JevCallError:                        # the transport already used its four sends; asking again would multiply them
+                    break
+                except Exception:                                         # any other error, such as a failed cache write, is a failed call, never a verdict
                     continue
         finally:
             attempts = budget.end_tally() if budget is not None else 0
