@@ -35,6 +35,8 @@ PROBE_PLAN_SUFFIX = "-probe-plan.json"                        # the driver write
 PAGE_ARMS     = ( "page-single1", "page-single2", "page-pack" )
 PAGE_NEAR     = 0.05                                          # a page this close to the floor makes the page arm conclusive
 PAGE_FLOOR    = vd.POLICY[ "floor" ]
+PAGE_AMBIGUITY = ( "page arm note: plan 11.5 can be read as failing the page arm on the set rule alone, or on the set rule or the overlap rule. "
+                   "Until Rick settles it, a breach of the overlap rule alone is not a pass and not a fail: it asks Rick." )
 LOST_ONE_IN   = 200                                           # an arm may lose one entry in this many and still be judged
 REQUIRED_ARMS = ( "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
                   "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" )
@@ -444,19 +446,20 @@ def page_arm( stage ):
     Requires:
         - stage comes from read_stage; each question with a page arm has all three page arms
     Ensures:
-        - returns { state, questions, pack_changes, noise_changes, pack_p99, noise_floor, near_floor_pages }
+        - returns { state, set_rule, overlap_rule, questions, pack_changes, noise_changes, pack_p99, noise_floor, near_floor_pages }
         - the counts are None when the arms were not judged: state is then invalid, or inconclusive when one is absent or unclean
         - pack_changes counts the questions where packing changes the set of chosen pages against the first one-each run
         - noise_changes counts the questions where the second one-each run does
         - noise_floor is the 99th percentile of the one-each differences, read as at least the minimum
-        - state is fail when pack_changes passes noise_changes, or when the packed p99 passes the noise floor
+        - set_rule is fail when pack_changes passes noise_changes; overlap_rule is fail when the packed p99 passes the noise floor
+        - state is fail when the set rule fails, and ask_rick when only the overlap rule fails, neither pass nor fail
         - state is inconclusive instead of pass when no page lies within the near band of the floor in any question
         - only the pages answered in all three arms of a question are read
     """
     from lupin_mcp import reuse_tools as rt
     qs   = [ q for q in sorted( stage ) if any( n in stage[ q ] for n in PAGE_ARMS ) ]
     bad  = _arms_state( [ stage[ q ].get( n ) for q in qs for n in PAGE_ARMS ] )
-    out  = { "state": bad, "questions": qs, "pack_changes": None, "noise_changes": None, "pack_p99": None, "noise_floor": None, "near_floor_pages": None }
+    out  = { "state": bad, "set_rule": None, "overlap_rule": None, "questions": qs, "pack_changes": None, "noise_changes": None, "pack_p99": None, "noise_floor": None, "near_floor_pages": None }
     if bad is not None: return out
     pack_changes = noise_changes = near = 0
     pack_diffs, noise_diffs = [], []
@@ -471,9 +474,9 @@ def page_arm( stage ):
         near += sum( 1 for i in common if round( abs( s1[ "overlaps" ][ i ] - PAGE_FLOOR ), 6 ) <= PAGE_NEAR )
     floor = max( percentile( noise_diffs ), NOISE_FLOOR_MIN )
     p99   = percentile( pack_diffs )
-    state = _combine( [ "fail" if pack_changes > noise_changes else "pass", "fail" if p99 > floor else "pass" ] )
-    if state == "pass" and not near: state = "inconclusive"
-    return dict( out, state=state, pack_changes=pack_changes, noise_changes=noise_changes, pack_p99=p99, noise_floor=floor, near_floor_pages=near )
+    set_rule, overlap_rule = "fail" if pack_changes > noise_changes else "pass", "fail" if p99 > floor else "pass"
+    state = "fail" if set_rule == "fail" else "ask_rick" if overlap_rule == "fail" else "pass" if near else "inconclusive"
+    return dict( out, state=state, set_rule=set_rule, overlap_rule=overlap_rule, pack_changes=pack_changes, noise_changes=noise_changes, pack_p99=p99, noise_floor=floor, near_floor_pages=near )
 
 
 def _confidence_flips( ref, other ):
@@ -605,7 +608,7 @@ def build_report( records, canaries ):
           canaries, unclean_arms, lost_by_arm }
         - lost_by_arm gives every arm's lost count beside its limit and its stop reason
         - decision comes from the passes and next_step from the stop rules
-        - page_arm is the page arm's verdict; a failing page arm turns a decision that did not stop into a stop
+        - page_arm is the page arm's verdict; a failing or asking page arm turns a decision that did not stop into a stop
         - unclean_arms lists every arm that is not clean, with its status and stop reason
     """
     stage = read_stage( records )
@@ -616,6 +619,7 @@ def build_report( records, canaries ):
     pg    = page_arm( stage )
     decision = ev[ "decision" ]
     if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails, so the page asks stay one each"
+    if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
     return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg,
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
@@ -654,8 +658,9 @@ def render( report ):
     if pg[ "pack_changes" ] is None: lines.append( f"page arm: {pg[ 'state' ]}" )
     else:
         why = f"no page lies within {PAGE_NEAR} of {PAGE_FLOOR} in any question; " if pg[ "state" ] == "inconclusive" and not pg[ "near_floor_pages" ] else ""
-        lines.append( f"page arm: {pg[ 'state' ]}; {why}chosen pages changed by packing on {pg[ 'pack_changes' ]} of {len( pg[ 'questions' ] )} questions against {pg[ 'noise_changes' ]} by noise; "
+        lines.append( f"page arm: {pg[ 'state' ]}; {why}set rule {pg[ 'set_rule' ]}, overlap rule {pg[ 'overlap_rule' ]}; chosen pages changed by packing on {pg[ 'pack_changes' ]} of {len( pg[ 'questions' ] )} questions against {pg[ 'noise_changes' ]} by noise; "
                       f"per-page difference p99 {pg[ 'pack_p99' ]} against floor {pg[ 'noise_floor' ]}; pages within {PAGE_NEAR} of {PAGE_FLOOR}: {pg[ 'near_floor_pages' ]}" )
+    if pg[ "state" ] == "ask_rick": lines.append( PAGE_AMBIGUITY )
     for q, p in report[ "pages" ].items():
         if "set_changed_by_packing" in p: lines.append( f"pages, question {q}: chosen set changed by packing {'yes' if p[ 'set_changed_by_packing' ] else 'no'}, by noise {'yes' if p[ 'set_changed_by_noise' ] else 'no'}" )
         else: lines.append( f"pages, question {q}: {p[ 'state' ]}" )
