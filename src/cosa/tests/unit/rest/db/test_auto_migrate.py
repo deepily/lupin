@@ -19,6 +19,9 @@ import unittest
 import uuid
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.engine import make_url
+
+import tests.helpers.template_database as td
 from cosa.rest.db import auto_migrate
 
 
@@ -158,7 +161,7 @@ class TestRunMigrationsToHead( unittest.TestCase ):
 # carries role keys tests as that role. The superuser name is only the fallback when nothing seeded.
 # Every connection here goes to the maintenance database "postgres", which any login may enter;
 # lupin_db_dev is closed to PUBLIC and to the test role.
-_PG = dict( host="localhost", port=5432, user=os.environ.get( "DB_USER", "lupin_dev" ),
+_PG = dict( host=os.environ.get( "DB_HOST", "localhost" ), port=int( os.environ.get( "DB_PORT", "5432" ) ), user=os.environ.get( "DB_USER", "lupin_dev" ),
             password=os.environ.get( "DB_PASSWORD", "" ) )
 _REFUSED = ( "authentication failed", "permission denied", "no pg_hba.conf entry", "is not permitted to log in" )
 
@@ -287,26 +290,19 @@ class TestAutoMigrateLive( unittest.TestCase ):
     PREV = "c3d4e5f6a7b8"
 
     def setUp( self ):
-        import psycopg2
-        self.dbname = "lupin_am_ut_" + uuid.uuid4().hex[ :12 ]
-        self._admin = psycopg2.connect( dbname="postgres", **_PG )
-        self._admin.autocommit = True
-        from psycopg2 import sql
-        self._sql = sql
-        with self._admin.cursor() as cur:
-            cur.execute( sql.SQL( "CREATE DATABASE {}" ).format( sql.Identifier( self.dbname ) ) )
-        self.url = f"postgresql+psycopg2://{_PG[ 'user' ]}:{_PG[ 'password' ]}@localhost:5432/{self.dbname}"
+        self.dbname  = "lupin_am_ut_" + uuid.uuid4().hex[ :12 ]
+        # A clone of the vector template, made as the test role: the superuser is not needed for it.
+        self._server = td.clone_server_url()
+        login        = make_url( self._server )
+        self._pg     = dict( host=login.host, port=login.port, user=login.username, password=login.password )
+        self.url     = td.create_from_template( self._server, self.dbname )
 
     def tearDown( self ):
-        with self._admin.cursor() as cur:
-            cur.execute(
-                self._sql.SQL( "DROP DATABASE IF EXISTS {} WITH ( FORCE )" ).format( self._sql.Identifier( self.dbname ) )
-            )
-        self._admin.close()
+        td.drop_database( self._server, self.dbname )
 
     def _query( self, sqlstr ):
         import psycopg2
-        conn = psycopg2.connect( dbname=self.dbname, **_PG )
+        conn = psycopg2.connect( dbname=self.dbname, **self._pg )
         try:
             with conn.cursor() as cur:
                 cur.execute( sqlstr )
@@ -325,7 +321,7 @@ class TestAutoMigrateLive( unittest.TestCase ):
 
     def _exec( self, sqlstr ):
         import psycopg2
-        conn = psycopg2.connect( dbname=self.dbname, **_PG )
+        conn = psycopg2.connect( dbname=self.dbname, **self._pg )
         conn.autocommit = True
         try:
             with conn.cursor() as cur:
@@ -385,10 +381,10 @@ class TestAutoMigrateLive( unittest.TestCase ):
 
         env = {
             "DB_NAME"     : self.dbname,
-            "DB_HOST"     : "localhost",
-            "DB_PORT"     : "5432",
-            "DB_USER"     : _PG[ "user" ],
-            "DB_PASSWORD" : _PG[ "password" ],
+            "DB_HOST"     : self._pg[ "host" ],
+            "DB_PORT"     : str( self._pg[ "port" ] ),
+            "DB_USER"     : self._pg[ "user" ],
+            "DB_PASSWORD" : self._pg[ "password" ],
         }
         # build_alembic_config(database_url=None) => NO injected_db_url attribute,
         # so env.py's OWN resolution (DATABASE_URL -> injected -> builder) runs.

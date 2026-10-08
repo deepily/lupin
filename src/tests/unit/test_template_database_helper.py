@@ -276,3 +276,14 @@ def test_a_worktree_marker_reaches_the_main_checkouts_dotenv( tmp_path ):
     tree.mkdir()
     ( tree / ".git" ).write_text( f"gitdir: {main}/.git/worktrees/w\n" )
     assert dp._read_dotenv_values( str( tree ), ( "LUPIN_TEST_DB_PASSWORD", ) ) == { "LUPIN_TEST_DB_PASSWORD": "mainp" }
+
+
+def test_the_worktrees_own_dotenv_wins_over_the_main_checkouts( tmp_path ):
+    main = tmp_path / "main"
+    ( main / ".git" / "worktrees" / "w" ).mkdir( parents=True )
+    ( main / ".env" ).write_text( "LUPIN_TEST_DB_PASSWORD=mainp\n" )
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( f"gitdir: {main}/.git/worktrees/w\n" )
+    ( tree / ".env" ).write_text( "LUPIN_TEST_DB_PASSWORD=treep\n" )
+    assert dp._read_dotenv_values( str( tree ), ( "LUPIN_TEST_DB_PASSWORD", ) ) == { "LUPIN_TEST_DB_PASSWORD": "treep" }

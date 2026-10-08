@@ -23,48 +23,40 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
+import tests.helpers.template_database as td
 
-def _base_url() -> str:
+
+def _server_url() -> str:
     """
-    Build the base connection URL (WITHOUT a trailing database name).
+    Build the URL of the maintenance database the throwaway database is made on.
 
     Ensures:
-        - honors PGVECTOR_TEST_DATABASE_URL when set (must end with '/')
-        - else builds from DB_USER/DB_PASSWORD/DB_HOST/DB_PORT with the
-          documented local-Docker defaults (lupin_dev / $DB_PASSWORD)
+        - honors PGVECTOR_TEST_DATABASE_URL when set (a base URL ending in '/', no database name)
+        - else uses the clone helper's login and server, on the "postgres" database
     """
     override = os.environ.get( "PGVECTOR_TEST_DATABASE_URL" )
-    if override:
-        return override if override.endswith( "/" ) else override + "/"
-
-    user = os.environ.get( "DB_USER", "lupin_dev" )
-    pw   = os.environ.get( "DB_PASSWORD", "" )
-    host = os.environ.get( "DB_HOST", "localhost" )
-    port = os.environ.get( "DB_PORT", "5432" )
-    return f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/"
+    if override: return ( override if override.endswith( "/" ) else override + "/" ) + "postgres"
+    return td.clone_server_url()
 
 
-# Maintenance DB used only to CREATE/DROP the throwaway DB.
-_MAINT_DB = os.environ.get( "PGVECTOR_TEST_MAINT_DB", "lupin_db_dev" )
 _THROWAWAY_DB = f"lupin_lane_b_test_{os.getpid()}"
 
 
-def _pgvector_reachable( base_url: str ) -> bool:
+def _server_reachable( server_url: str ) -> bool:
     """
-    Probe whether a pgvector-enabled Postgres is reachable via the maintenance DB.
+    Probe whether the server accepts the login and can give the database a vector column.
 
     Ensures:
-        - returns True iff the maintenance DB connects AND the 'vector' extension
-          is available (installed or installable); False on any failure
+        - returns True iff the maintenance database connects and the extension is usable; False on any failure
     """
     try:
-        eng = create_engine( base_url + _MAINT_DB, isolation_level="AUTOCOMMIT" )
+        eng = create_engine( server_url )
         with eng.connect() as conn:
-            avail = conn.execute(
-                text( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" )
-            ).first()
+            # A template clone brings the extension; a plain database needs it installable.
+            if td.uses_template(): conn.execute( text( "SELECT 1" ) )
+            else: assert conn.execute( text( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" ) ).first() is not None
         eng.dispose()
-        return avail is not None
+        return True
     except Exception:
         return False
 
@@ -75,39 +67,33 @@ def pg_engine():
     Session-scoped engine bound to a freshly-created disposable pgvector database.
 
     Ensures:
-        - SKIPS the whole suite when no pgvector Postgres is reachable
-        - creates the throwaway DB, installs the 'vector' extension, and builds
-          the 8 vector-store tables (+ HNSW indexes) on it
-        - drops the throwaway DB at session teardown
+        - SKIPS the whole suite when no Postgres server is reachable
+        - makes the throwaway database through the clone helper, so the vector extension comes with it
+        - builds the 8 vector-store tables (+ HNSW indexes) on it
+        - drops the throwaway DB at session teardown, and also when the build fails
     """
-    base_url = _base_url()
-    if not _pgvector_reachable( base_url ):
-        pytest.skip( "no pgvector-enabled Postgres reachable (set PGVECTOR_TEST_DATABASE_URL)" )
+    server_url = _server_url()
+    if not _server_reachable( server_url ):
+        pytest.skip( "no Postgres reachable (set PGVECTOR_TEST_DATABASE_URL)" )
 
-    # Create the throwaway DB (autocommit — CREATE DATABASE can't run in a txn).
-    maint = create_engine( base_url + _MAINT_DB, isolation_level="AUTOCOMMIT" )
-    with maint.connect() as conn:
-        conn.execute( text( f"DROP DATABASE IF EXISTS {_THROWAWAY_DB} WITH (FORCE)" ) )
-        conn.execute( text( f"CREATE DATABASE {_THROWAWAY_DB}" ) )
-    maint.dispose()
+    td.drop_database( server_url, _THROWAWAY_DB )
+    url = td.create_from_template( server_url, _THROWAWAY_DB )
+    try:
+        engine = create_engine( url )
 
-    engine = create_engine( base_url + _THROWAWAY_DB )
+        from cosa.rest.postgres_models import Base
+        from cosa.rest.db.vector_store_models import VECTOR_STORE_MODELS
 
-    from cosa.rest.postgres_models import Base
-    from cosa.rest.db.vector_store_models import VECTOR_STORE_MODELS
+        # Already there in a template clone; a plain database made by a superuser needs it.
+        with engine.begin() as conn:
+            conn.execute( text( "CREATE EXTENSION IF NOT EXISTS vector" ) )
+        for model in VECTOR_STORE_MODELS:
+            Base.metadata.tables[ model.__tablename__ ].create( bind=engine, checkfirst=True )
 
-    with engine.begin() as conn:
-        conn.execute( text( "CREATE EXTENSION IF NOT EXISTS vector" ) )
-    for model in VECTOR_STORE_MODELS:
-        Base.metadata.tables[ model.__tablename__ ].create( bind=engine, checkfirst=True )
-
-    yield engine
-
-    engine.dispose()
-    maint = create_engine( base_url + _MAINT_DB, isolation_level="AUTOCOMMIT" )
-    with maint.connect() as conn:
-        conn.execute( text( f"DROP DATABASE IF EXISTS {_THROWAWAY_DB} WITH (FORCE)" ) )
-    maint.dispose()
+        yield engine
+        engine.dispose()
+    finally:
+        td.drop_database( server_url, _THROWAWAY_DB )
 
 
 @pytest.fixture()
