@@ -552,6 +552,25 @@ def _pages( s1, s2, pack ):
     return [ _arm( "page-single1", s1 ), _arm( "page-single2", s2 ), _arm( "page-pack", pack, size=200 ) ]
 
 
+def _two_hundred_pages():
+    """Ensures: returns 200 page overlaps, two of them above the floor."""
+    return { **{ f"p{k:03d}": 0.05 for k in range( 200 ) }, "p000": 0.9, "p001": 0.6 }
+
+
+def test_a_page_arm_that_lost_an_entry_within_the_limit_is_read_over_the_pages_answered_in_all_three():
+    base = _two_hundred_pages()
+    s1   = _arm( "page-single1", base ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p150" ]; s1[ "failed" ] = [ "p150" ]
+    r    = an.analyze_pages( an.read_stage( [ s1, _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )[ 1 ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_pack" ] ) == ( "pass", [ "p000", "p001" ], [ "p000", "p001" ] )
+
+
+def test_a_chosen_page_lost_from_one_arm_is_left_out_of_all_three_so_the_loss_is_not_read_as_a_change():
+    base = _two_hundred_pages()
+    s1   = _arm( "page-single1", base ); s1[ "answers" ] = [ a for a in s1[ "answers" ] if a[ "id" ] != "p001" ]; s1[ "failed" ] = [ "p001" ]
+    r    = an.analyze_pages( an.read_stage( [ s1, _arm( "page-single2", base ), _arm( "page-pack", base, size=200 ) ] ) )[ 1 ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_single2" ], r[ "chosen_pack" ] ) == ( "pass", [ "p000" ], [ "p000" ], [ "p000" ] )
+
+
 def test_pages_chosen_the_same_after_packing_pass_and_the_differences_are_reported():
     base = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
     r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, 0.01 ), _moved( base, 0.03 ) ) ) )[ 1 ]
