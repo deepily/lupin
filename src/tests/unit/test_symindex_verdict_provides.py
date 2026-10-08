@@ -297,6 +297,7 @@ def test_a_flag_outside_the_four_pipeline_flags_raises_naming_it_and_is_never_dr
 
 
 def test_the_first_bad_flag_in_sorted_order_is_the_one_named():
-    with pytest.raises( ValueError, match="'A_BAD'" ):
-        vd.decide_provides( [], [], [], { "Z_BAD", "A_BAD", "INDEX_STALE" } )
+    bad = { f"BAD_{k:02d}" for k in range( 12 ) }                                  # twelve names, so an unsorted set cannot yield the first by luck
+    with pytest.raises( ValueError, match="'BAD_00'" ):
+        vd.decide_provides( [], [], [], bad | { "INDEX_STALE" } )
 
