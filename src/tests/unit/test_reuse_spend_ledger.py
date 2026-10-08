@@ -237,3 +237,69 @@ def test_after_a_stale_run_is_closed_a_run_that_did_not_fit_before_is_admitted( 
         ledger.begin_run( "next", 50_000 )
     ledger.close_run( "crashed", by="cheech", why="stale" )
     ledger.begin_run( "next", 50_000 )
+
+
+def test_a_budget_with_a_ledger_but_no_run_name_is_refused( ledger ):
+    with pytest.raises( ValueError, match="name of the run" ):
+        rc.TokenBudget( 10, 1_000, ledger=ledger, run="" )
+
+
+def test_once_the_ledger_has_stopped_a_run_every_later_send_is_refused_without_reading_again( ledger ):
+    budget, post = rc.TokenBudget( 10, 50_000, ledger=ledger, run="a" ), Post()
+    with ledger.path.open( "a", encoding="utf-8" ) as f: f.write( "{broken\n" )
+    for _ in range( 2 ):
+        with pytest.raises( jt.JevBudgetSpent, match="stopped" ):
+            send( budget, post )
+    assert post.calls == 0
+
+
+def test_a_ledger_that_fails_after_a_paid_response_keeps_the_response_and_stops_the_run( ledger ):
+    budget, post = rc.TokenBudget( 10, 50_000, ledger=ledger, run="a" ), Post()
+
+    class Vanishing( Post ):
+        def __call__( self, url, headers, body, timeout ):
+            ledger.path.unlink()                                  # the file goes while the request is in the air
+            return super().__call__( url, headers, body, timeout )
+
+    send( budget, Vanishing() )                                   # the answer is returned: it was paid for
+    assert budget.spent_tokens == 140 and "unreadable" in budget.stop_reason
+    with pytest.raises( jt.JevBudgetSpent ):
+        send( budget, post )
+    assert post.calls == 0
+
+
+def test_closing_a_request_that_took_no_attempt_charges_nothing():
+    budget = rc.TokenBudget( 10, 1_000 )
+    budget.open_request( BODY, 1 )
+    budget.close_request( None )
+    assert budget.spent_tokens == 0 and budget.reserved_tokens == 0
+
+
+def test_a_file_the_process_may_not_open_is_unreadable_not_a_crash( ledger, monkeypatch ):
+    def denied( self, *a, **k ): raise PermissionError( "denied" )
+    monkeypatch.setattr( type( ledger.path ), "open", denied )
+    with pytest.raises( rl.LedgerUnreadable, match="denied" ):
+        ledger.total()
+
+
+def test_blank_lines_in_the_ledger_are_skipped( ledger ):
+    with ledger.path.open( "a", encoding="utf-8" ) as f: f.write( "\n   \n" )
+    ledger.begin_run( "a", 10 )
+    assert ledger.total() == 10
+
+
+@pytest.mark.parametrize( "line, why", [ ( "[1, 2]", "not a ledger row" ), ( json.dumps( { "kind": "bogus" } ), "not a ledger row" ),
+                                           ( json.dumps( { "kind": "spend", "run": "a" } ), "token count" ),
+                                           ( json.dumps( { "kind": "spend", "run": "a", "tokens": -1 } ), "token count" ),
+                                           ( json.dumps( { "kind": "begin", "tokens": 5 } ), "names no run" ) ] )
+def test_a_row_of_the_wrong_shape_makes_the_ledger_unreadable( ledger, line, why ):
+    with ledger.path.open( "a", encoding="utf-8" ) as f: f.write( line + "\n" )
+    with pytest.raises( rl.LedgerUnreadable, match=why ):
+        ledger.total()
+
+
+def test_spending_or_ending_a_run_that_never_began_is_refused( ledger ):
+    with pytest.raises( ValueError, match="never began" ):
+        ledger.spend( "ghost", 5 )
+    with pytest.raises( ValueError, match="never began" ):
+        ledger.end_run( "ghost" )

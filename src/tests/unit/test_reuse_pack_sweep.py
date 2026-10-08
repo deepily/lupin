@@ -217,3 +217,9 @@ def test_a_cache_write_that_fails_keeps_the_answer_and_names_the_entry( ctx_for,
     monkeypatch.setattr( rt.JevCache, "put", broken )
     out = sweep( ctx, ENTRIES[ :2 ], size=2 )
     assert len( out[ "answers" ] ) == 2 and out[ "cache_write_failed" ] == [ e[ "id" ] for e in ENTRIES[ :2 ] ]
+
+
+@pytest.mark.parametrize( "size", [ 0, -1, 1.5, True, None ] )
+def test_a_pack_size_that_is_not_a_positive_integer_is_refused( ctx_for, size ):
+    with pytest.raises( ValueError, match="size" ):
+        sweep( ctx_for( Fake() ), size=size )

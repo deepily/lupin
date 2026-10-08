@@ -122,8 +122,10 @@ class AccountLedger:
             except ValueError as e: raise LedgerUnreadable( f"line {n} is not JSON" ) from e
             if not isinstance( row, dict ) or row.get( "kind" ) not in ( "limit", "begin", "spend", "end" ):
                 raise LedgerUnreadable( f"line {n} is not a ledger row" )
-            if row[ "kind" ] != "end" and not _whole( row.get( "tokens" ) ): raise LedgerUnreadable( f"line {n} has no whole token count" )
-            if row[ "kind" ] != "limit" and not isinstance( row.get( "run" ), str ): raise LedgerUnreadable( f"line {n} names no run" )
+            if row[ "kind" ] != "end" and not _whole( row.get( "tokens" ) ):
+                raise LedgerUnreadable( f"line {n} has no whole token count" )
+            if row[ "kind" ] != "limit" and not isinstance( row.get( "run" ), str ):
+                raise LedgerUnreadable( f"line {n} names no run" )
             rows.append( row )
         return rows
 
@@ -186,7 +188,8 @@ class AccountLedger:
         """
         with self._locked() as f:
             limit, total, runs = self._summary( self._rows( f ) )
-            if run in runs: raise ValueError( f"run {run!r} already began in this ledger" )
+            if run in runs:
+                raise ValueError( f"run {run!r} already began in this ledger" )
             if total + ceiling_tokens > limit:
                 raise AccountLimitReached( f"{total} already held plus a ceiling of {ceiling_tokens} passes the account limit of {limit}" )
             self._append( f, { "kind": "begin", "run": run, "tokens": ceiling_tokens } )
@@ -194,7 +197,8 @@ class AccountLedger:
     def spend( self, run, tokens ):
         """Ensures: appends one settled attempt's tokens; ValueError for a run that never began."""
         with self._locked() as f:
-            if run not in self._summary( self._rows( f ) )[ 2 ]: raise ValueError( f"run {run!r} never began" )
+            if run not in self._summary( self._rows( f ) )[ 2 ]:
+                raise ValueError( f"run {run!r} never began" )
             self._append( f, { "kind": "spend", "run": run, "tokens": tokens } )
 
     def close_run( self, run, by, why ):
@@ -209,12 +213,15 @@ class AccountLedger:
         if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise ValueError( "by and why must say who closed the run and why" )
         with self._locked() as f:
             runs = self._summary( self._rows( f ) )[ 2 ]
-            if run not in runs: raise ValueError( f"run {run!r} never began" )
-            if runs[ run ][ "closed" ]: raise ValueError( f"run {run!r} is already closed" )
+            if run not in runs:
+                raise ValueError( f"run {run!r} never began" )
+            if runs[ run ][ "closed" ]:
+                raise ValueError( f"run {run!r} is already closed" )
             self._append( f, { "kind": "end", "run": run, "by": by, "why": why } )
 
     def end_run( self, run ):
         """Ensures: appends an end row, so the run counts at what it spent."""
         with self._locked() as f:
-            if run not in self._summary( self._rows( f ) )[ 2 ]: raise ValueError( f"run {run!r} never began" )
+            if run not in self._summary( self._rows( f ) )[ 2 ]:
+                raise ValueError( f"run {run!r} never began" )
             self._append( f, { "kind": "end", "run": run } )
