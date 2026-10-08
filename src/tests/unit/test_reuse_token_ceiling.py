@@ -7,6 +7,7 @@ jev_transport.send_with_meta with a stand-in post function, so a refused attempt
 import json
 import math
 import threading
+import time
 
 import pytest
 
@@ -142,7 +143,8 @@ def test_eight_workers_in_flight_never_hold_more_than_the_ceiling():
 
     threads = [ threading.Thread( target=worker ) for _ in range( 8 ) ]
     for t in threads: t.start()
-    while refused[ 0 ] < 5: threading.Event().wait( 0.01 )
+    deadline = time.monotonic() + 10
+    while refused[ 0 ] < 5 and time.monotonic() < deadline: threading.Event().wait( 0.01 )     # a broken lock ends as a red test, never a hang
     gate.set()
     for t in threads: t.join( 5 )
     assert calls[ 0 ] == 3 and refused[ 0 ] == 5 and peak[ 0 ] <= one * 3 and budget.ceiling_refusals == 5
@@ -160,3 +162,10 @@ def test_take_without_an_open_request_is_refused_not_guessed():
     budget = rc.TokenBudget( 10, 1_000_000 )
     with pytest.raises( RuntimeError, match="open_request" ):
         budget.take()
+
+
+def test_an_attempt_the_attempt_cap_refuses_is_neither_reserved_nor_charged():
+    budget, post = rc.TokenBudget( 1, 1_000_000 ), Post( ( 429, "" ) )
+    with pytest.raises( jt.JevBudgetSpent ):
+        send( budget, post )
+    assert budget.spent_tokens == input_reserve( BODY ) and budget.reserved_tokens == 0           # the one attempt that was sent, charged once

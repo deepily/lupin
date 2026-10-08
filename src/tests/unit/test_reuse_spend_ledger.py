@@ -187,3 +187,53 @@ def test_two_threads_beginning_runs_at_once_admit_exactly_one( ledger ):
     for t in threads: t.start()
     for t in threads: t.join( 5 )
     assert sorted( got ) == [ "ok", "refused" ]
+
+
+def test_an_attempt_the_attempt_cap_refuses_adds_no_row_to_the_ledger( ledger ):
+    budget = rc.TokenBudget( 1, 50_000, ledger=ledger, run="a" )
+    with pytest.raises( jt.JevBudgetSpent ):
+        send( budget, lambda url, headers, body, timeout: ( 429, "" ) )
+    assert [ r[ "tokens" ] for r in rows( ledger ) if r[ "kind" ] == "spend" ] == [ rc.input_reserve( BODY ) ]
+
+
+def test_reading_an_absent_ledger_does_not_create_it( tmp_path ):
+    led = rl.AccountLedger( tmp_path / "none.jsonl" )
+    with pytest.raises( rl.LedgerUnreadable ):
+        led.total()
+    with pytest.raises( rl.LedgerUnreadable ):
+        led.begin_run( "a", 10 )
+    assert not led.path.exists()
+
+
+def test_a_stale_open_run_counts_at_its_ceiling_until_it_is_closed_by_name( ledger ):
+    ledger.begin_run( "crashed", 60_000 )
+    ledger.spend( "crashed", 1_000 )
+    assert ledger.total() == 60_000
+    ledger.close_run( "crashed", by="cheech", why="the process died before end()" )
+    assert ledger.total() == 1_000
+    closing = [ r for r in rows( ledger ) if r[ "kind" ] == "end" ][ 0 ]
+    assert closing[ "run" ] == "crashed" and closing[ "by" ] == "cheech" and closing[ "why" ] == "the process died before end()"
+
+
+def test_closing_a_run_that_never_began_or_is_already_closed_is_refused( ledger ):
+    with pytest.raises( ValueError, match="never began" ):
+        ledger.close_run( "ghost", by="x", why="y" )
+    ledger.begin_run( "a", 10 )
+    ledger.close_run( "a", by="x", why="y" )
+    with pytest.raises( ValueError, match="already closed" ):
+        ledger.close_run( "a", by="x", why="y" )
+
+
+def test_a_close_needs_who_and_why( ledger ):
+    ledger.begin_run( "a", 10 )
+    for who, why in ( ( "", "y" ), ( "x", "" ), ( None, "y" ) ):
+        with pytest.raises( ValueError, match="by and why" ):
+            ledger.close_run( "a", by=who, why=why )
+
+
+def test_after_a_stale_run_is_closed_a_run_that_did_not_fit_before_is_admitted( ledger ):
+    ledger.begin_run( "crashed", 90_000 )
+    with pytest.raises( rl.AccountLimitReached ):
+        ledger.begin_run( "next", 50_000 )
+    ledger.close_run( "crashed", by="cheech", why="stale" )
+    ledger.begin_run( "next", 50_000 )
