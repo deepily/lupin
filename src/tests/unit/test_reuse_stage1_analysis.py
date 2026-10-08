@@ -721,25 +721,31 @@ def test_the_other_boundaries_are_none_for_a_question_whose_arms_are_not_clean_o
 
 # --- tokens, retries and cost ----------------------------------------------------------------------------------------------
 
-def _sent( tin, tout, attempts=1 ):
-    return { "request_hash": "h", "size": 10, "status": "answered", "attempts": attempts, "tokens_in": tin, "tokens_out": tout }
+def _sent( tin, tout, attempts=1, log=None, status="answered" ):
+    return { "request_hash": "h", "size": 10, "status": status, "attempts": attempts, "tokens_in": tin, "tokens_out": tout, "attempt_log": [ { "status": c } for c in ( [ 200 ] if log is None else log ) ] }
 
 
 def test_request_statistics_count_only_requests_that_were_sent_and_their_mean_tokens():
-    rows = [ _sent( 1000, 400 ), _sent( 2000, 600 ), { "request_hash": "n", "size": 10, "status": "not_reached", "attempts": 0, "tokens_in": None, "tokens_out": None } ]
-    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[ { "attempts": 1, "attempt_log": [ { "status": 200 } ] },
-                                                                                  { "attempts": 3, "attempt_log": [ { "status": 429 }, { "status": 529 }, { "status": 200 } ] } ] )
+    rows = [ _sent( 1000, 400 ), _sent( 2000, 600, attempts=3, log=[ 429, 529, 200 ] ), { "request_hash": "n", "size": 10, "status": "not_reached", "attempts": 0, "tokens_in": None, "tokens_out": None, "attempt_log": [] } ]
+    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[] )
     st   = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
     assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_request" ] ) == ( 2, 1500.0, 500.0 )
     assert ( st[ "retried_calls" ], st[ "extra_attempts" ], st[ "usage_missing" ] ) == ( 1, 2, 0 )
     assert st[ "tokens_out_per_entry" ] == 50.0 and ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 1, 1 ) and "retry_statuses" not in st
 
 
-def test_the_429_and_529_counts_come_from_the_attempt_log_and_other_statuses_count_in_neither():
-    calls = [ { "attempts": 4, "attempt_log": [ { "status": 429 }, { "status": 429 }, { "status": 500 }, { "status": 200 } ] },
-              { "attempts": 3, "attempt_log": [ { "status": 529 }, { "status": 529 }, { "status": 529 } ] } ]
-    st    = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=[ _sent( 1000, 400 ) ], transport_calls=calls ) ] ) )[ 1 ][ "pack10" ]
-    assert ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 2, 3 )
+def test_the_429_and_529_counts_come_from_every_row_including_a_request_that_failed_outright_and_count_each_attempt_once():
+    rows = [ _sent( 1000, 400, attempts=4, log=[ 429, 429, 500, 200 ] ), _sent( None, None, attempts=4, log=[ 429, 429, 429, 529 ], status="failed" ),
+             _sent( None, None, attempts=3, log=[ 529, 529, 529 ], status="failed" ) ]
+    calls = [ { "attempts": 4, "attempt_log": [ { "status": 429 }, { "status": 429 }, { "status": 500 }, { "status": 200 } ] } ]          # the answered row again; it must not count twice
+    st    = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=calls ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "attempts_429" ], st[ "attempts_529" ] ) == ( 5, 4 ) and ( st[ "retried_calls" ], st[ "extra_attempts" ] ) == ( 3, 8 )
+
+
+def test_a_row_written_without_an_attempt_log_counts_no_429_or_529_and_the_report_still_reads():
+    row = _sent( 1000, 400, attempts=2 ); del row[ "attempt_log" ]
+    st  = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10, rows=[ row ], transport_calls=[] ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "attempts_429" ], st[ "attempts_529" ], st[ "extra_attempts" ] ) == ( 0, 0, 1 )
 
 
 def test_request_statistics_count_a_sent_request_without_usage_as_missing_and_leave_it_out_of_the_means():
@@ -1444,12 +1450,12 @@ def test_the_report_prints_the_tokens_per_request_of_a_real_driver_arm():
 
 
 def test_the_report_prints_the_retried_calls_and_the_extra_attempts_of_a_driver_arm_with_one_call_tried_three_times():
-    rec = _driver_arm( "lost-1-of-200" ); rec[ "transport_calls" ][ 0 ][ "attempts" ] = 3
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ][ "attempts" ] = 3
     assert REQUEST_LINE.format( r=1, e=2, a=0, b=0 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
 
 
 def test_the_report_prints_the_429_and_529_counts_of_a_driver_arm_whose_one_call_was_refused_by_each_in_turn():
-    rec = _driver_arm( "lost-1-of-200" ); rec[ "transport_calls" ][ 0 ].update( attempts=3, attempt_log=[ { "status": 429 }, { "status": 529 }, { "status": 200 } ] )
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ].update( attempts=3, attempt_log=[ { "status": 429 }, { "status": 529 }, { "status": 200 } ] )
     assert REQUEST_LINE.format( r=1, e=2, a=1, b=1 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
 
 
