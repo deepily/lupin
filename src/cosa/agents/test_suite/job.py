@@ -1330,6 +1330,7 @@ class TestSuiteJob( AgenticJobBase ):
               RuntimeError naming the offenders, which aborts the sweep before any suite
             - on lupin_db_test with none: logs the pass and returns
             - off the test DB, or with no reachable running queue: logged no-op
+            - after a clean pass, runs the grants preflight, which can raise for its own reason
 
         Raises:
             - RuntimeError when a foreign inflight writer shares lupin_db_test
@@ -1377,6 +1378,48 @@ class TestSuiteJob( AgenticJobBase ):
 
         print( "[TestSuiteJob] ✓ preflight exclusivity PASSED: no non-test inflight agentic "
                "jobs on lupin_db_test" )
+
+        self._preflight_assert_grants_on_test_db()
+
+    def _preflight_assert_grants_on_test_db( self ) -> None:
+        """
+        Fail at second zero if the database roles lack grants on lupin_db_test.
+
+        Requires:
+            - the engine is lupin_db_test, and the exclusivity preflight has just passed on a live server
+
+        Ensures:
+            - a gap in the privilege matrix raises RuntimeError naming each missing grant and the repair command
+            - a clean check logs one summary line and returns
+            - a cloud-backed deployment, a database the matrix does not name, or a check that could not run is a
+              logged no-op, so a bug in the check cannot stop a sweep that would otherwise pass
+
+        Raises:
+            - RuntimeError when a role lacks a grant the matrix requires
+
+        An integration or browser sweep over a table the roles cannot reach fails twenty tests with no common
+        message. This turns that into one line before the first suite starts.
+        """
+        from cosa.rest.db import database as db_module
+        from cosa.utils import db_grants
+
+        try:
+            if db_module.is_cloud_backed():
+                print( "[TestSuiteJob] preflight grants SKIPPED: a cloud-backed deployment has its own roles" )
+                return
+            with db_module.engine.connect() as connection:
+                report = db_grants.check_current_database( db_grants.query_runner( connection ) )
+        except Exception as error:
+            print( f"[TestSuiteJob] preflight grants SKIPPED: the check could not run ({type( error ).__name__}: {error})" )
+            return
+
+        if report is None:
+            print( "[TestSuiteJob] preflight grants SKIPPED: this database is not one the matrix describes" )
+            return
+        lines = db_grants.report_lines( report )
+        if not report[ "ok" ]:
+            raise RuntimeError( "Merge-gate sweep preflight FAILED: the database roles lack grants the matrix requires.\n" + "\n".join( lines ) )
+        print( f"[TestSuiteJob] ✓ preflight grants PASSED: {lines[ 0 ]}" )
 
     def _issue_suite_token( self, suites_to_run: List[ str ] ) -> Optional[ str ]:
         """

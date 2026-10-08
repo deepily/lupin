@@ -1366,6 +1366,26 @@ class TestPreflightAssertExclusiveTestDb:
     contamination). Fails LOUD if a non-test agentic job is inflight on the shared
     lupin_db_test; NO-OPs off the test DB or when the running queue is unreachable."""
 
+    @pytest.fixture( autouse=True )
+    def grants_preflight( self ):
+        """The grants preflight after a clean exclusivity pass is a stub here."""
+        with patch.object( TestSuiteJob, "_preflight_assert_grants_on_test_db" ) as stub:
+            yield stub
+
+    def test_a_clean_exclusivity_pass_is_followed_by_the_grants_preflight( self, job, grants_preflight ):
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), self._install_main( jobs_run_queue=fake_queue ):
+            job._preflight_assert_exclusive_test_db()
+        grants_preflight.assert_called_once_with()
+
+    def test_an_exclusivity_failure_never_reaches_the_grants_preflight( self, job, grants_preflight ):
+        fake_queue = MagicMock()
+        fake_queue.get_non_test_inflight_agentic_jobs.return_value = [ { "id_hash": "dr-abc123", "job_type": "deep_research" } ]
+        with patch( "cosa.rest.db.database.engine", self._test_engine() ), self._install_main( jobs_run_queue=fake_queue ):
+            with pytest.raises( RuntimeError, match="caf58f71" ): job._preflight_assert_exclusive_test_db()
+        grants_preflight.assert_not_called()
+
     @staticmethod
     def _test_engine():
         engine     = MagicMock()
@@ -2272,3 +2292,50 @@ class TestProgressParserSkipsVerboseLines:
         assert result[ "exit_code" ] == -2
         # It drained SOME but not all — the budget cut it short, which is the point.
         assert 0 < result[ "passed" ] < 16                  # 8 files x 2 dots = 16 if fully drained
+
+
+class TestPreflightAssertGrantsOnTestDb:
+    """The sweep-start grants preflight: a gap fails the job before the first suite."""
+
+    @staticmethod
+    def _engine():
+        engine = MagicMock()
+        engine.url = "postgresql://u@h/lupin_db_test"
+        return engine
+
+    @staticmethod
+    def _report( problems ):
+        from cosa.utils import db_grants
+        rows = [ ( "lupin_db_test", "tables", "", "27", "" ) ] + [ ( "lupin_db_test", *p ) for p in problems ]
+        return db_grants.evaluate( "lupin_db_test", rows )
+
+    def _run( self, job, report=None, check_raises=None, cloud=False ):
+        def fake_check( run_query ):
+            if check_raises: raise check_raises
+            return report
+        with patch( "cosa.rest.db.database.engine", self._engine() ), \
+             patch( "cosa.rest.db.database.is_cloud_backed", return_value=cloud ), \
+             patch( "cosa.utils.db_grants.check_current_database", fake_check ):
+            job._preflight_assert_grants_on_test_db()
+
+    def test_a_missing_grant_raises_naming_it_and_the_repair_command( self, job ):
+        report = self._report( [ ( "missing", "lupin_test", "gadgets", "SELECT" ) ] )
+        with pytest.raises( RuntimeError ) as raised: self._run( job, report )
+        text = str( raised.value )
+        assert "lupin_test cannot SELECT gadgets" in text and "--grants-only --apply" in text
+
+    def test_a_clean_check_passes_and_logs_the_summary( self, job, capsys ):
+        self._run( job, self._report( [] ) )
+        assert "preflight grants PASSED: lupin_db_test: 27 tables, 3 roles, 0 problems" in capsys.readouterr().out
+
+    def test_a_database_the_matrix_does_not_name_is_a_logged_noop( self, job, capsys ):
+        self._run( job, None )
+        assert "SKIPPED: this database is not one the matrix describes" in capsys.readouterr().out
+
+    def test_a_check_that_cannot_run_is_a_logged_noop_and_never_stops_the_sweep( self, job, capsys ):
+        self._run( job, check_raises=OSError( "connection refused" ) )
+        assert "SKIPPED: the check could not run (OSError: connection refused)" in capsys.readouterr().out
+
+    def test_a_cloud_backed_deployment_is_skipped_before_any_query( self, job, capsys ):
+        self._run( job, report=self._report( [ ( "missing", "lupin_test", "gadgets", "SELECT" ) ] ), cloud=True )
+        assert "cloud-backed" in capsys.readouterr().out

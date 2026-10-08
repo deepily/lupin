@@ -13,6 +13,12 @@
 #   The way back from --reassign (no password files needed, no role or grant touched):
 #   src/scripts/provision-db-roles.sh --psql "<same as above>" --rollback [--apply]
 #
+#   The repair after a migration or a test made a table the roles cannot reach (no password files, no root):
+#   src/scripts/provision-db-roles.sh --psql "<same as above>" --grants-only [--apply]
+#
+#   The read-only check, exit 1 on a gap (it prints each gap and the repair command above):
+#   src/scripts/provision-db-roles.sh --psql "<same as above>" --check
+#
 # ⚠️ NOT RUN AGAINST THE LIVE DATABASE YET. The app's password file is root-owned (a sudo step),
 # and --reassign is a cutover step that needs the app containers recreated first. See
 # io/findings-80513825.md §11 for the order.

@@ -90,6 +90,7 @@ def _run( busy_rc=None, warn_rc=0, extra_args=(), pause_secs="0", real_probe_url
     env[ "PATH" ]                = str( fakebin ) + os.pathsep + env[ "PATH" ]
     env[ "FAKE_WARN_RC" ]        = str( warn_rc )
     env[ "UNWARNED_PAUSE_SECS" ] = pause_secs
+    env[ "LUPIN_DB_GRANTS_CHECK" ]  = "skip"     # the grants step has its own tests; these assert the exact docker calls
     if real_probe_url is not None:
         env[ "BOUNCE_BUSY_URL" ] = real_probe_url   # the real probe reads this
     else:

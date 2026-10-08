@@ -765,6 +765,12 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.db.schema_drift import emit_startup_drift_alarm
     schema_drift_report = emit_startup_drift_alarm( debug=app_debug )
 
+    # The grants alarm, beside the drift alarm and under the same fail-open contract. A table made by a migration
+    # or a test can lack the grants the other roles need; this names each gap in the boot log. It asks one
+    # catalog query over this app's own login and never raises. A skipped or clean answer prints one line or none.
+    from cosa.utils.db_grants import emit_startup_grants_alarm
+    emit_startup_grants_alarm( debug=app_debug )
+
     # Initialize the ID generator singleton
     id_generator = TwoWordIdGenerator()
 

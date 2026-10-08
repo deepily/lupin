@@ -11,6 +11,8 @@ A database with no public tables fails the check: a zero is "nothing was checked
 
 import re
 import shlex
+import sys
+import traceback
 
 APP_ROLE   = "lupin_app"
 HOST_ROLE  = "lupin_host"
@@ -199,3 +201,97 @@ def check_with_psql( psql_command, run_fn, which=None ):
         return 2, [ f"the check could not read psql's answer: {error}" ]
     lines = format_report( reports, remedy_for( psql_command, reports ) )
     return ( 0 if all( r[ "ok" ] for r in reports ) else 1 ), lines
+
+
+# ── the check over an app's own connection ───────────────────────────────────
+
+STANDARD_PSQL = "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev"
+
+
+def query_runner( connection ):
+    """
+    Wrap a SQLAlchemy connection as the `run_query( sql )` that check_current_database takes.
+
+    Requires:
+        - connection is open; the caller closes it
+
+    Ensures:
+        - the returned function sends the sql unchanged and returns the first column of every row
+    """
+    return lambda sql: [ row[ 0 ] for row in connection.exec_driver_sql( sql ) ]
+
+
+def check_current_database( run_query ):
+    """
+    Check the database the connection is on, when the matrix describes it.
+
+    Requires:
+        - run_query( sql ) returns the first column of each result row as a list
+
+    Ensures:
+        - returns the evaluate() report for the current database
+        - returns None, asking nothing more, when the database is not one the matrix names
+
+    Raises:
+        - ValueError when the answer cannot be read, since nothing was checked
+    """
+    current = run_query( "SELECT current_database();" )[ 0 ]
+    if current not in databases(): return None
+    return evaluate( current, parse_rows( "\n".join( run_query( build_check_sql( current ) ) ) ) )
+
+
+def report_lines( report ):
+    """The check's lines for one report, with the repair command when it has a problem."""
+    remedy = remedy_for( STANDARD_PSQL, [ report ] )
+    return format_report( [ report ], remedy )
+
+
+def emit_startup_grants_alarm( debug=False, engine_factory=None ):
+    """
+    Boot-path entry point: check the app's own database, log a gap loudly, never raise.
+
+    It runs one catalog query over the app's own login. It swallows every exception, as the schema-drift
+    alarm does, because a bug here must never abort a boot that would otherwise succeed.
+
+    Ensures:
+        - on a gap: writes a block headed critical, naming each missing grant, to stderr and returns the report
+        - on a clean database: prints one summary line and returns None
+        - off a database the matrix names, and on a cloud-backed deployment: returns None, asking nothing
+        - on any internal failure: returns None after a bounded warning on stderr; never propagates
+
+    Args:
+        debug:          also prints a line when it skips
+        engine_factory: optional zero-argument function returning a SQLAlchemy engine (None: the app's own URL)
+
+    Returns:
+        dict | None
+    """
+    try:
+        from cosa.rest.db.database import is_cloud_backed
+        if is_cloud_backed():
+            if debug: print( "[db-grants] skipped: a cloud-backed deployment has its own roles" )
+            return None
+        if engine_factory is None:
+            from sqlalchemy import create_engine
+            from cosa.rest.db.auto_migrate import resolve_database_url
+            engine_factory = lambda: create_engine( resolve_database_url( None ) )
+        engine = engine_factory()
+        try:
+            with engine.connect() as connection: report = check_current_database( query_runner( connection ) )
+        finally:
+            engine.dispose()
+        if report is None:
+            if debug: print( "[db-grants] skipped: this database is not one the matrix describes" )
+            return None
+        if report[ "ok" ]:
+            print( "[db-grants] " + report_lines( report )[ 0 ] )
+            return None
+        print( "[db-grants] CRITICAL: the database roles lack grants the matrix requires\n" + "\n".join( report_lines( report ) ), file=sys.stderr, flush=True )
+        return report
+    except Exception:
+        try:
+            print( "[db-grants] WARNING: grants check failed; continuing boot (fail-open).", file=sys.stderr )
+            traceback.print_exc( file=sys.stderr )
+        except Exception:  # pragma: no cover  (stderr itself is unwritable; nothing is left to report with)
+            pass
+        return None
