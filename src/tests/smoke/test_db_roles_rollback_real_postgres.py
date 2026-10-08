@@ -2,8 +2,9 @@
 db_roles --rollback against a real Postgres, in a container made for the test.
 
 The provisioner is run for real, through docker exec, against a throwaway server.
-Venue: host-side, docker required. It skips where docker is absent and fails where the image is.
-The container is removed afterwards, and a start-of-run sweep removes leftovers.
+Venue: host-side, docker required; the :7999 rubric applies only if a run is timed under two minutes.
+The merge gate's containers have no docker socket, so there the two docker tests skip: read the skip count.
+The container is removed afterwards, and a start-of-run sweep removes old leftovers.
 """
 
 # Why a server of its own: roles are cluster-wide, and the provisioner changes owners and
@@ -16,6 +17,7 @@ The container is removed afterwards, and a start-of-run sweep removes leftovers.
 #   2. a marker: a database that only this container has, checked before every provisioner call
 #   3. a name guard: the prefix and the label must both match, and lupin-postgres is refused
 
+import json
 import os
 import secrets
 import shutil
@@ -23,6 +25,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -30,6 +33,9 @@ IMAGE            = "pgvector/pgvector:pg16"
 NAME_PREFIX      = "lupin-dbroles-test-"
 LABEL            = "lupin.test=db-roles-rollback"
 REAL_CONTAINERS  = ( "lupin-postgres", )
+RUN_LABEL_KEY    = "lupin.test.run"
+RUN_ID           = uuid.uuid4().hex[ :12 ]
+SWEEP_MIN_AGE    = timedelta( minutes=30 )
 READY_SECONDS    = 90
 SUPERUSER        = "lupin_dev"
 ROOT             = os.environ.get( "LUPIN_ROOT", "" )
@@ -67,6 +73,20 @@ def removable( name, labels ):
     return True
 
 
+def sweepable( name, labels, created, now ):
+    """
+    Whether the sweep may remove this container now.
+
+    Ensures:
+        - requires removable( name, labels )
+        - never a container labelled with this run's id
+        - never one younger than SWEEP_MIN_AGE, so a peer run's live server survives
+    """
+    if not removable( name, labels ): return False
+    if f"{RUN_LABEL_KEY}={RUN_ID}" in labels: return False
+    return now - created >= SWEEP_MIN_AGE
+
+
 @pytest.mark.parametrize( "name, labels, ok", [
     ( NAME_PREFIX + "abc", [ LABEL ],              True ),
     ( NAME_PREFIX + "abc", [ ],                    False ),
@@ -85,12 +105,58 @@ def test_the_guard_and_the_sweep_need_both_the_name_prefix_and_the_label( name, 
             refuse_unless_throwaway( name, labels )
 
 
+NOW = datetime( 2026, 1, 1, 12, 0, tzinfo=timezone.utc )
+
+
+@pytest.mark.parametrize( "labels, age_minutes, expected", [
+    ( [ LABEL ],                                          31, True ),
+    ( [ LABEL ],                                          30, True ),
+    ( [ LABEL ],                                          29, False ),
+    ( [ LABEL ],                                           0, False ),
+    ( [ LABEL, f"{RUN_LABEL_KEY}={RUN_ID}" ],            600, False ),
+    ( [ LABEL, f"{RUN_LABEL_KEY}=somebody-else" ],       600, True ),
+    ( [ ],                                               600, False ),
+] )
+def test_the_sweep_spares_young_containers_and_its_own_run( labels, age_minutes, expected ):
+    created = NOW - timedelta( minutes=age_minutes )
+    assert sweepable( NAME_PREFIX + "abc", labels, created, NOW ) is expected
+
+
+def test_the_sweep_never_removes_a_real_container_however_old( ):
+    assert sweepable( "lupin-postgres", [ LABEL ], NOW - timedelta( days=9 ), NOW ) is False
+
+
+def test_the_sweep_removes_with_volumes_only_the_old_labelled_ones( monkeypatch ):
+    module = sys.modules[ __name__ ]
+    old    = datetime.now( timezone.utc ) - timedelta( hours=3 )
+    young  = datetime.now( timezone.utc )
+    calls  = [ ]
+    def fake_docker( *args, **kwargs ):
+        calls.append( args )
+        class Done: returncode = 0; stdout = f"{NAME_PREFIX}old {NAME_PREFIX}young {NAME_PREFIX}mine"; stderr = ""
+        return Done()
+    monkeypatch.setattr( module, "_docker", fake_docker )
+    monkeypatch.setattr( module, "_labels_of", lambda n: [ LABEL, f"{RUN_LABEL_KEY}={RUN_ID}" ] if n.endswith( "mine" ) else [ LABEL ] )
+    monkeypatch.setattr( module, "_created_of", lambda n: young if n.endswith( "young" ) else old )
+    assert sweep_leftovers() == [ NAME_PREFIX + "old" ]
+    assert ( "rm", "-fv", NAME_PREFIX + "old" ) in calls
+    assert not any( a[ :2 ] == ( "rm", "-fv" ) and a[ 2 ] != NAME_PREFIX + "old" for a in calls )
+
+
 def test_the_real_database_container_is_refused_before_any_docker_command( monkeypatch ):
     calls = [ ]
     monkeypatch.setattr( sys.modules[ __name__ ], "_docker", lambda *a, **k: calls.append( a ) )
     with pytest.raises( RuntimeError, match="real database container" ):
         _psql( "lupin-postgres", "lupin_db_dev", "SELECT 1;" )
     assert calls == [ ], "a docker command was spent on the real container's name"
+
+
+def test_an_empty_lupin_root_stops_the_provisioner_before_anything_else( monkeypatch, tmp_path ):
+    module = sys.modules[ __name__ ]
+    monkeypatch.setattr( module, "ROOT", "" )
+    monkeypatch.setattr( module, "_psql", lambda *a, **k: pytest.fail( "a database was asked before LUPIN_ROOT was checked" ) )
+    with pytest.raises( AssertionError, match="LUPIN_ROOT is not set" ):
+        _provision( { "name": NAME_PREFIX + "x", "marker": "throwaway_marker_x" }, tmp_path )
 
 
 def test_a_missing_marker_stops_the_provisioner_before_it_runs( monkeypatch, tmp_path ):
@@ -130,18 +196,26 @@ needs_docker = pytest.mark.skipif( not _docker_usable(), reason="docker is not u
 def _labels_of( name ):
     shown = _docker( "inspect", "--format", "{{json .Config.Labels}}", name )
     assert shown.returncode == 0, shown.stderr
-    import json
     labels = json.loads( shown.stdout ) or { }
     return [ f"{k}={v}" for k, v in labels.items() ]
 
 
+def _created_of( name ):
+    """When docker made the container, as an aware datetime."""
+    shown = _docker( "inspect", "--format", "{{.Created}}", name )
+    assert shown.returncode == 0, shown.stderr
+    text = shown.stdout.strip()
+    return datetime.fromisoformat( text[ :19 ] + "+00:00" )
+
+
 def sweep_leftovers():
-    """Remove containers that carry the label and the name prefix, and nothing else."""
+    """Remove old containers that carry the label and the name prefix, and nothing else."""
     listed = _docker( "ps", "-a", "--filter", f"label={LABEL}", "--format", "{{.Names}}" )
     removed = [ ]
+    now = datetime.now( timezone.utc )
     for name in listed.stdout.split():
-        if removable( name, _labels_of( name ) ):
-            _docker( "rm", "-f", name )
+        if sweepable( name, _labels_of( name ), _created_of( name ), now ):
+            _docker( "rm", "-fv", name )
             removed.append( name )
     return removed
 
@@ -161,7 +235,10 @@ def throwaway():
     sweep_leftovers()
     name   = NAME_PREFIX + uuid.uuid4().hex[ :10 ]
     marker = "throwaway_marker_" + uuid.uuid4().hex[ :10 ]
-    started = _docker( "run", "-d", "--rm", "--name", name, "--label", LABEL,
+    image = _docker( "image", "inspect", IMAGE )
+    assert image.returncode == 0, f"the image {IMAGE} is not on this host; pull it deliberately, the test will not"
+    started = _docker( "run", "-d", "--rm", "--name", name, "--label", LABEL, "--label", f"{RUN_LABEL_KEY}={RUN_ID}",
+                       "--memory", "1g", "--cpus", "1",
                        "-e", "POSTGRES_USER=" + SUPERUSER, "-e", "POSTGRES_PASSWORD=" + secrets.token_hex( 16 ),
                        "-e", "POSTGRES_DB=lupin_db_dev", IMAGE )
     assert started.returncode == 0, f"could not start the container: {started.stderr}"
@@ -178,7 +255,7 @@ def throwaway():
         _psql( name, "postgres", f"CREATE DATABASE {marker};\nCREATE DATABASE lupin_db_test;\n" )
         yield { "name": name, "marker": marker }
     finally:
-        _docker( "rm", "-f", name )
+        _docker( "rm", "-fv", name )
 
 
 def _assert_marker( box ):
@@ -244,6 +321,7 @@ def _snapshot( box ):
 
 def _provision( box, tmp_path, *flags ):
     """Run the real provisioner against the throwaway container; returns the finished process."""
+    assert ROOT, "LUPIN_ROOT is not set, so the provisioner would run from the wrong tree"
     _assert_marker( box )
     files = { }
     for role in ( "app", "host", "test" ):
