@@ -162,6 +162,14 @@ def test_a_manifest_that_is_not_a_json_object_is_hashed_as_it_is( tmp_path, firs
     assert ts.bundle_hash( tmp_path ) != before
 
 
+def test_a_manifest_nested_too_deeply_to_parse_is_hashed_as_it_is( tmp_path ):
+    base   = _build_tree( tmp_path, b"[" * 100000 )
+    before = ts.bundle_hash( tmp_path )
+    assert before not in ( ts.BUNDLE_NONE, ts.BUNDLE_UNKNOWN )
+    _rewrite( base, "multiplexer/manifest.json", b"[" * 100001 )
+    assert ts.bundle_hash( tmp_path ) != before
+
+
 def test_only_manifest_json_loses_its_build_time( tmp_path ):
     other  = b'{"built": "2026-10-08T19:03:23Z"}'
     base   = _build_tree( tmp_path, MANIFEST_ONE, { "multiplexer/other.json": other } )

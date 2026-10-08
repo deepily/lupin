@@ -752,7 +752,7 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   what it measured, not by the sha you asked for.
   `bundle-span=` covers what both are blind to: it hashes the CONTENT of every
   served `.js` and `manifest.json` under `src/lupin_app/static/dist/` (gitignored; `.map` files are not served) at start and end, names the root hashed
-  (`bundle=<hash>@seat` or `@main`), leaves out each manifest's `built` time stamp (two builds of one source differ in it alone), and a rebuild that changes the served content inside the run reads `bundle-span=<a>..<b> ⚠️ BUNDLE
+  (`bundle=<hash>@seat` or `@main`), leaves out each manifest's `built` time stamp (two builds of one source differ in it alone), and a rebuild that changes what a page loads inside the run reads `bundle-span=<a>..<b> ⚠️ BUNDLE
   REBUILT MID-RUN` beside `run-span`. `@seat` and `@main` are different directories; `:8000` serves main's.
 
 ### Reading a result
