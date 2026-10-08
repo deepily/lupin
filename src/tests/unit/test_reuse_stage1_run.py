@@ -252,3 +252,49 @@ def test_ledger_init_makes_the_scratch_ledgers_folder_when_it_is_not_there( scra
     nested = scratch.ledger.parent / "new" / "folder" / "ledger.jsonl"
     argv   = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( nested ), "ledger-init" ]
     assert rr.main( argv, loader=loader ) == 0 and nested.exists()
+
+
+def test_the_stand_in_reports_the_attempt_log_and_client_version_the_live_transport_does():
+    class Budget:
+        def take( self ): pass
+    _, meta = rr.StandIn( Budget() ).post_with_meta( { "model": "m", "questions": { "q": { "instructions": "x" } } } )
+    assert meta[ "attempt_log" ] == [ { "status": 200, "request_ids": {} } ] and meta[ "client_version" ] == rr.STAND_IN_CLIENT == "stand-in"
+
+
+def test_an_arm_the_stand_in_ran_keeps_the_attempt_log_and_client_version_in_its_file( scratch ):
+    run( scratch, "ledger-init" )
+    run( scratch, "arm", "--question", "1", "--arm", "single1", "--ceiling", "5000000" )
+    record = read( scratch, "s1-q1-single1" )
+    assert record[ "rows" ][ 0 ][ "attempt_log" ] == [ { "status": 200, "request_ids": {} } ]
+    assert record[ "transport_calls" ][ 0 ][ "client_version" ] == "stand-in" and record[ "transport_calls" ][ 0 ][ "attempt_log" ] == [ { "status": 200, "request_ids": {} } ]
+
+
+@pytest.mark.parametrize( "refusal", [ rr.RunnerRefused( "no data folder" ), s1.KeyMissing( "JEV_API_TOASTER is not set" ), s1.CanaryNotApproved( "the canary of question 1 is not approved" ),
+                                       s1.CanaryTripped( "the canary tripped: refusal" ), s1.StageRefused( "9 asked, 1 remaining" ) ] )
+def test_a_refusal_the_runner_makes_is_one_line_on_the_error_stream_and_exit_code_two( monkeypatch, capsys, refusal ):
+    def refuse( argv=None, loader=None ): raise refusal
+    monkeypatch.setattr( rr, "main", refuse )
+    assert rr.cli( [ "status" ] ) == 2
+    seen = capsys.readouterr()
+    lines = seen.err.strip().splitlines()
+    assert seen.out == "" and len( lines ) == 1 and lines[ 0 ] == f"refused ({type( refusal ).__name__}): {refusal}"
+
+
+@pytest.mark.parametrize( "error", [ ValueError( "bad" ), RuntimeError( "boom" ), KeyError( "x" ) ] )
+def test_any_other_error_is_not_dressed_as_a_refusal( monkeypatch, error ):
+    def fail( argv=None, loader=None ): raise error
+    monkeypatch.setattr( rr, "main", fail )
+    with pytest.raises( type( error ) ): rr.cli( [ "status" ] )
+
+
+def test_a_gated_arm_before_the_canary_is_approved_gives_the_one_line_through_the_real_command( scratch, capsys ):
+    run( scratch, "ledger-init" ); capsys.readouterr()
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "arm", "--question", "1", "--arm", "single2", "--ceiling", "1000000" ]
+    assert rr.cli( argv, loader=loader ) == 2
+    assert "the canary of question 1 is not approved" in capsys.readouterr().err
+
+
+def test_a_command_that_works_returns_its_own_code_through_cli( scratch ):
+    run( scratch, "ledger-init" )
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "status" ]
+    assert rr.cli( argv, loader=loader ) == 0
