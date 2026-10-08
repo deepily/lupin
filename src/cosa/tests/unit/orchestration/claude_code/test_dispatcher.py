@@ -27,6 +27,8 @@ The quick_smoke_test() + `if __name__ == "__main__":` block is MARKED FOR DELETI
 exclude_also regex. `async def main()` is NOT excluded and is tested below.
 """
 import asyncio
+import logging
+import pathlib
 
 import pytest
 
@@ -722,6 +724,7 @@ def test_run_bounded_error_result_names_the_cli_text_when_stderr_is_empty( lupin
     assert res.success is False and res.exit_code == 1
     assert "Your credit balance is too low" in res.error
     assert "Unknown error" not in res.error
+    assert "stderr:" not in res.error                       # empty stderr adds no suffix
 
 
 def test_run_bounded_error_result_with_exit_zero_is_a_failure( lupin_root, monkeypatch ):
@@ -766,3 +769,31 @@ def test_run_interactive_error_result_names_the_errors_list( lupin_root, patched
     res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
     assert res.success is False
     assert "error_max_turns" in res.error and "ran out" in res.error
+
+
+def test_run_bounded_error_result_cuts_a_long_stderr_to_500( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"s" * 5000 ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "s" * 500 in res.error
+    assert "s" * 501 not in res.error
+
+
+def test_run_interactive_error_result_logs_the_task_id_and_the_cli_text( lupin_root, patched_sdk, caplog ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result="Your credit balance is too low" ) ] ]
+    with caplog.at_level( logging.ERROR, logger=disp.logger.name ):
+        asyncio.run( d._run_interactive( _bounded_task( id="task-77", type=TaskType.INTERACTIVE ) ) )
+    assert any( "task-77" in r.getMessage() and "Your credit balance is too low" in r.getMessage()
+                and r.name == disp.logger.name for r in caplog.records )
+
+
+def test_run_bounded_real_cli_max_turns_result_line_names_the_subtype_and_the_errors( lupin_root, monkeypatch ):
+    """A result line captured from the host CLI (max-turns 1, exit 1) fails with its text."""
+    line = ( pathlib.Path( __file__ ).parent / "fixtures" / "cli-error-max-turns-result-line.json" ).read_bytes()
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ line ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 1
+    assert "error_max_turns" in res.error
+    assert "Reached maximum number of turns (1)" in res.error
