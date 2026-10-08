@@ -44,6 +44,7 @@ from .test_runner import run_pytest, TestRunResult
 from .mock_clients import MockAgentSDKSession
 from .hooks import build_can_use_tool, post_tool_hook, notification_hook, wrap_prompt_for_streaming
 from .state_files import FeatureList, ProgressLog
+from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.utils.voice_io import read_gate_answer
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
@@ -1424,6 +1425,7 @@ Complete this task. When done, summarize what you did and list all files changed
                     collected_text.append( message.text )
 
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "SWEOrchestrator", logger )
                     # Forward SDK notification events through notification_hook
                     await notification_hook(
                         { "message": getattr( message, "text", str( message ) ) },
@@ -1556,6 +1558,7 @@ IMPORTANT:
                     collected_text.append( message.text )
 
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "SWEOrchestrator", logger )
                     await notification_hook(
                         { "message": getattr( message, "text", str( message ) ) },
                         team_io, role="tester", progress_group_id=tester_group_id,
@@ -1711,6 +1714,7 @@ INSTRUCTIONS:
                     collected_text.append( message.text )
 
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "SWEOrchestrator", logger )
                     await notification_hook(
                         { "message": getattr( message, "text", str( message ) ) },
                         team_io, role="coder", progress_group_id=redelegate_group_id,
