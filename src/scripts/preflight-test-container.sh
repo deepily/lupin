@@ -216,26 +216,10 @@ else
 fi
 
 # ── 7. Database grants ───────────────────────────────────────────────────
-# The roles can lack a grant on a table a migration or a test made. lib/check-db-grants.sh checks, and repairs
-# once with --grants-only when LUPIN_DB_GRANTS_REPAIR=on (off until the one-time apply has been run by hand).
-# A red answer with no repair is a warning; it blocks only after a repair that left the roles short. Exit 2
-# (the check could not run) is a warning: it says nothing about the container.
-# LUPIN_DB_GRANTS_CHECK=skip turns the probe off.
-if [ "${LUPIN_DB_GRANTS_CHECK:-on}" = "skip" ]; then
-    say_warn "database grants probe skipped (LUPIN_DB_GRANTS_CHECK=skip)"
-else
-    grants_rc=0
-    grants_out="$( "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/check-db-grants.sh" --repair-when-enabled 2>&1 )" || grants_rc=$?
-    if [ "$VERBOSE" = true ] || [ "$grants_rc" -ne 0 ]; then printf "%s\n" "$grants_out" | sed 's/^/       /'; fi
-    case "$grants_rc" in
-        0) say_ok "database roles hold every grant the matrix requires" ;;
-        1) say_fail "database roles still lack grants after a repair"
-           remedy "src/scripts/provision-db-roles.sh with the three password files (needs root); see the lines above" ;;
-        3) say_warn "database roles lack grants (repair is off)"
-           remedy "LUPIN_DB_GRANTS_REPAIR=on src/scripts/lib/check-db-grants.sh --repair-when-enabled, or the remedy line above" ;;
-        *) say_warn "database grants could not be checked (exit ${grants_rc})" ;;
-    esac
-fi
+# The probe lives in lib/preflight-db-grants-probe.sh so a test can drive it with a stub helper.
+# shellcheck source=lib/preflight-db-grants-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-db-grants-probe.sh"
+probe_db_grants
 
 # ── Summary ──────────────────────────────────────────────────────────────
 echo

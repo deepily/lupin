@@ -165,11 +165,73 @@ def test_a_bounce_with_the_check_skipped_never_asks( stub ):
 
 # ── the preflight script's probe ─────────────────────────────────────────────
 
-def test_the_preflight_script_calls_the_helper_before_its_summary_and_lets_the_helper_decide_the_repair():
+PROBE = os.path.join( ROOT, "src/scripts/lib/preflight-db-grants-probe.sh" )
+
+HARNESS = """
+say_ok()   { echo "OK: $1"; }
+say_warn() { echo "WARN: $1"; }
+say_fail() { echo "FAIL: $1"; }
+remedy()   { echo "REMEDY: $1"; }
+VERBOSE="${HARNESS_VERBOSE:-false}"
+source "$PROBE"
+probe_db_grants
+"""
+
+
+def _probe( tmp_path, rc, **env ):
+    """Run probe_db_grants with a stub helper that records its run and exits rc."""
+    helper = tmp_path / "stub-helper"
+    helper.write_text( f"#!/bin/sh\necho ran >> {tmp_path}/helper.log\necho 'helper says hello'\nexit {rc}\n" )
+    helper.chmod( helper.stat().st_mode | stat.S_IEXEC )
+    run_env = dict( os.environ, PROBE=PROBE, DB_GRANTS_HELPER=str( helper ) )
+    run_env.pop( "LUPIN_DB_GRANTS_CHECK", None )
+    run_env.update( env )
+    done = subprocess.run( [ "bash", "-c", HARNESS ], env=run_env, capture_output=True, text=True, timeout=30 )
+    ran = ( tmp_path / "helper.log" ).read_text().split() if ( tmp_path / "helper.log" ).exists() else [ ]
+    return done, ran
+
+
+@pytest.mark.parametrize( "rc, first_line", [
+    ( 0, "OK: database roles hold every grant the matrix requires" ),
+    ( 1, "FAIL: database roles still lack grants after a repair" ),
+    ( 3, "WARN: database roles lack grants (repair is off)" ),
+    ( 2, "WARN: database grants could not be checked (exit 2)" ),
+    ( 7, "WARN: database grants could not be checked (exit 7)" ),
+] )
+def test_each_helper_exit_code_maps_to_one_verdict_line( tmp_path, rc, first_line ):
+    done, ran = _probe( tmp_path, rc )
+    verdicts = [ l for l in done.stdout.splitlines() if l.split( ":" )[ 0 ] in ( "OK", "WARN", "FAIL" ) ]
+    assert verdicts == [ first_line ], done.stdout
+    assert ran == [ "ran" ], "the helper must run exactly once"
+
+
+@pytest.mark.parametrize( "rc, remedy_word", [ ( 1, "provision-db-roles.sh" ), ( 3, "LUPIN_DB_GRANTS_REPAIR=on" ) ] )
+def test_a_red_answer_prints_its_remedy( tmp_path, rc, remedy_word ):
+    done, _ = _probe( tmp_path, rc )
+    assert [ l for l in done.stdout.splitlines() if l.startswith( "REMEDY:" ) and remedy_word in l ]
+
+
+def test_a_clean_answer_is_quiet_unless_verbose_and_a_red_answer_always_shows_the_helper_lines( tmp_path ):
+    assert "helper says hello" not in _probe( tmp_path, 0 )[ 0 ].stdout
+    assert "       helper says hello" in _probe( tmp_path, 0, HARNESS_VERBOSE="true" )[ 0 ].stdout
+    assert "       helper says hello" in _probe( tmp_path, 3 )[ 0 ].stdout
+
+
+def test_the_skip_switch_warns_and_never_runs_the_helper( tmp_path ):
+    done, ran = _probe( tmp_path, 1, LUPIN_DB_GRANTS_CHECK="skip" )
+    assert done.stdout.splitlines() == [ "WARN: database grants probe skipped (LUPIN_DB_GRANTS_CHECK=skip)" ]
+    assert ran == [ ]
+
+
+def test_the_probe_calls_the_helper_once_and_lets_the_helper_decide_the_repair():
+    calls = [ l for l in open( PROBE ).read().splitlines() if '"$helper"' in l ]
+    assert len( calls ) == 1 and '"$helper" --repair-when-enabled ' in calls[ 0 ]
+
+
+def test_the_preflight_script_sources_the_probe_and_calls_it_before_its_summary():
     text  = open( PREFLIGHT ).read()
     probe = text.index( "# ── 7. Database grants" )
-    assert probe < text.index( "# ── Summary" )
-    calls = [ l for l in text[ probe: ].splitlines() if 'lib/check-db-grants.sh"' in l ]
-    assert len( calls ) == 1, "the probe must call the helper exactly once"
-    assert 'check-db-grants.sh" --repair-when-enabled ' in calls[ 0 ], "the probe must let the helper decide the repair"
+    section = text[ probe: text.index( "# ── Summary" ) ]
+    assert 'lib/preflight-db-grants-probe.sh"' in section and section.rstrip().endswith( "probe_db_grants" )
     assert subprocess.run( [ "bash", "-n", PREFLIGHT ] ).returncode == 0
+    assert subprocess.run( [ "bash", "-n", PROBE ] ).returncode == 0
