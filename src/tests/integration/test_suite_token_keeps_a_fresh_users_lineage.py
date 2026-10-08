@@ -2,8 +2,8 @@
 A fresh random user keeps the suite's lineage through the per-run token.
 
 Inside a sweep the token is the only thing that vouches for that user's claim.
-The request trace records a refused claim in parent_id_hash_dropped.
-One test reads the field for a good token, another for a wrong one, so the reader is proven.
+A refused claim on the suite itself gets a 403 and no trace row. Any other refused claim is dropped and traced.
+Two tests read parent_id_hash_dropped: a good token drops nothing, and a claim that is not the suite drops.
 
 Requires:
     - a sweep that exported the parent id and the token variable
@@ -20,7 +20,7 @@ import requests
 
 import cosa.utils.util as cu
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
-from tests.helpers.suite_lineage import lineage_request, require_sweep
+from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request, require_sweep
 
 from .conftest import BASE_URL
 
@@ -56,11 +56,17 @@ def _trace_row( trace_id ):
     return None
 
 
-def _ask_as( token, edit=None ):
+def _post_ask( token, edit=None, parent=None ):
+    """POST one ask as the fresh user; parent replaces the sweep's parent id when given."""
     request = lineage_request( { "question": "What is 2+2?", "websocket_id": "token_session", "speak": False },
                                { "Authorization": f"Bearer {token}" } )
     if edit is not None: request[ "headers" ] = edit( request[ "headers" ] )
-    response = requests.post( f"{BASE_URL}/api/v2/ask", timeout=REQUEST_TIMEOUT, **request )
+    if parent is not None: request[ "json" ][ "parent_id_hash" ] = parent
+    return requests.post( f"{BASE_URL}/api/v2/ask", timeout=REQUEST_TIMEOUT, **request )
+
+
+def _ask_as( token, edit=None, parent=None ):
+    response = _post_ask( token, edit, parent )
     assert response.status_code == 200, response.text
     return response.json()[ "trace_id" ]
 
@@ -71,8 +77,20 @@ def test_a_fresh_users_ask_is_traced_with_no_dropped_stamp( clean_test_db ):
     assert row.get( "parent_id_hash_dropped" ) is None, row.get( "parent_id_hash_dropped" )
 
 
-def test_the_same_ask_with_a_wrong_token_is_traced_as_token_mismatch( clean_test_db ):
+def test_the_same_ask_with_a_wrong_token_is_refused_with_403_naming_token_mismatch( clean_test_db ):
+    """The suite's own id with a wrong token is refused loudly, naming the parent."""
+    response = _post_ask( _fresh_user_token(), edit=lambda h: { **h, TOKEN_HEADER: "wrong-token-value" } )
+    assert response.status_code == 403, response.text
+    detail = response.json()[ "detail" ]
+    assert detail[ "error" ] == "parent_id_hash_refused", detail
+    assert detail[ "reason" ] == "token_mismatch", detail
+    assert detail[ "parent_id_hash" ] == os.environ[ PARENT_ENV_NAME ], detail
+
+
+def test_a_wrong_token_on_a_claim_that_is_not_the_suite_is_dropped_quietly_and_traced( clean_test_db ):
     """The instrument check: the reader finds a drop when there is one."""
-    row = _trace_row( _ask_as( _fresh_user_token(), edit=lambda h: { **h, TOKEN_HEADER: "wrong-token-value" } ) )
-    assert row is not None
-    assert str( row.get( "parent_id_hash_dropped" ) ).endswith( ":token_mismatch" ), row.get( "parent_id_hash_dropped" )
+    claimed = uuid.uuid4().hex
+    row     = _trace_row( _ask_as( _fresh_user_token(), edit=lambda h: { **h, TOKEN_HEADER: "wrong-token-value" }, parent=claimed ) )
+    assert row is not None, "the trace row for the request was not found, so the drop cannot be read"
+    dropped = str( row.get( "parent_id_hash_dropped" ) )
+    assert claimed in dropped and dropped.endswith( ":token_unknown" ), dropped
