@@ -70,8 +70,8 @@ fi
 # no `cosa` package import is involved — which matters, because the failure being
 # diagnosed is frequently an import error in this very tree.
 _diagnosis_python() {
-    if [ -n "$LUPIN_DIAGNOSIS_PYTHON" ] && [ -x "$LUPIN_DIAGNOSIS_PYTHON" ]; then
-        echo "$LUPIN_DIAGNOSIS_PYTHON"; return
+    if [ -n "${LUPIN_DIAGNOSIS_PYTHON:-}" ] && [ -x "${LUPIN_DIAGNOSIS_PYTHON:-}" ]; then
+        echo "${LUPIN_DIAGNOSIS_PYTHON:-}"; return
     fi
     local candidate
     for candidate in "$LUPIN_ROOT/.venv/bin/python" "/opt/venv/bin/python"; do

@@ -33,6 +33,7 @@ case "$1" in
             echo "$@" >> "$STUB_PYTEST_ARGS"
             for a in "$@"; do case "$a" in --junit-xml=*) OUT="${a#--junit-xml=}" ;; esac; done
             if [ -n "${STUB_JUNIT:-}" ]; then cp "$STUB_JUNIT" "$OUT"; fi
+            if [ -n "${STUB_PYTEST_OUT:-}" ]; then echo "$STUB_PYTEST_OUT"; fi
             exit "${STUB_PYTEST_RC:-0}"
         fi
         exec "$STUB_REAL_PYTHON" "$@" ;;
@@ -78,7 +79,7 @@ def tree( tmp_path ):
     return root
 
 
-def _run( tree, tmp_path, junit=None, pytest_rc=0, docker_rc=0 ):
+def _run( tree, tmp_path, junit=None, pytest_rc=0, docker_rc=0, pytest_out="" ):
     env = dict( os.environ )
     env.update( {
         "PATH"             : f"{tmp_path / 'bin'}:{env[ 'PATH' ]}",
@@ -86,6 +87,7 @@ def _run( tree, tmp_path, junit=None, pytest_rc=0, docker_rc=0 ):
         "STUB_PYTEST_ARGS" : str( tmp_path / "pytest-args.txt" ),
         "STUB_PYTEST_RC"   : str( pytest_rc ),
         "STUB_DOCKER_RC"   : str( docker_rc ),
+        "STUB_PYTEST_OUT"  : pytest_out,
     } )
     env.pop( "STUB_JUNIT", None )
     if junit: env[ "STUB_JUNIT" ] = junit
@@ -161,3 +163,13 @@ def test_a_tree_with_no_interpreter_exits_three( tree, tmp_path ):
     code, text = _run( tree, tmp_path, junit=_passing( tmp_path ) )
     assert code == 3, text
     assert "Total Tests" not in text
+
+
+def test_a_conftest_import_failure_is_diagnosed_under_the_runners_unset_variable_check( tree, tmp_path ):
+    """Under the runner's -u, an unset optional variable must not stop the wrapper's diagnosis."""
+    out        = "ImportError while loading conftest '/x/conftest.py'.\nModuleNotFoundError: No module named 'nothing'"
+    code, text = _run( tree, tmp_path, junit=_passing( tmp_path ), pytest_rc=4, pytest_out=out )
+    assert code == 2, text
+    assert "unbound variable" not in text and "command not found" not in text, text
+    assert "COLLECTION ERROR" in text and "missing module: nothing" in text, text
+    assert text.index( "ModuleNotFoundError" ) < text.index( "COLLECTION ERROR" ), "the diagnosis must print after pytest's own output"
