@@ -186,3 +186,22 @@ def test_the_reader_does_not_change_the_response():
     before = repr( resp )
     rpair.pair_answers( resp, { "a.one": QMAP[ "a.one" ] } )
     assert repr( resp ) == before
+
+
+def test_a_noul_of_exactly_one_and_of_exactly_zero_are_answered():
+    assert read_one( noul( 1 ), score() )[ 0 ][ "a.one" ][ "provides" ] == 1
+    assert read_one( noul( 0 ), score() )[ 0 ][ "a.one" ][ "provides" ] == 0
+
+
+@pytest.mark.parametrize( "level", LEVEL_NAMES := ( "0", "1", "2", "3" ) )
+def test_a_one_hot_score_is_answered_at_every_level( level ):
+    one_hot = { k: ( 1 if k == level else 0 ) for k in LEVEL_NAMES }
+    row     = read_one( noul(), score( one_hot ) )[ 0 ][ "a.one" ]
+    assert row[ "coverage" ] == ( 1 if level in ( "2", "3" ) else 0 )
+
+
+def test_the_probabilities_returned_are_a_copy_of_the_responses():
+    resp   = response( noul(), score() )
+    answer = rpair.pair_answers( resp, { "a.one": QMAP[ "a.one" ] } )[ 0 ][ "a.one" ]
+    answer[ "probabilities" ][ "0" ] = 99
+    assert resp[ "answers" ][ "c_1" ][ "probabilities" ][ "0" ] == PROBS[ "0" ]
