@@ -14,6 +14,7 @@ import pytest
 from lupin_mcp import reuse_stage1_analysis as an
 
 REAL = pathlib.Path( __file__ ).parent / "fixtures" / "stage1-real-single-answers-sample.json"
+REAL_PLAN = pathlib.Path( __file__ ).parent / "fixtures" / "stage1-real-probe-plan-q1.json"      # written by write_probe_plan at c0fb265b0 from the real answers above
 
 
 def _probs( overlap, extend=0.0 ):
@@ -873,6 +874,30 @@ def test_the_command_reads_a_folder_of_arm_files_and_canary_files_and_prints_the
     assert an.main( [ str( tmp_path ) ] ) == 0
     out = capsys.readouterr().out
     assert "default pack size 200" in out and "canary" in out
+
+
+def test_the_command_skips_the_probe_plan_the_driver_writes_beside_the_arms(tmp_path, capsys):
+    recs = _complete()
+    assert len( recs ) == len( an.REQUIRED_ARMS )
+    for rec in recs:
+        (tmp_path / f"{rec[ 'run_name' ]}.json").write_text( json.dumps( rec ) )
+    (tmp_path / "s1-q1-probe-plan.json").write_text( REAL_PLAN.read_text() )
+    assert json.loads( REAL_PLAN.read_text() )[ "question" ] == 1 and "format" not in json.loads( REAL_PLAN.read_text() )
+    assert an.main( [ str( tmp_path ) ] ) == 0
+    out = capsys.readouterr().out
+    assert "Decision:" in out and "probe-plan" not in out and "s1-q1-pack200: lost 0 of limit 0" in out
+
+
+def test_a_folder_holding_only_a_probe_plan_has_no_arm_files(tmp_path, capsys):
+    (tmp_path / "s1-q1-probe-plan.json").write_text( REAL_PLAN.read_text() )
+    assert an.main( [ str( tmp_path ) ] ) == 2
+    assert "no arm files" in capsys.readouterr().out
+
+
+def test_any_other_json_file_that_is_not_an_arm_still_stops_the_command(tmp_path):
+    (tmp_path / "notes.json").write_text( REAL_PLAN.read_text() )
+    with pytest.raises( ValueError, match = "expected format" ):
+        an.main( [ str( tmp_path ) ] )
 
 
 def test_the_command_with_an_empty_folder_says_there_is_nothing_to_read(tmp_path, capsys):
