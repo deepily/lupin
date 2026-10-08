@@ -12549,6 +12549,9 @@
                             }
                         }
                     },
+                    "403": {
+                        "description": "parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason"
+                    },
                     "422": {
                         "description": "Validation Error",
                         "content": {
@@ -12743,6 +12746,9 @@
                                 }
                             }
                         }
+                    },
+                    "403": {
+                        "description": "parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason"
                     },
                     "422": {
                         "description": "Validation Error",

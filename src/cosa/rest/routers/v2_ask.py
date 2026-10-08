@@ -446,6 +446,42 @@ def _active_monopolizer_id() -> Optional[ str ]:
     return running_queue.get_pool_status()[ "monopolize_id" ]
 
 
+def _active_suite_id() -> Optional[ str ]:
+    """
+    The id of the test-suite job that holds the monopoly slot, or None.
+
+    Ensures:
+        - returns None when the running queue is not initialised, when no job holds the slot,
+          when the holder is no longer in the queue, or when the holder is not a test-suite job
+        - never reads the queue's private attribute
+    """
+    import lupin_app.main as main_module
+    running_queue = main_module.jobs_run_queue
+    if running_queue is None: return None
+    holder = running_queue.get_pool_status()[ "monopolize_id" ]
+    if holder is None: return None
+    try:
+        job = running_queue.get_by_id_hash( holder )
+    except KeyError:
+        return None
+    return holder if job.job_type == "test_suite" else None
+
+
+def _claims_the_active_suite( parent_id_hash: str ) -> bool:
+    """
+    Whether a refused claim names the suite that holds the monopoly slot right now.
+
+    Ensures:
+        - True only when the slot holder is a test-suite job and its id equals the claim
+        - False when the holder cannot be read: the refusal then stays the quiet drop, never a 500
+    """
+    try:
+        return _active_suite_id() == parent_id_hash
+    except Exception as error:
+        print( f"[v2-lineage] suite slot read failed, so the refusal stays a quiet drop: {type( error ).__name__}" )
+        return False
+
+
 def _loggable( value: Any ) -> str:
     """The repr of the first PARENT_STAMP_LOG_MAX characters, so a caller cannot forge log lines."""
     text = str( value )
@@ -469,11 +505,11 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     Ensures:
         - an absent or empty claim returns it unchanged and ( claim, None ): nothing to vet.
         - an honoured claim returns ( parent_id_hash, None ).
-        - a refused claim returns ( None, reason ) and the request carries on without the stamp, never a 4xx.
-        - a dropped child of a real suite is not a small loss. Gate B defers every job that is not
-          a lineage child while a monopolize job is active, so it waits behind the suite that is
-          waiting on it and can starve for the whole run (review risk 1).
-        - a loud 403 for a refused claim on the active monopolizer is Rick's call, and is unbuilt.
+        - a refused claim returns ( None, reason ) and the request carries on without the stamp, except
+          when the claim names the test-suite job that holds the monopoly slot right now.
+        - that one refusal raises HTTPException 403 naming the reason. A dropped child of a real suite
+          is not a small loss: Gate B defers every job that is not a lineage child while a monopolize
+          job is active, so a quiet drop leaves it waiting behind the suite that is waiting on it.
         - reason is "not_owner" or "owner_unknown" (no job_history row for the parent), or, when a
           token was presented to a server that accepts one and failed, the token's own reason:
           token_unknown, token_mismatch, token_expired, not_active_monopolizer or
@@ -499,9 +535,33 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
             token_reason = "token_check_failed"
     owner = _job_owner_id( parent_id_hash )
     if owner is not None and str( owner ) == str( user_id ): return parent_id_hash, None
-    reason = token_reason or ( "owner_unknown" if owner is None else "not_owner" )
-    print( f"[v2-lineage] parent_id_hash dropped: caller={_loggable( user_email )} ({_loggable( user_id )}) parent={_loggable( parent_id_hash )} reason={reason}" )
+    reason  = token_reason or ( "owner_unknown" if owner is None else "not_owner" )
+    refused = _claims_the_active_suite( parent_id_hash )
+    print( f"[v2-lineage] parent_id_hash {'refused with 403' if refused else 'dropped'}: caller={_loggable( user_email )} "
+           f"({_loggable( user_id )}) parent={_loggable( parent_id_hash )} reason={reason}" )
+    if refused: raise HTTPException( status_code=403, detail=_refusal_detail( parent_id_hash, reason ) )
     return None, reason
+
+
+def _refusal_detail( parent_id_hash: str, reason: str ) -> dict:
+    """
+    The 403 body for a refused claim on the active suite.
+
+    Ensures:
+        - names the reason word and the claimed id, which the caller sent and /api/busy already publishes
+        - says how a real child proves its lineage; carries no token and no other caller's data
+    """
+    return {
+        "error"          : "parent_id_hash_refused",
+        "reason"         : reason,
+        "parent_id_hash" : parent_id_hash,
+        "message"        : "parent_id_hash names the test-suite job that holds the monopoly slot, and this caller may not claim its "
+                           f"lineage (reason: {reason}). A suite's own child sends the run's {suite_run_token.TOKEN_HEADER} header; "
+                           "an admin, the test account or the parent's owner needs no header.",
+    }
+
+
+PARENT_REFUSED_RESPONSE = { 403: { "description": "parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason" } }
 
 
 def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Optional[ str ] ) -> dict:
@@ -510,7 +570,7 @@ def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Opt
     return { "parent_stamp_dropped": f"{_loggable( parent_id_hash )}:{reason}" }
 
 
-@router.post( "/api/v2/ask", response_model=AskResponse )
+@router.post( "/api/v2/ask", response_model=AskResponse, responses=PARENT_REFUSED_RESPONSE )
 async def v2_ask(
     request       : AskRequest,
     current_user  : dict = Depends( get_current_user ),
@@ -748,7 +808,7 @@ async def transcribe(
     return TranscribeResponse( transcription=text, trace=TranscribeTrace( stt_ms=stt_ms, upload_bytes=len( content ) ) )
 
 
-@router.post( "/api/v2/submit", response_model=AskResponse )
+@router.post( "/api/v2/submit", response_model=AskResponse, responses=PARENT_REFUSED_RESPONSE )
 async def v2_submit(
     request       : SubmitRequest,
     http_request  : Request,

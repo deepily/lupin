@@ -4568,6 +4568,7 @@ Ensures:
 |-------------|-------------|-----------|
 | 200 | Successful Response | [AskResponse](#askresponse)
  |
+| 403 | parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## POST `/api/v2/ask-audio`
@@ -4698,6 +4699,7 @@ Ensures:
 |-------------|-------------|-----------|
 | 200 | Successful Response | [AskResponse](#askresponse)
  |
+| 403 | parent_id_hash names the test-suite job holding the monopoly slot and the caller may not claim its lineage; the body names the reason |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## POST `/api/v2/resume`
@@ -6266,4 +6268,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.08 05:36:18 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.08 10:30:05 by `src/scripts/generate-api-docs.sh`_
