@@ -226,7 +226,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=POLICY_PRO
     Requires:
         - answers is a list of dicts { "id": str, "provides": <anything>, "coverage": <anything> };
           provides is the Noul number and coverage the Score probabilities keyed 0 to 3
-        - expected_ids, failed_ids and flags are as for decide
+        - expected_ids, failed_ids and flags are as for decide; any flag outside the four pipeline flags is dropped
     Ensures:
         - returns the same keys as decide: verdict, cause, causes, shortlist, shortlist_total,
           nearest, doubtful, malformed, missing; rows are { id, provides, coverage, score }
@@ -257,7 +257,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=POLICY_PRO
         rows.append( _provides_row( a ) )
     accounted = { r[ "id" ] for r in rows } | { m[ "id" ] for m in malformed } | failed
     missing   = sorted( expected - accounted )
-    holds     = set( flags )
+    holds     = set( flags ).intersection( CAUSES[ :4 ] )                  # only the four pipeline flags are accepted
     if failed or missing:   holds.add( "CALL_FAILED" )
     if malformed:           holds.add( "MALFORMED_ANSWER" )
     if not rows and not holds.intersection( CAUSES[ :6 ] ): holds.add( "CALL_FAILED" )      # only the four pipeline flags and the two gaps count

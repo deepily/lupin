@@ -275,4 +275,25 @@ def test_nothing_answered_beside_an_unknown_flag_is_still_not_new():
 
 def test_nothing_answered_beside_a_low_confidence_flag_is_still_not_new():
     r = vd.decide_provides( [], [], [], { "LOW_CONFIDENCE" } )
-    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED", "LOW_CONFIDENCE" ] )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "CALL_FAILED" ] )      # the name is not a caller flag, so it is dropped
+
+
+def test_a_low_confidence_caller_flag_beside_a_below_floor_answer_is_dropped_and_the_verdict_is_new():
+    r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { "LOW_CONFIDENCE" } )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "NEW", None, [] )
+
+
+def test_an_all_malformed_sweep_gives_the_malformed_cause_alone():
+    bad = { "id": "x", "provides": True, "coverage": _cov() }
+    r = vd.decide_provides( [ bad ], [ "x" ], [], set() )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "MALFORMED_ANSWER" ] )
+
+
+def test_empty_answers_with_a_pipeline_flag_give_only_that_flag():
+    r = vd.decide_provides( [], [], [], { "INDEX_STALE" } )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "INDEX_STALE" ] )
+
+
+def test_a_caller_cannot_name_a_gap_cause_as_a_flag():
+    r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { "CALL_FAILED", "MALFORMED_ANSWER" } )
+    assert ( r[ "verdict" ], r[ "causes" ] ) == ( "NEW", [] )
