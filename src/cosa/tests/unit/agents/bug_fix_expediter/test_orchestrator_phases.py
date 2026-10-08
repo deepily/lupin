@@ -106,8 +106,13 @@ def _sdk_raise( exc ):
     return _gen
 
 
-def _result_msg():
-    return MagicMock( spec=orch_mod.ResultMessage )
+def _result_msg( is_error=False, subtype="success", result=None, errors=None ):
+    m = MagicMock( spec=orch_mod.ResultMessage )
+    m.is_error = is_error
+    m.subtype  = subtype
+    m.result   = result
+    m.errors   = errors
+    return m
 
 
 def _rate_limit():
@@ -290,6 +295,24 @@ class TestDelegateToLead( unittest.TestCase ):
         with patch.object( orch_mod, "sdk_query", _sdk_raise( RuntimeError( "sdk down" ) ) ):
             out = _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
         self.assertIsNone( out )
+
+    def test_error_result_logs_the_cli_text_and_returns_none( self ):
+        orch = _orch()
+        err  = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                out = _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
+        self.assertIsNone( out )
+        self.assertIn( "Your credit balance is too low", "\n".join( logs.output ) )
+
+    def test_error_result_logs_the_errors_list( self ):
+        orch = _orch()
+        err  = _result_msg( is_error=True, subtype="error_during_execution", errors=[ "tool died" ] )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                _run( orch._delegate_to_lead( vio_mod, "p", options="opts" ) )
+        self.assertIn( "error_during_execution", "\n".join( logs.output ) )
+        self.assertIn( "tool died", "\n".join( logs.output ) )
 
 
 # ===========================================================================
@@ -868,6 +891,16 @@ class TestDelegateToCoder( unittest.TestCase ):
             output, files = _run( orch._delegate_to_coder( vio_mod, "p", _guard(), MagicMock() ) )
         self.assertEqual( output, "patching done" )
         self.assertEqual( files, [ "/x/a.py" ] )         # dup + empty + Read filtered
+
+    def test_error_result_logs_the_cli_text_and_returns_nothing( self ):
+        orch = _orch()
+        orch._build_coder_options = MagicMock( return_value="opts" )
+        err = _result_msg( is_error=True, result="Your credit balance is too low" )
+        with patch.object( orch_mod, "sdk_query", _sdk_stream( err ) ):
+            with self.assertLogs( orch_mod.logger.name, level="ERROR" ) as logs:
+                output, files = _run( orch._delegate_to_coder( vio_mod, "p", _guard(), MagicMock() ) )
+        self.assertEqual( ( output, files ), ( "", [] ) )
+        self.assertIn( "Your credit balance is too low", "\n".join( logs.output ) )
 
     def test_cancellation_breaks_loop( self ):
         orch = _orch()
