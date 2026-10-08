@@ -148,6 +148,58 @@ class TestComposeInterpolatesFromTheEnvironmentItIsGiven( unittest.TestCase ):
         self.assertNotIn( "LUPIN_ROOT", out )
 
 
+# Captured 2026-10-08 from the live dev container (docker 24.0.4) and `docker compose config --format json`,
+# after the 13:48 bounce had recreated it. The 2026-09-15 pair above predates this mount, so it never held one.
+TMPFS_VOLUME_FROM_COMPOSE = { "type": "tmpfs", "target": "/var/lupin/.venv" }
+TMPFS_MOUNT_FROM_INSPECT  = { "Type": "tmpfs", "Source": "", "Destination": "/var/lupin/.venv", "Mode": "", "RW": True, "Propagation": "" }
+
+
+def _pair_with_the_tmpfs_volume():
+    rendered, inspected = _pair()
+    rendered[ "services" ][ SERVICE ][ "volumes" ].append( dict( TMPFS_VOLUME_FROM_COMPOSE ) )
+    inspected[ 0 ][ "Mounts" ].append( dict( TMPFS_MOUNT_FROM_INSPECT ) )
+    return rendered, inspected
+
+
+class TestALongFormTmpfsVolumeIsNotDrift( unittest.TestCase ):
+    """Compose gives a tmpfs volume no source and docker reports an empty one: they agree."""
+
+    def test_the_pair_with_the_tmpfs_volume_has_no_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_NO_DRIFT, [ ] ) )
+
+    def test_the_cli_exits_zero_on_it( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        with patch( "sys.stdout" ):
+            self.assertEqual( probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) ), probe_module.EXIT_NO_DRIFT )
+
+    def test_the_fragments_really_are_the_shape_that_broke_it( self ):
+        self.assertNotIn( "source", TMPFS_VOLUME_FROM_COMPOSE )
+        self.assertEqual( TMPFS_MOUNT_FROM_INSPECT[ "Source" ], "" )
+
+    def test_a_tmpfs_volume_the_container_lacks_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        inspected[ 0 ][ "Mounts" ] = [ m for m in inspected[ 0 ][ "Mounts" ] if m[ "Destination" ] != "/var/lupin/.venv" ]
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.venv" ] ) )
+
+    def test_a_tmpfs_mount_compose_no_longer_declares_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        rendered[ "services" ][ SERVICE ][ "volumes" ].pop()
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.venv" ] ) )
+
+    def test_a_tmpfs_mount_moved_to_another_target_is_still_drift( self ):
+        rendered, inspected = _pair_with_the_tmpfs_volume()
+        inspected[ 0 ][ "Mounts" ][ -1 ][ "Destination" ] = "/var/lupin/.other"
+        code, fields = _verdict( rendered, inspected )
+        self.assertEqual( ( code, sorted( fields ) ), ( probe_module.EXIT_DRIFT, [ "mount /var/lupin/.other", "mount /var/lupin/.venv" ] ) )
+
+    def test_whatever_source_docker_reports_for_a_tmpfs_mount_it_reads_as_empty( self ):
+        container = { "Mounts": [ dict( TMPFS_MOUNT_FROM_INSPECT, Source="/odd" ) ] }
+        self.assertEqual( probe_module.inspect_mounts( container ), { ( "tmpfs", "", "/var/lupin/.venv", False ) } )
+        service = { "volumes": [ dict( TMPFS_VOLUME_FROM_COMPOSE, source="/odd" ) ] }
+        self.assertEqual( probe_module.compose_mounts( service, { } ), { ( "tmpfs", "", "/var/lupin/.venv", False ) } )
+
+
 class TestEachKindOfDriftIsNamed( unittest.TestCase ):
 
     def test_a_changed_tmpfs_option_is_drift_the_mp3_upload_case( self ):

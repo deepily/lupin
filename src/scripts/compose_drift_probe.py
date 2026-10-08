@@ -89,6 +89,8 @@ def compose_mounts( service, volume_names ):
 
     Ensures:
         - read_only defaults to False, as compose does
+        - a tmpfs mount has no source: compose omits it, docker reports an empty string. Both read as
+          "", so a tmpfs mount never reads as drift on that difference alone
         - a named volume's source is the name docker actually created. The service says
           "claude-creds-dev"; docker calls it "lupin_claude-creds-dev", with the project
           prefix. Comparing the short name, as was done before this mapping, reported drift on
@@ -98,6 +100,7 @@ def compose_mounts( service, volume_names ):
     for v in service.get( "volumes" ) or [ ]:
         source = v.get( "source" )
         if v[ "type" ] == "volume": source = volume_names.get( source, source )
+        if v[ "type" ] == "tmpfs":  source = ""
         mounts.add( ( v[ "type" ], source, v[ "target" ], bool( v.get( "read_only", False ) ) ) )
     return mounts
 
@@ -111,10 +114,13 @@ def inspect_mounts( container ):
 
     Ensures:
         - a named volume is keyed by its Name, which is what compose calls its source
+        - a tmpfs mount is keyed by an empty source, whatever docker reports for it
     """
     mounts = set()
     for m in container.get( "Mounts" ) or [ ]:
-        source = m[ "Name" ] if m[ "Type" ] == "volume" else m[ "Source" ]
+        if   m[ "Type" ] == "volume": source = m[ "Name" ]
+        elif m[ "Type" ] == "tmpfs":  source = ""
+        else:                         source = m[ "Source" ]
         mounts.add( ( m[ "Type" ], source, m[ "Destination" ], not m[ "RW" ] ) )
     return mounts
 
