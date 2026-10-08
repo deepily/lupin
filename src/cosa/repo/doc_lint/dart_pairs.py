@@ -33,6 +33,8 @@ OWNER_REGEX  = re.compile( r"^(?:(?:abstract|base|sealed|final|interface|mixin)\
 UNNAMED_EXTENSION = re.compile( r"^extension\s+on\b" )
 OPERATOR_REGEX = re.compile( r"\boperator\s*([^\s(]+)" )
 LIBRARY_REGEX = re.compile( r"^(?:library|part|import|export)\b" )
+DIRECTIVE_REGEX = re.compile( r"^(?:[a-z][\w-]*:(?!//)|dart format (?:on|off)\b)" )
+MARKER_REGEX = re.compile( r"^[A-Z]{2,}(?:\([^)]*\))?(?::|\s*$)" )
 HEAD_STOP    = re.compile( r"[({}=;,]|=>" )
 MODIFIERS    = frozenset( "static final const late external abstract covariant factory async sync base sealed interface".split() )
 MAX_HEAD_LINES = 6
@@ -302,6 +304,32 @@ def declarations( source ):
     return out
 
 
+def comment_prose( run ):
+    """
+    Keep the prose of a run of // lines and drop the tool directives and task markers in it.
+
+    Requires:
+        - run is a list of // comment lines
+
+    Ensures:
+        - a line is a directive when, after the markers, it is a lowercase word glued to a colon (not a URL)
+          or a dart format on or off switch; it is dropped wherever it sits
+        - a line is a marker when it is a word of two or more capitals, an optional owner in parentheses, and
+          a colon or the end of the line; it and every later line of the run are dropped
+        - returns the remaining lines, markers removed and normalized by block_text, or an empty string
+
+    Raises:
+        - nothing
+    """
+    kept = []
+    for line in run:
+        text = re.sub( r"^\s*//\s?", "", line )
+        if MARKER_REGEX.match( text.strip() ): break
+        if DIRECTIVE_REGEX.match( text.strip() ): continue
+        kept.append( text )
+    return block_text( "\n".join( kept ) )
+
+
 def plain_comments( source ):
     """
     Map each declaration to the plain // comment directly above it.
@@ -313,6 +341,7 @@ def plain_comments( source ):
         - returns { symbol: text } for a run of // lines (not ///) that ends on the line just above the
           declaration or just above its annotations; a blank line in between means no comment
         - text has the // markers and one leading space removed and is normalized by block_text
+        - tool directives and task markers are not text (see comment_prose); a run of nothing else is no comment
         - a run above anything that is not a member-level declaration is ignored
 
     Raises:
@@ -331,7 +360,8 @@ def plain_comments( source ):
         following = lines[ end + 1 ].strip() if end + 1 < len( lines ) else ""
         if following and not following.startswith( "///" ):
             symbol = by_line.get( _skip_annotations( lines, end + 1 ) )
-            if symbol is not None: out.setdefault( symbol, block_text( "\n".join( re.sub( r"^\s*//\s?", "", line ) for line in lines[ index : end + 1 ] ) ) )
+            prose  = comment_prose( lines[ index : end + 1 ] )
+            if symbol is not None and prose: out.setdefault( symbol, prose )
         index = end + 1
     return out
 

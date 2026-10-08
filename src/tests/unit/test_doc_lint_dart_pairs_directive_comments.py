@@ -22,7 +22,7 @@ def _member( *comment_lines ):
     return "class A {\n" + "".join( f"  // {line}\n" for line in comment_lines ) + "  void _h() {}\n}\n"
 
 
-@pytest.mark.parametrize( "line", [ "coverage:ignore-line", "dart format off", "HACK(rick): remove", "expected_lint: avoid_print", "ignore_for_file: type=lint" ] )
+@pytest.mark.parametrize( "line", [ "coverage:ignore-line", "dart format off", "HACK(rick): remove", "expected_lint: avoid_print", "ignore_for_file: type=lint", "dart format on", "TODO" ] )
 def test_a_directive_or_marker_alone_is_no_comment( line ):
     assert dp.plain_comments( _member( line ) ) == {}
 
@@ -35,7 +35,7 @@ def test_a_task_marker_ends_the_text_with_its_continuation_lines():
     assert dp.plain_comments( _member( "Helper for the pane.", "TODO(rick): later,", "once the repo lands." ) ) == { "A._h": "Helper for the pane." }
 
 
-@pytest.mark.parametrize( "line", [ "Optional and used only for the roster.", "Why: avoids a rebuild.", "HTTP retries stay bounded.", "http://example.com/spec explains it." ] )
+@pytest.mark.parametrize( "line", [ "Optional and used only for the roster.", "Why: avoids a rebuild.", "HTTP retries stay bounded.", "http://example.com/spec explains it.", "A: the first case." ] )
 def test_control_prose_is_still_read_as_the_new_text( line ):
     assert dp.plain_comments( _member( line ) ) == { "A._h": line }
 
