@@ -15,8 +15,8 @@ URL = "postgresql+psycopg2://alice:pw@db.example:5433/postgres"
 
 
 class _Orig( Exception ):
-    def __init__( self, pgcode ):
-        super().__init__( "boom" )
+    def __init__( self, pgcode, message="boom" ):
+        super().__init__( message )
         self.pgcode = pgcode
 
 
@@ -49,38 +49,100 @@ class _Factory:
 def _programming( code ): return ProgrammingError( "stmt", { }, _Orig( code ) )
 
 
+def _operational( code, message="boom" ): return OperationalError( "stmt", { }, _Orig( code, message ) )
+
+
+def _outcome( call ):
+    """The exception type the call ends in, so a failure can be told from a skip."""
+    try:
+        call()
+    except BaseException as error:
+        return type( error )
+    return None
+
+
 def test_the_clone_statement_names_the_template_and_returns_the_new_url():
     factory = _Factory()
-    url = td.create_from_template( URL, "scratch_one", factory )
+    url = td.create_from_template( URL, "scratch_one", factory, use_template=True )
     assert factory.sql() == [ "CREATE DATABASE scratch_one TEMPLATE lupin_template_vector" ]
     assert url == "postgresql+psycopg2://alice:pw@db.example:5433/scratch_one"
     assert factory.engines[ 0 ].kwargs == { "isolation_level": "AUTOCOMMIT" }
     assert factory.engines[ 0 ].disposed
 
 
+def test_without_a_test_role_the_database_is_a_plain_create_as_before():
+    factory = _Factory()
+    td.create_from_template( URL, "scratch_one", factory, use_template=False )
+    assert factory.sql() == [ "CREATE DATABASE scratch_one" ]
+
+
+def test_the_mode_follows_whether_a_test_role_exists( monkeypatch ):
+    monkeypatch.setattr( dp, "clone_login", lambda: None )
+    assert td.uses_template() is False
+    first = _Factory()
+    td.create_from_template( URL, "scratch_one", first )
+    assert first.sql() == [ "CREATE DATABASE scratch_one" ]
+    monkeypatch.setattr( dp, "clone_login", lambda: ( "lupin_test", "tp" ) )
+    assert td.uses_template() is True
+    second = _Factory()
+    td.create_from_template( URL, "scratch_one", second )
+    assert second.sql() == [ "CREATE DATABASE scratch_one TEMPLATE lupin_template_vector" ]
+
+
+def test_throwaway_database_passes_the_mode_on():
+    factory = _Factory()
+    with td.throwaway_database( URL, "scratch_one", factory, use_template=False ): pass
+    assert factory.sql()[ 0 ] == "CREATE DATABASE scratch_one"
+
+
 def test_a_missing_template_fails_loudly_and_never_skips():
-    with pytest.raises( pytest.fail.Exception ) as caught:
-        td.create_from_template( URL, "scratch_one", _Factory( _programming( "3D000" ) ) )
-    assert "db_roles --grants-only --apply" in str( caught.value )
+    outcome = _outcome( lambda: td.create_from_template( URL, "scratch_one", _Factory( _programming( "3D000" ) ), use_template=True ) )
+    assert outcome is pytest.fail.Exception, f"expected a failure, got {outcome}"
+    with pytest.raises( pytest.fail.Exception, match="db_roles --grants-only --apply" ):
+        td.create_from_template( URL, "scratch_one", _Factory( _programming( "3D000" ) ), use_template=True )
 
 
 def test_a_login_that_may_not_create_databases_fails_loudly():
-    with pytest.raises( pytest.fail.Exception ) as caught:
-        td.create_from_template( URL, "scratch_one", _Factory( _programming( "42501" ) ) )
-    assert "may not create databases" in str( caught.value )
+    call = lambda: td.create_from_template( URL, "scratch_one", _Factory( _programming( "42501" ) ), use_template=True )
+    assert _outcome( call ) is pytest.fail.Exception
+    with pytest.raises( pytest.fail.Exception, match="may not create databases" ): call()
+
+
+@pytest.mark.parametrize( "error", [
+    _operational( None, 'FATAL:  password authentication failed for user "lupin_test"' ),
+    _operational( "28P01" ),
+    _operational( None, 'FATAL:  no pg_hba.conf entry for host "x"' ),
+    _operational( None, 'FATAL:  role "lupin_test" is not permitted to log in' ),
+] )
+def test_a_refused_test_login_fails_and_never_skips( error ):
+    call = lambda: td.create_from_template( URL, "scratch_one", _Factory( error ), use_template=True )
+    assert _outcome( call ) is pytest.fail.Exception
+    with pytest.raises( pytest.fail.Exception, match="LUPIN_TEST_DB_PASSWORD" ): call()
+
+
+def test_a_busy_template_fails_and_never_skips():
+    call = lambda: td.create_from_template( URL, "scratch_one", _Factory( _operational( "55006", "source database is being accessed" ) ), use_template=True )
+    assert _outcome( call ) is pytest.fail.Exception
+    with pytest.raises( pytest.fail.Exception, match="in use by another session" ): call()
+
+
+def test_a_connection_failure_still_reaches_the_site_so_it_can_skip():
+    error = _operational( None, 'connection to server at "127.0.0.1", port 1 failed: Connection refused' )
+    assert _outcome( lambda: td.create_from_template( URL, "scratch_one", _Factory( error ), use_template=True ) ) is OperationalError
+
+
+def test_without_a_test_role_every_error_passes_through_unchanged():
+    for error in ( _programming( "3D000" ), _operational( "28P01", "password authentication failed" ), _operational( "55006" ) ):
+        with pytest.raises( type( error ) ) as caught:
+            td.create_from_template( URL, "scratch_one", _Factory( error ), use_template=False )
+        assert caught.value is error
 
 
 def test_any_other_database_error_passes_through_unchanged():
     error = _programming( "XX000" )
     with pytest.raises( ProgrammingError ) as caught:
-        td.create_from_template( URL, "scratch_one", _Factory( error ) )
+        td.create_from_template( URL, "scratch_one", _Factory( error ), use_template=True )
     assert caught.value is error
-
-
-def test_an_unreachable_server_reaches_the_site_so_it_can_skip():
-    error = OperationalError( "stmt", { }, _Orig( None ) )
-    with pytest.raises( OperationalError ):
-        td.create_from_template( URL, "scratch_one", _Factory( error ) )
 
 
 @pytest.mark.parametrize( "name", [ "Upper", "has-dash", "semi;colon", "" ] )
@@ -102,7 +164,7 @@ def test_the_drop_closes_connections_then_drops_with_a_bound_name():
 def test_the_throwaway_database_drops_when_the_body_raises():
     factory = _Factory()
     with pytest.raises( RuntimeError ):
-        with td.throwaway_database( URL, "scratch_one", factory ) as url:
+        with td.throwaway_database( URL, "scratch_one", factory, use_template=True ) as url:
             assert url.endswith( "/scratch_one" )
             raise RuntimeError( "body failed" )
     assert factory.sql()[ -1 ] == "DROP DATABASE IF EXISTS scratch_one"
@@ -111,7 +173,7 @@ def test_the_throwaway_database_drops_when_the_body_raises():
 def test_a_failed_clone_drops_nothing():
     factory = _Factory( _programming( "3D000" ) )
     with pytest.raises( pytest.fail.Exception ):
-        with td.throwaway_database( URL, "scratch_one", factory ): pass
+        with td.throwaway_database( URL, "scratch_one", factory, use_template=True ): pass
     assert not any( "DROP" in s for s in factory.sql() )
 
 
@@ -177,12 +239,19 @@ def test_the_login_is_none_without_a_password_anywhere( monkeypatch, tmp_path ):
 
 
 def test_the_login_never_changes_the_environment( monkeypatch, tmp_path ):
-    monkeypatch.delenv( "LUPIN_TEST_DB_USER", raising=False )
-    monkeypatch.delenv( "LUPIN_TEST_DB_PASSWORD", raising=False )
-    monkeypatch.delenv( "DB_PASSWORD", raising=False )
-    dp.clone_login( _env( tmp_path, "LUPIN_TEST_DB_PASSWORD=filep\n" ) )
     import os
-    assert "DB_PASSWORD" not in os.environ and "LUPIN_TEST_DB_PASSWORD" not in os.environ
+    root = _env( tmp_path, "LUPIN_TEST_DB_USER=fileu\nLUPIN_TEST_DB_PASSWORD=filep\nPOSTGRES_PASSWORD=super\n" )
+    states = [ { }, { "LUPIN_TEST_DB_PASSWORD": "envp" }, { "LUPIN_TEST_DB_USER": "envu" }, { "DB_USER": "x", "DB_PASSWORD": "y" } ]
+    for state in states:
+        for key in ( "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD", "DB_USER", "DB_PASSWORD" ): monkeypatch.delenv( key, raising=False )
+        for key, value in state.items(): monkeypatch.setenv( key, value )
+        before = dict( os.environ )
+        dp.clone_login( root )
+        assert dict( os.environ ) == before, f"clone_login changed the environment under {state}"
+    for key in ( "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" ): monkeypatch.delenv( key, raising=False )
+    before = dict( os.environ )
+    dp.clone_login( str( tmp_path / "nowhere" ) )
+    assert dict( os.environ ) == before
 
 
 def test_the_login_default_root_is_the_project_root( monkeypatch ):
