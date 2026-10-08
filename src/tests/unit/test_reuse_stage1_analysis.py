@@ -1599,7 +1599,47 @@ def test_a_second_single_run_that_another_model_answered_leaves_the_noise_floor_
     s1  = _arm( "single1", _base() )
     s2  = _arm( "single2", _base(), stop_reason="model_mismatch", state="incomplete" )
     nf  = an.noise_floor( an.read_stage( [ s1, s2 ] ) )
-    assert nf == { "measured": None, "floor": None, "max": None, "n": 0, "state": "invalid" }
+    assert nf == { "measured": None, "floor": None, "max": None, "n": 0, "state": "invalid", "left_out": [ "s1-q1-single2" ] }
+
+
+# --- R11: the pooled floor leaves out the arms another model answered, and does not void the rest ------------------------------------------
+
+def _q2_first_single_from_another_model( question=2 ):
+    """Ensures: returns two single runs, the first answered by another model."""
+    return [ _arm( "single1", _base(), question=question, stop_reason="model_mismatch", state="incomplete" ), _arm( "single2", _base(), question=question ) ]
+
+
+def test_a_later_question_whose_first_single_run_another_model_answered_leaves_question_1s_noise_floor_intact_and_names_the_arm_left_out():
+    nf = an.noise_floor( an.read_stage( _question( 1, noise=0.04 ) + _q2_first_single_from_another_model() ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "measured" ], nf[ "left_out" ] ) == ( "ok", 120, 0.04, [ "s1-q2-single1" ] )
+
+
+def test_every_question_with_an_arm_left_out_is_left_out_of_the_pool_and_a_question_with_none_is_not():
+    nf = an.noise_floor( an.read_stage( _question( 1, noise=0.0 ) + _q2_first_single_from_another_model( 2 ) + _q2_first_single_from_another_model( 3 ) ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "left_out" ] ) == ( "ok", 120, [ "s1-q2-single1", "s1-q3-single1" ] )
+
+
+def test_the_floor_with_nothing_left_out_names_no_arm():
+    assert an.noise_floor( an.read_stage( _question( noise=0.03 ) ) )[ "left_out" ] == []
+
+
+def test_the_floor_stays_inconclusive_when_a_valid_question_lacks_a_single_run_even_with_an_arm_left_out():
+    recs = [ r for r in _question( 1 ) if r[ "arm" ] != "single2" ] + _q2_first_single_from_another_model()
+    nf   = an.noise_floor( an.read_stage( recs ) )
+    assert ( nf[ "state" ], nf[ "n" ], nf[ "left_out" ] ) == ( "inconclusive", 0, [ "s1-q2-single1" ] )
+
+
+def test_the_floor_line_says_which_arms_were_left_out_and_says_nothing_when_none_were():
+    left  = an.render( an.build_report( _question( 1, noise=0.04 ) + _q2_first_single_from_another_model(), canaries=[] ) )
+    whole = an.render( an.build_report( _question( 1, noise=0.04 ), canaries=[] ) )
+    assert "noise floor: ok, measured 0.04, used 0.04 over 120 entries; left out: s1-q2-single1" in left
+    assert "noise floor: ok, measured 0.04, used 0.04 over 120 entries\n" in whole and "left out" not in whole
+
+
+def test_a_mismatch_in_a_later_question_leaves_the_decision_a_stop_and_ask_though_the_floor_survives():
+    rec = _mismatch_arm( question=2, run_name="s1-q2-single1" )
+    rep = an.build_report( _question( 1, noise=0.04 ) + [ rec ], canaries=[] )
+    assert rep[ "decision" ].startswith( "stop and ask: s1-q2-single1 was answered by" ) and rep[ "evaluate" ][ "noise_floor" ][ "state" ] == "ok"
 
 
 def test_the_decision_names_the_arm_and_the_model_that_answered_and_stops_and_asks():
