@@ -233,6 +233,14 @@ def test_ties_go_to_the_highest_reuse_cut_then_the_highest_threshold_then_the_lo
     assert wide[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.2, "coverage": 0.3 } and wide[ "tied" ] == 4
 
 
+def test_the_reuse_cut_is_ranked_ahead_of_the_threshold_when_the_higher_cut_has_the_lower_threshold():
+    rows = [ _row( "m", "t", True, 0.55, 0.1 ), _row( "m", "n", False, 0.2, 0.1 ) ]                # one twin with low coverage: 0.9/0.6 drops it, the other three keep it
+    grid = { "reuse": ( 0.5, 0.9 ), "threshold": ( 0.4, 0.6 ), "floor": ( 0.3, ), "coverage": ( 0.5, ) }
+    r    = ft.fit_policy( rows, HALVES, 0.0, grid )
+    assert sorted( ( t[ "policy" ][ "reuse" ], t[ "policy" ][ "threshold" ], t[ "figures" ][ "twins_on_shortlist" ] ) for t in r[ "table" ] ) == [ ( 0.5, 0.4, 1 ), ( 0.5, 0.6, 1 ), ( 0.9, 0.4, 1 ), ( 0.9, 0.6, 0 ) ]
+    assert r[ "tied" ] == 3 and r[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.3, "coverage": 0.5 }      # threshold-first would pick 0.5 and 0.6
+
+
 def test_a_unique_best_point_reports_a_tie_of_one():
     assert ft.fit_policy( _opt_rows(), HALVES, 0.0, GRID )[ "tied" ] == 1
 
