@@ -38,9 +38,10 @@ def _two_members():
 def test_the_constants_and_the_default_grid_are_the_rulings():
     assert ft.FORMAT == "stage2-fit-1"
     assert ft.SHORTLIST == 10                                  # the shortlist size is not fitted
-    assert ft.GRID == { "reuse": ( 0.5, 0.6, 0.7, 0.8, 0.9 ), "threshold": ( 0.3, 0.4, 0.5, 0.6, 0.7 ),
+    assert ft.GRID == { "reuse": ( 0.5, 0.6, 0.7, 0.8, 0.9 ), "threshold": ( 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 ),
                         "floor": ( 0.1, 0.2, 0.3, 0.4 ), "coverage": ( 0.3, 0.5, 0.7 ) }
-    assert ft.OLD_CUTS == ( 0.3, 0.4, 0.5, 0.6, 0.7 )
+    assert ft.OLD_CUTS == ( 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7 )
+    assert "widened" in ft.GRID_NOTE and "0.05" in ft.GRID_NOTE and "0.1" in ft.GRID_NOTE
     assert ft.BINS == 10
 
 
@@ -305,6 +306,40 @@ def test_the_text_report_shows_the_rate_the_choice_both_halves_and_the_placehold
     assert "false-reuse rate allowed: 0.5" in text and "chosen on the fit half" in text and "same policy on the check half" in text
     assert "reliability, fit half" in text and "bin 0.9 to 1.0" in text and "groups: fit 1, check 1" in text
     assert "fitted on overlapping data" not in text
+
+
+# --- the grid edge ---------------------------------------------------------------------------------------------------------
+
+def test_a_chosen_value_on_the_edge_of_its_grid_is_flagged_and_a_single_value_axis_never_is():
+    chosen = { "reuse": 0.9, "threshold": 0.4, "floor": 0.3, "coverage": 0.5 }
+    assert ft.edges( chosen, GRID ) == [ { "key": "reuse", "value": 0.9, "edge": "highest" }, { "key": "threshold", "value": 0.4, "edge": "lowest" } ]
+    inner = { "reuse": 0.7, "threshold": 0.6, "floor": 0.3, "coverage": 0.5 }
+    assert ft.edges( inner, { **GRID, "reuse": ( 0.5, 0.7, 0.9 ), "threshold": ( 0.4, 0.6, 0.8 ) } ) == []
+    assert ft.edges( { "cut": 0.05 }, { "cut": ( 0.05, 0.1, 0.2 ) } ) == [ { "key": "cut", "value": 0.05, "edge": "lowest" } ]
+
+
+def test_the_report_carries_the_grid_and_the_edges_and_the_text_prints_both_with_the_grid_note():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rep   = ft.report( _opt_rows() + [ _row( "k", "t", True, 0.9 ) ], split, 0.0, GRID )
+    assert rep[ "grid" ] == GRID and [ e[ "key" ] for e in rep[ "edges" ] ] == [ "reuse", "threshold" ]
+    text = ft.render( rep )
+    assert "grid: reuse 0.7 to 0.9" in text and "threshold 0.4 to 0.6" in text and ft.GRID_NOTE in text
+    assert "warning: the chosen reuse 0.9 is the highest value of its grid" in text and "warning: the chosen threshold 0.4 is the lowest value of its grid" in text
+
+
+def test_the_text_has_no_edge_warning_when_the_choice_is_inside_its_grid():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rows  = _opt_rows() + [ _row( "k", "t", True, 0.9 ) ]
+    rep   = ft.report( rows, split, 0.5, { "reuse": ( 0.5, 0.7, 0.9 ), "threshold": ( 0.1, 0.4, 0.8 ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
+    assert rep[ "edges" ] == [] and "warning" not in ft.render( rep ) and ft.GRID_NOTE in ft.render( rep )
+
+
+def test_the_old_report_carries_its_cuts_as_the_grid_and_flags_a_choice_on_their_edge():
+    rows = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.1 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rep  = ft.old_report( rows, split, 0.5, cuts = ( 0.2, 0.4, 0.6 ) )
+    assert rep[ "grid" ] == { "cut": ( 0.2, 0.4, 0.6 ) } and rep[ "chosen" ] == { "cut": 0.2 } and rep[ "edges" ] == [ { "key": "cut", "value": 0.2, "edge": "lowest" } ]
+    assert "grid: cut 0.2 to 0.6" in ft.render( rep ) and "warning: the chosen cut 0.2 is the lowest value of its grid" in ft.render( rep )
 
 
 # --- the dry run on the old run's real rows ------------------------------------------------------------------------------
