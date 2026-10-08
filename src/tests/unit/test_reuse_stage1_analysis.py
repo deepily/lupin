@@ -1504,6 +1504,36 @@ def test_an_old_shape_arm_beside_an_unclean_single_run_says_not_measured():
     assert "old shape, question 1: not measured" in an.render( an.build_report( recs + [ old ], canaries=[] ) )
 
 
+def _empty_old_arm( tmp_path, question=1 ):
+    """Ensures: returns the old-shape arm the real reader makes from a cache with no answers."""
+    return an.old_shape_arm( question, tmp_path, "a need", [ { "id": f"m.{c}", "sig": "()", "doc": f"does {c}" } for c in "abc" ] )
+
+
+def test_an_old_shape_arm_with_no_cached_answers_is_named_and_says_so_in_both_lines_and_is_not_called_none(tmp_path):
+    text = an.render( an.build_report( _complete() + [ _empty_old_arm( tmp_path ) ], canaries=[] ) )
+    assert "question 1 old: no cached answers" in text and "not clean: question 1 old is inconclusive (no cached answers)" in text
+    assert "not clean: None" not in text and "stop reason None" not in text and "question 1 old: lost" not in text
+
+
+def test_each_question_names_its_own_old_shape_arm_in_the_not_clean_lines(tmp_path):
+    text = an.render( an.build_report( _complete( 1 ) + _complete( 2 ) + [ _empty_old_arm( tmp_path, 1 ), _empty_old_arm( tmp_path, 2 ) ], canaries=[] ) )
+    assert "not clean: question 1 old is inconclusive" in text and "not clean: question 2 old is inconclusive" in text
+
+
+def test_a_partly_cached_old_shape_arm_keeps_its_lost_count_and_names_the_arm_with_the_stop_reason_none(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" }, { "id": "m.b", "sig": "()", "doc": "does b" } ]
+    body    = rt.build_request( "a need", rt.entry_text( entries[ 0 ] ) )
+    rt.JevCache( tmp_path ).put( rt.request_hash( body ), { "answers": { "fit": { "choice": "x", "confidence": 1.0, "probabilities": { "reuse": 0.8, "extend": 0.1, "unrelated": 0.1 }, "type": "choice" } }, "model": "jev-1.13.0" } )
+    text = an.render( an.build_report( _complete() + [ an.old_shape_arm( 1, tmp_path, "a need", entries ) ], canaries=[] ) )
+    assert "question 1 old: lost 1 of limit 0, stop reason none" in text and "not clean: question 1 old is inconclusive (stop reason none)" in text and "no cached answers" not in text
+
+
+def test_a_named_arm_that_is_not_clean_with_no_stop_reason_prints_the_stop_reason_as_none():
+    bad = _arm( "pack50", _base(), size=50, state="incomplete" ); bad[ "answers" ] = bad[ "answers" ][ 4: ]
+    assert "not clean: s1-q1-pack50 is inconclusive (stop reason none)" in an.render( an.build_report( [ r for r in _complete() if r[ "arm" ] != "pack50" ] + [ bad ], canaries=[] ) )
+
+
 def test_the_report_prints_each_questions_cost_and_the_mean_when_it_has_one():
     text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
     assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text and "cost per search: mean $0.063" in text
