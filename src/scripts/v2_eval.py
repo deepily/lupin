@@ -1635,8 +1635,7 @@ def run_pass(
                 f"cold pass. The integration test clears it itself through clean_v2_snapshot_store "
                 f"(its cold_v2_store fixture), so a run that did not go through that fixture started "
                 f"from whatever the last run left. Clear it with that function, never by hand: "
-                f"do NOT hand-truncate the test DB. The step-13 cache dump is a separate step "
-                f"that covers the dev store only."
+                f"do NOT hand-truncate the test DB. The step-13 cache dump is a separate step."
             )
     return records
 

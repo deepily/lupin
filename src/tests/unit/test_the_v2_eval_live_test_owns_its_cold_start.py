@@ -46,11 +46,18 @@ def test_the_live_test_asks_for_the_cold_store_fixture():
     assert arguments == [ "cold_v2_store" ], arguments
 
 
-def test_the_fixture_clears_through_the_helper_and_the_helper_calls_the_primitive():
-    fixture = _function( "cold_v2_store" )
-    assert "_clear_v2_store" in ast.dump( fixture ), "the fixture no longer calls the helper"
-    helper = ast.dump( _function( "_clear_v2_store" ) )
-    assert "clean_v2_snapshot_store" in helper, "the helper no longer calls the primitive"
+def test_the_fixture_returns_the_result_of_calling_the_helper():
+    """A fixture that only names the helper clears nothing, so look for the call."""
+    returns = [ n for n in ast.walk( _function( "cold_v2_store" ) ) if isinstance( n, ast.Return ) ]
+    assert len( returns ) == 1, returns
+    value = returns[ 0 ].value
+    assert isinstance( value, ast.Call ) and isinstance( value.func, ast.Name ) and value.func.id == "_clear_v2_store", ast.dump( value )
+
+
+def test_the_helper_calls_the_primitive():
+    calls = [ n for n in ast.walk( _function( "_clear_v2_store" ) )
+              if isinstance( n, ast.Call ) and isinstance( n.func, ast.Attribute ) and n.func.attr == "clean_v2_snapshot_store" ]
+    assert len( calls ) == 1, "the helper no longer calls the primitive"
 
 
 def test_the_helper_runs_the_primitive_on_a_connection_of_the_process_engine( monkeypatch ):

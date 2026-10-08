@@ -1699,6 +1699,7 @@ def test_the_cold_abort_message_names_the_remedy_and_forbids_a_hand_truncate():
     assert "clean_v2_snapshot_store" in message
     assert "hand-truncate" in message
     assert "cannot clear it" not in message, "the message must not say the harness cannot clear the store"
+    assert "dev store only" not in message, "the dump takes --db dev, test or both; the message must not narrow it"
 
 
 def test_allow_warm_cold_suppresses_the_early_abort_too():
