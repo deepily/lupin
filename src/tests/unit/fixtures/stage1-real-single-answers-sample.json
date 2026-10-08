@@ -1,0 +1,2416 @@
+{
+ "source": "the 7,705 single-entry answers the live check wrote to projects-data/lupin/reuse-review/jev-cache at 15:34 EDT 2026-10-07 (receipt 949a66030e8df21a, model jev-1.13.0, old three-way question), read through reuse_tools.parse_answer",
+ "ids": "each id is the answer's request_hash (the cache file's key); the cache does not store the entry id",
+ "total_answers": 7705,
+ "malformed": 0,
+ "in_band_035_065": 33,
+ "in_band_040_060": 15,
+ "overlap_at_or_above_0_5": 47,
+ "sha256_of_all_hash_overlap_pairs": "872b853c23639ebbc2f2806dd2e73df5daf073a31d88f0a628d094f24fe68242",
+ "sample": {
+  "size": 300,
+  "method": "every in-band answer plus 267 others drawn with random.Random(20261007) from the rest, sorted by id"
+ },
+ "answers": [
+  {
+   "id": "008655c1e8de42b7ae79e189ff32ee6ff21ec497",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "00c2cd56f8b0d05a744d35ccb3c36ac151b3c72c",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "01a5cc3778dd795c97ca38746ae9d1aa28a3e8b8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0396274ed6efc5999a5a67935ec0430fb856039d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "03ce14195556ce05d1a83340b47978cacee8bd92",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "04ad0cbd07739d4c48626b92c17744094883e6a4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0742ab3e0d59eda51d9d87b608cc5a1dbb6d6465",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0785e9c97c14e60afc7b72e676eb2af441245e64",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "08859080e5a62200b7b26357faa686dd663bcfb4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "089f44240f3de693fa251347967bffddf1997fbc",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "09e3e3979704cec6df1343106431c671ad9773b1",
+   "probabilities": {
+    "extend": 0.04,
+    "reuse": 0.0,
+    "unrelated": 0.96
+   }
+  },
+  {
+   "id": "0a30208f1fad20620343aba7145763a85fdc0443",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0af5070740ea22bb2f02041ccd9d8e0cc00e0948",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0d3cbd26af14c89e47c1692e703ac941df32d9b5",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0d639831e52eab3aac39494103b9553150694ea5",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0d7555e9c96b72f3a85def233c14f322359096eb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0d7eddc5400fac2b44aa366608e9a745cd1476d0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0d8c08d309befc0b6e4e2936a0f2fcf266ac8fe4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0e1870e985c03937aa1cde3020e6e33dc70914c1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0ea86dde97be816b3e13d48c3d9164ba73bdb3a4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "0fa2e79074cd6cc93952935739f3b506fd48f8bb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "101a964f3b54f4ae7d697a345451b23f76dd7530",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1025f8b03fd06bd6886f08d3d3faba925ab5e8f7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "10e28dd7454811ea804ff07111a658877d56147d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "110ee7ac933d80da452d1da4d5331c96cf17c1d4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "111b1e9bbf283a0edc080412859a3a385526dd47",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "11745995ba5666c3f9122f84d43c821a2ee8b350",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "11ad2987ad16aac44608480374d11d2a25115b19",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1386a9273b07a30be686cbadf83a6bf84f9c581d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "13dd4096e94a58ac7826e0eb3bccf9e532972028",
+   "probabilities": {
+    "extend": 0.43,
+    "reuse": 0.05,
+    "unrelated": 0.52
+   }
+  },
+  {
+   "id": "1453183d34a81f1287051b92299a436b62a7ccf1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "14d2c68609667b09458cddbe8f781ed4ae2a4763",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "176a3c983d530ee4f8180a74e7013816cac126b6",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "17b002f792c84e16e2caa22b52fcac18748c140b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "18d6a2442afae74b30bc25c2e9697c00ca4a7ef6",
+   "probabilities": {
+    "extend": 0.02,
+    "reuse": 0.0,
+    "unrelated": 0.98
+   }
+  },
+  {
+   "id": "1a01065f0b5c2dd01e4fb782e7932f317cb72791",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1b2d4ff715e505430c4a16a7dc3e436dad0ed5c6",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1b48cbe62b615354bbe78c9a777340e5a3f7a7e9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1b9f4a2910ff863c0cc552b6e7ea65cf0c3ad7c8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1bd7acf9a1fae4fb9c59927fcc2dd142f1b6c702",
+   "probabilities": {
+    "extend": 0.42,
+    "reuse": 0.06,
+    "unrelated": 0.52
+   }
+  },
+  {
+   "id": "1d1f8409dda6a479a8c8a3e3cb3e4e0b8ea8cdee",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "1d9fbfaf4e01e8f927cb64ecc194d21f04bdcdf7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1eef4963f24aeeb40b2378b0586ffb40aabaec0b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "1fb98b33caff21ec1649bc1b7563f21cf3e3bdb3",
+   "probabilities": {
+    "extend": 0.06,
+    "reuse": 0.01,
+    "unrelated": 0.93
+   }
+  },
+  {
+   "id": "2075cf070291606273001bba9346f0aa3fa16063",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "22d77ec6b31d526acd477973fb711dfdbe6fa945",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "23862059c52bd53a2c3300af4d0e503b3bd4619a",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "24561483b44e13a5d082451929f79b3854aaa1d6",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "252c565c145a6b00936187690e546dc95280145d",
+   "probabilities": {
+    "extend": 0.02,
+    "reuse": 0.0,
+    "unrelated": 0.98
+   }
+  },
+  {
+   "id": "25697787cfc2f8b5974683a8bb864aefb5bfd2bc",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "25dee74da1e54c1111a02e0556fdefc9be836600",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "26727aecdf2822aed96fcc55c0ea0f1c3c9ebf5a",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "26f6c5232e5825344bc67eb01fe90d53c1af4875",
+   "probabilities": {
+    "extend": 0.34,
+    "reuse": 0.01,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "27007ae3864489088bcb2ca2084bcfedb2cdb063",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "27653897b6d93c1e164011400d2c3e7879b08b76",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "27c1a16cddb1540076d7869a37578d011e34c12a",
+   "probabilities": {
+    "extend": 0.59,
+    "reuse": 0.03,
+    "unrelated": 0.38
+   }
+  },
+  {
+   "id": "280b6bb8c2fcc68a2b71d9b0a937e3739111b589",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2826559c54c7ef5eb129c99a2163ee6674067e09",
+   "probabilities": {
+    "extend": 0.31,
+    "reuse": 0.08,
+    "unrelated": 0.61
+   }
+  },
+  {
+   "id": "2d36224c5a7c2cfea4c504af9b490d189deab9ad",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2d3bd6dd8d60afa8b12f220b9e18ff1300bec337",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2dc2f4f360e34b8671555583faff7708fd3c5a66",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2e8b3665e6497a666fe9a0f87a44e25a99ca7491",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2ed9d33358495e0749d841caa7308907808601c9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2f4334ece447ff42bdcc1749988497812e9a6c5e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "2f8b5fa05b49f5b91569c5ac3c83cd0f902e68f0",
+   "probabilities": {
+    "extend": 0.36,
+    "reuse": 0.02,
+    "unrelated": 0.62
+   }
+  },
+  {
+   "id": "2faa7d211f3c68bbfac3edc8b169cd2a58892562",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "31dd08cc37394bf3ccb74dc9bafbc26765d1da73",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "3237ff1deb4f6df3142d76f748d9448bc2e0aaa2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "329098aa44ae214eb97dc2f213e47725d23e21b5",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "330746ba9e02600b45223d583c678a956f53950d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "34348dacefd23a7a508a62d5a2a108af1e8fdb33",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "349fa2f93fc36bf80ff051048036fd8de2044116",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "36e287a924d3837e5b6bc7148e58f7679a72ab6f",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "381a85038dd0834ab254a64cf3855e1760bef9d5",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "38c71fbc03f5f7484a1401a17c6c931c4e9f1641",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "396a8b801778ed1c4a0db1d672a066fa837542f0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "396d8951af3fca217d9acd92cb6eb9904abcaed9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "3a85ac99a9e36f3a4c6b39405c3b5cc556391698",
+   "probabilities": {
+    "extend": 0.45,
+    "reuse": 0.07,
+    "unrelated": 0.48
+   }
+  },
+  {
+   "id": "3b3e66e4db95982df95c8ab288db143bde4dc48a",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "3d2baf1a4253e575164f9b8b06ad1830087714d2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "3e737c5a1504def3f7ad7f9d04205fa1bddc10cc",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "3efc3ad0f19ff00fd3c84e06414baf665dca5240",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4149656f61978ce00f86e1f5ff7b9bdb218aa79e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4337a9cc3fd2a9881959773dc0f909a915a4ee83",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "44780f1723c58f79133a543e5402644b4dd56e24",
+   "probabilities": {
+    "extend": 0.08,
+    "reuse": 0.0,
+    "unrelated": 0.92
+   }
+  },
+  {
+   "id": "46d8f9838e22c0f6a7e45f171df8bfe03a226346",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4733499f517341e69c330b9a7b0bd43e52602c9b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "47aa0d2d1881e9b93f5f08c13a64a6a7131a6d3d",
+   "probabilities": {
+    "extend": 0.51,
+    "reuse": 0.01,
+    "unrelated": 0.48
+   }
+  },
+  {
+   "id": "47af146f69aadd344ad22bddc006c2bd29464fd0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "47f7b4371771020ead97611d65df96e1b6ffabea",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4817048143e4151214e4cff532526bce348514d8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "48f426b475b2c3f874d33d9e41970145f84335a1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "49f2fda9e78f224e787fa9842cff6bd805e2e1ac",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4bd7b1cb0e3e7f6ab56d794992d0db6af2d88bf7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4bd868d06977c896c7601897f090bcc0767214a9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4cdc5765b6518de9e1ad89e3b99b8ed591ecea55",
+   "probabilities": {
+    "extend": 0.06,
+    "reuse": 0.0,
+    "unrelated": 0.94
+   }
+  },
+  {
+   "id": "4dd0a1fe432100d997e00d43399f2bf0afea1df7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4de7b51b2ba7513885118a7bde9f130bef1fdc40",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4e7d3eb665423bbb375e4738a9e729c41d4f65e7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4f4ebdd135c3b20eff5c79d1010a35d47de652be",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4fbdc17f72ae7e891eecbbb8dd6637056b302ded",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "4ff0acc290aca8e4780f77d8e11e28f40314fadf",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "501b1d14033c926915a6395407dcf39e71b3f2a4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "511be7f15157c1f45988ecd9067e5c5bf96b4aef",
+   "probabilities": {
+    "extend": 0.44,
+    "reuse": 0.03,
+    "unrelated": 0.53
+   }
+  },
+  {
+   "id": "55873faf1501b2ae2994c041ad7b9ee45b437e6d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "576b27897bb2b1cde17eca2ed394741576aeeb49",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "58a51ebd3babce6484f83b25668e966eaebb3fb1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "598ee51dba9e95a1d6ba7701b4c4d0065d76efa9",
+   "probabilities": {
+    "extend": 0.35,
+    "reuse": 0.09,
+    "unrelated": 0.5599999999999999
+   }
+  },
+  {
+   "id": "5a9105965f560e7875c955a0f999770cbd35a8fd",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5b4b00ef088ee64d004b9defcfef7e2a5144c506",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5cc8c8634d99fa025c5ab49431ef3eaad05198b2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5cef14313bdee9f1881f0d23bd5fc4e3c8aaa9da",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5ddb2a551c7d457d3c32c0ac3853fe53d4dfb2cb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5e1cbfdb23d274b6fa1d570883e8dd45637ed2cd",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5e68840e0e683eec462cc464950647712652c16b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5f7da8d5efdbaaf075b2b3b08fc53706418ccd5c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "5f897e4a65ca12c1d582d8df1d9e007fd89d737e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "60d45d3ce335f1ef3beec632ebb6cd3b198690e1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "616fb7ff7c748c05c85924df2969de0c3cf98254",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "62237380bea641c0e65ccefb561e2e72a54a484d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "63c47ae68bb571789fa4fd40f870cc6cfa12b401",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6406b62782a9d48ae5b4f43921d402ccc40ce59d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "66cad82ffb3c2b54dca14a81a206b50903931da2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6785c69259559c7495bbbbe728397d6f1bc55c94",
+   "probabilities": {
+    "extend": 0.39,
+    "reuse": 0.01,
+    "unrelated": 0.6
+   }
+  },
+  {
+   "id": "679b46b090685c8224363b184c5cc7d65d4c446c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "69488bfaa81c2ce286c57fe90ba96046124da39e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6a6bd544eabcea38a598299812ada52802eb8740",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6a733368d6265322ba1c674c475ed2ff0bf747a5",
+   "probabilities": {
+    "extend": 0.05,
+    "reuse": 0.0,
+    "unrelated": 0.95
+   }
+  },
+  {
+   "id": "6aa15c3a176c05642f4308ef6819bdd7ce8cd543",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6b96890519ab1635edefad718a82dfd7be020fdf",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6c2fbff2b7a3e7b359ab492ea764cc85c6b97da4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6c3f96bf9fd6df0c98a6fd5349feb76264e32056",
+   "probabilities": {
+    "extend": 0.27,
+    "reuse": 0.08,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "6c6dcfea88c3a07fa14800438306f6e8e4e10697",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "6c8d82dfaa746ca53821555a1904bd6214f5cec3",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "6cabab4b6eb72b1a819faade643affe339282749",
+   "probabilities": {
+    "extend": 0.43,
+    "reuse": 0.04,
+    "unrelated": 0.53
+   }
+  },
+  {
+   "id": "6e4afb91a445fe3f0d36d84610a019febe134934",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6e87d01f83e19e760b0b2f0aa91b40a3aab081ce",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "6fd5e79683d08109309884018b911a24a0cc214c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "70c93bf06a781b0907dab6678007503e9b33ebf1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "71a11b7ff106878be71ee44c1b5bbebaae329fd3",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "73810943b430fd58f717e662702aa4107c06b04b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "746465a2998fc678c9ceb034fd4de2650676ecb8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "771a8be2ae50f612db17b61e9cd763478ec61a8e",
+   "probabilities": {
+    "extend": 0.07,
+    "reuse": 0.0,
+    "unrelated": 0.93
+   }
+  },
+  {
+   "id": "776df78b6dc0a8aac333798e8ef838fc9aa980aa",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "783637eba1571fe1ac02e643f97a9fedf65f2b11",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7b5c98a7cf0c8305ac947a66597da4afe30c1042",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7c755a2ef12a653766653e78dadbf1fdd888017e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7cde48b4a6d79f910faea64a3d57fdb1bde8c62f",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7d6108712445b8e2aa83f737080216da23a0314b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7e6ebc13dcf650d30fad88f8a8a74e5fdbd687f2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "7edb19463e35927b5a2e60601126d4408a3b3114",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "80be82dfdc72d87d1a08c1cdc4dc3d2f2ec68d74",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "80e962f55743bfad752682bb1f0b6718904eabe1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8348eea968ee7ca42e225db1bfbfb278b8e05932",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8352ec6d6cb986452c0f2a7ec904ddd0e3360da8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "85797a2746fb469328d3013b38e8fd486884c40d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "87d1b645ec18918eb60ad6b19c54b3d1988363bb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "88b59d5cbe431f851d4d80f5eb1aed0dea239b62",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "88e4d9e07faa1e4ca8a11dd0d434a061345e0a75",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8985935ae7c0232dc1010a0d96f8585a70154ef8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "89b16339cb854921677be3fd2fa7d8d1918a4fee",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "89c30018781dfff0029c878675282ac73fbbc575",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "89e6e5a7ae527bb04c470c72458dd2e2b1d99eb0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8a8b76778b6d747a7c3791804cac21b9335450a2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8ac94da91d9fb7aff4c34ed75189cc990cfced1e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8b6f5f0b3f4fb55994b1d178d19d87801939b72e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8b8741d4eefed108279fda1f9e5d7b7e70a74d1a",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "8e33b1c7fc300dbb653fffd7c4b87b3a7b7e663f",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "90d5ce1bf753f0b53f2833856b6b3478aab90342",
+   "probabilities": {
+    "extend": 0.62,
+    "reuse": 0.02,
+    "unrelated": 0.36
+   }
+  },
+  {
+   "id": "92167c0f3ef5db426efd306f8092c3efc077b82e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "927248fc3c23d7a6cdd61dd9a8f1a153ec5bbb03",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "9338b79f406a6e0491afb0602b0ee5a1039a3cf0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "943b5602e83d0af6fddd91caa81e962f71ab8c69",
+   "probabilities": {
+    "extend": 0.21,
+    "reuse": 0.0,
+    "unrelated": 0.79
+   }
+  },
+  {
+   "id": "94a813f9e64b41496b3644a8584301d9de8d6e4e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "952a170ce26d5e94720dba8d27de1a9ac0f4dd32",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "96a7c73559f9084ab4bf70decd9176b771b8680d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "96b992bff4d1214c9864b1d7dc53a209fdb2c6c4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "96dc7168ad86095f0a8cf068002cdd62a3367fa0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "9851b6c53b9ecc51dc8ae11f889a23cc4c7b9d81",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "993d56fc55be36264420ee98fa427fb729ad16d0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "9940787a9d778fb119e9f80910b33da0044ae8ea",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "997d84bb15552003a1c36e4dd9641489d9dafc17",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "9c108ee71faea32ec4ef854d7578193e101a045c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "9ea0ef382a7e25a895ed1f6a37dba416e8a5b5ad",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a0be64fdb6e6693b648d085fe2b77577844b9de3",
+   "probabilities": {
+    "extend": 0.23,
+    "reuse": 0.12,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "a11404a25abd4bb9ba776c65f1e985407af81e8c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a1d0e19ce40d37411b9595f14b6ccc00b7711b47",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a35545d7ed6e7b538a27fa8c381be0ed0f099ffb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a59e97bab7ff7de719ca8927ced9f23c1c981bbb",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a59ee95d733d17f1776e6461ba74bfc21d937d65",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "a5d941d4549be9fe64364fc6611d585938ced108",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a7f2195a9689b2a00eba9648c24ecafd1eec023e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a82474e668ab93190862775d9063c2dda1c17977",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a8f8074af55eeba5ca50d44768c0257103f052ea",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "a926dc1fb524b224401bfb7191b1c7e4befbf8c4",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "a9b30e85a28cd4fe6580fbadb4c252b87e62af0b",
+   "probabilities": {
+    "extend": 0.33,
+    "reuse": 0.1,
+    "unrelated": 0.57
+   }
+  },
+  {
+   "id": "aacf215cf8ab00d065eda537d6aef989db310790",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "aafda8d846ab225b18778a921f8055efbc0848f0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ab72c0f72d2874ff229e1c6994e16e3a57ac6198",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "abf0dfb745f76b8d14b2051077e2cdb4bab24366",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ac02c86a2f97ede6ea1387b8721c9781aa65b781",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "accc801567e463c5ab9d17318cc39badf3f767cd",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ada6e90b6dc9d054628671ebea84257c7667dba2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "adff2ace3e2ce466a0060bc3d1010f9143fb505a",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ae923db848b57e9b39774d6b6cf4daa223cd0993",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "aff7bcab0dee2e722a4f23b48bc44ab28d6adc41",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b218381c84fb2e6b642dd64380a83f0c81f339d6",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b3136da86cf258fc4195833fe35af4663e3b5893",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b3d9ad6e5902b3f6fa2148f2560d9dad5484e72b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b48afac4d519ccd765b04e25cdf38fd7409a3913",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b837c70f5aa3b56a2851a559487df2d7a63e8f7c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b8af74cc890402144e8815a2e3d7d14b91705182",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "b9c2702bf4b9e892cf5a8804e84a392ae7473409",
+   "probabilities": {
+    "extend": 0.3,
+    "reuse": 0.0,
+    "unrelated": 0.7
+   }
+  },
+  {
+   "id": "b9f9ba5bebf31451d3e74c9683943c3c334525d1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bc20ccc93634ee42feb1a2b378ffa573b20a374c",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "bc2364521627887183d5399308dc831999705f55",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bc644d984f828dc9e9dcefea1748f99e298b7c12",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bd3485638c27f78591018487fdc713b9e57e87f2",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bd739958f558f1d6d15ef29b394f5d93db4754a7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "be32cc5a1cea55c0ce817c8d40fa444dcdbba798",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bf25884d2da8b9d5a54fa750187f6fb213b7b2ea",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "bf8072f8a6d12945d34dab5c1893e20d7df65c92",
+   "probabilities": {
+    "extend": 0.35,
+    "reuse": 0.0,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "c01f94112317520ccf2ba30e971be35a1062354c",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.01,
+    "unrelated": 0.98
+   }
+  },
+  {
+   "id": "c0ceb3561fdcbad840cb1ea0b349b9a6612c21d9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c218d1e4b30983c1dc7e193f821b2283e52657fd",
+   "probabilities": {
+    "extend": 0.59,
+    "reuse": 0.03,
+    "unrelated": 0.38
+   }
+  },
+  {
+   "id": "c22f67a7f43738480f5b5c8ec9ebc61c684778fc",
+   "probabilities": {
+    "extend": 0.41,
+    "reuse": 0.02,
+    "unrelated": 0.57
+   }
+  },
+  {
+   "id": "c2b6cded1c357b8f54c29c5214b7afac16d58a87",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c3573209d871ddc49f1e147b9265857a689cf1c8",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c48e74397d78f5c20b576924a608b25a8531207b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c4a540b8a76ba1c31b5a8b070b6fec95951ad644",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c4a7faaf1e7c624eb78498e6c57d8193b7fe8b6b",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "c4f36c86cc61a75194cd4600e8b9e976c65fdd57",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c55f945d8fc908abed41c120f5a90850f688d932",
+   "probabilities": {
+    "extend": 0.43,
+    "reuse": 0.02,
+    "unrelated": 0.55
+   }
+  },
+  {
+   "id": "c60b70ccbf806067785f359e227291f6bb1ecf45",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c699fd0ba56343aa9dc0a17ea1377d6e7e37e809",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c7c4c143a7e98a9fc85dc8e26b466bd33b352209",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c866acd22ecc163d58303d70e4dd3d4644b9b585",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c92023290cd39aa90f35e9f66cee24590b83f698",
+   "probabilities": {
+    "extend": 0.22,
+    "reuse": 0.14,
+    "unrelated": 0.64
+   }
+  },
+  {
+   "id": "c9767aa763e4b341469b5359723c42c77cdada8b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "c9c42c79248e70341a1c54a4c9e7b4d569dc3a1c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "cb16b24182ad8108022e0c0db75cd2c0077bbac7",
+   "probabilities": {
+    "extend": 0.34,
+    "reuse": 0.01,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "cb8ae299039ae5a33eeb25f47707b8adcce6c925",
+   "probabilities": {
+    "extend": 0.02,
+    "reuse": 0.0,
+    "unrelated": 0.98
+   }
+  },
+  {
+   "id": "cbef8b57b9bc2a6cc904877ccddbca1e6aec932c",
+   "probabilities": {
+    "extend": 0.6,
+    "reuse": 0.01,
+    "unrelated": 0.39
+   }
+  },
+  {
+   "id": "cc20f2cd1b3bd62576093242427b4d5dfb90be3a",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "cc43ec8a722a7d29deb91e850ecef62acb881cc6",
+   "probabilities": {
+    "extend": 0.31,
+    "reuse": 0.19,
+    "unrelated": 0.5
+   }
+  },
+  {
+   "id": "d00c058de80eae6e8bdd8457ecf7317dd6af1853",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d01715a414aa0a5e5a0805afedb3dd48e4121517",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d145a0f1e576ab85a4f897550cd0880a14ef4124",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d2f0fe0590457778e77e296f358e652fa0d8528a",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "d374175019e27b3ffa222f148fb1bf5f9f243eb7",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "d3b9ccd4d6dcbf5dd112f21aedb7c72209f0784c",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d40e5d4d53cbd75310e5e5dd2a39aaff87ceefd0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d6f846e47c57866f6f4cff7b7e8821f3e22f46ea",
+   "probabilities": {
+    "extend": 0.3,
+    "reuse": 0.05,
+    "unrelated": 0.65
+   }
+  },
+  {
+   "id": "d72a4f8572a6f6fb8277b91f3b352f9971952723",
+   "probabilities": {
+    "extend": 0.28,
+    "reuse": 0.17,
+    "unrelated": 0.55
+   }
+  },
+  {
+   "id": "d83c62bb5e9e2dc2fe0b8c1ab687d8402d3297cc",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d90a20858e1d89ed3d88dd298a888ff5b52ad483",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "d9ef79d7ee8f80afc0ffe5c3db85765fde2e3d78",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "dbc476e0a16590dc89f9c9af351e8c502133dbc9",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "dc64bc051f71e333c3dd5cf1e812a14c9b91584d",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "dcbc833da285153dec2b88ec824fa1c9c8c9c006",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "dd5e73c101103ba9e8ace749f641bc24262c3a97",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "dd86ff0559f3f3f49a98f437c40cd625be34a05e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ddf0b1e7b6758cb410e20038dfed913508dc29e6",
+   "probabilities": {
+    "extend": 0.35,
+    "reuse": 0.01,
+    "unrelated": 0.64
+   }
+  },
+  {
+   "id": "df12cff87e226f1cf499d23b59db98fd48f960dd",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "df31f68cab30c37d6baa788484596fa186f628ba",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "df48ab90e80cb0fb33bdc8f567ef691b91947441",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "df5a390c9cf73cbe0b22870335c4f4fc7503b2ac",
+   "probabilities": {
+    "extend": 0.28,
+    "reuse": 0.09,
+    "unrelated": 0.63
+   }
+  },
+  {
+   "id": "df69aa03e40679a884e277987fa4077f66d54c68",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e010e68fd29ac3b5f2dc98d26436ffa788426da0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e064d0ffd19d0353e7b2417f6c5ceabb7aae43e0",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e1ce1901171d0037d9b62f8dad21827cb773ce07",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e364859a71e010ef027d998b023f9478233cf9e1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e38e871adccc1ec93e91189e4dcb714376900c40",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e5fb43eef75873614762a905a75abc41fd59b5ff",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e65d5896f2a1424fd8625b73d1ba1a8a57c05c6f",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e7ccbcf32db7412e34361c8d3b861ca285300b00",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "e86061639f1b3f67751175329ad423c698c5eb43",
+   "probabilities": {
+    "extend": 0.3,
+    "reuse": 0.14,
+    "unrelated": 0.56
+   }
+  },
+  {
+   "id": "e867a955fd2ac8bbdc1bb033e6056bb4127ce4d8",
+   "probabilities": {
+    "extend": 0.01,
+    "reuse": 0.0,
+    "unrelated": 0.99
+   }
+  },
+  {
+   "id": "eaf73f03709adbbf523c4634d2cc0c9add5e6d0b",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "eb4a7dbd782d702c584b372079609aad4a01eeb5",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "eba18f68d8e3ed1193d1c1b6ffa6d73c0222db13",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "eba98058e2241ebaff67d00dbcb9db72cb820f31",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ed7bc839bffcd813714683d2739aad25c0528923",
+   "probabilities": {
+    "extend": 0.02,
+    "reuse": 0.0,
+    "unrelated": 0.98
+   }
+  },
+  {
+   "id": "ee00bdb9b54c6175a99c32f13a12496c03ac287a",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ee45ea2a509048f32caeb3b0c7ee8bee736be614",
+   "probabilities": {
+    "extend": 0.57,
+    "reuse": 0.07,
+    "unrelated": 0.36
+   }
+  },
+  {
+   "id": "f023ff0175ad769e1221e922e8a05aa32ea534a7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f0d727520220e80db45ebf644321958946df9b30",
+   "probabilities": {
+    "extend": 0.58,
+    "reuse": 0.06,
+    "unrelated": 0.36
+   }
+  },
+  {
+   "id": "f27abd6139acbe9ba11d66a5cd83708581fb0bea",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f2ce5a8c1d5718720f63e5ae888ad7b48bb399c7",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f2fa24cedfd372f1853708755b200658577d8862",
+   "probabilities": {
+    "extend": 0.4,
+    "reuse": 0.0,
+    "unrelated": 0.6
+   }
+  },
+  {
+   "id": "f3c74c281aa78329dd530b186ffdd2f8c552c084",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f4b4b8c4507d83e7bc3406884637c03b5be54777",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f8aa333830d91ea83f6f0dec14eceea547502973",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f8c8db3d2f7cc0e64a243a377bae9db8fd8392e1",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "f8e4c06844a105497779d4267a90b9fd88a838a0",
+   "probabilities": {
+    "extend": 0.05,
+    "reuse": 0.0,
+    "unrelated": 0.95
+   }
+  },
+  {
+   "id": "fb1322aeaa882ee1d8cebe682d3c43738b68c054",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "fd4d3e80850ea9a1fc2455bebe644d2a9efc7a8e",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "fd81cfb07aab1207861454878d52544eb9677d99",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  },
+  {
+   "id": "ff4a9a68fac3395e4e78716499970225b2f2057b",
+   "probabilities": {
+    "extend": 0.37,
+    "reuse": 0.01,
+    "unrelated": 0.62
+   }
+  },
+  {
+   "id": "ff6a807099fbd667dc1b0d064ef663dc46f4c730",
+   "probabilities": {
+    "extend": 0.0,
+    "reuse": 0.0,
+    "unrelated": 1.0
+   }
+  }
+ ]
+}
