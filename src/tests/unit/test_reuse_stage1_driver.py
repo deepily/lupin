@@ -666,3 +666,27 @@ def test_a_ceiling_that_is_not_a_positive_whole_number_is_refused_before_the_led
     before = env.ledger.path.read_text()
     with pytest.raises( ValueError, match="ceiling" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], ceiling )
     assert env.ledger.path.read_text() == before and env.made == []
+
+
+def test_two_separate_drivers_on_one_ledger_file_cannot_both_be_admitted_against_a_stage_that_holds_one( env, monkeypatch ):
+    second = st.Stage1Env( env.root, env.data, rl.AccountLedger( env.ledger.path ), transport_factory=env.transport_factory )
+    assert second is not env and second.ledger is not env.ledger
+    real, finished, lock, release = st.stage_remaining, [], threading.Lock(), threading.Event()
+    def slow_check( ledger ):
+        left = real( ledger )
+        threading.Event().wait( 0.05 )
+        return left
+    monkeypatch.setattr( st, "stage_remaining", slow_check )
+    env.standin = { "hook": lambda n: release.wait( 5 ) }
+    def go( driver, slot ):
+        try: st.run_arm( driver, slot, "single1", NEED, ENTRIES[ :2 ], 50_000_000 ); result = "ran"
+        except st.StageRefused: result = "refused"
+        with lock: finished.append( result )
+    threads = [ threading.Thread( target=go, args=( driver, slot ) ) for driver, slot in ( ( env, 1 ), ( second, 2 ) ) ]
+    for t in threads: t.start()
+    for _ in range( 60 ):
+        if finished: break
+        threading.Event().wait( 0.05 )
+    release.set()
+    for t in threads: t.join( 10 )
+    assert sorted( finished ) == [ "ran", "refused" ]
