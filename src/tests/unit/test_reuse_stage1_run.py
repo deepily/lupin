@@ -217,3 +217,27 @@ def test_an_index_that_is_not_ready_is_refused_by_name( monkeypatch, flag ):
 def test_a_repeated_page_slug_is_named_before_any_arm_runs( monkeypatch ):
     fake_index( monkeypatch, set(), [ { "slug": "a", "text": "One.", "scope": "x" }, { "slug": "a", "text": "Two.", "scope": "x" } ] )
     with pytest.raises( rr.RunnerRefused, match="'a'" ): rr.load_inputs( "." )
+
+
+def test_a_live_run_with_no_paths_named_reads_the_real_data_folder_and_the_real_ledger( scratch ):
+    scratch.real_ledger.parent.mkdir(); rl.AccountLedger.create( scratch.real_ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
+    env = rr.open_env( scratch.root, None, None, True, 5 )
+    assert env.data == scratch.real_data and env.ledger.path == scratch.real_ledger and env.live is True
+
+
+def test_a_report_on_a_folder_with_no_arm_file_says_so_and_returns_the_analysis_code( scratch, capsys ):
+    run( scratch, "ledger-init" ); capsys.readouterr()
+    assert run( scratch, "report" ) == 2
+    assert "no arm files" in capsys.readouterr().out
+
+
+def test_a_path_refusal_comes_before_the_index_is_read( scratch ):
+    def never( root ): raise AssertionError( "the index was read" )
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.real_data ), "--ledger", str( scratch.ledger ), "status" ]
+    with pytest.raises( rr.RunnerRefused, match="real data folder" ): rr.main( argv, loader=never )
+
+
+def test_ledger_init_makes_the_scratch_ledgers_folder_when_it_is_not_there( scratch ):
+    nested = scratch.ledger.parent / "new" / "folder" / "ledger.jsonl"
+    argv   = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( nested ), "ledger-init" ]
+    assert rr.main( argv, loader=loader ) == 0 and nested.exists()
