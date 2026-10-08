@@ -22,6 +22,8 @@ FORMAT           = "stage1-arm-1"
 CANARY_FORMAT    = "stage1-canary-1"
 QUESTIONS        = ( 1, 2, 3, 4 )
 CANARY_SIZE      = 10
+MAX_ATTEMPTS     = 3                                             # the canary may be run, and retried twice; no other arm is retried
+RETRY_INDEX      = { 2: 15, 3: 16 }                              # a retry asks again: its run index is free of every arm's, so it reads no earlier answer
 OUTPUT_LIMIT     = rc.OUTPUT_TOKENS_PER_ENTRY
 UNGATED          = ( "single1", "canary" )                       # the arms that may run before a canary is approved
 PLACEMENTS       = ( "first", "middle", "last" )
@@ -69,9 +71,9 @@ class Stage1Env:
         return self.data / "stage1-results"
 
 
-def run_name( question, arm ):
-    """Ensures: returns the run name s1-q<question>-<arm>, which the ledger accepts once, ever."""
-    return f"{RUN_PREFIX}q{question}-{arm}"
+def run_name( question, arm, attempt=1 ):
+    """Ensures: returns s1-q<question>-<arm>, plus -a<attempt> for a retry."""
+    return f"{RUN_PREFIX}q{question}-{arm}" + ( f"-a{attempt}" if attempt > 1 else "" )
 
 
 def stage_remaining( ledger ):
@@ -104,15 +106,39 @@ def _check_probe( arm, probe, entries ):
     if ids.index( probe[ "id" ] ) != want: raise ValueError( f"probe is not at the {place} position of the pack" )
 
 
-def _canary_path( env, question ):
-    return env.results_dir / f"{run_name( question, 'canary' )}.canary.json"
+def _canary_path( env, question, attempt=1 ):
+    return env.results_dir / f"{run_name( question, 'canary', attempt )}.canary.json"
+
+
+def _canary_reports( env, question ):
+    """Ensures: returns ( attempt, path, report ) for each canary file written, oldest first."""
+    found = [ ( n, _canary_path( env, question, n ) ) for n in range( 1, MAX_ATTEMPTS + 1 ) ]
+    return [ ( n, path, json.loads( path.read_text() ) ) for n, path in found if path.exists() ]
 
 
 def _require_approved( env, question ):
-    """Raises: CanaryNotApproved unless this question's canary file exists and holds an approval."""
-    path = _canary_path( env, question )
-    if not path.exists() or json.loads( path.read_text() )[ "approved" ] is None:
+    """Raises: CanaryNotApproved unless a canary file of this question holds an approval."""
+    if not any( report[ "approved" ] is not None for _, _, report in _canary_reports( env, question ) ):
         raise CanaryNotApproved( f"the canary of question {question} is not approved" )
+
+
+def _check_attempt( env, question, arm, attempt, reason ):
+    """
+    Check a retry against the rules that let only the canary run again.
+
+    Raises:
+        - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a retry of any arm but the canary,
+          a retry without a reason or a first attempt with one, a retry with no attempt before it,
+          or a retry after any attempt was approved
+    """
+    if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise ValueError( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
+    if attempt == 1:
+        if reason is not None: raise ValueError( "a first attempt has no reason; only a retry gives one" )
+        return
+    if arm != "canary": raise ValueError( f"only the canary may be retried, not {arm!r}" )
+    if not isinstance( reason, str ) or not reason.strip(): raise ValueError( "a retry needs a named reason" )
+    if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise ValueError( f"attempt {attempt} has no earlier attempt to follow" )
+    if any( report[ "approved" ] is not None for _, _, report in _canary_reports( env, question ) ): raise ValueError( f"the canary of question {question} is already approved" )
 
 
 def _write_json( path, record ):
@@ -142,7 +168,7 @@ def _rows_with_reserve( rows, need, by_id, template, model ):
     return out
 
 
-def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=None, probe=None ):
+def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=None, probe=None, attempt=1, reason=None ):
     """
     Run one arm as its own ledger run and write its results file.
 
@@ -150,6 +176,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - question is 1 to 4 and arm is one of the arm names
         - entries are symbol dicts; for a probe arm they are one pack with the probe at its position
         - ceiling_tokens is what this arm may spend, and fits in what the stage has left
+        - attempt is 1 for every arm; only the canary may be run again, as attempt 2 or 3, with a reason
     Ensures:
         - nothing is sent and no ledger row is written when any check below refuses
         - the sweep keys its answers by pack size and run index, so no two arms share an answer
@@ -166,6 +193,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     """
     if type( question ) is not int or question not in QUESTIONS: raise ValueError( f"question must be one of {QUESTIONS}, got {question!r}" )
     if arm not in ARMS: raise ValueError( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
+    _check_attempt( env, question, arm, attempt, reason )
     attempt_limit = rt.CALL_BUDGET_CAP if attempt_limit is None else attempt_limit
     if type( attempt_limit ) is not int or not 1 <= attempt_limit <= rt.CALL_BUDGET_CAP:
         raise rt.ReuseError( "BAD_BUDGET", f"attempt limit must be an integer from 1 to {rt.CALL_BUDGET_CAP}, got {attempt_limit!r}" )
@@ -173,12 +201,14 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     _check_probe( arm, probe, entries )
     remaining = stage_remaining( env.ledger )
     if type( ceiling_tokens ) is int and ceiling_tokens > remaining: raise StageRefused( f"{ceiling_tokens} asked, {remaining} remaining of the stage's {STAGE_TOKENS}" )
-    name, ( index, size ) = run_name( question, arm ), ARMS[ arm ]
+    name, ( index, size ) = run_name( question, arm, attempt ), ARMS[ arm ]
+    index = RETRY_INDEX.get( attempt, index )
     template = rt.PAGE_TEMPLATE if arm.startswith( "page-" ) else rt.PROMPT_TEMPLATE
     budget   = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
     record   = { "format": FORMAT, "question": question, "need": need, "arm": arm, "run_name": name, "run_index": index, "size": size, "model": env.model,
                  "template_hash": rt.prompt_template_hash( template ), "started_at": env.clock(), "ceiling_tokens": ceiling_tokens, "attempt_limit": attempt_limit,
-                 "entry_ids": [ e[ "id" ] for e in entries ], "entries_in_index": env.entries_in_index, "probe": probe }
+                 "entry_ids": [ e[ "id" ] for e in entries ], "entries_in_index": env.entries_in_index, "probe": probe,
+                 "attempt": attempt, "retry_reason": reason }
     try:
         ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit )
         sweep = rp.sweep_packed( ctx, need, entries, size, workers=env.workers, key_mode="stage1", run_index=index, template=template, model=env.model, budget=budget )
@@ -211,17 +241,20 @@ def _canary_report( question, out ):
                    "over": r[ "tokens_in" ] + r[ "tokens_out" ] > r[ "reserve_tokens" ] } for r in sent ]
     per      = [ r[ "tokens_out" ] / r[ "size" ] for r in sent ]
     refusals = sum( 1 for r in out[ "rows" ] if r[ "status" ] == "refused" )
+    sent_rows = [ r for r in out[ "rows" ] if r[ "attempts" ] ]
     tripped  = [ name for name, hit in ( ( f"output_per_entry_over_{OUTPUT_LIMIT}", any( n > OUTPUT_LIMIT for n in per ) ),
                                          ( "usage_over_reserve", any( u[ "over" ] for u in usage ) ),
                                          ( "refusal", refusals > 0 ),
                                          ( "usage_missing", out[ "totals" ][ "usage_missing" ] > 0 ),
+                                         ( "nothing_measured", not sent_rows ),
                                          ( "incomplete", out[ "state" ] != "complete" ) ) if hit ]
-    return { "format": CANARY_FORMAT, "question": question, "run_name": out[ "run_name" ], "output_tokens_per_entry": per, "usage_vs_reserve": usage,
+    return { "format": CANARY_FORMAT, "question": question, "run_name": out[ "run_name" ], "attempt": out[ "attempt" ], "retry_reason": out[ "retry_reason" ],
+             "output_tokens_per_entry": per, "usage_vs_reserve": usage,
              "refusals": refusals, "attempts_over_one": sum( 1 for c in out[ "transport_calls" ] if c[ "attempts" ] > 1 ), "unasked": len( out[ "unasked" ] ),
              "tripped": tripped, "approved": None }
 
 
-def run_canary( env, question, need, entries, ceiling_tokens, attempt_limit=None ):
+def run_canary( env, question, need, entries, ceiling_tokens, attempt_limit=None, attempt=1, reason=None ):
     """
     Ask the first pack of ten and write the numbers a human reads before more is paid for.
 
@@ -229,27 +262,32 @@ def run_canary( env, question, need, entries, ceiling_tokens, attempt_limit=None
         - sends the first CANARY_SIZE entries as one request, under the run s1-q<question>-canary
         - writes the canary file beside the arm file, with `approved` empty
         - returns the canary record; a stop number that was crossed is in `tripped`
+        - a retry is attempt 2 or 3 with a reason, runs as s1-q<question>-canary-a<attempt>, and keeps every earlier file
     """
-    out    = run_arm( env, question, "canary", need, entries[ :CANARY_SIZE ], ceiling_tokens, attempt_limit )
+    out    = run_arm( env, question, "canary", need, entries[ :CANARY_SIZE ], ceiling_tokens, attempt_limit, attempt=attempt, reason=reason )
     report = _canary_report( question, out )
-    _write_json( _canary_path( env, question ), report )
+    _write_json( _canary_path( env, question, attempt ), report )
     return report
 
 
-def approve_canary( env, question, by, why ):
+def approve_canary( env, question, by, why, attempt=None ):
     """
-    Record that a human read the canary and let the other arms run.
+    Record that a human read a canary and let the other arms run.
 
+    Ensures:
+        - approves the latest attempt that wrote a canary file, or the attempt named
     Raises:
         - ValueError for a missing by or why, or a canary already approved
-        - CanaryNotApproved when the question has no canary
-        - CanaryTripped when the canary crossed a stop number; it is never approved
+        - CanaryNotApproved when the question, or the attempt named, has no canary
+        - CanaryTripped when that canary crossed a stop number; it is never approved
     """
     if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise ValueError( "by and why must say who approved the canary and why" )
-    path = _canary_path( env, question )
-    if not path.exists(): raise CanaryNotApproved( f"no canary was run for question {question}" )
-    report = json.loads( path.read_text() )
-    if report[ "approved" ] is not None: raise ValueError( f"the canary of question {question} is already approved" )
+    reports = _canary_reports( env, question )
+    if not reports: raise CanaryNotApproved( f"no canary was run for question {question}" )
+    if any( report[ "approved" ] is not None for _, _, report in reports ): raise ValueError( f"the canary of question {question} is already approved" )
+    chosen = [ r for r in reports if attempt is None or r[ 0 ] == attempt ]
+    if not chosen: raise CanaryNotApproved( f"no canary was run for question {question} attempt {attempt}" )
+    _, path, report = chosen[ -1 ]
     if report[ "tripped" ]: raise CanaryTripped( f"the canary tripped: {', '.join( report[ 'tripped' ] )}" )
     report[ "approved" ] = { "by": by, "why": why, "at": env.clock() }
     _write_json( path, report )

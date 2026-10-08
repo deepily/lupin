@@ -536,3 +536,38 @@ def test_a_tripped_latest_attempt_blocks_approval_though_an_earlier_one_was_clea
     st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )                       # clean and never read
     tripped_canary( env, attempt=2, reason="the clean one was never read" )
     with pytest.raises( st.CanaryTripped ): st.approve_canary( env, 1, "maria", "ok" )
+
+
+def test_a_retry_asks_again_under_its_own_run_index_so_it_cannot_read_the_first_attempts_answers( env ):
+    tripped_canary( env )
+    sent = len( bodies( env ) )
+    env.standin = {}
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="fixed" )
+    out = json.loads( ( env.results_dir / "s1-q1-canary-a2.json" ).read_text() )
+    assert len( bodies( env ) ) == sent + 1 and out[ "cache_hits" ] == 0 and out[ "run_index" ] == st.RETRY_INDEX[ 2 ] == 15
+    assert st.RETRY_INDEX == { 2: 15, 3: 16 } and not set( st.RETRY_INDEX.values() ) & { index for index, _ in st.ARMS.values() }
+
+
+def test_a_canary_that_sent_nothing_measured_nothing_and_trips( env ):
+    budget  = rc.TokenBudget( 10, 1_000_000 )
+    seeding = rt.ReuseContext( env.root, env.data, transport=Standin( budget ) )
+    seeded  = rp.sweep_packed( seeding, NEED, ENTRIES[ :10 ], 10, key_mode="stage1", run_index=3, budget=budget )     # the canary's answers already sit in the cache
+    assert seeded[ "calls" ] == 10
+    report = st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    assert "nothing_measured" in report[ "tripped" ] and len( bodies( env ) ) == 0
+    with pytest.raises( st.CanaryTripped, match="nothing_measured" ): st.approve_canary( env, 1, "maria", "ok" )
+
+
+def test_a_canary_whose_only_request_was_never_sent_measured_nothing( env ):
+    report = st.run_canary( env, 1, NEED, ENTRIES, 100 )                       # a ceiling too small for the first request
+    assert bodies( env ) == [] and "nothing_measured" in report[ "tripped" ] and "incomplete" in report[ "tripped" ]
+
+
+def test_the_third_attempt_can_be_approved_and_opens_the_gate( env ):
+    tripped_canary( env )
+    tripped_canary( env, attempt=2, reason="second" )
+    env.standin = {}
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=3, reason="third" )
+    st.approve_canary( env, 1, "maria", "third attempt read" )
+    assert json.loads( ( env.results_dir / "s1-q1-canary-a3.canary.json" ).read_text() )[ "approved" ][ "by" ] == "maria"
+    st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 2_000_000 )
