@@ -1427,7 +1427,7 @@ def test_the_arm_check_can_be_left_off_to_read_the_rules_alone():
 
 # --- the text report prints every figure the report computes (the rehearsal's tokens, retries, other boundaries, old shape, cost) ------------
 
-REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429 or 529 not told apart"
+REQUEST_LINE = "requests, question 1 single1: 200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls {r}, extra attempts {e}; usage missing 0; 429 or 529, not told apart"
 
 
 def test_the_report_prints_the_tokens_per_request_of_a_real_driver_arm():
@@ -1440,27 +1440,31 @@ def test_the_report_prints_the_retried_calls_and_the_extra_attempts_of_a_driver_
     assert REQUEST_LINE.format( r=1, e=2 ) in an.render( an.build_report( [ rec ], canaries=[] ) )
 
 
-def _flipping_complete():
+def _flipping_complete( question=1, scale=1 ):
     """
     Build a question whose pack200 moves two far entries across the floor.
 
     Ensures:
         - each pack arm carries a spend of one million tokens
     """
-    recs = _complete()
+    recs = _complete( question )
     pack = next( r for r in recs if r[ "arm" ] == "pack200" )
     for a in pack[ "answers" ]:
-        if a[ "id" ] in ( "o000", "o001" ): a[ "probabilities" ] = _probs( 0.35 )
+        if a[ "id" ] in ( "o000", "o001" ): a[ "probabilities" ] = _probs( 0.35 )                     # across the floor and the confidence bar
+        if a[ "id" ] in ( "e010", "e011", "e012" ): a[ "probabilities" ] = _probs( 0.25 )             # across the floor only
+    for a in next( r for r in recs if r[ "arm" ] == "single2" )[ "answers" ]:
+        if a[ "id" ] == "o002": a[ "probabilities" ] = _probs( 0.35 )
+        if a[ "id" ] == "e013": a[ "probabilities" ] = _probs( 0.25 )
     for r in recs:
-        if r[ "arm" ] in ( "pack10", "pack50", "pack200" ): r[ "totals" ][ "spent_tokens" ] = 1_000_000          # the default size is whichever pack passes, so each carries the spend
-    next( r for r in recs if r[ "arm" ] == "page-pack" )[ "totals" ][ "spent_tokens" ] = 500_000
+        if r[ "arm" ] in ( "pack10", "pack50", "pack200" ): r[ "totals" ][ "spent_tokens" ] = 1_000_000 * scale          # the default size is whichever pack passes, so each carries the spend
+    next( r for r in recs if r[ "arm" ] == "page-pack" )[ "totals" ][ "spent_tokens" ] = 500_000 * scale
     return recs
 
 
 def test_the_report_prints_the_other_boundaries_for_every_pack_size_and_question():
     text = an.render( an.build_report( _flipping_complete(), canaries=[] ) )
-    assert "other boundaries, pack 200, question 1: floor flips 2 by packing against 0 by noise; confidence flips 2 by packing against 0 by noise" in text
-    assert "other boundaries, pack 10, question 1: floor flips 0 by packing against 0 by noise; confidence flips 0 by packing against 0 by noise" in text
+    assert "other boundaries, pack 200, question 1: floor flips 5 by packing against 2 by noise; confidence flips 2 by packing against 1 by noise" in text
+    assert "other boundaries, pack 10, question 1: floor flips 0 by packing against 2 by noise; confidence flips 0 by packing against 1 by noise" in text
     assert "other boundaries, pack 50, question 1: floor flips 0 by packing" in text
 
 
@@ -1470,9 +1474,9 @@ def test_a_question_whose_other_boundaries_cannot_be_read_says_not_measured():
 
 
 def test_the_report_prints_the_old_shape_comparison_beside_its_note():
-    old = _arm( "old", { **{ i: 0.5 for i in _names( 10 ) }, "e000": 0.52, "e001": 0.49 }, size=1, run_name=NO_NAME )
+    old = _arm( "old", { **_base(), "e000": 0.6, "e001": 0.49, "e002": 0.54 }, size=1, run_name=NO_NAME )         # moves of 0.1, 0.01 and 0.04; only e001 crosses 0.5
     text = an.render( an.build_report( _complete() + [ old ], canaries=[] ) )
-    assert "old shape, question 1: 10 cached hits, p99 0.02, max 0.02, 1 boundary flips (reported only, no pass or fail)" in text
+    assert "old shape, question 1: 120 cached hits, p99 0.04, max 0.1, 1 boundary flips (reported only, no pass or fail)" in text
 
 
 def test_an_old_shape_arm_beside_an_unclean_single_run_says_not_measured():
@@ -1522,3 +1526,21 @@ def test_a_next_step_that_already_stops_keeps_its_own_reason_beside_a_stopping_d
 def test_a_decision_that_does_not_stop_leaves_the_next_step_as_the_rules_wrote_it():
     rep = an.build_report( _question(), canaries=[] )
     assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == rep[ "stop_rules" ][ "next_step" ]
+
+
+def test_the_report_prints_the_out_tokens_per_entry_apart_from_those_per_request_when_a_request_held_four_entries():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 0 ][ "size" ] = 4                           # 40 out for four entries is 10 an entry; the other 199 rows stay at 40
+    assert "tokens per request in 500.0 out 40.0; out per entry 39.85;" in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_a_request_with_no_usage_as_missing_and_leaves_it_out_of_the_means():
+    rec = _driver_arm( "lost-1-of-200" ); rec[ "rows" ][ 1 ][ "tokens_in" ] = None
+    assert "200 sent; tokens per request in 500.0 out 40.0; out per entry 40.0; retried calls 0, extra attempts 0; usage missing 1;" in an.render( an.build_report( [ rec ], canaries=[] ) )
+
+
+def test_the_report_prints_one_cost_line_for_each_question_and_the_mean_of_them():
+    recs = _flipping_complete() + _flipping_complete( 2, 2 )                                      # $0.063 and $0.126
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "cost, question 1: 1000000 entry tokens + 500000 page tokens = $0.063" in text
+    assert "cost, question 2: 2000000 entry tokens + 1000000 page tokens = $0.126" in text
+    assert "cost per search: mean $0.0945" in text

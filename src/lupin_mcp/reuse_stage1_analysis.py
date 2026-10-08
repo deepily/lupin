@@ -612,6 +612,8 @@ def build_report( records, canaries ):
           canaries, unclean_arms, lost_by_arm }
         - lost_by_arm gives every arm's lost count beside its limit and its stop reason
         - decision comes from the passes and next_step from the stop rules
+        - a decision that stops and asks turns a next step that runs more into "stop and ask: see the decision above"
+        - a next step that already stops and asks keeps its own reason
         - duplicate_ids lists each arm that asked an id more than once; such an arm stops the decision
         - page_arm is the page arm's verdict; a failing or asking page arm turns a decision that did not stop into a stop
         - unclean_arms lists every arm that is not clean, with its status and stop reason
@@ -628,7 +630,9 @@ def build_report( records, canaries ):
     if pg[ "state" ] == "invalid" and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm is invalid"
     if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
-    return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg, "duplicate_ids": dups,
+    next_step = stop[ "next_step" ]
+    if decision.startswith( "stop and ask" ) and not next_step.startswith( "stop and ask" ): next_step = "stop and ask: see the decision above"
+    return { "decision": decision, "next_step": next_step, "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg, "duplicate_ids": dups,
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
              "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
@@ -642,7 +646,8 @@ def render( report ):
 
     Ensures:
         - returns a string with the decision, the next step, the boundary count, the noise floor, one block per
-          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary, the page arm with its questions and the cost
+          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary,
+          the requests each arm sent, the other boundaries, the old-shape comparison, the page arm with its questions and the cost per question
     """
     ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
     lines  = [ "Live packing measurement: analysis", "", f"Decision: {report[ 'decision' ]}", f"Next step: {report[ 'next_step' ]}", "",
@@ -663,6 +668,19 @@ def render( report ):
     for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
+    for q, arms in report[ "request_stats" ].items():
+        for name, r in arms.items():
+            lines.append( f"requests, question {q} {name}: {r[ 'requests_sent' ]} sent; tokens per request in {r[ 'tokens_in_per_request' ]} out {r[ 'tokens_out_per_request' ]}; "
+                          f"out per entry {r[ 'tokens_out_per_entry' ]}; retried calls {r[ 'retried_calls' ]}, extra attempts {r[ 'extra_attempts' ]}; "
+                          f"usage missing {r[ 'usage_missing' ]}; {r[ 'retry_statuses' ]}" )
+    for size, by_q in report[ "other_boundaries" ].items():
+        for q, o in by_q.items():
+            if o is None: lines.append( f"other boundaries, pack {size}, question {q}: not measured" ); continue
+            lines.append( f"other boundaries, pack {size}, question {q}: floor flips {o[ 'floor' ][ 'pack' ]} by packing against {o[ 'floor' ][ 'noise' ]} by noise; "
+                          f"confidence flips {o[ 'confidence' ][ 'pack' ]} by packing against {o[ 'confidence' ][ 'noise' ]} by noise" )
+    for q, o in report[ "old_shape" ].items():
+        if o is None: lines.append( f"old shape, question {q}: not measured" ); continue
+        lines.append( f"old shape, question {q}: {o[ 'hits' ]} cached hits, p99 {o[ 'p99' ]}, max {o[ 'max' ]}, {o[ 'boundary_flips' ]} boundary flips ({o[ 'note' ]})" )
     pg = report[ "page_arm" ]
     if pg[ "pack_changes" ] is None: lines.append( f"page arm: {pg[ 'state' ]}" )
     else:
@@ -673,7 +691,10 @@ def render( report ):
     for q, p in report[ "pages" ].items():
         if "set_changed_by_packing" in p: lines.append( f"pages, question {q}: chosen set changed by packing {'yes' if p[ 'set_changed_by_packing' ] else 'no'}, by noise {'yes' if p[ 'set_changed_by_noise' ] else 'no'}" )
         else: lines.append( f"pages, question {q}: {p[ 'state' ]}" )
-    if report[ "cost" ] is not None: lines.append( f"cost per search: mean ${report[ 'cost' ][ 'mean_dollars' ]}" )
+    if report[ "cost" ] is not None:
+        for q, c in report[ "cost" ].items():
+            if q != "mean_dollars": lines.append( f"cost, question {q}: {c[ 'entry_tokens' ]} entry tokens + {c[ 'page_tokens' ]} page tokens = ${c[ 'dollars' ]}" )
+        lines.append( f"cost per search: mean ${report[ 'cost' ][ 'mean_dollars' ]}" )
     return "\n".join( lines )
 
 
