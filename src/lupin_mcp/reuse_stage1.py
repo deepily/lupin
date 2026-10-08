@@ -50,6 +50,10 @@ class CanaryTripped( Exception ):
     """A canary crossed one of its stop numbers and cannot be approved."""
 
 
+class DriverRefused( ValueError ):
+    """The driver refused a step before spending: no ledger run opened, no name used."""
+
+
 class KeyMissing( Exception ):
     """The live transport has no key, so the arm was refused before it opened a ledger run."""
 
@@ -99,20 +103,20 @@ def _check_probe( arm, probe, entries ):
           is not in the pack, is not at its stated position, or does not match the arm's name
     """
     if not arm.startswith( "probe-" ):
-        if probe is not None: raise ValueError( f"a probe belongs to a probe arm, not to {arm!r}" )
+        if probe is not None: raise DriverRefused( f"a probe belongs to a probe arm, not to {arm!r}" )
         return
-    if probe is None: raise ValueError( f"{arm!r} needs a probe" )
+    if probe is None: raise DriverRefused( f"{arm!r} needs a probe" )
     _, place, near = arm.split( "-" )
     if not isinstance( probe, dict ) or set( probe ) != PROBE_KEYS or not isinstance( probe[ "id" ], str ):
-        raise ValueError( f"a probe is a mapping with exactly {sorted( PROBE_KEYS )}" )
+        raise DriverRefused( f"a probe is a mapping with exactly {sorted( PROBE_KEYS )}" )
     if probe[ "placement" ] not in PLACEMENTS or probe[ "neighbours" ] not in NEIGHBOURS.values():
-        raise ValueError( f"probe placement is one of {PLACEMENTS} and neighbours one of {tuple( NEIGHBOURS.values() )}" )
+        raise DriverRefused( f"probe placement is one of {PLACEMENTS} and neighbours one of {tuple( NEIGHBOURS.values() )}" )
     if ( probe[ "placement" ], probe[ "neighbours" ] ) != ( place, NEIGHBOURS[ near ] ):
-        raise ValueError( f"the probe does not match the arm {arm!r}" )
+        raise DriverRefused( f"the probe does not match the arm {arm!r}" )
     ids = [ e[ "id" ] for e in entries ]
-    if probe[ "id" ] not in ids: raise ValueError( f"probe {probe[ 'id' ]!r} is not in the pack" )
+    if probe[ "id" ] not in ids: raise DriverRefused( f"probe {probe[ 'id' ]!r} is not in the pack" )
     want = { "first": 0, "middle": len( ids ) // 2, "last": len( ids ) - 1 }[ place ]
-    if ids.index( probe[ "id" ] ) != want: raise ValueError( f"probe is not at the {place} position of the pack" )
+    if ids.index( probe[ "id" ] ) != want: raise DriverRefused( f"probe is not at the {place} position of the pack" )
 
 
 def _check_ready( env, entries ):
@@ -127,10 +131,10 @@ def _check_ready( env, entries ):
     """
     workers = env.workers
     if type( workers ) is not int or not rp.WORKERS_MIN <= workers <= rp.WORKERS_MAX:
-        raise ValueError( f"workers must be an integer from {rp.WORKERS_MIN} to {rp.WORKERS_MAX}, got {workers!r}" )
+        raise DriverRefused( f"workers must be an integer from {rp.WORKERS_MIN} to {rp.WORKERS_MAX}, got {workers!r}" )
     counts   = collections.Counter( e[ "id" ] for e in entries )
     repeated = sorted( i for i, n in counts.items() if n > 1 )
-    if repeated: raise ValueError( f"{len( repeated )} entry id(s) are repeated in the arm, the first is {repeated[ 0 ]!r}" )
+    if repeated: raise DriverRefused( f"{len( repeated )} entry id(s) are repeated in the arm, the first is {repeated[ 0 ]!r}" )
     if env.live and not jt.has_key(): raise KeyMissing( f"{jt.KEY_VARIABLE} is not set; no ledger run was opened and no run name was spent" )
 
 
@@ -159,16 +163,16 @@ def _check_attempt( env, question, arm, attempt, reason ):
           a retry without a reason or a first attempt with one, a retry with no attempt before it,
           a retry after any attempt was approved, or a retry after an attempt tripped on model_mismatch
     """
-    if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise ValueError( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
+    if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise DriverRefused( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
     if attempt == 1:
-        if reason is not None: raise ValueError( "a first attempt has no reason; only a retry gives one" )
+        if reason is not None: raise DriverRefused( "a first attempt has no reason; only a retry gives one" )
         return
-    if arm != "canary": raise ValueError( f"only the canary may be retried, not {arm!r}" )
-    if not isinstance( reason, str ) or not reason.strip(): raise ValueError( "a retry needs a named reason" )
-    if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise ValueError( f"attempt {attempt} has no earlier attempt to follow" )
+    if arm != "canary": raise DriverRefused( f"only the canary may be retried, not {arm!r}" )
+    if not isinstance( reason, str ) or not reason.strip(): raise DriverRefused( "a retry needs a named reason" )
+    if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise DriverRefused( f"attempt {attempt} has no earlier attempt to follow" )
     reports = _canary_reports( env, question )
-    if any( report[ "approved" ] is not None for _, _, report in reports ): raise ValueError( f"the canary of question {question} is already approved" )
-    if any( "model_mismatch" in report[ "tripped" ] for _, _, report in reports ): raise ValueError( f"the canary of question {question} tripped on model_mismatch; it is not retried" )
+    if any( report[ "approved" ] is not None for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} is already approved" )
+    if any( "model_mismatch" in report[ "tripped" ] for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} tripped on model_mismatch; it is not retried" )
 
 
 @contextlib.contextmanager
@@ -232,8 +236,8 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - CanaryNotApproved for any arm but the first single run before the canary is approved
         - LedgerUnreadable or AccountLimitReached from the ledger
     """
-    if type( question ) is not int or question not in QUESTIONS: raise ValueError( f"question must be one of {QUESTIONS}, got {question!r}" )
-    if arm not in ARMS: raise ValueError( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
+    if type( question ) is not int or question not in QUESTIONS: raise DriverRefused( f"question must be one of {QUESTIONS}, got {question!r}" )
+    if arm not in ARMS: raise DriverRefused( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
     _check_attempt( env, question, arm, attempt, reason )
     attempt_limit = rt.CALL_BUDGET_CAP if attempt_limit is None else attempt_limit
     if type( attempt_limit ) is not int or not 1 <= attempt_limit <= rt.CALL_BUDGET_CAP:
@@ -252,7 +256,8 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         remaining = stage_remaining( env.ledger )
         if type( ceiling_tokens ) is int and ceiling_tokens > remaining:  # pragma: no branch -- the lock never swallows this raise
             raise StageRefused( f"{ceiling_tokens} asked, {remaining} remaining of the stage's {STAGE_TOKENS}" )
-        budget = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
+        try: budget = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
+        except ValueError as e: raise DriverRefused( str( e ) ) from e                    # a run name used before, refused by the ledger
     try:
         ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit )
         sweep = rp.sweep_packed( ctx, need, entries, size, workers=env.workers, key_mode="stage1", run_index=index, template=template, model=env.model, budget=budget )
@@ -326,10 +331,10 @@ def approve_canary( env, question, by, why, attempt=None ):
         - CanaryNotApproved when the question, or the attempt named, has no canary
         - CanaryTripped when that canary crossed a stop number; it is never approved
     """
-    if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise ValueError( "by and why must say who approved the canary and why" )
+    if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise DriverRefused( "by and why must say who approved the canary and why" )
     reports = _canary_reports( env, question )
     if not reports: raise CanaryNotApproved( f"no canary was run for question {question}" )
-    if any( report[ "approved" ] is not None for _, _, report in reports ): raise ValueError( f"the canary of question {question} is already approved" )
+    if any( report[ "approved" ] is not None for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} is already approved" )
     chosen = [ r for r in reports if attempt is None or r[ 0 ] == attempt ]
     if not chosen: raise CanaryNotApproved( f"no canary was run for question {question} attempt {attempt}" )
     _, path, report = chosen[ -1 ]

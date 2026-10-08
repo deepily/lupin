@@ -886,6 +886,7 @@ def refusals( env ):
 @pytest.mark.parametrize( "name", [ "question out of range", "unknown arm", "attempt out of range", "first attempt with reason", "retry of another arm", "retry without reason",
                                     "retry with no first", "probe on a plain arm", "probe arm without probe", "repeated entry id", "approve without a name" ] )
 def test_each_refusal_before_a_spend_is_a_driver_refusal( env, name ):
+    if name == "probe arm without probe": st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "read" )          # a probe arm is gated
     with pytest.raises( st.DriverRefused ): refusals( env )[ name ]()
 
 

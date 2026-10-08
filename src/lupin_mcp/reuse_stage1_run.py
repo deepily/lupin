@@ -235,11 +235,11 @@ def cli( argv=None, loader=None ):
 
     Ensures:
         - returns main's own code when it works
-        - returns 2 after one line on the error stream for a RunnerRefused, KeyMissing, CanaryNotApproved, CanaryTripped or StageRefused
+        - returns 2 after one line on the error stream for a RunnerRefused, DriverRefused, KeyMissing, CanaryNotApproved, CanaryTripped or StageRefused
         - any other error propagates untouched, so a crash is never read as a refusal
     """
     try: return main( argv, loader )
-    except ( RunnerRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused ) as e:
+    except ( RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused ) as e:
         print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
         return 2
 
