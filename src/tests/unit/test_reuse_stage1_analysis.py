@@ -795,7 +795,7 @@ def test_the_report_names_each_size_with_its_three_numbers_and_each_arm_that_was
     recs = _question(); recs[ 3 ][ "failed" ] = [ "e001" ]
     text = an.render( an.build_report( recs, canaries=[] ) )
     assert "pack 50" in text and "inconclusive" in text and "s1-q1-pack50" in text
-    assert "s1-q1-pack10" not in text and "s1-q1-single1" not in text                       # only arms that are not clean are named
+    assert "not clean: s1-q1-pack50" in text and "not clean: s1-q1-pack10" not in text and "not clean: s1-q1-single1" not in text   # only arms that are not clean are named as such
 
 
 def test_a_canary_that_disagrees_with_the_driver_is_listed_in_the_report():
@@ -826,7 +826,9 @@ def test_real_answers_of_one_question_alone_read_inconclusive_and_ask_for_questi
     recs = [ _arm( n, ov, size=s, answers=fx[ "answers" ] ) for n, s in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ) ]
     recs += _extra_arms( 1, ov, fx[ "answers" ] )
     rep  = an.build_report( recs, canaries=[] )
-    assert rep[ "evaluate" ][ "boundary_pooled" ] == 33 and rep[ "next_step" ] == "run question 2"
+    assert rep[ "evaluate" ][ "boundary_pooled" ] == 33 and rep[ "next_step" ].startswith( "run question 1's remaining arms: probe-first-random" )
+    rep = an.build_report( recs + _probes( 1, next( iter( ov ) ), ov ), canaries=[] )
+    assert rep[ "next_step" ] == "run question 2"
     assert all( rep[ "evaluate" ][ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
 
 
@@ -996,6 +998,12 @@ def test_beside_the_default_the_report_says_sizes_ten_and_fifty_carry_no_positio
     text = an.render( rep )
     assert rep[ "decision" ] == "default pack size 200" and "pass 3 was run at size 200 only" in text
     assert "sizes 10 and 50 carry no position evidence" in text
+
+
+def test_with_no_default_size_the_report_makes_no_claim_about_where_pass_three_ran():
+    recs = _question(); recs[ 0 ][ "failed" ] = [ "e001" ]
+    rep  = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "default_size" ] is None and rep[ "decision" ] != "default pack size 200" and "carry no position evidence" not in an.render( rep )
 
 
 def test_the_report_names_the_questions_that_were_not_probed():

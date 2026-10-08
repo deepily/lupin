@@ -31,6 +31,21 @@ FLOOR                           = 0.3                         # the page floor o
 CONFIDENCE_BAR                  = 0.9                         # an answer is confident from this largest probability
 
 INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422" )
+LOST_ONE_IN   = 200                                           # an arm may lose one entry in this many and still be judged
+REQUIRED_ARMS = ( "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
+                  "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" )
+
+
+def lost_limit( n ):
+    """
+    Give the number of entries an arm of n entries may lose and still be judged.
+
+    Requires:
+        - n is a non-negative integer
+    Ensures:
+        - returns n divided by the lost-entry ratio, rounded down
+    """
+    return n // LOST_ONE_IN
 
 
 def read_arm( record ):
@@ -45,9 +60,10 @@ def read_arm( record ):
         - overlaps maps each validly answered id to reuse plus extend rounded to six places
         - malformed maps an answered id whose probabilities are not valid to the reason
         - status is "invalid" when the arm was stopped by the ceiling, the ledger or refusals, or errored
-        - status is "inconclusive" when it ran out of attempts, is not complete, or has any failed, unasked,
-          unreached entry, or has an entry without a valid answer (a malformed one included), or asked nothing
-        - status is "clean" otherwise
+        - lost lists, sorted, the asked ids without a valid answer plus every id named failed, unasked or not reached
+        - lost_limit is the number of entries the arm may lose and still be judged
+        - status is "inconclusive" when it asked nothing, or is not complete and did not stop on attempts
+        - status is "clean" when the lost entries number at most the limit, and "inconclusive" otherwise
     Raises:
         - ValueError for another format, an answer for an id the arm did not ask about, or an id answered twice
     """
@@ -64,14 +80,16 @@ def read_arm( record ):
         p, conf, _ = vd.call_facts( a[ "probabilities" ] )
         overlaps[ i ], confidences[ i ], probabilities[ i ] = round( p, 6 ), round( conf, 6 ), a[ "probabilities" ]
     stop = record[ "stop_reason" ]
+    lost = sorted( ( asked - set( overlaps ) ) | set( record[ "failed" ] ) | set( record[ "unasked" ] ) | set( record[ "not_reached" ] ) )
+    limit = lost_limit( len( asked ) )
     if record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
-    elif ( stop == "attempts" or record[ "state" ] != "complete" or record[ "failed" ] or record[ "unasked" ] or record[ "not_reached" ]
-           or set( overlaps ) != asked or not asked ): status = "inconclusive"
-    else: status = "clean"
+    elif not asked or ( record[ "state" ] != "complete" and stop != "attempts" ): status = "inconclusive"
+    else: status = "clean" if len( lost ) <= limit else "inconclusive"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
              "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
              "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
+             "lost": lost, "lost_limit": limit,
              "failed": list( record[ "failed" ] ), "not_reached": list( record[ "not_reached" ] ), "unasked": list( record[ "unasked" ] ),
              "cache_hits": record[ "cache_hits" ], "totals": record[ "totals" ], "rows": record[ "rows" ],
              "transport_calls": record[ "transport_calls" ], "probe": record.get( "probe" ), "status": status }
@@ -248,17 +266,19 @@ def pass_three( stage, floor ):
     Requires:
         - a question with probe arms has all six placements, each once
     Ensures:
-        - returns { state, placements, worst } pooled over the questions that have probe arms
+        - returns { state, placements, worst, not_probed } pooled over the questions that have probe arms
+        - not_probed lists, in order, the questions with no probe arm; they add no evidence
         - state is "pass" when every placement is within floor of single run 1, "fail" when one is not
+        - state is "inconclusive" while any probed question has fewer than all six placements
         - state is "invalid" when a probe arm was stopped, and "inconclusive" when no question has probes, a
           question lacks a placement, single run 1 is not clean or lacks the probe, or the arm has no probe answer
     Raises:
         - ValueError when one placement is given twice for a question
     """
-    placements, diffs, states = 0, [], []
+    placements, diffs, states, not_probed = 0, [], [], []
     for q in sorted( stage ):
         probes = [ a for a in stage[ q ].values() if a[ "probe" ] ]
-        if not probes: continue
+        if not probes: not_probed.append( q ); continue
         seen = {}
         for a in probes:
             key = ( a[ "probe" ][ "placement" ], a[ "probe" ][ "neighbours" ] )
@@ -272,10 +292,10 @@ def pass_three( stage, floor ):
             if pid not in a[ "overlaps" ] or pid not in s1[ "overlaps" ]: states.append( "inconclusive" ); continue
             placements += 1
             diffs.append( round( abs( a[ "overlaps" ][ pid ] - s1[ "overlaps" ][ pid ] ), 6 ) )
-    if not states and not diffs: return { "state": "inconclusive", "placements": 0, "worst": None }
+    if not states and not diffs: return { "state": "inconclusive", "placements": 0, "worst": None, "not_probed": not_probed }
     if floor is None: states.append( "inconclusive" )
     else: states.append( "pass" if all( d <= floor for d in diffs ) else "fail" )
-    return { "state": _combine( states ), "placements": placements, "worst": max( diffs ) if diffs else None }
+    return { "state": _combine( states ), "placements": placements, "worst": max( diffs ) if diffs else None, "not_probed": not_probed }
 
 
 def evaluate( stage ):
@@ -312,7 +332,7 @@ def evaluate( stage ):
              "decision": decision }
 
 
-def stop_rules( stage ):
+def stop_rules( stage, check_arms=True ):
     """
     Read the rules that stop the stage between questions.
 
@@ -320,6 +340,9 @@ def stop_rules( stage ):
         - returns { stop, next_step, findings, pooled_boundary, spent_by_question, spent_total }
         - a finding is { rule, stop, detail }; the rules are the stage ceiling, spend after question 1,
           and a single run 1 that is absent or not clean
+        - with check_arms, the first question that lacks a required arm names its remaining arms as the next step
+        - the arms are checked after the stop findings and an unclean single run 1, and before the rules below
+        - a retry such as canary-a2 never stands in for a required arm
         - after question 2, fewer than the minimum pooled boundary entries stops before question 3
         - after question 3, fewer than the pooled minimum asks for the reserve question
         - after the reserve question, fewer than the pooled minimum reads inconclusive
@@ -335,6 +358,9 @@ def stop_rules( stage ):
     stops   = [ f for f in findings if f[ "stop" ] ]
     if stops: stop, step = True, f"stop and ask: {stops[ 0 ][ 'detail' ]}"
     elif unclean: stop, step = True, f"stop and ask: question {unclean[ 0 ]}'s single run 1 is not clean"
+    elif check_arms and any( n not in stage[ q ] for q in sorted( stage ) for n in REQUIRED_ARMS ):
+        q = next( q for q in sorted( stage ) if any( n not in stage[ q ] for n in REQUIRED_ARMS ) )
+        stop, step = False, f"run question {q}'s remaining arms: " + ", ".join( n for n in REQUIRED_ARMS if n not in stage[ q ] )
     elif last <= 1: stop, step = False, "run question 2"
     elif last == 2 and pooled < STOP_BOUNDARY_AFTER_QUESTION_2: stop, step = True, f"stop and ask: under {STOP_BOUNDARY_AFTER_QUESTION_2} pooled boundary entries after question 2"
     elif last == 2: stop, step = False, "run question 3"
@@ -529,7 +555,8 @@ def build_report( records, canaries ):
         - records are stage1-arm-1 dicts; canaries is a list of ( canary arm record, canary file ) pairs
     Ensures:
         - returns { decision, next_step, evaluate, stop_rules, pages, other_boundaries, request_stats, cost, old_shape,
-          canaries, unclean_arms }
+          canaries, unclean_arms, lost_by_arm }
+        - lost_by_arm gives every arm's lost count beside its limit
         - decision comes from the passes and next_step from the stop rules
         - unclean_arms lists every arm that is not clean, with its status and stop reason
     """
@@ -541,7 +568,9 @@ def build_report( records, canaries ):
     return { "decision": ev[ "decision" ], "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ),
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
-             "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean }
+             "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
+             "lost_by_arm": [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "lost": len( a[ "lost" ] ), "lost_limit": a[ "lost_limit" ] }
+                              for q in sorted( stage ) for a in stage[ q ].values() ] }
 
 
 def render( report ):
@@ -550,7 +579,7 @@ def render( report ):
 
     Ensures:
         - returns a string with the decision, the next step, the boundary count, the noise floor, one block per
-          pack size, each arm that is not clean, each canary, the page arms and the cost
+          pack size, every arm's lost count and limit, the questions not probed, each arm that is not clean, each canary, the page arms and the cost
     """
     ev, nf = report[ "evaluate" ], report[ "evaluate" ][ "noise_floor" ]
     lines  = [ "Live packing measurement: analysis", "", f"Decision: {report[ 'decision' ]}", f"Next step: {report[ 'next_step' ]}", "",
@@ -562,6 +591,11 @@ def render( report ):
         lines.append( f"pack {size}: {s[ 'state' ]}; pass 1 {s[ 'pass_one' ][ 'state' ]} (p99 {s[ 'pass_one' ][ 'p99' ]}, max {s[ 'pass_one' ][ 'max' ]}); "
                       f"pass 2 {s[ 'pass_two' ][ 'state' ]} (flips {s[ 'pass_two' ][ 'pack_flips' ]} against noise {s[ 'pass_two' ][ 'noise_flips' ]})"
                       + ( f"; pass 3 {p3[ 'state' ]} ({p3[ 'placements' ]} placements, worst {p3[ 'worst' ]})" if p3 else "" ) )
+    for a in report[ "lost_by_arm" ]: lines.append( f"{a[ 'run_name' ] or 'question ' + str( a[ 'question' ] ) + ' ' + a[ 'arm' ]}: lost {a[ 'lost' ]} of limit {a[ 'lost_limit' ]}" )
+    p3 = ev[ "sizes" ][ PASS_THREE_SIZE ][ "pass_three" ]
+    for q in p3[ "not_probed" ]: lines.append( f"not probed: question {q}" )
+    if ev[ "default_size" ] is not None:
+        lines.append( f"pass 3 was run at size {PASS_THREE_SIZE} only; sizes 10 and 50 carry no position evidence" )
     for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
