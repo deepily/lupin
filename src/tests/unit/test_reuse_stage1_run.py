@@ -92,8 +92,19 @@ def test_the_default_is_the_stand_in_and_it_marks_its_data_folder( scratch ):
 
 
 def test_a_live_run_refuses_a_data_folder_a_stand_in_wrote( scratch ):
-    run( scratch, "ledger-init" ); run( scratch, "status" )
-    with pytest.raises( rr.RunnerRefused, match="stand-in" ): run( scratch, "status", live=True )
+    scratch.real_ledger.parent.mkdir(); rl.AccountLedger.create( scratch.real_ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
+    scratch.real_data.mkdir(); ( scratch.real_data / rr.STAND_IN_MARKER ).write_text( "marked\n" )
+    with pytest.raises( rr.RunnerRefused, match="stand-in" ): run( scratch, "status", live=True, data=False, ledger=False )
+
+
+def test_a_live_run_refuses_a_data_folder_or_ledger_that_is_not_the_real_one( scratch ):
+    scratch.real_ledger.parent.mkdir(); rl.AccountLedger.create( scratch.real_ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
+    rl.AccountLedger.create( scratch.ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "a scratch ledger" )
+    with pytest.raises( rr.RunnerRefused, match="real ledger" ): run( scratch, "status", live=True, data=False )              # spend on it would escape the account limit
+    with pytest.raises( rr.RunnerRefused, match="real data folder" ): run( scratch, "status", live=True, ledger=False )
+    assert run( scratch, "status", live=False ) == 0                                                                           # the same scratch paths are fine for a stand-in
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.real_data ), "--ledger", str( scratch.real_ledger ), "--live", "status" ]
+    assert rr.main( argv, loader=loader ) == 0                                                                                  # naming the real ones is allowed
 
 
 def test_a_live_run_uses_the_real_paths_by_default_and_needs_the_ledger_to_exist( scratch ):
@@ -104,10 +115,10 @@ def test_a_live_run_uses_the_real_paths_by_default_and_needs_the_ledger_to_exist
 
 
 def test_a_live_run_with_no_key_is_refused_by_the_driver_and_spends_nothing( scratch ):
-    scratch.ledger.parent.mkdir( exist_ok=True ); rl.AccountLedger.create( scratch.ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
-    before = ledger_rows( scratch.ledger )
-    with pytest.raises( s1.KeyMissing, match=KEY ): run( scratch, "canary", "--question", "1", "--ceiling", "2000000", live=True )
-    assert ledger_rows( scratch.ledger ) == before and not ( scratch.data / "stage1-results" ).exists()
+    scratch.real_ledger.parent.mkdir(); rl.AccountLedger.create( scratch.real_ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
+    before = ledger_rows( scratch.real_ledger )
+    with pytest.raises( s1.KeyMissing, match=KEY ): run( scratch, "canary", "--question", "1", "--ceiling", "2000000", live=True, data=False, ledger=False )
+    assert ledger_rows( scratch.real_ledger ) == before and not ( scratch.real_data / "stage1-results" ).exists()
 
 
 def test_ledger_init_makes_a_scratch_ledger_once_and_never_the_real_one( scratch ):
