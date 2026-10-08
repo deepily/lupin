@@ -10,6 +10,8 @@ pins:
   - cosa.rest.task_store_rejoin.classify_blocked_row@adcf2351f2
   - cosa.rest.task_chase_consumer.TaskChaseConsumer.sweep_once@80a7268a04
   - cosa.rest.task_store_change_notifier.record_appended_event@7b9f6b43b5
+  - cosa.rest.task_store_epic_keys.audit_rows@3d1af5e250
+  - cosa.rest.task_store_prose_refs.scan_rows@c71c73ea51
 ---
 # Task store
 

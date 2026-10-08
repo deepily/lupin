@@ -11,6 +11,7 @@ pins:
   - lupin_mcp.persona_normalization.canonical_persona_key@2d2cdf3a9b
   - lupin_mcp.persona_normalization.normalize_for_match@49bc823e64
   - lupin_mcp.commons_persona_matcher.match_persona@62e4b1e574
+  - lupin_mcp.commons_llm_disambiguator.CommonsLlmDisambiguator.disambiguate@015c52a9b8
 ---
 # Voice persona allocation
 
