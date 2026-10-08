@@ -343,6 +343,36 @@ def test_the_old_report_carries_its_cuts_as_the_grid_and_flags_a_choice_on_their
     assert "grid: cut 0.2 to 0.6 (3 values)" in ft.render( rep ) and "warning: the chosen cut 0.2 is the lowest value of its grid" in ft.render( rep )
 
 
+# --- the second named condition: a rate that binds nowhere -----------------------------------------------------------------
+
+def test_the_condition_text_is_the_one_cheech_named():
+    assert ft.NOT_BINDING == "the false-reuse rate does not bind at any cut; the cut is not determined by it"
+
+
+def test_a_rate_that_every_grid_point_keeps_is_named_in_the_report_and_the_text():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rows  = _opt_rows() + [ _row( "k", "t", True, 0.9 ) ]
+    rep   = ft.report( rows, split, 0.5, GRID )
+    assert rep[ "fit" ][ "feasible" ] == len( rep[ "fit" ][ "table" ] ) and rep[ "rate_binds" ] is False
+    assert f"warning: {ft.NOT_BINDING}" in ft.render( rep )
+
+
+def test_a_rate_that_rules_out_even_one_grid_point_binds_and_the_text_stays_silent_about_it():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rep   = ft.report( _opt_rows() + [ _row( "k", "t", True, 0.9 ) ], split, 0.0, GRID )
+    assert rep[ "fit" ][ "feasible" ] < len( rep[ "fit" ][ "table" ] ) and rep[ "rate_binds" ] is True
+    assert ft.NOT_BINDING not in ft.render( rep )
+
+
+def test_the_old_question_gets_the_same_condition():
+    rows  = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.1 ), _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    free  = ft.old_report( rows, split, 0.5, cuts = ( 0.2, 0.4, 0.6 ) )
+    tight = ft.old_report( rows, split, 0.0, cuts = ( 0.2, 0.4, 0.6 ) )
+    assert free[ "rate_binds" ] is False and ft.NOT_BINDING in ft.render( free )
+    assert tight[ "rate_binds" ] is True and ft.NOT_BINDING not in ft.render( tight )
+
+
 # --- the dry run on the old run's real rows ------------------------------------------------------------------------------
 
 def _old_world():
