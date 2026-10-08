@@ -169,6 +169,7 @@ def test_the_preflight_script_calls_the_helper_before_its_summary_and_lets_the_h
     text  = open( PREFLIGHT ).read()
     probe = text.index( "# ── 7. Database grants" )
     assert probe < text.index( "# ── Summary" )
-    assert "lib/check-db-grants.sh" in text[ probe: ] and "--repair-when-enabled" in text[ probe: ]
-    assert "--repair )" not in text[ probe: ], "the probe repairs without asking the helper"
+    calls = [ l for l in text[ probe: ].splitlines() if 'lib/check-db-grants.sh"' in l ]
+    assert len( calls ) == 1, "the probe must call the helper exactly once"
+    assert 'check-db-grants.sh" --repair-when-enabled ' in calls[ 0 ], "the probe must let the helper decide the repair"
     assert subprocess.run( [ "bash", "-n", PREFLIGHT ] ).returncode == 0
