@@ -346,7 +346,7 @@ def _provision( box, tmp_path, *flags, database="lupin_db_dev", expect_ok=True )
         files[ role ] = str( path )
     psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d {database}"
     args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--apply", *flags ]
-    if "--rollback" not in flags:
+    if not ( "--rollback" in flags or "--drop-template" in flags ):
         args += [ "--app-pw-file", files[ "app" ], "--host-pw-file", files[ "host" ], "--test-pw-file", files[ "test" ] ]
     env = _clean_env( LUPIN_ROOT=ROOT, PYTHONPATH=os.path.join( ROOT, "src" ) )
     done = subprocess.run( args, capture_output=True, text=True, timeout=120, env=env, cwd=ROOT )

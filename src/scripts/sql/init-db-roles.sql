@@ -39,9 +39,12 @@
 -- and nothing else. It needs no password variable and creates, alters and drops no role, so it needs
 -- no password file and no root. It stops with a named error when one of the three roles is missing.
 --
--- The template database lupin_template_vector is made in every run except a rollback, which removes it. It holds
+-- The template database lupin_template_vector is made in every run except a rollback and a drop_template run. It holds
 -- the vector extension, is marked as a template and refuses connections. A test that creates a database clones
 -- it, so the extension needs no superuser at test time. See cosa.utils.db_grants for the check that reports it.
+--
+-- drop_template=1 (optional, alone) removes the template database and runs nothing else. It is separate from
+-- rollback because the template has nothing to do with the cutover: undoing the cutover must not delete a test aid.
 --
 -- IDEMPOTENT: roles are created if absent and their passwords reset each run; grants repeat
 -- harmlessly. Not applied to the live database by anyone yet.
@@ -54,6 +57,16 @@
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
 SET log_min_duration_statement = -1;
+
+-- ---- DROP_TEMPLATE ONLY: remove the template database and stop ------------------------
+-- A template cannot be dropped while it is one, so it is unmarked first. A second run finds nothing and succeeds.
+\if :{?drop_template}
+  SELECT 'ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false'
+   WHERE EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' )
+  \gexec
+  DROP DATABASE IF EXISTS lupin_template_vector;
+  \quit
+\endif
 
 -- ---- ROLLBACK ONLY: hand both databases back to the bootstrap superuser ---------------
 -- The reassign blocks below in reverse, with the same extension exclusions and the two role names
@@ -133,11 +146,6 @@ SET log_min_duration_statement = -1;
   SELECT format( 'ALTER DATABASE %I OWNER TO lupin_dev', current_database() )
    WHERE EXISTS ( SELECT FROM pg_database d JOIN pg_roles o ON o.oid = d.datdba WHERE d.datname = current_database() AND o.rolname = 'lupin_app' )
   \gexec
-  -- The template database goes too. A template cannot be dropped until it is no longer one.
-  SELECT 'ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false'
-   WHERE EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' )
-  \gexec
-  DROP DATABASE IF EXISTS lupin_template_vector;
   \quit
 \endif
 
@@ -309,12 +317,13 @@ ALTER DEFAULT PRIVILEGES FOR ROLE lupin_test IN SCHEMA public GRANT ALL ON SEQUE
 \endif
 
 -- ---- the template database for tests that create databases --------------------------------
--- Created empty, opened for the extension step, closed again. A superuser cannot connect to a database that
--- refuses connections, so the flags are loosened for the extension and tightened after. A re-run repeats all of it.
-SELECT 'CREATE DATABASE lupin_template_vector'
+-- Created empty and already marked as a template, opened for the extension step, closed again. A superuser cannot
+-- connect to a database that refuses connections, so only that flag is loosened for the extension. The template mark
+-- is never taken off, so a test that clones during a re-run is not refused for want of a template.
+SELECT 'CREATE DATABASE lupin_template_vector IS_TEMPLATE true'
  WHERE NOT EXISTS ( SELECT FROM pg_database WHERE datname = 'lupin_template_vector' )
 \gexec
-ALTER DATABASE lupin_template_vector WITH IS_TEMPLATE false ALLOW_CONNECTIONS true;
+ALTER DATABASE lupin_template_vector WITH ALLOW_CONNECTIONS true;
 \connect lupin_template_vector
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';

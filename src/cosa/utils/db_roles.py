@@ -14,10 +14,14 @@ works around.
         --psql "docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev" [--reassign] [--apply]
 
 `--rollback` is the cutover's way back. It hands every object that `lupin_app` owns in the test and dev
-databases back to `lupin_dev`. It also removes the template database. It runs nothing else: no role, password
-or grant is touched. It reads no password file, so the three file options may be left out.
+databases back to `lupin_dev`. It runs nothing else: no role, password or grant is touched, and the template
+database stays. It reads no password file, so the three file options may be left out.
 
     python -m cosa.utils.db_roles --psql "..." --rollback [--apply]
+
+`--drop-template` removes the template database and nothing else, and reads no password file.
+
+    python -m cosa.utils.db_roles --psql "..." --drop-template [--apply]
 
 `--grants-only` repeats the grants, the revoke on approval_settings and the default privileges, and makes
 the template database if it is missing. Nothing else runs. It creates no role and resets no password, so it reads no password file and needs no root.
@@ -27,9 +31,8 @@ It is the repair after a migration or a test created a table the roles cannot ye
 
 `--check` changes nothing. It asks Postgres what each role may do to every public table of both
 databases and compares the answer with the matrix in `cosa.utils.db_grants`. Each gap is printed
-with the one repair command. It also reports the template database, `lupin_template_vector`, when it is
-missing, is not a template or accepts connections. Tests that create databases clone it, so the vector
-extension needs no superuser at test time.
+with the one repair command. It also reports the template database `lupin_template_vector`, which tests clone,
+when it is missing, is not a template or accepts connections.
 Exit 0 is clean, 1 is a gap or a database with no tables, 2 is a check that could not run.
 
     python -m cosa.utils.db_roles --psql "..." --check [--database lupin_db_test]
@@ -75,7 +78,7 @@ def read_secret( path ):
     return value
 
 
-def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False, rollback=False, grants_only=False ):
+def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact=False, rollback=False, grants_only=False, drop_template=False ):
     """
     Build the psql stdin: three password `\\set` lines, an optional reassign line, the SQL.
 
@@ -92,11 +95,13 @@ def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact
         - reassign=True adds the cutover-only ownership transfer
         - rollback=True gives one `\\set rollback 1` line and the SQL, with no password line, so the three password arguments are ignored
         - grants_only=True gives one `\\set grants_only 1` line and the SQL, with no password line, so the three password arguments are ignored
+        - drop_template=True gives one `\\set drop_template 1` line and the SQL, with no password line, so the three password arguments are ignored
         - ends with a newline
     """
     shown = lambda value: "<redacted>" if redact else value
-    if rollback:      lines = [ "\\set rollback 1" ]
-    elif grants_only: lines = [ "\\set grants_only 1" ]
+    if rollback:        lines = [ "\\set rollback 1" ]
+    elif grants_only:   lines = [ "\\set grants_only 1" ]
+    elif drop_template: lines = [ "\\set drop_template 1" ]
     else:
         lines = [
             f"\\set app_pw  '{shown( app_pw )}'",
@@ -131,7 +136,8 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     direction.add_argument( "--reassign", action="store_true", help="CUTOVER ONLY: move ownership in the dev and test databases to lupin_app" )
     direction.add_argument( "--rollback", action="store_true", help="CUTOVER ONLY: move it back to lupin_dev; no role, password or grant changes" )
     direction.add_argument( "--check", action="store_true", help="read-only: list every missing or unexpected privilege; exit 1 when there is one" )
-    direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges only; no role or password is touched" )
+    direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges, and make the template database if missing; no role or password is touched" )
+    direction.add_argument( "--drop-template", action="store_true", help="remove the template database lupin_template_vector and nothing else" )
     parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
     parser.add_argument( "--database", action="append", choices=db_grants.databases(), help="with --check: check only this database (repeatable)" )
     args = parser.parse_args( argv )
@@ -143,10 +149,10 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         return code
 
     app_pw = host_pw = test_pw = None
-    if not ( args.rollback or args.grants_only ):
+    if not ( args.rollback or args.grants_only or args.drop_template ):
         pw_files = ( args.app_pw_file, args.host_pw_file, args.test_pw_file )
         if any( path is None for path in pw_files ):
-            parser.error( "--app-pw-file, --host-pw-file and --test-pw-file are required unless --rollback or --grants-only is given" )
+            parser.error( "--app-pw-file, --host-pw-file and --test-pw-file are required unless --rollback, --grants-only or --drop-template is given" )
         try:
             app_pw, host_pw, test_pw = ( read_secret( path ) for path in pw_files )
         except ValueError as error:
@@ -168,10 +174,10 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         print( "db_roles: DRY RUN (nothing was run). Add --apply to run it.", file=out )
         print( "command: " + shlex.join( command ), file=out )
         print( "stdin:", file=out )
-        print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True, rollback=args.rollback, grants_only=args.grants_only ), file=out, end="" )
+        print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True, rollback=args.rollback, grants_only=args.grants_only, drop_template=args.drop_template ), file=out, end="" )
         return 0
 
-    stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, rollback=args.rollback, grants_only=args.grants_only )
+    stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, rollback=args.rollback, grants_only=args.grants_only, drop_template=args.drop_template )
     return run_fn( command, input=stdin, text=True ).returncode
 
 

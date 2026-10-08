@@ -7,7 +7,7 @@ lupin_template_vector, is what a test that creates a database clones, so the ext
 Four things are pinned. The provisioner makes the template with the extension, as a template that refuses
 connections, and repeating it changes nothing. The grants-only run makes a missing template without a
 password file. The check reports a missing template and one that accepts connections, and stays quiet
-when it is right. The rollback removes it.
+when it is right. The drop flag removes it, and the cutover rollback leaves it alone.
 
 Reuses the throwaway harness of test_db_roles_rollback_real_postgres.py.
 Venue: host-side, docker required. The merge gate's containers have no docker socket, so there it skips.
@@ -96,10 +96,19 @@ def test_the_check_run_by_a_plain_login_still_sees_the_template( stocked, tmp_pa
 
 
 @needs_docker
-def test_the_rollback_removes_the_template( stocked, tmp_path ):
+def test_the_cutover_rollback_leaves_the_template_alone( stocked, tmp_path ):
     _provision( stocked, tmp_path )
-    assert _psql( stocked[ "name" ], "postgres", COUNT_SQL ).strip() == "1"
     _provision( stocked, tmp_path, "--rollback" )
+    assert _psql( stocked[ "name" ], "postgres", COUNT_SQL ).strip() == "1"
+    assert _flags( stocked ) == "true|false"
+
+
+@needs_docker
+def test_the_drop_flag_removes_only_the_template_and_a_second_run_succeeds( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    roles_before = _psql( stocked[ "name" ], "postgres", "SELECT string_agg( rolname, ',' ORDER BY rolname ) FROM pg_roles WHERE rolname LIKE 'lupin_%';\n" )
+    _provision( stocked, tmp_path, "--drop-template" )
     assert _psql( stocked[ "name" ], "postgres", COUNT_SQL ).strip() == "0"
-    _provision( stocked, tmp_path, "--rollback" )   # a second rollback finds nothing and succeeds
+    assert _psql( stocked[ "name" ], "postgres", "SELECT string_agg( rolname, ',' ORDER BY rolname ) FROM pg_roles WHERE rolname LIKE 'lupin_%';\n" ) == roles_before
+    _provision( stocked, tmp_path, "--drop-template" )
     assert _psql( stocked[ "name" ], "postgres", COUNT_SQL ).strip() == "0"
