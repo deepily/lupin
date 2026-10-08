@@ -156,3 +156,15 @@ def test_the_default_limit_is_sixty_thousand_tokens():
 def test_an_empty_pack_is_refused_by_the_split_too():
     with pytest.raises( ValueError, match="empty" ):
         rpr.split_for_size( NEED, [] )
+
+
+def test_the_estimate_rounds_up_on_a_body_whose_length_is_not_a_multiple_of_four():
+    assert len( rt.canonical( { "a": "xyz" } ) ) == 11
+    assert rpr.estimate_tokens( { "a": "xyz" } ) == 3
+
+
+def test_a_pack_exactly_at_the_limit_is_one_piece_and_one_token_under_it_is_two():
+    entries = [ entry( n ) for n in range( 8 ) ]
+    whole   = rpr.estimate_tokens( rpr.pair_request( NEED, entries )[ 0 ] )
+    assert rpr.split_for_size( NEED, entries, limit=whole )[ 0 ] == [ entries ]
+    assert len( rpr.split_for_size( NEED, entries, limit=whole - 1 )[ 0 ] ) == 2
