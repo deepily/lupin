@@ -502,8 +502,8 @@ def _canary( rows, totals=None, tripped=None ):
     return arm, { "format": "stage1-canary-1", "question": 1, "run_name": "s1-q1-canary", "tripped": [] if tripped is None else tripped, "approved": None }
 
 
-def _row( tokens_out=420, tokens_in=1000, reserve=4000, size=10, status="answered", http_status=None ):
-    return { "request_hash": "h", "size": size, "status": status, "tokens_in": tokens_in, "tokens_out": tokens_out,
+def _row( tokens_out=420, tokens_in=1000, reserve=4000, size=10, status="answered", http_status=None, attempts=1 ):
+    return { "request_hash": "h", "size": size, "status": status, "attempts": attempts, "tokens_in": tokens_in, "tokens_out": tokens_out,
              "reserve_tokens": reserve, "http_status": http_status }
 
 
@@ -526,13 +526,13 @@ def test_any_refusal_trips_the_canary_by_status_by_http_422_or_by_the_total():
 
 
 def test_the_trips_come_in_a_fixed_order_and_a_row_never_sent_is_skipped():
-    r = an.check_canary( *_canary( [ _row( tokens_out=700, tokens_in=9000, status="refused" ), _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached" ) ] ) )
+    r = an.check_canary( *_canary( [ _row( tokens_out=700, tokens_in=9000, status="refused" ), _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached", attempts=0 ) ] ) )
     assert r[ "tripped" ] == [ "output_per_entry_over_60", "usage_over_reserve", "refusal" ]
 
 
 def test_an_answered_row_without_usage_cannot_be_checked_and_is_listed_for_a_human():
     r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=None ) ] ) )
-    assert r[ "tripped" ] == [] and r[ "unverifiable" ] == 1
+    assert r[ "tripped" ] == [ "usage_missing" ] and r[ "unverifiable" ] == 1
 
 
 def test_a_disagreement_with_the_drivers_own_list_is_reported_both_ways():
@@ -629,4 +629,229 @@ def test_a_row_that_was_refused_without_usage_is_not_counted_unverifiable_but_an
 
 def test_a_row_with_output_but_no_input_usage_is_skipped_rather_than_crashing_the_reserve_check():
     r = an.check_canary( *_canary( [ _row( tokens_in=None, tokens_out=600, reserve=1 ) ] ) )
-    assert r[ "tripped" ] == [] and r[ "output_per_entry" ] == [] and r[ "unverifiable" ] == 1
+    assert r[ "tripped" ] == [ "usage_missing" ] and r[ "output_per_entry" ] == [] and r[ "unverifiable" ] == 1
+
+
+# --- the canary also trips on missing usage and on an unfinished arm, as the driver writes it ---------------------------------
+
+def test_the_canary_trips_on_missing_usage_and_on_an_unfinished_arm_in_the_drivers_order():
+    arm, can = _canary( [ _row( tokens_in=None, tokens_out=None ) ] ); arm[ "state" ] = "incomplete"
+    assert an.check_canary( arm, can )[ "tripped" ] == [ "usage_missing", "incomplete" ]
+    assert an.CANARY_TRIPS == ( "output_per_entry_over_60", "usage_over_reserve", "refusal", "usage_missing", "incomplete", "nothing_measured" )
+
+
+@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] } ] )
+def test_a_canary_arm_with_a_failed_unasked_or_unreached_entry_trips_incomplete(over):
+    arm, can = _canary( [ _row() ] ); arm.update( over )
+    assert an.check_canary( arm, can )[ "tripped" ] == [ "incomplete" ]
+
+
+def test_the_drivers_five_names_agree_with_the_recomputed_ones():
+    arm, can = _canary( [ _row() ], tripped=[] )
+    assert an.check_canary( arm, can )[ "agrees" ] is True
+    arm, can = _canary( [ _row( tokens_in=None, tokens_out=None ) ], tripped=[ "usage_missing" ] )
+    assert an.check_canary( arm, can )[ "agrees" ] is True
+
+
+# --- the other policy boundaries ------------------------------------------------------------------------------------------
+
+def _with_probs( arm, probs ):
+    """Ensures: returns an arm record answering each id with the given probabilities."""
+    rec = _arm( arm, { i: 0.0 for i in probs } )
+    rec[ "answers" ] = [ { "id": i, "probabilities": p } for i, p in probs.items() ]
+    return rec
+
+
+def test_the_other_boundaries_are_the_page_floor_and_the_confidence_bar_of_the_policy():
+    assert ( an.FLOOR, an.CONFIDENCE_BAR ) == ( 0.3, 0.9 )
+
+
+def test_flips_at_the_page_floor_are_counted_over_every_entry_for_the_pack_and_for_the_noise():
+    s1 = _arm( "single1", { "x": 0.3, "y": 0.29, "z": 0.8 } )
+    s2 = _arm( "single2", { "x": 0.29, "y": 0.29, "z": 0.8 } )
+    pk = _arm( "pack10", { "x": 0.29, "y": 0.3, "z": 0.2 }, size=10 )
+    r  = an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 )
+    assert r[ 1 ][ "floor" ] == { "pack": 3, "noise": 1 }
+
+
+def test_flips_at_the_confidence_bar_use_the_largest_probability_of_each_answer():
+    hi, lo = { "reuse": 0.9, "extend": 0.0, "unrelated": 0.1 }, { "reuse": 0.89, "extend": 0.0, "unrelated": 0.11 }
+    s1 = _with_probs( "single1", { "x": hi, "y": lo } ); s2 = _with_probs( "single2", { "x": hi, "y": lo } )
+    pk = _with_probs( "pack10", { "x": lo, "y": hi } ); pk[ "size" ] = 10
+    r  = an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 )
+    assert r[ 1 ][ "confidence" ] == { "pack": 2, "noise": 0 }
+
+
+def test_the_other_boundaries_are_none_for_a_question_whose_arms_are_not_clean_or_absent():
+    s1 = _arm( "single1", { "x": 0.3 } ); s2 = _arm( "single2", { "x": 0.3 } )
+    assert an.other_boundaries( an.read_stage( [ s1, s2 ] ), 10 ) == { 1: None }
+    pk = _arm( "pack10", { "x": 0.3 }, size=10, failed=[ "x" ] )
+    assert an.other_boundaries( an.read_stage( [ s1, s2, pk ] ), 10 ) == { 1: None }
+
+
+# --- tokens, retries and cost ----------------------------------------------------------------------------------------------
+
+def _sent( tin, tout, attempts=1 ):
+    return { "request_hash": "h", "size": 10, "status": "answered", "attempts": attempts, "tokens_in": tin, "tokens_out": tout }
+
+
+def test_request_statistics_count_only_requests_that_were_sent_and_their_mean_tokens():
+    rows = [ _sent( 1000, 400 ), _sent( 2000, 600 ), { "request_hash": "n", "size": 10, "status": "not_reached", "attempts": 0, "tokens_in": None, "tokens_out": None } ]
+    arm  = _arm( "pack10", { "a": 0.1 }, size=10, rows=rows, transport_calls=[ { "attempts": 1 }, { "attempts": 3 } ] )
+    st   = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_request" ] ) == ( 2, 1500.0, 500.0 )
+    assert ( st[ "retried_calls" ], st[ "extra_attempts" ], st[ "usage_missing" ] ) == ( 1, 2, 0 )
+    assert st[ "tokens_out_per_entry" ] == 50.0 and st[ "retry_statuses" ] == "429 or 529, not told apart"
+
+
+def test_request_statistics_count_a_sent_request_without_usage_as_missing_and_leave_it_out_of_the_means():
+    arm = _arm( "pack10", { "a": 0.1 }, size=10, rows=[ _sent( 1000, 400 ), _sent( None, None ) ] )
+    st  = an.request_stats( an.read_stage( [ arm ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "usage_missing" ], st[ "tokens_in_per_request" ] ) == ( 2, 1, 1000.0 )
+
+
+def test_an_arm_with_no_request_sent_has_no_means():
+    st = an.request_stats( an.read_stage( [ _arm( "pack10", { "a": 0.1 }, size=10 ) ] ) )[ 1 ][ "pack10" ]
+    assert ( st[ "requests_sent" ], st[ "tokens_in_per_request" ], st[ "tokens_out_per_entry" ] ) == ( 0, None, None )
+
+
+def test_the_cost_of_a_search_is_the_default_pack_arm_plus_the_page_pack_at_the_pinned_price():
+    pack = _arm( "pack200", { "a": 0.1 }, size=200 ); pack[ "totals" ][ "spent_tokens" ] = 1_000_000
+    page = _arm( "page-pack", { "p": 0.1 }, size=200 ); page[ "totals" ][ "spent_tokens" ] = 100_000
+    c    = an.cost_per_search( an.read_stage( [ pack, page ] ), 200 )
+    assert c[ 1 ] == { "entry_tokens": 1_000_000, "page_tokens": 100_000, "dollars": 0.0462 }
+    assert c[ "mean_dollars" ] == 0.0462
+
+
+def test_the_cost_is_none_without_a_default_size_and_the_page_part_is_zero_when_there_is_no_page_arm():
+    pack = _arm( "pack50", { "a": 0.1 }, size=50 ); pack[ "totals" ][ "spent_tokens" ] = 2_000_000
+    st   = an.read_stage( [ pack ] )
+    assert an.cost_per_search( st, None ) is None
+    assert an.cost_per_search( st, 50 )[ 1 ] == { "entry_tokens": 2_000_000, "page_tokens": 0, "dollars": 0.084 }
+
+
+# --- the old-shape arm, reported only -------------------------------------------------------------------------------------
+
+def test_the_old_shape_report_compares_only_the_entries_that_were_cache_hits():
+    s1  = _arm( "single1", { "a": 0.5, "b": 0.5, "c": 0.5, "d": 0.9 } )
+    old = _arm( "old", { "a": 0.5, "b": 0.45, "c": 0.7 }, size=1, run_name=NO_NAME, state="incomplete" )
+    r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
+    assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 3, 0.2, 0.2, 2 )
+    assert r[ "note" ] == "reported only, no pass or fail"
+
+
+def test_a_question_with_no_old_shape_arm_or_no_clean_single_run_is_left_out_of_the_old_shape_report():
+    assert an.old_shape_report( an.read_stage( [ _arm( "single1", { "a": 0.5 } ) ] ) ) == {}
+    s1 = _arm( "single1", { "a": 0.5 }, failed=[ "a" ] ); old = _arm( "old", { "a": 0.5 }, run_name=NO_NAME )
+    assert an.old_shape_report( an.read_stage( [ s1, old ] ) ) == { 1: None }
+
+
+def test_the_old_shape_arm_is_read_from_the_cache_through_the_real_request_builder(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" }, { "id": "m.b", "sig": "()", "doc": "does b" }, { "id": "m.c", "sig": "()", "doc": "does c" } ]
+    cache   = rt.JevCache( tmp_path )
+    for rec, probs in ( ( entries[ 0 ], { "reuse": 0.8, "extend": 0.1, "unrelated": 0.1 } ), ( entries[ 1 ], { "reuse": 0.0, "extend": 0.0, "unrelated": 1.0 } ) ):
+        body = rt.build_request( "a need", rt.entry_text( rec ) )
+        cache.put( rt.request_hash( body ), { "answers": { "fit": { "choice": "x", "confidence": 1.0, "probabilities": probs, "type": "choice" } }, "model": "jev-1.13.0" } )
+    rec = an.old_shape_arm( 2, tmp_path, "a need", entries )
+    arm = an.read_arm( rec )
+    assert ( rec[ "arm" ], rec[ "run_name" ], rec[ "question" ], rec[ "size" ], rec[ "cache_hits" ] ) == ( "old", None, 2, 1, 2 )
+    assert rec[ "entry_ids" ] == [ "m.a", "m.b", "m.c" ] and arm[ "overlaps" ] == { "m.a": 0.9, "m.b": 0.0 }
+    assert ( rec[ "state" ], rec[ "not_reached" ] ) == ( "incomplete", [ "m.c" ] ) and arm[ "status" ] == "inconclusive"
+
+
+def test_the_old_shape_arm_is_complete_only_when_every_entry_was_a_hit_and_a_bad_answer_is_malformed(tmp_path):
+    from lupin_mcp import reuse_tools as rt
+    entries = [ { "id": "m.a", "sig": "()", "doc": "does a" } ]
+    body = rt.build_request( "n", rt.entry_text( entries[ 0 ] ) )
+    rt.JevCache( tmp_path ).put( rt.request_hash( body ), { "answers": {}, "model": "jev-1.13.0" } )
+    rec = an.old_shape_arm( 1, tmp_path, "n", entries )
+    assert rec[ "state" ] == "complete" and an.read_arm( rec )[ "malformed" ] == { "m.a": "not_a_mapping" }
+
+
+# --- the report ----------------------------------------------------------------------------------------------------------
+
+def test_the_report_gathers_every_part_and_the_text_names_the_decision_and_the_next_step():
+    rep = an.build_report( _question(), canaries=[] )
+    assert set( rep ) >= { "decision", "next_step", "evaluate", "stop_rules", "pages", "other_boundaries", "request_stats", "cost", "old_shape", "canaries" }
+    assert rep[ "decision" ] == "default pack size 200"
+    text = an.render( rep )
+    assert "default pack size 200" in text and rep[ "next_step" ] in text and "boundary entries pooled: 100" in text
+
+
+def test_the_report_names_each_size_with_its_three_numbers_and_each_arm_that_was_not_clean():
+    recs = _question(); recs[ 3 ][ "failed" ] = [ "e001" ]
+    text = an.render( an.build_report( recs, canaries=[] ) )
+    assert "pack 50" in text and "inconclusive" in text and "s1-q1-pack50" in text
+
+
+def test_a_canary_that_disagrees_with_the_driver_is_listed_in_the_report():
+    arm, can = _canary( [ _row( tokens_out=700 ) ], tripped=[] )
+    arm[ "question" ] = 1
+    rep = an.build_report( _question(), canaries=[ ( arm, can ) ] )
+    assert rep[ "canaries" ][ 0 ][ "agrees" ] is False
+    assert "output_per_entry_over_60" in an.render( rep )
+
+
+def test_real_answers_copied_into_three_questions_reach_the_ninety_and_a_default_through_every_function():
+    fx   = json.loads( REAL.read_text() )
+    recs = []
+    for q in ( 1, 2, 3 ):
+        ov = { r[ "id" ]: 0.0 for r in fx[ "answers" ] }
+        for name, size in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ):
+            recs.append( _arm( name, ov, question=q, size=size, answers=fx[ "answers" ] ) )
+        recs += [ dict( r, answers=fx[ "answers" ], entry_ids=[ a[ "id" ] for a in fx[ "answers" ] ] ) for r in _probes( q, fx[ "answers" ][ 0 ][ "id" ], ov ) ]
+    rep = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "boundary_pooled" ] == 99 and rep[ "evaluate" ][ "boundary_by_question" ] == { 1: 33, 2: 33, 3: 33 }
+    assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == "evaluate"
+
+
+def test_real_answers_of_one_question_alone_read_inconclusive_and_ask_for_question_two():
+    fx   = json.loads( REAL.read_text() )
+    ov   = { r[ "id" ]: 0.0 for r in fx[ "answers" ] }
+    recs = [ _arm( n, ov, size=s, answers=fx[ "answers" ] ) for n, s in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ) ]
+    rep  = an.build_report( recs, canaries=[] )
+    assert rep[ "evaluate" ][ "boundary_pooled" ] == 33 and rep[ "next_step" ] == "run question 2"
+    assert all( rep[ "evaluate" ][ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
+
+
+# --- the command line ----------------------------------------------------------------------------------------------------
+
+def test_the_command_reads_a_folder_of_arm_files_and_canary_files_and_prints_the_report(tmp_path, capsys):
+    for rec in _question():
+        (tmp_path / f"{rec[ 'run_name' ]}.json").write_text( json.dumps( rec ) )
+    arm, can = _canary( [ _row() ] )
+    (tmp_path / "s1-q1-canary.canary.json").write_text( json.dumps( can ) )
+    (tmp_path / "s1-q1-canary.json").write_text( json.dumps( arm ) )
+    assert an.main( [ str( tmp_path ) ] ) == 0
+    out = capsys.readouterr().out
+    assert "default pack size 200" in out and "canary" in out
+
+
+def test_the_command_with_an_empty_folder_says_there_is_nothing_to_read(tmp_path, capsys):
+    assert an.main( [ str( tmp_path ) ] ) == 2
+    assert "no arm files" in capsys.readouterr().out
+
+
+# --- canary retries and the sixth trip -----------------------------------------------------------------------------------
+
+def test_a_canary_that_sent_no_request_trips_nothing_measured():
+    for rows in ( [], [ _row( tokens_in=None, tokens_out=None, reserve=None, status="not_reached", attempts=0 ) ] ):
+        assert an.check_canary( *_canary( rows ) )[ "tripped" ] == [ "nothing_measured" ], rows
+    assert an.check_canary( *_canary( [ _row() ] ) )[ "tripped" ] == []
+
+
+def test_the_canary_attempts_of_one_question_are_read_side_by_side_by_attempt():
+    first  = _arm( "canary", { "a": 0.1 }, size=10 )
+    second = _arm( "canary", { "a": 0.1 }, size=10, run_name="s1-q1-canary-a2", attempt=2, retry_reason="refused" )
+    st = an.read_stage( [ first, second ] )
+    assert sorted( st[ 1 ] ) == [ "canary", "canary-a2" ]
+    assert ( st[ 1 ][ "canary" ][ "attempt" ], st[ 1 ][ "canary-a2" ][ "attempt" ] ) == ( 1, 2 )
+    assert st[ 1 ][ "canary-a2" ][ "retry_reason" ] == "refused" and st[ 1 ][ "canary" ][ "retry_reason" ] is None
+
+
+def test_a_third_attempt_is_a_third_key_and_the_same_attempt_twice_is_refused():
+    recs = [ _arm( "canary", { "a": 0.1 }, size=10, run_name=f"r{a}", attempt=a ) for a in ( 1, 2, 3 ) ]
+    assert sorted( an.read_stage( recs )[ 1 ] ) == [ "canary", "canary-a2", "canary-a3" ]
+    with pytest.raises( ValueError, match="given twice" ):
+        an.read_stage( [ recs[ 1 ], dict( recs[ 1 ], run_name="other" ) ] )
