@@ -560,9 +560,9 @@ def test_a_retry_after_an_attempt_that_raised_is_allowed( env, monkeypatch ):
     assert report[ "tripped" ] == [] and read( env, 1, "canary" )[ "state" ] == "error"
 
 
-def test_only_the_canary_may_be_retried( env ):
+def test_an_arm_that_completed_is_not_retried_whatever_the_arm( env ):
     st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
-    with pytest.raises( ValueError, match="canary" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000, attempt=2, reason="again" )
+    with pytest.raises( ValueError, match="already complete" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000, attempt=2, reason="again" )
     assert len( bodies( env ) ) == 2
 
 
@@ -923,7 +923,7 @@ def refusals( env ):
         "unknown arm"              : lambda: st.run_arm( env, 1, "nonsense", NEED, two, 1_000_000 ),
         "attempt out of range"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, attempt=4, reason="x" ),
         "first attempt with reason": lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, reason="x" ),
-        "retry of another arm"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, attempt=2, reason="x" ),
+        "retry of an unrun arm"      : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, attempt=2, reason="x" ),
         "retry without reason"     : lambda: st.run_canary( env, 1, NEED, ENTRIES, 1_000_000, attempt=2, reason=" " ),
         "retry with no first"      : lambda: st.run_canary( env, 1, NEED, ENTRIES, 1_000_000, attempt=2, reason="x" ),
         "probe on a plain arm"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, probe={ "id": "x" } ),
@@ -933,7 +933,7 @@ def refusals( env ):
     }
 
 
-@pytest.mark.parametrize( "name", [ "question out of range", "unknown arm", "attempt out of range", "first attempt with reason", "retry of another arm", "retry without reason",
+@pytest.mark.parametrize( "name", [ "question out of range", "unknown arm", "attempt out of range", "first attempt with reason", "retry of an unrun arm", "retry without reason",
                                     "retry with no first", "probe on a plain arm", "probe arm without probe", "repeated entry id", "approve without a name" ] )
 def test_each_refusal_before_a_spend_is_a_driver_refusal( env, name ):
     if name == "probe arm without probe": st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "read" )          # a probe arm is gated
