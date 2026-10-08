@@ -78,6 +78,22 @@ def test_an_override_that_tags_its_own_payload_keeps_its_value():
     assert _posted_body( _SelfTaggedOverride(), "ts-abc123" )[ "parent_id_hash" ] == "own-value"
 
 
+_SHARED = { "question": "what is 2 plus 2", "websocket_id": "wise penguin" }
+
+
+class _SharedDictOverride( _Harness ):
+    """An override that returns one dict object every time, like a literal held in a scenario."""
+    def get_submit_payload( self, scenario, ws_id ):
+        return _SHARED
+
+
+def test_tagging_does_not_write_into_the_dict_an_override_returned():
+    posted = _posted_body( _SharedDictOverride(), "ts-abc123" )
+    assert posted[ "parent_id_hash" ] == "ts-abc123"
+    assert "parent_id_hash" not in _SHARED
+    assert posted is not _SHARED
+
+
 def test_the_ask_door_accepts_the_body_the_base_class_posts():
     assert v2_ask.AskRequest( **_posted_body( _Harness(), "ts-abc123" ) ).parent_id_hash == "ts-abc123"
 
