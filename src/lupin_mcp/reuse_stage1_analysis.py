@@ -63,8 +63,10 @@ def read_arm( record ):
         - status is "invalid" when the arm was stopped by the ceiling, the ledger or refusals, or errored
         - lost lists, sorted, the asked ids without a valid answer plus every id named failed, unasked or not reached
         - lost_limit is the number of entries the arm may lose and still be judged
-        - status is "inconclusive" when it asked nothing, or is not complete and did not stop on attempts
+        - status is "inconclusive" when it asked nothing, or has any other stop reason, whatever it lost
+        - status is "inconclusive" when it is not complete and lost nothing, since the record contradicts itself
         - status is "clean" when the lost entries number at most the limit, and "inconclusive" otherwise
+        - an arm that tried every entry and has no stop reason is judged by its lost entries, complete or not
     Raises:
         - ValueError for another format, an answer for an id the arm did not ask about, or an id answered twice
     """
@@ -84,7 +86,7 @@ def read_arm( record ):
     lost = sorted( ( asked - set( overlaps ) ) | set( record[ "failed" ] ) | set( record[ "unasked" ] ) | set( record[ "not_reached" ] ) )
     limit = lost_limit( len( asked ) )
     if record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
-    elif not asked or ( record[ "state" ] != "complete" and stop != "attempts" ): status = "inconclusive"
+    elif not asked or stop is not None or ( record[ "state" ] != "complete" and not lost ): status = "inconclusive"
     else: status = "clean" if len( lost ) <= limit else "inconclusive"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
              "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
