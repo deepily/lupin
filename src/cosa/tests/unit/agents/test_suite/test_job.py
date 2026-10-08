@@ -1392,3 +1392,113 @@ def test_clean_eof_still_reports_the_childs_own_exit_code( monkeypatch, no_real_
 
     assert res[ "exit_code" ] == 0
     assert res.get( "error" ) in ( None, "" ) or "reader" not in str( res.get( "error" ) )
+
+
+# =========================================================================== #
+# Row 2f18ad99: the unit suite is not offered in a container
+# =========================================================================== #
+NOT_RUN_NOTE = "unit: not run here, host tier"
+WITHOUT_UNIT = [ c for c in ALL_SUITE_COMPONENTS if c != "unit" ]
+
+
+def test_expand_all_leaves_unit_out_in_a_container_and_the_list_itself_keeps_it():
+    assert _expand_all( [ "all" ], True ) == WITHOUT_UNIT
+    assert "unit" in ALL_SUITE_COMPONENTS                    # the pyramid's definition is unchanged; only a container's answer differs
+
+
+def test_expand_all_without_the_container_flag_is_the_host_answer():
+    assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
+    assert _expand_all( [ "all" ], False ) == ALL_SUITE_COMPONENTS
+
+
+def test_an_explicit_unit_beside_all_still_runs_in_a_container_for_a_row_that_asked_for_it():
+    """A unit row persisted earlier keeps its meaning.
+
+    The door refuses a new unit request; the queue rehydrates an old row unchanged.
+    """
+    assert _expand_all( [ "all", "unit" ], True ) == WITHOUT_UNIT + [ "unit" ]
+
+
+def test_running_in_container_reads_the_sentinel_then_the_dockerenv_file( monkeypatch ):
+    monkeypatch.delenv( "LUPIN_IN_CONTAINER", raising=False )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: p == "/.dockerenv" )
+    assert job_mod.running_in_container() is True
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: False )
+    assert job_mod.running_in_container() is False
+    monkeypatch.setenv( "LUPIN_IN_CONTAINER", "TRUE" )
+    assert job_mod.running_in_container() is True            # the sentinel alone is enough
+    monkeypatch.setenv( "LUPIN_IN_CONTAINER", "0" )
+    assert job_mod.running_in_container() is False           # a falsy sentinel is not a container
+
+
+def test_execute_of_all_in_a_container_runs_no_unit_and_names_it_in_every_result( monkeypatch, tmp_path, patched_voice ):
+    import pathlib
+    job = _make_job( test_types=[ "all" ] )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True, raising=False )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    seen = []
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: seen.append( st ) or _passing_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    assert seen == WITHOUT_UNIT
+    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier" }
+    assert NOT_RUN_NOTE in summary and NOT_RUN_NOTE in job.artifacts[ "abstract" ]
+    assert NOT_RUN_NOTE in pathlib.Path( job.report_path ).read_text()
+    assert "ALL PASSED." not in summary, "a pyramid without unit must not read as a bare full green"
+
+
+def test_execute_of_all_on_a_host_runs_unit_and_names_nothing_as_left_out( monkeypatch, tmp_path, patched_voice ):
+    job = _make_job( test_types=[ "all" ] )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False, raising=False )
+    monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
+    seen = []
+    monkeypatch.setattr( job, "_run_suite", lambda st, pr: seen.append( st ) or _passing_result() )
+
+    summary = asyncio.run( job._execute() )
+
+    assert seen == ALL_SUITE_COMPONENTS
+    assert job.cost_summary.get( "suites_not_run", {} ) == {}
+    assert NOT_RUN_NOTE not in summary and "ALL PASSED." in summary
+
+
+def test_a_dry_run_of_all_in_a_container_says_what_the_real_run_would_leave_out( monkeypatch, patched_voice ):
+    job = _make_job( test_types=[ "all" ], dry_run=True )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True, raising=False )
+    summary = asyncio.run( job._execute() )
+    assert NOT_RUN_NOTE in summary
+    assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier" }
+
+
+def test_run_suite_tells_the_runner_which_tiers_were_left_out( monkeypatch, no_real_log ):
+    """The coverage gate reads this variable and answers inconclusive."""
+    _patch_config_mgr( monkeypatch )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    captured = {}
+    def _popen( cmd, **k ):
+        captured[ "env" ] = k[ "env" ]
+        return _FakeProcess( lines=[ "x\n" ], returncode=0 )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", _popen )
+
+    left_out = _make_job( test_types=[ "all" ] )
+    left_out.suites_not_run = { "unit": "not run here, host tier" }
+    left_out._run_suite( "coverage", "/proj" )
+    assert captured[ "env" ][ "LUPIN_TEST_TIERS_NOT_RUN" ] == "unit"
+
+    complete = _make_job( test_types=[ "coverage" ] )
+    complete._run_suite( "coverage", "/proj" )
+    assert captured[ "env" ][ "LUPIN_TEST_TIERS_NOT_RUN" ] == ""
+
+
+def test_a_caller_cannot_clear_the_left_out_tiers_by_env_var( monkeypatch, no_real_log ):
+    _patch_config_mgr( monkeypatch )
+    monkeypatch.setattr( job_mod.os.path, "exists", lambda p: True )
+    captured = {}
+    def _popen( cmd, **k ):
+        captured[ "env" ] = k[ "env" ]
+        return _FakeProcess( lines=[ "x\n" ], returncode=0 )
+    monkeypatch.setattr( job_mod.subprocess, "Popen", _popen )
+    job = _make_job( test_types=[ "all" ], env_vars={ "LUPIN_TEST_TIERS_NOT_RUN": "" } )
+    job.suites_not_run = { "unit": "not run here, host tier" }
+    job._run_suite( "coverage", "/proj" )
+    assert captured[ "env" ][ "LUPIN_TEST_TIERS_NOT_RUN" ] == "unit"

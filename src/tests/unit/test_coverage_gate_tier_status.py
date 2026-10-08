@@ -258,3 +258,38 @@ def test_the_unmodified_fixture_reports_its_floor_as_intact( tmp_path ):
     done = _run_gate( tmp_path, 0, 1 )
     assert "[floor-guard] floor intact" in done.stdout
     assert "NO COVERAGE DATA TO GATE ON" in done.stdout
+
+
+# ── row 2f18ad99: a pyramid without the unit tier is not a coverage verdict ──────────────────
+
+def _run_gate_in_pyramid_mode( tmp_path, **extra_env ):
+    """Run the gate as the pyramid does, with no --run-tiers."""
+    gate = _fake_repo( tmp_path, 0, 0 )
+    env  = dict( os.environ )
+    env[ "COVERAGE_FILE" ] = str( tmp_path / ".coverage-stub" )
+    env.pop( "LUPIN_COVERAGE", None )
+    env.pop( "LUPIN_TEST_TIERS_NOT_RUN", None )
+    env.update( extra_env )
+    return subprocess.run( [ "bash", str( gate ) ], capture_output=True, text=True, env=env, timeout=120 )
+
+
+def test_a_pyramid_that_left_the_unit_tier_out_makes_the_gate_inconclusive_before_any_data_check( tmp_path ):
+    """
+    A pyramid without the unit tier is not a coverage verdict.
+
+    The job names the tiers it left out. The gate answers exit 2 and names them before it reads any data.
+    """
+    done = _run_gate_in_pyramid_mode( tmp_path, LUPIN_TEST_TIERS_NOT_RUN="unit" )
+    assert done.returncode == 2, f"expected inconclusive, got {done.returncode}: {done.stdout}"
+    assert "INCONCLUSIVE" in done.stdout
+    assert "unit" in done.stdout and "host tier" in done.stdout, "the verdict does not name the tier and where it runs"
+    assert "NO COVERAGE DATA TO GATE ON" not in done.stdout, "it reached the data check; the left-out tier must come first"
+    assert "coverage gate: floor" not in done.stdout and "PASSED" not in done.stdout
+
+
+@pytest.mark.parametrize( "value", [ None, "" ] )
+def test_a_pyramid_with_no_tier_left_out_goes_on_to_the_data_check( tmp_path, value ):
+    extra = {} if value is None else { "LUPIN_TEST_TIERS_NOT_RUN": value }
+    done  = _run_gate_in_pyramid_mode( tmp_path, **extra )
+    assert "NO COVERAGE DATA TO GATE ON" in done.stdout, done.stdout
+    assert "host tier" not in done.stdout
