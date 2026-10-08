@@ -23,6 +23,7 @@ from typing import Optional, Callable
 
 import cosa.utils.util as cu
 
+from cosa.agents.shared.sdk_error_result import raise_error_result
 from cosa.agents.bug_fix_expediter.state import BFEPhase, BFE_PHASE_ORDINALS, DiagnosisResult, ProposedFix, FixResult
 from cosa.agents.bug_fix_expediter.prompts.diagnosis import (
     DIAGNOSIS_SYSTEM_PROMPT,
@@ -474,6 +475,7 @@ class BFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "BFEOrchestrator", logger )
                     msg_text = getattr( message, "text", str( message ) )[ :200 ]
                     await self._notify( voice_io, msg_text, priority="low" )
                 elif isinstance( message, RateLimitEvent ):
@@ -1451,6 +1453,7 @@ class BFEOrchestrator:
                 elif isinstance( message, TextBlock ):
                     collected_text.append( message.text )
                 elif isinstance( message, ResultMessage ):
+                    if message.is_error: raise_error_result( message, "BFEOrchestrator", logger )
                     msg_text = getattr( message, "text", str( message ) )[ :200 ]
                     await self._notify( voice_io, msg_text, priority="low" )
                 elif isinstance( message, RateLimitEvent ):
