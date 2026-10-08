@@ -116,6 +116,17 @@ def test_wrong_on_is_a_miss_for_a_seeded_pair_and_a_flag_for_an_unseeded_one( ru
     assert [ jc.wrong_on( by_id[ i ], 0 ) for i in ( "p3", "p4", "p5" ) ] == [ False, False, True ], "only the pair that lost a claim with no seed is a false alarm"
 
 
+def test_a_group_whose_every_pair_was_skipped_for_empty_new_text_has_no_rate_and_counts_them():
+    empty = { "claims": [], "flags": [], "flag_words": [], "discards": [], "parse_failed": False, "retry_calls": 0, "runs": [] }
+    keys  = { "a": { "kind": "paraphrase", "seeded_positive": False, "injection": False }, "b": { "kind": "paraphrase", "seeded_positive": False, "injection": False } }
+    skipped = [ { "id": i, "seed_span": None, "judge_skipped": True, "lists": [ empty ] } for i in ( "a", "b" ) ]
+    row = jc.group_rows( skipped, keys, 1 )[ 0 ]
+    assert ( row[ "group" ], row[ "n" ], row[ "wrong" ], row[ "new_text_empty" ] ) == ( "paraphrase", 0, 0, 2 )
+    assert ( row[ "rate" ], row[ "bound" ], row[ "expected" ], row[ "per_list" ], row[ "worst_list" ] ) == ( None, None, "not flagged", [ 0 ], 0 )
+    kept = jc.group_rows( [ skipped[ 0 ], { **skipped[ 1 ], "judge_skipped": False } ], keys, 1 )[ 0 ]
+    assert ( kept[ "n" ], kept[ "new_text_empty" ] ) == ( 1, 1 ) and kept[ "rate" ] == 0.0     # one skipped, one judged: the judged pair alone makes the rate
+
+
 def test_group_rows_count_wrong_verdicts_per_group_on_the_worse_list( run ):
     results, _, _ = jc.rebuild( run[ "pairs" ], configs()[ "haiku" ][ 0 ], run[ "ledger" ] )
     rows       = { r[ "group" ]: r for r in jc.group_rows( results, run[ "keys" ], 2 ) }
