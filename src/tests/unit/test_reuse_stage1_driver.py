@@ -31,7 +31,8 @@ class Standin:
     `refuse_over` raises a 422 for a body with more questions. `die_after` raises a JevCallError from that request on.
     """
 
-    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None, drop_last=False ):
+    def __init__( self, budget, out_per_entry=40, usage_in=500, refuse_over=None, die_after=None, usage=True, hook=None, drop_last=False, transient=False ):
+        self.transient = transient
         self.budget, self.out, self.usage_in, self.refuse_over, self.die_after, self.usage, self.hook = budget, out_per_entry, usage_in, refuse_over, die_after, usage, hook
         self.drop_last = drop_last
         self.bodies, self.lock = [], threading.Lock()
@@ -773,9 +774,14 @@ def test_an_empty_key_counts_as_no_key( env, tmp_path, monkeypatch ):
 
 def test_a_key_on_the_live_transport_lets_the_arm_run( env, tmp_path, monkeypatch ):
     monkeypatch.setenv( KEY, "not-a-real-key" )
-    monkeypatch.setattr( rt, "LiveJevTransport", Standin )                                           # the live class is never built here
+    built = []
+    class Live( Standin ):
+        def __init__( self, budget, **kw ):
+            built.append( kw[ "transient" ] )
+            super().__init__( budget, **kw )
+    monkeypatch.setattr( rt, "LiveJevTransport", Live )                                              # the live class is never built here
     st.run_arm( live_env( tmp_path, env.ledger ), 1, "single1", NEED, ENTRIES[ :3 ], 1_000_000 )
-    assert read( env, 1, "single1" )[ "state" ] == "complete"
+    assert read( env, 1, "single1" )[ "state" ] == "complete" and built == [ True ]                  # a live arm asks for transient retries
 
 
 def test_a_transport_the_caller_supplies_needs_no_key( env, monkeypatch ):
