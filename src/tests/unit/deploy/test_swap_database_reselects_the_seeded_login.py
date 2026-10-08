@@ -54,7 +54,10 @@ class _Url:
 def swap( monkeypatch, tmp_path ):
     """A swap_database with the engine factory replaced and the .env read from tmp_path."""
     for key in ( "DB_PASSWORD", "DB_USER", "DB_PASSWORD_FILE", "LUPIN_ENV", "LUPIN_CLOUD_BACKED" ):
-        monkeypatch.delenv( key, raising=False )
+        # setenv first: delenv alone records nothing for an absent key, so a value that swap_database
+        # writes later would outlive the test and reach every test that runs after it.
+        monkeypatch.setenv( key, "placeholder" )
+        monkeypatch.delenv( key )
     ( tmp_path / ".env" ).write_text( ENV_TEXT )
     monkeypatch.setattr( dotenv_password, "_SEEDED", { } )
     monkeypatch.setattr( database, "seed_db_password_from_dotenv",
