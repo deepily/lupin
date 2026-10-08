@@ -17,10 +17,12 @@ from cosa.repo.symindex import stage2_split as ss
 FORMAT    = "stage2-fit-1"
 SHORTLIST = 10                                                # the shortlist size is not fitted
 GRID      = { "reuse"     : ( 0.5, 0.6, 0.7, 0.8, 0.9 ),
-              "threshold" : ( 0.3, 0.4, 0.5, 0.6, 0.7 ),
+              "threshold" : ( 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 ),
               "floor"     : ( 0.1, 0.2, 0.3, 0.4 ),
               "coverage"  : ( 0.3, 0.5, 0.7 ) }
-OLD_CUTS  = ( 0.3, 0.4, 0.5, 0.6, 0.7 )
+OLD_CUTS  = ( 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7 )
+GRID_NOTE = ( "grid note: widened on 2026-10-08. The first fit chose the old question's lowest cut, 0.3, so the old cuts now start at 0.05 "
+              "and the new question's threshold at 0.1." )
 BINS      = 10
 ROW_KEYS  = ( "member", "candidate", "label", "provides", "coverage", "score", "p_overlap", "malformed", "unasked" )
 
@@ -155,6 +157,23 @@ def evaluate( rows, policy, cap=SHORTLIST ):
              "unusable": sum( 1 for r in rows if not usable( r ) ) }
 
 
+def edges( chosen, grid ):
+    """
+    Name the chosen values that sit on the edge of their grid.
+
+    Requires:
+        - chosen and grid have the same keys, and each grid value is a tuple of numbers
+    Ensures:
+        - returns [ { key, value, edge } ] in the key order of chosen, edge being lowest or highest
+        - a key whose grid has one value is never an edge
+    """
+    out = []
+    for k, v in chosen.items():
+        vals = sorted( grid[ k ] )
+        if len( vals ) > 1 and v in ( vals[ 0 ], vals[ -1 ] ): out.append( { "key": k, "value": v, "edge": "lowest" if v == vals[ 0 ] else "highest" } )
+    return out
+
+
 def _check_rate( rate ):
     """Raises: ValueError unless rate is a number from 0 to 1."""
     if type( rate ) not in ( int, float ) or not 0 <= rate <= 1: raise ValueError( f"rate must be a number from 0 to 1, got {rate!r}" )
@@ -283,14 +302,16 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
     Requires:
         - split is the record the split module writes; rate is the allowed false-reuse rate
     Ensures:
-        - returns { format, rate, placeholder, counts, fit, chosen, on_fit, on_check, reliability }
+        - returns { format, rate, placeholder, grid, edges, counts, fit, chosen, on_fit, on_check, reliability }
+        - edges names each chosen value that sits on the edge of its grid
         - on_check is the chosen policy read on the check half, which the fit never saw
     """
     halves = ss.half_by_member( split )
     check_rows( rows )
     fit_rows, other = split_rows( rows, halves )
     fit = fit_policy( fit_rows, halves, rate, grid )
-    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
+    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": grid, "edges": edges( fit[ "chosen" ], grid ),
+             "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( fit_rows, fit[ "chosen" ] ), "on_check": evaluate( other, fit[ "chosen" ] ),
              "reliability": { "fit": reliability( fit_rows ), "check": reliability( other ) } }
 
@@ -309,7 +330,8 @@ def old_report( rows, split, rate, cuts=OLD_CUTS, placeholder=False ):
     fit_rows, other = split_rows( rows, halves )
     fit    = fit_old( fit_rows, halves, rate, cuts )
     policy = _old_policy( fit[ "chosen" ][ "cut" ] )
-    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
+    return { "format": FORMAT, "rate": rate, "placeholder": placeholder, "grid": { "cut": tuple( sorted( cuts ) ) }, "edges": edges( fit[ "chosen" ], { "cut": cuts } ),
+             "counts": _counts( rows, split, halves ), "fit": fit, "chosen": fit[ "chosen" ],
              "on_fit": evaluate( _old_view( fit_rows ), policy ), "on_check": evaluate( _old_view( other ), policy ),
              "reliability": { "fit": reliability( fit_rows, "p_overlap" ), "check": reliability( other, "p_overlap" ) } }
 
@@ -319,12 +341,15 @@ def render( rep ):
     Write a report as plain text.
 
     Ensures:
-        - returns a string with the allowed rate, the group counts, the chosen policy on both halves and both reliability tables
+        - returns a string with the allowed rate, the grid and its note, the group counts, the chosen policy on both halves and both reliability tables
+        - a chosen value on the edge of its grid gets a warning line
     """
     lines = [ f"Threshold fit ({rep[ 'format' ]})", "", f"false-reuse rate allowed: {rep[ 'rate' ]}" + ( " (placeholder)" if rep[ "placeholder" ] else "" ),
+              "grid: " + "; ".join( f"{k} {min( v )} to {max( v )} ({len( v )} values)" for k, v in rep[ "grid" ].items() ), GRID_NOTE,
               f"groups: fit {rep[ 'counts' ][ 'fit' ][ 'groups' ]}, check {rep[ 'counts' ][ 'check' ][ 'groups' ]}",
               f"rows: fit {rep[ 'counts' ][ 'fit' ][ 'rows' ]}, check {rep[ 'counts' ][ 'check' ][ 'rows' ]}; points within the rate: {rep[ 'fit' ][ 'feasible' ]} of {len( rep[ 'fit' ][ 'table' ] )}",
               f"chosen on the fit half: {rep[ 'chosen' ]}", f"  {rep[ 'on_fit' ]}", f"same policy on the check half: {rep[ 'chosen' ]}", f"  {rep[ 'on_check' ]}" ]
+    for e in rep[ "edges" ]: lines.append( f"warning: the chosen {e[ 'key' ]} {e[ 'value' ]} is the {e[ 'edge' ]} value of its grid; widen the grid before reading it" )
     for half in ( "fit", "check" ):
         rel = rep[ "reliability" ][ half ]
         lines.append( f"reliability, {half} half ({rel[ 'unusable' ]} rows with no readable score):" )
