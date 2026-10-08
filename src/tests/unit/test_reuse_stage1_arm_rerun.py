@@ -168,3 +168,23 @@ def test_two_arms_of_one_size_do_not_read_each_others_reruns( env ):
     st.run_arm( env, 1, "single2", NEED, TWO, 1 )
     again = st.run_arm( env, 1, "single2", NEED, TWO, 1_000_000, attempt=2, reason="again" )
     assert again[ "cache_hits" ] == 0 and result( env, "s1-q1-single1-a2" )[ "run_index" ] != again[ "run_index" ]
+
+
+def test_a_rerun_asks_the_entries_of_the_stopped_run_and_no_others( env ):
+    stop_single1( env, THREE )
+    other = ENTRIES[ 3:6 ]
+    with pytest.raises( st.DriverRefused, match="not the entries of attempt 1" ): st.run_arm( env, 1, "single1", NEED, other, 1_000_000, attempt=2, reason="again" )
+    with pytest.raises( st.DriverRefused, match="not the entries of attempt 1" ): st.run_arm( env, 1, "single1", NEED, THREE[ :2 ], 1_000_000, attempt=2, reason="again" )
+    assert sent( env ) == [] and not ( env.results_dir / "s1-q1-single1-a2.json" ).exists()
+
+
+def test_the_same_entries_in_another_order_are_other_entries( env ):
+    stop_single1( env, THREE )
+    with pytest.raises( st.DriverRefused, match="not the entries of attempt 1" ): st.run_arm( env, 1, "single1", NEED, THREE[ ::-1 ], 1_000_000, attempt=2, reason="again" )
+
+
+def test_a_third_attempt_asks_the_entries_of_every_attempt_before_it( env ):
+    stop_single1( env, THREE )
+    st.run_arm( env, 1, "single1", NEED, THREE, 1, attempt=2, reason="still too low" )
+    with pytest.raises( st.DriverRefused, match="not the entries of attempt 2" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ 3:6 ], 1_000_000, attempt=3, reason="other ids" )
+    assert st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt=3, reason="same ids" )[ "state" ] == "complete"

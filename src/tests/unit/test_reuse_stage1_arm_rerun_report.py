@@ -116,3 +116,21 @@ def test_a_rerun_probe_arm_counts_once_and_its_stopped_run_does_not_clash_with_i
     rerun    = { **probe, "run_name": probe[ "run_name" ] + "-a2", "attempt": 2 }
     result   = an.pass_three( an.read_stage( [ r for r in recs if r is not probe ] + [ stopped, rerun ] ), 0.02 )
     assert result == an.pass_three( an.read_stage( recs ), 0.02 ) and result[ "placements" ] == 6
+
+
+def test_a_rerun_on_other_entries_does_not_stand_in_and_the_stopped_arm_still_stops_the_stage():
+    other   = _arm( "single1", { "x": 0.3, "y": 0.8 }, run_name="s1-q1-single1-a2", attempt=2 )
+    by_name = an.read_stage( [ stopped(), other ] )[ 1 ]
+    assert sorted( by_name ) == [ "single1", "single1-a2" ] and by_name[ "single1" ][ "run_name" ] == "s1-q1-single1"
+    assert not any( a[ "superseded" ] for a in by_name.values() )
+    assert an.stop_rules( an.read_stage( [ stopped(), other ] ) )[ "stop" ] is True
+
+
+def test_a_rerun_on_the_same_entries_in_another_order_does_not_stand_in():
+    reordered = done( entry_ids=[ "b", "a" ] )
+    assert sorted( an.read_stage( [ stopped(), reordered ] )[ 1 ] ) == [ "single1", "single1-a2" ]
+
+
+def test_a_third_attempt_on_other_entries_than_the_second_does_not_stand_in():
+    other = _arm( "single1", { "x": 0.3, "y": 0.8 }, run_name="s1-q1-single1-a3", attempt=3 )
+    assert sorted( an.read_stage( [ stopped(), stopped( attempt=2 ), other ] )[ 1 ] ) == [ "single1", "single1-a2", "single1-a3" ]
