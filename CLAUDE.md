@@ -352,6 +352,14 @@ Suites that qualify:
   so the same reasoning holds: `docker exec` only, a name guard, removal at the end, nothing persists. Its
   17 docker tests all skip without docker and took 59.3s with it in one run (2026-10-08, at 9e9cfbce7). Re-time it rather than
   trusting that figure. It needs no monopoly.
+- `src/tests/smoke/test_template_database_vector_real_postgres.py` and
+  `src/tests/smoke/test_db_template_provisioning_real_postgres.py` — the template database
+  `lupin_template_vector` (the vector extension, made once by `db_roles`, so the test role clones it with no
+  superuser). Both reuse the rollback file's throwaway container, so the same reasoning holds. It is reached by
+  `docker exec` only, behind a name guard, and removed at the end. Nothing persists and no monopoly is needed. With docker they took 11.1s (3 tests)
+  and 28.0s (7 tests) in one run (2026-10-08, at 53ba759b9); with docker hidden every test skips (0.4s each).
+  Re-time them rather than trusting those figures. They are not in `docker_smoke`'s list of three, so a
+  skip there is not yet a failure.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
