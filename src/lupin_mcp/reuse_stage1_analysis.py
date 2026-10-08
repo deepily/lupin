@@ -532,9 +532,9 @@ def other_boundaries( stage, size ):
 def _mean( values ): return round( sum( values ) / len( values ), 3 ) if values else None
 
 
-def _logged( calls, status ):
-    """Ensures: returns how many logged attempts across the calls ended in the status."""
-    return sum( 1 for c in calls for a in c[ "attempt_log" ] if a[ "status" ] == status )
+def _logged( rows, status ):
+    """Ensures: returns the attempts in the rows' logs that ended in the status."""
+    return sum( 1 for r in rows for a in r.get( "attempt_log", [] ) if a[ "status" ] == status )
 
 
 def request_stats( stage ):
@@ -545,19 +545,19 @@ def request_stats( stage ):
         - returns { question: { arm: { requests_sent, tokens_in_per_request, tokens_out_per_request, tokens_out_per_entry,
           retried_calls, extra_attempts, usage_missing, attempts_429, attempts_529 } } }
         - only rows with an attempt count as sent; a sent row without usage counts as missing and stays out of the means
-        - attempts_429 and attempts_529 count the attempts in every call's recorded attempt log that ended in that status; any other status counts in neither
+        - retried_calls, extra_attempts, attempts_429 and attempts_529 are counted from the rows, so a request that failed outright counts, and each attempt counts once
+        - attempts_429 and attempts_529 count the attempts in the rows' attempt logs that ended in that status; any other status counts in neither
     """
     out = {}
     for q in sorted( stage ):
         for name, arm in stage[ q ].items():
             sent  = [ r for r in arm[ "rows" ] if r[ "attempts" ] > 0 ]
             known = [ r for r in sent if r[ "tokens_in" ] is not None and r[ "tokens_out" ] is not None ]
-            calls = arm[ "transport_calls" ]
             out.setdefault( q, {} )[ name ] = { "requests_sent": len( sent ), "tokens_in_per_request": _mean( [ r[ "tokens_in" ] for r in known ] ),
                 "tokens_out_per_request": _mean( [ r[ "tokens_out" ] for r in known ] ), "tokens_out_per_entry": _mean( [ r[ "tokens_out" ] / r[ "size" ] for r in known ] ),
-                "retried_calls": sum( 1 for c in calls if c[ "attempts" ] > 1 ), "extra_attempts": sum( c[ "attempts" ] - 1 for c in calls ),
+                "retried_calls": sum( 1 for r in sent if r[ "attempts" ] > 1 ), "extra_attempts": sum( r[ "attempts" ] - 1 for r in sent ),
                 "usage_missing": len( sent ) - len( known ),
-                "attempts_429": _logged( calls, 429 ), "attempts_529": _logged( calls, 529 ) }
+                "attempts_429": _logged( sent, 429 ), "attempts_529": _logged( sent, 529 ) }
     return out
 
 
