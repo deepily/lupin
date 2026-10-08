@@ -178,7 +178,7 @@ def _check_attempt( env, question, arm, attempt, reason ):
     Raises:
         - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a rerun without a reason or a first attempt with one,
           or a rerun with no attempt before it
-        - ValueError for a rerun of an arm with an attempt that completed
+        - ValueError for a rerun of an arm with an attempt that completed, or with one that stopped for any reason but its ceiling
         - ValueError for a canary rerun after any attempt was approved, or after an attempt tripped on model_mismatch
     """
     if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise DriverRefused( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
@@ -188,8 +188,11 @@ def _check_attempt( env, question, arm, attempt, reason ):
     if not isinstance( reason, str ) or not reason.strip(): raise DriverRefused( "a retry needs a named reason" )
     if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise DriverRefused( f"attempt {attempt} has no earlier attempt to follow" )
     if arm != "canary":
-        done = [ n for n in range( 1, attempt ) if json.loads( ( env.results_dir / f"{run_name( question, arm, n )}.json" ).read_text() )[ "state" ] == "complete" ]
+        before = { n: json.loads( ( env.results_dir / f"{run_name( question, arm, n )}.json" ).read_text() ) for n in range( 1, attempt ) }
+        done   = [ n for n, rec in before.items() if rec[ "state" ] == "complete" ]
         if done: raise DriverRefused( f"{arm!r} of question {question} already completed as attempt {done[ 0 ]}; it is not run again" )
+        for n, rec in before.items():
+            if rec[ "stop_reason" ] != "ceiling": raise DriverRefused( f"{arm!r} of question {question} attempt {n} stopped for {rec[ 'stop_reason' ]}; only an arm stopped by its ceiling is run again" )
         return
     reports = _canary_reports( env, question )
     if any( report[ "approved" ] is not None for _, _, report in reports ): raise DriverRefused( f"the canary of question {question} is already approved" )
@@ -241,7 +244,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - question is 1 to 4 and arm is one of the arm names
         - entries are symbol dicts; for a probe arm they are one pack with the probe at its position
         - ceiling_tokens is what this arm may spend, and fits in what the stage has left
-        - attempt is 1 for a first run; a stopped arm may be run again as attempt 2 or 3, with a reason; an arm that completed may not
+        - attempt is 1 for a first run; an arm its ceiling stopped may be run again as attempt 2 or 3, with a reason; any other arm may not
     Ensures:
         - nothing is sent and no ledger row is written when any check below refuses
         - the sweep keys its answers by pack size and run index, so no two arms share an answer

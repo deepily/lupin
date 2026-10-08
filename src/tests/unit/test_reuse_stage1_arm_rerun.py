@@ -116,6 +116,13 @@ def test_only_an_arm_stopped_by_its_ceiling_is_run_again( env ):
     assert not ( env.results_dir / "s1-q1-single1-a2.json" ).exists()
 
 
+def test_a_third_attempt_is_refused_when_the_second_stopped_for_any_reason_but_the_ceiling( env ):
+    stop_single1( env )
+    second = st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt=2, reason="again", attempt_limit=1 )
+    assert second[ "stop_reason" ] == "attempts"
+    with pytest.raises( st.DriverRefused, match="attempt 2 stopped for attempts" ): st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt=3, reason="once more" )
+
+
 def test_an_arm_that_spent_its_attempts_is_not_run_again_either( env ):
     first = st.run_arm( env, 1, "single1", NEED, THREE, 1_000_000, attempt_limit=1 )
     assert first[ "stop_reason" ] == "attempts" and first[ "state" ] == "incomplete"
