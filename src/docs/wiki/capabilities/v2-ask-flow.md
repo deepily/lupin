@@ -32,7 +32,7 @@ The v2 door onto CJ Flow: `AskFlow` takes a question, or a command that is alrea
 - `quantities_differ` refuses a near match when either question contains a number and the ordered numbers and words differ. "Convert 10 miles to kilometers" once replayed the answer to "How many miles is 10 kilometers?" at a score of 93.4.
 - An unknown or expired `pending_id` on `resume` answers `status='expired'`, `route_reason='pending_expired'`. Parked entries expire after `ttl_seconds` (3600 by default).
 - `submit` raises `ValueError` unless exactly one of `command` and `job` is given.
-- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for an admin, the configured test account, or the owner of the parent job. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`, and the request still runs without it, never as a 4xx.
+- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for an admin, the configured test account, a caller holding the per-run suite token (header `X-Lupin-Lineage-Token`, Development and Testing only, valid while that run holds the monopoly slot), or the owner of the parent job. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`, and the request still runs without it, never as a 4xx.
 
 ## How to extend
 - Add a command as one `AgentSpec` row in `cosa.rest.v2.registry`; do not add a branch to `AskFlow`.

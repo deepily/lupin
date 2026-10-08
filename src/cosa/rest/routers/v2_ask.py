@@ -25,7 +25,7 @@ import re
 from typing import Any, Literal, Optional
 
 import torch
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user, identity_or_401
 from cosa.rest.auth_middleware import is_admin
+from cosa.rest import suite_run_token
 from cosa.rest.routers import speech
 from cosa.rest.v2.request_context import set_bearer_token, reset_bearer_token
 
@@ -426,6 +427,32 @@ def _test_account_email() -> Optional[ str ]:
     return value.strip().lower() or None
 
 
+def _suite_token_enabled() -> bool:
+    """
+    Whether this server accepts a per-run suite token as proof of lineage.
+
+    Ensures:
+        - returns False when the INI key is absent, which is the case in Baseline and Production
+        - is read per call, and only when a request actually presents a token
+    """
+    config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return bool( config_mgr.get( suite_run_token.TOKEN_ENABLED_KEY, default=False, return_type="boolean" ) )
+
+
+def _active_monopolizer_id() -> Optional[ str ]:
+    """
+    The id of the job that holds the monopoly slot, read through the pool-status accessor.
+
+    Ensures:
+        - returns None when the running queue is not initialised
+        - never reads the queue's private attribute
+    """
+    import lupin_app.main as main_module
+    running_queue = main_module.jobs_run_queue
+    if running_queue is None: return None
+    return running_queue.get_pool_status()[ "monopolize_id" ]
+
+
 def _loggable( value: Any ) -> str:
     """The repr of the first PARENT_STAMP_LOG_MAX characters, so a caller cannot forge log lines."""
     text = str( value )
@@ -433,16 +460,18 @@ def _loggable( value: Any ) -> str:
     return shown + "..." if len( text ) > PARENT_STAMP_LOG_MAX else shown
 
 
-def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, user_id: str, user_email: str ) -> tuple:
+def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, user_id: str, user_email: str,
+                        lineage_token: Optional[ str ] = None ) -> tuple:
     """
     Decide whether a caller's `parent_id_hash` lineage claim is honoured.
 
-    The field takes any id, and GET /api/busy publishes the running suite's id. Unchecked, any
-    caller could claim suite lineage and walk through the monopoly hold. A claim is honoured
-    for an admin, for the configured test account, or for the owner of the parent job.
+    GET /api/busy publishes the running suite's id, so an unchecked claim walks through the hold.
+    A claim is honoured for an admin, the test account, the parent's owner, or a suite-token holder.
 
     Requires:
         - user_id / user_email come from the token (identity_or_401).
+        - lineage_token is the X-Lupin-Lineage-Token header value, or None. It is consulted only
+          when the INI switch is on, and it never reaches a log line, a trace or a flow kwarg.
 
     Ensures:
         - an absent or empty claim returns it unchanged and ( claim, None ): nothing to vet.
@@ -452,7 +481,11 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
           a lineage child while a monopolize job is active, so it waits behind the suite that is
           waiting on it and can starve for the whole run (review risk 1).
         - a loud 403 for a refused claim on the active monopolizer is Rick's call, and is unbuilt.
-        - reason is "not_owner" or "owner_unknown" (no job_history row for the parent).
+        - reason is "not_owner" or "owner_unknown" (no job_history row for the parent), or, when a
+          token was presented to a server that accepts one and failed, the token's own reason:
+          token_unknown, token_mismatch, token_expired, not_active_monopolizer or
+          token_check_failed (the slot reader raised).
+        - a failed token never blocks the owner check: an owner presenting a bad token is honoured.
         - the refusal is never silent: one log line names caller and parent, both repr()'d and
           length-capped (a caller-supplied id cannot forge or flood log lines).
     """
@@ -460,9 +493,18 @@ def vet_parent_id_hash( parent_id_hash: Optional[ str ], current_user: dict, use
     if is_admin( current_user ): return parent_id_hash, None
     test_account = _test_account_email()
     if test_account is not None and user_email.strip().lower() == test_account: return parent_id_hash, None
+    token_reason = None
+    if lineage_token is not None and _suite_token_enabled():
+        try:
+            honoured, token_reason = suite_run_token.check( parent_id_hash, lineage_token, _active_monopolizer_id )
+        except Exception as error:
+            # A reader that cannot answer must not become a 500, nor skip the owner check below.
+            print( f"[v2-lineage] suite token check failed: {type( error ).__name__}" )
+            honoured, token_reason = False, "token_check_failed"
+        if honoured: return parent_id_hash, None
     owner = _job_owner_id( parent_id_hash )
     if owner is not None and str( owner ) == str( user_id ): return parent_id_hash, None
-    reason = "owner_unknown" if owner is None else "not_owner"
+    reason = token_reason or ( "owner_unknown" if owner is None else "not_owner" )
     print( f"[v2-lineage] parent_id_hash dropped: caller={_loggable( user_email )} ({_loggable( user_id )}) parent={_loggable( parent_id_hash )} reason={reason}" )
     return None, reason
 
@@ -475,9 +517,10 @@ def _flow_kwargs_for_dropped_stamp( parent_id_hash: Optional[ str ], reason: Opt
 
 @router.post( "/api/v2/ask", response_model=AskResponse )
 async def v2_ask(
-    request      : AskRequest,
-    current_user : dict = Depends( get_current_user ),
-    flow         : Any  = Depends( get_ask_flow ),
+    request       : AskRequest,
+    current_user  : dict = Depends( get_current_user ),
+    flow          : Any  = Depends( get_ask_flow ),
+    lineage_token : Optional[ str ] = Header( None, alias=suite_run_token.TOKEN_HEADER ),
 ) -> AskResponse:
     """
     Route one question through CJ Flow v2 and return the terminal result.
@@ -495,7 +538,7 @@ async def v2_ask(
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     claimed        = request.parent_id_hash
-    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email ) )
+    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email, lineage_token ) )
     # flow.ask() is SYNCHRONOUS and takes as long as the agent takes — measured at
     # ~70s for a single ask on :8000, of which routing is ~1s (row 1c36199e). Called
     # directly from this coroutine it holds the event loop for that whole span, and
@@ -712,10 +755,11 @@ async def transcribe(
 
 @router.post( "/api/v2/submit", response_model=AskResponse )
 async def v2_submit(
-    request      : SubmitRequest,
-    http_request : Request,
-    current_user : dict = Depends( get_current_user ),
-    flow         : Any  = Depends( get_ask_flow ),
+    request       : SubmitRequest,
+    http_request  : Request,
+    current_user  : dict = Depends( get_current_user ),
+    flow          : Any  = Depends( get_ask_flow ),
+    lineage_token : Optional[ str ] = Header( None, alias=suite_run_token.TOKEN_HEADER ),
 ) -> AskResponse:
     """Run work whose command is already decided — the door beside /api/v2/ask.
 
@@ -743,7 +787,7 @@ async def v2_submit(
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     claimed        = request.parent_id_hash
-    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email ) )
+    parent_id_hash, dropped = await run_in_threadpool( lambda: vet_parent_id_hash( claimed, current_user, user_id, user_email, lineage_token ) )
     # Same reason as /api/v2/ask: submit skips the head (no routing, no cache read)
     # but still RUNS THE AGENT, so it holds the caller for the agent's full span.
     # On the loop that starves /health with workers=1 (row 1c36199e); off it, it
