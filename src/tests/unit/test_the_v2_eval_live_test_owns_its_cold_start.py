@@ -70,17 +70,30 @@ def test_the_helper_runs_the_primitive_on_a_connection_of_the_process_engine( mo
 
 def test_the_primitive_the_helper_calls_empties_both_replay_tables( monkeypatch ):
     """The real primitive over a recording connection: one statement, both tables, a commit."""
-    module     = _load_module()
-    statements = [ ]
+    module = _load_module()
+    events = [ ]
+
+    def execute( statement ):
+        """Like SQLAlchemy 2.x: a bare string is refused, an executable statement is recorded."""
+        if not hasattr( statement, "_execute_on_connection" ):
+            raise AttributeError( f"{type( statement ).__name__!r} object has no attribute '_execute_on_connection'" )
+        events.append( ( "execute", str( statement ) ) )
+
     connection = MagicMock()
     connection.engine.url = "postgresql://u@h/lupin_db_test"
-    connection.execute.side_effect = lambda statement: statements.append( str( statement ) )
+    connection.execute.side_effect = execute
+    connection.commit.side_effect  = lambda: events.append( ( "commit", None ) )
     config = MagicMock()
     config.get.return_value = "solution_snapshots"
     assert module.ve.clean_v2_snapshot_store( connection, config ) == "solution_snapshots"
-    ( truncate, ) = statements
-    assert truncate == "TRUNCATE TABLE solution_snapshots, canonical_synonyms"
-    connection.commit.assert_called_once()
+    assert events == [ ( "execute", "TRUNCATE TABLE solution_snapshots, canonical_synonyms" ), ( "commit", None ) ]
+
+
+def test_the_stand_in_connection_refuses_a_bare_string_as_the_real_one_does():
+    """Guards the guard: the fake above must reject a str, or the text() requirement is untested."""
+    from sqlalchemy import text
+    assert hasattr( text( "SELECT 1" ), "_execute_on_connection" )
+    assert not hasattr( "SELECT 1", "_execute_on_connection" )
 
 
 def test_the_primitive_sends_nothing_when_the_connection_is_not_a_measurement_database():
