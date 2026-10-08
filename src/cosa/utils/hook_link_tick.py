@@ -35,6 +35,7 @@ EXIT_CLEAN, EXIT_CANNOT_LOOK, EXIT_DELIVERED, EXIT_DELIVERY_FAILED, EXIT_UNCHANG
 
 DEFAULT_API_BASE     = "http://localhost:7999"
 DEFAULT_RESEND_HOURS = 6.0
+HTTP_TIMEOUT_SECONDS = 30
 DEFAULT_STATE_PATH   = "~/.claude/hook-link-tick-state.json"
 REMEDY               = "bash src/scripts/install-git-hooks.sh   # a person runs it in the main checkout; a Claude seat is refused"
 PROJECT              = "lupin"
@@ -145,7 +146,7 @@ def build_payload( findings, why, drill ):
 
 def _http( request ):
     try:
-        with urllib.request.urlopen( request, timeout=30 ) as reply: return reply.status, reply.read().decode()[ :400 ]
+        with urllib.request.urlopen( request, timeout=HTTP_TIMEOUT_SECONDS ) as reply: return reply.status, reply.read().decode()[ :400 ]
     except urllib.error.HTTPError as error: return error.code, error.read().decode()[ :400 ]
     except Exception as error:              return 0, str( error )
 
