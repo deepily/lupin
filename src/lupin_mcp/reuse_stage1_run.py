@@ -88,13 +88,15 @@ def check_paths( root, data, ledger, live ):
     Ensures:
         - returns ( data, ledger ) as paths
         - without live: both were named, and neither is the real one
-        - with live: the real paths stand in for any not named, the ledger is there, and the data folder is not marked by a stand-in
+        - with live: the real paths, whether or not they are named; naming another is refused; the ledger is there and the folder is not marked
     Raises:
         - RunnerRefused for any of the above that does not hold
     """
     real_data, real_ledger = pathlib.Path( rt.data_dir( root ) ), pathlib.Path( rl.ledger_path( root ) )
     if live:
-        data, ledger = pathlib.Path( data ) if data else real_data, pathlib.Path( ledger ) if ledger else real_ledger
+        if data and pathlib.Path( data ).resolve() != real_data.resolve(): raise RunnerRefused( "a live run uses the real data folder only" )
+        if ledger and pathlib.Path( ledger ).resolve() != real_ledger.resolve(): raise RunnerRefused( "a live run uses the real ledger only: spend on another would escape the account limit" )
+        data, ledger = real_data, real_ledger
         if ( data / STAND_IN_MARKER ).exists(): raise RunnerRefused( f"{data} was written by a stand-in run; a live run will not read its answers" )
         if not ledger.exists(): raise RunnerRefused( f"{ledger} does not exist; create the ledger first" )
         return data, ledger
