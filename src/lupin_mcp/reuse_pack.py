@@ -5,6 +5,7 @@ One request holds the need once in `state` and one three-way question per candid
 The question is the same one the single-entry path asks; only the packing differs.
 Nothing in this module sends anything.
 """
+from cosa.repo.doc_lint import jev_transport as jt
 from lupin_mcp import reuse_tools as rt
 
 SHAPE      = "packed-choice-1"                                # names the body layout; a new layout needs a new name
@@ -94,3 +95,73 @@ def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL )
 def pack_key( body ):
     """Ensures: returns the key of a whole packed body; a changed neighbour changes it."""
     return rt.request_hash( body )
+
+
+def _row( request_hash, entries, parent ):
+    """Ensures: returns a request row before the request is sent, with every outcome field empty."""
+    return { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
+             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "error": None }
+
+
+def _post( transport, body ):
+    """Ensures: returns ( response, meta ); meta is None for a transport that only has post()."""
+    if hasattr( transport, "post_with_meta" ): return transport.post_with_meta( body )
+    return transport.post( body ), None
+
+
+def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, budget=None, parent=None ):
+    """
+    Send one pack and account for every entry in it.
+
+    Requires:
+        - entries is a non-empty list of symbol dicts with unique ids
+        - transport has post_with_meta( body ) returning ( response, meta ), or post( body )
+        - budget, when given, is a TokenBudget; attempts are read from its tally
+        - parent is the request hash of the pack this one was split from, or None
+    Ensures:
+        - returns { answers, failed, not_reached, rows }: answers are { id, probabilities } in entry order
+        - an entry is answered only when its answer is present; every other entry is failed, never unrelated
+        - a 422 splits the pack in half and resends each half, the larger half second; a 422 on one entry
+          fails that entry
+        - an attempt refused by the budget before any HTTP leaves the pack not reached
+        - any other error fails every entry of the pack, and the row keeps the error class and HTTP status
+        - rows lists this request first, then the rows of its halves, each with status answered, failed,
+          refused or not_reached, its attempts, its reported tokens and the ids it asked about
+    Raises:
+        - ValueError for an empty pack
+    """
+    if not entries: raise ValueError( "a pack cannot be empty" )
+    body, qmap = pack_request( entries=entries, need=need, template=template, model=model )
+    row        = _row( pack_key( body ), entries, parent )
+    response, meta, error, sent = None, None, None, True
+    if budget is not None: budget.open_request( body, len( entries ) ); budget.begin_tally()
+    try:
+        response, meta = _post( transport, body )
+    except Exception as e:                                          # any transport error ends this one request, never the run
+        error = e
+    taken = budget.end_tally() if budget is not None else None
+    if isinstance( error, jt.JevBudgetSpent ): sent = False
+    row[ "attempts" ] = taken if taken is not None else ( meta[ "attempts" ] if meta is not None else ( 1 if sent else 0 ) )
+    if error is None:
+        usage = rt.usage_of( response )
+        if budget is not None: budget.close_request( usage )
+        answered, unasked = pack_answers( response, qmap )
+        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked )
+        row[ "status" ] = "answered" if answered else "failed"
+        if not answered: row[ "error" ] = "NoAnswers"
+        return { "answers": [ { "id": i, "probabilities": answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked, "not_reached": [], "rows": [ row ] }
+    if budget is not None: budget.fail_request()
+    if isinstance( error, jt.JevConfigError ): row[ "http_status" ] = error.status
+    if isinstance( error, jt.JevConfigError ) and error.status == 422:
+        row[ "status" ] = "refused"
+        if len( entries ) == 1: return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
+        half  = len( entries ) // 2
+        left  = send_pack( transport, need, entries[ :half ], template, model, budget, row[ "request_hash" ] )
+        right = send_pack( transport, need, entries[ half: ], template, model, budget, row[ "request_hash" ] )
+        return { "answers": left[ "answers" ] + right[ "answers" ], "failed": left[ "failed" ] + right[ "failed" ],
+                 "not_reached": left[ "not_reached" ] + right[ "not_reached" ], "rows": [ row ] + left[ "rows" ] + right[ "rows" ] }
+    if not sent and row[ "attempts" ] == 0:
+        row[ "status" ] = "not_reached"
+        return { "answers": [], "failed": [], "not_reached": row[ "ids" ], "rows": [ row ] }
+    row[ "status" ], row[ "error" ] = "failed", type( error ).__name__
+    return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
