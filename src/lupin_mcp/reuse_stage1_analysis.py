@@ -31,6 +31,7 @@ FLOOR                           = 0.3                         # the page floor o
 CONFIDENCE_BAR                  = 0.9                         # an answer is confident from this largest probability
 
 INVALID_STOPS = ( "ceiling", "ledger", "consecutive_422" )
+PROBE_PLAN_SUFFIX = "-probe-plan.json"                        # the driver writes one of these beside the arms of a question
 LOST_ONE_IN   = 200                                           # an arm may lose one entry in this many and still be judged
 REQUIRED_ARMS = ( "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
                   "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" )
@@ -611,6 +612,7 @@ def main( argv=None ):
     Read a folder of arm and canary files and print the report.
 
     Ensures:
+        - probe plan files, which end in the plan suffix, are not read as arm files
         - returns 0 after printing, and 2 when the folder holds no arm file
     Raises:
         - ValueError when a canary file has no arm file beside it
@@ -619,7 +621,7 @@ def main( argv=None ):
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "folder" )
     folder = pathlib.Path( ap.parse_args( argv ).folder )
-    arm_files    = sorted( p for p in folder.glob( "*.json" ) if not p.name.endswith( ".canary.json" ) )
+    arm_files    = sorted( p for p in folder.glob( "*.json" ) if not p.name.endswith( ( ".canary.json", PROBE_PLAN_SUFFIX ) ) )
     canary_files = sorted( folder.glob( "*.canary.json" ) )
     if not arm_files: print( f"no arm files in {folder}" ); return 2
     pairs = []
