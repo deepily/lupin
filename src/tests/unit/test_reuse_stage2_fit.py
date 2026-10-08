@@ -187,6 +187,27 @@ def test_evaluate_does_not_depend_on_the_order_of_the_rows():
     assert ft.evaluate( list( reversed( rows ) ), POLICY ) == ft.evaluate( rows, POLICY )
 
 
+def test_a_member_with_two_twins_on_the_shortlist_counts_once_for_hit_at_ten_and_twice_for_recall():
+    r = ft.evaluate( [ _row( "m", "t1", True, 0.9 ), _row( "m", "t2", True, 0.8 ), _row( "m", "n", False, 0.1 ) ], POLICY )
+    assert ( r[ "members" ], r[ "twins" ], r[ "twins_on_shortlist" ], r[ "hit_at_10" ], r[ "twin_recall" ] ) == ( 1, 2, 2, 1.0, 1.0 )
+
+
+def test_recall_is_over_twins_and_not_over_members_when_a_member_has_several():
+    rows = [ _row( "m1", "t1", True, 0.9 ), _row( "m1", "t2", True, 0.2 ), _row( "m2", "t3", True, 0.9 ) ]
+    r    = ft.evaluate( rows, POLICY )
+    assert ( r[ "members" ], r[ "twins" ], r[ "twins_on_shortlist" ] ) == ( 2, 3, 2 )
+    assert ( r[ "hit_at_10" ], r[ "twin_recall" ] ) == ( 1.0, round( 2 / 3, 6 ) )
+
+
+@pytest.mark.parametrize( "flag", [ { "malformed": "not a mapping" }, { "unasked": True } ] )
+def test_a_flagged_row_is_unusable_even_when_it_still_carries_a_provides( flag ):
+    twin = _row( "m", "t", True, 0.9, **flag )
+    non  = _row( "m", "n", False, 0.95, **flag )
+    assert ft.usable( twin ) is False and ft.shortlist( [ twin, non ], POLICY ) == []
+    r = ft.evaluate( [ twin, non ], POLICY )
+    assert ( r[ "twins_on_shortlist" ], r[ "false_reuse" ], r[ "unusable" ], r[ "non_twin_rows" ] ) == ( 0, 0, 2, 1 )
+
+
 # --- the fit -------------------------------------------------------------------------------------------------------------
 
 GRID = { "reuse": ( 0.7, 0.9 ), "threshold": ( 0.4, 0.6 ), "floor": ( 0.3, ), "coverage": ( 0.5, ) }
@@ -421,6 +442,13 @@ def test_the_command_reads_a_rows_file_of_the_new_question(tmp_path, capsys):
     ( tmp_path / "split.json" ).write_text( json.dumps( split ) )
     assert ft.main( [ "--rows", str( tmp_path / "rows.json" ), "--split", str( tmp_path / "split.json" ), "--rate", "0.5" ] ) == 0
     assert "chosen on the fit half" in capsys.readouterr().out
+
+
+def test_the_command_refuses_both_sources_of_rows_even_with_a_manifest(tmp_path, capsys):
+    ( tmp_path / "s.json" ).write_text( "{}" )
+    with pytest.raises( SystemExit ) as caught:
+        ft.main( [ "--rows", "a", "--old-results", "b", "--manifest", "m", "--split", str( tmp_path / "s.json" ), "--rate", "0.1" ] )
+    assert caught.value.code == 2 and "exactly one" in capsys.readouterr().err
 
 
 def test_the_command_needs_exactly_one_source_of_rows(tmp_path):
