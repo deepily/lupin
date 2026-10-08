@@ -213,3 +213,113 @@ class TestConfigKey:
                 assert set( values ) == { "false" }
             else:
                 assert "nothing is pushed" in values[ 0 ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# BFE: commit_and_pr_single and its own flag
+# ─────────────────────────────────────────────────────────────────────────
+
+BFE_INI_KEY = "bug fix expediter push fix branch enabled"
+
+
+def _bfe_git_ops_mock():
+    mock = MagicMock()
+    mock.get_current_branch = AsyncMock( return_value="main" )
+    mock.create_fix_branch  = AsyncMock( return_value={ "success": True, "branch_name": "fix/x", "error": None } )
+    mock.commit_on_branch   = AsyncMock( return_value={ "success": True, "commit_hash": "abc12345", "error": None } )
+    mock.commit_and_push    = AsyncMock( return_value={ "success": True, "commit_hash": "abc12345", "error": None } )
+    mock.create_pr          = AsyncMock( return_value={ "success": True, "pr_url": "http://pr/1", "error": None } )
+    mock.checkout_branch    = AsyncMock( return_value={ "success": True } )
+    return mock
+
+
+async def _run_single( git_ops, notes, trust=3, **kwargs ):
+    async def _notify( msg, priority="low" ):
+        notes.append( msg )
+    return await GitStrategist().commit_and_pr_single(
+        git_ops=git_ops, files_changed=[ "a.py" ], commit_message="m", pr_title="T", pr_body="B",
+        trust_level=trust, notify_fn=_notify, **kwargs )
+
+
+class TestBfeFlag:
+
+    def test_flag_off_is_the_default_and_pushes_nothing( self ):
+        git_ops, notes = _bfe_git_ops_mock(), []
+
+        result = asyncio.run( _run_single( git_ops, notes ) )
+
+        git_ops.commit_and_push.assert_not_called()
+        git_ops.create_pr.assert_not_called()
+        git_ops.commit_on_branch.assert_called_once_with( [ "a.py" ], "m" )
+        git_ops.checkout_branch.assert_called_once_with( "main" )
+        assert result[ "git_strategy" ] == "commit_only"
+        assert result[ "branch_name" ] == "fix/x"
+        assert result[ "commit_hash" ] == "abc12345"
+        assert result[ "pr_url" ] is None
+        assert "nothing was pushed" in result[ "error" ]
+        assert "no pull request was opened" in result[ "error" ]
+        assert BFE_INI_KEY in result[ "error" ]
+        assert result[ "error" ] in notes
+
+    def test_flag_off_with_a_failing_local_commit_reports_that_failure( self ):
+        git_ops = _bfe_git_ops_mock()
+        git_ops.commit_on_branch = AsyncMock( return_value={ "success": False, "commit_hash": None, "error": "dirty" } )
+
+        result = asyncio.run( _run_single( git_ops, [] ) )
+
+        assert result[ "error" ] == "dirty"
+        assert result[ "git_strategy" ] is None
+        git_ops.commit_and_push.assert_not_called()
+        git_ops.checkout_branch.assert_called_once_with( "main" )
+
+    def test_flag_on_pushes_then_opens_the_pr( self ):
+        git_ops = _bfe_git_ops_mock()
+
+        result = asyncio.run( _run_single( git_ops, [], push_enabled=True ) )
+
+        git_ops.commit_and_push.assert_called_once()
+        git_ops.create_pr.assert_called_once()
+        assert result[ "git_strategy" ] == "branch_and_pr"
+
+    def test_trust_one_and_two_never_push_either_way( self ):
+        git_ops = _bfe_git_ops_mock()
+
+        result = asyncio.run( _run_single( git_ops, [], trust=2, push_enabled=True ) )
+
+        git_ops.commit_and_push.assert_not_called()
+        assert result[ "git_strategy" ] == "commit_only"
+        assert result[ "error" ] is None
+
+
+class TestBfeConfigKey:
+
+    def test_dataclass_default_is_off( self ):
+        from cosa.agents.bug_fix_expediter.config import BugFixExpediterConfig
+        assert BugFixExpediterConfig().push_fix_branch_enabled is False
+
+    def test_from_config_reads_the_key_as_a_boolean( self ):
+        from cosa.agents.bug_fix_expediter.config import BugFixExpediterConfig
+        seen = {}
+        def _get( ini_key, default=None, return_type=None ):
+            seen[ ini_key ] = ( default, return_type )
+            return default
+        mgr = MagicMock()
+        mgr.get.side_effect = _get
+
+        config = BugFixExpediterConfig.from_config( mgr )
+
+        assert seen[ BFE_INI_KEY ] == ( False, "boolean" )
+        assert config.push_fix_branch_enabled is False
+
+    def test_the_shipped_ini_sets_it_false_and_the_splainer_explains_it( self ):
+        root = Path( cu.get_project_root() )
+        for name in ( "lupin-app.ini", "lupin-app-splainer.ini" ):
+            parser = configparser.RawConfigParser( strict=False, delimiters=( "=", ) )
+            parser.optionxform = str
+            parser.read( root / "src/conf" / name )
+            values = [ v for section in parser.sections() for k, v in parser.items( section ) if k.strip() == BFE_INI_KEY ]
+            assert len( values ) >= 1, f"{BFE_INI_KEY} missing from {name}"
+            if name == "lupin-app.ini":
+                assert set( values ) == { "false" }
+            else:
+                assert "nothing is pushed" in values[ 0 ]

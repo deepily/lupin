@@ -836,6 +836,20 @@ class TestRunGitStrategy( unittest.TestCase ):
         self.assertEqual( out.pr_url, "http://pr" )
         self.writer.update_git_references.assert_called_once()
 
+    def test_the_push_flag_reaches_the_strategist( self ):
+        for flag in ( True, False ):
+            orch = _orch()
+            orch.config.push_fix_branch_enabled = flag
+            fr = FixResult( applied=True, success=True, details="the fix" )
+            strat = MagicMock()
+            strat.commit_and_pr_single = AsyncMock( return_value={ "git_strategy": None, "commit_hash": None,
+                                                                   "branch_name": None, "pr_url": None } )
+            with patch.object( orch_mod, "GitStrategist",
+                               MagicMock( return_value=strat,
+                                          resolve_trust_level=MagicMock( return_value=3 ) ) ):
+                _run( orch.run_git_strategy( fr, [ "a.py" ], "/tmp/plan.md" ) )
+            self.assertIs( strat.commit_and_pr_single.call_args.kwargs[ "push_enabled" ], flag )
+
     def test_success_with_none_git_fields_and_no_details( self ):
         orch = _orch()
         fr = FixResult( applied=True, success=True, details="" )     # no details → default messages
