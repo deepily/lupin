@@ -116,8 +116,8 @@ def test_the_ledger_path_is_the_same_from_a_worktree_and_from_the_main_tree( tmp
 
 def test_the_price_is_written_once_and_the_account_limit_comes_from_it():
     assert rl.PRICE_PER_MILLION_USD == 0.042
-    assert rl.ACCOUNT_LIMIT_USD == 19.31
-    assert rl.ACCOUNT_LIMIT_TOKENS == rl.usd_to_tokens( rl.ACCOUNT_LIMIT_USD ) == 459_761_904
+    assert rl.ACCOUNT_LIMIT_USD == 40.00
+    assert rl.ACCOUNT_LIMIT_TOKENS == rl.usd_to_tokens( rl.ACCOUNT_LIMIT_USD ) == 952_380_952
 
 
 def test_the_stage_one_ceiling_is_three_dollars_rounded_down_to_a_round_number():
@@ -129,6 +129,7 @@ def test_the_end_to_end_estimate_of_420_million_tokens_fits_eighteen_dollars():
     assert 420_000_000 <= rl.usd_to_tokens( 18.00 ) < 430_000_000
 
 
-def test_stage_one_plus_stage_two_plus_end_to_end_is_more_than_the_account_limit():
-    """The 11.2 table sums to 487M tokens, past 459.8M, so the top-up is needed first."""
-    assert 56_000_000 + 11_000_000 + 420_000_000 > rl.ACCOUNT_LIMIT_TOKENS
+def test_stage_one_plus_stage_two_plus_end_to_end_fits_the_account_limit_with_room_to_spare():
+    """The 11.2 table sums to 487M tokens; the 40 dollar limit holds 952M, so about half is left."""
+    total = 56_000_000 + 11_000_000 + 420_000_000
+    assert total < rl.ACCOUNT_LIMIT_TOKENS and rl.ACCOUNT_LIMIT_TOKENS - total > 400_000_000
