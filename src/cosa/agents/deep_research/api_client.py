@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .rate_limiter import WebSearchRateLimiter
+from cosa.agents.shared.sdk_error_result import raise_error_result
 
 # Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
 try:
@@ -521,6 +522,7 @@ class ResearchAPIClient:
             elif isinstance( message, TextBlock ):
                 collected.append( message.text )
             elif isinstance( message, ResultMessage ):
+                if message.is_error: raise_error_result( message, f"ResearchAPIClient {call_type}", logger )
                 usage         = message.usage or {}
                 input_tokens  = usage.get( "input_tokens", 0 )
                 output_tokens = usage.get( "output_tokens", 0 )
