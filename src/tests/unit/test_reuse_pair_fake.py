@@ -44,13 +44,14 @@ def test_a_candidate_that_shares_the_needs_words_provides_more_than_one_that_doe
 
 
 def test_swapping_two_candidates_text_swaps_their_answers():
-    swapped_feed = dict( FEED, doc=MATH[ "doc" ], sig=MATH[ "sig" ] )
-    swapped_math = dict( MATH, doc=FEED[ "doc" ], sig=FEED[ "sig" ] )
-    before, _, _ = ask( fake.PairFake( [ FEED, MATH ] ), [ FEED, MATH ] )
-    after, _, _  = ask( fake.PairFake( [ swapped_feed, swapped_math ] ), [ swapped_feed, swapped_math ] )
-    assert after[ FEED[ "id" ] ][ "provides" ] == before[ MATH[ "id" ] ][ "provides" ] == 0
-    assert after[ MATH[ "id" ] ][ "provides" ] > 0.5
-    assert after[ MATH[ "id" ] ][ "probabilities" ] == before[ FEED[ "id" ] ][ "probabilities" ]
+    first, second = { "id": "x.a", "sig": "( url )", "doc": FEED[ "doc" ] }, { "id": "x.b", "sig": "( a, b )", "doc": MATH[ "doc" ] }
+    swapped_first, swapped_second = dict( first, sig=second[ "sig" ], doc=second[ "doc" ] ), dict( second, sig=first[ "sig" ], doc=first[ "doc" ] )
+    before, _, _ = ask( fake.PairFake( [ first, second ] ), [ first, second ] )
+    after, _, _  = ask( fake.PairFake( [ swapped_first, swapped_second ] ), [ swapped_first, swapped_second ] )
+    assert before[ "x.a" ][ "provides" ] == pytest.approx( 0.8 ) and before[ "x.b" ][ "provides" ] == 0
+    assert after[ "x.a" ][ "provides" ] == 0 and after[ "x.b" ][ "provides" ] == pytest.approx( 0.8 )
+    assert after[ "x.b" ][ "probabilities" ] == before[ "x.a" ][ "probabilities" ]
+    assert after[ "x.a" ][ "probabilities" ] == before[ "x.b" ][ "probabilities" ]
 
 
 def test_changing_the_need_changes_the_answer_about_the_same_candidate():
@@ -136,7 +137,7 @@ def test_the_need_must_be_the_only_thing_in_state():
 def test_a_question_the_fake_cannot_place_is_an_error_not_a_quiet_answer():
     body, _ = rpr.pair_request( NEED, [ FEED ] )
     body[ "questions" ][ "p_stranger" ] = { "type": "noul", "instructions": "no candidate here" }
-    with pytest.raises( AssertionError, match="question" ):
+    with pytest.raises( AssertionError, match="holds no candidate" ):
         fake.PairFake( [ FEED ] ).post_with_meta( body )
 
 
@@ -144,3 +145,8 @@ def test_a_question_for_an_entry_the_fake_was_not_given_is_an_error():
     body, _ = rpr.pair_request( NEED, [ FEED, MATH ] )
     with pytest.raises( AssertionError, match="unknown" ):
         fake.PairFake( [ FEED ] ).post_with_meta( body )
+
+
+def test_a_need_with_no_usable_words_provides_nothing():
+    answered, _, _ = ask( fake.PairFake( [ FEED ] ), [ FEED ], need="a an it" )
+    assert answered[ FEED[ "id" ] ][ "provides" ] == 0
