@@ -1503,3 +1503,13 @@ def test_a_caller_cannot_clear_the_left_out_tiers_by_env_var( monkeypatch, no_re
     job.suites_not_run = { "unit": "not run here, host tier" }
     job._run_suite( "coverage", "/proj" )
     assert captured[ "env" ][ "LUPIN_TEST_TIERS_NOT_RUN" ] == "unit"
+
+
+def test_suites_left_out_names_unit_only_when_all_drops_it_in_a_container():
+    """The left-out list names unit only when all drops it in a container."""
+    here = job_mod.NOT_RUN_HERE
+    assert job_mod.suites_left_out( [ "all" ], True ) == { "unit": here }
+    assert job_mod.suites_left_out( [ "all" ], False ) == {}
+    assert job_mod.suites_left_out( [ "coverage" ], True ) == {}
+    assert job_mod.suites_left_out( [ "unit" ], True ) == {}
+    assert job_mod.suites_left_out( [ "all", "unit" ], True ) == {}
