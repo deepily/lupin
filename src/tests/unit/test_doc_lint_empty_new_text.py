@@ -121,3 +121,11 @@ def test_the_harness_version_is_two_and_the_agreement_note_names_it( tmp_path ):
     report     = hr.build_report( results, CONFIG )
     assert hn.HARNESS_VERSION == 2 and report[ "harness_version" ] == 2
     assert "from harness version 2," in report[ "agreement_note" ]
+
+
+def test_a_seeded_pair_with_an_empty_new_text_stays_in_the_group_row_as_a_catch( tmp_path ):
+    pairs = [ pair( "cut", L2 + "\n" + L3, seeded=L1 ), pair( "gone", "", seeded=L1 ) ]
+    keys  = { i: { "seeded_positive": True, "kind": "delete", "injection": False } for i in ( "cut", "gone" ) }
+    results, _ = _results( pairs, tmp_path )
+    row = { r[ "group" ]: r for r in jc.group_rows( results, keys, 2 ) }[ "delete" ]
+    assert row[ "n" ] == 2 and row[ "wrong" ] == 0 and row[ "new_text_empty" ] == 0
