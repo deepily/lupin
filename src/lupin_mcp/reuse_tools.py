@@ -24,6 +24,7 @@ import math
 import os
 import pathlib
 import re
+import threading
 import uuid
 import zlib
 
@@ -37,6 +38,7 @@ from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_
 TOOL_VERSION = "1"
 JEV_MODEL    = "jev-1.13.0"                     # pinned: a moving alias would break replay
 RETRIES      = 2
+BREAKER_422  = 5          # refusals in a row, with no answered request between them, that stop a sweep
 WORKERS      = 32
 CALL_BUDGET_CAP     = 8000                      # Rick's hard ceiling on HTTP attempts to Jev in one call (2026-10-07)
 DEFAULT_CALL_BUDGET = CALL_BUDGET_CAP
@@ -492,6 +494,11 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
           adds nothing and is counted in usage_missing
         - transport_calls lists { status, attempts, retry_after, latency_ms, model } for every live response whose
           transport reported them; a cache hit adds none, and model is the response's own "model" or None
+        - a 422 is never retried: that entry is posted once and fails, and the next entry still goes; refused_422 counts them
+        - BREAKER_422 refusals in a row, with no answered request between them, stop the sweep: stopped_by is
+          "consecutive_422" (else None), and every entry not yet asked is not_reached, so the receipt lists it as missing
+        - until the first answer, and while a refusal is unanswered, entries are posted one at a time, so a door that
+          refuses everything costs exactly BREAKER_422 posts; after an answer they run in parallel again
     Raises:
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an entry is absent or damaged
     """
@@ -499,14 +506,30 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
     cache, stats    = JevCache( ctx.data ), { "calls": 0, "hits": 0 }
     budget          = ctx.transport.budget if isinstance( ctx.transport, LiveJevTransport ) else None
 
+    gate, probe = threading.Lock(), threading.Lock()
+    state       = { "answered": False, "streak": 0, "refused": 0, "stopped": False }
+
     def one( rec ):
         body = build_request( need, entry_text( rec ), template, model ); key = request_hash( body )
         if frozen and gaps is not None and rec[ "id" ] in gaps: return rec[ "id" ], None, gaps[ rec[ "id" ] ], 0, []      # the live run never got an answer; a later run's cache must not supply one
         hit  = cache.get( key )
         if hit is not None: return rec[ "id" ], hit, "hit", 0, []
         if frozen: raise ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key})" )
+        needs_probe = lambda: not state[ "answered" ] or state[ "streak" ] > 0
+        with gate: serial = needs_probe()
+        row = None
+        if serial:
+            with probe:                                                  # one at a time while no answer has cleared the refusals
+                with gate: serial = needs_probe()                         # an answer may have come in while this entry waited
+                row = ask( rec, body, key ) if serial else None
+        return row if row is not None else ask( rec, body, key )
+
+    def ask( rec, body, key ):
+        """Ensures: returns the row for one uncached entry; not_reached once the breaker has stopped."""
+        with gate: stopped = state[ "stopped" ]
+        if stopped: return rec[ "id" ], None, "not_reached", 0, []
         if budget is not None: budget.begin_tally()
-        how, resp, cut_off, got = "failed", None, False, []
+        how, resp, cut_off, got, refused = "failed", None, False, [], False
         try:
             for _ in range( RETRIES + 1 ):
                 try:
@@ -519,10 +542,20 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                 except jev_transport.JevBudgetSpent:
                     cut_off = True
                     break
+                except jev_transport.JevConfigError as e:
+                    if e.status == 422:                                   # a refusal of this one request is final: never posted again
+                        refused = True
+                        break
+                    continue
                 except Exception:                                         # any transport error is a failed call, never a verdict
                     continue
         finally:
             attempts = budget.end_tally() if budget is not None else 0
+        with gate:
+            if how == "call": state[ "answered" ], state[ "streak" ] = True, 0
+            elif refused:
+                state[ "streak" ] += 1; state[ "refused" ] += 1
+                if state[ "streak" ] >= BREAKER_422: state[ "stopped" ] = True
         if cut_off and attempts == 0: how = "not_reached"                 # asked nothing: the budget was already spent
         return rec[ "id" ], resp, how, attempts, got
 
@@ -545,7 +578,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
             answers.append( { "id": rid, "probabilities": parse_answer( resp ) } )
     return { "answers": answers, "failed": failed, "not_reached": not_reached, "calls": stats[ "calls" ], "cache_hits": stats[ "hits" ],
              "attempts_answered": spent[ "answered" ], "attempts_failed": spent[ "failed" ], "failed_attempts": failed_attempts,
-             "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ], "transport_calls": seen_calls }
+             "tokens_in": used[ "in" ], "tokens_out": used[ "out" ], "usage_missing": used[ "missing" ], "transport_calls": seen_calls,
+             "refused_422": state[ "refused" ], "stopped_by": "consecutive_422" if state[ "stopped" ] else None }
 
 
 def module_of( file ):
@@ -854,7 +888,9 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
                        "route": routed[ "route" ], "stages": routed[ "stages" ], "attempts_total": sum( st[ "attempts" ] for st in routed[ "stages" ] ),
                        "tokens_in": sum( st[ "tokens_in" ] for st in routed[ "stages" ] ), "tokens_out": sum( st[ "tokens_out" ] for st in routed[ "stages" ] ),
                        "usage_missing": sum( st[ "usage_missing" ] for st in routed[ "stages" ] ),
-                       "transport": transport_summary( [ c for sweep_ in routed[ "sweeps" ] for c in sweep_[ "transport_calls" ] ] ) } }
+                       "transport": transport_summary( [ c for sweep_ in routed[ "sweeps" ] for c in sweep_[ "transport_calls" ] ] ),
+                       "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
+                       "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     return store_receipt( ctx, rec ) if write else rec
 
 

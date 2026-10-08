@@ -56,14 +56,14 @@ class Door:
 
 def ctx_over( env_, door ):
     root, data, out = env_
-    transport = rt.LiveJevTransport( post_fn=door, sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5 )
+    transport = rt.LiveJevTransport( post_fn=door, sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5, budget=jev_transport.CallBudget( 1000 ) )
     return rt.ReuseContext( root, data, out_dir=out, transport=transport )
 
 
 def test_a_422_is_posted_once_for_its_entry_and_never_retried( env ):
     door = Door( [ 422 ] )
     sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 3 ) )
-    assert door.posts == 3 and sw[ "failed" ] == [ "m.f0", "m.f1", "m.f2" ] and sw[ "not_reached" ] == []
+    assert door.posts == 3 and sorted( sw[ "failed" ] ) == [ "m.f0", "m.f1", "m.f2" ] and sw[ "not_reached" ] == []
     assert [ f[ "attempts" ] for f in sw[ "failed_attempts" ] ] == [ 1, 1, 1 ]
     assert sw[ "refused_422" ] == 3 and sw[ "stopped_by" ] is None
 
@@ -72,7 +72,8 @@ def test_five_refusals_in_a_row_stop_the_run_and_the_rest_are_counted_unasked( e
     door = Door( [ 422 ] )
     sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 8 ) )
     assert door.posts == 5 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422"
-    assert sw[ "failed" ] == [ f"m.f{i}" for i in range( 5 ) ] and sw[ "not_reached" ] == [ "m.f5", "m.f6", "m.f7" ]
+    assert len( sw[ "failed" ] ) == 5 and len( sw[ "not_reached" ] ) == 3
+    assert sorted( sw[ "failed" ] + sw[ "not_reached" ] ) == [ f"m.f{i}" for i in range( 8 ) ]
 
 
 def test_an_answer_between_refusals_resets_the_count( env, monkeypatch ):
@@ -106,3 +107,10 @@ def test_the_receipt_says_why_the_run_stopped( env, monkeypatch ):
 def test_a_receipt_with_no_refusal_reports_none_and_zero( env ):
     r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 200 ] ) ) )
     assert r[ "stats" ][ "stopped_by" ] is None and r[ "stats" ][ "refused_422" ] == 0
+
+
+def test_an_unanswered_refusal_after_an_answer_puts_posts_back_in_single_file( env, monkeypatch ):
+    monkeypatch.setattr( rt, "WORKERS", 4 )
+    door = Door( [ 200, 422 ], pause=0.03 )
+    sw   = rt.sweep( ctx_over( env, door ), N( "q" ), entries( 8 ) )
+    assert door.posts == 6 and sw[ "refused_422" ] == 5 and sw[ "stopped_by" ] == "consecutive_422" and len( sw[ "not_reached" ] ) == 2
