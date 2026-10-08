@@ -166,9 +166,10 @@ def test_an_attempt_limit_above_the_arms_own_cap_is_refused_and_one_at_it_is_tak
 
 
 def test_a_packed_arm_is_never_held_below_the_floor_by_its_small_entry_count( env ):
-    st.run_arm( env, 1, "pack10", NEED, ENTRIES[ :20 ], 5_000_000 )
-    out = read( env, 1, "pack10" )
-    assert out[ "attempt_cap" ] == out[ "attempt_limit" ] == rt.CALL_BUDGET_CAP == env.made[ 0 ].budget.limit
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "ok" )
+    st.run_arm( env, 1, "pack50", NEED, ENTRIES[ :10 ], 5_000_000 )
+    out = read( env, 1, "pack50" )
+    assert out[ "attempt_cap" ] == out[ "attempt_limit" ] == rt.CALL_BUDGET_CAP == env.made[ -1 ].budget.limit
 
 
 def test_the_tool_path_keeps_the_floor_as_its_hard_ceiling( env ):

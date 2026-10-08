@@ -50,6 +50,7 @@ BREAKER_422  = 5          # refusals in a row, with no answered request between 
 WORKERS      = 32
 CALL_BUDGET_CAP     = 8000                      # Rick's hard ceiling on HTTP attempts to Jev in one call (2026-10-07)
 DEFAULT_CALL_BUDGET = CALL_BUDGET_CAP
+ARM_CAP_PERCENT    = 10                         # an arm of the measurement stage may send its entry count plus this share, rounded up
 BUDGET_VARIABLE     = "LUPIN_REUSE_JEV_CALL_BUDGET"
 NAME_RE      = re.compile( r"[\w\-]+" )
 SYMBOL_FIELDS = ( "id", "sig", "doc", "file" )
@@ -161,6 +162,18 @@ def write_once( path, data ):
         tmp.unlink()
 
 
+def call_budget_cap_for( entry_count ):
+    """
+    Requires:
+        - entry_count is a non-negative integer: the entries one measurement arm sends
+
+    Ensures:
+        - returns the arm's cap on HTTP attempts: the entry count plus ARM_CAP_PERCENT percent, rounded up
+        - never returns less than CALL_BUDGET_CAP, so a packed arm of few requests keeps today's allowance
+    """
+    return max( CALL_BUDGET_CAP, -( -entry_count * ( 100 + ARM_CAP_PERCENT ) // 100 ) )
+
+
 class ReuseContext:
     """
     Everything a reuse call needs from its environment, injectable for tests.
@@ -168,19 +181,21 @@ class ReuseContext:
     Requires:
         - root is the git working-tree root being asked about
         - data is the per-repository data directory (receipts, snapshots, cache, call log)
-        - call_budget is an integer from 1 to CALL_BUDGET_CAP: the most HTTP attempts, retries included, one call may make
+        - call_budget is an integer from 1 to call_budget_cap (CALL_BUDGET_CAP unless the stage driver passes its arm's own cap): the most HTTP attempts, retries included, one call may make
         - sweeper is None for the one-request-per-entry path, or a function with sweep's signature for the packed path
         - a packed context that builds its own live transport also has token_ceiling, run_name and a ledger
         - single_use closes the run in the ledger when the question ends
 
     Raises:
-        - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer
+        - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
-                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False ):
-        if type( call_budget ) is not int or not 1 <= call_budget <= CALL_BUDGET_CAP:
-            raise ReuseError( "BAD_BUDGET", f"call budget must be an integer from 1 to {CALL_BUDGET_CAP}, got {call_budget!r}" )
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP ):
+        if type( call_budget_cap ) is not int or call_budget_cap < CALL_BUDGET_CAP:
+            raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
+        if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
+            raise ReuseError( "BAD_BUDGET", f"call budget must be an integer from 1 to {call_budget_cap}, got {call_budget!r}" )
         self.call_budget      = call_budget
         self.pages            = []                            # set by prepare(): the capability pages Stage A may ask about
         self.root             = pathlib.Path( root )

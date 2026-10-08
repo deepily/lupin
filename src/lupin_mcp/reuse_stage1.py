@@ -225,13 +225,14 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - nothing is sent and no ledger row is written when any check below refuses
         - the sweep keys its answers by pack size and run index, so no two arms share an answer
         - the run is closed in the ledger however the arm ends, and the results file is written
+        - the attempt limit defaults to the arm's cap, and the results file records both as attempt_cap and attempt_limit
         - an arm that runs out of attempts, ceiling or ledger is incomplete with its reason, never raised
         - an entry the response left unasked counts as failed, so it makes the arm incomplete
         - returns the results record
     Raises:
         - ValueError for a question, arm or probe out of range, a run name used before, workers out of range or a repeated entry id
         - KeyMissing for the live transport with no key; this and the ValueErrors above open no ledger run and spend no name
-        - ReuseError BAD_BUDGET for an attempt limit above the cap
+        - ReuseError BAD_BUDGET for an attempt limit above the arm's cap: its entries plus ten percent, never below the 8,000 floor
         - StageRefused when the ceiling passes what the stage has left
         - CanaryNotApproved for any arm but the first single run before the canary is approved
         - LedgerUnreadable or AccountLimitReached from the ledger
@@ -239,9 +240,10 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     if type( question ) is not int or question not in QUESTIONS: raise DriverRefused( f"question must be one of {QUESTIONS}, got {question!r}" )
     if arm not in ARMS: raise DriverRefused( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
     _check_attempt( env, question, arm, attempt, reason )
-    attempt_limit = rt.CALL_BUDGET_CAP if attempt_limit is None else attempt_limit
-    if type( attempt_limit ) is not int or not 1 <= attempt_limit <= rt.CALL_BUDGET_CAP:
-        raise rt.ReuseError( "BAD_BUDGET", f"attempt limit must be an integer from 1 to {rt.CALL_BUDGET_CAP}, got {attempt_limit!r}" )
+    attempt_cap   = rt.call_budget_cap_for( len( entries ) )
+    attempt_limit = attempt_cap if attempt_limit is None else attempt_limit
+    if type( attempt_limit ) is not int or not 1 <= attempt_limit <= attempt_cap:
+        raise rt.ReuseError( "BAD_BUDGET", f"attempt limit must be an integer from 1 to {attempt_cap}, got {attempt_limit!r}" )
     if arm not in UNGATED: _require_approved( env, question )
     _check_probe( arm, probe, entries )
     _check_ready( env, entries )
@@ -249,7 +251,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
     index    = RETRY_INDEX.get( attempt, index )
     template = rt.PAGE_TEMPLATE if arm.startswith( "page-" ) else rt.PROMPT_TEMPLATE
     record   = { "format": FORMAT, "question": question, "need": need, "arm": arm, "run_name": name, "run_index": index, "size": size, "model": env.model,
-                 "template_hash": rt.prompt_template_hash( template ), "started_at": env.clock(), "ceiling_tokens": ceiling_tokens, "attempt_limit": attempt_limit,
+                 "template_hash": rt.prompt_template_hash( template ), "started_at": env.clock(), "ceiling_tokens": ceiling_tokens, "attempt_cap": attempt_cap, "attempt_limit": attempt_limit,
                  "entry_ids": [ e[ "id" ] for e in entries ], "entries_in_index": env.entries_in_index, "probe": probe,
                  "attempt": attempt, "retry_reason": reason }
     with _stage_lock( env ):                                                      # the check and the admission are one step
@@ -259,7 +261,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         try: budget = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
         except ValueError as e: raise DriverRefused( str( e ) ) from e                    # a run name used before, refused by the ledger
     try:
-        ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit )
+        ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit, call_budget_cap=attempt_cap )
         sweep = rp.sweep_packed( ctx, need, entries, size, workers=env.workers, key_mode="stage1", run_index=index, template=template, model=env.model, budget=budget )
         rows  = _rows_with_reserve( sweep[ "rows" ], need, { e[ "id" ]: e for e in entries }, template, env.model )
         record.update( state="complete" if not ( sweep[ "failed" ] or sweep[ "not_reached" ] ) else "incomplete", stop_reason=_stop_reason( sweep, budget ),
