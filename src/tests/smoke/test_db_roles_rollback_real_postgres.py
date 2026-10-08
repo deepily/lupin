@@ -395,3 +395,14 @@ def test_a_rollback_after_provisioning_only_changes_no_owner( stocked, tmp_path 
     _provision( stocked, tmp_path, "--rollback" )
     after = _snapshot( stocked )
     assert after == before, "a rollback with no reassign behind it changed something"
+
+
+@needs_docker
+def test_a_rollback_leaves_a_database_and_schema_owned_by_a_third_role( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    _psql( stocked[ "name" ], "postgres", "ALTER DATABASE lupin_db_dev OWNER TO lupin_host;\n" )
+    _psql( stocked[ "name" ], "lupin_db_dev", "ALTER SCHEMA public OWNER TO lupin_host;\n" )
+    before = _owners( _snapshot( stocked )[ "dev_owners" ] )
+    assert "database|lupin_db_dev|lupin_host" in before and "schema|public|lupin_host" in before, "the setup did not hand both to the third role"
+    _provision( stocked, tmp_path, "--rollback" )
+    assert _owners( _snapshot( stocked )[ "dev_owners" ] ) == before, "a rollback moved a database or schema that lupin_app does not own"
