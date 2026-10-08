@@ -157,7 +157,7 @@ def _check_attempt( env, question, arm, attempt, reason ):
     Raises:
         - ValueError for an attempt outside 1 to MAX_ATTEMPTS, a retry of any arm but the canary,
           a retry without a reason or a first attempt with one, a retry with no attempt before it,
-          or a retry after any attempt was approved
+          a retry after any attempt was approved, or a retry after an attempt tripped on model_mismatch
     """
     if type( attempt ) is not int or not 1 <= attempt <= MAX_ATTEMPTS: raise ValueError( f"attempt must be a whole number from 1 to {MAX_ATTEMPTS}, got {attempt!r}" )
     if attempt == 1:
@@ -166,7 +166,9 @@ def _check_attempt( env, question, arm, attempt, reason ):
     if arm != "canary": raise ValueError( f"only the canary may be retried, not {arm!r}" )
     if not isinstance( reason, str ) or not reason.strip(): raise ValueError( "a retry needs a named reason" )
     if not ( env.results_dir / f"{run_name( question, arm, attempt - 1 )}.json" ).exists(): raise ValueError( f"attempt {attempt} has no earlier attempt to follow" )
-    if any( report[ "approved" ] is not None for _, _, report in _canary_reports( env, question ) ): raise ValueError( f"the canary of question {question} is already approved" )
+    reports = _canary_reports( env, question )
+    if any( report[ "approved" ] is not None for _, _, report in reports ): raise ValueError( f"the canary of question {question} is already approved" )
+    if any( "model_mismatch" in report[ "tripped" ] for _, _, report in reports ): raise ValueError( f"the canary of question {question} tripped on model_mismatch; it is not retried" )
 
 
 @contextlib.contextmanager
@@ -288,6 +290,7 @@ def _canary_report( question, out ):
                                          ( "usage_over_reserve", any( u[ "over" ] for u in usage ) ),
                                          ( "refusal", refusals > 0 ),
                                          ( "usage_missing", out[ "totals" ][ "usage_missing" ] > 0 ),
+                                         ( "model_mismatch", out[ "stop_reason" ] == "model_mismatch" ),
                                          ( "nothing_measured", not sent_rows ),
                                          ( "incomplete", out[ "state" ] != "complete" ) ) if hit ]
     return { "format": CANARY_FORMAT, "question": question, "run_name": out[ "run_name" ], "attempt": out[ "attempt" ], "retry_reason": out[ "retry_reason" ],
