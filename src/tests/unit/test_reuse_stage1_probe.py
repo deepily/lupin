@@ -1,8 +1,9 @@
 """
 Choosing the probe entry and composing the six probe packs.
 
-Rule: María's, with Cheech's ruling on near neighbours. The probe is the clean single-run entry whose overlap is nearest 0.5 inside 0.35 to 0.65.
-0.35 to 0.65. Neighbours are drawn at random with a recorded seed, or by word similarity to the probe's text.
+Rule: María's, with Cheech's ruling on near neighbours. The probe is the clean single-run entry
+whose overlap is nearest 0.5 inside 0.35 to 0.65. Neighbours are drawn at random with a recorded seed,
+or by word similarity to the probe's text.
 Nothing here reaches Jev.
 """
 import json
@@ -167,3 +168,12 @@ def test_the_probe_arms_run_through_the_driver_unchanged( tmp_path ):
     plan = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
     assert all( st.ARMS[ arm ][ 1 ] == len( body[ "entries" ] ) for arm, body in plan[ "arms" ].items() )
     assert all( rt.entry_text( e ) for body in plan[ "arms" ].values() for e in body[ "entries" ] )
+
+
+def test_each_kind_of_pack_holds_its_own_neighbour_list_in_order():
+    built = sp.build_probe_plan( catalogue( 260 ), single1( { "e07": 0.5 } ), 11 )
+    for near, listed in ( ( "random", built[ "plan" ][ "random_ids" ] ), ( "near", built[ "plan" ][ "near_ids" ] ) ):
+        for place in sp.POSITIONS:
+            ids = [ e[ "id" ] for e in built[ "arms" ][ f"probe-{place}-{near}" ][ "entries" ] ]
+            assert [ i for i in ids if i != "e07" ] == listed
+    assert built[ "plan" ][ "random_ids" ] != built[ "plan" ][ "near_ids" ]
