@@ -37,7 +37,7 @@ def candidate_of( instructions ):
     """
     for before, after in ( PROVIDES_AT, COVERAGE_AT ):
         start = instructions.find( before )
-        end   = instructions.find( after )
+        end   = instructions.rfind( after )            # the last one is the template's own, whatever the candidate text holds
         if start >= 0 and end > start: return ast.literal_eval( instructions[ start + len( before ):end ] )
     return None
 

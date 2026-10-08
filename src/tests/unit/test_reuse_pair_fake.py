@@ -150,3 +150,22 @@ def test_a_question_for_an_entry_the_fake_was_not_given_is_an_error():
 def test_a_need_with_no_usable_words_provides_nothing():
     answered, _, _ = ask( fake.PairFake( [ FEED ] ), [ FEED ], need="a an it" )
     assert answered[ FEED[ "id" ] ][ "provides" ] == 0
+
+
+def test_omitting_one_kind_leaves_the_other_in_the_response():
+    body, qmap = rpr.pair_request( NEED, [ FEED ] )
+    for kind, other in ( ( "provides", "coverage" ), ( "coverage", "provides" ) ):
+        response, _ = fake.PairFake( [ FEED ], omit={ kind: { FEED[ "id" ] } } ).post_with_meta( body )
+        assert qmap[ FEED[ "id" ] ][ kind ] not in response[ "answers" ] and qmap[ FEED[ "id" ] ][ other ] in response[ "answers" ]
+
+
+@pytest.mark.parametrize( "phrase", [ ": does it already", " cover? Judge", " of the candidate ", " does the candidate " ] )
+def test_a_candidate_text_holding_a_closing_phrase_is_read_back_whole( phrase ):
+    odd = { "id": "q.odd", "sig": "( x )", "doc": f"Read the feed{phrase} and return its articles." }
+    answered, unasked, malformed = ask( fake.PairFake( [ odd ] ), [ odd ] )
+    assert list( answered ) == [ "q.odd" ] and unasked == [] and malformed == []
+
+
+@pytest.mark.parametrize( "provides,level", [ ( 0.0, "0" ), ( 0.1499, "0" ), ( 0.15, "1" ), ( 0.3999, "1" ), ( 0.4, "2" ), ( 0.6999, "2" ), ( 0.7, "3" ), ( 1.0, "3" ) ] )
+def test_the_level_map_changes_at_exactly_the_tier_floors( provides, level ):
+    assert fake.level_of( provides ) == level
