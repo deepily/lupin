@@ -102,7 +102,7 @@ def test_ac2_build_artifacts_exist():
 # AC3 — Watch-mode smoke
 # ---------------------------------------------------------------------------
 
-def test_ac3_watch_mode_starts_and_exits():
+def test_ac3_watch_mode_starts_and_exits( tmp_path ):
     """--watch mode starts esbuild watcher, exits cleanly on SIGINT, and leaves dist/ untouched."""
     assert BUILD_SCRIPT.exists()
 
@@ -115,7 +115,7 @@ def test_ac3_watch_mode_starts_and_exits():
         "precondition: the production build left the stable and hashed bundles identical"
 
     proc = subprocess.Popen(
-        [ "bash", str( BUILD_SCRIPT ), "--watch" ],
+        [ "bash", str( BUILD_SCRIPT ), "--watch", "--outfile", str( tmp_path / "boot.js" ) ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=str( PROJECT_ROOT ),
@@ -141,6 +141,8 @@ def test_ac3_watch_mode_starts_and_exits():
     after   = { p.name: p.read_bytes() for p in DIST_DIR.iterdir() if p.is_file() }
     changed = sorted( k for k in set( before ) | set( after ) if before.get( k ) != after.get( k ) )
     assert changed == [], f"the watcher changed files in dist/multiplexer: {changed}"
+    # Positive control: the watcher really built, and into the path it was given.
+    assert ( tmp_path / "boot.js" ).stat().st_size > 0, "the watcher wrote nothing to its --outfile"
 
 
 # ---------------------------------------------------------------------------
