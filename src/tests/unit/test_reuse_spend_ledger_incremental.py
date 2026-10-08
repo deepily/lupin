@@ -153,3 +153,45 @@ def test_an_empty_file_has_no_limit_row_however_often_it_is_read( tmp_path ):
     for _ in range( 2 ):
         with pytest.raises( rl.LedgerUnreadable, match="limit" ):
             led.total()
+
+
+@pytest.fixture
+def anchor_blind( monkeypatch ):
+    """The anchor check reports the file unchanged, so the guard under test has to stand alone."""
+    monkeypatch.setattr( rl.AccountLedger, "_unchanged_before_offset", lambda self, raw: True )
+
+
+def test_the_shrink_check_alone_reads_a_same_inode_file_cut_shorter_from_the_start( ledger, anchor_blind ):
+    prefill( ledger, 20 )
+    ledger.begin_run( "live", 500 )
+    assert ledger.total() == 20 * 3 + 500
+    limit_row = ledger.path.read_text( encoding="utf-8" ).splitlines()[ 0 ]
+    inode     = ledger.path.stat().st_ino
+    with ledger.path.open( "r+", encoding="utf-8" ) as f:            # the same inode, now far shorter than what was read
+        f.write( limit_row + "\n" + json.dumps( { "kind": "begin", "run": "z", "tokens": 7 } ) + "\n" )
+        f.truncate()
+    assert ledger.path.stat().st_ino == inode
+    assert ledger.snapshot() == ( 100_000, 7 )
+
+
+def test_the_inode_check_alone_reads_a_longer_replacement_file_from_the_start( ledger, tmp_path, anchor_blind ):
+    ledger.begin_run( "live", 500 )
+    assert ledger.total() == 500
+    other = rl.AccountLedger.create( tmp_path / "other.jsonl", limit_tokens=50_000, by="test", why="replacement" )
+    prefill( other, 30 )                                             # far longer than what was read
+    os.replace( other.path, ledger.path )
+    assert ledger.snapshot() == ( 50_000, 30 * 3 )
+
+
+def test_a_bad_line_stays_refused_and_its_neighbour_is_counted_once_with_the_anchor_blind( ledger, anchor_blind ):
+    ledger.begin_run( "live", 1_000 )
+    ledger.snapshot()
+    good = json.dumps( { "kind": "spend", "run": "live", "tokens": 60 } ) + "\n"
+    size = ledger.path.stat().st_size
+    with ledger.path.open( "a", encoding="utf-8" ) as f: f.write( good + "{not json\n" )
+    for _ in range( 2 ):
+        with pytest.raises( rl.LedgerUnreadable, match="line 4 is not JSON" ):
+            ledger.total()                                           # a skipped line would make the second read pass
+    with ledger.path.open( "r+b" ) as f: f.truncate( size + len( good ) )
+    ledger.close_run( "live", "test", "closing" )
+    assert ledger.total() == 60
