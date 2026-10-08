@@ -75,6 +75,16 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 - **The un-park card is minted by a new manager-only endpoint and one new MCP verb** (Maya's option A), with one live card per row and park.
 - **The stock snapshot plugin's 0.1 threshold at nine call sites stays as it is**; the 0.03 tolerance covers the repository's own comparators and the flake tool.
 
+**Mr. Radio's calls, evening (his own, not rulings by Rick):**
+
+- **Main was not reverted after the red; the failing test got a strict xfail instead** (about 19:27 EDT). Integration `ts-d6e007b4` on `5785c22c0` failed `test_job_interactions_endpoint` (the lineage fix `996dfdb8f`, row `8d4a5a59`, drops a fresh user's parent claim). The cause was read by Rachel and Pocholo and never proven by a revert and re-run. The mark landed as `69d871f80`, `d8cb3bff7`, `7849dc1e1` and hides the regression until the repair lands.
+- **The step-13 line in the v2 plan is read as not forbidding the eval's own clear of the test store** (before 20:20 EDT, when Pocholo's review of it is dated). The eval test now empties `solution_snapshots` and `canonical_synonyms` on `lupin_db_test` through the guarded helper (`6fbfb6e95`, `702f8f023`, `f7faf9a8f`). Pocholo agreed in substance and attached three conditions (`io/tmp/2026.10.07-pocholo-review-eval-warm-store-finding.md`). Not Rick's ruling; if he reads step 13 differently the eval fixture comes out.
+- **The database login cutover is not tonight**, although Rick ruled at 16:53 "tonight, after the builds land". Measured 18:13 EDT: `lupin_app` reads 1 of 27 tables on `lupin_db_test` (27 of 27 on dev), so the test server cannot be cut over until the test-database fixes land and the provisioner is re-run. The scope card timed out at about 18:29; the row's chase is 2026-10-08 10:15 EDT. Row `80513825`.
+- **Three lines were built while their rows were still not_approved, and landed in the assembly** (rows `315ba9d0`, `e4e02931`, `b2db7be7`). Rick was told at 18:06 EDT; the assembly landed at 19:35 EDT. He has not answered the bulk card.
+- **The 20-commit assembly landed as one fast-forward** (`5785c22c0` to `7849dc1e1`, 19:35 EDT) after a whole unit tier and a cosa tier on `808a9bb45`, and a short unit and lint check on the tip. No integration run of those lines happened before landing; the first ran after (`ts-813c2263`).
+
+**Pinned for Rick's one bulk card, not on main** (keep refs `refs/keep/mr-radio/`): row `a80630a4` option (a) (`a5c75fda8`, ref `a80630a4-job-history-proposal`); the env-step proposal for row `80513825` (`79fe3e95d`, ref `80513825-env-step-proposal`, its role SQL is Rick's to run); the per-run suite token (`io/tmp/2026.10.07-maya-lineage-token-proposal.md`, checked by Pocholo, six notes); the DB login compose commit (`7564e8bf8`, ref `80513825-db-login-on-48baaf49b`). Also unanswered: row `d03c5592` (hooks-folder guard), the orphan sweep schedule, the cutover scope and VM step, and the wake-proof marker (card `kuxt0p31n` expired).
+
 ## 📚 DECISIONS LOG 2026-10-06 (Mr. Radio 🦉 `4afec3b4`, no crew)
 
 **Rick ruled** (2026-10-06):
