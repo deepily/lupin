@@ -859,3 +859,52 @@ def test_a_canary_stopped_for_another_reason_is_not_named_model_mismatch_and_may
     assert read( env, 1, "canary" )[ "stop_reason" ] == stop and named in report[ "tripped" ] and "model_mismatch" not in report[ "tripped" ]
     env.standin = {}
     assert st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="the first was stopped by something else" )[ "tripped" ] == []
+
+
+def test_a_driver_refusal_is_a_value_error_of_its_own_kind():
+    assert issubclass( st.DriverRefused, ValueError ) and st.DriverRefused is not ValueError
+
+
+def refusals( env ):
+    """One call for each refusal the driver makes before it spends anything, each as a function."""
+    two = ENTRIES[ :2 ]
+    return {
+        "question out of range"    : lambda: st.run_arm( env, 9, "single1", NEED, two, 1_000_000 ),
+        "unknown arm"              : lambda: st.run_arm( env, 1, "nonsense", NEED, two, 1_000_000 ),
+        "attempt out of range"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, attempt=4, reason="x" ),
+        "first attempt with reason": lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, reason="x" ),
+        "retry of another arm"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, attempt=2, reason="x" ),
+        "retry without reason"     : lambda: st.run_canary( env, 1, NEED, ENTRIES, 1_000_000, attempt=2, reason=" " ),
+        "retry with no first"      : lambda: st.run_canary( env, 1, NEED, ENTRIES, 1_000_000, attempt=2, reason="x" ),
+        "probe on a plain arm"     : lambda: st.run_arm( env, 1, "single1", NEED, two, 1_000_000, probe={ "id": "x" } ),
+        "probe arm without probe"  : lambda: st.run_arm( env, 1, "probe-first-random", NEED, two, 1_000_000 ),
+        "repeated entry id"        : lambda: st.run_arm( env, 1, "single1", NEED, [ ENTRIES[ 0 ], ENTRIES[ 0 ] ], 1_000_000 ),
+        "approve without a name"   : lambda: st.approve_canary( env, 1, "", "why" ),
+    }
+
+
+@pytest.mark.parametrize( "name", [ "question out of range", "unknown arm", "attempt out of range", "first attempt with reason", "retry of another arm", "retry without reason",
+                                    "retry with no first", "probe on a plain arm", "probe arm without probe", "repeated entry id", "approve without a name" ] )
+def test_each_refusal_before_a_spend_is_a_driver_refusal( env, name ):
+    with pytest.raises( st.DriverRefused ): refusals( env )[ name ]()
+
+
+def test_workers_out_of_range_and_a_spent_run_name_are_driver_refusals( env ):
+    env.workers = 3
+    with pytest.raises( st.DriverRefused, match="workers" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    env.workers = 6
+    st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    with pytest.raises( st.DriverRefused, match="already began" ): st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+
+
+def test_a_canary_already_approved_is_a_driver_refusal_to_approve_or_retry( env ):
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 ); st.approve_canary( env, 1, "maria", "read" )
+    with pytest.raises( st.DriverRefused, match="already approved" ): st.approve_canary( env, 1, "maria", "again" )
+    with pytest.raises( st.DriverRefused, match="already approved" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="x" )
+
+
+def test_a_retry_after_a_wrong_model_is_a_driver_refusal( env ):
+    env.standin = { "served": "jev-9.9.9" }
+    st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
+    env.standin = {}
+    with pytest.raises( st.DriverRefused, match="model_mismatch" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="x" )

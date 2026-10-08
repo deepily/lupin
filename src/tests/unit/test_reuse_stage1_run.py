@@ -304,3 +304,19 @@ def test_a_command_that_works_returns_its_own_code_through_cli( scratch ):
 def test_cli_returns_whatever_code_main_returns( monkeypatch, code ):
     monkeypatch.setattr( rr, "main", lambda argv=None, loader=None: code )
     assert rr.cli( [ "report" ] ) == code
+
+
+def test_a_driver_refusal_is_one_line_and_exit_two_through_the_real_command( scratch, capsys ):
+    run( scratch, "ledger-init" )
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "arm", "--question", "1", "--arm", "single1", "--ceiling", "5000000" ]
+    assert rr.cli( argv, loader=loader ) == 0
+    capsys.readouterr()
+    assert rr.cli( argv, loader=loader ) == 2                                      # the run name is spent
+    seen = capsys.readouterr()
+    assert seen.err.strip().splitlines() == [ f"refused (DriverRefused): run 's1-q1-single1' already began in this ledger" ] and seen.out == ""
+
+
+def test_a_stray_value_error_from_a_bug_is_still_a_traceback( monkeypatch ):
+    def bug( argv=None, loader=None ): raise ValueError( "a bug, not a refusal" )
+    monkeypatch.setattr( rr, "main", bug )
+    with pytest.raises( ValueError, match="a bug" ): rr.cli( [ "status" ] )
