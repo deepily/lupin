@@ -340,8 +340,9 @@ Suites that qualify:
 - `src/tests/smoke/test_db_roles_rollback_real_postgres.py` — it starts a Docker container, which
   reads like a :8000 suite and is not one. The container is a throwaway Postgres reached only by
   `docker exec`, with a name guard, memory and processor caps, and removal with its volumes at the end, so
-  nothing persists and the real database is refused before any command runs. Both docker tests
-  together took about 12s, and it needs no monopoly.
+  nothing persists and the real database is refused before any command runs. The file's three
+  docker tests took 21.9s in one run on a loaded host (2026-10-08, at 75235ba4e), and it needs no
+  monopoly. Re-time it rather than trusting that figure.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only
