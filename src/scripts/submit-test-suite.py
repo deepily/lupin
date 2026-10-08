@@ -13,9 +13,10 @@ Run `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000` first and read 
 Usage:
     submit-test-suite.py --test-types e2e_b --pytest-args "-v -k 'name_a or name_b'"
     submit-test-suite.py --test-types e2e_a --scheduled-at 2026-09-28T19:00:00-04:00
-    submit-test-suite.py --test-types unit --dry-run
+    submit-test-suite.py --test-types integration --dry-run
     submit-test-suite.py --test-types integration --env LUPIN_TEST_V2_EVAL_LIMIT=20
 
+The test container refuses `--test-types unit`, dry run or not: the unit suite runs on the host with `pytest src/tests/unit/`.
 `--env KEY=VALUE` (repeatable) sets an environment variable for that run's pytest process only.
 The server keeps only names with a test-scoped prefix and drops the rest. Its log line is one
 the submitter never sees, so this script refuses such a name here, before anything is sent.

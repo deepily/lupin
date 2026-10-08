@@ -466,6 +466,8 @@ This table's numbering and membership are guarded by
 `ALL_SUITE_COMPONENTS` appears in a row, and the count is the suites plus the serial bridge guard.
 A new suite therefore needs a row here as well as a marker entry.
 
+The test container does not offer the unit suite (row 2f18ad99): a request naming `unit` is refused with `status: failed` and the cause in `error`, and `all` there runs the pyramid without it and says `unit: not run here, host tier`. The coverage gate then answers exit 2, because the data file holds no unit tier. Unit runs on the host, as row 4 says.
+
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.
 

@@ -34,33 +34,35 @@ arguments:
 "src/cosa/memory/":
   type: "core_infrastructure"
   criticality: "critical"
-  test_types: ["unit", "smoke"]
+  test_kinds: ["unit", "smoke"]
   test_location: "src/cosa/tests/unit/memory/"
 
 "src/cosa/rest/":
   type: "api_integration"
   criticality: "critical"
-  test_types: ["unit", "smoke"]
+  test_kinds: ["unit", "smoke"]
   test_location: "src/cosa/tests/unit/rest/"
 
 "src/cosa/agents/":
   type: "business_logic"
   criticality: "non-critical"
-  test_types: ["unit", "smoke"]
+  test_kinds: ["unit", "smoke"]
   test_location: "src/cosa/tests/unit/agents/"
 
 "src/lupin_app/":
   type: "lupin_integration"
   criticality: "critical"
-  test_types: ["smoke"]
+  test_kinds: ["smoke"]
   test_location: "src/tests/unit/"
 
 "src/cosa/utils/":
   type: "support"
   criticality: "non-critical"
-  test_types: ["unit"]
+  test_kinds: ["unit"]
   test_location: "src/cosa/tests/unit/"
 ```
+
+`test_kinds` names the kinds of test a component needs. It is not the `test_types` argument of the scheduled test-suite door: unit tests run on the host (`pytest src/tests/unit/`), and the test container refuses a request that names `unit`.
 
 ---
 

@@ -58,7 +58,7 @@ TFE — can trigger automated remediation on failure.
 
 | Type | Script path | Default timeout | Typical runtime | Test count |
 |------|-------------|-----------------|-----------------|------------|
-| `unit` | `src/tests/run-unit-tests.sh` | 300s (5 min) | ~3 min | ~6700 tests |
+| `unit` | `src/tests/run-unit-tests.sh` | refused by the test container: it runs on the host | not offered here | `pytest src/tests/unit/` on the host. A request naming `unit` answers `status: failed` with the cause in `error` |
 | `smoke` | `src/tests/run-smoke-tests.sh` | 3600s (60 min) | ~40 min | ~340 tests (excludes destructive `test_proxy_integration.py` — own :8000 venue) |
 | `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | Phase D live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
@@ -88,10 +88,12 @@ time, the runner's PID file refuses a second copy, and every test truncates the 
 file is in neither half or in both. A new e2e test file therefore goes into one of the two partition
 manifests, whichever half is lighter.
 
-**The `all` suite**: internally runs a curated pyramid (unit → smoke → websocket →
-integration → e2e) via `run-all-tests.sh`. Prefer `all` over manually passing
-`["unit", "smoke", "websocket", "integration", "e2e"]` because `all` uses a
-single optimized invocation path.
+**The `all` suite**: expands to the curated pyramid in `ALL_SUITE_COMPONENTS`, each leg with its own
+timeout. In a container it runs the pyramid without `unit`, and the result says so:
+`unit: not run here, host tier`, in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
+A pyramid without unit is not the full pyramid, so read that note before reading the verdict.
+The job also tells the coverage gate (`LUPIN_TEST_TIERS_NOT_RUN`), which then answers exit 2, inconclusive,
+because the data file holds no unit tier. Run unit on the host, and run the coverage gate there.
 
 ### Cancellation
 
@@ -128,8 +130,8 @@ flowchart LR
 ### Between-suites DB isolation (invariant — bug 8bd20375)
 
 When a single `TestSuiteJob` runs **multiple** suites (`test_types=["all"]` →
-`unit → smoke → websocket → integration → e2e`, or any explicit multi-suite
-list), all legs execute back-to-back against **one shared** `lupin_db_test`.
+`smoke → websocket → integration → e2e` after the unit tier, which a container leaves to the host,
+or any explicit multi-suite list), all legs execute back-to-back against **one shared** `lupin_db_test`.
 The per-test `clean_test_db` fixture cannot defend a later suite against the
 **residue** an earlier suite left in the DB — most acutely `refresh_tokens`,
 whose duplicate `jti` makes the next suite's login fail `500 "Token already
