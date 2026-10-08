@@ -192,3 +192,18 @@ def test_the_login_default_root_is_the_project_root( monkeypatch ):
     assert dp.clone_login() is None
     import os
     assert os.path.isfile( os.path.join( seen[ 0 ], "src", "cosa", "utils", "dotenv_password.py" ) )
+
+
+def test_a_malformed_git_marker_reads_nothing_and_never_raises( tmp_path ):
+    ( tmp_path / ".git" ).write_text( "not a gitdir pointer" )
+    assert dp._read_dotenv_values( str( tmp_path ), ( "LUPIN_TEST_DB_PASSWORD", ) ) == { }
+
+
+def test_a_worktree_marker_reaches_the_main_checkouts_dotenv( tmp_path ):
+    main = tmp_path / "main"
+    ( main / ".git" / "worktrees" / "w" ).mkdir( parents=True )
+    ( main / ".env" ).write_text( "LUPIN_TEST_DB_PASSWORD=mainp\n" )
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( f"gitdir: {main}/.git/worktrees/w\n" )
+    assert dp._read_dotenv_values( str( tree ), ( "LUPIN_TEST_DB_PASSWORD", ) ) == { "LUPIN_TEST_DB_PASSWORD": "mainp" }
