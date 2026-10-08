@@ -909,3 +909,11 @@ def test_a_retry_after_a_wrong_model_is_a_driver_refusal( env ):
     st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
     env.standin = {}
     with pytest.raises( st.DriverRefused, match="model_mismatch" ): st.run_canary( env, 1, NEED, ENTRIES, 2_000_000, attempt=2, reason="x" )
+
+
+@pytest.mark.parametrize( "raised", [ rl.LedgerUnreadable( "damaged" ), rl.AccountLimitReached( "full" ) ] )
+def test_a_damaged_ledger_or_a_full_account_is_not_dressed_as_a_driver_refusal( env, monkeypatch, raised ):
+    def refuse( run, ceiling_tokens ): raise raised
+    monkeypatch.setattr( env.ledger, "begin_run", refuse )
+    with pytest.raises( type( raised ) ) as caught: st.run_arm( env, 1, "single1", NEED, ENTRIES[ :2 ], 1_000_000 )
+    assert not isinstance( caught.value, st.DriverRefused ) and caught.value is raised
