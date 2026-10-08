@@ -11,7 +11,7 @@ import pytest
 from cosa.repo.doc_lint import jev_transport as jt
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
-from tests.unit.test_reuse_pack_send import NEED, ENTRIES, Fake
+from tests.unit.test_reuse_pack_send import ENTRIES, NEED, PROBS, Fake
 
 
 class SpyBreaker( rt.RefusalBreaker ):
@@ -41,7 +41,8 @@ class Refusing( Fake ):
         if self.bad & set( body[ "questions" ] ):
             with self.lock: self.bodies.append( body )
             raise jt.JevConfigError( "Jev refused the request with status 422", 422 )
-        return super().post_with_meta( body )
+        answers = { key: { "probabilities": dict( PROBS ) } for key in body[ "questions" ] }                   # any question, not only the fixture's eight entries
+        return { "answers": answers, "model": body[ "model" ] }, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 1 }
 
 
 MANY = [ { "id": f"pkg.mod.fn{i}", "sig": "()", "doc": f"Does thing {i}.", "file": "src/pkg/mod.py" } for i in range( 24 ) ]

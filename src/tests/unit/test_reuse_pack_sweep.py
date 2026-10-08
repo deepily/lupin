@@ -188,27 +188,6 @@ def test_a_plain_call_budget_instead_of_a_token_budget_still_sweeps( ctx_for ):
     assert len( out[ "answers" ] ) == 8 and budget.used == 3
 
 
-class Breaker:
-    def __init__( self ): self.events = []
-    def answered( self ): self.events.append( "answered" )
-    def refused( self, key ): self.events.append( ( "refused", key ) )
-
-
-def test_the_breaker_hears_one_refusal_for_a_refused_pack_and_all_its_halves( ctx_for ):
-    bad = ENTRIES[ 1 ][ "id" ]
-
-    class Poisoned( Fake ):
-        def post_with_meta( self, body ):
-            if rp.question_key( bad ) in body[ "questions" ]: raise rp.jt.JevConfigError( "Jev refused the request with status 422", 422 )
-            return super().post_with_meta( body )
-
-    breaker = Breaker()
-    out     = sweep( ctx_for( Poisoned() ), size=3, breaker=breaker, workers=4 )
-    refused = [ e for e in breaker.events if e != "answered" ]
-    assert len( refused ) == 1 and refused[ 0 ] == ( "refused", out[ "rows" ][ 0 ][ "request_hash" ] ) and breaker.events.count( "answered" ) == 2
-    assert out[ "failed" ] == [ bad ] and len( out[ "answers" ] ) == 7
-
-
 def test_a_cache_write_that_fails_keeps_the_answer_and_names_the_entry( ctx_for, monkeypatch ):
     ctx = ctx_for( Fake() )
 

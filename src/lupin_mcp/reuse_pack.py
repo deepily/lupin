@@ -116,7 +116,7 @@ def _post( transport, body ):
     return transport.post( body ), None
 
 
-def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, budget=None, parent=None ):
+def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, budget=None, parent=None, breaker=None ):
     """
     Send one pack and account for every entry in it.
 
@@ -125,12 +125,15 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         - transport has post_with_meta( body ) returning ( response, meta ), or post( body )
         - budget, when given, is a TokenBudget; attempts are read from its tally
         - parent is the request hash of the pack this one was split from, or None
+        - breaker, when given, is a RefusalBreaker; it hears a 422 of a top-level pack once, under that pack's hash,
+          and every answered request
     Ensures:
         - returns { answers, failed, not_reached, rows }: answers are { id, probabilities } in entry order
         - an entry is answered only when its answer is present; every other entry is failed, never unrelated
         - a 422 splits the pack in half and resends each half, the larger half second; a 422 on one entry
           fails that entry
         - an attempt refused by the budget before any HTTP leaves the pack not reached
+        - a stopped breaker leaves the pack, or the halves not yet sent, not reached with no HTTP
         - any other error fails every entry of the pack; the row keeps the error class, and the HTTP status
           for a refused key or request (a JevConfigError), which is the only error that carries one
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
@@ -141,6 +144,9 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     if not entries: raise ValueError( "a pack cannot be empty" )
     body, qmap = pack_request( entries=entries, need=need, template=template, model=model )
     row        = _row( pack_key( body ), entries, parent )
+    if breaker is not None and breaker.stopped:
+        row[ "status" ] = "not_reached"
+        return { "answers": [], "failed": [], "not_reached": row[ "ids" ], "rows": [ row ] }
     response, meta, error, sent = None, None, None, True
     metered = isinstance( budget, rc.TokenBudget )
     if metered: budget.open_request( body, len( entries ) )
@@ -160,15 +166,17 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
                     model=response[ "model" ] if isinstance( response, dict ) and "model" in response else None )
         row[ "status" ] = "answered" if answered else "failed"
         if not answered: row[ "error" ] = "NoAnswers"
+        elif breaker is not None: breaker.answered()
         return { "answers": [ { "id": i, "probabilities": answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked, "not_reached": [], "rows": [ row ] }
     if metered: budget.fail_request()
     if isinstance( error, jt.JevConfigError ): row[ "http_status" ] = error.status
     if isinstance( error, jt.JevConfigError ) and error.status == 422:
         row[ "status" ] = "refused"
+        if breaker is not None and parent is None: breaker.refused( row[ "request_hash" ] )          # the halves of this pack are one family
         if len( entries ) == 1: return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
         half  = len( entries ) // 2
-        left  = send_pack( transport, need, entries[ :half ], template, model, budget, row[ "request_hash" ] )
-        right = send_pack( transport, need, entries[ half: ], template, model, budget, row[ "request_hash" ] )
+        left  = send_pack( transport, need, entries[ :half ], template, model, budget, row[ "request_hash" ], breaker )
+        right = send_pack( transport, need, entries[ half: ], template, model, budget, row[ "request_hash" ], breaker )
         return { "answers": left[ "answers" ] + right[ "answers" ], "failed": left[ "failed" ] + right[ "failed" ],
                  "not_reached": left[ "not_reached" ] + right[ "not_reached" ], "rows": [ row ] + left[ "rows" ] + right[ "rows" ] }
     if not sent and row[ "attempts" ] == 0:
@@ -202,7 +210,9 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - key_mode "candidate" keys each answer by need and candidate text alone; "stage1" adds the pack size and
           the run index, so a measurement arm never reads another arm's answers or the production answers
         - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
-        - breaker, when given, has answered() and refused( key ); it hears one refusal for a refused pack and all its halves
+        - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
+        - a refused pack and all its halves are one refusal, keyed by the top-level pack's hash; BREAKER_422 refused
+          packs in a row, with no answered request between them, stop the sweep and the rest is not reached
     Ensures:
         - returns every key sweep() returns, plus rows (one per HTTP request), requests, unasked and cache_write_failed
         - answered entries are in entry order; a cache hit costs no request and the misses are packed together
@@ -218,6 +228,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
     template, model = template or ctx.template, model or ctx.model
     if budget is None and isinstance( ctx.transport, rt.LiveJevTransport ): budget = ctx.transport.budget
     cache = rt.JevCache( ctx.data )
+    breaker = rt.RefusalBreaker( rt.BREAKER_422 ) if breaker is None else breaker
 
     def key_of( rec ):
         text = rt.entry_text( rec )
@@ -234,11 +245,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
     chunks = [ misses[ i:i + size ] for i in range( 0, len( misses ), size ) ]
 
     def one( chunk ):
-        out = send_pack( ctx.transport, need, chunk, template, model, budget )
-        top, written, unwritten = out[ "rows" ][ 0 ], {}, []
-        if breaker is not None:
-            if top[ "status" ] == "refused": breaker.refused( top[ "request_hash" ] )
-            elif top[ "status" ] == "answered": breaker.answered()
+        out = send_pack( ctx.transport, need, chunk, template, model, budget, breaker=breaker )
+        unwritten = []
         row_of = { i: r for r in out[ "rows" ] if r[ "status" ] == "answered" for i in r[ "ids" ] }
         for a in out[ "answers" ]:
             try: cache.put( key_of( by_id[ a[ "id" ] ] ), _entry_response( a[ "probabilities" ], row_of[ a[ "id" ] ] ) )
@@ -271,7 +279,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "usage_missing": sum( 1 for r in rows if r[ "status" ] == "answered" and r[ "tokens_in" ] is None ),
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
-             "cache_write_failed": unwritten }
+             "cache_write_failed": unwritten, "refused_422": breaker.refusals, "stopped_by": "consecutive_422" if breaker.stopped else None }
 
 
 def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None ):
