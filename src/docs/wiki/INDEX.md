@@ -21,13 +21,11 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[notification-delivery]] — creating, routing and expiring notifications and their types, rate limits and push. `lupin_cli.notifications`, `cosa.rest` (notification_fifo_queue, notify_rate_limiter, notification_expiry_sweeper, fcm_push_pause, fcm_wake_service), `cosa.rest.routers`
 - [[websocket-events]] — session-keyed WebSocket connections, subscriptions and event fan-out. `cosa.rest` (websocket_manager, routers), `lupin_app.main`
 - [[decision-proxy]] — trust-scored auto-answering of questions, ratification, and the notification proxy. `cosa.agents` (decision_proxy, notification_proxy, dm_quality_judge)
-- [[voice-persona-allocation]] — per-session voice personas, the persona matcher and name normalization. `cosa.rest.voice_persona_helpers`, `lupin_mcp` (commons_persona_matcher, persona_normalization, commons_llm_disambiguator)
 - [[cosa-voice-mcp]] — the voice and commons MCP server: notify, ask and converse tools, commons, DMs, session info. `lupin_mcp` (cosa_voice_mcp, commons_*, notify_outbox, broadcast_handler, bridge_liveness_middleware)
 - [[code-reuse-tools]] — check_exists, fetch_similar, replay and read_capability, and the Jev client. `lupin_mcp` (reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex`
 
 ## Fleet, heartbeat and the task store
 
-- [[task-store]] — owed work rows, transitions, receipts, promotion gates, priority firewall, epic keys and rejoin. `cosa.rest` (task_store_*, task_promotion_*, task_request_*, task_priority_firewall, task_approval_settings, task_chase_consumer), `lupin_mcp.task_store_tools`
 - [[heartbeat-arbiter]] — fleet liveness: the arbiter loop, watchdogs, escalation, context-pressure, health watcher and the poker job. `cosa.agents` (heartbeat_arbiter, heartbeat_poker_job, heartbeat_poker_commons_gateway), `lupin_arbiter_app`, `cosa.rest` (follow_through_escalation_watcher, commons_*_watcher)
 - [[claude-code-hooks]] — the session-start, stop, pre/post tool and prompt hooks, heartbeat events and the session bridge. `lupin_cli.claude_code.hooks`
 - [[seat-lifecycle]] — spawning seats, the fleet size cap, mementos, self re-spin, reaping and worktree hygiene. `lupin_mcp` (session_spawner, fleet_size_cap, fleet_cap_*, memento_*, reap_*, self_respin_core)
@@ -106,7 +104,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
 - [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task, replaying frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
-- [[voice-persona-allocation]] — how each Claude Code session gets a named voice, the speakerphone switch beside it, and the name normalization every persona lookup shares. `cosa.rest` (voice_persona_helpers), `cosa.rest.routers` (voice_persona)
+- [[voice-persona-allocation]] — how each Claude Code session gets a named voice, the speakerphone switch beside it, and the name normalization every persona lookup shares. `cosa.rest` (voice_persona_helpers), `cosa.rest.routers` (voice_persona, speakerphone), `lupin_mcp` (persona_normalization, commons_persona_matcher)
 - [[task-store]] — the store of owed work: one row per task, decision, review request, bug or gate, with an append-only event trail, served through `/api/tasks`. `cosa.rest` (task_store_rules, task_store_owed, task_store_rejoin, task_chase_consumer, task_store_change_notifier)
 - [[v2-ask-flow]] — the v2 door onto CJ Flow: `AskFlow` takes a question or a decided command and returns one result, over `/api/v2/ask`, `ask-audio`, `transcribe`, `submit`, `resume`, `resume-job` and `agents`. `cosa.rest.v2` (flow, registry), `cosa.rest.routers` (v2_ask)
 - [[model-server]] — the standalone FastAPI app that holds Whisper and two text encoders on one GPU, which compute containers call over HTTP. `lupin_model_server` (main)
