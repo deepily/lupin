@@ -38,13 +38,12 @@ def client( queue, tmp_path ):
 
 @pytest.fixture
 def in_container( monkeypatch ):
-    # raising=False: before the fix the function does not exist, and this must fail at the door, not here.
-    monkeypatch.setattr( job_mod, "running_in_container", lambda: True, raising=False )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True )
 
 
 @pytest.fixture
 def on_host( monkeypatch ):
-    monkeypatch.setattr( job_mod, "running_in_container", lambda: False, raising=False )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False )
 
 
 def _door( client, test_types, dry_run=True ):

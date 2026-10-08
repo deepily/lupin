@@ -549,7 +549,7 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
     # (the directory, not a suite) did exactly that five times and measured nothing. Only the
     # builder checks -- TestSuiteJob.__init__ also runs on persistence rehydration, where a
     # stale name in an old row must not stop the queue coming back.
-    from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
+    from cosa.agents.test_suite.job import SUITE_SCRIPTS, container_refusal, unknown_suite_names
     if not test_types:
         raise ValueError( f"test_types names no suite. Valid suites: {', '.join( SUITE_SCRIPTS )}" )
     bad = unknown_suite_names( test_types )
@@ -558,6 +558,10 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
             f"unknown test suite(s) {bad}. Valid suites: {', '.join( SUITE_SCRIPTS )}. "
             f"(\"e2e_ui\" is the tests' directory name, not a suite — use e2e_a, e2e_b or e2e.)"
         )
+    # The unit tier is not offered by a server that runs in a container (row 2f18ad99): same refusal path,
+    # same answer shape, and a dry run is refused too, because it answers what the real run would.
+    refusal = container_refusal( test_types )
+    if refusal: raise ValueError( refusal )
 
     job = TestSuiteJob(
         test_types          = test_types,

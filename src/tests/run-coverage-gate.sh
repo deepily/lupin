@@ -197,6 +197,18 @@ if [ "$RUN_TIERS" -eq 1 ]; then
     fi
 fi
 
+# ⚠️ A PYRAMID THAT LEFT A TIER OUT IS NOT A COVERAGE VERDICT (row 2f18ad99). The test container no
+# longer runs the unit tier, so an "all" there appends cosa's data alone. The job names the tiers it
+# left out in LUPIN_TEST_TIERS_NOT_RUN; the gate answers exit 2 before it reads any data, because a
+# percentage over that file would be a verdict on the box. Empty or unset means nothing was left out.
+if [ -n "${LUPIN_TEST_TIERS_NOT_RUN:-}" ]; then
+    echo ""
+    echo "COVERAGE GATE INCONCLUSIVE — this pyramid left out: ${LUPIN_TEST_TIERS_NOT_RUN} (not run here, host tier)."
+    echo "  The data file holds only the tiers that ran here, so any percentage rendered from it"
+    echo "  would be measured over a SHORT denominator. Run the gate on the host, with the unit tier."
+    exit 2
+fi
+
 # Record the tree the figure is earned on. A coverage number without a sha cannot be
 # recovered later, only re-earned: coverage stores line NUMBERS and parses the file at
 # RENDER time, so once the source moves underneath, previously-recorded lines land on

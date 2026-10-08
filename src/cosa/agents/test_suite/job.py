@@ -232,6 +232,57 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "doclint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
+# Suites a container does not offer: they run on the host. The unit tier ran inside the :8000 container
+# until it hit its own time limit, and part of it needs what only the host has (the venv at
+# /var/lupin/.venv, systemd-run, the Dart SDK). Rick took it off the container's menu on 2026-10-07.
+HOST_ONLY_SUITES = ( "unit", )
+NOT_RUN_HERE     = "not run here, host tier"
+
+
+def running_in_container() -> bool:
+    """
+    Say whether this server process runs inside a container.
+
+    Ensures:
+        - returns True when LUPIN_IN_CONTAINER is 1, true or yes (any case), or when /.dockerenv exists
+        - returns False otherwise; a falsy sentinel does not hide the file check, it simply adds nothing
+    """
+    if os.environ.get( "LUPIN_IN_CONTAINER", "" ).strip().lower() in ( "1", "true", "yes" ): return True
+    return os.path.exists( "/.dockerenv" )
+
+
+def container_refusal( test_types: List[ str ] ) -> Optional[ str ]:
+    """
+    Say why a request naming a host-only suite is refused, or None.
+
+    Requires:
+        - test_types is the list of names as submitted, before "all" is expanded
+
+    Ensures:
+        - returns None unless this process runs in a container and a name is in HOST_ONLY_SUITES
+        - the message names the host, the command that runs the suite there, and the suites offered here
+        - the suite name all is not a host-only name: the job expands it without them
+    """
+    if not running_in_container(): return None
+    asked = [ t for t in test_types if t in HOST_ONLY_SUITES ]
+    if not asked: return None
+    offered = ", ".join( s for s in SUITE_SCRIPTS if s not in HOST_ONLY_SUITES )
+    return ( f"the {', '.join( asked )} suite is not offered through this server's test container: it runs on the host, "
+             f"with `pytest src/tests/unit/` (or `src/tests/run-unit-tests.sh`). Suites offered here: {offered}." )
+
+
+def suites_left_out( test_types: List[ str ], in_container: bool ) -> Dict[ str, str ]:
+    """
+    Name the host-only suites that "all" leaves out in a container, with where they run.
+
+    Ensures:
+        - returns { suite: NOT_RUN_HERE } for each host-only suite when in_container and "all" is requested
+          and the suite was not also named on its own, else an empty dict
+    """
+    if not in_container or "all" not in test_types: return {}
+    return { s: NOT_RUN_HERE for s in HOST_ONLY_SUITES if s not in test_types }
+
+
 def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
     """
     Names in `test_types` that are not keys of SUITE_SCRIPTS, in first-seen order.
@@ -253,7 +304,7 @@ def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
     return unknown
 
 
-def _expand_all( test_types: List[ str ] ) -> List[ str ]:
+def _expand_all( test_types: List[ str ], in_container: bool = False ) -> List[ str ]:
     """
     Expand "all" in `test_types` into ALL_SUITE_COMPONENTS, keeping order and deduping.
 
@@ -264,13 +315,14 @@ def _expand_all( test_types: List[ str ] ) -> List[ str ]:
 
     Ensures:
         - returns a new list; never mutates the input
-        - "all" is replaced in place by ALL_SUITE_COMPONENTS
+        - "all" is replaced in place by ALL_SUITE_COMPONENTS, minus HOST_ONLY_SUITES when in_container
+        - a host-only suite named on its own still runs, so a row persisted earlier keeps its meaning
         - duplicates (e.g. test_types=["all","unit"]) are removed, first wins
     """
     expanded = []
     seen     = set()
     for t in test_types:
-        candidates = ALL_SUITE_COMPONENTS if t == "all" else [ t ]
+        candidates = [ c for c in ALL_SUITE_COMPONENTS if not ( in_container and c in HOST_ONLY_SUITES ) ] if t == "all" else [ t ]
         for c in candidates:
             if c not in seen:
                 seen.add( c )
@@ -435,6 +487,7 @@ class TestSuiteJob( AgenticJobBase ):
         # Results (populated after execution)
         self.suite_results = {}
         self.cost_summary  = None  # Required by queues.py for unified job interface
+        self.suites_not_run = {}   # host-only suites that "all" left out in a container, with where they run
         # The 4-way verdict from _classify_outcome, published by the REAL run path only
         # (row a9d19d18). Stays None on the dry-run path and on any early return, which
         # is exactly what do_all uses to tell "a real run executed nothing" apart from
@@ -789,7 +842,9 @@ class TestSuiteJob( AgenticJobBase ):
             # timeout and its own suite_results entry. self.test_types stays
             # unchanged so the report filename ("all-results.md") and the
             # user-visible label in notifications/snapshots remain meaningful.
-            suites_to_run = _expand_all( self.test_types )
+            in_container        = running_in_container()
+            suites_to_run       = _expand_all( self.test_types, in_container )
+            self.suites_not_run = suites_left_out( self.test_types, in_container )
             if self.debug and suites_to_run != list( self.test_types ):
                 print( f"[TestSuiteJob] Expanded {self.test_types} -> {suites_to_run}" )
 
@@ -959,6 +1014,7 @@ class TestSuiteJob( AgenticJobBase ):
                 "total_deselected"   : total_deselected,
                 "filtered"           : filtered,
                 "all_passed"         : all_passed,
+                "suites_not_run"     : dict( self.suites_not_run ),
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -976,6 +1032,9 @@ class TestSuiteJob( AgenticJobBase ):
                 "NOT EXECUTED"     : "NOT EXECUTED",
                 "COLLECTION ERROR" : "COLLECTION ERROR — THE SUITE DID NOT RUN",
             }[ overall_status ]
+            # A pyramid without a tier must not read as a full green: the label carries what was left out.
+            if self.suites_not_run:
+                overall = f"{overall} ({'; '.join( f'{s}: {why}' for s, why in self.suites_not_run.items() )})"
 
             # ─── Write full report to io/ for the document viewer ───
             import urllib.parse
@@ -1152,6 +1211,8 @@ class TestSuiteJob( AgenticJobBase ):
         voice_io.set_job_id( self.id_hash )
 
         if self.debug: print( f"[TestSuiteJob] DRY RUN MODE for: {self.test_types}" )
+        self.suites_not_run = suites_left_out( self.test_types, running_in_container() )
+        left_out            = ''.join( f" ({s}: {why})" for s, why in self.suites_not_run.items() )
 
         try:
             await voice_io.notify(
@@ -1189,6 +1250,7 @@ class TestSuiteJob( AgenticJobBase ):
                 "mode"       : "dry_run",
                 "suites"     : self.test_types,
                 "suites_run" : len( self.test_types ),
+                "suites_not_run" : dict( self.suites_not_run ),
             }
             self.artifacts[ "suite_results" ] = self.suite_results
             self.artifacts[ "cost_summary" ]  = self.cost_summary
@@ -1208,7 +1270,7 @@ class TestSuiteJob( AgenticJobBase ):
                 queue_name="run"
             )
 
-            return f"Dry run complete. Would have run: {', '.join( self.test_types )}"
+            return f"Dry run complete. Would have run: {', '.join( self.test_types )}{left_out}"
 
         finally:
             voice_io.clear_job_id()
@@ -1554,6 +1616,9 @@ class TestSuiteJob( AgenticJobBase ):
                     "LUPIN_TEST_MONOPOLIZE_PARENT_ID" : self.id_hash,
                     # Caller-supplied env (allowlist-filtered in __init__) overrides defaults.
                     **self.env_vars,
+                    # The tiers this job left out of an "all", for the coverage gate: without the unit tier's data it
+                    # answers inconclusive. After **self.env_vars so a caller cannot clear it.
+                    "LUPIN_TEST_TIERS_NOT_RUN" : ",".join( self.suites_not_run ),
                     # 🔴 PROVENANCE — DELIBERATELY AFTER **self.env_vars, so a caller cannot
                     # overwrite it (row 224fbb68). Everything above is a default a caller may
                     # override; this is a FACT about who ran the suite, and a run that can

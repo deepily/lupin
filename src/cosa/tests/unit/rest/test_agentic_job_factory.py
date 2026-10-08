@@ -338,14 +338,15 @@ class TestCreateAgenticJobBranches( unittest.TestCase ):
 
     # --- test suite: csv test_types, csv pytest_args, optional bool -----
     def test_test_suite_branch_csv_args( self ):
-        self._create(
-            "agent router go to test suite",
-            {
-                "test_types"          : "unit, integration",
-                "pytest_args"         : "-k foo -v",
-                "auto_fix_on_failure" : "no",
-            },
-        )
+        with patch( "cosa.agents.test_suite.job.running_in_container", return_value=False ):    # unit is admitted on a host only
+            self._create(
+                "agent router go to test suite",
+                {
+                    "test_types"          : "unit, integration",
+                    "pytest_args"         : "-k foo -v",
+                    "auto_fix_on_failure" : "no",
+                },
+            )
         kw = self.mocks[ "TestSuiteJob" ].call_args.kwargs
         self.assertEqual( kw[ "test_types" ], [ "unit", "integration" ] )
         self.assertEqual( kw[ "pytest_args" ], [ "-k", "foo", "-v" ] )

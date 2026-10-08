@@ -693,6 +693,7 @@ def test_execute_c8_threshold_miss_is_not_all_passed( monkeypatch, tmp_path, pat
 def test_execute_expands_all_with_debug( monkeypatch, tmp_path, patched_voice, capsys ):
     """test_types=['all'] + debug logs the expansion and runs each component."""
     job = _make_job( test_types=[ "all" ], debug=True )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False )           # the answer must not depend on where this test runs
     monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
     seen = []
     def _fake( st, pr ):
@@ -1434,7 +1435,7 @@ def test_running_in_container_reads_the_sentinel_then_the_dockerenv_file( monkey
 def test_execute_of_all_in_a_container_runs_no_unit_and_names_it_in_every_result( monkeypatch, tmp_path, patched_voice ):
     import pathlib
     job = _make_job( test_types=[ "all" ] )
-    monkeypatch.setattr( job_mod, "running_in_container", lambda: True, raising=False )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True )
     monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
     seen = []
     monkeypatch.setattr( job, "_run_suite", lambda st, pr: seen.append( st ) or _passing_result() )
@@ -1450,7 +1451,7 @@ def test_execute_of_all_in_a_container_runs_no_unit_and_names_it_in_every_result
 
 def test_execute_of_all_on_a_host_runs_unit_and_names_nothing_as_left_out( monkeypatch, tmp_path, patched_voice ):
     job = _make_job( test_types=[ "all" ] )
-    monkeypatch.setattr( job_mod, "running_in_container", lambda: False, raising=False )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: False )
     monkeypatch.setattr( job_mod.cu, "get_project_root", lambda: str( tmp_path ) )
     seen = []
     monkeypatch.setattr( job, "_run_suite", lambda st, pr: seen.append( st ) or _passing_result() )
@@ -1464,7 +1465,7 @@ def test_execute_of_all_on_a_host_runs_unit_and_names_nothing_as_left_out( monke
 
 def test_a_dry_run_of_all_in_a_container_says_what_the_real_run_would_leave_out( monkeypatch, patched_voice ):
     job = _make_job( test_types=[ "all" ], dry_run=True )
-    monkeypatch.setattr( job_mod, "running_in_container", lambda: True, raising=False )
+    monkeypatch.setattr( job_mod, "running_in_container", lambda: True )
     summary = asyncio.run( job._execute() )
     assert NOT_RUN_NOTE in summary
     assert job.cost_summary[ "suites_not_run" ] == { "unit": "not run here, host tier" }
