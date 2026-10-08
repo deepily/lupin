@@ -618,7 +618,7 @@ def build_report( records, canaries ):
                 for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
     pg    = page_arm( stage )
     decision = ev[ "decision" ]
-    if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails, so the page asks stay one each"
+    if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
     return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg,
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
