@@ -25,18 +25,20 @@ class _FakeAssistantMessage:
 
 
 class _FakeResultMessage:
-    def __init__( self, subtype="success", is_error=False, result=None, usage=None, total_cost_usd=None, stop_reason="end_turn" ):
+    def __init__( self, subtype="success", is_error=False, result=None, errors=None, usage=None, total_cost_usd=None, stop_reason="end_turn" ):
         self.subtype        = subtype
         self.is_error       = is_error
         self.result         = result
+        self.errors         = errors
         self.usage          = usage
         self.total_cost_usd = total_cost_usd
         self.stop_reason    = stop_reason
 
 
-def _call( messages ):
+def _call( messages, then_raise=None ):
     async def _gen( prompt, options ):
         for m in messages: yield m
+        if then_raise is not None: raise then_raise
     client = PresentationAPIClient()
     with patch.multiple( ac, AssistantMessage=_FakeAssistantMessage, TextBlock=_FakeTextBlock, ResultMessage=_FakeResultMessage ), \
          patch.object( ac, "sdk_query", _gen ):
@@ -77,3 +79,25 @@ def test_a_long_error_text_is_cut_to_500_characters():
 def test_a_clean_result_still_returns_its_text():
     out = _call( [ _FakeAssistantMessage( [ _FakeTextBlock( "fine" ) ] ), _FakeResultMessage() ] )
     assert out.content == "fine"
+
+
+SDK_RERAISE = Exception( "Claude Code returned an error result: success" )
+
+
+def test_the_incident_path_names_the_cli_text_when_the_sdk_re_raises_after_the_result():
+    """SDK 0.2.88 yields the error result, then re-raises with the subtype only."""
+    with pytest.raises( Exception ) as raised:
+        _call( [ ERROR ], then_raise=SDK_RERAISE )
+    assert "Your credit balance is too low to continue" in str( raised.value )
+
+
+def test_an_exception_with_no_result_before_it_passes_through_unchanged():
+    with pytest.raises( Exception ) as raised:
+        _call( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], then_raise=SDK_RERAISE )
+    assert raised.value is SDK_RERAISE
+
+
+def test_the_errors_list_of_an_error_result_is_named_beside_the_text():
+    with pytest.raises( Exception ) as raised:
+        _call( [ _FakeResultMessage( subtype="error_during_execution", is_error=True, result=None, errors=[ "tool died", "disk full" ] ) ] )
+    assert "tool died; disk full" in str( raised.value )
