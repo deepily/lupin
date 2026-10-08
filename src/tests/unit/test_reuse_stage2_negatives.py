@@ -12,7 +12,7 @@ import pathlib
 
 import pytest
 
-from cosa.repo.symindex import stage2_negatives as ng
+from lupin_mcp import reuse_stage2_negatives as ng
 
 FIX = pathlib.Path( __file__ ).parent / "fixtures"
 
@@ -78,7 +78,7 @@ def test_the_chosen_are_of_the_same_package_and_language_not_the_member_nor_an_e
     member, recs = _pool()
     r = ng.lexical_negatives( member, recs, { "pk.sub.mod.twin_of_member" }, 25 )
     ids = [ c[ "id" ] for c in r[ "chosen" ] ]
-    assert ids == [ "pk.sub.mod.fetch_user_name", "pk.sub.mod.fetch_account_record" ]
+    assert ids == [ "pk.sub.mod.fetch_account_record", "pk.sub.mod.fetch_user_name" ]                  # equal overlap, so by id
     assert r[ "pool" ] == 3                                              # the three same-package Python entries left after the exclusions
 
 
@@ -115,7 +115,7 @@ def test_exactly_the_held_out_overlap_is_held_out_and_just_under_is_chosen():
 
 def test_fewer_eligible_candidates_than_n_give_a_short_list_and_no_top_up_from_another_package():
     member, recs = _pool()
-    r = ng.lexical_negatives( member, recs, set(), 25 )
+    r = ng.lexical_negatives( member, recs, { "pk.sub.mod.twin_of_member" }, 25 )
     assert len( r[ "chosen" ] ) == 2 and all( ng.package_of( c[ "id" ] ) == "pk.sub" for c in r[ "chosen" ] )
 
 
@@ -157,7 +157,7 @@ def test_each_member_gets_its_twins_its_lexical_neighbours_and_its_surviving_ran
     r = ng.select_negatives( twins, idx, old )[ "members" ]
     m = r[ "pk.a.m.fetch_user_record" ]
     assert m[ "twins" ] == [ "pk.a.m.get_user_record" ]
-    assert [ c[ "id" ] for c in m[ "lexical" ] ] == [ "pk.a.m.fetch_user_name", "pk.a.m.fetch_account_record" ]
+    assert [ c[ "id" ] for c in m[ "lexical" ] ] == [ "pk.a.m.fetch_account_record", "pk.a.m.fetch_user_name" ]
     assert m[ "random" ] == [ "pk.a.m.render_page" ] and m[ "random_dropped" ] == [ "pk.a.m.removed_since" ]
 
 
@@ -194,15 +194,15 @@ def test_a_member_that_got_no_lexical_neighbour_is_counted_and_listed_by_name():
 
 def test_a_member_missing_from_the_index_is_refused_because_it_cannot_be_asked_about():
     twins, idx, old = _world()
-    del idx[ "pk.a.m.get_user_record" ]
-    with pytest.raises( ValueError, match="get_user_record" ):
+    twins[ "pk.a.m.ghost_member" ] = []
+    with pytest.raises( ValueError, match="member 'pk.a.m.ghost_member' is not in the index" ):
         ng.select_negatives( twins, idx, old )
 
 
 def test_a_twin_missing_from_the_index_is_refused_too():
     twins, idx, old = _world()
     twins[ "pk.a.m.fetch_user_record" ].append( "pk.a.m.nowhere" )
-    with pytest.raises( ValueError, match="nowhere" ):
+    with pytest.raises( ValueError, match="twin 'pk.a.m.nowhere' of 'pk.a.m.fetch_user_record'" ):
         ng.select_negatives( twins, idx, old )
 
 
@@ -289,3 +289,49 @@ def test_the_command_reads_the_symbols_through_the_one_place_that_decides_what_m
     out = tmp_path / "negatives.json"
     ng.main( [ "--manifest", str( manifest ), "--symbols", str( symbols ), "--old-stage2", str( old ), "--out", str( out ) ] )
     assert rec[ "id" ] in json.loads( out.read_text() )[ "not_sendable" ]
+
+
+# --- cases a mutation showed unguarded -----------------------------------------------------------------------------------
+
+def test_rows_of_a_member_outside_the_twin_map_are_ignored():
+    rows = [ { "member": "ghost", "candidate": "r1" }, { "member": "m1", "candidate": "r2" } ]
+    assert ng.old_random_by_member( rows, { "m1": [] } ) == { "m1": [ "r2" ] }
+
+
+def test_an_old_random_negative_at_exactly_the_held_out_overlap_is_held_out():
+    ten = "aaa bbb ccc ddd eee fff ggg hhh iii jjj"
+    recs = [ _rec( "pk.a.m.f", f"( {ten} )" ), _rec( "pk.a.m.f1", "( " + ten.rsplit( " ", 1 )[ 0 ] + " )" ), _rec( "pk.a.m.f2", "( " + ten.rsplit( " ", 2 )[ 0 ] + " )" ) ]
+    m = ng.select_negatives( { "pk.a.m.f": [] }, _index( *recs ), { "pk.a.m.f": [ "pk.a.m.f1", "pk.a.m.f2" ] } )[ "members" ][ "pk.a.m.f" ]
+    assert m[ "random" ] == [ "pk.a.m.f2" ] and [ c[ "id" ] for c in m[ "held_out" ] ] == [ "pk.a.m.f1" ]
+
+
+def test_the_twins_are_listed_in_id_order_whatever_order_the_map_gives_them():
+    recs = [ _rec( f"pk.a.m.{n}", "( shared )" ) for n in ( "zed", "mid", "abe", "key" ) ]
+    r = ng.select_negatives( { "pk.a.m.key": [ "pk.a.m.zed", "pk.a.m.abe", "pk.a.m.mid" ] }, _index( *recs ), {} )
+    assert r[ "members" ][ "pk.a.m.key" ][ "twins" ] == [ "pk.a.m.abe", "pk.a.m.mid", "pk.a.m.zed" ]
+
+
+def _crowd( n, name="base" ):
+    """Ensures: returns a member and n candidates, each sharing one word with it."""
+    member = _rec( f"pk.a.m.{name}", "( shared )", "Shared things." )
+    names  = [ f"cand{chr( 97 + k // 26 )}{chr( 97 + k % 26 )}" for k in range( n ) ]
+    return member, [ _rec( f"pk.a.m.{c}", "( shared )", f"Other words {c}." ) for c in names ]
+
+
+@pytest.mark.parametrize( "n, got, short_by, short", [ ( 24, 24, 1, 1 ), ( 25, 25, 0, 0 ), ( 26, 25, 0, 0 ) ] )
+def test_the_cut_is_twenty_five_and_the_shortfall_counts_below_it_not_at_it(n, got, short_by, short):
+    member, cands = _crowd( n )
+    r = ng.select_negatives( { member[ "id" ]: [] }, _index( member, *cands ), {} )
+    m = r[ "members" ][ member[ "id" ] ]
+    assert ( len( m[ "lexical" ] ), m[ "short_by" ], r[ "summary" ][ "short_of_25" ] ) == ( got, short_by, short )
+
+
+def test_a_member_with_exactly_one_lexical_neighbour_is_not_counted_as_getting_none():
+    member, cands = _crowd( 1 )
+    r = ng.select_negatives( { member[ "id" ]: [] }, _index( member, *cands ), {} )
+    assert ( r[ "summary" ][ "got_none" ], r[ "summary" ][ "lexical_min" ], r[ "summary" ][ "lexical_median" ] ) == ( 0, 1, 1 )
+
+
+def test_a_selection_of_no_members_has_no_minimum_median_or_maximum():
+    s = ng.select_negatives( {}, {}, {} )[ "summary" ]
+    assert ( s[ "members" ], s[ "lexical_min" ], s[ "lexical_median" ], s[ "lexical_max" ], s[ "pairs" ] ) == ( 0, None, None, None, 0 )
