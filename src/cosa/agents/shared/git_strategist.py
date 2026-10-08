@@ -117,6 +117,8 @@ class GitStrategist:
         pr_body: str,
         trust_level: int,
         notify_fn: Callable,
+        push_enabled: bool = False,
+        push_flag_key: str = "bug fix expediter push fix branch enabled",
     ) -> dict:
         """
         Single-fix git strategy: commit_only (trust 1-2) or branch plus PR (trust 3+).
@@ -134,6 +136,8 @@ class GitStrategist:
             - Any key may be None on failure
             - Never raises
             - On a trust level 3 and above error, checks out original branch before returning
+            - Trust 3 and above with push_enabled false (the default): commits on the fix branch, pushes nothing,
+              opens no PR, restores the original branch; the error says so and names push_flag_key
 
         Args:
             git_ops: GitOps instance
@@ -179,6 +183,22 @@ class GitStrategist:
                 return result
 
             result[ "branch_name" ] = br_result[ "branch_name" ]
+
+            if not push_enabled:
+                # Flag off: keep the fix as a local commit on its branch, push nothing, open no PR.
+                commit_result = await git_ops.commit_on_branch( files_changed, commit_message )
+                if commit_result[ "success" ]:
+                    result[ "git_strategy" ] = "commit_only"
+                    result[ "commit_hash" ]  = commit_result[ "commit_hash" ]
+                    result[ "error" ] = (
+                        f"push disabled ({push_flag_key} is false): nothing was pushed and no pull request was opened"
+                    )
+                else:
+                    result[ "error" ] = commit_result[ "error" ]
+                await notify_fn( result[ "error" ], priority="high" )
+                if original_branch:
+                    await git_ops.checkout_branch( original_branch )
+                return result
 
             push_result = await git_ops.commit_and_push( slug, files_changed, commit_message )
             if not push_result[ "success" ]:

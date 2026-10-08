@@ -1352,6 +1352,7 @@ class BFEOrchestrator:
             pr_body=pr_body,
             trust_level=trust_level,
             notify_fn=_notify_fn,
+            push_enabled=self.config.push_fix_branch_enabled,
         )
 
         # Apply git result fields to FixResult

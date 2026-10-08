@@ -77,8 +77,8 @@ class TestFromConfig( unittest.TestCase ):
         self.assertEqual( c.min_diagnosis_confidence, 0.7 )    # float → "float"
         self.assertFalse( c.enabled )                          # bool → "boolean"
 
-        # All 14 mapped keys consulted exactly once.
-        self.assertEqual( self.cfg_mgr.get.call_count, 14 )
+        # All 15 mapped keys consulted exactly once.
+        self.assertEqual( self.cfg_mgr.get.call_count, 15 )
 
         # The computed return_type per field type — proves each branch of the
         # bool/int/float/str ladder was taken (discriminating, not just "ran").
@@ -91,6 +91,8 @@ class TestFromConfig( unittest.TestCase ):
         self.assertEqual( seen[ "bug fix expediter min diagnosis confidence" ], "float" )
         self.assertEqual( seen[ "bug fix expediter budget usd" ],           "float" )
         self.assertEqual( seen[ "bug fix expediter trust mode" ],           "string" )
+        self.assertEqual( seen[ "bug fix expediter push fix branch enabled" ], "boolean" )
+        self.assertFalse( c.push_fix_branch_enabled )
 
     def test_from_config_debug_prints_each_field( self ):
         buf = io.StringIO()

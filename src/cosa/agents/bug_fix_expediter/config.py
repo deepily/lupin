@@ -52,6 +52,7 @@ class BugFixExpediterConfig:
 
     # === Decision Proxy (Phase 5) ===
     trust_mode                : str   = "shadow"   # "shadow" | "suggest" | "active"
+    push_fix_branch_enabled   : bool  = False      # false: nothing is pushed, no PR is opened
 
     # === Feature Flags ===
     enabled                   : bool  = False
@@ -89,6 +90,7 @@ class BugFixExpediterConfig:
             "auto_retry_on_fix"        : "bug fix expediter auto retry on fix",
             "require_user_confirm"     : "bug fix expediter require user confirm",
             "trust_mode"               : "bug fix expediter trust mode",
+            "push_fix_branch_enabled"  : "bug fix expediter push fix branch enabled",
             "enabled"                  : "bug fix expediter enabled",
         }
 

@@ -101,6 +101,7 @@ class TestCommitAndPrSingle( unittest.IsolatedAsyncioTestCase ):
         return await gs.commit_and_pr_single(
             git_ops=git_ops, files_changed=[ "a.py" ], commit_message="msg",
             pr_title="t", pr_body="b", trust_level=trust, notify_fn=notify,
+            push_enabled=True,   # these tests exercise the push path; the flag is off by default
         ), notify
 
     async def test_l1_commit_only_success( self ):
