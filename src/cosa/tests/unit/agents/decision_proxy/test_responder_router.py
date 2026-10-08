@@ -117,3 +117,9 @@ def test_the_configured_window_decides_not_the_defaults():
     r, _ = _responder( _result(), connected=True, now=datetime( 2026, 10, 8, 20, 0 ), active_hours_start=7, active_hours_end=18 )
     _run( r )
     r.submit_response.assert_called_once_with( "nid-1", "yes" )
+
+
+def test_a_router_defer_says_so_in_debug_output( capsys ):
+    r, _ = _responder( _result(), connected=True, debug=True )
+    _run( r )
+    assert "DEFER TO USER" in capsys.readouterr().out
