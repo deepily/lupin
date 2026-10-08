@@ -571,6 +571,17 @@ def test_a_chosen_page_lost_from_one_arm_is_left_out_of_all_three_so_the_loss_is
     assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_single2" ], r[ "chosen_pack" ] ) == ( "pass", [ "p000" ], [ "p000" ], [ "p000" ] )
 
 
+@pytest.mark.parametrize( "which", [ "page-single2", "page-pack" ] )
+@pytest.mark.parametrize( "lost", [ "p150", "p001" ] )
+def test_a_page_lost_from_the_second_single_run_or_the_pack_is_left_out_of_all_three_too( which, lost ):
+    base = _two_hundred_pages()
+    arms = { "page-single1": _arm( "page-single1", base ), "page-single2": _arm( "page-single2", base ), "page-pack": _arm( "page-pack", base, size=200 ) }
+    arms[ which ][ "answers" ] = [ a for a in arms[ which ][ "answers" ] if a[ "id" ] != lost ]; arms[ which ][ "failed" ] = [ lost ]
+    r    = an.analyze_pages( an.read_stage( list( arms.values() ) ) )[ 1 ]
+    want = [ "p000" ] if lost == "p001" else [ "p000", "p001" ]
+    assert ( r[ "state" ], r[ "chosen_single1" ], r[ "chosen_single2" ], r[ "chosen_pack" ] ) == ( "pass", want, want, want )
+
+
 def test_pages_chosen_the_same_after_packing_pass_and_the_differences_are_reported():
     base = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
     r = an.analyze_pages( an.read_stage( _pages( base, _moved( base, 0.01 ), _moved( base, 0.03 ) ) ) )[ 1 ]
