@@ -1916,6 +1916,7 @@ class TFEOrchestrator:
             pr_title         = pr_title,
             pr_body          = pr_body,
             branch_slug_hint = branch_slug_hint,
+            push_enabled     = self.config.push_fix_branch_enabled,
         )
 
         self.branch_name   = git_result.get( "branch_name" )

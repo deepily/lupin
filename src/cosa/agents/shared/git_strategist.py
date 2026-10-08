@@ -229,6 +229,8 @@ class GitStrategist:
         pr_title: str,
         pr_body: str,
         branch_slug_hint: Optional[ str ] = None,
+        push_enabled: bool = False,
+        push_flag_key: str = "test fix expediter push fix branch enabled",
     ) -> dict:
         """
         Multi-cluster git strategy: one branch, N commits (one per cluster), one PR.
@@ -255,7 +257,8 @@ class GitStrategist:
             - Any field may be None on failure; error is set
             - Never raises
             - On a trust level 3 and above error, checks out original branch before returning
-            - Without a successful push (no push_branch, or it failed): commit_only, error set, no PR
+            - No successful push (push_enabled false, no push_branch, or it failed): commit_only, error set, no PR
+            - push_enabled is false by default; the error then says nothing was pushed and names push_flag_key
 
         Args:
             git_ops: GitOps instance (async git/gh wrapper)
@@ -366,10 +369,16 @@ class GitStrategist:
                 return result
 
             # Push the branch. GitOps.commit_and_push commits AND pushes, so after separate
-            # commits only a dedicated push_branch can push. When git_ops has none, nothing
-            # was pushed: say so and open no PR (row c07aef9f).
+            # commits only a dedicated push_branch can push. When the caller's flag is off,
+            # or git_ops has no push_branch, nothing was pushed: say so and open no PR
+            # (row c07aef9f).
             push_ok = False
-            if hasattr( git_ops, "push_branch" ):
+            if not push_enabled:
+                result[ "error" ] = (
+                    f"push disabled ({push_flag_key} is false): nothing was pushed and no pull request was opened"
+                )
+                await notify_fn( result[ "error" ], priority="high" )
+            elif hasattr( git_ops, "push_branch" ):
                 push_result = await git_ops.push_branch( slug )
                 if push_result.get( "success" ):
                     push_ok = True

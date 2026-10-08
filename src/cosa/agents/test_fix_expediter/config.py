@@ -21,6 +21,7 @@ class TestFixExpediterConfig:
     Requires:
         - All numeric values are positive
         - trust_mode in {"inherit", "shadow", "fixed_l1", "fixed_l3"}
+        - push_fix_branch_enabled is false unless the INI turns it on; false means nothing is pushed
         - rerun_scope in {"affected", "full"}
         - voice_gate_mode in {"aggregate", "per_cluster"}
 
@@ -76,6 +77,7 @@ class TestFixExpediterConfig:
 
     # === Trust / Git ===
     trust_mode                    : str   = "inherit"
+    push_fix_branch_enabled       : bool  = False
 
     # === Phase 6 validation ===
     rerun_scope                   : str   = "affected"
@@ -145,6 +147,7 @@ class TestFixExpediterConfig:
             "cost_cap_usd"                : "test fix expediter cost cap usd",
             "wall_clock_timeout_secs"     : "test fix expediter wall clock timeout secs",
             "trust_mode"                  : "test fix expediter trust mode",
+            "push_fix_branch_enabled"     : "test fix expediter push fix branch enabled",
             "rerun_scope"                 : "test fix expediter rerun scope",
             "continue_on_cluster_failure" : "test fix expediter continue on cluster failure",
             "voice_gate_mode"             : "test fix expediter voice gate mode",

@@ -159,6 +159,26 @@ class GitOps:
 
         return { "success": True, "commit_hash": commit_result[ "commit_hash" ], "error": None }
 
+    async def push_branch( self, slug: str ) -> dict:
+        """
+        Push the fix branch <slug> to origin with upstream tracking, and nothing else.
+
+        Requires:
+            - slug names a branch that already exists locally, as fix/<name>
+
+        Ensures:
+            - Returns {"success": bool, "error": str|None}
+            - A slug that is not fix/<name> (empty, main, master, HEAD, any other prefix)
+              is refused without running git
+            - Pushes one explicit refspec, so no other branch or tag moves; never forces
+        """
+        if not slug.startswith( "fix/" ) or len( slug ) == len( "fix/" ):
+            return { "success": False, "error": f"refusing to push [{slug}]: only a fix branch named fix/<name> is pushed" }
+        result = await self._run_git( "push", "-u", "origin", f"refs/heads/{slug}:refs/heads/{slug}" )
+        if not result[ "success" ]:
+            return { "success": False, "error": f"git push failed: {result[ 'stderr' ]}" }
+        return { "success": True, "error": None }
+
     async def create_pr( self, branch: str, title: str, body: str ) -> dict:
         """
         Create a pull request via `gh pr create`.

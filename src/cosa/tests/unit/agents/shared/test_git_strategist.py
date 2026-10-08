@@ -181,6 +181,7 @@ class TestCommitAndPrMulti( unittest.IsolatedAsyncioTestCase ):
         return await gs.commit_and_pr_multi(
             git_ops=git_ops, clusters=clusters, trust_level=trust,
             notify_fn=notify, pr_title="t", pr_body="b", branch_slug_hint=hint,
+            push_enabled=True,   # these tests exercise the push path; the flag is off by default
         ), notify
 
     async def test_empty_clusters_errors( self ):
