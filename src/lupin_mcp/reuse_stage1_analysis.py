@@ -8,6 +8,7 @@ live number existed, and a change to one is a change to the pre-registration.
 
 An arm is clean, inconclusive or invalid. Only a clean arm can contribute to a pass.
 """
+import collections
 import math
 
 from cosa.repo.symindex import verdict as vd
@@ -68,19 +69,22 @@ def read_arm( record ):
         - status is "invalid" when the arm was stopped by the ceiling, the ledger or refusals, or errored
         - lost lists, sorted, the asked ids without a valid answer plus every id named failed, unasked or not reached
         - lost_limit is the number of entries the arm may lose and still be judged
+        - duplicate_ids lists the ids the arm asked more than once; the first answer to each stands and the arm is invalid
         - status is "inconclusive" when it asked nothing, or has a stop reason other than attempts and the invalid ones
         - status is "inconclusive" when it is not complete and lost nothing, since the record contradicts itself
         - status is "clean" when the lost entries number at most the limit, and "inconclusive" otherwise
         - an arm with no stop reason, or one that spent its attempts, is judged by its lost entries, complete or not
     Raises:
-        - ValueError for another format, an answer for an id the arm did not ask about, or an id answered twice
+        - ValueError for another format, an answer for an id the arm did not ask about, or an id answered twice that was asked once
     """
     if record.get( "format" ) != FORMAT: raise ValueError( f"expected format {FORMAT!r}, got {record.get( 'format' )!r}" )
     asked = set( record[ "entry_ids" ] )
+    dup   = sorted( i for i, n in collections.Counter( record[ "entry_ids" ] ).items() if n > 1 )
     overlaps, confidences, probabilities, malformed, seen = {}, {}, {}, {}, set()
     for a in record[ "answers" ]:
         i = a[ "id" ]
         if i not in asked: raise ValueError( f"answer for {i!r} which the arm did not ask about" )
+        if i in seen and i in dup: continue                                     # the first answer stands; the arm is invalid
         if i in seen: raise ValueError( f"{i!r} answered twice" )
         seen.add( i )
         reason = vd.malformed_reason( a[ "probabilities" ] )
@@ -90,14 +94,14 @@ def read_arm( record ):
     stop = record[ "stop_reason" ]
     lost = sorted( ( asked - set( overlaps ) ) | set( record[ "failed" ] ) | set( record[ "unasked" ] ) | set( record[ "not_reached" ] ) )
     limit = lost_limit( len( asked ) )
-    if record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
+    if dup or record[ "state" ] == "error" or stop in INVALID_STOPS or ( stop is not None and stop.startswith( "error" ) ): status = "invalid"
     elif not asked or stop not in ( None, "attempts" ) or ( record[ "state" ] != "complete" and not lost ): status = "inconclusive"
     else: status = "clean" if len( lost ) <= limit else "inconclusive"
     return { "question": record[ "question" ], "arm": record[ "arm" ], "run_name": record[ "run_name" ], "size": record[ "size" ],
              "attempt": record.get( "attempt" ) or 1, "retry_reason": record.get( "retry_reason" ),
              "state": record[ "state" ], "stop_reason": stop, "entry_ids": list( record[ "entry_ids" ] ),
              "overlaps": overlaps, "confidences": confidences, "probabilities": probabilities, "malformed": malformed,
-             "lost": lost, "lost_limit": limit,
+             "lost": lost, "lost_limit": limit, "duplicate_ids": dup,
              "failed": list( record[ "failed" ] ), "not_reached": list( record[ "not_reached" ] ), "unasked": list( record[ "unasked" ] ),
              "cache_hits": record[ "cache_hits" ], "totals": record[ "totals" ], "rows": record[ "rows" ],
              "transport_calls": record[ "transport_calls" ], "probe": record.get( "probe" ), "status": status }
@@ -608,6 +612,7 @@ def build_report( records, canaries ):
           canaries, unclean_arms, lost_by_arm }
         - lost_by_arm gives every arm's lost count beside its limit and its stop reason
         - decision comes from the passes and next_step from the stop rules
+        - duplicate_ids lists each arm that asked an id more than once; such an arm stops the decision
         - page_arm is the page arm's verdict; a failing or asking page arm turns a decision that did not stop into a stop
         - unclean_arms lists every arm that is not clean, with its status and stop reason
     """
@@ -617,10 +622,13 @@ def build_report( records, canaries ):
     unclean = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "status": a[ "status" ], "stop_reason": a[ "stop_reason" ] }
                 for q in sorted( stage ) for a in stage[ q ].values() if a[ "status" ] != "clean" ]
     pg    = page_arm( stage )
+    dups  = [ { "run_name": a[ "run_name" ], "question": a[ "question" ], "arm": a[ "arm" ], "ids": a[ "duplicate_ids" ] } for q in sorted( stage ) for a in stage[ q ].values() if a[ "duplicate_ids" ] ]
     decision = ev[ "decision" ]
+    if dups and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm asks the same id twice (duplicate_ids)"
+    if pg[ "state" ] == "invalid" and not decision.startswith( "stop and ask" ): decision = "stop and ask: an arm is invalid"
     if pg[ "state" ] == "fail" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm fails; Rick decides whether the page asks stay packed"
     if pg[ "state" ] == "ask_rick" and not decision.startswith( "stop and ask" ): decision = "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
-    return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg,
+    return { "decision": decision, "next_step": stop[ "next_step" ], "evaluate": ev, "stop_rules": stop, "pages": analyze_pages( stage ), "page_arm": pg, "duplicate_ids": dups,
              "other_boundaries": { s: other_boundaries( stage, s ) for s in PACK_SIZES }, "request_stats": request_stats( stage ),
              "cost": cost_per_search( stage, ev[ "default_size" ] ), "old_shape": old_shape_report( stage ),
              "canaries": [ dict( check_canary( arm, can ), run_name=can[ "run_name" ] ) for arm, can in canaries ], "unclean_arms": unclean,
@@ -651,6 +659,7 @@ def render( report ):
     for q in p3[ "not_probed" ]: lines.append( f"not probed: question {q}" )
     if ev[ "default_size" ] is not None:
         lines.append( f"pass 3 was run at size {PASS_THREE_SIZE} only; sizes 10 and 50 carry no position evidence" )
+    for d in report[ "duplicate_ids" ]: lines.append( f"duplicate ids: {d[ 'run_name' ]} asked {', '.join( d[ 'ids' ] )} more than once" )
     for a in report[ "unclean_arms" ]: lines.append( f"not clean: {a[ 'run_name' ]} is {a[ 'status' ]} (stop reason {a[ 'stop_reason' ]})" )
     for c in report[ "canaries" ]:
         lines.append( f"canary {c[ 'run_name' ]}: tripped {c[ 'tripped' ]}; driver agrees {c[ 'agrees' ]}; only here {c[ 'analysis_only' ]}; only driver {c[ 'driver_only' ]}" )
