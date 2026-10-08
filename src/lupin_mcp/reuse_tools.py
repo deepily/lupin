@@ -316,7 +316,7 @@ class LiveJevTransport:
         try:
             return json.loads( text ), meta
         except ValueError as e:
-            raise jev_transport.JevCallError( "response body is not JSON" ) from e
+            raise jev_transport.JevCallError( "response body is not JSON", 200, meta[ "attempt_log" ] ) from e
 
     def post( self, body ):
         """Ensures: returns the parsed response alone."""
@@ -656,7 +656,8 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                     cache.put( key, resp )
                     how = "call"
                     break
-                except jev_transport.JevBudgetSpent:
+                except jev_transport.JevBudgetSpent as e:
+                    if e.attempt_log: attempt_logs.append( e.attempt_log )
                     cut_off = True
                     break
                 except jev_transport.JevConfigError as e:

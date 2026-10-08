@@ -159,7 +159,7 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     except Exception as e:                                          # any transport error ends this one request, never the run
         error = e
     taken = budget.end_tally() if budget is not None else None
-    if isinstance( error, jt.JevBudgetSpent ): sent = False
+    if isinstance( error, jt.JevBudgetSpent ): sent, row[ "attempt_log" ] = False, error.attempt_log
     row[ "attempts" ] = taken if taken is not None else ( meta[ "attempts" ] if meta is not None else ( 1 if sent else 0 ) )
     if error is None:
         usage = rt.usage_of( response )

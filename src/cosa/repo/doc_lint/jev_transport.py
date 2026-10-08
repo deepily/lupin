@@ -50,6 +50,10 @@ class JevCallError( Exception ):
 class JevBudgetSpent( Exception ):
     """The call budget is used up: no further HTTP attempt may be made."""
 
+    def __init__( self, message, attempt_log=None ):
+        super().__init__( message )
+        self.attempt_log = [] if attempt_log is None else attempt_log      # the attempts made before the budget ran out, as send_with_meta logs them
+
 
 class _Tally( threading.local ):
     """One thread's running count of the attempts it took, or None when it is not counting."""
@@ -242,7 +246,12 @@ def send_with_meta( body, post_fn=None, sleep_fn=None, environ=None, budget=None
     last_status = None
     log       = []
     for attempt in range( MAX_ATTEMPTS ):
-        if budget is not None: budget.take()
+        if budget is not None:
+            try:
+                budget.take()
+            except JevBudgetSpent as e:
+                e.attempt_log = log
+                raise
         started = clock_fn()
         try:
             reply = post_fn( URL, headers, body, TIMEOUT_SECONDS )

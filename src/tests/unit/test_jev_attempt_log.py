@@ -124,3 +124,71 @@ def test_a_request_id_header_is_found_by_each_spelling_and_other_headers_are_lef
 def test_the_plain_sweep_keeps_the_log_of_a_post_that_failed( env, status, tries ):      # noqa: F811
     sw = rt.sweep( ctx_over( env, Door( [ status ] ) ), N( "q" ), entries( 2 ) )
     assert len( sw[ "attempt_logs" ] ) == 2 * tries and all( log == [ { "status": status, "request_ids": {} } ] for log in sw[ "attempt_logs" ] )
+
+
+def live( replies, budget=None, transient=False ):
+    """Ensures: returns a live transport over a scripted door with no sleeping."""
+    return rt.LiveJevTransport( post_fn=door( replies ), sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5, budget=budget, transient=transient )
+
+
+def test_a_200_with_a_body_that_is_not_json_keeps_the_log_of_every_attempt():
+    with pytest.raises( jt.JevCallError, match="not JSON" ) as caught:
+        live( [ ( 429, "x", { "request-id": "q" } ), ( 200, "not json" ) ] ).post_with_meta( {} )
+    assert caught.value.attempt_log == [ { "status": 429, "request_ids": { "request-id": "q" } }, { "status": 200, "request_ids": {} } ]
+
+
+def test_a_budget_that_runs_out_mid_call_carries_the_attempts_already_made():
+    with pytest.raises( jt.JevBudgetSpent ) as caught:
+        jt.send_with_meta( b"{}", post_fn=door( [ ( 429, "x" ), ( 200, "ok" ) ] ), sleep_fn=lambda s: None, environ=ENV,
+                                          random_fn=lambda: 0.5, budget=jt.CallBudget( 1 ) )
+    assert caught.value.attempt_log == [ { "status": 429, "request_ids": {} } ]
+
+
+def test_a_budget_stop_before_any_attempt_has_an_empty_log():
+    spent = jt.CallBudget( 1 )
+    spent.take()
+    with pytest.raises( jt.JevBudgetSpent ) as caught:
+        jt.send_with_meta( b"{}", post_fn=door( [ ( 200, "ok" ) ] ), environ=ENV, budget=spent )
+    assert caught.value.attempt_log == []
+
+
+def test_the_plain_sweep_keeps_the_log_of_a_request_the_budget_cut_off( env ):      # noqa: F811
+    ctx = ctx_over( env, Door( [ 429, 200 ] ) )
+    ctx.transport.budget = jt.CallBudget( 1 )
+    sw  = rt.sweep( ctx, N( "q" ), entries( 1 ) )
+    assert sw[ "attempt_logs" ] == [ [ { "status": 429, "request_ids": {} } ] ]
+
+
+def test_the_packed_sweep_returns_the_log_of_every_request(tmp_path):
+    log = [ { "status": 200, "request_ids": { "request-id": "z" } } ]
+    class Meta:
+        def post_with_meta( self, body ):
+            answers = { k: { "probabilities": { "reuse": 0.7, "extend": 0.2, "unrelated": 0.1 } } for k in body[ "questions" ] }
+            return { "answers": answers, "model": body[ "model" ] }, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 1, "attempt_log": log }
+    ctx = rt.ReuseContext( tmp_path, tmp_path / "data", out_dir=tmp_path / "out", transport=Meta() )
+    out = rp.sweep_packed( ctx, NEED, ENTRIES, 3 )
+    assert out[ "attempt_logs" ] == [ log ] * out[ "requests" ] and out[ "requests" ] == 3
+
+
+def test_timeouts_and_resets_are_counted_apart():
+    one = lambda status: { "status": status, "request_ids": {} }
+    counts = rt.attempt_counts( [ [ one( "timeout" ), one( "timeout" ), one( "connection" ) ] ] )
+    assert counts[ "timeouts" ] == 2 and counts[ "resets" ] == 1
+
+
+def test_a_server_error_runs_from_500_to_599_apart_from_529():
+    one = lambda status: { "status": status, "request_ids": {} }
+    counts = rt.attempt_counts( [ [ one( s ) for s in ( 499, 500, 529, 599, 600 ) ] ] )
+    assert counts[ "server_errors" ] == 2 and counts[ "n529" ] == 1
+
+
+def test_the_receipt_stats_carry_the_attempt_counts( env ):      # noqa: F811
+    r = rt.check_exists_impl( N( "ok" ), ctx_over( env, Door( [ 429, 200 ] ) ) )
+    counts = r[ "stats" ][ "attempt_counts" ]
+    assert counts[ "requests" ] == r[ "stats" ][ "calls" ] and counts[ "n429" ] == 1 and counts[ "attempts" ] == counts[ "requests" ] + 1
+
+
+def test_a_pack_cut_off_by_the_budget_mid_call_keeps_the_log_of_its_attempts():
+    transport = live( [ ( 429, "x" ), ( 200, "ok" ) ], budget=rc.TokenBudget( 1, 1_000_000 ) )
+    row = rp.send_pack( transport, NEED, ENTRIES[ :2 ], budget=transport.budget )[ "rows" ][ 0 ]
+    assert row[ "attempt_log" ] == [ { "status": 429, "request_ids": {} } ]
