@@ -154,6 +154,13 @@ DETECTED_BUT_DOES_NOT_BREAK = {
         "suite. Measured BOTH ways at b78c7651 in this worktree, the `.venv` symlink moved "
         "aside and restored between the two runs, the second driven by the main checkout's "
         "interpreter: 14 passed with a `.venv`, 14 passed without.",
+    "test_run_test_suite_live_smoke.py":
+        "the one `.venv/bin/pytest` it names is planted BY THE FIXTURE inside a scratch copy of the "
+        "runner (`root / \".venv/bin\"` under tmp_path, with a fake pytest script written into it), "
+        "so the path is a property of the temp tree it builds and never of the tree running the "
+        "suite. Measured BOTH ways at 7aa064187 in one worktree, the `.venv` symlink moved aside "
+        "and restored between the runs, the interpreter pinned to the main checkout so only the "
+        "target moved: 12 passed with a `.venv`, 12 passed without, 12 passed with again.",
     "test_v2_eligible_routing_denominator.py":
         "does spawn PROJECT_ROOT/.venv/bin/python, but skips first when the pinned baseline "
         "worktree is absent — which it is. Reaching the spawn again in an unprovisioned tree "
