@@ -1,0 +1,2441 @@
+{
+"source": "a slice of src/docs/index/current/symbols.jsonl at f89e7b944: the 61 members of stage2-manifest-slice.json, up to 50 other Python entries of each of their packages, and 15 TypeScript entries (drawn with random.Random(20261007))",
+"entries": [
+{
+"id": "cosa.agents.agent_base.AgentBase.is_format_output_runnable",
+"sig": "(self) -> bool",
+"doc": "Check if output formatting is available.",
+"file": "src/cosa/agents/agent_base.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.agent_base.AgentBase.run_prompt",
+"sig": "(self, include_raw_response: bool=False) -> dict[str, Any]",
+"doc": "Execute the prompt against the configured LLM.",
+"file": "src/cosa/agents/agent_base.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.base_llm_client.BaseLlmClient.__init__",
+"sig": "(self, model: str, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize base LLM client.",
+"file": "src/cosa/agents/base_llm_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"sig": "(cls, config_mgr, debug=False)",
+"doc": "Create a BugFixExpediterConfig from ConfigurationManager INI values.",
+"file": "src/cosa/agents/bug_fix_expediter/config.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"sig": "(question: str, default: str='no', timeout: int=60, abstract: Optional[str]=None, job_id: Optional[str]=None, priority: str=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"sig": "(message: str, priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None, progress_group_id: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification.",
+"file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"sig": "(questions: list, timeout: int=120, title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, priority: str=None, response_default: Optional[str]=None) -> dict",
+"doc": "Present multiple-choice questions and get user's selection.",
+"file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.prompts.diagnosis.build_diagnosis_prompt",
+"sig": "(ctx, extra_context: str='', iteration: int=1, prior_diagnosis=None, user_messages: Optional[list]=None) -> str",
+"doc": "Build the diagnosis prompt for the Lead agent.",
+"file": "src/cosa/agents/bug_fix_expediter/prompts/diagnosis.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_fix_expediter.prompts.proposal.build_proposal_prompt",
+"sig": "(diagnosis, dead_job_context, extra_context: str='', user_feedback: Optional[str]=None) -> str",
+"doc": "Build the proposal prompt for the Lead agent.",
+"file": "src/cosa/agents/bug_fix_expediter/prompts/proposal.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.bug_injector.BugInjector.run_prompt",
+"sig": "(self, **kwargs) -> dict[str, Any]",
+"doc": "Execute bug injection prompt and modify code.",
+"file": "src/cosa/agents/bug_injector.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.calculator.agent.CalculatorAgent.__init__",
+"sig": "(self, question='', question_gist='', last_question_asked='', push_counter=-1, routing_command='agent router go to calculator', user_id='ricardo_felipe_ruiz_6bdc', user_email='', session_id='', debug=False, verbose=False, auto_debug=False, inject_bugs=False)",
+"doc": "Initialize CalculatorAgent.",
+"file": "src/cosa/agents/calculator/agent.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.calculator.dispatcher.quick_smoke_test",
+"sig": "()",
+"doc": "Module-level smoke test following CoSA convention.",
+"file": "src/cosa/agents/calculator/dispatcher.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"sig": "(question: str, default: str='no', timeout: int=60, abstract: Optional[str]=None, job_id: Optional[str]=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/claude_code/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"sig": "(message: str, priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification.",
+"file": "src/cosa/agents/claude_code/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.date_and_time_agent.DateAndTimeAgent.__init__",
+"sig": "(self, question: str='', question_gist: str='', last_question_asked: str='', push_counter: int=-1, routing_command: str='agent router go to datetime', user_id: str='ricardo_felipe_ruiz_6bdc', user_email: str='', session_id: str='', debug: bool=False, verbose: bool=False, auto_debug: bool=False, inject_bugs: bool=False) -> None",
+"doc": "Initialize date and time agent.",
+"file": "src/cosa/agents/date_and_time_agent.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+"sig": "(self, action, value=None, category='unknown', confidence=0.0, trust_level=1, reason='')",
+"doc": "",
+"file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.category_classifier.CategoryClassifier",
+"sig": "",
+"doc": "Abstract interface for classifying decisions into categories.",
+"file": "src/cosa/agents/decision_proxy/category_classifier.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore.__init__",
+"sig": "(self, embedding_store, top_k=5, confidence_threshold=0.6, debug=False)",
+"doc": "Initialize the CBR decision store.",
+"file": "src/cosa/agents/decision_proxy/cbr_decision_store.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings.add_decision",
+"sig": "(self, id, question, category, decision_value, ratification_state, question_embedding, created_at, data_origin='organic', response_type='')",
+"doc": "Insert a decision record into the store.",
+"file": "src/cosa/agents/decision_proxy/proxy_decision_embeddings.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.proxy_decision_embeddings.ProxyDecisionEmbeddings.exists",
+"sig": "(self, id) -> bool",
+"doc": "Return True iff a decision with this id is present in the store.",
+"file": "src/cosa/agents/decision_proxy/proxy_decision_embeddings.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.responder.DecisionResponder",
+"sig": "",
+"doc": "Trust-aware decision responder for the Decision Proxy.",
+"file": "src/cosa/agents/decision_proxy/responder.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.trust_tracker.CategoryTrust.error_rate",
+"sig": "(self)",
+"doc": "Overall error (rejection) rate (0.0-1.0).",
+"file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+"sig": "(self, rolling_window_days=30, decay_half_life_days=14, l2_threshold=50, l3_threshold=200, l4_threshold=500, l5_threshold=1000, trust_model='count', rate_thresholds=None, min_samples=None, debug=False)",
+"doc": "",
+"file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.api_client.ResearchAPIClient.__init__",
+"sig": "(self, config: Optional[ResearchConfig]=None, cost_tracker: Optional[CostTracker]=None, api_key: Optional[str]=None, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize the bounded-CC research client.",
+"file": "src/cosa/agents/deep_research/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.cli.parse_args",
+"sig": "() -> argparse.Namespace",
+"doc": "Parse command-line arguments.",
+"file": "src/cosa/agents/deep_research/cli.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.config.quick_smoke_test",
+"sig": "()",
+"doc": "Quick smoke test for ResearchConfig.",
+"file": "src/cosa/agents/deep_research/config.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+"sig": "(question: str, default: str='no', timeout: int=60, abstract: Optional[str]=None, job_id: Optional[str]=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/deep_research/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.cosa_interface.notify_progress",
+"sig": "(message: str, priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None, progress_group_id: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification.",
+"file": "src/cosa/agents/deep_research/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.cosa_interface.present_choices",
+"sig": "(questions: list, timeout: int=120, title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, priority: Optional[str]=None) -> dict",
+"doc": "Present multiple-choice questions and get user's selection.",
+"file": "src/cosa/agents/deep_research/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.job.DeepResearchJob.__init__",
+"sig": "(self, query: str, user_id: str, user_email: str, session_id: str, budget: Optional[float]=None, lead_model: Optional[str]=None, no_confirm: bool=True, dry_run: bool=False, force_failure_mode: Optional[str]=None, audience: Optional[str]=None, audience_context: Optional[str]=None, source_document: Optional[list]=None, confirm_topics: bool=False, debug: bool=False, verbose: bool=False) -> None",
+"doc": "Initialize a Deep Research job.",
+"file": "src/cosa/agents/deep_research/job.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research.search_cache.save_to_cache",
+"sig": "(user_email: str, query: str, results: dict) -> str",
+"doc": "Save search results to cache.",
+"file": "src/cosa/agents/deep_research/search_cache.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research_to_podcast.__main__.parse_args",
+"sig": "() -> argparse.Namespace",
+"doc": "Parse command-line arguments.",
+"file": "src/cosa/agents/deep_research_to_podcast/__main__.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research_to_podcast.__main__.show_dry_run",
+"sig": "(args: argparse.Namespace) -> None",
+"doc": "Show what the pipeline would do without executing.",
+"file": "src/cosa/agents/deep_research_to_podcast/__main__.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research_to_presentation.__main__.parse_args",
+"sig": "() -> argparse.Namespace",
+"doc": "Parse command-line arguments.",
+"file": "src/cosa/agents/deep_research_to_presentation/__main__.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob.__init__",
+"sig": "(self, query: str, user_id: str, user_email: str, session_id: str, budget: Optional[float]=None, target_duration_minutes: Optional[int]=None, target_slide_count: Optional[int]=None, theme: Optional[str]=None, lead_model: Optional[str]=None, dry_run: bool=False, audience: Optional[str]=None, audience_context: Optional[str]=None, source_document: Optional[list]=None, debug: bool=False, verbose: bool=False) -> None",
+"doc": "Initialize a Deep Research to Presentation job.",
+"file": "src/cosa/agents/deep_research_to_presentation/job.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.deep_research_to_presentation.state.ChainedResult.get_summary",
+"sig": "(self) -> str",
+"doc": "Get a human-readable summary of the result.",
+"file": "src/cosa/agents/deep_research_to_presentation/state.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.dm_compression.freeze.FrozenMessage.should_bypass",
+"sig": "(self)",
+"doc": "True when this message must be delivered as-is, without a rewrite.",
+"file": "src/cosa/agents/dm_compression/freeze.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.dm_quality_judge.judge.round_half_up",
+"sig": "(x)",
+"doc": "Round half up (toward +infinity on a .5 tie), as an explicit tie-break.",
+"file": "src/cosa/agents/dm_quality_judge/judge.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.dm_quality_judge.xml_models_v2.parse_index",
+"sig": "(raw)",
+"doc": "Parse the model's payload index into an int.",
+"file": "src/cosa/agents/dm_quality_judge/xml_models_v2.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.dm_tutor.sentences.count_sentences",
+"sig": "(text)",
+"doc": "Count the claim-carrying sentences in a DM body.",
+"file": "src/cosa/agents/dm_tutor/sentences.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway.__init__",
+"sig": "(self, sender_session_id, store, persona_name='heartbeat-arbiter', persona_icon=None, persona_color=None)",
+"doc": "",
+"file": "src/cosa/agents/heartbeat_arbiter/arbiter_gateway.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.arbiter_state.PingLedger.record_ping",
+"sig": "(self, edge_key, ts)",
+"doc": "Ensures: records ts as the last-ping for the edge.",
+"file": "src/cosa/agents/heartbeat_arbiter/arbiter_state.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.events_tail.save_offsets",
+"sig": "(path, offsets)",
+"doc": "Persist the per-session byte-offset map atomically, so offsets survive restarts.",
+"file": "src/cosa/agents/heartbeat_arbiter/events_tail.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.manager_resolver.resolve_manager",
+"sig": "(worker_session_id, *, declared_manager: Optional[str]=None, bridge_lookup: Optional[Callable]=None, persona_lookup: Optional[Callable]=None, manifest_scan: Optional[Callable]=None, session_dir: Path=SESSION_DIR) -> dict",
+"doc": "Resolve a worker's manager from spawn lineage, falling back to a declared manager.",
+"file": "src/cosa/agents/heartbeat_arbiter/manager_resolver.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop.stop",
+"sig": "(self, timeout: float=5.0) -> None",
+"doc": "Signal the daemon to exit and join it (idempotent \u2014 safe if never started).",
+"file": "src/cosa/agents/heartbeat_arbiter/self_respin_observer.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.self_respin_observer.effective_deadline",
+"sig": "(marker, fired_at, deadline)",
+"doc": "Resolve the deadline a not-yet-returned seat is judged against.",
+"file": "src/cosa/agents/heartbeat_arbiter/self_respin_observer.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog.stop",
+"sig": "(self, timeout: float=5.0) -> None",
+"doc": "Signal the daemon to exit and join it (idempotent \u2014 safe if never started).",
+"file": "src/cosa/agents/heartbeat_arbiter/turn_age_watchdog.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway.__init__",
+"sig": "(self, sender_session_id: str, api_key: str, api_base_url: str, store: Any, http_post: Callable, persona_name: Optional[str]=None, persona_icon: Optional[str]=None, persona_color: Optional[str]=None) -> None",
+"doc": "Store the injected dependencies for the three protocol methods.",
+"file": "src/cosa/agents/heartbeat_poker_commons_gateway.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.io_models.utils.json_object_recovery.extract_json_object",
+"sig": "(text: str) -> Optional[str]",
+"doc": "Extract the last balanced JSON object from text by matching braces.",
+"file": "src/cosa/agents/io_models/utils/json_object_recovery.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.io_models.xml_models.BugInjectionResponse.is_valid_response",
+"sig": "(self) -> bool",
+"doc": "Check if this represents a valid bug injection response.",
+"file": "src/cosa/agents/io_models/xml_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.io_models.xml_models.CodeBrainstormResponse.process_xml_data",
+"sig": "(cls, data)",
+"doc": "Process XML data before field validation.",
+"file": "src/cosa/agents/io_models/xml_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.__main__.parse_languages_arg",
+"sig": "(languages_str: str) -> list",
+"doc": "Parse comma-separated language codes into a list.",
+"file": "src/cosa/agents/podcast_generator/__main__.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_analysis",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=4096, temperature: float=0.7) -> APIResponse",
+"doc": "Call Claude for content analysis.",
+"file": "src/cosa/agents/podcast_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_revision",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=8192, temperature: float=0.6) -> APIResponse",
+"doc": "Call Claude for script revision.",
+"file": "src/cosa/agents/podcast_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=8192, temperature: float=0.8) -> APIResponse",
+"doc": "Call Claude for script generation.",
+"file": "src/cosa/agents/podcast_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.audio_stitcher.PodcastAudioStitcher.create_silence_segment",
+"sig": "(self, duration_ms: int) -> AudioSegment",
+"doc": "Create a silent audio segment of specified duration.",
+"file": "src/cosa/agents/podcast_generator/audio_stitcher.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+"sig": "(question: str, default: str='no', timeout: int=60, abstract: Optional[str]=None, job_id: Optional[str]=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.cosa_interface.notify_progress",
+"sig": "(message: str, priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None, progress_group_id: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification.",
+"file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+"sig": "(questions: list, timeout: int=120, title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, priority: Optional[str]=None) -> dict",
+"doc": "Present multiple-choice questions and get user's selection.",
+"file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+"sig": "(self, config_mgr=None, progress_callback: Optional[Callable[[int, int, str, float], Awaitable[None]]]=None, retry_callback: Optional[Callable[[int, int, int, str], Awaitable[None]]]=None, debug: bool=False, verbose: bool=False, max_retries: int=3, retry_base_delay: float=1.0)",
+"doc": "Initialize mock TTS client.",
+"file": "src/cosa/agents/podcast_generator/mock_clients.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.podcast_generator.orchestrator.PodcastGenerationError",
+"sig": "",
+"doc": "Raised when a core LLM-backed generation step fails.",
+"file": "src/cosa/agents/podcast_generator/orchestrator.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.prediction_engine.xml_models.OpenEndedSynthesisResponse.get_example_for_template",
+"sig": "(cls)",
+"doc": "Get example instance with placeholder values for prompt templates.",
+"file": "src/cosa/agents/prediction_engine/xml_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.APIResponse",
+"sig": "",
+"doc": "Structured response from a content-phase LLM call.",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.CostEstimate.add_sdk_cost",
+"sig": "(self, cost_usd: float)",
+"doc": "Accumulate the SDK-reported per-call cost telemetry.",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_analysis",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=4096, temperature: float=0.7) -> APIResponse",
+"doc": "Call Claude for narrative analysis.",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_d2",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=2048, temperature: float=0.3) -> APIResponse",
+"doc": "Generate d2 diagram code (text output, not JSON).",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_elaboration",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=8192, temperature: float=0.7) -> APIResponse",
+"doc": "Call Claude for full slide content elaboration.",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_matplotlib",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=4096, temperature: float=0.2) -> APIResponse",
+"doc": "Generate Matplotlib Python code (text output, not JSON).",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_mermaid",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=2048, temperature: float=0.3) -> APIResponse",
+"doc": "Generate Mermaid diagram code (text output, not JSON).",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_outline",
+"sig": "(self, system_prompt: str, user_message: str, max_tokens: int=4096, temperature: float=0.7) -> APIResponse",
+"doc": "Call Claude for slide outline generation.",
+"file": "src/cosa/agents/presentation_generator/api_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+"sig": "(question: str, default: str='no', timeout: int=60, abstract: Optional[str]=None, job_id: Optional[str]=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.cosa_interface.notify_progress",
+"sig": "(message: str, priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None, progress_group_id: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification.",
+"file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+"sig": "(questions: list, timeout: int=120, title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, priority: Optional[str]=None) -> dict",
+"doc": "Present multiple-choice questions and get user's selection.",
+"file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+"sig": "(self, passed, reason, pptx_path=None, size_bytes=None, slide_count=None, text_run_count=None)",
+"doc": "",
+"file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.gemini_client.GeminiImageClient.__init__",
+"sig": "(self, model: str='imagen-4.0-generate-001', aspect_ratio: str='16:9', budget_limit: float=1.0, video_model: str='veo-2.0-generate-001', video_budget_limit: float=5.0, debug: bool=False)",
+"doc": "Initialize GeminiImageClient.",
+"file": "src/cosa/agents/presentation_generator/gemini_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.gemini_client.GeminiImageClient.generate_video",
+"sig": "(self, prompt: str, output_path: str, duration_seconds: int=8) -> bool",
+"doc": "Generate a video via Veo model with async polling.",
+"file": "src/cosa/agents/presentation_generator/gemini_client.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.orchestrator.quick_smoke_test",
+"sig": "()",
+"doc": "Quick smoke test for PresentationOrchestratorAgent.",
+"file": "src/cosa/agents/presentation_generator/orchestrator.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.renderers.d2_renderer.D2Renderer.__init__",
+"sig": "(self, debug: bool=False, verbose: bool=False, d2_theme: int=0)",
+"doc": "Initialize D2Renderer.",
+"file": "src/cosa/agents/presentation_generator/renderers/d2_renderer.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.presentation_generator.renderers.veo_renderer.VeoRenderer.__init__",
+"sig": "(self, gemini_client=None, max_videos: int=5, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize VeoRenderer.",
+"file": "src/cosa/agents/presentation_generator/renderers/veo_renderer.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.prompt_formatter.PromptFormatter.create_template_examples",
+"sig": "(self) -> dict[str, str]",
+"doc": "Create example templates for all supported format types.",
+"file": "src/cosa/agents/prompt_formatter.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.runnable_code.RunnableCode",
+"sig": "",
+"doc": "Base class for agents that can execute generated code.",
+"file": "src/cosa/agents/runnable_code.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.runtime_argument_expeditor.xml_models.ArgConfirmationResponse.is_approval",
+"sig": "(self)",
+"doc": "Check if the user approved the arguments.",
+"file": "src/cosa/agents/runtime_argument_expeditor/xml_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_multi",
+"sig": "(self, git_ops, clusters: list, trust_level: int, notify_fn: Callable, pr_title: str, pr_body: str, branch_slug_hint: Optional[str]=None) -> dict",
+"doc": "Multi-cluster git strategy: one branch, N commits (one per cluster), one PR.",
+"file": "src/cosa/agents/shared/git_strategist.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.shared.worktree_straggler_tickets.load_state",
+"sig": "(state_path: str) -> dict",
+"doc": "The sidecar { path: { first_refused_at, estimated, ticket_id } }.",
+"file": "src/cosa/agents/shared/worktree_straggler_tickets.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.config.SweTeamConfig.from_config",
+"sig": "(cls, config_mgr, debug=False)",
+"doc": "Create a SweTeamConfig from ConfigurationManager INI values.",
+"file": "src/cosa/agents/swe_team/config.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+"sig": "(question: str, role: str='lead', default: str='no', timeout: int=120, abstract: Optional[str]=None) -> bool",
+"doc": "Ask a yes/no question and return boolean result.",
+"file": "src/cosa/agents/swe_team/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+"sig": "(message: str, role: str='lead', priority: str='medium', abstract: Optional[str]=None, session_name: Optional[str]=None, job_id: Optional[str]=None, queue_name: Optional[str]=None, progress_group_id: Optional[str]=None) -> None",
+"doc": "Send fire-and-forget progress notification from a specific agent role.",
+"file": "src/cosa/agents/swe_team/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.cosa_interface.request_decision",
+"sig": "(question: str, options: list, role: str='lead', timeout: int=300, abstract: Optional[str]=None) -> dict",
+"doc": "Present multiple-choice decision to user/proxy.",
+"file": "src/cosa/agents/swe_team/cosa_interface.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.safety_limits.SafetyGuard.record_success",
+"sig": "(self) -> None",
+"doc": "Reset consecutive failure counter on success.",
+"file": "src/cosa/agents/swe_team/safety_limits.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.swe_team.state_files.FeatureList.load",
+"sig": "(self)",
+"doc": "Load task list from disk.",
+"file": "src/cosa/agents/swe_team/state_files.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase2_propose",
+"sig": "(self) -> tuple",
+"doc": "Per-cluster fix proposals. Aggregated voice gate selects a subset.",
+"file": "src/cosa/agents/test_fix_expediter/orchestrator.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.test_fix_expediter.prompts.fix.build_redelegation_prompt",
+"sig": "(selected_fix, coder_output, tester_output, iteration: int) -> str",
+"doc": "Build the redelegation prompt when the Tester reports failure.",
+"file": "src/cosa/agents/test_fix_expediter/prompts/fix.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.test_fix_expediter.state.VoiceGateTimeoutError.__init__",
+"sig": "(self, phase: str, message: str='', delivered: bool=False)",
+"doc": "",
+"file": "src/cosa/agents/test_fix_expediter/state.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.test_harness.mock_submit.MockJobArgs",
+"sig": "",
+"doc": "The arguments of `agent router go to mock job`, the door's request body.",
+"file": "src/cosa/agents/test_harness/mock_submit.py",
+"lang": "py"
+},
+{
+"id": "cosa.agents.test_suite.attestation.verify_chain",
+"sig": "(path)",
+"doc": "Walk the ledger and report the first index where the chain breaks.",
+"file": "src/cosa/agents/test_suite/attestation.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_analyzer.analyzer.BranchChangeAnalyzer.__init__",
+"sig": "(self, config_path: Optional[str]=None, base_branch: Optional[str]=None, head_branch: Optional[str]=None, repo_path: Optional[str]=None, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize branch change analyzer.",
+"file": "src/cosa/repo/branch_analyzer/analyzer.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_analyzer.file_classifier.FileTypeClassifier.is_binary",
+"sig": "(self, filename: str) -> bool",
+"doc": "Check if file is classified as binary.",
+"file": "src/cosa/repo/branch_analyzer/file_classifier.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_analyzer.git_diff_parser.GitDiffParser.get_diff",
+"sig": "(self, base: str, head: str) -> List[DiffLine]",
+"doc": "Get diff between two git references.",
+"file": "src/cosa/repo/branch_analyzer/git_diff_parser.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_analyzer.statistics_collector.StatisticsCollector.reset",
+"sig": "(self) -> None",
+"doc": "Reset all statistics to zero.",
+"file": "src/cosa/repo/branch_analyzer/statistics_collector.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_change_analysis.analyze_diff",
+"sig": "()",
+"doc": "Analyze the git diff and categorize changes.",
+"file": "src/cosa/repo/branch_change_analysis.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.branch_change_analysis.is_javascript_comment",
+"sig": "(line)",
+"doc": "Check if a JavaScript line is a comment.",
+"file": "src/cosa/repo/branch_change_analysis.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.directory_analyzer.analyzer.DirectoryAnalyzer.__init__",
+"sig": "(self, config_path: Optional[str]=None, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize directory analyzer.",
+"file": "src/cosa/repo/directory_analyzer/analyzer.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.directory_analyzer.directory_scanner.DirectoryScanner.scan",
+"sig": "(self, root_path: str) -> Iterator[FileInfo]",
+"doc": "Scan directory tree and yield file information.",
+"file": "src/cosa/repo/directory_analyzer/directory_scanner.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter.format_markdown",
+"sig": "(self, stats: Dict[str, Any], directory_path: str, scan_stats: Dict[str, Any]=None) -> str",
+"doc": "Format statistics as Markdown.",
+"file": "src/cosa/repo/directory_analyzer/report_formatter.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.changed_ranges.filter_findings",
+"sig": "(findings, ranges_by_path)",
+"doc": "Keep the findings that sit on a touched line.",
+"file": "src/cosa/repo/doc_lint/changed_ranges.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.claim_extractor.classify_quote",
+"sig": "(quote, old_text, bounded=True)",
+"doc": "Decide whether a quote verifies in old text, and say why not when it does not.",
+"file": "src/cosa/repo/doc_lint/claim_extractor.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.cli.build_parser",
+"sig": "(description)",
+"doc": "Build the argument parser every linter shares.",
+"file": "src/cosa/repo/doc_lint/cli.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.contract_diff.stand_in",
+"sig": "(before, new_sections, own_headings)",
+"doc": "Find the new heading that now holds a vanished heading's items.",
+"file": "src/cosa/repo/doc_lint/contract_diff.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.counts.allowance",
+"sig": "(path, files, renamed_from)",
+"doc": "Return the count a staged counted path may hold.",
+"file": "src/cosa/repo/doc_lint/counts.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.counts.differing_rule_files",
+"sig": "(root)",
+"doc": "Compare the rule files in the index with their working copies.",
+"file": "src/cosa/repo/doc_lint/counts.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.gate.head_table_text",
+"sig": "(root)",
+"doc": "Read the count table as the last commit has it.",
+"file": "src/cosa/repo/doc_lint/gate.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.gate.main",
+"sig": "(argv=None, err=None)",
+"doc": "Run the gate.",
+"file": "src/cosa/repo/doc_lint/gate.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.harness_runner.Ledger.get",
+"sig": "(self, key)",
+"doc": "Return the stored value for key, or None when that call has not finished.",
+"file": "src/cosa/repo/doc_lint/harness_runner.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.harness_schedule.build_submit_payload",
+"sig": "(argv, when)",
+"doc": "Build the /api/v2/submit body that runs one harness command as a bounded job.",
+"file": "src/cosa/repo/doc_lint/harness_schedule.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.judge_comparison.check_unanswered",
+"sig": "(name, missing, reported)",
+"doc": "Square the passes a ledger lacks with the unanswered count the same run reported.",
+"file": "src/cosa/repo/doc_lint/judge_comparison.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.judge_comparison.refuse_model_call",
+"sig": "(prompt, options)",
+"doc": "Stand in for the model: any call means the ledger is missing a row.",
+"file": "src/cosa/repo/doc_lint/judge_comparison.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_rules.content_words",
+"sig": "(text)",
+"doc": "Return the set of lowercase words of three letters or more that are not function words.",
+"file": "src/cosa/repo/doc_lint/labelled_set_rules.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.WriterStopped.__init__",
+"sig": "(self, message, called, dropped)",
+"doc": "",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.check_set",
+"sig": "(base, split)",
+"doc": "Run rule 1 over every seeded pair of a written split, reading files only.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.cmd_verify",
+"sig": "(args)",
+"doc": "Write the second seat's input, without kind labels, and a separate span file.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.cut_text",
+"sig": "(old, span)",
+"doc": "Return old with the ( start, end ) span removed and the join repaired.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.delete_candidates",
+"sig": "(old, stoplist)",
+"doc": "Return the seedable deletions of one docstring, each { span, span_text, cut }.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.seed_search",
+"sig": "(pool, stoplist, gate_sizes, dev_sizes, mix, split_seed_start, tries, draw_seed, exclude=frozenset())",
+"doc": "Search split seeds until dev, gate and reserve can each fill every kind and stratum.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.labelled_set_seeder.unit_of",
+"sig": "(file)",
+"doc": "Return a file's package directory: the unit never split across dev, gate and reserve.",
+"file": "src/cosa/repo/doc_lint/labelled_set_seeder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.links.markdown_link_findings",
+"sig": "(text, path, root)",
+"doc": "Report relative markdown links whose target file does not exist.",
+"file": "src/cosa/repo/doc_lint/links.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.marker_counts.count_markers",
+"sig": "(text, words=None)",
+"doc": "Count the six marker columns in a piece of prose.",
+"file": "src/cosa/repo/doc_lint/marker_counts.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.md_lint.lint_source",
+"sig": "(path, source, root=None, stats=None)",
+"doc": "Lint one markdown page.",
+"file": "src/cosa/repo/doc_lint/md_lint.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.model_transport.ModelUnavailableError",
+"sig": "",
+"doc": "The service stayed unavailable, or a stop cut the wait; retrying cannot help.",
+"file": "src/cosa/repo/doc_lint/model_transport.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.model_transport.configure_claude",
+"sig": "()",
+"doc": "Send every later call through bounded Claude Code again, and forget the agy pin.",
+"file": "src/cosa/repo/doc_lint/model_transport.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.pool_builder.build_parser",
+"sig": "()",
+"doc": "Return the command-line parser.",
+"file": "src/cosa/repo/doc_lint/pool_builder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.prose_judge.ProseParseError",
+"sig": "",
+"doc": "The model's reply is not the JSON shape the prose judge demands.",
+"file": "src/cosa/repo/doc_lint/prose_judge.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.reader_rig_run.RunRefused",
+"sig": "",
+"doc": "The run cannot start; the message names why.",
+"file": "src/cosa/repo/doc_lint/reader_rig_run.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.reader_rig_run.parse_args",
+"sig": "(argv)",
+"doc": "Parse the command line.",
+"file": "src/cosa/repo/doc_lint/reader_rig_run.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.reader_rig_run.read_at",
+"sig": "(repo, sha, path)",
+"doc": "Return a file's text at a commit, read from git and never from the working tree.",
+"file": "src/cosa/repo/doc_lint/reader_rig_run.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.reader_rig_run.score_file",
+"sig": "(path, old_text, new_text, group, config, ledger, query_fn, halt, salvage=True)",
+"doc": "Score every question of one file on both texts for every run, on the same questions.",
+"file": "src/cosa/repo/doc_lint/reader_rig_run.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.scope_gate.main",
+"sig": "(argv=None, out=None)",
+"doc": "Run the gate and return its exit code.",
+"file": "src/cosa/repo/doc_lint/scope_gate.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.text_rules.defined_steps",
+"sig": "(text)",
+"doc": "Collect the step, phase or option labels that the text itself defines.",
+"file": "src/cosa/repo/doc_lint/text_rules.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.text_rules.summary_findings",
+"sig": "(text, path, first_line)",
+"doc": "Check rule 1: the summary, the first paragraph with its wrapped lines joined, is short.",
+"file": "src/cosa/repo/doc_lint/text_rules.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.tool_runners.run_markdownlint",
+"sig": "(root, paths, runner=subprocess.run)",
+"doc": "Run markdownlint-cli2 over markdown files, with the config in .markdownlint-cli2.jsonc.",
+"file": "src/cosa/repo/doc_lint/tool_runners.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.doc_lint.train_builder.build_train",
+"sig": "(root, rows, order, size, data_root)",
+"doc": "Build one train from the claim rows.",
+"file": "src/cosa/repo/doc_lint/train_builder.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.gate_reachability.read_suite_scripts",
+"sig": "(project_root: Path) -> Set[str]",
+"doc": "Extract the runner-script paths from the SUITE_SCRIPTS dict literal.",
+"file": "src/cosa/repo/gate_reachability.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.git_loc_delta.analyzer.GitLogLocDeltaAnalyzer.__init__",
+"sig": "(self, repo_path: str='.', mode: str='today', branch: Optional[str]=None, base: str='main', since: Optional[str]=None, until: Optional[str]=None, all_branches: bool=False, include_merges: bool=False, author: Optional[str]=None, repo_name: Optional[str]=None, timeout: int=60, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize the analyzer.",
+"file": "src/cosa/repo/git_loc_delta/analyzer.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.git_loc_delta.daily_aggregator.DailyAggregator.by_type",
+"sig": "(self) -> Dict[Tuple[str, str], Dict[str, int]]",
+"doc": "Return the by-(date,file_type) bucket view.",
+"file": "src/cosa/repo/git_loc_delta/daily_aggregator.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.git_loc_delta.exceptions.DateRangeError",
+"sig": "",
+"doc": "Raised when the requested date range or branch range is invalid or empty.",
+"file": "src/cosa/repo/git_loc_delta/exceptions.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+"sig": "(self, repo_path: str='.', since: Optional[str]=None, until: Optional[str]=None, rev_range: Optional[str]=None, all_branches: bool=False, include_merges: bool=False, author: Optional[str]=None, timeout: int=60, debug: bool=False, verbose: bool=False)",
+"doc": "Initialize git-log parser.",
+"file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+"lang": "py"
+},
+{
+"id": "cosa.repo.symindex.py_index.strip_docs",
+"sig": "(node)",
+"doc": "Return a copy of an AST node with every docstring removed.",
+"file": "src/cosa/repo/symindex/py_index.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.arbiter_bootstrap.quick_smoke_test",
+"sig": "()",
+"doc": "Self-contained smoke test with fake queues. Returns True or raises.",
+"file": "src/cosa/rest/arbiter_bootstrap.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.auth.init_firebase",
+"sig": "()",
+"doc": "Initialize Firebase Admin SDK with mock implementation.",
+"file": "src/cosa/rest/auth.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.auth_models.RegisterRequest",
+"sig": "",
+"doc": "User registration request.",
+"file": "src/cosa/rest/auth_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.cc_transcript_mapper.map_records",
+"sig": "(records, budget=0, tool_names=None)",
+"doc": "Map transcript records to display blocks, in file order.",
+"file": "src/cosa/rest/cc_transcript_mapper.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.database.is_cloud_backed",
+"sig": "() -> bool",
+"doc": "Decide whether this deployment uses cloud-backed Postgres (Cloud SQL).",
+"file": "src/cosa/rest/db/database.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.embedding_regeneration.AdaptiveBudget.__init__",
+"sig": "(self, start: int=DEFAULT_CHAR_BUDGET, *, floor: int=MIN_CHAR_BUDGET, ceiling: int=MAX_CHAR_BUDGET, growth: float=1.5)",
+"doc": "Requires:",
+"file": "src/cosa/rest/db/embedding_regeneration.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.embedding_regeneration.classify_norm",
+"sig": "(norm: float) -> str",
+"doc": "Classify a vector's norm against the current model's measured band.",
+"file": "src/cosa/rest/db/embedding_regeneration.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.embedding_regeneration.is_off_peak",
+"sig": "(hour_edt: int, end_hour: int=OFF_PEAK_END_HOUR) -> bool",
+"doc": "True iff an hour falls in the sanctioned batch window (midnight - end_hour EDT).",
+"file": "src/cosa/rest/db/embedding_regeneration.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.activate",
+"sig": "(self, key_id: uuid.UUID) -> bool",
+"doc": "Reactivate API key.",
+"file": "src/cosa/rest/db/repositories/api_key_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.deactivate",
+"sig": "(self, key_id: uuid.UUID) -> bool",
+"doc": "Deactivate API key.",
+"file": "src/cosa/rest/db/repositories/api_key_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.email_verification_token_repository.EmailVerificationTokenRepository.mark_used",
+"sig": "(self, token: str) -> bool",
+"doc": "Mark email verification token as used.",
+"file": "src/cosa/rest/db/repositories/email_verification_token_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.failed_login_attempt_repository.FailedLoginAttemptRepository.count_recent_by_ip",
+"sig": "(self, ip_address: str, minutes: int=15) -> int",
+"doc": "Count recent failed login attempts from IP address.",
+"file": "src/cosa/rest/db/repositories/failed_login_attempt_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.input_and_output_repository.InputAndOutputRepository.get_io_stats_by_input_type",
+"sig": "(self, max_rows: int=1000) -> Dict[str, int]",
+"doc": "Count rows grouped by input_type (over a bounded window).",
+"file": "src/cosa/rest/db/repositories/input_and_output_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.notification_repository.NotificationRepository.get_sender_conversation",
+"sig": "(self, sender_id: str, recipient_id: uuid.UUID, anchor: Optional[datetime]=None, window_hours: int=24) -> List[Notification]",
+"doc": "Load conversation window relative to anchor (activity-anchored loading).",
+"file": "src/cosa/rest/db/repositories/notification_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.password_reset_token_repository.PasswordResetTokenRepository.mark_used",
+"sig": "(self, token: str) -> bool",
+"doc": "Mark password reset token as used.",
+"file": "src/cosa/rest/db/repositories/password_reset_token_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository.log_decision",
+"sig": "(self, notification_id, domain, category, question, action, decision_value=None, sender_id='', confidence=0.0, trust_level=1, reason='', requires_ratification=False, metadata_json=None, data_origin='organic')",
+"doc": "Log a decision with specified action (suggest, act, defer).",
+"file": "src/cosa/rest/db/repositories/proxy_decision_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository.update_circuit_breaker_state",
+"sig": "(self, user_email, domain, category, cb_state)",
+"doc": "Set the circuit breaker state for a category.",
+"file": "src/cosa/rest/db/repositories/proxy_decision_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository.__init__",
+"sig": "(self, session: Session)",
+"doc": "Initialize with a database session.",
+"file": "src/cosa/rest/db/repositories/question_embedding_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.task_repository.TaskRepository.pledge_facts_for_id",
+"sig": "(self, id: uuid.UUID) -> tuple",
+"doc": "Read one pledged row's ( status, owner_persona ) without locking it.",
+"file": "src/cosa/rest/db/repositories/task_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.user_repository.UserRepository.__init__",
+"sig": "(self, session: Session)",
+"doc": "Initialize UserRepository with session.",
+"file": "src/cosa/rest/db/repositories/user_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.repositories.user_repository.UserRepository.get_active_users",
+"sig": "(self, limit: int=100, offset: int=0) -> List[User]",
+"doc": "Get all active users with pagination.",
+"file": "src/cosa/rest/db/repositories/user_repository.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.db.vector_store_models.SolutionSnapshot",
+"sig": "",
+"doc": "solution-snapshot store; question_embedding + code_embedding ANN (HNSW dot).",
+"file": "src/cosa/rest/db/vector_store_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.dead_queue_watchdog.DeadQueueWatchdog.increment_attempt",
+"sig": "(self, job_id: str) -> int",
+"doc": "Increment and return attempt count for a job.",
+"file": "src/cosa/rest/dead_queue_watchdog.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.fcm_wake_service.build_wake_payload",
+"sig": "(reason: str) -> dict",
+"doc": "Build the data-only `ws_wake` payload in its contract shape.",
+"file": "src/cosa/rest/fcm_wake_service.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher.stop",
+"sig": "(self, timeout: float=5.0) -> None",
+"doc": "Signal the daemon to exit and join it (idempotent \u2014 safe if never started).",
+"file": "src/cosa/rest/follow_through_escalation_watcher.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.middleware.api_key_auth.validate_api_key",
+"sig": "(api_key: str) -> Optional[str]",
+"doc": "Validate API key and return user_id if valid.",
+"file": "src/cosa/rest/middleware/api_key_auth.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.notification_fifo_queue.NotificationFifoQueue",
+"sig": "",
+"doc": "FIFO queue for Claude Code notifications with priority handling and io_tbl logging.",
+"file": "src/cosa/rest/notification_fifo_queue.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.password_service.verify_password",
+"sig": "(plain_password: str, hashed_password: str) -> bool",
+"doc": "Verify plaintext password against stored hash.",
+"file": "src/cosa/rest/password_service.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.postgres_models.JobHistory",
+"sig": "",
+"doc": "Job history model for CJ Flow persistence.",
+"file": "src/cosa/rest/postgres_models.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.queue_protocol.QueueableJob.formatter_ran_to_completion",
+"sig": "(self) -> bool",
+"doc": "Check if output formatting completed successfully.",
+"file": "src/cosa/rest/queue_protocol.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.rate_limiter.record_failed_login",
+"sig": "(email: str, ip_address: Optional[str]=None) -> None",
+"doc": "Record failed login attempt in database.",
+"file": "src/cosa/rest/rate_limiter.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.refresh_token_service.revoke_refresh_token",
+"sig": "(jti: str) -> Tuple[bool, str]",
+"doc": "Revoke refresh token by JTI.",
+"file": "src/cosa/rest/refresh_token_service.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.admin.UserListResponse",
+"sig": "",
+"doc": "Response model for list users endpoint.",
+"file": "src/cosa/rest/routers/admin.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.decision_proxy.acknowledge_batch",
+"sig": "() -> dict",
+"doc": "Retire current batch and start a new one.",
+"file": "src/cosa/rest/routers/decision_proxy.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.decision_proxy.update_trust_mode",
+"sig": "(request_body: TrustModeUpdateRequest, current_user: dict=Depends(get_current_user), run_queue=Depends(get_run_queue), config_mgr=Depends(get_config_mgr))",
+"doc": "Change the trust mode at runtime for the running orchestrator and the INI config.",
+"file": "src/cosa/rest/routers/decision_proxy.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.dm.get_dm_quality_audit_endpoint",
+"sig": "(authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]) -> JSONResponse",
+"doc": "",
+"file": "src/cosa/rest/routers/dm.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.mock_job.submit_mock_job",
+"sig": "()",
+"doc": "Refuse this retired door with 410 Gone.",
+"file": "src/cosa/rest/routers/mock_job.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.mode.AvailableModesResponse",
+"sig": "",
+"doc": "Response for listing available modes.",
+"file": "src/cosa/rest/routers/mode.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.mode.get_mode",
+"sig": "(current_user=Depends(get_current_user), todo_queue=Depends(get_todo_queue))",
+"doc": "Get current mode for the authenticated user.",
+"file": "src/cosa/rest/routers/mode.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.notifications.get_local_timestamp",
+"sig": "()",
+"doc": "Get timezone-aware timestamp using configured timezone from ConfigurationManager.",
+"file": "src/cosa/rest/routers/notifications.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.pages.page_app",
+"sig": "()",
+"doc": "",
+"file": "src/cosa/rest/routers/pages.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.routers.queues.push_agentic",
+"sig": "()",
+"doc": "Refuse this retired door with 410 Gone.",
+"file": "src/cosa/rest/routers/queues.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.running_fifo_queue.RunningFifoQueue.__init__",
+"sig": "(self, app: Any, websocket_mgr: Any, snapshot_mgr: Any, jobs_todo_queue: FifoQueue, jobs_done_queue: FifoQueue, jobs_dead_queue: FifoQueue, config_mgr: Optional[Any]=None, emit_speech_callback: Optional[Any]=None) -> None",
+"doc": "Initialize the running FIFO queue.",
+"file": "src/cosa/rest/running_fifo_queue.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.running_fifo_queue.RunningFifoQueue.enter_running_loop",
+"sig": "(self) -> None",
+"doc": "Deprecated: enters the main job execution loop.",
+"file": "src/cosa/rest/running_fifo_queue.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.running_fifo_queue.compute_duration_seconds",
+"sig": "(started_at: Any, completed_at: Any) -> Optional[float]",
+"doc": "Elapsed seconds between two timestamps, or None when either is absent.",
+"file": "src/cosa/rest/running_fifo_queue.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.task_approval_settings.set_overrides",
+"sig": "(updated_by=None, **updates)",
+"doc": "Persist one or more approval settings through the one validated door.",
+"file": "src/cosa/rest/task_approval_settings.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.task_chase_consumer.TaskChaseConsumer.stop",
+"sig": "(self, timeout: float=5.0) -> None",
+"doc": "Signal the daemon to exit and join it (idempotent \u2014 safe if never started).",
+"file": "src/cosa/rest/task_chase_consumer.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.task_store_owed.owed_status_clause",
+"sig": "(model, now)",
+"doc": "Return the `owed_only=True` set: queued, in_progress, and parked rows not park-active.",
+"file": "src/cosa/rest/task_store_owed.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.task_store_prose_refs.quick_smoke_test",
+"sig": "()",
+"doc": "Exercise the scanner on a synthetic board, including its negative control.",
+"file": "src/cosa/rest/task_store_prose_refs.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.cache.V2Cache.normalize",
+"sig": "(self, question: str) -> str",
+"doc": "The normalized form of a question, from the same normalizer the store is keyed by.",
+"file": "src/cosa/rest/v2/cache.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.flow.AskFlow.submit",
+"sig": "(self, user_id: str, user_email: str, session_id: str, websocket_id: str, command: Optional[str]=None, args: Optional[dict]=None, question: Optional[str]=None, job: Any=None, speak: bool=True, scheduled_at: Optional[str]=None, monopolize: bool=False, parent_id_hash: Optional[str]=None, parent_stamp_dropped: Optional[str]=None) -> dict",
+"doc": "Run work whose command is already decided: the door beside ask.",
+"file": "src/cosa/rest/v2/flow.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.near_match_guard.quantities_differ",
+"sig": "(asked: Optional[str], stored: Optional[str]) -> bool",
+"doc": "Whether replaying the answer to `stored` for `asked` could change the quantity asked.",
+"file": "src/cosa/rest/v2/near_match_guard.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.pending.PendingRequests.put",
+"sig": "(self, extraction: Any, user_email: str, session_id: str, user_id: str, command: str='', question: str='', pending_id: Optional[str]=None) -> str",
+"doc": "Park a request and return its pending_id.",
+"file": "src/cosa/rest/v2/pending.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.router_prompt_generator.render_router_prompt",
+"sig": "()",
+"doc": "Render the agent-router completion prompt from the registry.",
+"file": "src/cosa/rest/v2/router_prompt_generator.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.v2.trace.StageTrace.has_mark",
+"sig": "(self, name: str) -> bool",
+"doc": "Return True iff stage `name` has been marked.",
+"file": "src/cosa/rest/v2/trace.py",
+"lang": "py"
+},
+{
+"id": "cosa.rest.voice_persona_helpers.pick_unallocated_persona",
+"sig": "(pool: List[PoolPersona], occupied_names: Set[str], stable_session_id: str, overflow_persona: Optional[PoolPersona]=None, extra_colors: Optional[List[str]]=None, declared_manager_names: Optional[Set[str]]=None) -> Optional[PoolPersona]",
+"doc": "Uniform random draw from (pool \u2212 occupied \u2212 declared managers), with overflow fallback.",
+"file": "src/cosa/rest/voice_persona_helpers.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.api_resource_manager.ApiResourceManager.get_status",
+"sig": "(self) -> dict",
+"doc": "Return a dict snapshot suitable for /api/queue/pool-status.",
+"file": "src/cosa/utils/api_resource_manager.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.bounded_retry.retry_call_async",
+"sig": "(fn: Callable[[], Any], policy: Optional[RetryPolicy]=None, on_retry: Optional[Callable[[int, Any, float], Any]]=None, sleep: Optional[Callable[[float], Any]]=None, now: Optional[Callable[[], float]]=None) -> Any",
+"doc": "Await ``fn()`` until it succeeds or the policy's bound is spent (asynchronous).",
+"file": "src/cosa/utils/bounded_retry.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.cc_memory_watch.AlertTracker.__init__",
+"sig": "(self, threshold_kb, restep_kb)",
+"doc": "",
+"file": "src/cosa/utils/cc_memory_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.cc_memory_watch.AlertTracker.forget_absent",
+"sig": "(self, live_pids)",
+"doc": "Drop state for processes that are gone.",
+"file": "src/cosa/utils/cc_memory_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.cc_memory_watch.Sample.__init__",
+"sig": "(self, pid, rss_kb, cmdline, session_id=None, scope_unit=None, tmux_session=None, scope_anon_kb=None)",
+"doc": "",
+"file": "src/cosa/utils/cc_memory_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.cc_memory_watch.resolve_tmux_session",
+"sig": "(pane, runner=subprocess.run)",
+"doc": "Map a tmux pane id to its session name.",
+"file": "src/cosa/utils/cc_memory_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.cc_memory_watch.run_once",
+"sig": "(tracker, emit, now=None)",
+"doc": "Sample once and emit a line for each process that deserves one.",
+"file": "src/cosa/utils/cc_memory_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.checked_hash_pyc.ledger_path",
+"sig": "(root=None)",
+"doc": "Locate the append-only mode-change ledger.",
+"file": "src/cosa/utils/checked_hash_pyc.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.coverage_contention.comm_could_be_pytest",
+"sig": "(comm: str) -> bool",
+"doc": "Return True when a process's `comm` is one a pytest run could actually have.",
+"file": "src/cosa/utils/coverage_contention.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.coverage_contention.looks_like_a_direct_test_file_run",
+"sig": "(cmdline: str) -> bool",
+"doc": "Return True when `cmdline` is an interpreter running a test file directly.",
+"file": "src/cosa/utils/coverage_contention.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.coverage_frame.report_paths",
+"sig": "(coverage_json_path)",
+"doc": "Read the file paths a coverage JSON report contains.",
+"file": "src/cosa/utils/coverage_frame.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.coverage_frame.unreachable_subdirs",
+"sig": "(root, source_entries, omit_globs=())",
+"doc": "Find directories holding .py files that the configured frame cannot reach.",
+"file": "src/cosa/utils/coverage_frame.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.coverage_frame.unseen_python_files",
+"sig": "(root, source_entries, reported_paths, omit_globs=())",
+"doc": "Census the gap between the .py files a frame claims and a coverage report holds.",
+"file": "src/cosa/utils/coverage_frame.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.credential_watch.container_is_busy",
+"sig": "(ps_output: str, markers=BUSY_PROCESS_MARKERS) -> Tuple[bool, str]",
+"doc": "Decide whether a container is running work a restart would destroy.",
+"file": "src/cosa/utils/credential_watch.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.edt_timestamp.resolve_tz",
+"sig": "(tz_name: Optional[str])",
+"doc": "Resolve a tz-database name to a ZoneInfo, degrade-safe.",
+"file": "src/cosa/utils/edt_timestamp.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.edt_timestamp.split_leading_stamp",
+"sig": "(text)",
+"doc": "Split a leading EDT stamp off `text` and return ( stamp, rest ).",
+"file": "src/cosa/utils/edt_timestamp.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.gcp_project.resolve_gcp_project_id",
+"sig": "(environ=None, env_file=None)",
+"doc": "Resolve the GCP project id.",
+"file": "src/cosa/utils/gcp_project.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.model_server_liveness.probe_endpoint",
+"sig": "(endpoint: str, timeout_s: float=DEFAULT_TIMEOUT_S, url_opener: Optional[Callable]=None) -> Dict[str, Any]",
+"doc": "Ask one endpoint whether it is serving, and describe the answer.",
+"file": "src/cosa/utils/model_server_liveness.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.notification_utils.convert_open_ended_batch_for_api",
+"sig": "(questions: list) -> dict",
+"doc": "Convert open-ended batch questions to API response_options format.",
+"file": "src/cosa/utils/notification_utils.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.notification_utils.normalize_abstract",
+"sig": "(abstract) -> str",
+"doc": "Convert literal \\n to actual newlines in abstract text.",
+"file": "src/cosa/utils/notification_utils.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.pytest_collection_diagnosis.quick_smoke_test",
+"sig": "()",
+"doc": "Exercise both measured shapes plus the two must-stay-silent controls.",
+"file": "src/cosa/utils/pytest_collection_diagnosis.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.seat_worktree.quick_smoke_test",
+"sig": "()",
+"doc": "Non-destructive: exercises the no-op and parsing paths only, never git.",
+"file": "src/cosa/utils/seat_worktree.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.secret_drift.sha256_of",
+"sig": "(text: str) -> str",
+"doc": "Return the hex sha256 of a string.",
+"file": "src/cosa/utils/secret_drift.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.transcript_tail.tail_jsonl",
+"sig": "(path, offset=0)",
+"doc": "Read new complete JSONL records from `path` since `offset`, reporting rotation.",
+"file": "src/cosa/utils/transcript_tail.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.tree_state.capture_start_sha",
+"sig": "(git)",
+"doc": "The sha a run is about to start on, read with a single git call.",
+"file": "src/cosa/utils/tree_state.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.unit_network_guard.is_loopback",
+"sig": "(address)",
+"doc": "Say whether a connect address is local, so only routed dials are guarded.",
+"file": "src/cosa/utils/unit_network_guard.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.get_api_key",
+"sig": "(key_name: str, project_root: str=None) -> Optional[str]",
+"doc": "Get an API key from the configuration directory.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.get_current_date",
+"sig": "(tz_name: str='US/Eastern', return_prose: bool=False, offset: int=0) -> str",
+"doc": "Get the current date in the specified timezone with optional formatting.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.get_file_as_dictionary",
+"sig": "(path: str, lower_case: bool=False, omit_comments: bool=True, debug: bool=False, verbose: bool=False) -> dict[str, str]",
+"doc": "Load a file as a dictionary with key=value pairs.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.init",
+"sig": "(d: bool) -> None",
+"doc": "Initialize the debug flag for the utility module.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.print_stack_trace",
+"sig": "(exception: Exception, explanation: str='Unknown reason', caller: str='Unknown caller', prepend_nl: bool=True, debug: bool=False) -> None",
+"doc": "Print a formatted stack trace for an exception.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.quick_smoke_test",
+"sig": "()",
+"doc": "Quick smoke test to validate utility functions.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util.write_string_to_file",
+"sig": "(path: str, string: str) -> None",
+"doc": "Write a string to a file.",
+"file": "src/cosa/utils/util.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_code_runner.assemble_and_run_solution",
+"sig": "(solution_code: list[str], example_code: str, path_to_df: Optional[str]=None, solution_code_returns: str='string', python_runtime: str='python3', debug: bool=False, verbose: bool=False, inject_bugs: bool=False, return_none_on_timeout: bool=True) -> dict[str, Any]",
+"doc": "Assemble and execute the solution code with necessary imports and post-processing.",
+"file": "src/cosa/utils/util_code_runner.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_code_runner.quick_smoke_test",
+"sig": "()",
+"doc": "Critical smoke test for util_code_runner - validates code execution infrastructure.",
+"file": "src/cosa/utils/util_code_runner.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_gcs.quick_smoke_test",
+"sig": "()",
+"doc": "Quick smoke test for GCS utilities - validates basic functionality.",
+"file": "src/cosa/utils/util_gcs.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_gcs.read_text_from_gcs",
+"sig": "(gcs_uri: str, debug: bool=False) -> str",
+"doc": "Read text content from Google Cloud Storage.",
+"file": "src/cosa/utils/util_gcs.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_gcs.validate_gcs_bucket_access",
+"sig": "(bucket_uri: str, debug: bool=False) -> bool",
+"doc": "Pre-flight check for GCS bucket write access.",
+"file": "src/cosa/utils/util_gcs.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_pandas.DeepilyDataFrame",
+"sig": "",
+"doc": "Extended pandas DataFrame that maintains file path information.",
+"file": "src/cosa/utils/util_pandas.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_xml.get_nested_list",
+"sig": "(xml_string: str, tag_name: str='code', debug: bool=False, verbose: bool=False) -> list[str]",
+"doc": "Extract a list of values from nested line tags within a parent tag.",
+"file": "src/cosa/utils/util_xml.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.util_xml.get_value_by_xml_tag_name",
+"sig": "(xml_string: str, name: str, default_value: Optional[str]=None) -> Union[str, None]",
+"doc": "Extract the value enclosed by an XML tag's open and close brackets.",
+"file": "src/cosa/utils/util_xml.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_env.VertexEnvError",
+"sig": "",
+"doc": "Raised when the Vertex environment cannot be composed safely. Fail loud.",
+"file": "src/cosa/utils/vertex_env.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_env.assert_region_oracle_is_admissible",
+"sig": "(oracle, evidence)",
+"doc": "Refuse a region certification whose instrument cannot see regions.",
+"file": "src/cosa/utils/vertex_env.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_env.parse_tmux_global_env",
+"sig": "(show_environment_output)",
+"doc": "Parse `tmux show-environment -g` output into a mapping.",
+"file": "src/cosa/utils/vertex_env.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_logging.LoggingReadout.count_sentinel",
+"sig": "(self, table, sentinel)",
+"doc": "Count the rows in which the sentinel appears anywhere, without naming a column.",
+"file": "src/cosa/utils/vertex_logging.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_logging.ProbePlan",
+"sig": "",
+"doc": "The declared shape of a probe, validated before any live call is fired.",
+"file": "src/cosa/utils/vertex_logging.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_logging.assert_traffic_config_coupling",
+"sig": "(cloud_ml_region, config_location)",
+"doc": "Assert that the traffic region equals the location the logging config was written at.",
+"file": "src/cosa/utils/vertex_logging.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_monitoring_oracle.MonitoringOracle.verify_no_leak_into_default_path",
+"sig": "(self, env, series_before, series_after, canary)",
+"doc": "Check that no Vertex traffic leaked into the default Max path.",
+"file": "src/cosa/utils/vertex_monitoring_oracle.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_spend_ceiling.binding_daily_usd",
+"sig": "(daily_usd, monthly_usd, days_in_month=DAYS_PER_MONTH_WORST_CASE)",
+"doc": "Reconcile a daily target against a monthly target and return the one that binds.",
+"file": "src/cosa/utils/vertex_spend_ceiling.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.vertex_spend_ceiling.max_daily_usd_at_tpm",
+"sig": "(price, tpm, minutes_per_day=MINUTES_PER_DAY)",
+"doc": "Inverse of the clamp: what does a given TPM permit, in dollars/day, worst case?",
+"file": "src/cosa/utils/vertex_spend_ceiling.py",
+"lang": "py"
+},
+{
+"id": "cosa.utils.visual_failures.session_collects_visual",
+"sig": "(items)",
+"doc": "Requires:",
+"file": "src/cosa/utils/visual_failures.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.SessionIdUnavailable",
+"sig": "",
+"doc": "Raised instead of hard-exiting when the session ID never resolved and this",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.ask_multiple_choice",
+"sig": "(questions: list, timeout_seconds: int=120, priority: str='medium', title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, default: Optional[dict]=None, override_size_limitation: bool=False) -> dict",
+"doc": "Ask multiple-choice questions and get the user's selection(s). Presents questions with options via TTS and UI; supports single-select (radio buttons) and multi-select (checkboxes), and the user can give a custom \"Other\" answer.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.ask_open_ended_batch",
+"sig": "(questions: list, timeout_seconds: int=300, priority: str='high', title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, override_size_limitation: bool=False) -> dict",
+"doc": "Ask multiple open-ended questions at once and get all answers as a dict.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.ask_yes_no",
+"sig": "(question: str, default: str='no', timeout_seconds: int=60, priority: str='medium', abstract: Optional[str]=None, job_id: Optional[str]=None, override_size_limitation: bool=False, human_only: bool=False) -> str",
+"doc": "Ask a yes/no question and get the user's response as a string. A convenience wrapper for quick binary decisions, with a third \"Neither\" escape hatch for when the question itself needs re-framing. The user may attach a qualifying comment to any answer via the UI.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.check_exists",
+"sig": "(need: str, root: Optional[str]=None) -> dict",
+"doc": "Should this be built? Returns REUSE, EXTEND, NEW or UNCERTAIN_READ_SOURCE for a planned capability.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.commons_ask_async",
+"sig": "(topic: str, body: str, question_id: Optional[str]=None) -> dict",
+"doc": "**[ATTENTION-DEMANDING \u2014 requires user trigger or clear coordination need]** Post a question to a topic at large and return immediately (fire-and-forget, polling-mode). For directed peer DMs use `dm_send` (body inline) instead.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.commons_ask_sync",
+"sig": "(topic: str, body: str, timeout_seconds: float=120.0, grace_seconds: Optional[float]=None) -> dict",
+"doc": "**[ATTENTION-DEMANDING + BLOCKING \u2014 rarely justified; consider `commons_ask_async` first]** Post a question to commons and block until the first reply arrives plus a grace period.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.commons_post",
+"sig": "(topic: str, body: str, metadata: Optional[dict]=None) -> dict",
+"doc": "Append an entry to a commons topic (the file-based inter-session blackboard). The tier depends on the topic: **[SELF-DISCLOSURE]** for free-form, presence and incident topics (announcing your own state); **[ATTENTION-DEMANDING]** for coordination, help-wanted and contested-claim topics (summons peer attention).",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.commons_read",
+"sig": "(topic: str, since: Optional[str]=None, limit: int=50) -> list",
+"doc": "**[READ \u2014 always allowed, no user permission needed]** Tail a commons topic. Returns newest-first when `since` is None, ascending when `since` is supplied. Honors `limit` strictly. A missing free-form topic returns an empty list (no error).",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.commons_who",
+"sig": "(topic: Optional[str]=None, retention_hours: int=24) -> list",
+"doc": "**[READ \u2014 always allowed, no user permission needed]** \"Who else is active right now?\"",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.converse",
+"sig": "(message: str, response_type: str='open_ended', timeout_seconds: int=120, response_default: Optional[str]=None, priority: str='medium', title: Optional[str]=None, abstract: Optional[str]=None, job_id: Optional[str]=None, override_size_limitation: bool=False) -> str",
+"doc": "Speak to the user and wait for their voice/text response.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.disable_speakerphone",
+"sig": "() -> dict",
+"doc": "Exit conversation mode (revert to default notification mode) for this session.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.dismiss_sessions",
+"sig": "(session_names: Optional[List[str]]=None, reason: str='', write_memento: Optional[bool]=None, respin_personas: Optional[List[str]]=None) -> dict",
+"doc": "**[REAP \u2014 host-side]** Tear down reviewer sessions THIS manager spawned.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.dm_get",
+"sig": "(message_id: str) -> dict",
+"doc": "**[READ]** Fetch a single peer DM by its message id.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.dm_list",
+"sig": "(thread_id: Optional[str]=None, since: Optional[str]=None, limit: int=50, scope: str='session') -> dict",
+"doc": "**[READ]** List or poll peer DMs addressed to THIS session, or on request every DM on the account.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.dm_respond",
+"sig": "(recipient: str, body: str, reply_to: str, thread_id: str, recipient_session_id: Optional[str]=None) -> dict",
+"doc": "**[DM \u2014 directed attention-demanding]** Reply to a peer DM IN-THREAD. A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the message_id you are answering) and `thread_id` (the conversation) are REQUIRED, and both are surfaced in the inbound DM framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch. It is equivalent to `dm_send(..., reply_to=..., thread_id=...)`.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.enable_speakerphone",
+"sig": "() -> dict",
+"doc": "Enter conversation mode for this session.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.fetch_similar",
+"sig": "(entry: str, root: Optional[str]=None) -> dict",
+"doc": "What does this symbol resemble? Returns the shortlist of similar existing symbols and a receipt_id.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.get_session_info",
+"sig": "() -> dict",
+"doc": "Get current session identification and server info.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.list_spawned_sessions",
+"sig": "() -> dict",
+"doc": "**[READ \u2014 host-side]** List the sessions THIS manager spawned, on two axes: LIVENESS (probed from tmux) and IDENTITY (read from each child's bridge).",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.notify",
+"sig": "(message: str, notification_type: str='progress', priority: str='medium', abstract: Optional[str]=None, job_id: Optional[str]=None, suppress_ding: bool=False, progress_group_id: Optional[str]=None, session_name: Optional[str]=None, override_size_limitation: bool=False) -> str",
+"doc": "Announce something to the user without waiting for response.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.read_capability",
+"sig": "(names: list, root: Optional[str]=None) -> dict",
+"doc": "Read capability pages from the code wiki by slug. No model call; returns the page text and a receipt_id.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.replay",
+"sig": "(receipt_id: str, root: Optional[str]=None) -> dict",
+"doc": "Re-check a receipt_id: the stored result, a re-run against the frozen index, and a re-run at HEAD.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.request_persona",
+"sig": "(name: Optional[str]=None) -> dict",
+"doc": "Request a named voice persona for this session, or let the server pick one.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.self_respin",
+"sig": "(memento_path: str, memento_nonce: str, delay_seconds: int=20, cycle_window_seconds: int=300) -> dict",
+"doc": "Self-re-spin: schedule a `/clear` into THIS session's OWN pane so it rehydrates as the same seat (same session id, tmux, persona, board, lineage). IRREVERSIBLE; every guard is inside this verb.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.set_session_topic",
+"sig": "(topic: str) -> dict",
+"doc": "Set the current session's topic/description for context in stop hook notifications.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.spawn_sessions",
+"sig": "(count: int, task_prompt: str, role: str='reviewer', project: str='lupin', persona_preference=None, seed_memento=None, dry_run: bool=False, model: Optional[str]=None) -> dict",
+"doc": "**[SPAWN \u2014 host-side; launches real Claude Code sessions]** Spin up `count` headless reviewer sessions for this manager.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.strip_fenced_code_blocks",
+"sig": "(text: str) -> str",
+"doc": "Strip triple-backtick fenced code blocks from text.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_amend",
+"sig": "(task_id: str, note: str, reason: Optional[str]=None, authority: str='standing') -> dict",
+"doc": "**[SELF-DISCLOSURE]** Append an amendment to a task-store item's body: the durable home for a LIVE item whose scope is legitimately reframed mid-flight, instead of leaving the current spec in scratchpad checklists, code comments or transition reasons, where a successor rehydrating from the store never sees it. APPEND-ONLY: the original body is preserved verbatim and your note lands below a persona-stamped, UTC-timestamped divider, so the amendment history reads inline. Reach for it when you would otherwise rewrite a body but must keep the prior spec.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_correlate",
+"sig": "(task_id: str, correlation_key: str, authority: str='standing') -> dict",
+"doc": "**[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key. When a successor session inherits an item, ADOPT it by re-keying it onto your own harness id instead of forking a duplicate. The server appends an audited `re-correlated` event and REJECTS terminal items (no re-keying closed history); this tool does not pre-check that, and a 422 carries the server's words verbatim.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_create",
+"sig": "(item_class: str, title: str, project: str, body: Optional[str]=None, owner_persona: Optional[str]=None, accountable_manager: Optional[str]=None, gate_class: str='none', priority: str='P2', urgency: str='normal', status: Optional[str]=None, blocked_by: Optional[list]=None, next_chase_ts: Optional[str]=None, source_qid: Optional[str]=None, correlation_key: Optional[str]=None, authority: str='standing') -> dict",
+"doc": "**[SELF-DISCLOSURE]** Create an item in the unified task store, the one door for owed work, your own included: an item created on the native harness `TaskCreate` list is invisible to the fleet, the arbiter and the operator's board. Use it for self-owned tasks, cross-persona assignments and typed items (decision, gate, bug, review_request) alike. Omit `status`: the row lands in the holding area (not_approved) and waits for Rick. It is NOT how DM-born tasks get created: `source_qid` only stamps provenance.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_edit",
+"sig": "(task_id: str, updates: dict, reason: Optional[str]=None, authority: str='standing') -> dict",
+"doc": "**[SELF-DISCLOSURE]** Edit one or more of the 5 FREE-EDIT fields of a task-store item: `title` \u00b7 `body` \u00b7 `priority` \u00b7 `gate_class` \u00b7 `urgency`. Most often used to DEMOTE a mis-inflated `priority`. A thin wrapper over `PATCH /api/tasks/{id}`: it OVERWRITES the named fields atomically (one txn, one `patched` audit event). Value validation stays server-side.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_get",
+"sig": "(task_id: str) -> dict",
+"doc": "**[READ \u2014 always allowed, no user permission needed]** Fetch ONE store row by its UUID.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_promotion_status",
+"sig": "(ticket_id: str) -> dict",
+"doc": "**[READ \u2014 always allowed, no user permission needed]** How did that promotion go?",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_query",
+"sig": "(owner_persona: Optional[str]=None, status: Optional[str]=None, gate_class: Optional[str]=None, urgency: Optional[str]=None, accountable_manager: Optional[str]=None, project: Optional[str]=None, item_class: Optional[str]=None, correlation_key: Optional[str]=None, limit: Optional[int]=None, offset: Optional[int]=None, terse: bool=False, include_terminal: bool=False, unscoped_audit: bool=False, include_parked: bool=False) -> dict",
+"doc": "**[READ \u2014 always allowed, no user permission needed]** Query the task store: exact-match filters, AND semantics, newest first. Bad enum values are a 422.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_reassign",
+"sig": "(task_id: str, new_owner_persona: str, reason: str, new_manager: Optional[str]=None, authority: str='manager_relay') -> dict",
+"doc": "**[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona: the manager's handoff primitive, to pull a worker off a queue and hand their in-flight work to another persona. Changes OWNERSHIP ONLY; it can NEVER change `status`. If the handoff should also re-queue the item, that is a SEPARATE `task_transition`. The server canonicalizes the new owner to the owed-query key (so the new owner's `task_query(owner_persona=\u2026)` finds the row) and appends one `patched` event carrying your `reason`. A non-empty `reason` is REQUIRED here at the verb; a blank one is rejected before any server round-trip.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_request",
+"sig": "(task_id: str, move: str, reason: str, deletion_task_id: Optional[str]=None) -> dict",
+"doc": "**[MANAGER \u2014 directed at Rick]** Ask Rick to promote or demote ONE task-store row. Rick alone promotes and demotes; managers can only request, and requests default to no. This files a question on the row and NEVER moves it: the row stays exactly where it is until Rick answers from his board.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "lupin_mcp.cosa_voice_mcp.task_transition",
+"sig": "(task_id: str, to_status: str, receipt_refs: Optional[dict]=None, next_chase_ts: Optional[str]=None, blocked_by: Optional[list]=None, reason: Optional[str]=None, authority: str='standing', park_reason: Optional[str]=None, asynchronous: Optional[bool]=True) -> dict",
+"doc": "**[SELF-DISCLOSURE]** Apply one state change to a task-store item. The server enforces the rules and surfaces them verbatim (a 422 carries its errors unedited); this tool pre-checks none of them. `asynchronous` defaults to True and matters only for a promotion out of `not_approved`.",
+"file": "src/lupin_mcp/cosa_voice_mcp.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.EligibleCommandsUnavailable",
+"sig": "",
+"doc": "The routing denominator could not be read. Raised instead of scoring a wider one.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.EvalIntegrityError",
+"sig": "",
+"doc": "Raised when a run's own integrity properties fail: a lying run, not a low score.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.HttpAskClient",
+"sig": "",
+"doc": "A `POST /api/v2/ask` client for the scheduled :8000 run (the ask endpoint contract).",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.HttpAskClient.__init__",
+"sig": "(self, base_url: str, bearer: str, websocket_id: str='v2-eval', post_fn: Optional[Callable]=None, timeout: float=ASK_READ_TIMEOUT_SECONDS, clock: Callable[[], float]=time.monotonic, relogin_fn: Optional[Callable[[], str]]=None, attempt_log_fn: Optional[Callable[[Dict[str, Any]], None]]=None, wall_clock: Callable[[], float]=time.time, parent_id_hash: Optional[str]=None) -> None",
+"doc": "",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.HttpAskClient.ask",
+"sig": "(self, question: str) -> Dict[str, Any]",
+"doc": "Submit one utterance and normalize the reply to a record.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.build_arg_parser",
+"sig": "() -> argparse.ArgumentParser",
+"doc": "The CLI parser: --corpus, --passes, --base-url, --limit, --max-router-error-rate.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.clean_v2_snapshot_store",
+"sig": "(connection: Any, config_mgr: Any) -> str",
+"doc": "Truncate v2's snapshot and synonym tables so the cold pass starts from an empty store.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.compute_metrics",
+"sig": "(records: List[Dict[str, Any]], mappable_commands: Optional[Sequence[str]]=None) -> Dict[str, Any]",
+"doc": "Compute the full metric set for one pass over the corpus.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.dump_records_early",
+"sig": "(out_dir: str, cold_records: List[Dict[str, Any]], warm_records: List[Dict[str, Any]]) -> Optional[str]",
+"doc": "Write the raw records to disk as soon as both passes return, before anything may refuse.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.first_useful_ms",
+"sig": "(record: Dict[str, Any]) -> Optional[float]",
+"doc": "The latency to first useful response in ms, or None when unstamped/failed.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.guard_cold_start",
+"sig": "(cold_metrics: Dict[str, Any]) -> None",
+"doc": "Raise EvalIntegrityError when the cold pass was not actually cold.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.guard_run_integrity",
+"sig": "(records: List[Dict[str, Any]], jsonl_trace_ids: Sequence[str], max_router_error_rate: float=0.2) -> None",
+"doc": "Raise EvalIntegrityError unless the run's integrity properties all hold.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.is_completed_ok",
+"sig": "(status_code, payload)",
+"doc": "Say whether a call completed the work, the same question the v1 arm answers.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.is_outcome_observed",
+"sig": "(record: Dict[str, Any]) -> bool",
+"doc": "Say whether a response reported an outcome the cache metrics can read.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.is_receptionist_degrade",
+"sig": "(record: Dict[str, Any]) -> bool",
+"doc": "Say whether a request reached the receptionist because nothing could serve it.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.is_utterance_line",
+"sig": "(line: str) -> bool",
+"doc": "True iff `line` carries an utterance rather than a comment or blank.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.latency_delta",
+"sig": "(cold: Dict[str, Any], warm: Dict[str, Any]) -> Dict[str, Optional[float]]",
+"doc": "The cold->warm latency change for p50 and p95.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.load_corpus",
+"sig": "(name: str, project_root: Optional[str]=None, limit: Optional[int]=None) -> List[Tuple[str, str]]",
+"doc": "Load a named corpus as (utterance, expected_command) pairs.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.load_mappable_commands",
+"sig": "(path: Optional[str]=None) -> List[str]",
+"doc": "Read the routing commands both arms score on from the frozen checked-in list.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.main",
+"sig": "(argv: Optional[List[str]]=None, client_factory: Optional[Callable[[str], Any]]=None, project_root: Optional[str]=None, timestamp: Optional[str]=None, read_sha_fn: Optional[Callable[[str], str]]=None, probe_models_fn: Optional[Callable[[str], None]]=None, ws_listener_factory: Optional[Callable[[str, Any], Any]]=None) -> Dict[str, Any]",
+"doc": "Run the two-pass eval and write the report.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.make_attempt_logger",
+"sig": "(path: Optional[str]=None) -> Callable[[Dict[str, Any]], None]",
+"doc": "Build the append-a-JSON-line sink for HttpAskClient's start, end and error rows.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.matched_command",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "Return the command attributed to a replayed snapshot (the response `command` on a replay).",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.neighbouring_trace_paths",
+"sig": "(trace_path: str) -> List[str]",
+"doc": "Return the named trace file plus the files for the day before and the day after.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.percentile",
+"sig": "(values: Sequence[float], pct: float) -> Optional[float]",
+"doc": "The linear-interpolated percentile of `values`.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.read_jsonl_trace_ids",
+"sig": "(trace_path: str) -> List[str]",
+"doc": "The trace ids recorded in one JSONL trace file.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.read_running_server_sha",
+"sig": "(base_url: str) -> str",
+"doc": "Ask the running v2 server which git sha it booted from, so numbers trace to a tree.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.read_trace_ids_around",
+"sig": "(trace_path: str) -> List[str]",
+"doc": "Every trace id in the named day's file and the day either side.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.render_report",
+"sig": "(cold_metrics: Dict[str, Any], warm_metrics: Dict[str, Any], warm_table: List[Dict[str, Any]], delta: Dict[str, Optional[float]], corpus_name: str, timestamp: str, seed: int, n_per_command: int) -> str",
+"doc": "Render the markdown report for a two-pass run.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.reported_route_reason",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "Return the `route_reason` a 200 response carries, whether or not the work completed.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.resolve_base_url",
+"sig": "(explicit: Optional[str], in_container: bool) -> str",
+"doc": "Pick the base url this run should ask, given where the run is executing.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.response_path",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "The `path` field of a record's response, or None when the record is not ok.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.response_route_reason",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "The `route_reason` field of a record's response, or None when the record is not ok.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.response_similarity",
+"sig": "(record: Dict[str, Any]) -> Optional[float]",
+"doc": "The `similarity` (best score) of a record's response, or None when absent or not ok.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.response_status",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "Return the `status` a 200 response carries, the field that says whether the work finished.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.response_trace_id",
+"sig": "(record: Dict[str, Any]) -> Optional[str]",
+"doc": "The `trace_id` of a record's response, or None when the record is not ok.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.route_matches",
+"sig": "(actual: Optional[str], expected: str) -> bool",
+"doc": "True iff the router's chosen command matches the utterance's expected command.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.run_pass",
+"sig": "(corpus: List[Tuple[str, str]], ask: Callable[[str], Dict[str, Any]], pass_kind: str, fail_fast: bool=False, allow_warm_cold: bool=False) -> List[Dict[str, Any]]",
+"doc": "Run one pass over the corpus, attaching the expected command to each record.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.running_in_container",
+"sig": "() -> bool",
+"doc": "True when this process runs inside a container (`/.dockerenv` exists).",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.stratified_sample",
+"sig": "(pairs: List[Tuple[str, str]], n_per_command: int, seed: int) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]",
+"doc": "Draw a seeded, per-command random sample of the corpus (the paired-harness sampler).",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.terminal_waiting_ask",
+"sig": "(ask, ws_recv_events, clock=time.monotonic)",
+"doc": "Wrap an `ask` so its record's `client_span_ms` ends at the observed completion.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.threshold_table",
+"sig": "(records: List[Dict[str, Any]], floors: Sequence[float]=THRESHOLD_FLOORS) -> List[Dict[str, Any]]",
+"doc": "Build the cache-hit-rate-vs-threshold table, computed after the fact from recorded scores.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "scripts.v2_eval.write_outputs",
+"sig": "(out_dir: str, report_md: str, cold_records: List[Dict[str, Any]], warm_records: List[Dict[str, Any]]) -> Dict[str, str]",
+"doc": "Write the markdown report and the raw records to `out_dir`.",
+"file": "src/scripts/v2_eval.py",
+"lang": "py"
+},
+{
+"id": "src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.errorMessage",
+"sig": "(err: unknown): string",
+"doc": "",
+"file": "src/lupin_app/static/js/multiplexer/render/BroadcastCardRenderer.ts",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.multiplexer.render.templates.commonsActivityEntry.renderCommonsActivityEntry",
+"sig": "(entry: CommonsActivityEntry, opts: RenderOptions = {}): HTMLElement",
+"doc": "Render one commons activity entry as a `.commons-activity-entry` row.",
+"file": "src/lupin_app/static/js/multiplexer/render/templates/commonsActivityEntry.ts",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.multiplexer.render.templates.truncationBanner.queryLimit",
+"sig": "(queryString: string): number",
+"doc": "The `limit=` a query string asks for, or NaN when it names none.",
+"file": "src/lupin_app/static/js/multiplexer/render/templates/truncationBanner.ts",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.multiplexer.shared.ttsPreview.computeTtsPreview",
+"sig": "(text: string, settings: TtsPreviewSettings): TtsPreview",
+"doc": "Decide what, if anything, to speak for one notification.",
+"file": "src/lupin_app/static/js/multiplexer/shared/ttsPreview.ts",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.multiplexer.stores.JobStore.JobStoreImpl.isHistoryHydrated",
+"sig": "(): boolean",
+"doc": "",
+"file": "src/lupin_app/static/js/multiplexer/stores/JobStore.ts",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.activateNextNotification",
+"sig": "()",
+"doc": "Promotes the next pending notification in queue to active state.",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.closeSessionNameEditModal",
+"sig": "()",
+"doc": "Close the session name edit modal.",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.getLocalTimeDisplay",
+"sig": "()",
+"doc": "Get formatted time display with timezone abbreviation.",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.playTTS",
+"sig": "(text, mode, voiceId = null, userInitiated = false)",
+"doc": "",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.refreshFleetStatus",
+"sig": "()",
+"doc": "",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.updateElement",
+"sig": "(elementId, content)",
+"doc": "",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.notifications.NotificationsUI.updateSenderProgressGroupEntry",
+"sig": "(element, notification)",
+"doc": "",
+"file": "src/lupin_app/static/js/notifications.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.shared.task-create.buildNewTicketPayload",
+"sig": "(fields)",
+"doc": "Turn what the form holds into the POST body, or say why it cannot be sent.",
+"file": "src/lupin_app/static/js/shared/task-create.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.websocket-diagnostic.WebSocketDiagnosticTool",
+"sig": "",
+"doc": "WebSocket Audio Diagnostic Tool",
+"file": "src/lupin_app/static/js/websocket-diagnostic.js",
+"lang": "ts"
+},
+{
+"id": "src.lupin_app.static.js.ws-channel.createChannel",
+"sig": "(opts)",
+"doc": "Create a per-channel WebSocket state machine.",
+"file": "src/lupin_app/static/js/ws-channel.js",
+"lang": "ts"
+}
+]
+}

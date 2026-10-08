@@ -1,0 +1,1369 @@
+{
+"source": "member and candidate columns of the first rows of stage2-twins-plus-50-random.json (baseline commit ac0f91673, seed 0) for six members of the manifest slice",
+"rows": [
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.swe_team.config.SweTeamConfig.from_config"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._handlePrioritySelectChange"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.notify_rate_limiter.check_notify_allowed"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.render.taskVerbs.transitionExtras"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.refreshTimeSavedStats"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.routers.notifications.get_senders_with_activity"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.deep_research.prompts.synthesis.get_revision_prompt"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.repo.doc_lint.contract_diff.findings"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.utils.model_server_liveness.discover_vllm_endpoints"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.tools.search_lupin_v010.LupinSearch.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.routers.commons.execute_broadcast_history"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.shared.task-request.requestVerdictBody"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.ActionRequiredStore.ActionRequiredStoreImpl.disposeForTesting"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.transport.ws-channel.WSChannelImpl.start"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.repo.git_loc_delta.report_formatter.print_console_banner"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.v2.trace.StageTrace.update"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.db.repositories.task_repository.TaskRepository.apply_amendment"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "lupin_cli.notifications.test_notifications.NotificationTestSuite"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.renderFleetStatus"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.updateMetricsRTT"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.memory.embedding_manager.EmbeddingManager.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.utils.checked_hash_pyc.ledger_path"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.presentation_generator.__main__.main"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.repo.doc_lint.labelled_set_seeder.delete_candidates"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.presentation_generator.api_client.CostEstimate"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.render.taskListModel.taskPriorityClass"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.io_models.xml_models.CodeResponse.validate_code"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "scripts.capture-bounce-resubmit.format_report"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.MissedStore.MissedStoreImpl.disposeForTesting"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.repo.branch_change_analysis.is_python_comment_or_docstring"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.updateSenderCardHeader"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "lupin_app.asset_tokens.stamp"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.boot.pickRandom"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.SessionStripStore.SessionStripStoreImpl.disposeForTesting"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "lupin_mcp.reap_memento.verify_seat_memento_at_any_readable_slot"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.stopCountdownTimer"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.presentation_generator.prompts.narrative.extract_narrative_metadata"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.repo.symindex.spec.skipped"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.io_models.xml_models.IterativeDebuggingMinimalistResponse.get_example_for_template"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.multiplexer.render.SessionStripRenderer.SessionStripRendererImpl.unmount"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.heartbeat_arbiter.idle_roster.classify_idle"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.setupClaudeCodeEventListeners"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._patchTaskFields"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "src.lupin_app.static.js.hybrid-tts-FAILED-INTEGRATION.HybridTTS.fallbackSpeak"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.commons_topic_watcher.CommonsTopicWatcher"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.v2.pending.PendingRequests.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "lupin_cli.claude_code.hooks.lib.hook_common.build_stop_block_with_system_message"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.agents.io_models.xml_models.ReceptionistResponse.get_example_for_template"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.db.repositories.query_log_repository.QueryLogRepository"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.rest.routers.system.reset_prediction_engine"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+"candidate": "cosa.research.phi4_flash_lite_study.report.backfill_provenance"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.claude_code.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.deep_research.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.deep_research.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.swe_team.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.swe_team.cosa_interface.request_decision"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_mcp.task_store_tools.task_get_impl"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "scripts.init_test_database.main"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.sequential-audio-manager.SequentialAudioManager.isPlaying"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.weather_agent.WeatherAgent.restore_from_serialized_state"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.heartbeat_hold_warn.clear_warn_state"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.voice_persona_helpers.load_overflow_persona_from_config"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.routers.websocket_admin.get_websocket_manager"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.calculateDestination"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.utils.util_pandas.DeepilyDataFrame.read_csv"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.repo.doc_lint.dart_pool_builder.list_blobs"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.dm_tutor.xml_models.DmTutorResponse.get_example_for_template"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.QaStore.createQaStore"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS.handleStatusMessage"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.heartbeat_events.should_emit_idle"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.shared.task-create.selectOf"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.calculator.conversion_tables.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.io_models.xml_models.CodeResponse"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.NavBarRenderer.NavBarRendererImpl.unmount"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._fleetVerdictClass"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.routers.admin.create_user_endpoint"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.ConversationModePinRenderer.ConversationModePinRendererImpl.unmount"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.testkit.parityFixture.toConversationByDate"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.AudioStore.AudioStoreImpl.state"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "scripts.v2_eval.route_matches"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "scripts.dead_rnd_citations.is_cross_repo"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.agent_base.AgentBase.run_code"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_mcp.validation_alert_throttle.record_sent"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.training.xml_coordinator.XmlCoordinator.validate_responses"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.transport.QueueTransport.stripTrailingSlash"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.copyToClipboard"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.db.embedding_regeneration.remaining_ids"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.repo.branch_analyzer.config_loader.ConfigLoader.get"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.SessionTranscriptRenderer.createSessionTranscriptRenderer"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.cc_transcript_tailer.CcTranscriptTailer.mark_seat_ended"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.boot.emitLifecycle"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.escapeHtml"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.dm_tutor.xml_models.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.test_suite.attestation.append_attestation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.shared.task-request.requestFiledDetail"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.session_bridge.iter_live_bridges"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.memory.gist_normalizer.GistNormalizer.process_batch"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.memory.two_tier_question_search.pg_record_to_snapshot"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.QaStore.QaStoreImpl.dispose"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.presentation_generator.gemini_client.GeminiImageClient.generate_video"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.QaStore.QaStoreImpl.clearVoiceMode"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.board_sweep.record_reviewed"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.task_chase_consumer.TaskChaseConsumer.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.io_models.xml_models.BugInjectionResponse.validate_line_number"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.heartbeat_arbiter.self_respin_observer.collect_respin_samples"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.auth.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.claude_code.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.deep_research.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.swe_team.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.generateSessionName"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.utils.credential_file_scrubber.scan_for_values"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.training.peft_trainer.check_privileges"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.llm_exceptions.LlmModelError"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.repo.git_loc_delta.exceptions.DateRangeError"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.heartbeat_hold.prune_stale_hold_files"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.repo.doc_lint.pool_builder.prefix_of"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.createActionRequiredRenderer"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.podcast_generator.config.PodcastConfig.get_output_path"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger.acked_ledger_path"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.rest.db.embedding_regeneration.classify_norm"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.SubmitJobsStore.SubmitJobsStoreImpl.submitTestSuite"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.test.experimental-tts.updateCustomSettings"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_arbiter_app.health_watcher.SystemClock.sleep"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.utils.voice_io.is_cli_mode"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.NotificationStore.NotificationStoreImpl"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_mcp.reuse_tools.ReuseError.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile.surface_dm_inbox"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_mcp.cosa_voice_mcp.ask_multiple_choice"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.repo.doc_lint.md_lint.lint_source"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.rest.salutations.parse_salutations"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.io_models.xml_models.CalendarResponse"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_mcp.memento_slot.mirror_home_clause"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.JobStore.JobStoreImpl.historyWindowDays"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.rest.password_service.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.research.phi4_flash_lite_study.statistics.scipy_version"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.task_store_spool.read_entries"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.orchestration.claude_code.dispatcher.Task.sender_id"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.repo.doc_lint.pool_builder.docstrings_of"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.test_fix_expediter.job.TestFixExpediterJob.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.test_fix_expediter.state.TestDiagnosisResult"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.ViewStateStore.ViewStateStoreImpl.setSectionVisible"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.test_fix_expediter.prompts.fix.build_redelegation_prompt"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.deep_research.config.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "lupin_model_server.main.EmbedRequest"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "scripts.seed_proxy_decisions.ratify_suggested"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.repo.doc_lint.dart_pairs.extract_blocks"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.rest.venue_idle.decide"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.heartbeat_arbiter.context_pressure.Usage.last_prompt_size"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.io_models.xml_models.AgentRouterResponse"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.chunk-sequencer.ChunkSequencer.validateFinalOrder"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.render.taskVerbs.verbDateComplaint"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.podcast_generator.prompts.personality.get_dynamic_duo_description"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.getPersonaForSender"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.renderers.mermaid.MermaidRenderer.render"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.tts-audio-cache.TTSAudioCache.getStats"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent.stop"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._groupHeldRowsByFiler"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "cosa.agents.heartbeat_arbiter.self_respin_observer.append_respin_samples"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.setModeStatus"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.claude_code.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.deep_research.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.deep_research.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.swe_team.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.swe_team.cosa_interface.request_decision"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.audio.directTtsPlayback.DirectTtsPlayerImpl.isPlaying"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.tts-audio-cache.TTSAudioCache.initializeIndexedDB"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.wireQaMetrics.wireQaMetrics"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "lupin_arbiter_app.local_snapshot_store.LocalSnapshotStore.clear"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.hybrid-tts-FAILED-INTEGRATION.HybridTTS.handleTTSServiceError"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.refresh_token_service.revoke_refresh_token"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._epicGroupIsExpanded"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl.constructor"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.utils.vertex_env.pane_guard"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.repo.doc_lint.labelled_set_rules.markup_rejection"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.utils.util_pytorch.is_allocated_to_cpu"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.SessionTranscriptStore.SessionTranscriptStoreImpl.loadEarlier"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.memory.solution_snapshot.SolutionSnapshot.get_last_synonymous_question"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._patchTaskFields"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.crud_for_dataframes.xml_models.CRUDIntent.to_xml"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.saveCollapsedTaskOwners"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.diagnostic.websocketDiagnostic.WebSocketDiagnosticTool.addToChunkTimeline"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "lupin_mcp.cosa_voice_mcp.self_respin"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.testkit.parityHarness.legacyShapes"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.routers.notifications.get_sender_date_summaries"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "lupin_cli.notifications.notification_models.RespondedEvent"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.repo.doc_lint.labelled_set_rules.in_protected"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.task_promotion_gate.get_ask_timeout_seconds"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.training.xml_coordinator.XmlCoordinator.is_valid_xml"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "scripts.swe_workload_catalog.get_categories"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "scripts.lib.job_liveness.read_cmdline"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.audio.recordingManager.RecordingManager.getActiveContextId"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.shared.task-request.requestEventsPath"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.FlowRatioStore.FlowRatioStoreImpl.ratio"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.db.repositories.task_repository.TaskRepository.apply_patch"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.auth_models.VerifyEmailRequest"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "lupin_model_server.main.health"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.notification_proxy.strategies.expediter_rules.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.training.hf_downloader.HuggingFaceDownloader"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "lupin_mcp.cosa_voice_mcp.ask_open_ended_batch"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "scripts.dm-experiment.analyze_arms.format_counts"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.update_last_used"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._hideCircuitBanner"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.test_harness.mock_job.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.orchestration.claude_code.message_history.quick_smoke_test"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.calculator.xml_models.CalcIntent.to_xml"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.render.SubmitJobsPaneRenderer.SubmitJobsPaneRendererImpl.unmount"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.repo.doc_lint.jev_transport.parse_answer"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.notification_proxy.verification.LlmAnswerVerifier.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl.forceRenderForTesting"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.memory.gist_cache_table.GistCacheTable.__init__"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.rest.fifo_queue.FifoQueue.push"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.HoldingAreaStore.HoldingAreaStoreImpl"
+},
+{
+"member": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+"candidate": "cosa.agents.swe_team.config.SweTeamConfig.from_config"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.deep_research.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.deep_research.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.present_choices"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.swe_team.cosa_interface.ask_confirmation"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.swe_team.cosa_interface.request_decision"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.podcast_generator.config.PodcastConfig.get_host_a_name"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.websocket_manager.WebSocketManager.begin_resume"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.notification_proxy.strategies.llm_fallback.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.audio.directTtsPlayback.createDirectTtsPlayer"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.training.xml_response_validator.XmlResponseValidator.contains_correct_response_values"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.routers.queues.push_agentic"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.deep_research.orchestrator.ResearchOrchestratorAgent.__init__"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.repo.git_loc_delta.report_formatter.format_console"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.get_by_user"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.TtsChromeRenderer.TtsChromeRendererImpl.unmount"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.hybrid-tts.HybridTTS.destroy"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.resumeStalledJob"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.receptionist_agent.ReceptionistAgent.run_prompt"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS.onStreamComplete"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.shared.worktree_reaper.retire_branch"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "scripts.debug.debug_websocket_connection.test_basic_connection"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.memento_verify_tick.verify_tick_line"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.job_persistence.persist_job_failed_from_metadata"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.ReadingPaneStore.ReadingPaneStoreImpl.enterActionRequiredPane"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "scripts.falsify.MutationRefused"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor.process_template"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.heartbeat_arbiter.arbiter_job.ArbiterGateway.send_to"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.ReadingPaneStore.createReadingPaneStore"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.heartbeat_poker_job.CommonsGateway.read_since"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.utils.proxy_agents.base_config.get_anthropic_api_key"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.requestChips.RequestChipControllerImpl.constructor"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.memory.gist_cache_table.GistCacheTable.get_statistics"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.dm_tutor.tutor.attribution_bindings"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.persona_key_backfill.scan_stragglers"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.validate_text_fields"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.repair_attempt_tracker.RepairChain.elapsed_seconds"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "lupin_cli.claude_code.hooks.lib.heartbeat_user_gates.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.utils.util.print_stack_trace"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.repo.doc_lint.pool_builder.drop_duplicates"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.task_priority_firewall.caller_is_manager"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.test.experimental-tts.ExperimentalProgressiveTTS.resetMetrics"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.training.peft_trainer.check_env"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.CommonsStore.createCommonsStore"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "lupin_mcp.commons_ask.ask_sync"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.render.FinishedTasksRenderer.createFinishedTasksRenderer"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.diagnostic.websocketDiagnostic.WebSocketDiagnosticTool"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.memory.embedding_manager.EmbeddingManager"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.routers.peer.WatchActionResponse"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway.read_since"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.rest.fcm_push_pause.PushPauseController"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.memory.embedding_provider.get_embedding_provider"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "cosa.repo.doc_lint.dart_pool_builder.write_pool"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "lupin_mcp.commons_llm_disambiguator.CommonsLlmDisambiguator.disambiguate"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+"candidate": "src.lupin_app.static.js.multiplexer.shared.StorageService.StorageServiceImpl.getAudioSessionId"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.deep_research.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.podcast_generator.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.swe_team.cosa_interface.notify_progress"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.shared.worktree_reaper.main_worktree_branch"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.routers.swe_team.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.test_suite.attestation.attestation_path"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.db.repositories.task_repository.TaskRepository.count_admissions_since"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.coldHistoryHydration.ColdHistoryHydrationImpl"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.addDebugMessage"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI._renderPersonaBadgeHTML"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.auth.AuthManager.AuthManagerImpl.isCurrentUserAdmin"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.decision_proxy.smart_router.SmartRouter.should_defer_to_user"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.submitClaudeCode"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.utils.vertex_logging.LoggingReadout.__init__"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.task_promotion_gate.promotion_ask_kwargs"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.render.senderProject.projectFromSenderId"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.chunk-sequencer.ChunkSequencer.initializeWebAudioContext"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.utils.sender_id.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.notification_proxy.xml_models.BatchScriptMatcherResponse.to_xml"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.training.xml_prompt_generator.XmlPromptGenerator.get_test_types"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.routers.admin.ResetPasswordRequest"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.repo.doc_lint.claim_judge.judge_claims"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.config.configuration_manager.ConfigurationManager.set_config"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "scripts.init_test_database.main"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.deep_research.search_cache.clear_cache"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.stores.JobStore.JobStoreImpl.disposeForTesting"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.crud_for_dataframes.xml_models.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "scripts.create_api_keys_table.validate_schema"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.prompts.matplotlib.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.run_prompts"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.utils.agent_notification_dispatcher.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.task_store_rejoin.classify_blocked_row"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.managed_bounce_broadcast.boot_counter_path"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.db.repositories.user_repository.UserRepository.get_by_role"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.dm_inbox_hwm_janitor.classify_hwm_file"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.multiplexer.transport.ConnectionStateMachine.ConnectionStateMachineImpl.send"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.renderers.veo_renderer.VeoRenderer.render"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.serialize_to_json"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "lupin_mcp.memento_slot.mirror_home_clause"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.training.peft_trainer.PeftTrainer.get_prompt"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.agents.presentation_generator.renderers.d2_renderer.quick_smoke_test"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "lupin_cli.claude_code.hooks.lib.listener_processes.exclusive_flock"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.routers.decision_proxy.acknowledge_batch"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "scripts.eval_isolation_guard.pin_carries_leak_fix"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.diagnostic.websocketDiagnostic.WebSocketDiagnosticTool"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.rest.routers.pages.page_multiplexer"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.notifications.NotificationsUI.groupFleetByManager"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.utils.util_gcs.read_text_from_gcs"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "cosa.training.xml_prompt_generator.XmlPromptGenerator.get_claude_code_tasks"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.chunk-sequencer.stopAllTests"
+},
+{
+"member": "cosa.agents.claude_code.cosa_interface.notify_progress",
+"candidate": "src.lupin_app.static.js.shared.task-lookup.taskRefRefusalMessage"
+}
+]
+}
