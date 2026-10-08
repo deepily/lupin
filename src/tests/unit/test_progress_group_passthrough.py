@@ -418,7 +418,7 @@ def _run_stream( method_name, call_args, result_message_count=3 ):
     from cosa.agents.swe_team.orchestrator import SweTeamOrchestrator
     from cosa.agents.swe_team.config import SweTeamConfig
 
-    messages = [ MagicMock( spec=orch_mod.ResultMessage ) for _ in range( result_message_count ) ]
+    messages = [ MagicMock( spec=orch_mod.ResultMessage, is_error=False ) for _ in range( result_message_count ) ]
 
     async def _stream( *a, **kw ):
         for m in messages: yield m
