@@ -68,7 +68,7 @@ class Stage1Env:
 
     def __init__( self, root, data, ledger, transport_factory=None, entries_in_index=None, workers=rp.WORKERS_DEFAULT, model=rt.JEV_MODEL, clock=None ):
         self.root, self.data, self.ledger  = pathlib.Path( root ), pathlib.Path( data ), ledger
-        self.transport_factory             = transport_factory or ( lambda budget: rt.LiveJevTransport( budget=budget ) )
+        self.transport_factory             = transport_factory or ( lambda budget: rt.LiveJevTransport( budget=budget, transient=True ) )
         self.live                          = transport_factory is None
         self.entries_in_index              = entries_in_index
         self.workers, self.model           = workers, model

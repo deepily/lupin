@@ -293,14 +293,15 @@ class LiveJevTransport:
           any HTTP, so a bad key costs one refusal per in-flight call and not one per index entry
         - a 422 refuses only the request that drew it; the next post is sent
         - with a budget (a jev_transport.CallBudget), every HTTP attempt takes one from it, retries included
+        - transient is the retry policy send_with_meta takes: the packed and first-trial paths set it, the default path does not
     Raises:
         - JevConfigError, JevCallError as jev_transport.send does; JevCallError for a body that is not JSON
         - JevBudgetSpent when the budget has no attempt left; no HTTP is made for it
     """
 
-    def __init__( self, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None, clock_fn=None ):
+    def __init__( self, post_fn=None, sleep_fn=None, environ=None, budget=None, random_fn=None, clock_fn=None, transient=False ):
         self.post_fn, self.sleep_fn, self.environ, self.budget = post_fn, sleep_fn, environ, budget
-        self.random_fn, self.clock_fn = random_fn, clock_fn
+        self.random_fn, self.clock_fn, self.transient = random_fn, clock_fn, transient
         self.refusal = None
 
     def post_with_meta( self, body ):
@@ -308,7 +309,7 @@ class LiveJevTransport:
         if self.refusal is not None: raise self.refusal
         try:
             text, meta = jev_transport.send_with_meta( json.dumps( body ).encode( "utf-8" ), self.post_fn, self.sleep_fn, self.environ,
-                                                       self.budget, self.random_fn, self.clock_fn )
+                                                       self.budget, self.random_fn, self.clock_fn, self.transient )
         except jev_transport.JevConfigError as e:
             if e.status != 422: self.refusal = e                          # a 422 refuses this one request, so later requests are still sent
             raise
@@ -640,8 +641,9 @@ def sweep( ctx, need, entries, frozen=False, template=None, model=None, gaps=Non
                         refused = True
                         break
                     continue
-                except jev_transport.JevCallError:                        # the transport already used its four sends; asking again would multiply them
-                    break
+                except jev_transport.JevCallError:
+                    if isinstance( ctx.transport, LiveJevTransport ) and ctx.transport.transient: break      # that transport already used its four sends; asking again would multiply them
+                    continue
                 except Exception:                                         # any other error, such as a failed cache write, is a failed call, never a verdict
                     continue
         finally:
@@ -878,7 +880,7 @@ def prepare( ctx ):
     header = sx_build.read_header( gen )
     if header[ "missing_dependencies" ]: flags.add( "DEPENDENCY_MISSING" )
     if ctx.transport is None:
-        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx ) )
+        if jev_transport.has_key(): ctx.transport = LiveJevTransport( budget=_live_budget( ctx ), transient=ctx.sweeper is not None )
         else: flags.add( "KEY_UNREADABLE" )
     symbols    = sx_build.read_symbols( gen )
     entries, _ = sendable( symbols, ctx.exclude_prefixes )
