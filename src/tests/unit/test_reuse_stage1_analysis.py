@@ -1170,28 +1170,28 @@ def test_each_rule_of_the_page_arm_is_reported_beside_the_state():
            [ ( "pass", "pass" ), ( "fail", "fail" ), ( "fail", "pass" ), ( "pass", "fail" ), ( "pass", "pass" ) ]
 
 
-def test_when_only_the_overlap_rule_is_breached_the_interim_rule_asks_rick_and_does_not_decide():
+def test_the_page_arm_fails_on_the_set_rule_alone_and_an_overlap_breach_does_not_decide_it():
     r = _page_arm( "overlap-only" )
-    assert r[ "state" ] == "ask_rick" and r[ "state" ] not in ( "pass", "fail" )
+    assert ( r[ "state" ], r[ "set_rule" ], r[ "overlap_rule" ] ) == ( "pass", "pass", "fail" )
     assert _page_arm( "set-only" )[ "state" ] == "fail" and _page_arm( "pack-changes-two" )[ "state" ] == "fail"
     assert _page_arm( "same" )[ "state" ] == "pass"
 
 
-def test_asking_rick_still_asks_when_no_page_is_near_the_floor():
+def test_an_overlap_breach_with_no_page_near_the_floor_reads_inconclusive_like_any_other_page_arm():
     recs = _driver_pages( "overlap-only" )
     for rec in recs:
         for a in rec[ "answers" ]:
             if a[ "id" ] in ( "page.03", "page.04" ): a[ "probabilities" ] = { "reuse": 0.5, "extend": 0.0, "unrelated": 0.5 }
     r = an.page_arm( an.read_stage( recs ) )
-    assert r[ "near_floor_pages" ] == 0 and r[ "state" ] == "ask_rick"
+    assert ( r[ "near_floor_pages" ], r[ "overlap_rule" ], r[ "state" ] ) == ( 0, "fail", "inconclusive" )
 
 
-def test_asking_rick_turns_the_decision_into_a_stop_and_the_text_states_the_ambiguity_with_both_results():
+def test_an_overlap_breach_is_printed_on_the_page_arm_line_and_leaves_the_decision_alone():
     rep  = an.build_report( _driver_pages( "overlap-only" ), canaries=[] )
     text = an.render( rep )
-    assert rep[ "decision" ] == "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
-    assert "page arm: ask_rick; set rule pass, overlap rule fail;" in text and an.PAGE_AMBIGUITY in text
-    assert "11.5" in an.PAGE_AMBIGUITY and "set rule" in an.PAGE_AMBIGUITY and "overlap rule" in an.PAGE_AMBIGUITY and "Rick" in an.PAGE_AMBIGUITY
+    assert "page arm: pass; set rule pass, overlap rule fail;" in text
+    assert "page arm" not in rep[ "decision" ] and "Rick" not in text.split( "page arm:" )[ 1 ]
+    assert not hasattr( an, "PAGE_AMBIGUITY" ) and "ask_rick" not in text
 
 
 def test_the_near_pages_are_counted_in_single_run_one_and_not_in_the_other_runs():
@@ -1201,19 +1201,10 @@ def test_the_near_pages_are_counted_in_single_run_one_and_not_in_the_other_runs(
     assert stage[ 1 ][ "page-pack" ][ "overlaps" ][ "page.04" ] == 0.27 and stage[ 1 ][ "page-single1" ][ "overlaps" ][ "page.04" ] == 0.2
 
 
-def test_a_stop_on_an_invalid_entry_arm_outranks_asking_rick_about_the_page_arm():
+def test_a_stop_on_an_invalid_entry_arm_still_decides_when_the_page_arm_breaches_only_the_overlap_rule():
     bad = _question( 1 )[ 0 ]; bad[ "stop_reason" ] = "ceiling"
     rep = an.build_report( _driver_pages( "overlap-only" ) + [ bad ], canaries=[] )
-    assert rep[ "page_arm" ][ "state" ] == "ask_rick" and rep[ "decision" ] == "stop and ask: an arm is invalid"
-
-
-def test_the_ambiguity_text_says_what_the_interim_rule_does_with_the_overlap_rule():
-    assert "not a pass and not a fail: it asks Rick" in an.PAGE_AMBIGUITY and "set rule alone" in an.PAGE_AMBIGUITY
-
-
-def test_the_ambiguity_is_stated_only_when_the_page_arm_asks_rick():
-    for name in ( "same", "pack-changes-two", "no-page-near-the-floor" ):
-        assert an.PAGE_AMBIGUITY not in an.render( an.build_report( _driver_pages( name ), canaries=[] ) ), name
+    assert rep[ "page_arm" ][ "state" ] == "pass" and rep[ "decision" ] == "stop and ask: an arm is invalid"
 
 
 def test_a_page_arm_with_no_page_near_the_floor_in_any_question_reads_inconclusive_not_pass():
