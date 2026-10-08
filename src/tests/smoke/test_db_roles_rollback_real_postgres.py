@@ -319,7 +319,7 @@ def _snapshot( box ):
     }
 
 
-def _provision( box, tmp_path, *flags ):
+def _provision( box, tmp_path, *flags, database="lupin_db_dev" ):
     """Run the real provisioner against the throwaway container; returns the finished process."""
     assert ROOT, "LUPIN_ROOT is not set, so the provisioner would run from the wrong tree"
     _assert_marker( box )
@@ -329,7 +329,7 @@ def _provision( box, tmp_path, *flags ):
         path.write_text( secrets.token_hex( 16 ) )
         path.chmod( 0o600 )
         files[ role ] = str( path )
-    psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d lupin_db_dev"
+    psql = f"docker exec -i {box[ 'name' ]} psql -U {SUPERUSER} -d {database}"
     args = [ sys.executable, "-m", "cosa.utils.db_roles", "--psql", psql, "--apply", *flags ]
     if "--rollback" not in flags:
         args += [ "--app-pw-file", files[ "app" ], "--host-pw-file", files[ "host" ], "--test-pw-file", files[ "test" ] ]
@@ -406,3 +406,12 @@ def test_a_rollback_leaves_a_database_and_schema_owned_by_a_third_role( stocked,
     assert "database|lupin_db_dev|lupin_host" in before and "schema|public|lupin_host" in before, "the setup did not hand both to the third role"
     _provision( stocked, tmp_path, "--rollback" )
     assert _owners( _snapshot( stocked )[ "dev_owners" ] ) == before, "a rollback moved a database or schema that lupin_app does not own"
+
+
+@needs_docker
+def test_a_rollback_started_on_another_database_still_returns_the_dev_owners( stocked, tmp_path ):
+    _provision( stocked, tmp_path )
+    before = _owners( _snapshot( stocked )[ "dev_owners" ] )
+    _provision( stocked, tmp_path, "--reassign" )
+    _provision( stocked, tmp_path, "--rollback", database="postgres" )
+    assert _owners( _snapshot( stocked )[ "dev_owners" ] ) == before, "the rollback acted on the database it started in, not lupin_db_dev"
