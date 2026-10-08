@@ -109,3 +109,25 @@ def test_every_attempt_takes_one_from_the_budget_and_a_spent_budget_stops_the_re
 def test_a_timeout_error_message_does_not_carry_the_key():
     out, _, _ = send( [ TimeoutError( "timed out" ) ] )
     assert jt.JevCallError is type( out ) and "k" != str( out ) and ENV[ jt.KEY_VARIABLE ] + "x" not in str( out )
+
+
+def test_a_timeout_waits_the_same_doubling_and_jittered_backoff_as_a_status():
+    out, calls, sleeps = send( [ TimeoutError( "t" ), TimeoutError( "t" ), TimeoutError( "t" ), ( 200, "ok" ) ] )
+    assert out[ 1 ][ "attempts" ] == 4 and sleeps == [ BASE, BASE * 2, BASE * 4 ]
+    out, calls, sleeps = send( [ TimeoutError( "t" ), ( 200, "ok" ) ], random_fn=lambda: 0.0 )
+    assert sleeps == [ BASE * ( 1 - jt.JITTER ) ]
+    out, calls, sleeps = send( [ TimeoutError( "t" ), ( 200, "ok" ) ], random_fn=lambda: 1.0 )
+    assert sleeps == [ BASE * ( 1 + jt.JITTER ) ]
+
+
+def test_the_final_status_is_that_of_the_last_attempt_whatever_came_before():
+    out, calls, _ = send( [ TimeoutError( "t" ), ( 503, "x" ), TimeoutError( "t" ), ( 503, "x" ) ] )
+    assert isinstance( out, jt.JevCallError ) and out.status == 503 and len( calls ) == 4
+    out, calls, _ = send( [ ( 503, "x" ), ( 503, "x" ), ( 503, "x" ), TimeoutError( "t" ) ] )
+    assert isinstance( out, jt.JevCallError ) and out.status is None and len( calls ) == 4
+
+
+@pytest.mark.parametrize( "status", [ 400, 404, 409, 501 ] )
+def test_a_status_outside_the_retry_set_carries_itself_and_is_sent_once( status ):
+    out, calls, sleeps = send( [ ( status, "x" ) ] )
+    assert isinstance( out, jt.JevCallError ) and out.status == status and len( calls ) == 1 and sleeps == []
