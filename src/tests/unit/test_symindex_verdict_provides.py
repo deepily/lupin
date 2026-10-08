@@ -297,3 +297,9 @@ def test_empty_answers_with_a_pipeline_flag_give_only_that_flag():
 def test_a_caller_cannot_name_a_gap_cause_as_a_flag():
     r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { "CALL_FAILED", "MALFORMED_ANSWER" } )
     assert ( r[ "verdict" ], r[ "causes" ] ) == ( "NEW", [] )
+
+
+@pytest.mark.parametrize( "flag", [ "NOT_LUPIN_TREE", "DEPENDENCY_MISSING" ] )
+def test_each_pipeline_flag_beside_a_below_floor_answer_gives_uncertain_with_that_cause(flag):
+    r = vd.decide_provides( [ _a( "x", 0.1 ) ], [ "x" ], [], { flag } )
+    assert ( r[ "verdict" ], r[ "cause" ], r[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", flag, [ flag ] )
