@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import pathlib
+import sys
 
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_stage1 as s1
@@ -24,6 +25,7 @@ NEEDS = { 1: "A function that sends a notification to the user and waits for a y
           3: "A function that marks a one-time token record as used, so it cannot be redeemed twice.",
           4: "A function that takes an LLM reply containing a fenced JSON block and returns the metadata fields from it." }
 STAND_IN_MARKER = ".stand-in"
+STAND_IN_CLIENT = "stand-in"
 NOT_READY       = ( "NOT_LUPIN_TREE", "INDEX_STALE", "DEPENDENCY_MISSING" )
 ARM_NAMES       = sorted( arm for arm in s1.ARMS if arm != "canary" )
 PACK_ARMS       = ( "single1", "single2", "pack10", "pack50", "pack200" )
@@ -53,7 +55,8 @@ class StandIn:
             u = min( 1.0, max( 0.0, u + 0.002 * ( len( questions ) % 5 - 2 ) ) )
             answers[ key ] = { "probabilities": { "reuse": round( u * 0.6, 6 ), "extend": round( u * 0.4, 6 ), "unrelated": round( 1 - u, 6 ) } }
         usage = { "input_tokens": len( json.dumps( body ) ) // 4, "output_tokens": 40 * len( questions ) }
-        return { "answers": answers, "model": body[ "model" ], "usage": usage }, { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 2 }
+        meta  = { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 2, "attempt_log": [ { "status": 200, "request_ids": {} } ], "client_version": STAND_IN_CLIENT }
+        return { "answers": answers, "model": body[ "model" ], "usage": usage }, meta
 
 
 def load_inputs( root ):
@@ -226,5 +229,20 @@ def main( argv=None, loader=None ):
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover -- the module entry point; main is what the tests drive
-    raise SystemExit( main() )
+def cli( argv=None, loader=None ):
+    """
+    Run main as a command line: a refusal the runner makes is one line and exit code 2.
+
+    Ensures:
+        - returns main's own code when it works
+        - returns 2 after one line on the error stream for a RunnerRefused, KeyMissing, CanaryNotApproved, CanaryTripped or StageRefused
+        - any other error propagates untouched, so a crash is never read as a refusal
+    """
+    try: return main( argv, loader )
+    except ( RunnerRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused ) as e:
+        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
+        return 2
+
+
+if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive
+    raise SystemExit( cli() )
