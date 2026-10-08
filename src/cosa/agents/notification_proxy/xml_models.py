@@ -18,6 +18,20 @@ from pydantic import Field, field_validator, model_validator
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
 
 
+def _says_no_entry( matched_entry ):
+    """
+    Tell whether a matched_entry value is the model's "none" marker.
+
+    Requires:
+        - matched_entry is a string or None
+
+    Ensures:
+        - returns True for "none" in any case, with surrounding space allowed
+        - returns False for anything else, including None
+    """
+    return isinstance( matched_entry, str ) and matched_entry.strip().lower() == "none"
+
+
 class ScriptMatcherResponse( BaseXMLModel ):
     """
     XML response from Phi-4 for Q&A script matching.
@@ -53,9 +67,12 @@ class ScriptMatcherResponse( BaseXMLModel ):
 
         Ensures:
             - Returns "" for None values on optional fields (confidence, reasoning)
-            - Passes through non-None values and required fields unchanged
+            - Returns "" for a None answer when matched_entry says none
+            - Passes through every other value unchanged
         """
         if v is None and info.field_name not in ( "matched_entry", "answer" ):
+            return ""
+        if v is None and info.field_name == "answer" and _says_no_entry( info.data.get( "matched_entry" ) ):
             return ""
         return v
 
