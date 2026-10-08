@@ -102,11 +102,15 @@ class _FakeAssistantMessage:
 
 
 class _FakeResultMessage:
-    def __init__( self, session_id="s1", result="done", total_cost_usd=0.01, duration_ms=42 ):
+    def __init__( self, session_id="s1", result="done", total_cost_usd=0.01, duration_ms=42,
+                  is_error=False, subtype="success", errors=None ):
         self.session_id     = session_id
         self.result         = result
         self.total_cost_usd = total_cost_usd
         self.duration_ms    = duration_ms
+        self.is_error       = is_error
+        self.subtype        = subtype
+        self.errors         = errors
 
 
 class _FakeRateLimitEvent:
@@ -702,3 +706,54 @@ def test_main_dispatch_failure( monkeypatch, lupin_root, capsys ):
     asyncio.run( disp.main() )
     out = capsys.readouterr().out
     assert "✗ Failed: nope" in out and "Exit code: 7" in out
+
+
+# =========================================================================== #
+# An error result keeps the CLI's own text (both entry points)
+# =========================================================================== #
+ERROR_LINE = b'{"type":"result","subtype":"success","is_error":true,"result":"Your credit balance is too low"}\n'
+
+
+def test_run_bounded_error_result_names_the_cli_text_when_stderr_is_empty( lupin_root, monkeypatch ):
+    """A failed run whose stderr is empty reports the result's text, not 'Unknown error'."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert res.success is False and res.exit_code == 1
+    assert "Your credit balance is too low" in res.error
+    assert "Unknown error" not in res.error
+
+
+def test_run_bounded_error_result_names_the_errors_list( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    line = b'{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool died","disk full"]}\n'
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ line ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "error_during_execution" in res.error
+    assert "tool died; disk full" in res.error
+
+
+def test_run_bounded_error_result_keeps_stderr_beside_the_text( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"kaboom" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "Your credit balance is too low" in res.error
+    assert "kaboom" in res.error
+
+
+def test_run_interactive_error_result_fails_with_the_cli_text( lupin_root, patched_sdk ):
+    """An error ResultMessage ends the session as a failure that names the text, and cleans up."""
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result="Your credit balance is too low" ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "Your credit balance is too low" in res.error
+    assert d.active_sessions == {}
+
+
+def test_run_interactive_error_result_names_the_errors_list( lupin_root, patched_sdk ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage( is_error=True, result=None, subtype="error_max_turns", errors=[ "ran out" ] ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "error_max_turns" in res.error and "ran out" in res.error
