@@ -107,8 +107,7 @@ def test_an_arm_with_a_failed_unasked_or_unreached_entry_is_inconclusive_whateve
     assert an.read_arm( rec )[ "status" ] == "inconclusive"
 
 
-@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] },
-                                    { "state": "incomplete" }, { "stop_reason": "attempts" } ] )
+@pytest.mark.parametrize( "over", [ { "failed": [ "a" ] }, { "unasked": [ "a" ] }, { "not_reached": [ "a" ] }, { "state": "incomplete" } ] )
 def test_an_arm_that_lists_a_problem_is_inconclusive_even_when_every_entry_has_an_answer(over):
     assert an.read_arm( _arm( "single1", { "a": 0.1 }, **over ) )[ "status" ] == "inconclusive"
 
@@ -442,54 +441,54 @@ def _with_boundary( question, n ):
 
 
 def test_spend_above_fifteen_million_after_question_one_stops_the_stage_and_exactly_fifteen_million_does_not():
-    over  = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_001, "single2" ) ] ) )
-    exact = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_000, "single2" ) ] ) )
+    over  = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_001, "single2" ) ] ), check_arms=False )
+    exact = an.stop_rules( an.read_stage( [ _spend( 1, 8_000_000 ), _spend( 1, 7_000_000, "single2" ) ] ), check_arms=False )
     assert ( over[ "stop" ], over[ "findings" ][ 0 ][ "rule" ] ) == ( True, "spend_after_question_1" )
     assert exact[ "stop" ] is False and exact[ "spent_by_question" ] == { 1: 15_000_000 }
 
 
 def test_the_spend_of_an_arm_without_a_settled_figure_is_its_reported_tokens():
     rec = _spend( 1, None ); rec[ "totals" ][ "tokens_in" ], rec[ "totals" ][ "tokens_out" ] = 15_000_000, 1
-    assert an.stop_rules( an.read_stage( [ rec ] ) )[ "stop" ] is True
+    assert an.stop_rules( an.read_stage( [ rec ] ), check_arms=False )[ "stop" ] is True
 
 
 def test_fewer_than_fifty_pooled_boundary_entries_after_question_two_stops_before_question_three():
-    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 29 ) ] ) )
-    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 30 ) ] ) )
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 29 ) ] ), check_arms=False )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 30 ) ] ), check_arms=False )
     assert ( short[ "stop" ], short[ "pooled_boundary" ], short[ "next_step" ] ) == ( True, 49, "stop and ask: under 50 pooled boundary entries after question 2" )
     assert ( ok[ "stop" ], ok[ "next_step" ] ) == ( False, "run question 3" )
 
 
 def test_the_fifty_rule_is_read_only_after_question_two_and_before_question_three():
-    one = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ) )
+    one = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ), check_arms=False )
     assert one[ "stop" ] is False and one[ "next_step" ] == "run question 2"
-    three = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ), _with_boundary( 2, 3 ), _with_boundary( 3, 90 ) ] ) )
+    three = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ), _with_boundary( 2, 3 ), _with_boundary( 3, 90 ) ] ), check_arms=False )
     assert three[ "stop" ] is False and three[ "next_step" ] == "evaluate"
 
 
 def test_after_question_three_fewer_than_ninety_allows_the_reserve_question_and_ninety_does_not_need_it():
-    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 29 ) ] ) )
-    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ) ] ) )
+    short = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 29 ) ] ), check_arms=False )
+    ok    = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ) ] ), check_arms=False )
     assert ( short[ "pooled_boundary" ], short[ "next_step" ] ) == ( 89, "run the reserve question" )
     assert ( ok[ "pooled_boundary" ], ok[ "next_step" ] ) == ( 90, "evaluate" )
 
 
 def test_after_the_reserve_question_fewer_than_ninety_is_inconclusive_and_nothing_more_is_run():
     st = an.read_stage( [ _with_boundary( 1, 20 ), _with_boundary( 2, 20 ), _with_boundary( 3, 20 ), _with_boundary( 4, 20 ) ] )
-    r  = an.stop_rules( st )
+    r  = an.stop_rules( st, check_arms=False )
     assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 80, "evaluate: inconclusive, under 90 pooled boundary entries" )
 
 
 def test_a_single_run_that_is_not_clean_gives_no_boundary_count_and_the_rule_says_so():
     bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
-    r   = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ) )
+    r   = an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )
     assert r[ "next_step" ] == "stop and ask: question 2's single run 1 is not clean" and r[ "stop" ] is True
 
 
 def test_the_stage_total_above_seventy_one_million_is_reported_as_a_breach():
-    r = an.stop_rules( an.read_stage( [ _spend( 1, 71_000_001 ) ] ) )
+    r = an.stop_rules( an.read_stage( [ _spend( 1, 71_000_001 ) ] ), check_arms=False )
     assert any( f[ "rule" ] == "stage_ceiling" for f in r[ "findings" ] ) and r[ "stop" ] is True
-    ok = an.stop_rules( an.read_stage( [ _spend( 1, 14_000_000 ), _spend( 2, 57_000_000 ) ] ) )
+    ok = an.stop_rules( an.read_stage( [ _spend( 1, 14_000_000 ), _spend( 2, 57_000_000 ) ] ), check_arms=False )
     assert not any( f[ "rule" ] == "stage_ceiling" for f in ok[ "findings" ] ) and ok[ "spent_total" ] == 71_000_000
 
 
@@ -591,13 +590,13 @@ def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questi
 # --- cases a mutation showed unguarded -----------------------------------------------------------------------------------
 
 def test_exactly_ninety_pooled_after_the_reserve_question_is_enough_to_evaluate():
-    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ), _arm( "single1", { "far": 0.05 }, question=4 ) ] ) )
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 30 ), _with_boundary( 2, 30 ), _with_boundary( 3, 30 ), _arm( "single1", { "far": 0.05 }, question=4 ) ] ), check_arms=False )
     assert ( r[ "pooled_boundary" ], r[ "next_step" ] ) == ( 90, "evaluate" )
 
 
 def test_a_question_whose_single_run_is_not_clean_adds_nothing_to_the_pooled_count():
     bad = _with_boundary( 2, 49 ); bad[ "failed" ] = [ "x" ]
-    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ) )[ "pooled_boundary" ] == 20
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 20 ), bad ] ), check_arms=False )[ "pooled_boundary" ] == 20
     recs = _question() + [ dict( r, question=2, run_name=f"s1-q2-{r[ 'arm' ]}" ) for r in _question() if r[ "arm" ] == "single1" ]
     recs[ -1 ][ "failed" ] = [ "e000" ]
     assert an.evaluate( an.read_stage( recs ) )[ "boundary_by_question" ] == { 1: 100 }
@@ -769,6 +768,19 @@ def test_the_old_shape_arm_is_complete_only_when_every_entry_was_a_hit_and_a_bad
     assert rec[ "state" ] == "complete" and an.read_arm( rec )[ "malformed" ] == { "m.a": "not_a_mapping" }
 
 
+def _extra_arms( question, overlaps, answers=None ):
+    """Ensures: returns the canary and the three page arms of a question."""
+    ids = list( overlaps )[ :10 ]
+    can = _arm( "canary", { i: overlaps[ i ] for i in ids }, question=question, size=10 )
+    pages = { "p1": 0.9, "p2": 0.6, "p3": 0.1 }
+    return [ can ] + [ _arm( n, pages, question=question, size=s ) for n, s in ( ( "page-single1", 1 ), ( "page-single2", 1 ), ( "page-pack", 200 ) ) ]
+
+
+def _complete( question=1, **kw ):
+    """Ensures: returns the fifteen arms the plan runs for one question."""
+    return _question( question, **kw ) + _extra_arms( question, _base() )
+
+
 # --- the report ----------------------------------------------------------------------------------------------------------
 
 def test_the_report_gathers_every_part_and_the_text_names_the_decision_and_the_next_step():
@@ -802,6 +814,7 @@ def test_real_answers_copied_into_three_questions_reach_the_ninety_and_a_default
         for name, size in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ):
             recs.append( _arm( name, ov, question=q, size=size, answers=fx[ "answers" ] ) )
         recs += [ dict( r, answers=fx[ "answers" ], entry_ids=[ a[ "id" ] for a in fx[ "answers" ] ] ) for r in _probes( q, fx[ "answers" ][ 0 ][ "id" ], ov ) ]
+        recs += _extra_arms( q, ov, fx[ "answers" ] )
     rep = an.build_report( recs, canaries=[] )
     assert rep[ "evaluate" ][ "boundary_pooled" ] == 99 and rep[ "evaluate" ][ "boundary_by_question" ] == { 1: 33, 2: 33, 3: 33 }
     assert rep[ "decision" ] == "default pack size 200" and rep[ "next_step" ] == "evaluate"
@@ -811,6 +824,7 @@ def test_real_answers_of_one_question_alone_read_inconclusive_and_ask_for_questi
     fx   = json.loads( REAL.read_text() )
     ov   = { r[ "id" ]: 0.0 for r in fx[ "answers" ] }
     recs = [ _arm( n, ov, size=s, answers=fx[ "answers" ] ) for n, s in ( ( "single1", 1 ), ( "single2", 1 ), ( "pack10", 10 ), ( "pack50", 50 ), ( "pack200", 200 ) ) ]
+    recs += _extra_arms( 1, ov, fx[ "answers" ] )
     rep  = an.build_report( recs, canaries=[] )
     assert rep[ "evaluate" ][ "boundary_pooled" ] == 33 and rep[ "next_step" ] == "run question 2"
     assert all( rep[ "evaluate" ][ "sizes" ][ s ][ "state" ] == "inconclusive" for s in an.PACK_SIZES )
@@ -877,3 +891,157 @@ def test_an_old_arm_that_shares_no_entry_with_single_run_one_has_no_percentile_a
     s1  = _arm( "single1", { "a": 0.5 } ); old = _arm( "old", { "zzz": 0.5 }, run_name=NO_NAME )
     r   = an.old_shape_report( an.read_stage( [ s1, old ] ) )[ 1 ]
     assert ( r[ "hits" ], r[ "p99" ], r[ "max" ], r[ "boundary_flips" ] ) == ( 1, None, None, 0 )
+
+
+# --- ruling R1: lost entries ---------------------------------------------------------------------------------------------
+
+def _lossy( n, lost, arm="single1", **over ):
+    """Ensures: returns an arm of n entries whose first `lost` ids failed with no answer."""
+    ids  = [ f"e{k:05d}" for k in range( n ) ]
+    rec  = _arm( arm, { i: 0.05 for i in ids }, **over )
+    rec[ "answers" ] = rec[ "answers" ][ lost: ]
+    rec[ "failed" ]  = ids[ :lost ]
+    return rec
+
+
+def test_the_lost_entry_limit_is_one_in_two_hundred_rounded_down():
+    assert an.LOST_ONE_IN == 200
+    assert [ an.lost_limit( n ) for n in ( 0, 1, 199, 200, 399, 400, 7705, 7800 ) ] == [ 0, 0, 0, 1, 1, 2, 38, 39 ]
+
+
+def test_an_arm_of_7705_entries_may_lose_38_and_no_more_to_be_judged():
+    ok  = an.read_arm( _lossy( 7705, 38 ) )
+    bad = an.read_arm( _lossy( 7705, 39 ) )
+    assert ( ok[ "status" ], len( ok[ "lost" ] ), ok[ "lost_limit" ] ) == ( "clean", 38, 38 )
+    assert ( bad[ "status" ], len( bad[ "lost" ] ), bad[ "lost_limit" ] ) == ( "inconclusive", 39, 38 )
+
+
+def test_a_lost_entry_is_one_failed_unasked_unreached_malformed_or_simply_without_an_answer_counted_once():
+    rec = _arm( "single1", { f"e{k:03d}": 0.05 for k in range( 1000 ) } )
+    rec[ "answers" ] = rec[ "answers" ][ 5: ]                                          # five ids have no answer: e000 to e004
+    rec[ "failed" ], rec[ "unasked" ], rec[ "not_reached" ] = [ "e000", "e005" ], [ "e000", "e006" ], [ "e007" ]
+    rec[ "answers" ][ 0 ][ "probabilities" ] = None                                    # e005 is malformed (it also sits in `failed`)
+    a = an.read_arm( rec )
+    assert a[ "lost" ] == [ "e000", "e001", "e002", "e003", "e004", "e005", "e006", "e007" ]
+    assert a[ "lost_limit" ] == 5 and a[ "status" ] == "inconclusive"
+
+
+def test_an_id_listed_as_lost_that_the_arm_never_asked_about_still_counts():
+    rec = _arm( "single1", { "a": 0.05 }, failed=[ "ghost" ] )
+    assert an.read_arm( rec )[ "lost" ] == [ "ghost" ]
+
+
+def test_an_arm_that_ran_out_of_attempts_is_judged_by_its_lost_entries_not_by_the_stop():
+    ok  = _lossy( 400, 2, state="incomplete", stop_reason="attempts" ); ok[ "not_reached" ] = ok.pop( "failed" ) and [ f"e{k:05d}" for k in range( 2 ) ]; ok[ "failed" ] = []
+    bad = _lossy( 400, 3, state="incomplete", stop_reason="attempts" )
+    assert an.read_arm( ok )[ "status" ] == "clean" and an.read_arm( bad )[ "status" ] == "inconclusive"
+
+
+def test_an_incomplete_arm_with_no_named_stop_is_inconclusive_however_few_entries_were_lost():
+    assert an.read_arm( _lossy( 400, 0, state="incomplete" ) )[ "status" ] == "inconclusive"
+
+
+def test_a_ceiling_stop_is_invalid_even_when_nothing_was_lost():
+    assert an.read_arm( _lossy( 400, 0, state="incomplete", stop_reason="ceiling" ) )[ "status" ] == "invalid"
+
+
+def test_an_arm_with_nothing_answered_is_inconclusive_whatever_the_limit_says():
+    assert an.read_arm( _lossy( 400, 400 ) )[ "status" ] == "inconclusive"
+    assert an.read_arm( _arm( "single1", {} ) )[ "status" ] == "inconclusive"
+
+
+def test_a_comparison_is_pairwise_over_the_entries_answered_in_both_arms():
+    s1 = _lossy( 400, 1 )                                                                   # loses e00000
+    pk = _lossy( 400, 0, arm="pack10", size=10 ); pk[ "answers" ] = pk[ "answers" ][ :-1 ]; pk[ "failed" ] = [ "e00399" ]       # loses e00399
+    st = an.read_stage( [ s1, pk ] )
+    assert an.pass_one( st, 10, 0.02 )[ "n" ] == 398 and st[ 1 ][ "single1" ][ "status" ] == st[ 1 ][ "pack10" ][ "status" ] == "clean"
+
+
+def test_the_boundary_count_is_taken_after_the_lost_entries_are_dropped():
+    base = { **{ f"b{k:03d}": 0.5 for k in range( 91 ) }, **{ f"o{k:03d}": 0.05 for k in range( 309 ) } }          # 400 entries, 91 on the boundary
+    s1   = _arm( "single1", base ); s1[ "answers" ] = s1[ "answers" ][ 2: ]; s1[ "failed" ] = [ "b000", "b001" ]
+    st   = an.read_stage( [ s1 ] )
+    assert st[ 1 ][ "single1" ][ "status" ] == "clean" and len( an.boundary_ids( st[ 1 ][ "single1" ] ) ) == 89
+    assert an.evaluate( st )[ "boundary_pooled" ] == 89
+
+
+def test_the_report_prints_the_lost_count_and_the_limit_beside_each_other_for_every_arm():
+    text = an.render( an.build_report( _complete(), canaries=[] ) )
+    assert "s1-q1-single1: lost 0 of limit 0" in text and "s1-q1-pack200: lost 0 of limit 0" in text and "s1-q1-page-pack: lost 0 of limit 0" in text
+    lossy = an.render( an.build_report( [ _lossy( 7705, 40, size=1, run_name="s1-q1-single1" ) ], canaries=[] ) )
+    assert "s1-q1-single1: lost 40 of limit 38" in lossy
+
+
+# --- ruling R2: pass 3 and a question with no probes -------------------------------------------------------------------------
+
+def test_a_question_with_no_probe_arms_is_skipped_and_named_as_not_probed():
+    r = an.pass_three( an.read_stage( _question( 1 ) + _question( 2, probes=False ) ), 0.02 )
+    assert ( r[ "state" ], r[ "placements" ], r[ "not_probed" ] ) == ( "pass", 6, [ 2 ] )
+
+
+def test_a_question_with_one_to_five_placements_makes_pass_three_inconclusive_even_beside_a_full_one():
+    for kept in range( 1, 6 ):
+        q2 = _question( 2, probes=False ) + _probes( 2, "e000", _base() )[ :kept ]
+        r  = an.pass_three( an.read_stage( _question( 1 ) + q2 ), 0.02 )
+        assert r[ "state" ] == "inconclusive", kept
+
+
+def test_pass_three_reads_pass_only_when_at_least_one_question_has_all_six():
+    assert an.pass_three( an.read_stage( _question( 1, probes=False ) + _question( 2, probes=False ) ), 0.02 )[ "state" ] == "inconclusive"
+    assert an.pass_three( an.read_stage( _question( 1 ) ), 0.02 )[ "state" ] == "pass"
+
+
+def test_beside_the_default_the_report_says_sizes_ten_and_fifty_carry_no_position_evidence():
+    rep  = an.build_report( _complete(), canaries=[] )
+    text = an.render( rep )
+    assert rep[ "decision" ] == "default pack size 200" and "pass 3 was run at size 200 only" in text
+    assert "sizes 10 and 50 carry no position evidence" in text
+
+
+def test_the_report_names_the_questions_that_were_not_probed():
+    text = an.render( an.build_report( _complete( 1 ) + _question( 2, probes=False ) + _extra_arms( 2, _base() ), canaries=[] ) )
+    assert "not probed: question 2" in text
+
+
+# --- ruling R3: the next step looks at the arms ------------------------------------------------------------------------------
+
+ALL_ARMS = [ "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
+             "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" ]
+
+
+def test_the_arms_a_question_must_have_are_the_fifteen_the_plan_runs():
+    assert list( an.REQUIRED_ARMS ) == ALL_ARMS
+
+
+def test_with_only_single_run_one_present_the_next_step_names_the_remaining_arms_in_order():
+    r = an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ) )
+    assert r[ "stop" ] is False
+    assert r[ "next_step" ] == "run question 1's remaining arms: " + ", ".join( ALL_ARMS[ 1: ] )
+
+
+def test_a_whole_first_question_gives_run_question_two_and_a_whole_second_gives_run_question_three():
+    one = an.stop_rules( an.read_stage( _complete( 1 ) ) )
+    two = an.stop_rules( an.read_stage( _complete( 1 ) + _complete( 2 ) ) )
+    assert one[ "next_step" ] == "run question 2" and two[ "next_step" ] in ( "run question 3", "stop and ask: under 50 pooled boundary entries after question 2" )
+
+
+def test_the_first_question_with_arms_missing_is_named_even_when_a_later_question_has_started():
+    recs = [ r for r in _complete( 1 ) if r[ "arm" ] != "pack200" ] + [ _with_boundary( 2, 3 ) ]
+    r = an.stop_rules( an.read_stage( recs ) )
+    assert r[ "next_step" ] == "run question 1's remaining arms: pack200"
+
+
+def test_a_canary_retry_is_not_a_required_arm_and_does_not_stand_in_for_one():
+    recs = [ r for r in _complete( 1 ) if r[ "arm" ] != "canary" ] + [ _arm( "canary", { "a": 0.1 }, size=10, run_name="s1-q1-canary-a2", attempt=2 ) ]
+    assert an.stop_rules( an.read_stage( recs ) )[ "next_step" ] == "run question 1's remaining arms: canary"
+
+
+def test_a_spend_stop_and_an_unclean_single_run_come_before_the_remaining_arms():
+    spent = _spend( 1, 16_000_000 )
+    assert an.stop_rules( an.read_stage( [ spent ] ) )[ "next_step" ] == "stop and ask: spend after question 1 above 15,000,000 tokens"
+    bad = _with_boundary( 1, 3 ); bad[ "failed" ] = [ "x" ]
+    assert an.stop_rules( an.read_stage( [ bad ] ) )[ "next_step" ] == "stop and ask: question 1's single run 1 is not clean"
+
+
+def test_the_arm_check_can_be_left_off_to_read_the_rules_alone():
+    assert an.stop_rules( an.read_stage( [ _with_boundary( 1, 3 ) ] ), check_arms=False )[ "next_step" ] == "run question 2"
