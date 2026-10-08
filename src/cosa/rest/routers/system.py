@@ -403,6 +403,8 @@ async def reset_prediction_engine( drop_table: bool = False ):
         - PredictionEngine singleton is destroyed and re-created
         - New instance reads current config (e.g., test LanceDB table after hot-swap)
         - No config reinit, DB swap, or snapshot reload (use /api/init for those)
+        - drop_table=True with a failed clear still resets the singleton, but answers status "error"
+          with table_dropped false and the cause in message, so a caller never reads it as success
     """
     try:
         from cosa.agents.prediction_engine.prediction_engine import PredictionEngine, get_prediction_engine
@@ -411,6 +413,7 @@ async def reset_prediction_engine( drop_table: bool = False ):
         config_mgr  = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         table_name  = config_mgr.get( "prediction engine lancedb table", default="prediction_decisions" )
         table_dropped = False
+        clear_error   = None
 
         # Clear the decision store (server process has write permission, test process may not).
         # The rows go; the alembic-managed table itself is kept.
@@ -422,10 +425,20 @@ async def reset_prediction_engine( drop_table: bool = False ):
                     PredictionDecisionRepository( session ).delete_all()
                 table_dropped = True
             except Exception as drop_err:
+                clear_error = drop_err
                 print( f"[PE-RESET] Postgres clear note: {drop_err}" )
 
         PredictionEngine.reset()
         engine = get_prediction_engine( config_mgr=config_mgr )
+
+        if clear_error is not None:
+            return {
+                "status"           : "error",
+                "message"          : f"PredictionEngine reset ran, but the decision store was not cleared: {clear_error}",
+                "prediction_table" : engine.lancedb_table,
+                "table_dropped"    : False,
+                "timestamp"        : du.get_current_datetime_iso()
+            }
 
         return {
             "status"           : "success",

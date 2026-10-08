@@ -174,7 +174,7 @@ result, not only where it posts. (`AskResponse.queue_position` — added 2026-09
 | GET | `/health` | Public | Simplified health check (deliberately 2 fields — backs a 30s docker healthcheck) |
 | GET | `/api/code-identity` | Public | Which code the RUNNING PROCESS holds — captured at module import, never re-read (row `ce89669e`) |
 | GET | `/api/init` | Admin | Hot-reload config; `?config_block_id=` also swaps the running DB connection. Admin-only since 2026-09-23 (row `977eaaf2`) — it was `Public` before, which is what made it a P1 |
-| POST | `/api/prediction-engine/reset` | Auth | Reset the PredictionEngine singleton; `?drop_table=true` clears the decision rows. Was an **unauthenticated GET whose `drop_table` defaulted to true** — hardened 2026-09-25 (row `2d6f2221`) to POST + credential + default false |
+| POST | `/api/prediction-engine/reset` | Auth | Reset the PredictionEngine singleton; `?drop_table=true` clears the decision rows; if the clear fails the singleton is still reset but the answer is `status: error` with `table_dropped: false`. Was an **unauthenticated GET whose `drop_table` defaulted to true** — hardened 2026-09-25 (row `2d6f2221`) to POST + credential + default false |
 | GET | `/api/get-session-id` | Public | Generate new session ID. ⚠️ NOT read-only: it grows `TwoWordIdGenerator.generated_ids`, a process-lifetime set that is never pruned (row `977eaaf2`) |
 | GET | `/api/auth-test` | JWT | Verify token validity |
 | GET | `/api/config/client` | JWT | Get client configuration values |
