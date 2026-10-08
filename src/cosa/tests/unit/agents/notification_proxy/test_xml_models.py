@@ -110,6 +110,10 @@ class TestScriptMatcherResponseCleanNoMatch:
         assert r.answer == ""
         assert r.is_match() is False
 
+    def test_a_marker_that_only_starts_with_none_is_not_the_marker( self ):
+        with pytest.raises( ValidationError ):
+            ScriptMatcherResponse( matched_entry="none of these", answer=None )
+
     def test_an_empty_answer_with_an_entry_is_still_an_error( self ):
         with pytest.raises( ValidationError ):
             ScriptMatcherResponse( matched_entry="1", answer=None )
