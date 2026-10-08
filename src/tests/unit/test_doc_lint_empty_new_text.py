@@ -114,3 +114,10 @@ def test_the_markdown_names_the_pairs_left_out_of_agreement_and_of_the_group_row
     text = jc.render_markdown( out )
     assert "(2 pairs left out)" in text and "New text empty, in neither n nor wrong: haiku relocate 1; haiku paraphrase 1." in text
     assert [ g for g in out[ "judges" ][ "haiku" ][ "groups" ] if g[ "group" ] == "relocate" ][ 0 ][ "rate" ] is None
+
+
+def test_the_harness_version_is_two_and_the_agreement_note_names_it( tmp_path ):
+    results, _ = _results( [ pair( "kept", OLD ) ], tmp_path )
+    report     = hr.build_report( results, CONFIG )
+    assert hn.HARNESS_VERSION == 2 and report[ "harness_version" ] == 2
+    assert "from harness version 2," in report[ "agreement_note" ]
