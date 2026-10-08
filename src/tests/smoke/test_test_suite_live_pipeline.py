@@ -52,7 +52,15 @@ lupin_root = os.environ.get( "LUPIN_ROOT" )
 if lupin_root:
     sys.path.insert( 0, os.path.join( lupin_root, "src" ) )
 
+import pytest
+
 from tests.smoke.utilities.live_pipeline_base import LivePipelineTestBase
+
+TIER_SKIP_REASON = (
+    "This smoke submits a test-suite job, and a test-suite job always takes the monopolize slot. "
+    "Inside a tier that slot is held by the tier itself, so the job is deferred until the tier ends "
+    "and can never run as the tier's child. Run this file as its own scheduled run."
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,6 +135,7 @@ def quick_smoke_test():
 
 
 def test_test_suite_live_pipeline():
+    if os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ): pytest.skip( TIER_SKIP_REASON )
     assert quick_smoke_test()
 
 

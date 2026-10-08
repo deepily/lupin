@@ -18,6 +18,14 @@ import tests.smoke.test_test_suite_live_pipeline as smoke
 ENV = "LUPIN_TEST_MONOPOLIZE_PARENT_ID"
 
 
+def _run_the_smoke():
+    """Run the smoke body; a skip fails here, because these callers expect the flow to run."""
+    try:
+        smoke.test_test_suite_live_pipeline()
+    except pytest.skip.Exception as skipped:
+        pytest.fail( f"the smoke skipped outside a tier: {skipped}" )
+
+
 def _env_without_the_tier_id( **extra ):
     env = { k: v for k, v in os.environ.items() if k != ENV }
     env.update( extra )
@@ -45,7 +53,7 @@ def test_inside_a_tier_the_smoke_skips_and_never_reaches_the_flow( flow_calls ):
 def test_outside_a_tier_the_smoke_runs_the_flow( flow_calls, value ):
     extra = {} if value is None else { ENV: value }
     with patch.dict( os.environ, _env_without_the_tier_id( **extra ), clear=True ):
-        smoke.test_test_suite_live_pipeline()
+        _run_the_smoke()
     assert flow_calls == [ "ran" ]
 
 
@@ -53,4 +61,4 @@ def test_a_failing_flow_outside_a_tier_still_fails_the_test( monkeypatch ):
     monkeypatch.setattr( smoke, "quick_smoke_test", lambda: False )
     with patch.dict( os.environ, _env_without_the_tier_id(), clear=True ):
         with pytest.raises( AssertionError ):
-            smoke.test_test_suite_live_pipeline()
+            _run_the_smoke()
