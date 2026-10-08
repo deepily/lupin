@@ -70,6 +70,16 @@ def test_a_canary_that_another_model_did_not_answer_does_not_trip_the_name( env 
     assert "model_mismatch" not in report[ "tripped" ] and "model_mismatch" not in check[ "tripped" ] and check[ "agrees" ]
 
 
+@pytest.mark.parametrize( "standin,ceiling", [ ( {}, 1 ), ( { "refuse_over": 0 }, 2_000_000 ) ] )
+def test_a_canary_the_right_model_answered_but_another_reason_stopped_does_not_trip_the_name_and_the_two_agree( env, standin, ceiling ):
+    env.transport_factory = lambda budget, **kw: Standin( budget, **{ "served": None, **standin, **kw } )
+    report = st.run_canary( env, 1, NEED, ENTRIES, ceiling )
+    rec    = read( env, "s1-q1-canary" )
+    check  = an.check_canary( rec, report )
+    assert rec[ "stop_reason" ] != "model_mismatch" and report[ "tripped" ] != [] and "model_mismatch" not in check[ "tripped" ] and check[ "agrees" ]
+    assert ceiling != 1 or rec[ "stop_reason" ] == "ceiling"                                    # the ceiling case is a stop that is not None and not the name
+
+
 def test_the_command_over_a_wrong_model_canary_folder_stops_and_asks_and_prints_no_disagreement( env, capsys ):
     st.run_canary( env, 1, NEED, ENTRIES, 2_000_000 )
     assert an.main( [ str( env.results_dir ) ] ) == 0
