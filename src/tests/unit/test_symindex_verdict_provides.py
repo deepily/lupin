@@ -254,3 +254,15 @@ def test_an_integer_too_large_for_a_float_is_not_finite_not_a_crash():
     a = { "id": "x", "provides": 10 ** 400, "coverage": _cov() }
     r = vd.decide_provides( [ a ], [ "x" ], [], set() )
     assert r[ "malformed" ] == [ { "id": "x", "reason": "not_finite" } ]
+
+
+def test_an_entry_at_exactly_the_reuse_bar_is_reuse_and_not_doubtful():
+    r = _decide( [ _a( "at", 0.7 ) ] )
+    assert ( r[ "verdict" ], r[ "doubtful" ] ) == ( "REUSE", [] )
+
+
+def test_coverage_exactly_a_half_under_the_floor_is_uncertain_while_just_under_is_new():
+    at    = _decide( [ _a( "at", 0.1, 0.5 ) ] )
+    under = _decide( [ _a( "under", 0.1, 0.49 ) ] )
+    assert ( at[ "verdict" ], at[ "cause" ], at[ "doubtful" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [] )
+    assert ( under[ "verdict" ], under[ "causes" ] ) == ( "NEW", [] )
