@@ -255,6 +255,7 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 | `bug fix expediter auto retry on fix` | `false` | Phase 6 auto-resubmit of the original job after a successful fix. |
 | `bug fix expediter require user confirm` | `true` | Ask user confirmation at Phase 1 (diagnosis) and Phase 2 (fix selection) gates. |
 | `bug fix expediter trust mode` | `shadow` | Trust proxy mode: `shadow` (L1, commit_only), `suggest` (L2, commit_only), `active` (L3+, branch_and_pr). |
+| `bug fix expediter push fix branch enabled` | `false` | Whether trust level 3 and above pushes the fix branch and opens the PR. Off, the fix stays a local commit on its fix branch and the run says nothing was pushed. |
 
 **Config loading**: `BugFixExpediterConfig.from_config(config_mgr)` reads all keys
 with type coercion (int/float/bool/string) based on dataclass field annotations.
@@ -292,6 +293,12 @@ for the canonical table. In summary:
 | L3+ Active | `active` | `branch_and_pr` | New `fix/YYYY-MM-DD-{slug}` branch + push + PR via `gh` |
 | `gh` missing | any | `branch_only` (degraded) | Branch + commit + push; no PR |
 | Proxy down | any | `commit_only` (fallback) | Commit on current branch |
+
+**The push is behind its own flag.** At trust level 3 and above the `branch_and_pr` row applies only when
+`bug fix expediter push fix branch enabled` is `true`. It is `false` by default. With it off, BFE commits the fix on a
+new `fix/...` branch, pushes nothing, opens no PR and checks the original branch out again. The result is
+`commit_only` and its error reads "push disabled (bug fix expediter push fix branch enabled is false): nothing was
+pushed and no pull request was opened". TFE has its own key. Trust levels 1 and 2 never push.
 
 The trust level is read at Phase 5 time via
 `GitStrategist.resolve_trust_level(orchestrator.proxy)`. If the SWE Team Trust
@@ -334,7 +341,10 @@ To graduate to `active` (L3+ branching + PR):
 
 ```ini
 bug fix expediter trust mode = active
+bug fix expediter push fix branch enabled = true
 ```
+
+The second line is what allows the push. Left at its default `false`, `active` still branches and commits locally but pushes nothing.
 
 This requires a populated SWE Team Trust Proxy and functional `gh` CLI.
 See the [Decision Proxy Admin Guide](../proxy-admin-guide.md) for how to earn
@@ -496,7 +506,8 @@ strategy degrades. Options:
 ### PR creation fails (`gh not found`)
 
 The strategist degrades to `branch_only` mode automatically and emits a
-high-priority notification. The fix branch still exists and has been pushed — you
+high-priority notification. The fix branch still exists and, with
+`bug fix expediter push fix branch enabled = true`, has been pushed — you
 can manually create the PR via `gh pr create` or the GitHub web UI. To prevent this,
 install `gh` CLI on the host:
 

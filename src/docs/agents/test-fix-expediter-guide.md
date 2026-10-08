@@ -403,6 +403,7 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 | `test fix expediter cost cap usd` | `15.00` | Per-run USD ceiling (aliased as `budget_usd` for the shared `FixExecutor`) |
 | `test fix expediter wall clock timeout secs` | `2400` | Whole-pipeline timeout (40 min covers cluster → diagnose → propose → fix → git → rerun dispatch) |
 | `test fix expediter trust mode` | `inherit` | Trust proxy mode: `inherit`, `fixed_l1`, `fixed_l3`, `shadow` |
+| `test fix expediter push fix branch enabled` | `false` | Whether trust level 3 and above pushes the fix branch (only `fix/<name>`, never forced) and opens the PR. Off, the commits stay on a local branch and the run says nothing was pushed. |
 | `test fix expediter rerun scope` | `affected` | Phase 6 rerun scope: `affected` (original suites) or `full` (all) |
 | `test fix expediter continue on cluster failure` | `true` | Phase 3: continue remaining clusters after a failure (`true`) or abort whole batch (`false`) |
 | `test fix expediter voice gate mode` | `aggregate` | Phase 1+2 gate UX: `aggregate` (2 total gates, multi-select for Phase 2) or `per_cluster` (K+1 gates) |
@@ -608,8 +609,9 @@ failures. Possible causes:
 
 `commit_and_pr_multi()` degrades to `branch_only` when `gh` CLI is missing or
 fails. The commits + branch exist; the PR just wasn't opened. At trust 3 and above it
-also stops at `commit_only`, with an error naming `push_branch`, because the real `GitOps`
-cannot push; then the branch exists only on this machine and no PR was tried. Push it
+also stops at `commit_only` while `test fix expediter push fix branch enabled` is `false`, its default.
+The error reads "push disabled (test fix expediter push fix branch enabled is false): nothing was pushed and no
+pull request was opened". The branch then exists only on this machine. Set the key to `true` for the next run, or push it
 yourself first, then create the PR manually:
 
 ```bash
