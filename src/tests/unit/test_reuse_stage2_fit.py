@@ -224,10 +224,17 @@ def test_a_known_optimum_is_found_and_the_rate_rules_out_the_values_that_break_i
     assert r[ "feasible" ] == 2 and len( r[ "table" ] ) == 4
 
 
-def test_ties_go_to_the_lowest_threshold_then_the_lowest_reuse():
-    assert ft.fit_policy( _opt_rows(), HALVES, 0.5, GRID )[ "chosen" ] == { "reuse": 0.7, "threshold": 0.4, "floor": 0.3, "coverage": 0.5 }
+def test_ties_go_to_the_highest_reuse_cut_then_the_lowest_threshold_floor_and_coverage():
+    r = ft.fit_policy( _opt_rows(), HALVES, 0.5, GRID )
+    assert r[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.3, "coverage": 0.5 } and r[ "tied" ] == 2
     both = ft.fit_policy( _opt_rows( 0.7 ), HALVES, 0.0, GRID )
-    assert both[ "chosen" ][ "threshold" ] == 0.4 and both[ "chosen" ][ "reuse" ] == 0.9
+    assert both[ "chosen" ][ "threshold" ] == 0.4 and both[ "chosen" ][ "reuse" ] == 0.9 and both[ "tied" ] == 2
+    wide = ft.fit_policy( _opt_rows(), HALVES, 0.5, { **GRID, "threshold": ( 0.4, ), "reuse": ( 0.9, ), "floor": ( 0.2, 0.3 ), "coverage": ( 0.3, 0.5 ) } )
+    assert wide[ "chosen" ] == { "reuse": 0.9, "threshold": 0.4, "floor": 0.2, "coverage": 0.3 } and wide[ "tied" ] == 4
+
+
+def test_a_unique_best_point_reports_a_tie_of_one():
+    assert ft.fit_policy( _opt_rows(), HALVES, 0.0, GRID )[ "tied" ] == 1
 
 
 def test_a_grid_point_with_the_floor_above_the_reuse_cut_is_never_tried():
@@ -289,7 +296,9 @@ def test_the_old_question_is_fitted_on_its_own_overlap_with_one_cut():
     r = ft.fit_old( rows, HALVES, 0.7, cuts = ( 0.4, 0.6, 0.85 ) )
     assert r[ "chosen" ] == { "cut": 0.4 } and r[ "feasible" ] == 3 and [ t[ "policy" ][ "cut" ] for t in r[ "table" ] ] == [ 0.4, 0.6, 0.85 ]
     assert r[ "table" ][ 1 ][ "figures" ][ "twins_on_shortlist" ] == 0 and r[ "table" ][ 0 ][ "figures" ][ "false_reuse" ] == 2
-    assert ft.fit_old( rows, HALVES, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )[ "chosen" ] == { "cut": 0.6 }                # 0.4 breaks the rate, 0.6 and 0.85 find no twin
+    assert ft.fit_old( rows, HALVES, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )[ "chosen" ] == { "cut": 0.85 }              # 0.4 breaks the rate, 0.6 and 0.85 find no twin and tie
+    tie = ft.fit_old( rows, HALVES, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )
+    assert tie[ "tied" ] == 2 and ft.fit_old( rows, HALVES, 0.7, cuts = ( 0.4, 0.6, 0.85 ) )[ "tied" ] == 1
     with pytest.raises( ft.NoFeasiblePolicy ): ft.fit_old( rows, HALVES, 0.0, cuts = ( 0.4, 0.6 ) )
 
 
@@ -350,9 +359,9 @@ def test_the_report_carries_the_grid_and_the_edges_and_the_text_prints_both_with
 
 def test_the_text_has_no_edge_warning_when_the_choice_is_inside_its_grid():
     split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
-    rows  = [ _row( "m", "t", True, 0.55, 0.1 ), _row( "m", "a", False, 0.6, 0.1 ), _row( "k", "t", True, 0.9 ) ]
-    rep   = ft.report( rows, split, 0.0, { "reuse": ( 0.5, 0.7, 0.9 ), "threshold": ( 0.4, ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
-    assert rep[ "chosen" ][ "reuse" ] == 0.7 and rep[ "edges" ] == [] and "warning" not in ft.render( rep ) and ft.GRID_NOTE in ft.render( rep )
+    rows  = [ _row( "m", "t", True, 0.75, 0.1 ), _row( "m", "a", False, 0.6, 0.1 ), _row( "k", "t", True, 0.9 ) ]
+    rep   = ft.report( rows, split, 0.0, { "reuse": ( 0.5, 0.7, 0.9 ), "threshold": ( 0.8, ), "floor": ( 0.3, ), "coverage": ( 0.5, ) } )
+    assert rep[ "chosen" ][ "reuse" ] == 0.7 and rep[ "tied" ] == 1 and rep[ "edges" ] == [] and "warning" not in ft.render( rep ) and ft.GRID_NOTE in ft.render( rep )
 
 
 def test_the_old_report_carries_its_cuts_as_the_grid_and_flags_a_choice_on_their_edge():
@@ -362,6 +371,26 @@ def test_the_old_report_carries_its_cuts_as_the_grid_and_flags_a_choice_on_their
     assert rep[ "grid" ] == { "cut": ( 0.2, 0.4, 0.6 ) } and rep[ "chosen" ] == { "cut": 0.2 } and rep[ "edges" ] == [ { "key": "cut", "value": 0.2, "edge": "lowest" } ]
     assert ft.old_report( rows, split, 0.5, cuts = ( 0.6, 0.2, 0.4 ) )[ "grid" ] == { "cut": ( 0.2, 0.4, 0.6 ) }
     assert "grid: cut 0.2 to 0.6 (3 values)" in ft.render( rep ) and "warning: the chosen cut 0.2 is the lowest value of its grid" in ft.render( rep )
+
+
+# --- the tie, said in words ---------------------------------------------------------------------------------------------------
+
+def test_a_tie_is_said_in_words_with_its_size_and_the_way_it_was_broken_and_a_unique_best_says_nothing():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rows  = _opt_rows() + [ _row( "k", "t", True, 0.9 ) ]
+    tied  = ft.report( rows, split, 0.5, GRID )
+    assert tied[ "tied" ] == 2
+    assert "tie: 2 points within the rate tied on twins on the shortlist; the highest reuse cut among them was chosen" in ft.render( tied )
+    assert "tie:" not in ft.render( ft.report( rows, split, 0.0, GRID ) )
+
+
+def test_the_old_question_says_the_tie_with_its_own_word_for_the_cut():
+    split = { "fit": [ { "members": [ "m" ] } ], "check": [ { "members": [ "k" ] } ], "seed": 5, "groups": 2, "members": 2 }
+    rows  = [ _row( "m", "t", True, None, None, p_overlap = 0.55 ), _row( "m", "a", False, None, None, p_overlap = 0.5 ), _row( "m", "b", False, None, None, p_overlap = 0.8 ),
+              _row( "k", "t", True, None, None, p_overlap = 0.9 ) ]
+    rep   = ft.old_report( rows, split, 0.34, cuts = ( 0.4, 0.6, 0.85 ) )
+    assert rep[ "tied" ] == 2 and rep[ "chosen" ] == { "cut": 0.85 }
+    assert "tie: 2 points within the rate tied on twins on the shortlist; the highest cut among them was chosen" in ft.render( rep )
 
 
 # --- the second named condition: a rate that binds nowhere -----------------------------------------------------------------
