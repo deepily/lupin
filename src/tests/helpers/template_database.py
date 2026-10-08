@@ -61,7 +61,7 @@ def uses_template():
 _REFUSED = ( "authentication failed", "no pg_hba.conf entry", "is not permitted to log in" )
 
 
-def _fail_on_a_refusal( error ):
+def fail_on_a_refusal( error ):
     """Fail on a refused login or a busy template; leave a connection failure alone."""
     code = getattr( error.orig, "pgcode", None )
     if code == _BUSY_CODE: pytest.fail( f"template {TEMPLATE_NAME} is in use by another session: run the test again" )
@@ -98,7 +98,7 @@ def create_from_template( server_url, name, engine_factory=create_engine, use_te
             code = getattr( error.orig, "pgcode", None )
             if code == _MISSING_CODE: pytest.fail( f"template {TEMPLATE_NAME} is missing: run db_roles --grants-only --apply" )
             if code == _DENIED_CODE: pytest.fail( "this login may not create databases" )
-            _fail_on_a_refusal( error )
+            fail_on_a_refusal( error )
         raise
     finally:
         engine.dispose()

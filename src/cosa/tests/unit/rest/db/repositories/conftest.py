@@ -14,13 +14,17 @@ Honest skip predicate (design §7 / task): the whole module SKIPS when no
 pgvector-enabled Postgres is reachable — local proof needs no gate (pgvector is
 live), but CI environments without it skip rather than error. Override the target
 with PGVECTOR_TEST_DATABASE_URL (a base URL WITHOUT the database name, e.g.
-``postgresql+psycopg2://user:pw@host:5432/``).
+``postgresql+psycopg2://user:pw@host:5432/``). The override names the server only: when a test role exists, the
+clone statement still runs over the override's login.
+
+The maintenance database is "postgres". PGVECTOR_TEST_MAINT_DB, which defaulted to lupin_db_dev, is gone.
 """
 
 import os
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 import tests.helpers.template_database as td
@@ -57,6 +61,10 @@ def _server_reachable( server_url: str ) -> bool:
             else: assert conn.execute( text( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" ) ).first() is not None
         eng.dispose()
         return True
+    except OperationalError as error:
+        # A refused test login on a provisioned host must fail, never skip the whole suite.
+        if td.uses_template(): td.fail_on_a_refusal( error )
+        return False
     except Exception:
         return False
 

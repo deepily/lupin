@@ -168,6 +168,9 @@ def _create_all( url ):
     not exist` — all four tests in this file, on a real boot path that works
     fine. Restored 2026-08-26.
 
+    In keyed mode the database is a template clone with the extension already in it.
+    Deleting the line below cannot redden this file. A unit test guards the production line.
+
     Requires:
         - url points at a reachable Postgres whose image bundles pgvector
           (docker-compose uses pgvector/pgvector:pg16; Cloud SQL has it native)
