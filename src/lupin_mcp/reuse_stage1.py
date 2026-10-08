@@ -6,6 +6,7 @@ packs of 10, 50 and 200, the page arms, and six probe arms. The ledger holds the
 counted over the runs named s1-*, so it survives a restart. A human approves the canary before any
 arm but the first single run is paid for. The driver sends nothing itself: the transport is a factory.
 """
+import collections
 import contextlib
 import fcntl
 import json
@@ -13,6 +14,7 @@ import os
 import pathlib
 import time
 
+from cosa.repo.doc_lint import jev_transport as jt
 from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_pack as rp
@@ -48,6 +50,10 @@ class CanaryTripped( Exception ):
     """A canary crossed one of its stop numbers and cannot be approved."""
 
 
+class KeyMissing( Exception ):
+    """The live transport has no key, so the arm was refused before it opened a ledger run."""
+
+
 class Stage1Env:
     """
     Everything the driver needs from outside, injectable for tests.
@@ -63,6 +69,7 @@ class Stage1Env:
     def __init__( self, root, data, ledger, transport_factory=None, entries_in_index=None, workers=rp.WORKERS_DEFAULT, model=rt.JEV_MODEL, clock=None ):
         self.root, self.data, self.ledger  = pathlib.Path( root ), pathlib.Path( data ), ledger
         self.transport_factory             = transport_factory or ( lambda budget: rt.LiveJevTransport( budget=budget ) )
+        self.live                          = transport_factory is None
         self.entries_in_index              = entries_in_index
         self.workers, self.model           = workers, model
         self.clock                         = clock or ( lambda: time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) )
@@ -106,6 +113,25 @@ def _check_probe( arm, probe, entries ):
     if probe[ "id" ] not in ids: raise ValueError( f"probe {probe[ 'id' ]!r} is not in the pack" )
     want = { "first": 0, "middle": len( ids ) // 2, "last": len( ids ) - 1 }[ place ]
     if ids.index( probe[ "id" ] ) != want: raise ValueError( f"probe is not at the {place} position of the pack" )
+
+
+def _check_ready( env, entries ):
+    """
+    Check what a run would otherwise learn only after its ledger run opened.
+
+    Requires:
+        - every entry has an id
+    Raises:
+        - ValueError for a workers value outside the sweep's range, or for an entry id that is repeated
+        - KeyMissing when the transport is the live one and the key variable is empty or unset
+    """
+    workers = env.workers
+    if type( workers ) is not int or not rp.WORKERS_MIN <= workers <= rp.WORKERS_MAX:
+        raise ValueError( f"workers must be an integer from {rp.WORKERS_MIN} to {rp.WORKERS_MAX}, got {workers!r}" )
+    counts   = collections.Counter( e[ "id" ] for e in entries )
+    repeated = sorted( i for i, n in counts.items() if n > 1 )
+    if repeated: raise ValueError( f"{len( repeated )} entry id(s) are repeated in the arm, the first is {repeated[ 0 ]!r}" )
+    if env.live and not jt.has_key(): raise KeyMissing( f"{jt.KEY_VARIABLE} is not set; no ledger run was opened and no run name was spent" )
 
 
 def _canary_path( env, question, attempt=1 ):
@@ -197,7 +223,8 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         - an entry the response left unasked counts as failed, so it makes the arm incomplete
         - returns the results record
     Raises:
-        - ValueError for a question, arm or probe out of range, or a run name used before
+        - ValueError for a question, arm or probe out of range, a run name used before, workers out of range or a repeated entry id
+        - KeyMissing for the live transport with no key; this and the ValueErrors above open no ledger run and spend no name
         - ReuseError BAD_BUDGET for an attempt limit above the cap
         - StageRefused when the ceiling passes what the stage has left
         - CanaryNotApproved for any arm but the first single run before the canary is approved
@@ -211,6 +238,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         raise rt.ReuseError( "BAD_BUDGET", f"attempt limit must be an integer from 1 to {rt.CALL_BUDGET_CAP}, got {attempt_limit!r}" )
     if arm not in UNGATED: _require_approved( env, question )
     _check_probe( arm, probe, entries )
+    _check_ready( env, entries )
     name, ( index, size ) = run_name( question, arm, attempt ), ARMS[ arm ]
     index    = RETRY_INDEX.get( attempt, index )
     template = rt.PAGE_TEMPLATE if arm.startswith( "page-" ) else rt.PROMPT_TEMPLATE
