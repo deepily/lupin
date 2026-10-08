@@ -140,8 +140,11 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
           refused or not_reached, its attempts, its reported tokens and the ids it asked about
     Raises:
         - ValueError for an empty pack
+        - ReuseError BAD_SPEND_LIMIT for a live transport whose budget is not a TokenBudget; nothing is posted
     """
     if not entries: raise ValueError( "a pack cannot be empty" )
+    if isinstance( transport, rt.LiveJevTransport ) and not isinstance( transport.budget, rc.TokenBudget ):
+        raise rt.ReuseError( "BAD_SPEND_LIMIT", "a live packed send needs a TokenBudget on its transport" )
     body, qmap = pack_request( entries=entries, need=need, template=template, model=model )
     row        = _row( pack_key( body ), entries, parent )
     if breaker is not None and breaker.stopped:
