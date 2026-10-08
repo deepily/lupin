@@ -13,7 +13,9 @@ import os
 import pytest
 
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
-from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request
+import ast
+
+from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request, sweep_state
 
 BODY    = { "question": "q" }
 HEADERS = { "Authorization": "Bearer t" }
@@ -70,3 +72,50 @@ def test_each_fresh_user_file_sends_its_asks_through_the_helper_and_keeps_no_cop
     asks = text.count( '/api/v2/ask"' )
     assert asks >= 1, "the file posts no ask, so the guard counts nothing"
     assert text.count( "lineage_request(" ) == asks
+
+
+@pytest.mark.parametrize( "environ, expected", [
+    ( { },                                                       "outside" ),
+    ( { TOKEN_ENV_NAME: "tok" },                                 "outside" ),
+    ( { PARENT_ENV_NAME: "ts-abc" },                             "missing_token" ),
+    ( { PARENT_ENV_NAME: "ts-abc", TOKEN_ENV_NAME: "" },         "missing_token" ),
+    ( { PARENT_ENV_NAME: "ts-abc", TOKEN_ENV_NAME: "tok" },      "ready" ),
+] )
+def test_sweep_state_names_what_the_sweep_exported( environ, expected ):
+    assert sweep_state( environ ) == expected
+
+
+def test_sweep_state_reads_the_process_environment_by_default( monkeypatch ):
+    monkeypatch.setenv( PARENT_ENV_NAME, "ts-abc" )
+    assert sweep_state() == "missing_token"
+    monkeypatch.setenv( TOKEN_ENV_NAME, "tok" )
+    assert sweep_state() == "ready"
+
+
+TOKEN_FILE = "test_suite_token_keeps_a_fresh_users_lineage.py"
+
+
+def _token_file_tree():
+    path = os.path.join( os.environ[ "LUPIN_ROOT" ], "src", "tests", "integration", TOKEN_FILE )
+    return ast.parse( open( path, encoding="utf-8" ).read() )
+
+
+def test_the_token_file_fails_not_skips_when_the_parent_is_set_and_the_token_is_not():
+    fixture = [ n for n in ast.walk( _token_file_tree() ) if isinstance( n, ast.FunctionDef )
+                and n.name == "_sweep_exported_what_this_file_needs" ]
+    assert len( fixture ) == 1
+    calls = [ ast.unparse( n.func ) for n in ast.walk( fixture[ 0 ] ) if isinstance( n, ast.Call ) ]
+    assert "sweep_state" in calls and "pytest.fail" in calls and "pytest.skip" in calls
+    fails = [ n for n in ast.walk( fixture[ 0 ] ) if isinstance( n, ast.Call ) and ast.unparse( n.func ) == "pytest.fail" ]
+    assert "missing_token" in ast.unparse( fixture[ 0 ] ) and len( fails ) == 1
+
+
+def test_every_request_in_the_token_file_carries_the_sixty_second_timeout():
+    tree     = _token_file_tree()
+    requests = [ n for n in ast.walk( tree ) if isinstance( n, ast.Call ) and ast.unparse( n.func ) in ( "requests.post", "requests.get" ) ]
+    assert len( requests ) == 3, "register, login and ask: a new request must be counted here"
+    for call in requests:
+        keywords = { k.arg: ast.unparse( k.value ) for k in call.keywords }
+        assert keywords.get( "timeout" ) == "REQUEST_TIMEOUT", ast.unparse( call )
+    constant = [ n for n in ast.walk( tree ) if isinstance( n, ast.Assign ) and ast.unparse( n.targets[ 0 ] ) == "REQUEST_TIMEOUT" ]
+    assert len( constant ) == 1 and ast.unparse( constant[ 0 ].value ) == "60"

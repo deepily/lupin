@@ -35,3 +35,19 @@ def lineage_request( body: dict, headers: dict ) -> dict:
         "json"    : { **body, "parent_id_hash": parent_id } if parent_id else dict( body ),
         "headers" : { **headers, TOKEN_HEADER: token } if token else dict( headers ),
     }
+
+
+def sweep_state( environ: dict = None ) -> str:
+    """
+    Say what the sweep exported, so a test can skip, fail or run.
+
+    Ensures:
+        - returns "outside" when no parent id is exported: not inside a sweep, skip
+        - returns "missing_token" when the parent id is set and the token is not: a failed
+          or disabled issue, which a test about the token must report, not skip
+        - returns "ready" when both are set
+    """
+    environ = os.environ if environ is None else environ
+    if not environ.get( PARENT_ENV_NAME ): return "outside"
+    if not environ.get( TOKEN_ENV_NAME ): return "missing_token"
+    return "ready"

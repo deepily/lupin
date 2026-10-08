@@ -20,22 +20,29 @@ import requests
 
 import cosa.utils.util as cu
 from cosa.rest.suite_run_token import TOKEN_ENV_NAME, TOKEN_HEADER
-from tests.helpers.suite_lineage import PARENT_ENV_NAME, lineage_request
+from tests.helpers.suite_lineage import lineage_request, sweep_state
 
 from .conftest import BASE_URL
 
-pytestmark = pytest.mark.skipif(
-    not ( os.environ.get( PARENT_ENV_NAME ) and os.environ.get( TOKEN_ENV_NAME ) ),
-    reason = "Needs a sweep that exported the parent id and the per-run token (row 8d4a5a59)",
-)
+REQUEST_TIMEOUT = 60
+MISSING_TOKEN   = ( "The sweep exported its parent id but no per-run token, so the token was not issued "
+                    "(switch off, or the issue failed). This file exists to prove the token works." )
+
+
+@pytest.fixture( autouse=True )
+def _sweep_exported_what_this_file_needs():
+    """Skip outside a sweep; inside one without a token, fail instead of hiding."""
+    state = sweep_state()
+    if state == "outside": pytest.skip( "Needs a sweep that exported the parent id" )
+    if state == "missing_token": pytest.fail( MISSING_TOKEN, pytrace=False )
 
 
 def _fresh_user_token():
     email    = f"token_{uuid.uuid4().hex[ :8 ]}@test.com"
     password = uuid.uuid4().hex + "Aa1!"
-    register = requests.post( f"{BASE_URL}/auth/register", json={ "email": email, "password": password } )
+    register = requests.post( f"{BASE_URL}/auth/register", json={ "email": email, "password": password }, timeout=REQUEST_TIMEOUT )
     assert register.status_code == 201, f"Registration failed: {register.text}"
-    login = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password } )
+    login = requests.post( f"{BASE_URL}/auth/login", json={ "email": email, "password": password }, timeout=REQUEST_TIMEOUT )
     assert login.status_code == 200, f"Login failed: {login.text}"
     return login.json()[ "tokens" ][ "access_token" ]
 
@@ -57,7 +64,7 @@ def _ask_as( token, edit=None ):
     request = lineage_request( { "question": "What is 2+2?", "websocket_id": "token_session", "speak": False },
                                { "Authorization": f"Bearer {token}" } )
     if edit is not None: request[ "headers" ] = edit( request[ "headers" ] )
-    response = requests.post( f"{BASE_URL}/api/v2/ask", **request )
+    response = requests.post( f"{BASE_URL}/api/v2/ask", timeout=REQUEST_TIMEOUT, **request )
     assert response.status_code == 200, response.text
     return response.json()[ "trace_id" ]
 

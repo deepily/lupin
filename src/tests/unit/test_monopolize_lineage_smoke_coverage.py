@@ -60,6 +60,10 @@ TEST_DIRS    = ( "src/tests/smoke", "src/tests/integration" )
 LINEAGE_FIELD = "parent_id_hash"
 LINEAGE_ENV   = "LUPIN_TEST_MONOPOLIZE_PARENT_ID"
 
+# The shared helper threads the parent id for a file that imports and calls it.
+HELPER_PATH   = "src/tests/helpers/suite_lineage.py"
+HELPER_IMPORT = re.compile( r"^from tests\.helpers\.suite_lineage import [^\n]*\blineage_request\b", re.MULTILINE )
+
 PREFIX_RE = re.compile( r"""prefix\s*=\s*["']([^"']+)["']""" )
 POST_RE   = re.compile( r"""@router\.post\(\s*\n?\s*["']([^"']+)["']""", re.MULTILINE )
 
@@ -414,6 +418,24 @@ def names_endpoint_in_code( text, endpoint ):
                 for node in ast.walk( tree ) )
 
 
+def _helper_threads_the_parent_id( root ):
+    """
+    Whether the shared helper reads the env var and stamps the field, in code.
+
+    Ensures:
+        - returns False when the helper file does not exist under `root`
+    """
+    path = os.path.join( root, HELPER_PATH )
+    if not os.path.isfile( path ): return False
+    with open( path, "r", errors="ignore" ) as f: code = _code_only( f.read() )
+    return LINEAGE_ENV in code and LINEAGE_FIELD in code
+
+
+def _threads_through_the_helper( code, helper_ok ):
+    """A file threads the id through the helper when it imports lineage_request and calls it."""
+    return helper_ok and bool( HELPER_IMPORT.search( code ) ) and "lineage_request(" in code
+
+
 def untagged_callers( endpoints, root, test_dirs ):
     """
     Test files that POST to a lineage-aware endpoint without READING the parent-id env var.
@@ -423,8 +445,11 @@ def untagged_callers( endpoints, root, test_dirs ):
         - the env var must appear in CODE, not in a comment (see _code_only)
         - the file must also stamp `parent_id_hash` in code — reading the var and never
           putting it in a payload is not threading it
+        - a file that imports lineage_request from the shared helper and calls it also passes,
+          provided the helper itself reads the env var and stamps the field
     """
     offenders = []
+    helper_ok = _helper_threads_the_parent_id( root )
     for d in test_dirs:
         full_dir = os.path.join( root, d )
         if not os.path.isdir( full_dir ): continue
@@ -434,6 +459,7 @@ def untagged_callers( endpoints, root, test_dirs ):
             with open( path, "r", errors="ignore" ) as f: text = f.read()
             code = _code_only( text )
             if LINEAGE_ENV in code and LINEAGE_FIELD in code: continue
+            if _threads_through_the_helper( code, helper_ok ): continue
             for endpoint in endpoints:
                 if names_endpoint_in_code( text, endpoint ):
                     offenders.append( ( os.path.join( d, name ), endpoint ) )
@@ -944,6 +970,45 @@ def test_the_derivation_finds_the_lineage_aware_routers():
     endpoints, _unmatched = lineage_aware_endpoints( ROUTER_DIR )
     assert endpoints, "derived ZERO lineage-aware endpoints — the router parse has rotted"
     assert "/api/v2/submit" in endpoints
+
+
+def _write( root, rel, text ):
+    path = os.path.join( root, rel )
+    os.makedirs( os.path.dirname( path ), exist_ok=True )
+    with open( path, "w" ) as f: f.write( text )
+
+
+GOOD_HELPER = f'import os\nparent = os.environ.get( "{LINEAGE_ENV}" )\nbody = {{ "{LINEAGE_FIELD}": parent }}\n'
+CALLER      = ( 'from tests.helpers.suite_lineage import lineage_request\n'
+                'requests.post( "http://x/api/v2/ask", **lineage_request( {}, {} ) )\n' )
+
+
+def test_a_file_that_sends_its_asks_through_the_shared_helper_is_threaded( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, GOOD_HELPER )
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == []
+
+
+def test_the_helper_does_not_vouch_when_it_never_reads_the_env_var( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, f'body = {{ "{LINEAGE_FIELD}": 1 }}\n' )
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_there_is_no_vouching_without_a_helper_file( tmp_path ):
+    _write( str( tmp_path ), "smoke/test_x.py", CALLER )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_importing_the_helper_without_calling_it_is_not_threading( tmp_path ):
+    _write( str( tmp_path ), HELPER_PATH, GOOD_HELPER )
+    _write( str( tmp_path ), "smoke/test_x.py",
+            'from tests.helpers.suite_lineage import lineage_request\nrequests.post( "http://x/api/v2/ask", json={} )\n' )
+    assert untagged_callers( { "/api/v2/ask": "v2_ask.py" }, str( tmp_path ), ( "smoke", ) ) == [ ( "smoke/test_x.py", "/api/v2/ask" ) ]
+
+
+def test_the_real_helper_reads_the_env_var_and_stamps_the_field():
+    assert _helper_threads_the_parent_id( PROJECT_ROOT ) is True
 
 
 def test_every_lineage_aware_caller_threads_the_parent_id():
