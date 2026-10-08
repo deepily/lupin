@@ -1148,7 +1148,41 @@ def test_the_set_rule_alone_can_fail_the_page_arm_when_a_page_crosses_the_floor_
 
 def test_the_per_page_difference_is_held_to_the_noise_floor_read_as_at_least_two_hundredths():
     r = _page_arm( "overlap-only" )
-    assert ( r[ "state" ], r[ "pack_changes" ], r[ "pack_p99" ], r[ "noise_floor" ] ) == ( "fail", 0, 0.1, 0.02 )
+    assert ( r[ "pack_changes" ], r[ "pack_p99" ], r[ "noise_floor" ], r[ "overlap_rule" ] ) == ( 0, 0.1, 0.02, "fail" )
+
+
+def test_each_rule_of_the_page_arm_is_reported_beside_the_state():
+    assert [ ( _page_arm( n )[ "set_rule" ], _page_arm( n )[ "overlap_rule" ] ) for n in ( "same", "pack-changes-two", "set-only", "overlap-only", "noise-one-pack-one" ) ] == \
+           [ ( "pass", "pass" ), ( "fail", "fail" ), ( "fail", "pass" ), ( "pass", "fail" ), ( "pass", "pass" ) ]
+
+
+def test_when_only_the_overlap_rule_is_breached_the_interim_rule_asks_rick_and_does_not_decide():
+    r = _page_arm( "overlap-only" )
+    assert r[ "state" ] == "ask_rick" and r[ "state" ] not in ( "pass", "fail" )
+    assert _page_arm( "set-only" )[ "state" ] == "fail" and _page_arm( "pack-changes-two" )[ "state" ] == "fail"
+    assert _page_arm( "same" )[ "state" ] == "pass"
+
+
+def test_asking_rick_still_asks_when_no_page_is_near_the_floor():
+    recs = _driver_pages( "overlap-only" )
+    for rec in recs:
+        for a in rec[ "answers" ]:
+            if a[ "id" ] in ( "page.03", "page.04" ): a[ "probabilities" ] = { "reuse": 0.5, "extend": 0.0, "unrelated": 0.5 }
+    r = an.page_arm( an.read_stage( recs ) )
+    assert r[ "near_floor_pages" ] == 0 and r[ "state" ] == "ask_rick"
+
+
+def test_asking_rick_turns_the_decision_into_a_stop_and_the_text_states_the_ambiguity_with_both_results():
+    rep  = an.build_report( _driver_pages( "overlap-only" ), canaries=[] )
+    text = an.render( rep )
+    assert rep[ "decision" ] == "stop and ask: the page arm needs Rick's reading, because only its overlap rule is breached"
+    assert "page arm: ask_rick; set rule pass, overlap rule fail;" in text and an.PAGE_AMBIGUITY in text
+    assert "11.5" in an.PAGE_AMBIGUITY and "set rule" in an.PAGE_AMBIGUITY and "overlap rule" in an.PAGE_AMBIGUITY and "Rick" in an.PAGE_AMBIGUITY
+
+
+def test_the_ambiguity_is_stated_only_when_the_page_arm_asks_rick():
+    for name in ( "same", "pack-changes-two", "no-page-near-the-floor" ):
+        assert an.PAGE_AMBIGUITY not in an.render( an.build_report( _driver_pages( name ), canaries=[] ) ), name
 
 
 def test_a_page_arm_with_no_page_near_the_floor_in_any_question_reads_inconclusive_not_pass():
@@ -1202,12 +1236,12 @@ def test_the_report_carries_the_page_arm_and_prints_one_line_for_it():
     rep  = an.build_report( _driver_pages( "noise-one-pack-one" ), canaries=[] )
     assert rep[ "page_arm" ][ "state" ] == "pass"
     text = an.render( rep )
-    assert "page arm: pass; chosen pages changed by packing on 1 of 2 questions against 1 by noise; per-page difference p99 0.04 against floor 0.04; pages within 0.05 of 0.3: 4" in text
+    assert "page arm: pass; set rule pass, overlap rule pass; chosen pages changed by packing on 1 of 2 questions against 1 by noise; per-page difference p99 0.04 against floor 0.04; pages within 0.05 of 0.3: 4" in text
 
 
 def test_the_report_says_why_an_inconclusive_page_arm_is_inconclusive():
     text = an.render( an.build_report( _driver_pages( "no-page-near-the-floor" ), canaries=[] ) )
-    assert "page arm: inconclusive; no page lies within 0.05 of 0.3 in any question" in text
+    assert "page arm: inconclusive; no page lies within 0.05 of 0.3 in any question; set rule pass, overlap rule pass;" in text
 
 
 def test_a_failing_page_arm_turns_the_decision_into_a_stop_that_goes_back_to_rick():
