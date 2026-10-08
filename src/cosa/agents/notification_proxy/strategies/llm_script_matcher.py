@@ -265,7 +265,7 @@ class LlmScriptMatcherStrategy:
                 if self.debug:
                     print( f"[LlmScriptMatcher] Match: entry={parsed.matched_entry}, "
                            f"confidence={parsed.confidence}, answer={parsed.answer[ :80 ]}" )
-                return parsed.answer
+                return strip_surrounding_quotes( parsed.answer )
             else:
                 if self.debug: print( f"[LlmScriptMatcher] No match (reasoning: {parsed.reasoning[ :100 ]})" )
                 return None
@@ -527,6 +527,24 @@ class LlmScriptMatcherStrategy:
 # ============================================================================
 # Script Path Resolution
 # ============================================================================
+
+def strip_surrounding_quotes( answer ):
+    """
+    Remove one pair of double quotes that wraps the whole answer.
+
+    Requires:
+        - answer is a string
+
+    Ensures:
+        - returns the text inside a leading and trailing double quote
+        - returns answer unchanged when it holds a quote anywhere inside the pair
+        - returns answer unchanged when removing the pair would leave nothing
+    """
+    inner = answer[ 1:-1 ]
+    if len( answer ) > 2 and answer[ 0 ] == '"' and answer[ -1 ] == '"' and '"' not in inner:
+        return inner
+    return answer
+
 
 def resolve_script_path( profile_name, scripts_dir=None ):
     """

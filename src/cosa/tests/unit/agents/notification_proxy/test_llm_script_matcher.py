@@ -533,14 +533,17 @@ class TestSurroundingQuotesAreStripped:
     def test_a_bare_answer_is_unchanged( self ):
         assert _respond_with_answer( "no limit" ) == "no limit"
 
-    def test_only_one_pair_is_removed( self ):
-        assert _respond_with_answer( '""no limit""' ) == '"no limit"'
+    def test_doubled_quotes_are_left_whole( self ):
+        assert _respond_with_answer( '""no limit""' ) == '""no limit""'
 
     def test_quotes_inside_the_answer_keep_it_whole( self ):
         assert _respond_with_answer( '"a" and "b"' ) == '"a" and "b"'
 
     def test_a_lone_quote_is_unchanged( self ):
         assert _respond_with_answer( '"no limit' ) == '"no limit'
+
+    def test_a_lone_closing_quote_is_unchanged( self ):
+        assert _respond_with_answer( 'no limit"' ) == 'no limit"'
 
     def test_an_empty_pair_is_not_turned_into_an_empty_answer( self ):
         assert _respond_with_answer( '""' ) == '""'
