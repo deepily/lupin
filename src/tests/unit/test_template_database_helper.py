@@ -207,6 +207,12 @@ def _env( tmp_path, text ):
     return str( tmp_path )
 
 
+@pytest.fixture( autouse=True )
+def _no_ambient_password_file( monkeypatch ):
+    """Keep a password file exported on the host out of every login test."""
+    monkeypatch.delenv( "LUPIN_TEST_DB_PASSWORD_FILE", raising=False )
+
+
 def test_the_login_reads_the_environment_first( monkeypatch, tmp_path ):
     monkeypatch.setenv( "LUPIN_TEST_DB_USER", "envu" )
     monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD", "envp" )
@@ -369,3 +375,41 @@ def test_the_throwaway_database_hands_its_mode_to_the_drop( monkeypatch, mode ):
     monkeypatch.setattr( td, "drop_database", lambda server_url, name, engine_factory=None, use_template=None: seen.append( use_template ) )
     with td.throwaway_database( URL, "scratch_one", _Factory(), use_template=mode ): pass
     assert seen == [ mode ], f"the drop must use the mode the create used, got {seen}"
+
+
+def _secret( tmp_path, text ):
+    path = tmp_path / "db_test_password"
+    path.write_text( text )
+    return str( path )
+
+
+def test_the_login_reads_the_password_file_after_the_environment_and_before_the_dotenv( monkeypatch, tmp_path ):
+    monkeypatch.delenv( "LUPIN_TEST_DB_PASSWORD", raising=False )
+    monkeypatch.setenv( "LUPIN_TEST_DB_USER", "envu" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD_FILE", _secret( tmp_path, "secretp\n" ) )
+    root = _env( tmp_path, "LUPIN_TEST_DB_USER=fileu\nLUPIN_TEST_DB_PASSWORD=dotenvp\n" )
+    assert dp.clone_login( root ) == ( "envu", "secretp" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD", "envp" )
+    assert dp.clone_login( root ) == ( "envu", "envp" )
+
+
+def test_a_password_file_without_a_user_falls_back_to_the_test_role( monkeypatch, tmp_path ):
+    monkeypatch.delenv( "LUPIN_TEST_DB_PASSWORD", raising=False )
+    monkeypatch.delenv( "LUPIN_TEST_DB_USER", raising=False )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD_FILE", _secret( tmp_path, "secretp" ) )
+    assert dp.clone_login( str( tmp_path / "nowhere" ) ) == ( "lupin_test", "secretp" )
+
+
+def test_an_empty_or_missing_password_file_falls_through_to_the_dotenv( monkeypatch, tmp_path ):
+    monkeypatch.delenv( "LUPIN_TEST_DB_PASSWORD", raising=False )
+    monkeypatch.delenv( "LUPIN_TEST_DB_USER", raising=False )
+    root = _env( tmp_path, "LUPIN_TEST_DB_PASSWORD=dotenvp\n" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD_FILE", _secret( tmp_path, "  \n" ) )
+    assert dp.clone_login( root ) == ( "lupin_test", "dotenvp" )
+    monkeypatch.setenv( "LUPIN_TEST_DB_PASSWORD_FILE", str( tmp_path / "absent" ) )
+    assert dp.clone_login( root ) == ( "lupin_test", "dotenvp" )
+
+
+def test_the_password_file_reader_returns_none_for_an_unset_path():
+    assert dp._read_password_file( None ) is None
+    assert dp._read_password_file( "" ) is None

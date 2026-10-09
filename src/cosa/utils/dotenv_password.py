@@ -230,6 +230,25 @@ def seed_db_password_from_file():
     else: print( f"[DB] WARNING: DB_PASSWORD_FILE={path} is empty; DB_PASSWORD stays unset" )
 
 
+def _read_password_file( path ):
+    """
+    Return the stripped content of a secret file, or None.
+
+    Requires:
+        - path is a file path or None
+
+    Ensures:
+        - Returns None for an unset path, an unreadable file or an empty file
+        - Never raises
+    """
+    if not path: return None
+    try:
+        with open( path ) as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
 def clone_login( root=None ):
     """
     Return the test role's login for a throwaway database, or None.
@@ -240,6 +259,8 @@ def clone_login( root=None ):
     Ensures:
         - Returns ( user, password ) from LUPIN_TEST_DB_USER and LUPIN_TEST_DB_PASSWORD in
           os.environ when the password is non-empty
+        - Otherwise reads the password from the file named by LUPIN_TEST_DB_PASSWORD_FILE
+          when that file holds a non-empty value
         - Otherwise returns them from the same keys in the .env, the user falling back to
           "lupin_test" when its key is absent
         - Returns None when no test password is found anywhere
@@ -248,6 +269,8 @@ def clone_login( root=None ):
     if root is None: root = os.path.dirname( os.path.dirname( os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) ) ) )
     password = os.environ.get( "LUPIN_TEST_DB_PASSWORD" )
     user     = os.environ.get( "LUPIN_TEST_DB_USER" )
+    if not password:
+        password = _read_password_file( os.environ.get( "LUPIN_TEST_DB_PASSWORD_FILE" ) )
     if not password:
         found    = _read_dotenv_values( root, ( "LUPIN_TEST_DB_USER", "LUPIN_TEST_DB_PASSWORD" ) )
         password = found.get( "LUPIN_TEST_DB_PASSWORD" )
