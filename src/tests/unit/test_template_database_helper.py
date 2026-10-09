@@ -287,3 +287,85 @@ def test_the_worktrees_own_dotenv_wins_over_the_main_checkouts( tmp_path ):
     ( tree / ".git" ).write_text( f"gitdir: {main}/.git/worktrees/w\n" )
     ( tree / ".env" ).write_text( "LUPIN_TEST_DB_PASSWORD=treep\n" )
     assert dp._read_dotenv_values( str( tree ), ( "LUPIN_TEST_DB_PASSWORD", ) ) == { "LUPIN_TEST_DB_PASSWORD": "treep" }
+
+
+# ---- a refused login is told from no server by the text the server sent ---------------------
+
+class _ConnectRefuses:
+    """An engine factory whose connect() raises, as a refused or unreachable server does."""
+    def __init__( self, error ): self.error, self.engines = error, [ ]
+    def __call__( self, url, **kwargs ):
+        engine = _Engine( [ ], None, url, kwargs )
+        def connect(): raise self.error
+        engine.connect = connect
+        self.engines.append( engine )
+        return engine
+
+
+# Messages measured against a throwaway pg16 container, except "starting up", the server's known wording.
+SERVER_SPOKE_AND_REFUSED = (
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  password authentication failed for user "lupin_test"',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  database "nope_db" does not exist',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  no pg_hba.conf entry for host "10.0.0.2", user "lupin_test"',
+)
+NO_SERVER_OR_NOT_READY = (
+    'connection to server at "127.0.0.1", port 1 failed: Connection refused\n\tIs the server running on that host?',
+    'could not translate host name "nowhere" to address: Name or service not known',
+    'connection to server at "127.0.0.1", port 5432 failed: server closed the connection unexpectedly',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  the database system is shutting down',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  the database system is in recovery mode',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  the database system is not yet accepting connections',
+    'connection to server at "127.0.0.1", port 5432 failed: FATAL:  the database system is starting up',
+)
+
+
+@pytest.mark.parametrize( "message", SERVER_SPOKE_AND_REFUSED )
+def test_a_server_that_spoke_and_refused_counts_as_a_refusal( message ):
+    assert td.server_refused_me( _operational( None, message ) ) is True, message
+
+
+@pytest.mark.parametrize( "message", NO_SERVER_OR_NOT_READY )
+def test_no_server_and_a_server_not_ready_do_not_count_as_a_refusal( message ):
+    assert td.server_refused_me( _operational( None, message ) ) is False, message
+
+
+@pytest.mark.parametrize( "message", SERVER_SPOKE_AND_REFUSED )
+def test_a_refused_login_at_the_drop_fails_and_never_skips( message ):
+    call = lambda: td.drop_database( URL, "scratch_one", _ConnectRefuses( _operational( None, message ) ), use_template=True )
+    assert _outcome( call ) is pytest.fail.Exception, f"{message!r} must fail the test, not skip it"
+    with pytest.raises( pytest.fail.Exception, match="LUPIN_TEST_DB_PASSWORD" ): call()
+
+
+@pytest.mark.parametrize( "message", NO_SERVER_OR_NOT_READY )
+def test_no_server_at_the_drop_reaches_the_site_so_it_can_skip( message ):
+    error = _operational( None, message )
+    assert _outcome( lambda: td.drop_database( URL, "scratch_one", _ConnectRefuses( error ), use_template=True ) ) is OperationalError
+
+
+def test_without_a_test_role_a_refusal_at_the_drop_passes_through_for_the_old_skip():
+    error = _operational( None, SERVER_SPOKE_AND_REFUSED[ 0 ] )
+    assert _outcome( lambda: td.drop_database( URL, "scratch_one", _ConnectRefuses( error ), use_template=False ) ) is OperationalError
+
+
+def test_the_drop_takes_its_mode_from_the_login_when_not_told( monkeypatch ):
+    error = _operational( None, SERVER_SPOKE_AND_REFUSED[ 0 ] )
+    monkeypatch.setattr( dp, "clone_login", lambda: ( "lupin_test", "tp" ) )
+    assert _outcome( lambda: td.drop_database( URL, "scratch_one", _ConnectRefuses( error ) ) ) is pytest.fail.Exception
+    monkeypatch.setattr( dp, "clone_login", lambda: None )
+    assert _outcome( lambda: td.drop_database( URL, "scratch_one", _ConnectRefuses( error ) ) ) is OperationalError
+
+
+def test_the_failure_names_the_servers_reason_and_never_a_password():
+    error = _operational( None, 'connection to server at "h", port 5 failed: FATAL:  password authentication failed for user "lupin_test"' )
+    with pytest.raises( pytest.fail.Exception ) as caught:
+        td.drop_database( URL, "scratch_one", _ConnectRefuses( error ), use_template=True )
+    assert 'password authentication failed for user "lupin_test"' in str( caught.value )
+    assert "pw" not in str( caught.value ).replace( "password", "" ), "the URL password must not appear in the failure"
+
+
+@pytest.mark.parametrize( "mode", [ True, False ] )
+def test_the_throwaway_database_hands_its_mode_to_the_drop( monkeypatch, mode ):
+    seen = [ ]
+    monkeypatch.setattr( td, "drop_database", lambda server_url, name, engine_factory=None, use_template=None: seen.append( use_template ) )
+    with td.throwaway_database( URL, "scratch_one", _Factory(), use_template=mode ): pass
+    assert seen == [ mode ], f"the drop must use the mode the create used, got {seen}"

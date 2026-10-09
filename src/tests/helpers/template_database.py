@@ -58,15 +58,35 @@ def uses_template():
     return dp.clone_login() is not None
 
 
-_REFUSED = ( "authentication failed", "no pg_hba.conf entry", "is not permitted to log in" )
+# Messages a Postgres server sends while it is not ready, not because it refuses this login. Measured against a
+# throwaway pg16 container: "the database system is shutting down", "is in recovery mode" and "is not yet accepting
+# connections" (crash recovery). "starting up" is the server's known wording and was NOT measured here.
+_NOT_READY = ( "starting up", "shutting down", "recovery mode", "not yet accepting connections" )
+
+
+def server_refused_me( error ):
+    """
+    Say whether the server answered and turned this connection away.
+
+    Requires:
+        - error is a sqlalchemy OperationalError raised while connecting
+
+    Ensures:
+        - True when the text carries "FATAL:", which libpq adds to errors the server sent, and the server was ready
+        - False for a closed port, a DNS failure, a timeout or a server still starting, stopping or recovering
+        - needs no sqlstate: psycopg2 gives none at connect time, for a refused login or for no server
+    """
+    text = str( error.orig )
+    return "FATAL:" in text and not any( phrase in text for phrase in _NOT_READY )
 
 
 def fail_on_a_refusal( error ):
     """Fail on a refused login or a busy template; leave a connection failure alone."""
     code = getattr( error.orig, "pgcode", None )
     if code == _BUSY_CODE: pytest.fail( f"template {TEMPLATE_NAME} is in use by another session: run the test again" )
-    if ( code is not None and code.startswith( "28" ) ) or any( phrase in str( error.orig ) for phrase in _REFUSED ):
-        pytest.fail( "the test login was refused: check LUPIN_TEST_DB_USER and LUPIN_TEST_DB_PASSWORD" )
+    if ( code or "" ).startswith( "28" ) or server_refused_me( error ):
+        reason = str( error.orig ).split( "FATAL:" )[ -1 ].split( "\n" )[ 0 ].strip() or code
+        pytest.fail( f"the server refused the test login ({reason}): check LUPIN_TEST_DB_USER and LUPIN_TEST_DB_PASSWORD" )
 
 
 def create_from_template( server_url, name, engine_factory=create_engine, use_template=None ):
@@ -105,21 +125,28 @@ def create_from_template( server_url, name, engine_factory=create_engine, use_te
     return make_url( server_url ).set( database=name ).render_as_string( hide_password=False )
 
 
-def drop_database( server_url, name, engine_factory=create_engine ):
+def drop_database( server_url, name, engine_factory=create_engine, use_template=None ):
     """
     Drop database ``name``, closing its connections first.
 
     Requires:
         - server_url names the maintenance database of the same server
+        - use_template, when given, forces the mode; when None, uses_template() decides
 
     Ensures:
         - Does nothing when the database is already gone
+        - With a test role, a refused login or a server that spoke fails the test, named, and never skips
+        - Lets a connection failure through as the OperationalError it is, so a site can skip on it
     """
+    if use_template is None: use_template = uses_template()
     engine = _admin_engine( server_url, engine_factory )
     try:
         with engine.connect() as conn:
             conn.execute( text( "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity WHERE datname = :n AND pid <> pg_backend_pid()" ), { "n": name } )
             conn.execute( text( f"DROP DATABASE IF EXISTS {name}" ) )
+    except OperationalError as error:
+        if use_template: fail_on_a_refusal( error )
+        raise
     finally:
         engine.dispose()
 
@@ -137,4 +164,4 @@ def throwaway_database( server_url, name, engine_factory=create_engine, use_temp
     try:
         yield url
     finally:
-        drop_database( server_url, name, engine_factory )
+        drop_database( server_url, name, engine_factory, use_template )
