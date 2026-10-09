@@ -119,10 +119,17 @@ def pack_key( body ):
     return rt.request_hash( body )
 
 
-def _row( request_hash, entries, parent ):
-    """Ensures: returns a request row before the request is sent, with every outcome field empty."""
-    return { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
-             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "malformed": [], "http": None, "http_status": None, "attempt_log": [], "error": None, "model": None }
+def _row( request_hash, entries, parent, kind="choice" ):
+    """Ensures: returns an unsent request row with empty outcomes; a pair row adds malformed."""
+    row = { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
+             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "attempt_log": [], "error": None, "model": None }
+    if kind == "pair": row[ "malformed" ] = []
+    return row
+
+
+def _malformed_of( row ):
+    """Ensures: returns the malformed entries of a row, none for a row of the choice kind."""
+    return row[ "malformed" ] if "malformed" in row else []
 
 
 def _post( transport, body ):
@@ -186,7 +193,7 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     if isinstance( transport, rt.LiveJevTransport ) and not isinstance( transport.budget, rc.TokenBudget ):
         raise rt.ReuseError( "BAD_SPEND_LIMIT", "a live packed send needs a TokenBudget on its transport" )
     body, qmap = _build( kind, need, entries, template, model )
-    row        = _row( pack_key( body ), entries, parent )
+    row        = _row( pack_key( body ), entries, parent, kind )
     if breaker is not None and breaker.stopped:
         row[ "status" ] = "not_reached"
         return { "answers": [], "failed": [], "not_reached": row[ "ids" ], "rows": [ row ] }
@@ -212,8 +219,9 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
             return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
         answered, unasked, malformed = _read( kind, response, qmap )
         if meta is not None and "attempt_log" in meta: row[ "attempt_log" ] = meta[ "attempt_log" ]
-        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked, malformed=malformed,
+        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked,
                     model=response[ "model" ] if isinstance( response, dict ) and "model" in response else None )
+        if kind == "pair": row[ "malformed" ] = malformed
         row[ "status" ] = "answered" if answered else "failed"
         if not answered: row[ "error" ] = "NoAnswers"
         elif breaker is not None: breaker.answered()
@@ -347,7 +355,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
                 for rec in entries if isinstance( state[ rec[ "id" ] ], tuple ) ]
     failed_attempts = []
     for r in rows:
-        left = r[ "unasked" ] + [ m[ "id" ] for m in r[ "malformed" ] ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
+        left = r[ "unasked" ] + [ m[ "id" ] for m in _malformed_of( r ) ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
         if left: failed_attempts.append( { "request": r[ "request_hash" ], "ids": left, "attempts": r[ "attempts" ] } )
     return { "answers": answers,
              "failed": [ rec[ "id" ] for rec in entries if state[ rec[ "id" ] ] == "failed" ],
@@ -362,7 +370,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
-             "malformed": [ m for r in rows if r[ "status" ] == "answered" for m in r[ "malformed" ] ], "oversize": oversize,
+             "malformed": [ m for r in rows if r[ "status" ] == "answered" for m in _malformed_of( r ) ], "oversize": oversize,
              "cache_write_failed": unwritten, "refused_422": breaker.refusals,
              "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }
 
