@@ -104,6 +104,21 @@ def extract_sentence( reply_text ):
     return " ".join( reply_text.split() ).strip( " \"'`" )
 
 
+def own_words_found( sentence, need ):
+    """
+    List the member's own names that appear in the sentence, outside its opening phrase.
+
+    Requires:
+        - need is the NeedInput the sentence was written from
+
+    Ensures:
+        - returns names from need.forbidden only, in that list's order
+    """
+    opener = OPENERS[ need.kind ]
+    body   = sentence[ len( opener ): ] if sentence.startswith( opener ) else sentence
+    return [ name for name in need.forbidden if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", body ) ]
+
+
 def check_form( sentence, need ):
     """
     Check the form rules this tool can see: opener, length, one sentence, no names.
@@ -117,25 +132,28 @@ def check_form( sentence, need ):
         - twin identifiers and copied word runs are not checked here; another script owns them
     """
     kinds = set()
+    if own_words_found( sentence, need ): kinds.add( "own_identifier" )
     if not sentence.startswith( OPENERS[ need.kind ] ): kinds.add( "opener" )
     if not MIN_WORDS <= len( sentence.split() ) <= MAX_WORDS: kinds.add( "word_count" )
     if not sentence.endswith( ( ".", "?", "!" ) ) or SENTENCE_BREAK.search( sentence ): kinds.add( "one_sentence" )
     if PLACEHOLDER.search( sentence ): kinds.add( "placeholder" )
-    opener = OPENERS[ need.kind ]
-    body   = sentence[ len( opener ): ] if sentence.startswith( opener ) else sentence
-    for name in need.forbidden:
-        if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", body ): kinds.add( "own_identifier" )
     return sorted( kinds )
 
 
-def build_prompt( need, failures=None ):
+def build_prompt( need, failures=None, own_words=None ):
     """
     Build the user prompt for one member.
 
     Ensures:
         - holds the stripped text and the form rules
         - when failures is given, ends with a note naming only the kinds of failure
+        - own_words, when given, are named in that note; each must be one of the member's own names
+
+    Raises:
+        - ValueError when an own word is not one of the member's own names
     """
+    foreign = [ word for word in ( own_words or [] ) if word not in need.forbidden ]
+    if foreign: raise ValueError( f"{foreign[ 0 ]} is not one of the member's own names" )
     prompt = (
         f"Below is the text of a Python {need.kind} with its names replaced by stand-ins "
         "(NAME, CLASS, MODULE, ARG1, ARG2, ATTR1 and so on). Do not use the stand-ins, and do not "
@@ -150,6 +168,7 @@ def build_prompt( need, failures=None ):
     )
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
     if failures and "own_identifier" in failures:
+        for word in own_words or []: prompt += f' In your last sentence the word "{word}" is a name in the original code; do not use it.'
         prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it. Words that often double as names in code include limit, error, state, job, mode, store, seed, minutes, code, agent, result, budget; say those ideas in other words."
     return prompt
 
@@ -166,18 +185,20 @@ async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None )
         - need and job_id are None when no attempt passed
         - every attempt keeps its reply, failure kinds and telemetry
     """
-    attempts = []
-    record   = { "member_id": need.member_id, "kind": need.kind, "ok": False, "need": None, "job_id": None, "rewrites": 0 }
+    attempts  = []
+    own_words = None
+    record    = { "member_id": need.member_id, "kind": need.kind, "ok": False, "need": None, "job_id": None, "rewrites": 0 }
     for _ in range( max_attempts ):
         try:
-            reply = await reply_fn( build_prompt( need, failures ), SYSTEM_PROMPT )
+            reply = await reply_fn( build_prompt( need, failures, own_words ), SYSTEM_PROMPT )
         except RuntimeError as error:
             attempts.append( { "reply": str( error ), "failures": [ "call_error" ], "session_id": None, "cost_usd": 0.0,
                                "input_tokens": 0, "output_tokens": 0 } )
-            failures = None
+            failures, own_words = None, None
             continue
-        sentence = extract_sentence( reply.text )
-        failures = check_form( sentence, need )
+        sentence  = extract_sentence( reply.text )
+        failures  = check_form( sentence, need )
+        own_words = own_words_found( sentence, need )
         attempts.append( { "reply": reply.text, "failures": failures, "session_id": reply.session_id, "cost_usd": reply.cost_usd,
                            "input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens } )
         if not failures:

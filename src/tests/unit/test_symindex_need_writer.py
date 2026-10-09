@@ -248,7 +248,7 @@ def test_write_need_names_the_own_word_on_retry_but_not_a_foreign_word( src_root
 def test_a_redo_prompt_carries_no_word_until_the_writer_has_used_one( src_root ):
     fake = FakeQuery( [ GOOD ] )
     asyncio.run( nw.write_need( _input( src_root ), fake, failures=[ "own_identifier" ] ) )
-    assert "the word" not in fake.prompts[ 0 ]
+    assert 'the word "' not in fake.prompts[ 0 ]
 
 
 # --- write_need -------------------------------------------------------------
