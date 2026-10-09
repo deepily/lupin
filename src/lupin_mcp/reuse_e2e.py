@@ -4,10 +4,12 @@ The end-to-end run: frozen inputs, the reading of one search, and the figures' a
 The sample, the needs and the manifest are each checked against a hash before anything is read from them.
 Nothing here sends a request. The runner that spends tokens is reuse_e2e_run.
 """
+import collections
 import hashlib
 import json
 import math
 
+from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_stage2_fit as fit
 
 SAMPLE_SHA256   = "5b6d84fc2dd8dc458b36255e129001f55e3fbe4d252c14c6d65a4994779a91fd"
@@ -16,6 +18,7 @@ NEEDS_FORMAT    = "reuse-e2e-needs-1"
 STRATA          = ( ( "has_exact_cluster", 58 ), ( "near_only", 42 ) )
 MEMBERS         = sum( n for _, n in STRATA )
 Z_95            = 1.959964
+HEADLINE        = ( "on_shortlist", "ranked_first", "top_ten" )
 
 
 class FrozenInputRefused( ValueError ):
@@ -149,3 +152,65 @@ def mcnemar_exact( only_a, only_b ):
     if n == 0: return 1.0
     low = min( only_a, only_b )
     return min( 1.0, 2 * sum( math.comb( n, i ) for i in range( low + 1 ) ) / 2 ** n )
+
+
+def _hit( search, key ):
+    """Ensures: returns True when the search is complete and its reading found the twin at key."""
+    return search[ "status" ] == "complete" and search[ "read" ][ key ]
+
+
+def _count( rows, key, complete_only ):
+    """Ensures: returns { k, n, interval } over the given searches; an incomplete one is a miss."""
+    rows = [ r for r in rows if r[ "status" ] == "complete" ] if complete_only else rows
+    k    = sum( 1 for r in rows if _hit( r, key ) )
+    return { "k": k, "n": len( rows ), "interval": wilson( k, len( rows ) ) }
+
+
+def figures( searches, questions ):
+    """
+    Work out the headline figures of each question from the finished searches.
+
+    Requires:
+        - searches are the run's search records; questions names the questions to report
+    Ensures:
+        - returns { question: figures } with the counts of searches run, complete, incomplete and not run
+        - each headline figure is { k, n, interval } over the searches run, an incomplete search counting as a miss,
+          and again over the complete searches only, under the same name with _complete added
+        - causes counts the incomplete searches by cause; verdicts counts the complete ones by verdict class
+        - unasked, tokens, requests, n429 and n529 are sums; usd_per_search is None when nothing ran
+    """
+    out = {}
+    for q in questions:
+        mine = [ s for s in searches if s[ "question" ] == q ]
+        ran  = [ s for s in mine if s[ "status" ] != "not_run" ]
+        done = [ s for s in ran if s[ "status" ] == "complete" ]
+        fig  = { "n_run": len( ran ), "complete": len( done ), "incomplete": len( ran ) - len( done ), "not_run": len( mine ) - len( ran ) }
+        for key in HEADLINE:
+            fig[ key ], fig[ f"{key}_complete" ] = _count( ran, key, False ), _count( ran, key, True )
+        fig[ "causes" ]   = dict( collections.Counter( c for s in ran if s[ "status" ] != "complete" for c in s[ "causes" ] ) )
+        fig[ "verdicts" ] = dict( collections.Counter( s[ "read" ][ "verdict" ] for s in done ) )
+        for name in ( "unasked", "tokens", "requests", "n429", "n529" ): fig[ name ] = sum( s[ name ] for s in ran )
+        fig[ "usd_per_search" ] = fig[ "tokens" ] * rl.PRICE_PER_MILLION_USD / 1e6 / len( ran ) if ran else None
+        out[ q ] = fig
+    return out
+
+
+def paired( searches, first, second ):
+    """
+    Compare two questions on the members both were run for.
+
+    Ensures:
+        - returns { figure: { only_<first>, only_<second>, both, neither, p } } for each headline figure
+        - an incomplete search counts as a miss; a member with a question not run is left out
+        - p is the exact two-sided McNemar p of the two discordant counts
+    """
+    by = { ( s[ "member" ], s[ "question" ] ): s for s in searches if s[ "status" ] != "not_run" }
+    members = sorted( m for m, q in by if q == first and ( m, second ) in by )
+    out = {}
+    for key in HEADLINE:
+        a = [ _hit( by[ ( m, first ) ], key ) for m in members ]
+        b = [ _hit( by[ ( m, second ) ], key ) for m in members ]
+        only_a, only_b = sum( 1 for x, y in zip( a, b ) if x and not y ), sum( 1 for x, y in zip( a, b ) if y and not x )
+        out[ key ] = { f"only_{first}": only_a, f"only_{second}": only_b, "both": sum( 1 for x, y in zip( a, b ) if x and y ),
+                       "neither": sum( 1 for x, y in zip( a, b ) if not x and not y ), "p": mcnemar_exact( only_a, only_b ) }
+    return out

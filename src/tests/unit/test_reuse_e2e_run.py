@@ -121,9 +121,12 @@ def test_a_run_whose_ceiling_with_the_ledger_total_passes_the_account_limit_is_r
 
 def test_two_runs_whose_ceilings_each_fit_but_not_together_refuse_the_second_with_no_request( tmp_path ):
     scratch = Env( tmp_path, limit=400000, asks={ "old": ask_old } )
-    run.run_searches( scratch.env(), "e2e-one", items_of( 1 ), twins_of( 1 ), 250000 )
-    before = len( scratch.posts )
-    with pytest.raises( rl.AccountLimitReached ): run.run_searches( scratch.env(), "e2e-two", items_of( 1, 1 ), twins_of( 2 ), 250000 )
+    first   = run.run_searches( scratch.env(), "e2e-one", items_of( 1 ), twins_of( 1 ), 250000 )
+    spent   = first[ "totals" ][ "spent_tokens" ]
+    before  = len( scratch.posts )
+    ceiling = 400000 - spent + 1                                                               # alone it fits the limit; with what the first run spent it is one over
+    assert 0 < spent and ceiling <= 400000
+    with pytest.raises( rl.AccountLimitReached ): run.run_searches( scratch.env(), "e2e-two", items_of( 1, 1 ), twins_of( 2 ), ceiling )
     assert len( scratch.posts ) == before
 
 
@@ -205,12 +208,12 @@ def test_a_canary_with_an_incomplete_search_is_tripped_and_cannot_be_approved( t
 
 def test_the_full_run_waits_for_an_approved_canary_and_then_runs_the_remaining_members( tmp_path ):
     scratch = Env( tmp_path, asks={ "old": ask_old } )
-    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 5 * 10 ** 8 )
     run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
-    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 5 * 10 ** 8 )
     run.approve_canary( scratch.env(), "cheech", "tokens read" )
     with pytest.raises( s1.DriverRefused ): run.approve_canary( scratch.env(), "cheech", "again" )
-    rec = run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    rec = run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 5 * 10 ** 8 )
     assert [ s[ "member" ] for s in rec[ "searches" ] ] == IDS[ 5:100 ] and rec[ "kind" ] == "run" and rec[ "totals" ][ "complete" ] == 95   # the canary's five are not asked twice
     assert rec[ "canary_run" ] == "e2e-canary"
 
@@ -254,3 +257,28 @@ def test_the_reliability_window_counts_the_canary_searches_that_came_before_the_
     scratch = Env( tmp_path, asks={ "old": failing( failed=1 ) } )
     rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 10 ), twins_of( 10 ), 10 ** 6, prior=prior )
     assert rec[ "stopped" ] == { "reason": "reliability", "after": 2 }                               # 4 earlier + 2 here is the sixth incomplete
+
+
+def test_a_run_with_no_question_a_bad_pack_size_or_a_bad_worker_count_is_refused_before_the_ledger_opens( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    for change in ( { "asks": {} }, { "pack_size": 0 }, { "pack_size": rt.MAX_PACK_SIZE + 1 }, { "workers": 99 } ):
+        env = scratch.env()
+        for k, v in change.items(): setattr( env, k, v )
+        with pytest.raises( s1.DriverRefused ): run.run_searches( env, "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )
+    assert rl.AccountLedger( scratch.path ).total() == 0 and scratch.posts == []
+
+
+def test_the_live_transport_with_no_key_is_refused_before_the_ledger_opens( tmp_path, monkeypatch ):
+    monkeypatch.delenv( s1.jt.KEY_VARIABLE, raising=False )
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    env     = run.E2EEnv( scratch.root, scratch.data, rl.AccountLedger( scratch.path ), scratch.asks )
+    assert env.live
+    with pytest.raises( s1.KeyMissing ): run.run_searches( env, "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )
+    assert rl.AccountLedger( scratch.path ).total() == 0
+
+
+def test_an_error_result_makes_an_incomplete_search_with_its_own_cause_and_no_reading( tmp_path ):
+    def refused( ctx, item ): return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": item[ "member" ] }
+    scratch = Env( tmp_path, asks={ "old": refused } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )
+    assert rec[ "searches" ][ 0 ][ "status" ] == "incomplete" and rec[ "searches" ][ 0 ][ "causes" ] == [ "ERROR:UNKNOWN_ENTRY" ] and rec[ "searches" ][ 0 ][ "read" ] is None
