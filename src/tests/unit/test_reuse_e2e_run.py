@@ -452,3 +452,30 @@ def test_a_revised_estimate_is_a_positive_whole_number( tmp_path, monkeypatch, b
     scratch = Env( tmp_path, asks={ "old": ask_old } )
     run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
     with pytest.raises( s1.DriverRefused, match="positive whole number" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=bad )
+
+
+def test_a_canary_that_tripped_on_the_projection_and_on_something_else_is_never_approved_by_a_revised_estimate( tmp_path, monkeypatch ):
+    monkeypatch.setitem( run.E2E_SPEC, "estimate", 1000 )
+    def one_failed( ctx, item ):
+        result = ask_old( ctx, item )
+        return { **result, "stats": { **result[ "stats" ], "failed": 1 } }                                          # real sweep and real tokens, one entry reported failed
+    scratch = Env( tmp_path, asks={ "old": one_failed } )
+    run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    path = scratch.data / "e2e-results" / "e2e-canary.canary.json"
+    assert sorted( json.loads( path.read_text() )[ "tripped" ] ) == [ "incomplete", "projection_over_allowance" ]
+    with pytest.raises( s1.CanaryTripped, match="incomplete" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=10 ** 12 )
+    assert json.loads( path.read_text() )[ "approved" ] is None
+
+
+def test_a_revised_estimate_that_clears_the_projection_is_refused_when_the_ledger_has_less_left_than_the_projection( tmp_path, monkeypatch ):
+    monkeypatch.setitem( run.E2E_SPEC, "estimate", 1000 )
+    probe = Env( tmp_path, tag="probe", asks={ "old": ask_old } )
+    spent = run.run_canary( probe.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )[ "tokens" ]
+    scratch = Env( tmp_path, limit=10 * spent, asks={ "old": ask_old } )                                       # the ledger keeps 9 canaries' worth, the projection is 20
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 * spent )
+    assert report[ "tripped" ] == [ "projection_over_allowance" ] and report[ "tokens" ] == spent
+    projection = report[ "projection_tokens" ]
+    assert int( run.ESTIMATE_FACTOR * projection ) >= projection > scratch.env().ledger.snapshot()[ 0 ] - scratch.env().ledger.snapshot()[ 1 ]
+    with pytest.raises( s1.CanaryTripped, match="above the allowance" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=projection )
+    path = scratch.data / "e2e-results" / "e2e-canary.canary.json"
+    assert json.loads( path.read_text() )[ "approved" ] is None
