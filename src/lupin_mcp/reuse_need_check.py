@@ -30,6 +30,7 @@ DEFAULT_SAMPLE   = "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/202
 DEFAULT_SAMPLE_SHA   = "5b6d84fc2dd8dc458b36255e129001f55e3fbe4d252c14c6d65a4994779a91fd"      # plan 12.1, ruling R1
 DEFAULT_MANIFEST_SHA = "bfbfceab399cf753093f0c9ee0bec73a0de00738a0696126a669e129de466941"      # plan 12.1
 
+NEEDS_FORMAT     = "reuse-e2e-needs-1"                            # the document need_writer.needs_document emits and the driver loads
 SAMPLE_SIZE      = 100
 MIN_WORDS        = 8
 MAX_WORDS        = 40
@@ -222,6 +223,34 @@ def load_sample_ids( path ):
     return ids
 
 
+def load_needs( path, sample_sha256 ):
+    """
+    Read the needs document the writer emits.
+
+    Requires:
+        - path names a JSON document { format, sample_sha256, needs: [ { member, need, ... } ] }
+        - sample_sha256 is the sha256 of the sample file this check uses
+
+    Ensures:
+        - returns { member id: need text } in document order
+
+    Raises:
+        - ValueError when the format or sample_sha256 differs, needs is not a list,
+          an entry lacks a text member and need, or a member is named twice
+    """
+    doc = json.loads( pathlib.Path( path ).read_text( encoding="utf-8" ) )
+    if not isinstance( doc, dict ) or doc.get( "format" ) != NEEDS_FORMAT: raise ValueError( f"format is not {NEEDS_FORMAT}" )
+    if doc.get( "sample_sha256" ) != sample_sha256: raise ValueError( f"sample_sha256 in the document is {doc.get( 'sample_sha256' )}, not the sample's {sample_sha256}" )
+    if not isinstance( doc.get( "needs" ), list ): raise ValueError( "needs is not a list" )
+    out = {}
+    for i, e in enumerate( doc[ "needs" ] ):
+        if not ( isinstance( e, dict ) and isinstance( e.get( "member" ), str ) and isinstance( e.get( "need" ), str ) ):
+            raise ValueError( f"entry {i} has no text member and need" )
+        if e[ "member" ] in out: raise ValueError( f"{e[ 'member' ]} is named twice in the needs document" )
+        out[ e[ "member" ] ] = e[ "need" ]
+    return out
+
+
 def load_index( path ):
     """Ensures: returns { id: record } from a symbols.jsonl file, blank lines skipped."""
     recs = [ json.loads( l ) for l in pathlib.Path( path ).read_text( encoding="utf-8" ).splitlines() if l.strip() ]
@@ -249,7 +278,6 @@ def main( argv=None ):
     ap.add_argument( "--manifest-sha256", default=DEFAULT_MANIFEST_SHA )
     a = ap.parse_args( argv )
     try:
-        raw      = json.loads( pathlib.Path( a.needs ).read_text( encoding="utf-8" ) )
         groups   = twin_groups( json.loads( pathlib.Path( a.manifest ).read_text( encoding="utf-8" ) ) )
         index    = load_index( a.index )
         sample   = load_sample_ids( a.sample )
@@ -257,9 +285,8 @@ def main( argv=None ):
                      "index_generation": pathlib.Path( a.index ).resolve().parent.name, "index_sha256": file_sha256( a.index ) }
         for name, want in ( ( "sample_sha256", a.sample_sha256 ), ( "manifest_sha256", a.manifest_sha256 ) ):
             if shas[ name ] != want: raise ValueError( f"{name} is {shas[ name ]}, not the {want} named" )
-        bad = sorted( k for k, v in raw.items() if not ( isinstance( v, dict ) and isinstance( v.get( "need" ), str ) ) )
-        if bad: raise ValueError( f"needs rows without a text under 'need': {', '.join( bad )}" )
-        results = check_all( { k: v[ "need" ] for k, v in raw.items() }, sample, index, groups )
+        needs   = load_needs( a.needs, shas[ "sample_sha256" ] )
+        results = check_all( needs, sample, index, groups )
     except ( OSError, ValueError, KeyError, AttributeError ) as e:
         print( f"need check: cannot read an input: {e}" )
         return 2
