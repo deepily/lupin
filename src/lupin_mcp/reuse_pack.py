@@ -19,6 +19,7 @@ WORKERS_MIN     = 4
 WORKERS_MAX     = 8
 WORKERS_DEFAULT = 6
 KEY_MODES       = ( "candidate", "stage1" )
+PAIR_FIELDS     = frozenset( ( "provides", "coverage", "score", "confidence", "probabilities" ) )
 KINDS           = ( "choice", "pair" )                        # the three-way Choice, or the Noul and Score question
 
 
@@ -100,6 +101,17 @@ def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL )
         - the key holds the shape, model, template hash, need and candidate text, and no pack size or run index
     """
     return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need, "candidate": text } ) )
+
+
+def pair_key( need, text, model=rt.JEV_MODEL ):
+    """
+    Key one candidate's two-question answer wherever it was packed.
+
+    Ensures:
+        - the key holds the pair shape, model, the pair template's hash, need and candidate text, and no pack
+        - it never equals the key of the three-way question for the same need and text
+    """
+    return rt.sha( rt.canonical( { "shape": rpr.SHAPE, "model": model, "template": rpr.template_hash(), "need": need, "candidate": text } ) )
 
 
 def pack_key( body ):
@@ -226,21 +238,38 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
 
 
-def _check_sweep_args( size, workers, key_mode, run_index ):
+def _check_sweep_args( size, workers, key_mode, run_index, kind="choice" ):
     """Raises: ValueError naming the argument that is out of range."""
+    if kind not in KINDS: raise ValueError( f"kind must be one of {KINDS}, got {kind!r}" )
+    if kind == "pair" and key_mode != "candidate": raise ValueError( f"the pair kind has only the candidate key_mode, got {key_mode!r}" )
     if type( size ) is not int or size < 1: raise ValueError( f"size must be a positive integer, got {size!r}" )
     if type( workers ) is not int or not WORKERS_MIN <= workers <= WORKERS_MAX: raise ValueError( f"workers must be an integer from {WORKERS_MIN} to {WORKERS_MAX}, got {workers!r}" )
     if key_mode not in KEY_MODES: raise ValueError( f"key_mode must be one of {KEY_MODES}, got {key_mode!r}" )
     if key_mode == "stage1" and ( type( run_index ) is not int or run_index < 1 ): raise ValueError( f"a stage1 sweep needs a run_index of 1 or more, got {run_index!r}" )
 
 
-def _entry_response( probabilities, row ):
-    """Ensures: returns one entry's cached form: the old single answer plus its pack."""
-    return { "answers": { "fit": { "probabilities": probabilities } }, "model": row[ "model" ], "pack": { "request_hash": row[ "request_hash" ], "size": row[ "size" ] } }
+def _entry_response( fields, row ):
+    """Ensures: returns one entry's cached form: its answer fields and the pack they came from."""
+    return { "answers": { "fit": fields }, "model": row[ "model" ], "pack": { "request_hash": row[ "request_hash" ], "size": row[ "size" ] } }
+
+
+def _pair_hit( key, hit ):
+    """
+    Read a cached two-question answer.
+
+    Ensures:
+        - returns the answer fields: provides, coverage, score, confidence and probabilities
+    Raises:
+        - ReuseError CACHE_CORRUPT when the entry does not hold exactly those fields
+    """
+    try: fit = hit[ "answers" ][ "fit" ]
+    except ( KeyError, TypeError ): fit = None
+    if not isinstance( fit, dict ) or set( fit ) != PAIR_FIELDS: raise rt.ReuseError( "CACHE_CORRUPT", f"{key}: not a two-question answer" )
+    return fit
 
 
 def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="candidate", run_index=None, template=None, model=None,
-                  frozen=False, gaps=None, budget=None, breaker=None ):
+                  frozen=False, gaps=None, budget=None, breaker=None, kind="choice", size_limit=rpr.SIZE_LIMIT_TOKENS ):
     """
     Ask Jev about every entry in packs.
 
@@ -250,11 +279,13 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - key_mode "candidate" keys each answer by need and candidate text alone; "stage1" adds the pack size and
           the run index, so a measurement arm never reads another arm's answers or the production answers
         - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
+        - kind "pair" asks the Noul and Score question, with the candidate key only; each pack is first cut under size_limit tokens
         - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
         - a refused pack and all its halves are one refusal, keyed by the top-level pack's hash; BREAKER_422 refused
           packs in a row, with no answered request between them, stop the sweep and the rest is not reached
     Ensures:
-        - returns every key sweep() returns, plus rows (one per HTTP request), requests, unasked and cache_write_failed
+        - returns every key sweep() returns, plus rows (one per HTTP request), requests, unasked, malformed, oversize and cache_write_failed
+        - an entry too large to send alone is failed and listed in oversize, and no request is made for it
         - answered entries are in entry order; a cache hit costs no request and the misses are packed together
         - every answered entry is cached on its own, with the pack it came from
         - failed_attempts holds one { request, ids, attempts } for each request that left entries without an answer
@@ -265,9 +296,9 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
           "model_mismatch", every pack not yet sent being not reached
     Raises:
         - ValueError for an argument out of range
-        - ReuseError CACHE_MISSING or CACHE_CORRUPT when frozen and an answer is absent or damaged
+        - ReuseError CACHE_MISSING or CACHE_CORRUPT when an answer is absent or damaged and the sweep is frozen, or a two-question entry is damaged
     """
-    _check_sweep_args( size, workers, key_mode, run_index )
+    _check_sweep_args( size, workers, key_mode, run_index, kind )
     template, model = template or ctx.template, model or ctx.model
     if budget is None and isinstance( ctx.transport, rt.LiveJevTransport ): budget = ctx.transport.budget
     cache = rt.JevCache( ctx.data )
@@ -275,24 +306,31 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
 
     def key_of( rec ):
         text = rt.entry_text( rec )
+        if kind == "pair": return pair_key( need, text, model )
         return candidate_key( need, text, template, model ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model )
 
     state, misses = {}, []                                          # state maps an entry id to its answer, or to ( "failed" | "not_reached" )
     for rec in entries:
         if frozen and gaps is not None and rec[ "id" ] in gaps: state[ rec[ "id" ] ] = gaps[ rec[ "id" ] ]; continue
         hit = cache.get( key_of( rec ) )
-        if hit is not None: state[ rec[ "id" ] ] = ( "hit", rt.parse_answer( hit ) ); continue
+        if hit is not None: state[ rec[ "id" ] ] = ( "hit", _pair_hit( key_of( rec ), hit ) if kind == "pair" else rt.parse_answer( hit ) ); continue
         if frozen: raise rt.ReuseError( "CACHE_MISSING", f"{rec[ 'id' ]} ({key_of( rec )})" )
         misses.append( rec )
     by_id  = { rec[ "id" ]: rec for rec in entries }
-    chunks = [ misses[ i:i + size ] for i in range( 0, len( misses ), size ) ]
+    chunks, oversize = [], []
+    for i in range( 0, len( misses ), size ):
+        if kind == "pair":
+            pieces, big = rpr.split_for_size( need, misses[ i:i + size ], size_limit )
+            chunks += pieces; oversize += big
+        else: chunks.append( misses[ i:i + size ] )
+    for i in oversize: state[ i ] = "failed"
 
     def one( chunk ):
-        out = send_pack( ctx.transport, need, chunk, template, model, budget, breaker=breaker )
+        out = send_pack( ctx.transport, need, chunk, template, model, budget, breaker=breaker, kind=kind )
         unwritten = []
         row_of = { i: r for r in out[ "rows" ] if r[ "status" ] == "answered" for i in r[ "ids" ] }
         for a in out[ "answers" ]:
-            try: cache.put( key_of( by_id[ a[ "id" ] ] ), _entry_response( a[ "probabilities" ], row_of[ a[ "id" ] ] ) )
+            try: cache.put( key_of( by_id[ a[ "id" ] ] ), _entry_response( { k: v for k, v in a.items() if k != "id" }, row_of[ a[ "id" ] ] ) )
             except OSError: unwritten.append( a[ "id" ] )
         return out, unwritten
 
@@ -300,15 +338,16 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         results = list( pool.map( one, chunks ) )
     rows, unwritten = [], []
     for out, bad in results:
-        for a in out[ "answers" ]: state[ a[ "id" ] ] = ( "live", a[ "probabilities" ] )
+        for a in out[ "answers" ]: state[ a[ "id" ] ] = ( "live", { k: v for k, v in a.items() if k != "id" } if kind == "pair" else a[ "probabilities" ] )
         for i in out[ "failed" ]: state[ i ] = "failed"
         for i in out[ "not_reached" ]: state[ i ] = "not_reached"
         rows += out[ "rows" ]; unwritten += bad
     for n, r in enumerate( rows ): r[ "index" ] = n
-    answers = [ { "id": rec[ "id" ], "probabilities": state[ rec[ "id" ] ][ 1 ] } for rec in entries if isinstance( state[ rec[ "id" ] ], tuple ) ]
+    answers = [ { "id": rec[ "id" ], **state[ rec[ "id" ] ][ 1 ] } if kind == "pair" else { "id": rec[ "id" ], "probabilities": state[ rec[ "id" ] ][ 1 ] }
+                for rec in entries if isinstance( state[ rec[ "id" ] ], tuple ) ]
     failed_attempts = []
     for r in rows:
-        left = r[ "unasked" ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
+        left = r[ "unasked" ] + [ m[ "id" ] for m in r[ "malformed" ] ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
         if left: failed_attempts.append( { "request": r[ "request_hash" ], "ids": left, "attempts": r[ "attempts" ] } )
     return { "answers": answers,
              "failed": [ rec[ "id" ] for rec in entries if state[ rec[ "id" ] ] == "failed" ],
@@ -323,26 +362,27 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
+             "malformed": [ m for r in rows if r[ "status" ] == "answered" for m in r[ "malformed" ] ], "oversize": oversize,
              "cache_write_failed": unwritten, "refused_422": breaker.refusals,
              "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }
 
 
-def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None ):
+def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None, kind="choice" ):
     """
     Make the sweeper a ReuseContext takes for the packed path.
 
     Requires:
-        - size and workers are in range for sweep_packed
+        - size and workers are in range for sweep_packed, and kind is "choice" or "pair"
     Ensures:
         - returns a function with sweep's signature that sweeps in packs with the per-candidate cache key
         - the same function serves the page asks and the entry asks, so both travel through one transport
     Raises:
         - ValueError for a size or worker count out of range
     """
-    _check_sweep_args( size, workers, "candidate", None )
+    _check_sweep_args( size, workers, "candidate", None, kind )
 
     def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
         return sweep_packed( ctx, need, entries, size, workers=workers, key_mode="candidate", template=template, model=model,
-                             frozen=frozen, gaps=gaps, breaker=breaker )
+                             frozen=frozen, gaps=gaps, breaker=breaker, kind=kind )
 
     return sweeper
