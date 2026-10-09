@@ -63,6 +63,16 @@ def test_the_end_to_end_driver_asks_the_new_question_through_ask_new( env ):
     assert out[ "status" ] == "ok" and out[ "verdict" ] == "REUSE"
 
 
+def test_ask_new_leaves_the_member_out_of_every_request_and_the_receipt_names_it( env ):
+    member = "cosa.feeds.parse_feed"
+    client = fake.PairFake( entries_of( env ) )
+    out    = e2r.ask_new( packed_ctx( env, client ), { "need": NEED, "member": member } )
+    rec    = receipt_of( env, out )
+    asked  = [ i for r in rec[ "requests" ] for i in r[ "ids" ] ]
+    assert rec[ "exclude_id" ] == member and rec[ "sweep_only" ] is True and member not in asked and len( asked ) == 2
+    assert all( member not in q[ "instructions" ] for b in client.bodies for q in b[ "questions" ].values() ) and out[ "verdict" ] != "REUSE"
+
+
 def test_the_stage_two_driver_turns_a_pair_sweep_into_rows( env ):
     assert s2.NEW_PAIR_ASK is rp.pair_ask
     entries = entries_of( env )
