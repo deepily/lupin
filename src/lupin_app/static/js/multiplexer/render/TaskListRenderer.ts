@@ -566,10 +566,13 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - `restoreState` is the store's own restorer, not a new one
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => readBackAfterWrite(
-      () => this.stores.taskList.refreshAfterWrite(),
-      () => this.stampReadBackFailed(),
-    ) );
+    const done = mutation.done.then( async ( outcome ) => {
+      await readBackAfterWrite(
+        () => this.stores.taskList.refreshAfterWrite(),
+        () => this.stampReadBackFailed(),
+      );
+      return outcome;
+    } );
     return { restoreState: mutation.restoreState, done };
   }
 

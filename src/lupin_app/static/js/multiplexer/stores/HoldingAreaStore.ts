@@ -51,7 +51,7 @@ export interface HoldingAreaApiClient {
  * after the first refusal.
  */
 export type HoldingTransitionResult =
-  | { ok: true }
+  | { ok: true; alreadyAt?: string }
   | { ok: false; message: string; pending?: false }
   | { ok: false; message: string; pending: true; ticketId: string };
 
@@ -336,7 +336,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
       return { ok: true };
     } catch ( err ) {
       // Row 71a11ed7: a refused transition on a row already at the target is a success.
-      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { ok: true };
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { ok: true, alreadyAt: toStatus };
       return { ok: false, message: holdingRefusalMessage( err ) };
     }
   }

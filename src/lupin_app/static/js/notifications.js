@@ -11624,7 +11624,7 @@ class NotificationsUI {
             // said "no-op queued->queued", and this page showed that as "Approve refused" for a
             // promotion that worked. The server's message is unchanged (other callers read it); the
             // page takes its advice and re-reads the row. The test is the row's STATUS, never the text.
-            if ( response.status === 422 && await this._rowIsAlreadyAt( taskId, toStatus ) ) return { ok: true };
+            if ( response.status === 422 && await this._rowIsAlreadyAt( taskId, toStatus ) ) return { ok: true, alreadyAt: toStatus };
             let detail = `${response.status}`;
             try {
                 const body = await response.json();
@@ -11634,6 +11634,17 @@ class NotificationsUI {
         } catch ( e ) {
             return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
         }
+    }
+
+    _alreadyThereNote( label, status ) {
+        /**
+         * The sentence shown when a click found the row already at the target.
+         *
+         * Claims only the row's status, never that this click moved it: the server's no-op message says
+         * it cannot tell WHO moved the row. An identical copy lives in the multiplexer
+         * (`alreadyThereMessage`); a parity test pins the two.
+         */
+        return `${label}: this row is already ${status} — this click changed nothing.`;
     }
 
     async _rowIsAlreadyAt( taskId, toStatus ) {
@@ -14722,6 +14733,8 @@ class NotificationsUI {
         if ( result.ok ) {
             this._settlePinnedRowAfterVerb( taskId, needs.status );
             await this.refreshTaskList();
+            // Row 71a11ed7: say the row was already there rather than claim this click did it.
+            if ( result.alreadyAt ) this._renderTaskRowError( taskId, this._alreadyThereNote( this._verbLabel( verb ), result.alreadyAt ), paneScope );
         }
         else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
     }

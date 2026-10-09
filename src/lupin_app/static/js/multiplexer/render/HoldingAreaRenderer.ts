@@ -134,7 +134,7 @@ export interface HoldingAreaStoreLike {
    */
   transitionTask(
     id: string, toStatus: string, extras: TransitionExtras,
-  ): Promise<{ ok: boolean; message?: string }>;
+  ): Promise<{ ok: boolean; message?: string; alreadyAt?: string }>;
   /** PATCH one row's fields. Resolves to a result and never rejects, like transitionTask. */
   patchTask( id: string, fields: TaskPatchFields ): Promise<{ ok: boolean; message?: string }>;
 }
@@ -526,7 +526,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    *   - `done` resolves once the after-write read has SETTLED, either way
    *   - a failed read paints no stripe; it marks this pane stale instead
    */
-  private rowWrite( result: Promise<{ ok: boolean; message?: string }> ): TaskMutation {
+  private rowWrite( result: Promise<{ ok: boolean; message?: string; alreadyAt?: string }> ): TaskMutation {
     const done = result.then( async ( r ) => {
       /* c8 ignore next */ // `?? ""` RHS: the store's result type always carries a message when ok is false.
       if ( !r.ok ) throw new Error( r.message ?? "" );
@@ -534,6 +534,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
         () => this.store.refreshAfterWrite(),
         () => this.stampReadBackFailed(),
       );
+      return { alreadyAt: r.alreadyAt };
     } );
     return { restoreState: () => {}, done };
   }

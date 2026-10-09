@@ -475,10 +475,13 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
    *   - a failed read leaves the edit alone and marks this pane stale
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => readBackAfterWrite(
-      () => this.store.refreshAfterWrite(),
-      () => this.stampReadBackFailed(),
-    ) );
+    const done = mutation.done.then( async ( outcome ) => {
+      await readBackAfterWrite(
+        () => this.store.refreshAfterWrite(),
+        () => this.stampReadBackFailed(),
+      );
+      return outcome;
+    } );
     return { restoreState: mutation.restoreState, done };
   }
 

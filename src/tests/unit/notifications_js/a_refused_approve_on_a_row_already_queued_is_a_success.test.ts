@@ -21,6 +21,7 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+import { alreadyThereMessage } from "../../../lupin_app/static/js/multiplexer/stores/alreadyAtTarget";
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
@@ -173,7 +174,7 @@ const NOOP  = { status: 422, body: { detail: { errors: [ "no-op transition 'queu
 test( "a 422 on a row already at the target is a success, found by re-reading the row", async () => {
   const ui    = newUI();
   const calls = stubFetch( ui, { [ POST ]: NOOP, [ READ ]: { status: 200, body: { id: ROW_ID, status: "queued" } } } );
-  assert.deepEqual( await ui._transitionTask( ROW_ID, "queued" ), { ok: true } );
+  assert.deepEqual( await ui._transitionTask( ROW_ID, "queued" ), { ok: true, alreadyAt: "queued" } );
   assert.deepEqual( calls, [ POST, READ ] );
 } );
 
@@ -194,7 +195,8 @@ test( "a 403 is a refusal and the row is NEVER re-read", async () => {
 } );
 
 test( "a 422 whose re-read fails (non-2xx, network, or no row) leaves the refusal standing", async () => {
-  for ( const reread of [ { status: 500, body: {} }, "throw" as const, { status: 200, body: null } ] ) {
+  // The first entry is the arm that pins `response.ok`: a non-2xx answer whose body CARRIES status "queued".
+  for ( const reread of [ { status: 404, body: { status: "queued" } }, { status: 500, body: {} }, "throw" as const, { status: 200, body: null } ] ) {
     const ui = newUI();
     stubFetch( ui, { [ POST ]: NOOP, [ READ ]: reread } );
     const r = await ui._transitionTask( ROW_ID, "queued" );
@@ -202,7 +204,7 @@ test( "a 422 whose re-read fails (non-2xx, network, or no row) leaves the refusa
   }
 } );
 
-test( "the assembled click: Approve on a row the server says is already queued shows NO refusal stripe", async () => {
+test( "the assembled click: Approve on a row the server says is already queued says so, and never says refused", async () => {
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "not_approved" } ) );
   stubFetch( ui, { [ POST ]: NOOP, [ READ ]: { status: 200, body: { id: ROW_ID, status: "queued" } } } );
@@ -213,7 +215,8 @@ test( "the assembled click: Approve on a row the server says is already queued s
   await clickThrough( ui, "_handleTaskSubmitClick", host.querySelector( ".task-submit-button" ), "Submit for approve" );
 
   const stripe = host.querySelector( ".task-row-error-stripe" ) as HTMLElement;
-  assert.equal( stripe.hidden, true, `the operator was told: ${ stripe.textContent }` );
+  assert.equal( stripe.hidden, false, "the operator was told nothing" );
+  assert.equal( stripe.textContent, "Approve: this row is already queued — this click changed nothing." );
   assert.equal( refreshed, 1, "the list was not refreshed, so the row would not move" );
 } );
 
@@ -239,6 +242,36 @@ test( "a second press while the first is in flight sends nothing, and the key is
   assert.equal( sent, 2, "the key was never released, so the row can never be approved again" );
   release();
   await third;
+} );
+
+test( "the legacy note and the multiplexer's message are the same sentence", () => {
+  const ui = newUI();
+  for ( const [ label, status ] of [ [ "Approve", "queued" ], [ "Drop", "dropped" ], [ "Won't-fix", "wont_fix" ] ] as const ) {
+    assert.equal( ( ui as unknown as { _alreadyThereNote: ( l: string, s: string ) => string } )._alreadyThereNote( label, status ),
+                  alreadyThereMessage( label, status ) );
+  }
+} );
+
+test( "two different verbs on one row are independent: Approve in flight does not block Fixed", async () => {
+  const ui   = newUI();
+  const host = paneWithCell( ui, row( { status: "not_approved" } ) );
+  ui.refreshTaskList = async () => {};
+  const verbsSent: string[] = [];
+  const releases: Array<() => void> = [];
+  ui._transitionTask = ( _id: string, to: string ) => { verbsSent.push( to ); return new Promise( ( res ) => { releases.push( () => res( { ok: true } ) ); } ); };
+
+  const select = selectVerb( host, "approve" );
+  const button = host.querySelector( ".task-submit-button" ) as HTMLElement;
+  const first  = ui._handleTaskSubmitClick( button );
+
+  select.value = "fixed";
+  const second = button.cloneNode( true ) as HTMLElement;
+  second.dataset.armed = "1";   // Fixed arms on the first press; this is its confirming press
+  const secondRun = ui._handleTaskSubmitClick( second );
+
+  assert.deepEqual( verbsSent, [ "queued", "done" ], "Approve in flight blocked a different verb on the same row" );
+  releases.forEach( ( r ) => r() );
+  await Promise.all( [ first, secondRun ] );
 } );
 
 test( "the guard is per row: another row's Approve is not blocked by the first", async () => {

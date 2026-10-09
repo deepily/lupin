@@ -27,7 +27,8 @@
 
 import { ApiError } from "../api/ApiClient";
 import { recordingManager, type RecordingManagerStartOptions } from "../audio/recordingManager";
-import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
+import type { TaskMutation, TaskPatchFields, TransitionOutcome } from "../stores/TaskListStore";
+import { alreadyThereMessage } from "../stores/alreadyAtTarget";
 import { insertTranscriptionText } from "./insertTranscriptionText";
 import {
   transitionExtras,
@@ -479,7 +480,11 @@ export class TaskRowController {
     this.commitMutation(
       `${id}:${verb}`, id, button,
       () => this.writer.transitionTask( id, needs.status, extras ),
-      ( gone ) => this.onTransitionSettled( id, needs.status, gone ),
+      ( gone, alreadyAt ) => {
+        this.onTransitionSettled( id, needs.status, gone );
+        // Row 71a11ed7: the row was already there, so say that rather than claim this click did it.
+        if ( alreadyAt !== null ) this.rowError( button, id, alreadyThereMessage( verbLabel( verb ), alreadyAt ) );
+      },
     );
   }
 
@@ -594,14 +599,14 @@ export class TaskRowController {
    * `onSuccess` runs on both success outcomes, told which: `gone` is true for the 404.
    * `control` is the element that was pressed; its group is where the stripe goes.
    */
-  private commitMutation( key: string, id: string, control: Element, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
+  private commitMutation( key: string, id: string, control: Element, run: () => TaskMutation, onSuccess?: ( gone: boolean, alreadyAt: string | null ) => void ): void {
     if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
     this.editInFlight.add( key );
     const { restoreState, done } = run();
     done
-      .then( () => { onSuccess?.( false ); } )
+      .then( ( outcome ) => { onSuccess?.( false, ( outcome as TransitionOutcome | undefined )?.alreadyAt ?? null ); } )
       .catch( ( err: unknown ) => {
-        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true ); return; }
+        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true, null ); return; }
         restoreState();
         this.rowError( control, id, deriveEditErrorMessage( err ) );
       } )

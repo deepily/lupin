@@ -12,6 +12,17 @@
 // 🔴 THE TEST IS THE ROW'S STATUS, NOT THE MESSAGE TEXT. Matching the sentence would break on any
 // rewording; the status is the fact the operator cares about.
 
+/**
+ * The sentence both clients show when a click found the row already at the target.
+ *
+ * It claims only what was measured (the row's status) and not that this click moved it: the server's
+ * no-op message says it cannot tell WHO moved the row, so the page must not either. The legacy page
+ * (notifications.js, `_alreadyThereNote`) holds an identical copy; a parity test pins the two.
+ */
+export function alreadyThereMessage( label: string, status: string ): string {
+  return `${ label }: this row is already ${ status } — this click changed nothing.`;
+}
+
 /** The one read this needs. Both stores' api clients satisfy it structurally. */
 export interface RowReader {
   get<T>( path: string ): Promise<T>;

@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
-import { alreadyAtTarget } from "../../../lupin_app/static/js/multiplexer/stores/alreadyAtTarget";
+import { alreadyAtTarget, alreadyThereMessage } from "../../../lupin_app/static/js/multiplexer/stores/alreadyAtTarget";
 import { createHoldingAreaStore } from "../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore";
 import { createTaskListStore } from "../../../lupin_app/static/js/multiplexer/stores/TaskListStore";
 
@@ -32,6 +32,10 @@ function fakeApi( postErr: unknown, rowAnswer: () => Promise<unknown>, listing: 
 }
 
 const NOOP_422 = new Rejected( 422, "HTTP 422 u: {\"detail\":\"no-op transition 'queued'->'queued'\"}" );
+
+test( "alreadyThereMessage claims the row's status and not that this click moved it", () => {
+  assert.equal( alreadyThereMessage( "Approve", "queued" ), "Approve: this row is already queued — this click changed nothing." );
+} );
 
 // ---------------------------------------------------------------------------
 // alreadyAtTarget — every branch
@@ -75,9 +79,9 @@ function holdingStore( api: never ) {
   } );
 }
 
-test( "HoldingAreaStore: a 422 no-op on a row already queued is { ok: true }", async () => {
+test( "HoldingAreaStore: a 422 no-op on a row already queued is ok AND says the row was already there", async () => {
   const { api } = fakeApi( NOOP_422, async () => ( { status: "queued" } ) );
-  assert.deepEqual( await holdingStore( api ).transitionTask( "t1", "queued", {} ), { ok: true } );
+  assert.deepEqual( await holdingStore( api ).transitionTask( "t1", "queued", {} ), { ok: true, alreadyAt: "queued" } );
 } );
 
 test( "HoldingAreaStore: a 422 on a row NOT at the target is still a refusal carrying the server's words", async () => {
@@ -110,7 +114,7 @@ test( "TaskListStore: a 422 no-op on a row already at the target resolves done a
   const { api } = fakeApi( NOOP_422, async () => ( { status: "queued" } ) );
   const store = await listStore( api );
   const { done } = store.transitionTask( "t1", "queued", {} );
-  await done;   // rejects today
+  assert.deepEqual( await done, { alreadyAt: "queued" } );
   assert.equal( store.composite()?.tasks?.[ 0 ]?.status, "queued" );
 } );
 

@@ -89,7 +89,13 @@ export interface TaskPatchFields {
 // the ApiError the production ApiClient throws on non-2xx.
 export interface TaskMutation {
   restoreState : () => void;
-  done         : Promise<void>;
+  done         : Promise<TransitionOutcome | void>;
+}
+
+// What a transition's `done` resolves with when the row was ALREADY at the target (row 71a11ed7):
+// success, but not this click's doing. Anything else resolves with nothing.
+export interface TransitionOutcome {
+  alreadyAt? : string;
 }
 
 // v1 read-contract: the whole fleet board, newest-first, capped. Rick's
@@ -330,7 +336,7 @@ class TaskListStoreImpl implements TaskListStore {
     } ).catch( async ( err: unknown ) => {
       // Row 71a11ed7: the optimistic row already shows `toStatus`; if the server says the row is
       // there, keep it. Any other rejection (including the 202 error above) rethrows to rollback.
-      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return undefined;
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { alreadyAt: toStatus };
       throw err;
     } );
     return { restoreState: this.makeRestorer( snapshot ), done };
