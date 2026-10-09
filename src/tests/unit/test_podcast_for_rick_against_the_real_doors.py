@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from cosa.rest import podcast_proxy as pp
 from cosa.rest.middleware.api_key_auth import authenticated_account_email, require_api_key_or_jwt
 from cosa.rest.postgres_models import Notification
+from cosa.rest.db.repositories.podcast_proxy_spent_repository import PodcastProxySpentRepository
 from cosa.rest.routers import docs_files
 from cosa.rest.routers import notifications as notification_routes
 from cosa.rest.routers import podcast_proxy as door
@@ -317,3 +318,45 @@ def test_a_card_for_the_same_file_as_the_path_resumes_through_the_real_card_door
     rick_answers( world, card_id=first[ "card_id" ] )
     out = call( world, Clock(), card_id=first[ "card_id" ] )
     assert out[ "status" ] == "started" and len( world[ "flow" ].calls ) == 1
+
+
+def claim_without_a_job( world, card_id ):
+    """Write the spent record a start leaves when it claimed the card and recorded no job."""
+    card = world[ "cards" ].rows[ uuid.UUID( str( card_id ) ) ]
+    with world[ "sessions" ]() as session:
+        assert PodcastProxySpentRepository( session ).claim( card.id, ACTOR, card.payload[ "scope_path" ], card.payload[ "sha256" ] )
+        session.commit()
+
+
+def test_the_same_path_with_changed_bytes_gets_a_new_card_not_the_waiting_one( world ):
+    first = call( world, Clock() )
+    world[ "path" ].write_text( "# A summary\n\nDifferent words now.\n" )
+    second = call( world, Clock() )
+    assert second[ "status" ] == "expired" and second[ "card_id" ] != first[ "card_id" ]
+    assert len( world[ "cards" ].rows ) == 2
+
+
+def test_a_card_past_its_expiry_does_not_block_a_new_ask_for_the_same_file( world ):
+    first = call( world, Clock() )
+    CLOCK[ "now" ] = only_card( world ).expires_at + timedelta( seconds=1 )
+    second = call( world, Clock() )
+    assert second.get( "reason" ) != "card_already_waiting" and second[ "card_id" ] != first[ "card_id" ]
+
+
+def test_resuming_a_claimed_no_job_card_is_refused_with_a_hint_and_nothing_polls_or_starts( world ):
+    first = call( world, Clock() )
+    rick_answers( world, card_id=first[ "card_id" ] )
+    claim_without_a_job( world, first[ "card_id" ] )
+    clock = Clock()
+    out = call( world, clock, card_id=first[ "card_id" ], host_path="" )
+    assert out[ "reason" ] == "claimed_no_job" and out[ "stage" ] == "card" and "Do not start it again" in out[ "retry" ]
+    assert clock.sleeps == 0 and world[ "flow" ].calls == []
+
+
+def test_a_start_that_meets_a_claim_with_no_job_carries_the_servers_code_and_the_hint( world ):
+    def answer_and_claim( n ):
+        rick_answers( world )
+        claim_without_a_job( world, only_card( world ).id )
+    out = call( world, Clock( answer_and_claim ) )
+    assert out[ "reason" ] == "claimed_no_job" and out[ "stage" ] == "start" and "Do not start it again" in out[ "retry" ]
+    assert world[ "flow" ].calls == []

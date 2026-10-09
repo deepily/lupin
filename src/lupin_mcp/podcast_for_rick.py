@@ -19,6 +19,7 @@ CARD_FACTS_PATH       = "/api/podcast-proxy/card/{card_id}"
 POLL_INTERVAL_SECONDS = 3.0
 POLL_FAILURE_LIMIT    = 5
 WORKTREE_ADVICE       = "write it to the main checkout's io/tmp"
+CLAIMED_NO_JOB_HINT   = "A start of this card is under way, or one did not finish. Do not start it again: read the card, and if it stays so, ask afresh with the path for a new card."
 
 
 def _refusal( reason, detail, **extra ):
@@ -154,6 +155,7 @@ def podcast_for_rick_impl(
         - a refused start for queue_failed adds a retry hint: the card is still valid
         - a card_id that belongs to a different file than host_path is refused before any poll or start
         - a card the server reports as spent is refused with its job id, and start is not called
+        - a card in state claimed_no_job is refused on resume with a hint, and neither poll nor start is called
         - start is called at most once and is never retried
         - never raises
     """
@@ -167,6 +169,8 @@ def podcast_for_rick_impl(
         if facts.get( "status" ) == "error": return { **facts, "reason": _code_of( facts ) or facts.get( "reason" ), "card_id": card_id, "stage": "card" }
         if translated is not None and facts.get( "scope_path" ) != translated[ "path" ]:
             return _refusal( "card_for_a_different_file", f"Card {card_id} was made for {facts.get( 'scope_path' )}, not {translated[ 'path' ]}; nothing was started.", card_id=card_id )
+        if facts.get( "state" ) == "claimed_no_job":
+            return _refusal( "claimed_no_job", f"Card {card_id} was claimed by a start that recorded no job.", card_id=card_id, stage="card", retry=CLAIMED_NO_JOB_HINT )
         if facts.get( "spent" ) is True:
             return _refusal( "card_already_spent", f"Card {card_id} already started job {facts.get( 'job_id' )}; no second job was queued.", card_id=card_id, job_id=facts.get( "job_id" ), stage="card" )
         asked = facts
@@ -220,6 +224,7 @@ def _start( card_id, api_base_url, api_key, actor, request_fn ):
         - a refusal carries reason = the server's detail.code, the card id and stage "start"
         - code spent is named card_already_spent; no second job exists because the server spends a card once
         - code queue_failed adds retry, saying the card is still valid and to call again with its card_id
+        - code claimed_no_job adds retry, saying not to start it again and to ask afresh for a new card if it stays so
     """
     started = request_fn( "POST", PODCAST_START_PATH, api_base_url, api_key,
                           json_body={ "card_id": card_id, "actor": actor } )
@@ -229,4 +234,5 @@ def _start( card_id, api_base_url, api_key, actor, request_fn ):
     refused = { **started, "card_id": card_id, "stage": "start" }
     if code is not None: refused[ "reason" ] = "card_already_spent" if code == "spent" else code
     if code == "queue_failed": refused[ "retry" ] = f"The card is still valid: call podcast_for_rick again with card_id={card_id}."
+    if code == "claimed_no_job": refused[ "retry" ] = CLAIMED_NO_JOB_HINT
     return refused

@@ -4708,7 +4708,7 @@ def podcast_for_rick(
     Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
 
     The server makes the card. This tool polls it until Rick answers or it expires, then starts the job.
-    It blocks up to about 10 minutes, and only a person's yes starts anything. To resume after an error
+    It blocks up to about 15 minutes, and only a person's yes starts anything. To resume after an error
     such as queue_failed, pass the card_id: the ask is skipped, and the path refuses a card for another file.
 
     Args:
@@ -4724,8 +4724,9 @@ def podcast_for_rick(
         or { status: "error", reason, detail, stage? }. The reason is the server's own code
         (too_old, hash_mismatch, queue_failed and so on) or one of path_not_absolute, file_not_found,
         outside_any_repo, inside_a_worktree, path_or_card_required, card_for_a_different_file,
-        card_already_waiting, card_already_spent, ask_answer_malformed, card_unreadable.
+        card_already_waiting, card_already_spent, claimed_no_job, ask_answer_malformed, card_unreadable.
         A queue_failed error carries a retry hint: the card is still valid.
+        A claimed_no_job error means a start is under way or did not finish: do not start it again.
 
     The actor is not a parameter: it is stamped from the session bridge, bound to the stable session id.
 
