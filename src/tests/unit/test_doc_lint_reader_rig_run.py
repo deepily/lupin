@@ -807,3 +807,53 @@ def test_a_model_call_error_is_retried_the_full_attempts_but_an_unavailable_mode
     assert code == 3 and len( models.by( READER ) ) == 1
     assert old[ "step" ] == "reader" and old[ "error" ] == "ModelUnavailableError: service down" and old[ "raws" ] == [ "" ]
 
+
+# ---- per-question scores beside the totals ----------------------------------------------------
+
+def test_each_question_has_its_scores_beside_the_file_totals( repo ):
+    out  = str( repo[ "tmp" ] / "by-question.json" )
+    code, _ = run( repo, [ QA, QB1, QB2 ], FakeModels(), **{ "--out": out } )
+    files = json.load( open( out ) )[ "files" ]
+    assert code == 0
+    assert files[ "src/mod_a.py" ][ "by_question" ] == { "qa": { "old": [ 1, 1 ], "new": [ 0, 0 ], "old_total": 2, "new_total": 0 } }
+    assert files[ "src/mod_b.py" ][ "by_question" ] == { "qb1": { "old": [ 1, 1 ], "new": [ 1, 1 ], "old_total": 2, "new_total": 2 },
+                                                         "qb2": { "old": [ 1, 1 ], "new": [ 1, 1 ], "old_total": 2, "new_total": 2 } }
+    for f in files.values():
+        assert sum( v[ "old_total" ] for v in f[ "by_question" ].values() ) == f[ "old_total" ]
+        assert sum( v[ "new_total" ] for v in f[ "by_question" ].values() ) == f[ "new_total" ]
+
+
+def test_a_one_answer_drop_can_be_traced_to_its_question( repo ):
+    out = str( repo[ "tmp" ] / "trace.json" )
+    run( repo, [ QC1, QC2, QC3 ], **{ "--runs": "1", "--out": out } )         # mod_c's new text lost "Gamma holds": 3 of 3 become 2 of 3
+    file = json.load( open( out ) )[ "files" ][ "src/mod_c.py" ]
+    assert ( file[ "old_total" ], file[ "new_total" ] ) == ( 3, 2 )
+    assert file[ "by_question" ] == { "qc1": { "old": [ 1 ], "new": [ 1 ], "old_total": 1, "new_total": 1 },
+                                      "qc2": { "old": [ 1 ], "new": [ 1 ], "old_total": 1, "new_total": 1 },
+                                      "qc3": { "old": [ 1 ], "new": [ 0 ], "old_total": 1, "new_total": 0 } }
+
+
+def test_a_dropped_pair_shows_none_on_the_side_that_failed_and_stays_out_of_the_question_totals( repo ):
+    out    = str( repo[ "tmp" ] / "dropped.json" )
+    models = FakeModels( grader_script=[ None, "bad", "bad", "bad" ] )       # the old text grades fine; the new text fails all 3 attempts
+    run( repo, [ QA ], models, **{ "--runs": "1", "--out": out } )
+    file = json.load( open( out ) )[ "files" ][ "src/mod_a.py" ]
+    assert file[ "by_question" ] == { "qa": { "old": [ 1 ], "new": [ None ], "old_total": 0, "new_total": 0 } }
+    assert ( file[ "old_total" ], file[ "new_total" ] ) == ( 0, 0 )
+
+
+def test_a_rerun_from_the_ledger_gives_the_same_totals_and_the_same_question_scores( repo ):
+    first, second = str( repo[ "tmp" ] / "first.json" ), str( repo[ "tmp" ] / "second.json" )
+    run( repo, [ QA, QB1 ], FakeModels(), **{ "--out": first } )
+    again = FakeModels()
+    code, _ = run( repo, [ QA, QB1 ], again, **{ "--out": second } )
+    a, b = json.load( open( first ) ), json.load( open( second ) )
+    assert code == 0 and again.calls == [] and a[ "files" ] == b[ "files" ] and a[ "overall" ] == b[ "overall" ]
+    assert "by_question" in b[ "files" ][ "src/mod_a.py" ]
+
+
+def test_a_cap_stopped_pair_shows_none_on_both_sides( repo ):
+    out    = str( repo[ "tmp" ] / "cap-by-question.json" )
+    models = Spender( str( repo[ "tmp" ] / "ledger.jsonl.calls" ) )
+    run( repo, [ QA ], models, **{ "--runs": "1", "--grader-cap": "12", "--out": out } )
+    assert json.load( open( out ) )[ "files" ][ "src/mod_a.py" ][ "by_question" ] == { "qa": { "old": [ None ], "new": [ None ], "old_total": 0, "new_total": 0 } }
