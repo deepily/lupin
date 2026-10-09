@@ -1,0 +1,14 @@
+{
+ "what": "One real grader reply that reasons first and ends with its score object, copied unchanged from a salvaged record of the reader-rig run f91afa46 (run-1).",
+ "source_file": "projects-data/lupin/.rt-f91afa46-a3f9c1e7/run-1/report-salvage.json",
+ "source_sha256": "ad26ac6af5e2ce17541ba50026d87cefc7b06975f2831b8a8208283bc35f4309",
+ "record": {
+  "file": "src/cosa/rest/task_store_rules.py",
+  "text": "new",
+  "run": 2,
+  "id": "U5",
+  "score": 1
+ },
+ "raw": "The key has several points:\n1. Only a title correction prefix is allowed on a terminal row. The answer states this.\n2. The field set is checked first: title plus any other settable field is refused whole, naming the extras. The answer states this.\n3. Title alone but not a legal prefix is refused with the exact string that would have been accepted. The answer does not mention this.\n4. A patch without a title is refused naming the status. The answer says \"Any other combination is refused\" but does not mention naming the status.\n5. Legal markers are WITHDRAWN, SUPERSEDED or CORRECTED, then an em dash, then the existing title verbatim. The answer gives the format with the em dash and the verbatim title, but refers to TERMINAL_TITLE_PREFIXES without listing the markers.\n\nThe question asks \"what is allowed, and what happens to a request that sets a legal title prefix and also changes priority?\" The core of the answer is that only a title correction prefix is allowed, and that the combination is refused whole, naming the extras. The answer covers both. The missing details are secondary: the exact-string refusal, the status-naming refusal, and the marker list.\n\nThe grading instruction is to give 1 if the answer states what the key says. Several key elements are missing, including the marker names and the refusal behaviors for the other cases. Those are part of the key, even though the question focuses on the two core points. The question is about what's allowed and what happens to the combined request, and the answer handles both correctly. The extra key items go beyond what the question asks, but the \"what is allowed\" part arguably includes the legal markers, which the answer leaves unnamed.\n\nThe answer is substantively correct on the main asked points, but it is incomplete against the key on the markers. I lean toward 1 because the question's two parts are answered correctly, though it's borderline.\n\n{\"score\": 1}",
+ "raw_length": 1940
+}

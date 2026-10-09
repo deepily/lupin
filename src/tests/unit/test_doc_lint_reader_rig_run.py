@@ -15,6 +15,7 @@ import subprocess
 import pytest
 from claude_agent_sdk import AssistantMessage, TextBlock
 
+import cosa.utils.util as cu
 from cosa.repo.doc_lint import harness_runner, model_transport, reader_rig
 from cosa.repo.doc_lint import reader_rig_run as rr
 
@@ -576,11 +577,20 @@ def test_a_transport_error_that_clears_on_the_retry_is_scored( repo ):
     assert code == 0 and len( models.by( READER ) ) == 2
 
 
-def test_the_raw_reply_is_cut_to_two_thousand_characters( repo ):
-    out = str( repo[ "tmp" ] / "long.json" )
-    run( repo, [ QB1 ], FakeModels( grader_script=[ "x" * 5000 ] * 3 ), **{ "--runs": "1", "--out": out } )
+def test_a_long_raw_reply_keeps_its_head_and_its_tail_with_the_cut_marked( repo ):
+    out   = str( repo[ "tmp" ] / "long.json" )
+    reply = "H" * 600 + "m" * 3000 + "T" * 1400            # 5000 characters: 600 head, 3000 cut, 1400 tail
+    run( repo, [ QB1 ], FakeModels( grader_script=[ reply ] * 3 ), **{ "--runs": "1", "--out": out } )
     old, _ = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
-    assert [ len( raw ) for raw in old[ "raws" ] ] == [ rr.RAW_LIMIT ] * 3 and rr.RAW_LIMIT == 2000
+    assert rr.RAW_LIMIT == 2000 and ( rr.RAW_HEAD, rr.RAW_TAIL ) == ( 600, 1400 )
+    for raw in old[ "raws" ]:
+        assert raw == "H" * 600 + "\n[... 3000 characters cut ...]\n" + "T" * 1400
+
+
+def test_a_raw_reply_of_exactly_the_limit_is_kept_whole_and_one_over_is_cut():
+    whole, over = "a" * 2000, "a" * 2001
+    assert rr.cut_raw( whole ) == whole and rr.cut_raw( "" ) == "" and rr.cut_raw( "short" ) == "short"
+    assert rr.cut_raw( over ) == "a" * 600 + "\n[... 1 characters cut ...]\n" + "a" * 1400
 
 
 def test_a_cap_reached_mid_run_is_not_retried_and_retries_count_against_it( tmp_path ):
@@ -668,7 +678,41 @@ def test_the_salvaged_raw_reply_is_cut_to_two_thousand_characters():
 
     tracker = rr.CallTracker( Inner() )
     asyncio.run( collect( tracker ) )
-    assert tracker.salvaged[ "score" ] == 1 and len( tracker.salvaged[ "raw" ] ) == 2000 and tracker.raw == long_reply
+    assert tracker.salvaged[ "score" ] == 1 and tracker.raw == long_reply
+    assert tracker.salvaged[ "raw" ] == rr.cut_raw( long_reply ) and tracker.salvaged[ "raw" ].endswith( '{"score": 1}' )     # the score object survives the cut
+
+
+REAL = "src/tests/fixtures/reader_rig/real-grader-reply.json"
+
+
+def test_a_real_grader_reply_made_long_keeps_its_score_object_in_the_salvaged_record():
+    """
+    One real grader reply, made long, keeps its score object in the salvaged record.
+
+    The fixture is a real salvaged reply of 1,940 characters, copied unchanged from run f91afa46.
+    Its source file and sha256 are in the fixture. No real reply reached the 2,000 limit in that run.
+    So the long reply is the real reasoning twice over, then the real final object.
+    """
+    fixture   = json.load( open( cu.get_project_root() + "/" + REAL ) )
+    reasoning = fixture[ "raw" ][ :fixture[ "raw" ].rindex( '{"score"' ) ]
+    long_reply = reasoning + reasoning + '{"score": 1}'
+
+    class Inner:
+        async def __call__( self, prompt, options ):
+            yield AssistantMessage( content=[ TextBlock( long_reply ) ], model="m" )
+
+    class Options:
+        system_prompt = reader_rig.GRADER_SYSTEM
+
+    async def collect( tracker ):
+        return [ m async for m in tracker( "p", Options() ) ]
+
+    assert fixture[ "raw_length" ] == len( fixture[ "raw" ] ) == 1940 and len( long_reply ) > 3000
+    tracker = rr.CallTracker( Inner() )
+    asyncio.run( collect( tracker ) )
+    raw = tracker.salvaged[ "raw" ]
+    assert tracker.salvaged[ "score" ] == 1 and raw.endswith( '{"score": 1}' ) and raw.startswith( reasoning[ :600 ] )
+    assert "characters cut" in raw and long_reply.endswith( raw[ -1400: ] ) and len( raw ) < len( long_reply )
 
 
 def test_a_salvaged_score_counts_and_is_recorded_per_text( repo, capsys ):
@@ -762,3 +806,4 @@ def test_a_model_call_error_is_retried_the_full_attempts_but_an_unavailable_mode
     old, _ = json.load( open( out ) )[ "files" ][ "src/mod_b.py" ][ "unscored_records" ]
     assert code == 3 and len( models.by( READER ) ) == 1
     assert old[ "step" ] == "reader" and old[ "error" ] == "ModelUnavailableError: service down" and old[ "raws" ] == [ "" ]
+
