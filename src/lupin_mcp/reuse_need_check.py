@@ -35,7 +35,6 @@ SAMPLE_SIZE      = 100
 MIN_WORDS        = 8
 MAX_WORDS        = 40
 RUN_LENGTH       = 4                                              # John's number, not a measurement
-SUBPART_MIN      = 4                                              # characters; Sam's number
 FORM_STARTS      = ( "a function that ", "a method that ", "a class that " )
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
 
@@ -79,12 +78,6 @@ def twin_groups( manifest ):
     return { x: sorted( y for y in group if y != x ) for group in members.values() for x in group }
 
 
-def _subparts( name ):
-    """Ensures: returns the lowercase name parts of SUBPART_MIN characters or more."""
-    pieces = [ p for chunk in name.split( "_" ) for p in re.findall( r"[A-Z]+(?![a-z])|[A-Z]?[a-z0-9]+", chunk ) ]
-    return { p.lower() for p in pieces if len( p ) >= SUBPART_MIN }
-
-
 def _argument_names( sig ):
     """Ensures: returns the argument names of a signature string such as "( self, a, *b, **c )"."""
     try:
@@ -101,13 +94,11 @@ def identifier_tokens( rec ):
 
     Ensures:
         - returns the lowercase identifier tokens of one symbol record
-        - the tokens are the dotted parts of its id, its file stem and its argument names
-        - each of those also adds its own snake_case or CamelCase parts that are long enough
+        - the tokens are the dotted parts of its id, its file stem and its argument names, each whole
+        - a word that is only a piece of one of those names is not a token
     """
     names = set( rec[ "id" ].split( "." ) ) | { pathlib.PurePosixPath( rec[ "file" ] ).stem } | _argument_names( rec[ "sig" ] )
-    out   = { n.lower() for n in names }
-    for n in names: out |= _subparts( n )
-    return out
+    return { n.lower() for n in names }
 
 
 def _words( text ):
