@@ -18,6 +18,9 @@ three times when a reply is off contract or a call fails. A question that fails 
 It is then dropped from both texts for that run, so old and new are compared on the same questions.
 
 Every model id and both call caps are required. Rerunning the same command resumes from the ledger.
+
+A ledger grade carries no mode, so a rerun with --strict-grader reuses grades salvaged earlier.
+Start a strict run on a fresh ledger; otherwise its report says strict but holds salvaged scores.
 """
 
 import argparse
@@ -78,7 +81,7 @@ def parse_args( argv ):
     parser.add_argument( "--file-prefix", default="", help="put in front of each question's file before reading it from git, e.g. src/cosa/rest/" )
     parser.add_argument( "--repo", default=None, help="git repository to read from; default is the project root" )
     parser.add_argument( "--claude-cli-path", help="run this Claude Code binary instead of the SDK's bundled one" )
-    parser.add_argument( "--strict-grader", action="store_true", help="refuse every grader reply that is not a bare score object; the default salvages a score that follows the grader's reasoning" )
+    parser.add_argument( "--strict-grader", action="store_true", help="refuse every grader reply that is not a bare score object; the default salvages a score that follows the grader's reasoning; use a fresh ledger, since cached grades are reused whatever their mode" )
     parser.add_argument( "--dry-run", action="store_true", help="print sizes and projected calls, make no model call" )
     return parser.parse_args( argv )
 
