@@ -42,6 +42,7 @@ class StandIn:
     Ensures:
         - the same text gets the same answer, whatever the pack it sits in, apart from a tiny jitter by pack size
         - every post takes one attempt from the budget and reports 40 output tokens for each question
+        - a question of type noul gets a Noul number and one of type score gets four level probabilities summing to 1 and a score, as the live service answers
     """
 
     def __init__( self, budget ): self.budget = budget
@@ -53,7 +54,12 @@ class StandIn:
         for key, question in questions.items():
             u = int( hashlib.sha256( question[ "instructions" ].encode() ).hexdigest()[ :8 ], 16 ) / 0xFFFFFFFF
             u = min( 1.0, max( 0.0, u + 0.002 * ( len( questions ) % 5 - 2 ) ) )
-            answers[ key ] = { "probabilities": { "reuse": round( u * 0.6, 6 ), "extend": round( u * 0.4, 6 ), "unrelated": round( 1 - u, 6 ) } }
+            kind = question.get( "type" )
+            if kind == "noul": answers[ key ] = { "type": "noul", "noul": round( u, 6 ) }
+            elif kind == "score":
+                top = round( u * 0.5, 6 )
+                answers[ key ] = { "type": "score", "probabilities": { "0": round( 1 - u, 6 ), "1": round( u * 0.5, 6 ), "2": top, "3": 0.0 }, "score": round( u * 3, 6 ), "confidence": 0.5 }
+            else: answers[ key ] = { "probabilities": { "reuse": round( u * 0.6, 6 ), "extend": round( u * 0.4, 6 ), "unrelated": round( 1 - u, 6 ) } }
         usage = { "input_tokens": len( json.dumps( body ) ) // 4, "output_tokens": 40 * len( questions ) }
         meta  = { "status": 200, "attempts": 1, "retry_after": None, "latency_ms": 2, "attempt_log": [ { "status": 200, "request_ids": {} } ], "client_version": STAND_IN_CLIENT }
         return { "answers": answers, "model": body[ "model" ], "usage": usage }, meta

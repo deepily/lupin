@@ -381,13 +381,14 @@ def pair_ask( ctx, need, entries ):
 
     Requires:
         - ctx has a pack_size and a transport; entries are symbol dicts with id, sig and doc
+        - the sweep draws on ctx.run_budget when a driver set one, else on the live transport's own
     Ensures:
         - returns { answered, unasked, malformed, stats }: answered maps an id to its provides, coverage and score
         - malformed lists { id, reasons } for an entry whose answer was present and wrong; unasked lists the ids
           that got no answer and were not malformed
         - stats holds failed, not_checked, stopped_by, requests and attempt_counts, as the old question's pairs do
     """
-    sw      = sweep_packed( ctx, need, entries, ctx.pack_size, kind="pair" )
+    sw      = sweep_packed( ctx, need, entries, ctx.pack_size, budget=ctx.run_budget, kind="pair" )
     answered = { a[ "id" ]: { "provides": a[ "provides" ], "coverage": a[ "coverage" ], "score": a[ "score" ] } for a in sw[ "answers" ] }
     bad     = { m[ "id" ] for m in sw[ "malformed" ] }
     stats   = { "failed": len( sw[ "failed" ] ), "not_checked": len( sw[ "not_reached" ] ), "stopped_by": sw[ "stopped_by" ], "requests": sw[ "requests" ],

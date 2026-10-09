@@ -92,7 +92,7 @@ def _context( env, transport, budget, cap ):
         return rp.sweep_packed( ctx, need, entries, env.pack_size, workers=env.workers, key_mode="candidate", template=template, model=model,
                                 frozen=frozen, gaps=gaps, budget=budget )
     return rt.ReuseContext( env.root, env.data, transport=transport, sweeper=sweeper, request_shape=rp.SHAPE, pack_size=env.pack_size, model=env.model,
-                            call_budget=cap, call_budget_cap=cap )
+                            call_budget=cap, call_budget_cap=cap, run_budget=budget )
 
 
 def _record_of( member, question, status, causes, **rest ):

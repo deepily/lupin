@@ -188,13 +188,14 @@ class ReuseContext:
         - sweeper is None for the one-request-per-entry path, or a function with sweep's signature for the packed path
         - a packed context that builds its own live transport also has token_ceiling, run_name and a ledger
         - single_use closes the run in the ledger when the question ends
+        - run_budget is the run's TokenBudget when a driver holds it for asks that do not go through the sweeper, else None
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
-                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP ):
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None ):
         if type( call_budget_cap ) is not int or call_budget_cap < CALL_BUDGET_CAP:
             raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
         if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
@@ -216,6 +217,7 @@ class ReuseContext:
         self.run_name         = run_name
         self.ledger           = ledger
         self.single_use       = single_use
+        self.run_budget       = run_budget
 
 
 def context_from_environment( root=None ):
