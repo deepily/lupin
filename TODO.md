@@ -16,6 +16,47 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-08 afternoon to 10-09 night (Cheech 🌿 `e281ef6f`; crew Rachel · Rio · John · Chloé · Sam · Tiberius · Krishna) — Jev reuse sweep: stage one, the packed request, the frozen needs
+
+### Rick's rulings on 2026-10-08 (answered cards or his own words, none a timeout default; times from my record)
+
+| time (EDT) | ruling |
+|---|---|
+| 16:55 | Jev: go. Send cap 9,000 |
+| 17:12 | Agent push: behind a switch, shipped off |
+| 17:14 | SmartRouter: wire it in |
+| 17:15 | Dormant trust-proxy flags: leave them |
+| 17:17 | A switch for BFE, shipped off |
+| 17:24 | Router doubt: the proxy answers |
+| 17:46 | "Let her run, no questions" |
+| 18:50 | Page arm: "Chosen pages only" |
+| 20:00 | "Delete the orphaned tests" |
+| 20:13 | Free the María persona |
+| about 21:04 | Pack size: "Packs of 50" |
+| about 21:07 | R&D documents: "Row approved by you" |
+| about 21:08 | SWE gate: "Ask, behind a switch, off" |
+| about 21:08 | Orphan archive rows: "Keep María" |
+| about 21:09 | "Push now" |
+| 23:01 to 23:11 | "Push after each landing tonight" (my seat, green and reviewed landings, that night only); cap line: "Commit it" |
+| about 23:24 | Sweep: "Go live tonight" |
+| about 23:30 | Broadcast `8308d5a2`: all-night run, work the board to zero, an hourly entry in one running document |
+| 23:36 | Approved the admit on row `8f3bbe67` |
+| 00:24 (10-09) | Broadcast `1239bd69`: when the board is cleared or blocked, report and stop the hourly timer |
+
+### Not ruled, waiting on Rick
+
+- **The live Jev runs** (live stage two, about 11M tokens by estimate; the end-to-end run of plan section 12, about 420M by estimate). My card at 00:44 on 10-09 timed out, which is not a ruling. No live call was made overnight.
+- **The runner's permission block.** The runner seat's permission classifier refused a stand-in driver run twice. I withdrew the attempt and did not route around it. The run sheet with the command lines a permission rule would cover is `io/tmp/2026.10.09-runner-run-sheet.md`, section B.
+- **Three sudo steps** that give the test container its database login (Mr. Radio's report, 03:15 on 10-09). Until then integration on `:8000` is red with "permission denied to create database", and my integration run is held.
+
+### My rulings overnight, which Rick may overturn
+
+Written into the plan, section 12.2, "12.2 as built, and the frozen set" (`src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.07-jev-reuse-sweep-packed-request-plan.md`): eight items. The two that depart furthest from the plan as he approved it: the need writer is an in-process SDK call and not a bounded job, and one member's writer was told one word of its twin as a word to avoid.
+
+Also mine: rule D7, the seat that writes the run code never runs it live.
+
+---
+
 ## 📚 DECISIONS LOG 2026-10-08 afternoon to evening (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `d9cc796f`, `c572d723`, `c586cc46`, `c13c3d43`; crew Maya 🌻 · Pocholo 📣 · Tiffany · Clayton 😎)
 
 Rick's words below were checked against the fleet's hook logs (`io/claude_code_hooks/logs`) by Pocholo: the result of each ask tool, each inbound prompt, and the row writes. That is a disk record of what the seat received, not the notification table. A quote is tagged ASK (card answer), PROMPT (typed or voice message) or ROW (written into a row). Times are the hook log's, EDT.
