@@ -210,6 +210,7 @@ def test_a_queue_failure_removes_this_copy_releases_the_claim_and_a_retry_works(
     world[ "flow" ].raises = RuntimeError( "queue down" )
     failed = _click( world )
     assert failed.status_code == 502 and _code( failed ) == "queue_failed"
+    assert "card" not in failed.json()[ "detail" ][ "message" ], "a person in the viewer holds a button, not a card"
     assert _spent( world ) == [ ] and _copies( world ) == [ ]
     world[ "flow" ].raises = None
     assert _click( world ).status_code == 200 and len( _spent( world ) ) == 1

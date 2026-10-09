@@ -178,7 +178,12 @@ def copy_directory():
     return os.path.join( cu.get_project_root(), "io", "podcast-proxy" )
 
 
-def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email ):
+# The 502 sentence each door gives. A seat holds a card; a person in the viewer holds only a button.
+SEAT_QUEUE_FAILED_TEXT   = "The job could not be queued. The yes is still good; start the same card again."
+VIEWER_QUEUE_FAILED_TEXT = "The job could not be queued. Nothing was started; press the button again."
+
+
+def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email, queue_failed_text=SEAT_QUEUE_FAILED_TEXT ):
     """
     Queue the podcast job for a claim this caller already won, and record it.
 
@@ -186,6 +191,7 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email )
         - the spent row for claim_id is held by this caller and committed
         - facts is the dict check_source returned with keep_content=True
         - copy_id names this attempt's copy folder; the seat door passes its card id, the viewer door a fresh id per click
+        - queue_failed_text is the 502 sentence, written for the caller's door
 
     Ensures:
         - with INI `podcast proxy dry run` on: nothing is copied or queued and the spent row takes a "dry-run-" job id
@@ -217,7 +223,7 @@ def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email )
         with get_db() as session:
             PodcastProxySpentRepository( session ).release( claim_id )
         print( f"[podcast-proxy] queue failed for card {claim_id}: {failure!r}" )
-        raise _refuse( 502, "queue_failed", "The job could not be queued. The yes is still good; start the same card again." )
+        raise _refuse( 502, "queue_failed", queue_failed_text )
 
     with get_db() as session:
         PodcastProxySpentRepository( session ).record_job( claim_id, result[ "job_id" ] )
@@ -428,5 +434,6 @@ def start_a_podcast_from_viewer(
     if not won:
         raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "spent", "A podcast of this file was already started, and one click starts one job." ), "job_id": earlier_job } )
 
-    outcome = _run_claimed_job( flow, facts, claim_id=claim_id, copy_id=uuid.uuid4(), recipient_id=authenticated_user_id, user_email=email )
+    outcome = _run_claimed_job( flow, facts, claim_id=claim_id, copy_id=uuid.uuid4(), recipient_id=authenticated_user_id, user_email=email,
+                                queue_failed_text=VIEWER_QUEUE_FAILED_TEXT )
     return { **outcome, "size": facts[ "size" ] }

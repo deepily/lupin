@@ -101,6 +101,9 @@ COPY src/scripts/build-multiplexer.sh ./src/scripts/build-multiplexer.sh
 # `npm run build` also runs build-console.sh — the standalone /app/console page's bundle
 # (row 27760534), whose sources live under js/multiplexer/console/ and are copied below.
 COPY src/scripts/build-console.sh ./src/scripts/build-console.sh
+# ...and build-doc-podcast.sh, the doc viewer's "Make a podcast" button (row e23b9ed6). Its sources
+# live under js/multiplexer/docPodcast/, which the COPY below already carries.
+COPY src/scripts/build-doc-podcast.sh ./src/scripts/build-doc-podcast.sh
 COPY src/lupin_app/static/js/multiplexer ./src/lupin_app/static/js/multiplexer
 RUN npm run build
 
@@ -442,6 +445,10 @@ COPY --chown=rruiz:rruiz --from=multiplexer-builder \
 COPY --chown=rruiz:rruiz --from=multiplexer-builder \
      /build/src/lupin_app/static/dist/console \
      /var/lupin/src/lupin_app/static/dist/console
+# The doc viewer's podcast-button bundle (/app/docs), built by the same stage.
+COPY --chown=rruiz:rruiz --from=multiplexer-builder \
+     /build/src/lupin_app/static/dist/doc-podcast \
+     /var/lupin/src/lupin_app/static/dist/doc-podcast
 COPY --chown=rruiz:rruiz src/lib          /var/lupin/src/lib
 COPY --chown=rruiz:rruiz src/lupin_cli    /var/lupin/src/lupin_cli
 COPY --chown=rruiz:rruiz src/lupin_mcp    /var/lupin/src/lupin_mcp
