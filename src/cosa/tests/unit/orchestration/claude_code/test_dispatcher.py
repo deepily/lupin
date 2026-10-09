@@ -771,6 +771,36 @@ def test_run_interactive_error_result_names_the_errors_list( lupin_root, patched
     assert "error_max_turns" in res.error and "ran out" in res.error
 
 
+LOGIN_LINE = ( b'{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. '
+               b'API Error: 401 OAuth access token has expired. Re-authenticate to continue."}\n' )
+
+
+def test_run_bounded_401_result_says_the_servers_login_expired_and_how_to_renew_it( lupin_root, monkeypatch ):
+    """A 401 result gets the renew sentence, and stderr still follows it."""
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ LOGIN_LINE ], returncode=1, stderr=b"kaboom" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "API Error: 401 OAuth access token has expired" in res.error
+    assert "docker exec -it lupin-rest-dev claude /login" in res.error and "lupin-rest-test" in res.error
+    assert res.error.endswith( "; stderr: kaboom" )
+
+
+def test_run_bounded_other_errors_do_not_get_the_login_sentence( lupin_root, monkeypatch ):
+    d = _make_dispatcher( on_message=lambda tid, data: None )
+    _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"" ) )
+    res = asyncio.run( d._run_bounded( _bounded_task() ) )
+    assert "claude /login" not in res.error
+
+
+def test_run_interactive_401_result_says_the_servers_login_expired( lupin_root, patched_sdk ):
+    d = _make_dispatcher( on_message=lambda tid, m: None )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeResultMessage(
+        is_error=True, result="Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue." ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert "docker exec -it lupin-rest-dev claude /login" in res.error
+
+
 def test_run_bounded_error_result_cuts_a_long_stderr_to_500( lupin_root, monkeypatch ):
     d = _make_dispatcher( on_message=lambda tid, data: None )
     _patch_create_subprocess( monkeypatch, _FakeAsyncProcess( [ ERROR_LINE ], returncode=1, stderr=b"s" * 5000 ) )
