@@ -1108,6 +1108,29 @@ Pull-able AFK inbox (messaging-coordination plane, lever D): the authenticated u
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/notifications/awaiting-response`
+
+> **Get the response cards still waiting for an answer**
+
+The authenticated user's response-required notifications that are neither answered nor expired, oldest first, in the shape a live push carries. A page that opens after a card was filed draws its Yes/No from this.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/notifications/answers-owed`
 
 > **Get answers owed to a persona (late-answer handback pull inbox)**
@@ -6376,4 +6399,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.08 23:35:57 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.09 13:18:18 by `src/scripts/generate-api-docs.sh`_
