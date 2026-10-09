@@ -91,7 +91,7 @@ def test_a_missing_index_returns_the_flag_error_not_an_unknown_entry( env, tmp_p
     bare = ( tmp_path / "not-a-repo", tmp_path / "data2", tmp_path / "out2" )
     bare[ 0 ].mkdir()
     r = rt.page_route_need_impl( "a need", "cosa.mathx.add", rt.ReuseContext( bare[ 0 ], bare[ 1 ], out_dir=bare[ 2 ], transport=PageFake( "a need" ) ) )
-    assert r[ "status" ] == "ok" and r[ "verdict" ] == "UNCERTAIN" and "NOT_LUPIN_TREE" in r[ "flags" ]
+    assert r[ "status" ] == "ok" and r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and r[ "cause" ] == "NOT_LUPIN_TREE"
 
 
 def test_receipt_ids_of_other_questions_do_not_move():

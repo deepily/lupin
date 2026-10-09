@@ -133,12 +133,15 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
           receipt of the same question, and a complete one never hides an incomplete one
         - the tool version is part of the id (the module's TOOL_VERSION when none is given), and so is the request
           shape when there is one; with no shape the id is the one the old path has always produced
-        - a sweep-only question carries that mark and its excluded id in the id; any other question's id is unchanged
+        - a sweep-only question carries that mark and its excluded id in the id
+        - a check_exists question that leaves one symbol out without being sweep-only carries the excluded id and not the mark
+        - any other question's id is unchanged
     """
     fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
                "model": model, "policy": policy, "prompt_template_hash": template_hash, "causes": list( causes ) }
     if request_shape is not None: fields[ "request_shape" ] = request_shape
     if sweep_only: fields[ "sweep_only" ], fields[ "exclude_id" ] = True, exclude_id
+    elif tool == "check_exists" and exclude_id is not None: fields[ "exclude_id" ] = exclude_id
     return sha( canonical( fields ), 16 )
 
 
@@ -883,7 +886,7 @@ def load_receipt( ctx, rid ):
         ok = _receipt_shape_ok( r )
         again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ],
                             r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None,
-                            "sweep_only" in r, r[ "exclude_id" ] if "sweep_only" in r else None ) if ok else None
+                            "sweep_only" in r, r[ "exclude_id" ] if "exclude_id" in r else None ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
     if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
@@ -1127,6 +1130,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
+    elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
     if packed:
         rec[ "request_shape" ] = shape
         rec[ "pack_size" ]     = ctx.pack_size
@@ -1177,12 +1181,33 @@ def sweep_need_impl( need, exclude_id, ctx, question="choice" ):
         - an exclude_id that is not in the index returns { status: error, error: UNKNOWN_ENTRY, entry } before any request
         - question is passed to run_question, so "provides" asks the Noul and Score pair
     """
+    return _need_impl( need, exclude_id, ctx, question, True )
+
+
+def page_route_need_impl( need, exclude_id, ctx ):
+    """
+    Ask a free-text need through the page route, leaving one symbol out.
+
+    Requires:
+        - need is a non-empty description of the capability
+        - exclude_id is None, or a symbol id of a healthy index (the member whose twin is sought)
+    Ensures:
+        - returns the same shape as check_exists_impl, from a receipt that names exclude_id and is not marked sweep_only
+        - the page route is on: pages are asked first, then the entries in the chosen pages' scope, then every entry if none decides
+        - exclude_id is asked in no stage, and a replay of the receipt leaves it out too
+        - an exclude_id that is not in the index returns { status: error, error: UNKNOWN_ENTRY, entry } before any request
+    """
+    return _need_impl( need, exclude_id, ctx, "choice", False )
+
+
+def _need_impl( need, exclude_id, ctx, question, sweep_only ):
+    """Ensures: returns one need's public result with exclude_id left out."""
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
     try:
         prepared = prepare( ctx )
         if exclude_id is not None and not any( e[ "id" ] == exclude_id for e in prepared[ 1 ] ) and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
             return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": exclude_id }
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=True, question=question ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
@@ -1282,7 +1307,8 @@ def replay_impl( rid, ctx ):
             need    = next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
         sweep_only = "sweep_only" in stored
-        if sweep_only and stored[ "exclude_id" ] is not None: entries = [ e for e in entries if e[ "id" ] != stored[ "exclude_id" ] ]
+        left_out   = stored[ "exclude_id" ] if "exclude_id" in stored else None                  # a sweep-only receipt and a page-route receipt both name it
+        if left_out is not None: entries = [ e for e in entries if e[ "id" ] != left_out ]
         hard    = set( stored[ "flags" ] ) & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
         if hard or not entries:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
@@ -1303,7 +1329,7 @@ def replay_impl( rid, ctx ):
                 d = _route( frozen_ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
-        exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else ( stored[ "exclude_id" ] if sweep_only else None )
+        exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else left_out
         head    = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }

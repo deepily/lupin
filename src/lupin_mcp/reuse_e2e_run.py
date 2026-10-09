@@ -33,6 +33,7 @@ ESTIMATE_FACTOR  = 1.5
 WINDOW_SEARCHES  = 20
 MAX_INCOMPLETE   = 5
 QUESTION_NAMES   = ( "old", "new" )
+ASK_NAMES        = QUESTION_NAMES + ( "pages", )              # "pages" is the old question through the page route; the stage-two driver keeps QUESTION_NAMES
 
 
 class E2EEnv:
@@ -297,6 +298,11 @@ def ask_new( ctx, item ):
     return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, question="provides" )
 
 
+def ask_pages( ctx, item ):
+    """Ensures: returns the public result of the old question by the page route, member left out."""
+    return rt.page_route_need_impl( item[ "need" ], item[ "member" ], ctx )
+
+
 NEW_ASK = ask_new                                           # the new question's ask; set to None and "new" is refused
 
 FIRST_LINE = ( "100 searches, one per twin group, drawn from 151 groups of Python structural clones (exact and near); no TypeScript or JavaScript; "
@@ -312,9 +318,9 @@ def _asks( names ):
     """
     out = {}
     for name in names:
-        if name not in QUESTION_NAMES: raise s1.DriverRefused( f"question {name!r} is not one of {QUESTION_NAMES}" )
+        if name not in ASK_NAMES: raise s1.DriverRefused( f"question {name!r} is not one of {ASK_NAMES}" )
         if name == "new" and NEW_ASK is None: raise s1.DriverRefused( "the new question is not wired yet; run old only" )
-        out[ name ] = ask_old if name == "old" else NEW_ASK
+        out[ name ] = ask_pages if name == "pages" else ask_old if name == "old" else NEW_ASK
     return out
 
 
