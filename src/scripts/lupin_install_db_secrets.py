@@ -2,8 +2,8 @@
 """
 Make the compose secret files of the test login. Run as root, through one sudoers line.
 
-Copy this file by hand to /usr/local/sbin/lupin-install-db-secrets, owned by root with mode 0755.
-Run it from there with no arguments. Anyone who can write to the repository can edit the repository
+src/scripts/install_db_secrets.py copies this file to /usr/local/sbin/lupin-install-db-secrets, owned by
+root with mode 0755, and writes the sudoers line; do not copy it by hand. Run it from there with no arguments. Anyone who can write to the repository can edit the repository
 copy, so sudo must never run that one.
 
 It uses the standard library only and runs nothing from the repository. It refuses to run from a copy
