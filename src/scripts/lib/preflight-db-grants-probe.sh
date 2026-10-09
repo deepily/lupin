@@ -6,6 +6,7 @@
 # and the VERBOSE variable. lib/check-db-grants.sh does the work: it checks, and with LUPIN_DB_GRANTS_REPAIR=on
 # it repairs once with --grants-only and checks again. Repair is off until the one-time apply has been run
 # by hand, so a red answer is a warning, and it blocks only after a repair that left the roles short.
+# Exit 4 means the grants are clean and the secret files were not looked at: a warning that says so, never green.
 # Exit 2, or any code the helper does not define, means the check could not run: that says nothing about
 # the container, so it is a warning too. LUPIN_DB_GRANTS_CHECK=skip turns the probe off.
 #
@@ -26,6 +27,8 @@ probe_db_grants() {
            remedy "src/scripts/provision-db-roles.sh with the three password files (needs root); see the lines above" ;;
         3) say_warn "database roles lack grants (repair is off)"
            remedy "LUPIN_DB_GRANTS_REPAIR=on src/scripts/lib/check-db-grants.sh --repair-when-enabled, or the remedy line above" ;;
+        4) say_warn "database grants are clean, but the secret files were NOT checked (this login cannot search the directory)"
+           remedy "run src/scripts/lib/check-db-grants.sh as root or as a member of group 1002" ;;
         *) say_warn "database grants could not be checked (exit ${grants_rc})" ;;
     esac
 }

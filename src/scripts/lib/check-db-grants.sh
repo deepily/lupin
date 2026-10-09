@@ -9,12 +9,14 @@
 #
 # Usage:  check-db-grants.sh [--repair | --repair-when-enabled]
 # Exit:   0 = clean (or repaired) · 1 = still red after a repair attempt · 2 = the check could not run,
-#         which is not a pass · 3 = red, and no repair was attempted
+#         which is not a pass · 3 = red, and no repair was attempted · 4 = the grants are clean but the secret
+#         files were not checked (this login cannot search DB_GRANTS_SECRETS_DIR): not a pass either
 #
 # Environment:
 #   LUPIN_DB_GRANTS_REPAIR  on enables --repair-when-enabled; anything else leaves it check-only
 #   DB_GRANTS_PSQL    the psql command, default: docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev
 #   DB_GRANTS_PYTHON  the interpreter, default: the tree's .venv, then python3
+#   DB_GRANTS_SECRETS_DIR  when set, the first check also checks the secret files in that directory
 #
 # Standalone so a test can drive it with a stub psql and no database.
 
@@ -25,7 +27,7 @@ for arg in "$@"; do
     case "$arg" in
         --repair) REPAIR=1 ;;
         --repair-when-enabled) [ "${LUPIN_DB_GRANTS_REPAIR:-off}" = "on" ] && REPAIR=1 ;;
-        -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "check-db-grants.sh: unknown argument $arg" >&2; exit 2 ;;
     esac
 done
@@ -40,9 +42,16 @@ fi
 
 roles() { LUPIN_ROOT="$ROOT" PYTHONPATH="${ROOT}/src" "$PYTHON" -m cosa.utils.db_roles --psql "$PSQL" "$@"; }
 
-check_out="$( roles --check 2>&1 )"; rc=$?
+SECRETS_ARGS=()
+if [ -n "${DB_GRANTS_SECRETS_DIR:-}" ]; then SECRETS_ARGS=( --secrets-dir "$DB_GRANTS_SECRETS_DIR" ); fi
+
+check_out="$( roles --check ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} 2>&1 )"; rc=$?
 echo "$check_out"
 if [ "$rc" -eq 0 ]; then exit 0; fi
+if [ "$rc" -eq 5 ]; then
+    echo "check-db-grants: the grants are clean, but the secret files in ${DB_GRANTS_SECRETS_DIR} were NOT checked (this login cannot search the directory)" >&2
+    exit 4
+fi
 if [ "$rc" -ne 1 ]; then
     echo "check-db-grants: the check could not run (exit ${rc}); grants were not verified" >&2
     exit 2

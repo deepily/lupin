@@ -104,6 +104,27 @@ def test_a_check_that_cannot_run_exits_two_and_is_not_a_pass( stub ):
     assert stub.calls() == [ "check" ], "a repair was attempted on a check that never ran"
 
 
+def _five_python( tmp_path ):
+    """A stand-in interpreter that exits 5, the answer for an unsearchable directory."""
+    fake = tmp_path / "five-python"
+    fake.write_text( "#!/bin/sh\necho \"$@\" >> " + str( tmp_path ) + "/args.log\necho 'note: the secret files were not checked'\nexit 5\n" )
+    fake.chmod( 0o755 )
+    return fake
+
+
+def test_a_check_that_could_not_look_at_the_secret_files_exits_four_and_says_not_checked( stub, tmp_path ):
+    done = _helper( stub( "clean", DB_GRANTS_PYTHON=str( _five_python( tmp_path ) ), DB_GRANTS_SECRETS_DIR="/etc/lupin/secrets" ), "--repair" )
+    assert done.returncode == 4 and "NOT checked" in done.stderr and "/etc/lupin/secrets" in done.stderr
+    assert "--secrets-dir /etc/lupin/secrets" in ( tmp_path / "args.log" ).read_text(), "the helper did not pass the directory on"
+    assert stub.calls() == [ ], "a repair was attempted on a check that never looked"
+
+
+def test_without_a_secrets_directory_the_helper_passes_no_secrets_flag( stub, tmp_path ):
+    fake = _five_python( tmp_path )
+    _helper( stub( "clean", DB_GRANTS_PYTHON=str( fake ) ) )
+    assert "--secrets-dir" not in ( tmp_path / "args.log" ).read_text()
+
+
 def test_an_unknown_argument_exits_two_and_help_exits_zero( stub ):
     assert _helper( stub( "clean" ), "--bogus" ).returncode == 2
     helped = _helper( stub( "clean" ), "--help" )
@@ -158,6 +179,11 @@ def test_a_bounce_whose_check_cannot_run_warns_and_exits_zero( stub ):
     assert done.returncode == 0 and "could not be checked" in done.stderr
 
 
+def test_a_bounce_whose_secret_files_were_not_checked_says_so_and_exits_zero( stub, tmp_path ):
+    done = _bounce( stub( "clean", DB_GRANTS_PYTHON=str( _five_python( tmp_path ) ), DB_GRANTS_SECRETS_DIR="/etc/lupin/secrets" ) )
+    assert done.returncode == 0 and "NOT checked" in done.stderr and "could not be checked" not in done.stderr
+
+
 def test_a_bounce_with_the_check_skipped_never_asks( stub ):
     done = _bounce( stub( "red" ), LUPIN_DB_GRANTS_CHECK="skip" )
     assert done.returncode == 0 and stub.calls() == []
@@ -197,6 +223,7 @@ def _probe( tmp_path, rc, **env ):
     ( 3, "WARN: database roles lack grants (repair is off)" ),
     ( 2, "WARN: database grants could not be checked (exit 2)" ),
     ( 7, "WARN: database grants could not be checked (exit 7)" ),
+    ( 4, "WARN: database grants are clean, but the secret files were NOT checked (this login cannot search the directory)" ),
 ] )
 def test_each_helper_exit_code_maps_to_one_verdict_line( tmp_path, rc, first_line ):
     done, ran = _probe( tmp_path, rc )
@@ -205,7 +232,7 @@ def test_each_helper_exit_code_maps_to_one_verdict_line( tmp_path, rc, first_lin
     assert ran == [ "ran" ], "the helper must run exactly once"
 
 
-@pytest.mark.parametrize( "rc, remedy_word", [ ( 1, "provision-db-roles.sh" ), ( 3, "LUPIN_DB_GRANTS_REPAIR=on" ) ] )
+@pytest.mark.parametrize( "rc, remedy_word", [ ( 1, "provision-db-roles.sh" ), ( 3, "LUPIN_DB_GRANTS_REPAIR=on" ), ( 4, "group 1002" ) ] )
 def test_a_red_answer_prints_its_remedy( tmp_path, rc, remedy_word ):
     done, _ = _probe( tmp_path, rc )
     assert [ l for l in done.stdout.splitlines() if l.startswith( "REMEDY:" ) and remedy_word in l ]

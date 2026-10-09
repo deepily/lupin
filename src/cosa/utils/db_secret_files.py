@@ -119,6 +119,17 @@ def _state( path, password, group_id ):
         return "wrong"
 
 
+def unsearchable( directory ):
+    """
+    Say whether this login cannot search an existing directory.
+
+    Ensures:
+        - True only for an existing directory without search permission for this login
+        - False for a missing directory (its files are absent, which a check can say) and a searchable one
+    """
+    return os.path.isdir( directory ) and not os.access( directory, os.X_OK )
+
+
 def check_files( directory, values=None, group_id=GROUP_ID ):
     """
     List every gap in the secret files, read-only.
@@ -139,7 +150,7 @@ def check_files( directory, values=None, group_id=GROUP_ID ):
         - never raises and prints no password
     """
     gaps, notes = [ ], [ ]
-    if os.path.isdir( directory ) and not os.access( directory, os.X_OK ):
+    if unsearchable( directory ):
         notes.append( f"note: {directory} cannot be searched by this login, so the secret files were not checked; run this as root or as a member of group {group_id}" )
         return gaps, notes
     if os.path.isdir( directory ): gaps.extend( _dir_gaps( directory, group_id ) )

@@ -50,6 +50,7 @@ import sys
 from cosa.utils import db_grants, db_secret_files
 
 SQL_RELATIVE_PATH = "src/scripts/sql/init-db-roles.sql"
+NOT_CHECKED       = 5   # --check could not look at the secret files; --check itself answers only 0, 1 and 2
 
 # A value that would break out of a psql single-quoted meta-command argument. Generated
 # passwords are hex; refusing these is simpler and safer than escaping them.
@@ -120,6 +121,9 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout, geteuid=os.geteuid, 
 
     Ensures:
         - with --check: reads and prints only, never writes, and returns db_grants.check_with_psql's exit code
+        - with --check --secrets-dir, a clean grants check and a directory this login cannot search returns
+          NOT_CHECKED (5): the files were not looked at, which is neither clean nor a gap; a gap or a red
+          grants check still returns 1
         - without --apply: prints the psql command and the redacted stdin, runs nothing, returns 0
         - with --apply: runs the psql command with the real stdin and returns its exit code
         - a bad password file, or an unreadable SQL file, returns 2 and prints why, before anything runs
@@ -164,6 +168,7 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout, geteuid=os.geteuid, 
             gaps, notes = db_secret_files.check_files( args.secrets_dir, values, args.secrets_group_id )
             for line in gaps + notes: print( line, file=out )
             if gaps: code = max( code, 1 )
+            elif code == 0 and db_secret_files.unsearchable( args.secrets_dir ): code = NOT_CHECKED
         return code
 
     app_pw = host_pw = test_pw = None

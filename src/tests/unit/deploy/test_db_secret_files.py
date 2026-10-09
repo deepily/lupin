@@ -352,3 +352,39 @@ def test_a_directory_this_login_cannot_search_gives_a_note_and_no_gap( tmp_path,
     finally: os.chmod( target, 0o750 )
     assert gaps == [ ], f"files inside an unsearchable directory were called gaps: {gaps}"
     assert len( notes ) == 1 and "cannot be searched" in notes[ 0 ] and "group 1002" in notes[ 0 ]
+
+
+# ---- row 80513825 leftovers: a check that could not look must not exit like a clean one ----
+
+def test_the_unsearchable_predicate_is_true_only_for_an_existing_directory_this_login_cannot_search( tmp_path ):
+    assert sf.unsearchable( str( tmp_path / "nowhere" ) ) is False, "a missing directory is absent, not unsearchable"
+    assert sf.unsearchable( str( tmp_path ) ) is False
+
+
+@pytest.mark.skipif( os.geteuid() == 0, reason="root searches every directory" )
+def test_a_check_that_cannot_search_the_directory_exits_five_and_not_zero( tmp_path, pw, grants_clean, owners ):
+    _write( tmp_path / "s", owners )
+    os.chmod( tmp_path / "s", 0o000 )
+    out = io.StringIO()
+    try:
+        assert sf.unsearchable( str( tmp_path / "s" ) ) is True
+        code = db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "s" ) ], run_fn=Psql(), out=out )
+    finally: os.chmod( tmp_path / "s", 0o750 )
+    assert code == db_roles.NOT_CHECKED == 5, out.getvalue()
+    assert "were not checked" in out.getvalue()
+
+
+@pytest.mark.skipif( os.geteuid() == 0, reason="root searches every directory" )
+def test_a_red_grants_check_still_exits_one_when_the_directory_cannot_be_searched( tmp_path, monkeypatch, owners ):
+    monkeypatch.setattr( db_grants, "check_with_psql", lambda *a, **k: ( 1, [ "grants red" ] ) )
+    _write( tmp_path / "s", owners )
+    os.chmod( tmp_path / "s", 0o000 )
+    try: code = db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "s" ) ], run_fn=Psql(), out=io.StringIO() )
+    finally: os.chmod( tmp_path / "s", 0o750 )
+    assert code == 1
+
+
+def test_a_gap_in_a_searchable_directory_still_exits_one_and_a_clean_one_exits_zero( tmp_path, pw, grants_clean, owners ):
+    assert db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "missing" ) ], run_fn=Psql(), out=io.StringIO() ) == 1
+    _write( tmp_path / "s", owners )
+    assert db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "s" ) ], run_fn=Psql(), out=io.StringIO() ) == 0

@@ -338,6 +338,7 @@ if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
             0) ;;
             1) echo "ERROR: $CONTAINER is healthy but the database roles still lack grants after a repair." >&2
                exit 1 ;;
+            4) echo "WARNING: the database grants are clean, but the secret files were NOT checked (this login cannot search the directory); run src/scripts/lib/check-db-grants.sh as root or as a member of group 1002." >&2 ;;
             3) echo "WARNING: the database roles lack grants; the remedy line above repairs them (LUPIN_DB_GRANTS_REPAIR=on repairs on bounce)." >&2 ;;
             *) echo "WARNING: the database grants could not be checked; run src/scripts/lib/check-db-grants.sh by hand." >&2 ;;
         esac
