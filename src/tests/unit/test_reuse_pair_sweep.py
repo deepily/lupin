@@ -126,3 +126,10 @@ def test_the_choice_sweep_reports_no_oversize_and_no_malformed_entries( ctx_for 
 def test_the_pair_sweeper_made_for_a_context_sweeps_in_the_pair_kind( ctx_for ):
     out = rp.packed_sweeper( 4, kind="pair" )( ctx_for( fake.PairFake( ENTRIES ) ), NEED, ENTRIES )
     assert len( out[ "answers" ] ) == 8 and all( set( a ) == PAIR_FIELDS for a in out[ "answers" ] ) and out[ "requests" ] == 2
+
+
+def test_a_cached_pair_entry_with_no_answers_at_all_is_corrupt( ctx_for ):
+    ctx = ctx_for( fake.PairFake( ENTRIES ) )
+    rt.JevCache( ctx.data ).put( rp.pair_key( NEED, rt.entry_text( ENTRIES[ 0 ] ) ), { "unrelated": 1 } )
+    with pytest.raises( rt.ReuseError ) as e: sweep( ctx, ENTRIES[ :1 ] )
+    assert e.value.name == "CACHE_CORRUPT"
