@@ -318,7 +318,8 @@ def write_page_wiki( root ):
 
 
 def test_the_old_question_goes_through_the_free_text_sweep_so_no_page_is_asked_and_the_member_is_never_shown( tmp_path ):
-    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    assert run._asks( [ "old" ] )[ "old" ] is run.ask_old
+    scratch = Env( tmp_path, asks={ "old": run.ask_old } )
     write_page_wiki( scratch.root )
     rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
     member  = rt.entry_text( next( e for e in rt.prepare( rt.ReuseContext( scratch.root, scratch.data ) )[ 1 ] if e[ "id" ] == IDS[ 0 ] ) )
