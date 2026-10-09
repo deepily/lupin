@@ -16,10 +16,14 @@ The check runs in this order:
   patterns, and judges the path again where a link lands.
 - the handle: `_open_judged_file` opens the file first and judges the open handle. A link swapped
   in after the check cannot redirect the read.
-- the content: `credential_verdict` refuses key material whatever the file is called.
+- the content: the viewer's credential decision runs on the whole text, read once from that
+  same handle, and the same bytes are measured and hashed.
 - the kind: a text extension a podcast script can use.
 
 Every refusal is a `DoorRefusal` whose message names the path as the caller sent it.
+
+A hard link to a file outside the scope is accepted: it is the same file, so no path check can tell.
+The seat could already read that file as the same user.
 """
 
 import hashlib
@@ -28,11 +32,14 @@ import os
 from fastapi import HTTPException
 
 from cosa.rest import task_promotion_gate as promotion_gate
-from cosa.rest.routers._scope_registry import credential_verdict
-from cosa.rest.routers._pinned_open import PROC_FD
+from cosa.rest.routers._pinned_open import landed_path_of_fd
+from cosa.rest.routers._scope_registry import _prefix_looks_like_credential, landed_relative_path
 from cosa.rest.v2.source_document import ALLOWED_SOURCE_EXTENSIONS
 
 _READ_CHUNK = 1024 * 1024
+
+# The longest file a podcast will take. Past it the door refuses, because the whole file is held in memory.
+MAX_BYTES = 8 * 1024 * 1024
 
 # The two words that mark a card as this feature's. The server writes both; the start door reads them back.
 CARD_KIND = "podcast_proxy_start"
@@ -58,7 +65,27 @@ def _viewer():
     return docs_files
 
 
-def check_source( scope_path, registry=None ):
+def _read_whole( fd ):
+    """
+    Read the whole file behind an open descriptor, once, refusing one past MAX_BYTES.
+
+    Requires:
+        - fd is an open descriptor for a regular file
+
+    Ensures:
+        - returns the bytes; raises DoorRefusal when the file is longer than MAX_BYTES
+    """
+    chunks, total = [ ], 0
+    while True:
+        chunk = os.read( fd, _READ_CHUNK )
+        if not chunk: break
+        total += len( chunk )
+        if total > MAX_BYTES: raise DoorRefusal( f"The file is longer than {MAX_BYTES // ( 1024 * 1024 )} MiB, which is too long for a podcast." )
+        chunks.append( chunk )
+    return b"".join( chunks )
+
+
+def check_source( scope_path, registry=None, keep_content=False ):
     """
     Judge a document a seat named, and describe it, or refuse.
 
@@ -68,12 +95,14 @@ def check_source( scope_path, registry=None ):
 
     Ensures:
         - returns { scope, rel, name, server_path, size, sha256 } for a file that passed every guard
-          in the module docstring; server_path is where the server reads it, size and sha256 are
-          measured from the opened file
+          in the module docstring; rel and server_path are where the opened file really lives
+        - the file is read once, from the judged handle: the same bytes are judged for credential
+          material, measured, hashed and, when keep_content is True, returned under "content"
+        - the whole text is judged, not the viewer's first window, because a podcast sends all of it out
         - raises DoorRefusal, naming the path as sent, for a blank or malformed path, an unknown
           scope, a path the viewer's whitelist or blocklist refuses, a link that lands outside the
-          scope, a missing file, a folder, an unreadable file, credential content and an extension
-          a podcast cannot read
+          scope, a missing file, a folder, an unreadable file, a file past MAX_BYTES, credential
+          content and an extension a podcast cannot read, judged on the file the path lands on
         - the opened handle is closed on every path out
         - nothing here trusts a host path: the caller's text is only the key into the registry
 
@@ -89,35 +118,36 @@ def check_source( scope_path, registry=None ):
     if registry is None: registry = viewer._get_scope_registry()
 
     try:
-        scope, cfg, rel, full_path = viewer._resolve_scoped( sent, registry )
-    except HTTPException as refusal:
-        raise DoorRefusal( f"'{sent}' was refused: {refusal.detail}." ) from refusal
-
-    extension = os.path.splitext( full_path )[ 1 ].lower()
-    if extension not in ALLOWED_SOURCE_EXTENSIONS:
-        raise DoorRefusal( f"'{sent}' is a {extension or 'no-extension'} file. A podcast reads {', '.join( ALLOWED_SOURCE_EXTENSIONS )}." )
-
-    try:
+        scope, cfg, _, full_path = viewer._resolve_scoped( sent, registry )
         fd = viewer._open_judged_file( full_path, cfg )
     except HTTPException as refusal:
         raise DoorRefusal( f"'{sent}' was refused: {refusal.detail}." ) from refusal
 
     try:
-        verdict = credential_verdict( f"{PROC_FD}/{fd}" )
-        if verdict == "credential":
-            raise DoorRefusal( f"'{sent}' was refused: its content is credential material." )
-        if verdict == "unreadable":
-            raise DoorRefusal( f"'{sent}' could not be read or decoded as text, so it cannot be judged." )
-        digest, size = hashlib.sha256(), 0
-        with open( f"{PROC_FD}/{fd}", "rb" ) as handle:
-            for chunk in iter( lambda: handle.read( _READ_CHUNK ), b"" ):
-                digest.update( chunk )
-                size += len( chunk )
+        landed = landed_path_of_fd( fd )
+        data   = _read_whole( fd )
+    except DoorRefusal as refusal:
+        raise DoorRefusal( f"'{sent}' was refused: {refusal}" ) from refusal
     finally:
         os.close( fd )
 
-    return { "scope": scope, "rel": rel, "name": os.path.basename( rel ), "server_path": full_path,
-             "size": size, "sha256": digest.hexdigest() }
+    extension = os.path.splitext( landed )[ 1 ].lower()
+    if extension not in ALLOWED_SOURCE_EXTENSIONS:
+        raise DoorRefusal( f"'{sent}' is a {extension or 'no-extension'} file. A podcast reads {', '.join( ALLOWED_SOURCE_EXTENSIONS )}." )
+    try:
+        verdict = "credential" if _prefix_looks_like_credential( data.decode( "utf-8" ) ) else "clean"
+    except Exception:
+        verdict = "unreadable"
+    if verdict == "credential":
+        raise DoorRefusal( f"'{sent}' was refused: its content is credential material." )
+    if verdict == "unreadable":
+        raise DoorRefusal( f"'{sent}' could not be read or decoded as text, so it cannot be judged." )
+
+    rel   = landed_relative_path( landed, cfg.root )
+    facts = { "scope": scope, "rel": rel, "name": os.path.basename( rel ), "server_path": landed,
+              "size": len( data ), "sha256": hashlib.sha256( data ).hexdigest() }
+    if keep_content: facts[ "content" ] = data
+    return facts
 
 
 def max_age_seconds( config_mgr=None ):

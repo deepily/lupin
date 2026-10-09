@@ -163,3 +163,65 @@ def test_a_link_swapped_in_after_the_path_check_is_caught_by_the_handle_check( s
     monkeypatch.setattr( docs_files, "_resolve_scoped", lambda path, registry: ( "demo", cfg, "io/tmp/swap.md", str( swapped ) ) )
     with pytest.raises( pp.DoorRefusal, match="escapes scope root" ): _door( scope, "demo/io/tmp/swap.md" )
     assert real is not docs_files._resolve_scoped
+
+
+# ---- one read: what is judged is what is hashed and what is handed back ----
+
+def test_a_file_rewritten_after_the_judgement_does_not_change_what_was_hashed( scope, monkeypatch ):
+    path = _put( scope, "io/tmp/live.md", "clean words" )
+    judged = [ ]
+    def judge_then_rewrite( text ):
+        judged.append( text )
+        path.write_text( PEM )
+        return False
+    monkeypatch.setattr( pp, "_prefix_looks_like_credential", judge_then_rewrite )
+    facts = pp.check_source( "demo/io/tmp/live.md", scope[ "registry" ], keep_content=True )
+    assert judged == [ "clean words" ]
+    assert facts[ "content" ] == b"clean words" and facts[ "sha256" ] == hashlib.sha256( b"clean words" ).hexdigest()
+    assert facts[ "size" ] == len( b"clean words" )
+
+
+def test_the_content_is_returned_only_when_asked_for( scope ):
+    _put( scope, "io/tmp/a.md", "hello" )
+    assert "content" not in _door( scope, "demo/io/tmp/a.md" )
+    assert pp.check_source( "demo/io/tmp/a.md", scope[ "registry" ], keep_content=True )[ "content" ] == b"hello"
+
+
+def test_credential_material_past_the_viewers_first_window_is_still_refused( scope ):
+    _put( scope, "io/tmp/long.md", ( "plain words. " * 2000 ) + "\n" + PEM )
+    with pytest.raises( pp.DoorRefusal, match="credential material" ): _door( scope, "demo/io/tmp/long.md" )
+
+
+def test_a_file_longer_than_one_read_chunk_is_hashed_whole( scope ):
+    text = "x" * ( 1024 * 1024 + 1 )
+    _put( scope, "io/tmp/big.md", text )
+    facts = _door( scope, "demo/io/tmp/big.md" )
+    assert facts[ "size" ] == len( text ) and facts[ "sha256" ] == hashlib.sha256( text.encode() ).hexdigest()
+
+
+def test_a_file_past_the_size_limit_is_refused( scope, monkeypatch ):
+    monkeypatch.setattr( pp, "MAX_BYTES", 1024 )
+    _put( scope, "io/tmp/big.md", "x" * 1025 )
+    with pytest.raises( pp.DoorRefusal, match="too long for a podcast" ) as refusal: _door( scope, "demo/io/tmp/big.md" )
+    assert "demo/io/tmp/big.md" in str( refusal.value )
+    _put( scope, "io/tmp/ok.md", "x" * 1024 )
+    assert _door( scope, "demo/io/tmp/ok.md" )[ "size" ] == 1024
+
+
+def test_two_spellings_of_one_file_give_one_key( scope ):
+    _put( scope, "io/tmp/ok.md" )
+    plain, dotted = _door( scope, "demo/io/tmp/ok.md" ), _door( scope, "demo/io/tmp/./ok.md" )
+    assert plain[ "rel" ] == dotted[ "rel" ] == "io/tmp/ok.md" and plain[ "server_path" ] == dotted[ "server_path" ]
+
+
+def test_the_kind_is_judged_on_the_file_the_path_lands_on( scope ):
+    _put( scope, "io/tmp/real.png", "x" )
+    os.symlink( scope[ "root" ] / "io" / "tmp" / "real.png", scope[ "root" ] / "io" / "tmp" / "looks-like-text.md" )
+    with pytest.raises( pp.DoorRefusal, match="A podcast reads" ): _door( scope, "demo/io/tmp/looks-like-text.md" )
+
+
+def test_a_link_inside_the_scope_reports_the_file_it_lands_on( scope ):
+    _put( scope, "io/tmp/real.md" )
+    os.symlink( scope[ "root" ] / "io" / "tmp" / "real.md", scope[ "root" ] / "io" / "tmp" / "alias.md" )
+    facts = _door( scope, "demo/io/tmp/alias.md" )
+    assert facts[ "rel" ] == "io/tmp/real.md" and facts[ "name" ] == "real.md"
