@@ -7,6 +7,7 @@ A fake sdk_query yielding real SDK message objects covers the one real wrapper.
 """
 
 import asyncio
+import hashlib
 import json
 
 import pytest
@@ -164,6 +165,18 @@ def test_main_assemble_writes_the_document( src_root, tmp_path ):
     assert nw.main( base + [ "--assemble", str( target ) ] ) == 0
     document = json.loads( target.read_text() )
     assert len( document[ "needs" ] ) == 2 and len( document[ "sample_sha256" ] ) == 64
+
+
+def test_main_assemble_records_the_sha256_of_the_sample_file_bytes( src_root, tmp_path ):
+    out    = tmp_path / "out"
+    sample = _sample_file( tmp_path )
+    base   = [ "--sample", sample, "--src-root", src_root, "--out", str( out ) ]
+    nw.main( base, reply_fn=FakeQuery( [ GOOD, GOOD.replace( "function", "class" ) ] ) )
+    target = tmp_path / "needs.json"
+    nw.main( base + [ "--assemble", str( target ) ] )
+    expected = hashlib.sha256( open( sample, "rb" ).read() ).hexdigest()
+    assert json.loads( target.read_text() )[ "sample_sha256" ] == expected
+    assert expected != hashlib.sha256( b"" ).hexdigest()
 
 
 # --- build_prompt -----------------------------------------------------------
