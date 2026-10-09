@@ -264,7 +264,8 @@ def test_the_rows_of_a_stage_two_search_rank_best_first_and_a_candidate_at_exact
     assert [ r[ "id" ] for r in result[ "shortlist" ] ] == [ ids[ 2 ], ids[ 4 ], ids[ 1 ] ]                           # 0.5 itself is in
 
 
-def test_the_unwired_new_question_is_refused_by_the_name_check_before_any_ask_runs():
+def test_the_unwired_new_question_is_refused_by_the_name_check_before_any_ask_runs( monkeypatch ):
+    monkeypatch.setattr( s2, "NEW_PAIR_ASK", None )
     with pytest.raises( s1.DriverRefused, match="not wired" ): s2._asks( [ "new" ] )
     with pytest.raises( s1.DriverRefused, match="not one of" ): s2._asks( [ "other" ] )
     assert list( s2._asks( [ "old" ] ) ) == [ "old" ]

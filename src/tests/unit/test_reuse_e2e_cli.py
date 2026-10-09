@@ -129,7 +129,8 @@ def test_a_run_with_no_root_and_no_environment_root_is_refused( monkeypatch, cap
     assert run.cli( [ "status" ] ) == 2 and "--root" in capsys.readouterr().err
 
 
-def test_a_refused_new_question_is_refused_before_any_run_is_opened_or_request_is_sent( setup, capsys ):
+def test_a_refused_new_question_is_refused_before_any_run_is_opened_or_request_is_sent( setup, monkeypatch, capsys ):
+    monkeypatch.setattr( run, "NEW_ASK", None )
     before = rl.AccountLedger( setup.ledger ).snapshot()
     assert run.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--questions", "old,new" ] ) ) == 2
     assert not ( setup.data / "e2e-results" ).exists() and rl.AccountLedger( setup.ledger ).snapshot() == before
