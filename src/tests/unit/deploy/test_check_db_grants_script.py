@@ -231,7 +231,7 @@ def test_the_probe_calls_the_helper_once_and_lets_the_helper_decide_the_repair()
 def test_the_preflight_script_sources_the_probe_and_calls_it_before_its_summary():
     text  = open( PREFLIGHT ).read()
     probe = text.index( "# ── 7. Database grants" )
-    section = text[ probe: text.index( "# ── Summary" ) ]
+    section = text[ probe: text.index( "# ── 8. Test login secret" ) ]
     assert 'lib/preflight-db-grants-probe.sh"' in section and section.rstrip().endswith( "probe_db_grants" )
     assert subprocess.run( [ "bash", "-n", PREFLIGHT ] ).returncode == 0
     assert subprocess.run( [ "bash", "-n", PROBE ] ).returncode == 0
