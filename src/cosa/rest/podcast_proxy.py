@@ -193,26 +193,28 @@ def asker_label( session_id, persona_name ):
     return f"an unrecognized session ({session_id})"
 
 
-def card_payload( facts, asker ):
+def card_payload( facts, asker, session_id ):
     """
     The binding a podcast card carries in its payload, written by the server.
 
     Requires:
         - facts is the dict check_source returned; asker is the label asker_label made
+        - session_id is the asking session's id, parsed from its actor string
 
     Ensures:
-        - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by }
+        - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by, asked_by_session }
         - every value comes from the server: the file's measured facts, the constant command, and the label
     """
     return {
-        "kind"       : CARD_KIND,
-        "command"    : COMMAND,
-        "scope_path" : f"{facts[ 'scope' ]}/{facts[ 'rel' ]}",
-        "server_path": facts[ "server_path" ],
-        "name"       : facts[ "name" ],
-        "size"       : facts[ "size" ],
-        "sha256"     : facts[ "sha256" ],
-        "asked_by"   : asker,
+        "kind"             : CARD_KIND,
+        "command"          : COMMAND,
+        "scope_path"       : f"{facts[ 'scope' ]}/{facts[ 'rel' ]}",
+        "server_path"      : facts[ "server_path" ],
+        "name"             : facts[ "name" ],
+        "size"             : facts[ "size" ],
+        "sha256"           : facts[ "sha256" ],
+        "asked_by"         : asker,
+        "asked_by_session" : session_id,
     }
 
 

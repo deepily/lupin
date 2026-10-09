@@ -84,7 +84,7 @@ def ask_for_a_podcast(
 
     persona    = get_voice_persona( session_id )
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
-    ask_payload = proxy.card_payload( facts, asker )
+    ask_payload = proxy.card_payload( facts, asker, session_id )
     question, abstract = proxy.card_text( ask_payload )
     age        = proxy.max_age_seconds()
     now        = datetime.now( timezone.utc )

@@ -108,6 +108,7 @@ def test_a_seat_asking_makes_one_card_the_server_wrote_and_pushes_it( world ):
         "kind": "podcast_proxy_start", "command": "agent router go to podcast generator",
         "scope_path": "demo/io/tmp/summary.md", "server_path": os.path.realpath( path ), "name": "summary.md",
         "size": path.stat().st_size, "sha256": digest, "asked_by": f"Maya ({SESSION_ID})",
+        "asked_by_session": SESSION_ID,
     }
     assert card.recipient_id == OPERATOR_ID and card.response_requested is True
     assert card.response_type == "yes_no" and card.response_default == "no" and card.priority == "high"
