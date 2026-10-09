@@ -1,16 +1,14 @@
 # Test-Suite Scheduling Guide
 
-> **Audience**: Lupin operators scheduling test runs and developers integrating with `/api/v2/submit` (test-suite command)
->
-> **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/v2/submit` (test-suite command), remediation snapshot schema v1.0
->
-> **Last Updated**: 2026-04-10
->
-> **See Also**:
-> - [Test Fix Expediter Guide](test-fix-expediter-guide.md) — TFE consumes the remediation snapshots TestSuiteJob produces
-> - [Bug Fix Expediter Guide](bug-fix-expediter-guide.md) — if a TestSuiteJob crashes rather than completes, BFE picks it up from the dead queue
-> - [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — shared machinery across both expediters
-> - Skill: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling workflow (user-global Claude Code skill, outside the project tree)
+**Audience**: Lupin operators scheduling test runs and developers integrating with `/api/v2/submit` (test-suite command)
+
+**Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/v2/submit` (test-suite command), remediation snapshot schema v1.0
+
+**See Also**:
+- [Test Fix Expediter Guide](test-fix-expediter-guide.md) — TFE consumes the remediation snapshots TestSuiteJob produces
+- [Bug Fix Expediter Guide](bug-fix-expediter-guide.md). If a TestSuiteJob crashes rather than completes, BFE picks it up from the dead queue
+- [Shared Fix Primitives Reference](shared-fix-primitives-reference.md). Shared machinery across both expediters
+- Skill: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling workflow (user-global Claude Code skill, outside the project tree)
 
 ---
 
@@ -49,7 +47,7 @@ with `JOB_TYPE = "test_suite"`, `JOB_PREFIX = "ts"`.
 **Why a dedicated job type?** Before the TestSuiteJob, running the test pyramid
 required manual `pytest` invocations or ad-hoc cron entries. Now the test runner
 is a first-class citizen in CJ Flow: it reports progress via WebSocket, can be
-cancelled from the Activity Log, produces structured result artifacts, and — via
+cancelled from the Activity Log, produces structured result artifacts. And — via
 TFE — can trigger automated remediation on failure.
 
 ---
@@ -60,13 +58,13 @@ TFE — can trigger automated remediation on failure.
 |------|-------------|-----------------|-----------------|------------|
 | `unit` | `src/tests/run-unit-tests.sh` | refused by the test container: it runs on the host | not offered here | `pytest src/tests/unit/` on the host. A request naming `unit` answers `status: failed` with the cause in `error` |
 | `docker_smoke` | `src/tests/run-docker-smoke-gate.sh` | refused by the test container: it runs on the host | not offered here | `src/tests/run-docker-smoke-gate.sh` on the host. The three docker smoke files; a skip, an error or a missing file is a failure. A request naming `docker_smoke` answers `status: failed` with the cause in `error` |
-| `smoke` | `src/tests/run-smoke-tests.sh` | 3600s (60 min) | ~40 min | ~340 tests (excludes destructive `test_proxy_integration.py` — own :8000 venue) |
-| `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | Phase D live pipeline |
+| `smoke` | `src/tests/run-smoke-tests.sh` | 3600s (60 min) | ~40 min | ~340 tests (excludes destructive `test_proxy_integration.py` — own:8000 venue) |
+| `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
-| `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped on ts-b51e63c9) |
-| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run (ts-cf9f5f85, 2026-09-12) | 830 tests. The whole suite under ONE timeout; the merge pyramid runs the halves below instead |
-| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-a.txt` |
-| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-b.txt` |
+| `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped) |
+| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run | 830 tests. The whole suite under one timeout; the merge pyramid runs the halves below instead |
+| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s | files in `src/tests/e2e_ui/partition/half-a.txt` |
+| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s | files in `src/tests/e2e_ui/partition/half-b.txt` |
 | `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
@@ -80,24 +78,24 @@ submits a test-suite job, which always takes the monopolize slot. Inside any sui
 `src/scripts/run-test-suite-live-smoke.sh`. The runner exits 64 unless `cosa.rest.venue_idle --port 8000` exits 0, then
 runs the one file against `:8000` and exits with pytest's status.
 
-**Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is ONE comma-separated
+**Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is one comma-separated
 string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
-because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job
-object itself holds a list after the router splits the string; the job aggregates results
+because the request model declares a `str`. The job
+object itself holds a list after the router splits the string. The job aggregates results
 across all requested suites in a single Markdown report and a single remediation
 snapshot.
 
-**E2E halves (row 2818dad7, 2026-09-14)**: `e2e_a` and `e2e_b` split the e2e suite into two halves
+**E2E halves**: `e2e_a` and `e2e_b` split the e2e suite into two halves
 by file, balanced on measured per-file time. Submit `"e2e_a,e2e_b"` to run the whole suite with
 a separate timeout, junit and log per half: a timeout then discards one half's results, not both.
 They run back to back in one job and cannot run side by side. `:8000` runs one monopolize job at a
-time, the runner's PID file refuses a second copy, and every test truncates the shared
+time, the runner's PID file refuses a second copy. And every test truncates the shared
 `lupin_db_test`. `src/tests/unit/test_e2e_halves_partition.py` fails when a collectable e2e test
 file is in neither half or in both. A new e2e test file therefore goes into one of the two partition
 manifests, whichever half is lighter.
 
 **The `all` suite**: expands to the curated pyramid in `ALL_SUITE_COMPONENTS`, each leg with its own
-timeout. In a container it runs the pyramid without `unit` and `docker_smoke`, and the result says so:
+timeout. In a container it runs the pyramid without `unit` and `docker_smoke`. And the result says so:
 `unit: not run here, host tier` and `docker_smoke: not run here, host tier`, in the summary, the abstract, the report and `cost_summary["suites_not_run"]`.
 A pyramid without them is not the full pyramid, so read that note before reading the verdict.
 The job also tells the coverage gate (`LUPIN_TEST_TIERS_NOT_RUN`), which then answers exit 2, inconclusive,
@@ -135,19 +133,19 @@ flowchart LR
     Watchdog -->|no| Idle[Wait for next<br/>TestSuiteJob]
 ```
 
-### Between-suites DB isolation (invariant — bug 8bd20375)
+### Between-suites DB isolation (invariant —)
 
 When a single `TestSuiteJob` runs **multiple** suites (`test_types=["all"]` →
 `smoke → websocket → integration → e2e` after the unit tier, which a container leaves to the host,
 or any explicit multi-suite list), all legs execute back-to-back against **one shared** `lupin_db_test`.
 The per-test `clean_test_db` fixture cannot defend a later suite against the
-**residue** an earlier suite left in the DB — most acutely `refresh_tokens`,
+**residue** an earlier suite left in the DB. Most acutely `refresh_tokens`,
 whose duplicate `jti` makes the next suite's login fail `500 "Token already
-exists"` (the e2e→integration flood, RED `ts-2230937c`).
+exists"` (the e2e→integration flood, RED).
 
 **Invariant**: the sweep loop (`_execute`) calls `_reset_state_between_suites()`
-**in every gap between adjacent suites — before each suite after the first,
-never before the first, never after the last, and never at all for a
+**in every gap between adjacent suites. Before each suite after the first,
+never before the first, never after the last. And never at all for a
 single-suite run** (`_between_suite_pairs()` yields exactly `len(suites)-1`
 seams). Each reset deletes non-protected users and TRUNCATEs the residue tables
 (the `_BETWEEN_SUITE_TRUNCATE_TABLES` superset, which **includes
@@ -156,8 +154,8 @@ seams). Each reset deletes non-protected users and TRUNCATEs the residue tables
 `job_history` is not in that truncate. It is cleared by row, with the rule in
 `cosa.rest.job_history_cleanup`, which the two `clean_test_db` fixtures use as well.
 **What survives a seam:** a row that is `pending` and whose `scheduled_at` is still in the
-future, which is a job scheduled behind the sweep and waiting for a restart to restore it.
-**What does not:** a pending row with no, past or unreadable `scheduled_at`; any `running`,
+future. Which is a job scheduled behind the sweep and waiting for a restart to restore it.
+**What does not:** a pending row with no, past or unreadable `scheduled_at`. Any `running`,
 `completed` or `failed` row, including the sweep's own row. The table is locked for the
 read and the delete, and a lock that cannot be had within 15 seconds fails the reset.
 
@@ -166,17 +164,17 @@ test container, so bouncing it would self-kill the job. The reset is therefore
 an **in-process** truncate against the hot-swapped test engine, guarded by the
 same `lupin_db_test`-only safety assert as `clean_test_db`: on any non-test DB
 (e.g. a multi-suite run submitted to the `:7999` dev server) it is a logged
-**NO-OP**, never a destructive op on dev data. A reset failure is **fatal**: it
-raises `BetweenSuiteResetError` and the sweep stops before the next suite, because
+**no-OP**, never a destructive op on dev data. A reset failure is **fatal**: it
+raises `BetweenSuiteResetError` and the sweep stops before the next suite. Because
 a suite on an unreset database reports on the previous suite's rows. The truncate
 set must also be closed under foreign keys, since Postgres refuses to truncate a
-table another table references unless that table is in the same statement; the
+table another table references unless that table is in the same statement. The
 unit test `test_the_truncate_set_is_closed_under_foreign_keys` fails when a table
-with a foreign key into the set is missing from it (bug 07dde530).
+with a foreign key into the set is missing from it.
 
 > The concurrent-fleet-writer class — other agentic jobs writing
 > `lupin_db_test` *during* a suite (not at the seam) — is a **separate** bug
-> (`caf58f71`); between-suites isolation does not close it.
+>. Between-suites isolation does not close it.
 
 ---
 
@@ -193,8 +191,7 @@ something like "run the tests at 11pm" and the skill:
 4. **Authenticates** against the Lupin FastAPI server using
    `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD`
    env vars (same credentials as the smoke tests)
-5. **Submits** a POST to `/api/v2/submit` (test-suite command) with `test_types`, `scheduled_at`,
-   and `monopolize=True`
+5. **Submits** a POST to `/api/v2/submit` (test-suite command) with `test_types`, `scheduled_at`. And `monopolize=True`
 6. **Confirms scheduling** via a `notify()` call announcing the job ID and scheduled
    time
 
@@ -232,7 +229,7 @@ For programmatic/non-Claude-Code invocation, use the REST API directly (next sec
 
 ## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 
-> **`POST /api/test-suite/submit` was retired to 410 on 2026-09-29** (row a3c59f2d). A test suite is
+> **`POST /api/test-suite/submit` was retired to 410**. A test suite is
 > submitted through the general v2 door, naming the command. Everything below is that door.
 
 **Endpoint**: `POST /api/v2/submit`
@@ -254,17 +251,17 @@ authenticated Lupin API.
 }
 ```
 
-`cosa.agents.test_suite.v2_client.submit_body( … )` builds this; `src/scripts/submit-test-suite.py` is the
+`cosa.agents.test_suite.v2_client.submit_body( …)` builds this; `src/scripts/submit-test-suite.py` is the
 command-line wrapper. The suite arguments go in `args`; `scheduled_at` and `websocket_id` are directives
 to the queue and stay top-level.
 
 The wrapper's `--env KEY=VALUE` (repeatable) fills `args.env_vars`, which reach that run's pytest
-process only. The suite job keeps only names that start with `TFE_`, `BFE_` or `LUPIN_TEST_`; the
+process only. The suite job keeps only names that start with `TFE_`, `BFE_` or `LUPIN_TEST_`. The
 wrapper asks the job's own filter and refuses any other name before it logs in.
 
-**The live eval test has two sizes.** Inside the integration suite `test_v2_eval_live.py` runs a
-short proxy, 5 utterances per command (50 asks), ruled by Rick on 2026-10-05 (row `4cbd4858`). The
-full sample is a separate scheduled run in the 10 AM to 1 PM window:
+**The live eval test has two sizes**. Inside the integration suite `test_v2_eval_live.py` runs a
+short proxy, 5 utterances per command (50 asks), ruled by Rick. The
+full sample is a separate scheduled run in the 10 am to 1 PM window:
 
 ```bash
 src/scripts/submit-test-suite.py --test-types integration \
@@ -273,23 +270,23 @@ src/scripts/submit-test-suite.py --test-types integration \
   --scheduled-at 2026-10-06T11:00:00-04:00
 ```
 
-At 20 per command the file makes 200 asks. On 2026-10-05 it was measured at about 7.4 seconds per
-ask and was stopped by the default 15-minute per-file cap, which is why the run raises the cap.
+At 20 per command the file makes 200 asks. On it was measured at about 7.4 seconds per
+ask and was stopped by the default 15-minute per-file cap. Which is why the run raises the cap.
 
 | Field | Where | Type | Default | Purpose |
 |-------|-------|------|---------|---------|
-| `test_types` | `args` | string, comma-separated | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
+| `test_types` | `args` | string, comma-separated | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused at submit**, naming it and the valid list — `e2e_ui` is the tests' directory, not a suite. Use `e2e_a`, `e2e_b` or `e2e`. |
 | `pytest_args` | `args` | string, shell-style (shlex) parsed | none | Extra pytest args passed through to the script. Unbalanced quotes are refused at submit. `--bg` flag is stripped (harmful for subprocess runs). |
-| `dry_run` | `args` | bool | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds. |
+| `dry_run` | `args` | bool | `false` | Skips the pytest subprocess. But still queues a real job and takes the monopolize slot for a few seconds. |
 | `auto_fix_on_failure` | `args` | bool | none | Per-run override for TFE auto-dispatch; omitted uses the INI default. |
 | `env_vars` | `args` | object of strings | none | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). `LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN` is reserved to the runner and dropped from a request. |
 | `scheduled_at` | top-level | ISO datetime string | none (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
 | `websocket_id` | top-level | string | none | WebSocket session ID for notifications. |
 | `parent_id_hash` | top-level | string | none | A monopolizing sweep's id, so Gate B admits its child through the hold. |
 
-⚠️ **There is no `monopolize` request field.** The job forces monopolize on in its own constructor.
+**There is no `monopolize` request field**. The job forces monopolize on in its own constructor.
 
-**The per-run lineage token (row 8d4a5a59).** Where `v2 parent stamp token enabled = true` (Development and Testing only), a real sweep issues one secret for its run and exports it to every suite subprocess as `LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN`, beside `LUPIN_TEST_MONOPOLIZE_PARENT_ID`. A test that registers a fresh user sends the id as `parent_id_hash` and the token in the `X-Lupin-Lineage-Token` header (`tests/helpers/suite_lineage.py` does both). The server honours the claim while that run holds the monopoly slot and until the token expires, which is the sum of the sweep's suite budgets plus ten minutes. The sweep revokes the token on every exit. A refused token drops the stamp and names its reason in the trace field `parent_id_hash_dropped`, unless the claimed id is the sweep now holding the monopoly slot. Then the door answers 403 with the reason in the body, so a child that lost its token fails at once and does not queue behind its own sweep. Any process the suite starts can read the token.
+**The per-run lineage token**. Where `v2 parent stamp token enabled = true` (Development and Testing only), a real sweep issues one secret for its run and exports it to every suite subprocess as `LUPIN_TEST_MONOPOLIZE_PARENT_TOKEN`, beside `LUPIN_TEST_MONOPOLIZE_PARENT_ID`. A test that registers a fresh user sends the id as `parent_id_hash` and the token in the `X-Lupin-Lineage-Token` header (`tests/helpers/suite_lineage.py` does both). The server honours the claim while that run holds the monopoly slot and until the token expires. Which is the sum of the sweep's suite budgets plus ten minutes. The sweep revokes the token on every exit. A refused token drops the stamp and names its reason in the trace field `parent_id_hash_dropped`, unless the claimed id is the sweep now holding the monopoly slot. Then the door answers 403 with the reason in the body. So a child that lost its token fails at once and does not queue behind its own sweep. Any process the suite starts can read the token.
 
 **Response** (a v2 `AskResponse`, the fields that matter):
 
@@ -302,8 +299,7 @@ ask and was stopped by the default 15-minute per-file cap, which is why the run 
 }
 ```
 
-`queue_position` is the todo queue's size right after the push (the number the retired door returned);
-it is `null` when nothing was queued. **A refused submit is HTTP 200, not 400**: an unknown suite name,
+`queue_position` is the todo queue's size right after the push (the number the retired door returned). It is `null` when nothing was queued. **A refused submit is HTTP 200, not 400**: an unknown suite name,
 malformed `pytest_args`, or a per-test `--timeout` that contradicts the suite budget comes back with
 `status: "failed"` and the cause in `error`, and nothing is queued. A caller must check `status`
 (`read_reply()` in `v2_client` does), not only the HTTP code.
@@ -364,10 +360,10 @@ artifact that describes every failure. This artifact is what TFE consumes.
       "name":      "test_visual_page[login]",
       "type":      "FAILED",
       "message":   "Snapshots DO NOT match: login.png",
-      "traceback": "File \"src/tests/e2e_ui/test_visual_regression.py\", line 42, in test_visual_page\n    ...",
+      "traceback": "File \"src/tests/e2e_ui/test_visual_regression.py\", line 42, in test_visual_page\n...",
       "suite":     "e2e"
     },
-    ...
+...
   ]
 }
 ```
@@ -416,7 +412,7 @@ that Phase 0 clustering consumes. See the [TFE guide Phase 0 section](test-fix-e
 
 **What it is**: `monopolize=True` declares that the job needs exclusive DB access
 during its run. The `RunningFifoQueue` consumer enforces this — only one
-monopolize job runs at a time, and other monopolize jobs wait in the todo queue
+monopolize job runs at a time. And other monopolize jobs wait in the todo queue
 even if regular (non-monopolize) jobs could otherwise run in parallel.
 
 **Why tests need it**: Lupin's test suites hot-swap the database configuration at
@@ -428,7 +424,7 @@ config file and produce non-deterministic results.
 **When it's set**: `TestSuiteJob.__init__()` always passes `monopolize=True` to
 the parent `AgenticJobBase`. You can't turn it off — it's a hard requirement for
 test runs. Non-monopolize jobs (deep research, podcast generator, etc.) coexist
-with a running TestSuiteJob, but NO other monopolize job can start until the
+with a running TestSuiteJob, but no other monopolize job can start until the
 TestSuiteJob finishes.
 
 **Scheduling conflicts**: if you schedule two TestSuiteJobs for 23:00, they'll run
@@ -458,9 +454,9 @@ However, there are indirect costs:
 2. **TFE auto-fix** (if enabled) — when a test suite fails and TFE takes over,
    TFE's Phase 1/2/3 consume Claude API budget up to
    `test fix expediter cost cap usd` (default $15 per TFE run). See the
-   [TFE guide §8 Cost Model](test-fix-expediter-guide.md#6-ini-reference).
+   [TFE guide section 8 Cost Model](test-fix-expediter-guide.md#6-ini-reference).
 3. **Validation rerun** triggered by TFE Phase 6 — this submits a *new*
-   TestSuiteJob targeting the affected suites, which itself has the same cost
+   TestSuiteJob targeting the affected suites. Which itself has the same cost
    profile (nearly $0 direct, risk of triggering TFE again if clusters remain
    unfixed — though the recursion guard prevents cascading).
 
@@ -479,7 +475,7 @@ nightly runs averaging 2 red days: $30 per month. Tune
 
 ## 9. Interaction with TFE
 
-As of Session 1cfcdf73 (2026-04-10), `test fix expediter auto fix enabled = true`
+As of Session 1cfcdf73, `test fix expediter auto fix enabled = true`
 is the default. Every TestSuiteJob that lands in the done queue is evaluated by
 `TestSuiteCompletionWatchdog`. If the job's remediation snapshot shows failures,
 the watchdog auto-dispatches a TFE job. The TFE job then walks Phases 0-6 as
@@ -494,7 +490,7 @@ is `false`. Omitting the field uses the INI default.
 **The recursion guard** is critical: TFE's Phase 6 validation rerun creates a new
 TestSuiteJob with `metadata["triggered_by_tfe"] = <tfe_job_id>`. When the rerun
 completes, the watchdog sees the metadata flag and refuses to dispatch another
-TFE. This is the ONLY thing preventing an infinite rerun loop.
+TFE. This is the only thing preventing an infinite rerun loop.
 
 **What if I want manual control?** Either flip
 `test fix expediter auto fix enabled = false` globally in the INI, or use the
@@ -530,15 +526,14 @@ dead queue and **BFE** (not TFE) picks it up. The dead queue path is for agentic
 jobs that crashed; the done queue path is for agentic jobs that completed with
 failures. These are distinct code paths with distinct watchdogs.
 
-### The third case: a run that returned normally but executed ZERO tests
+### The third case: a run that returned normally but executed zero tests
 
-⚠️ **CHANGED 2026-08-25 (row `a9d19d18`).** There is a case that is neither of the
+**Changed**. There is a case that is neither of the
 two above, and it used to be filed under the wrong one. If the suite subprocess
-crashes at *startup* — before any test runs — `_execute()` still returns normally,
-so `do_all` used to set `JobState.COMPLETED` and the job landed in the **done**
+crashes at *startup* — before any test runs — `_execute()` still returns normally. So `do_all` used to set `JobState.COMPLETED` and the job landed in the **done**
 queue reading `completed` while carrying `0 passed / 0 failed / 0 errors / 0 skipped`.
 
-Measured on job `ts-76be90f0`: the capped JS-test lane refused to start (`exit=70`,
+Measured on job: the capped JS-test lane refused to start (`exit=70`,
 no container memory ceiling) and the run was reported as completed.
 
 **Now**: a run that executed zero tests terminates as `JobState.FAILED` and routes
@@ -550,17 +545,16 @@ executed has not passed.
 | Case | State | Why |
 |---|---|---|
 | **Genuine red** (tests ran, some failed) | `COMPLETED` → done → **TFE** | The job did its work and is reporting a red. TFE reads the done queue and gates on `all_passed`; routing reds to dead would hide them from the thing that remediates them. |
-| **Partial run** (one tier ran, another did not) | `COMPLETED` → done | Also classifies as `NOT EXECUTED`, but its counts and `all_passed` already tell the truth. Routing partials to dead is a behaviour change outside this defect. |
-| **Dry run** (all-zero counts by construction) | `COMPLETED` → done | The dry-run path builds `suite_results` with zero counts too. `overall_status` is published by the *real* run path only, and that is what separates "a real run executed nothing" from "no real run happened". |
+| **Partial run** (one tier ran, another did not) | `COMPLETED` → done | Also classifies as `NOT EXECUTED`. But its counts and `all_passed` already tell the truth. Routing partials to dead is a behaviour change outside this defect. |
+| **Dry run** (all-zero counts by construction) | `COMPLETED` → done | The dry-run path builds `suite_results` with zero counts too. `overall_status` is published by the *real* run path only. And that is what separates "a real run executed nothing" from "no real run happened". |
 
 **Consequence worth knowing**: because these now reach the dead queue, **BFE** may
 engage on a startup crash where previously nothing did. That is the intended
 direction — a suite that cannot start is a defect — but it is a new trigger.
 
-**This was NOT a live false green.** Every machine consumer reads
+**This was not a live false green**. Every machine consumer reads
 `cost_summary["all_passed"]`, which was already correctly `False`
-(`test_suite_completion_watchdog.py:150`, `test_fix_expediter/snapshot_loader.py:161`);
-no caller gates on the job status. The fix closes the gap before one does.
+(`test_suite_completion_watchdog.py:150`, `test_fix_expediter/snapshot_loader.py:161`). No caller gates on the job status. The fix closes the gap before one does.
 
 ---
 
@@ -580,7 +574,7 @@ until the clock catches up.
 
 The shell script may be missing or the pytest invocation may fail before running
 any tests. Check `/tmp/{suite}-junit-*.xml` for partial output. Check the FastAPI
-log for `[TestSuiteJob] Running: bash ...` lines showing the exact command.
+log for `[TestSuiteJob] Running: bash...` lines showing the exact command.
 
 Common causes:
 - **Script path wrong**: `SUITE_SCRIPTS` dict in `job.py` points at a moved script
@@ -617,7 +611,7 @@ or one of the watchdog constructors raised. Check the FastAPI startup log.
 **Check 4**: Is the metadata recursion guard tripped? Check
 `completed_job.metadata.get("triggered_by_tfe")` — if set, the watchdog skips.
 
-See also [TFE guide §8 troubleshooting](test-fix-expediter-guide.md#8-troubleshooting).
+See also [TFE guide section 8 troubleshooting](test-fix-expediter-guide.md#8-troubleshooting).
 
 ### Overlapping scheduled runs
 
@@ -638,9 +632,9 @@ user utterances like "11pm."
 If you see jobs running at unexpected times, check:
 1. Is `app timezone` set correctly in `lupin-app.ini`?
 2. Is your laptop's timezone correct?
-3. Did daylight saving time just change? EDT vs EST matters.
+3. Did daylight saving time just change? EDT vs `EST` matters.
 
-Report filenames use EST/EDT via `ZoneInfo("America/New_York")` with the `%Z`
+Report filenames use `EST`/EDT via `ZoneInfo("America/New_York")` with the `%Z`
 format specifier, so you can tell the suffix from filenames directly.
 
 ### Cancellation hangs
@@ -663,9 +657,9 @@ The TestSuiteJob will then return a cancelled result dict.
 
 - **[Test Fix Expediter Guide](test-fix-expediter-guide.md)** — TFE consumes remediation snapshots produced here
 - **[Bug Fix Expediter Guide](bug-fix-expediter-guide.md)** — BFE handles crashed TestSuiteJobs (dead queue path)
-- **[Shared Fix Primitives Reference](shared-fix-primitives-reference.md)** — shared expediter machinery
+- **[Shared Fix Primitives Reference](shared-fix-primitives-reference.md)**. Shared expediter machinery
 - **[REST API Reference](../rest-api-reference.md)** — `/api/v2/submit` and the retired-door table
-- **`/schedule-tests` skill**: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling
+- **`/schedule-tests` skill**: `~/.claude/skills/schedule-tests/SKILL.md`. Voice-driven scheduling
 - **`src/tests/AUTH-TESTING-GUIDE.md`** — test credentials + env var setup
-- **Live E2E driver**: `src/tests/e2e/run-tfe-live-e2e.sh` — bash script that exercises TestSuiteJob → TFE end-to-end
-- **R&D**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design doc
+- **Live E2E driver**: `src/tests/e2e/run-tfe-live-e2e.sh`. Bash script that exercises TestSuiteJob → TFE end-to-end
+- **R&D**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(removed; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design doc
