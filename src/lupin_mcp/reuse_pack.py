@@ -287,6 +287,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - key_mode "candidate" keys each answer by need and candidate text alone; "stage1" adds the pack size and
           the run index, so a measurement arm never reads another arm's answers or the production answers
         - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
+        - budget, when not passed, is ctx.run_budget when a driver set one, else the live transport's own; a stand-in transport has none of its own
         - kind "pair" asks the Noul and Score question, with the candidate key only; each pack is first cut under size_limit tokens
         - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
         - a refused pack and all its halves are one refusal, keyed by the top-level pack's hash; BREAKER_422 refused
@@ -308,6 +309,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
     """
     _check_sweep_args( size, workers, key_mode, run_index, kind )
     template, model = template or ctx.template, model or ctx.model
+    if budget is None: budget = ctx.run_budget
     if budget is None and isinstance( ctx.transport, rt.LiveJevTransport ): budget = ctx.transport.budget
     cache = rt.JevCache( ctx.data )
     breaker = rt.RefusalBreaker( rt.BREAKER_422 ) if breaker is None else breaker
@@ -381,14 +383,13 @@ def pair_ask( ctx, need, entries ):
 
     Requires:
         - ctx has a pack_size and a transport; entries are symbol dicts with id, sig and doc
-        - the sweep draws on ctx.run_budget when a driver set one, else on the live transport's own
     Ensures:
         - returns { answered, unasked, malformed, stats }: answered maps an id to its provides, coverage and score
         - malformed lists { id, reasons } for an entry whose answer was present and wrong; unasked lists the ids
           that got no answer and were not malformed
         - stats holds failed, not_checked, stopped_by, requests and attempt_counts, as the old question's pairs do
     """
-    sw      = sweep_packed( ctx, need, entries, ctx.pack_size, budget=ctx.run_budget, kind="pair" )
+    sw      = sweep_packed( ctx, need, entries, ctx.pack_size, kind="pair" )
     answered = { a[ "id" ]: { "provides": a[ "provides" ], "coverage": a[ "coverage" ], "score": a[ "score" ] } for a in sw[ "answers" ] }
     bad     = { m[ "id" ] for m in sw[ "malformed" ] }
     stats   = { "failed": len( sw[ "failed" ] ), "not_checked": len( sw[ "not_reached" ] ), "stopped_by": sw[ "stopped_by" ], "requests": sw[ "requests" ],

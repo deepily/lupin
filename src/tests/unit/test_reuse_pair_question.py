@@ -145,3 +145,12 @@ def test_the_receipt_shows_the_first_reason_of_an_entry_with_two( env ):
     _, _, rec = pair_run( env, wrong={ "provides": { bad } }, omit={ "coverage": { bad } } )
     one, = rec[ "malformed" ]
     assert one[ "id" ] == bad and one[ "reason" ].startswith( "provides:" ) and "not 'noul'" in one[ "reason" ]
+
+
+def test_a_frozen_replay_of_a_pair_receipt_sends_nothing_and_spends_nothing_from_a_run_budget_the_context_holds( env ):
+    from lupin_mcp import reuse_ceiling as rc
+    client, ctx, rec = pair_run( env )
+    sent, ctx.run_budget = len( client.bodies ), rc.TokenBudget( 100, 10 ** 6 )
+    out = rt.replay_impl( rec[ "id" ], ctx )
+    assert out[ "status" ] == "ok" and out[ "differences" ] == { "frozen": [], "head": [] }
+    assert len( client.bodies ) == sent and ctx.run_budget.spent_tokens == 0 and ctx.run_budget.reserved_tokens == 0
