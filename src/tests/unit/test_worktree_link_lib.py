@@ -113,8 +113,10 @@ def test_the_same_directory_is_recognised_through_a_symlink( main_with_worktree,
 
 def test_the_library_reads_the_list_without_a_pipe():
     code = "\n".join( ln for ln in open( _LIB ).read().splitlines() if not ln.lstrip().startswith( "#" ) )
-    assert "| awk" not in code and "| head" not in code, "git worktree list must not feed an early-closing reader"
-    assert 'WT_LIST="$( git -C "$dir" worktree list --porcelain' in code
+    reads = [ ln for ln in code.splitlines() if "worktree list --porcelain" in ln ]
+    assert len( reads ) == 1, f"expected one line that reads the worktree list, got {reads}"
+    assert "|" not in reads[ 0 ], "git worktree list must not feed any reader through a pipe"
+    assert reads[ 0 ].lstrip().startswith( ( 'if ! WT_LIST="$( git -C "$dir" worktree list --porcelain', 'WT_LIST="$( git -C "$dir" worktree list --porcelain' ) )
 
 
 def test_the_three_scripts_source_the_library_and_hold_no_copy_of_its_functions():
