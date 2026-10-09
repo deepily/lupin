@@ -387,7 +387,7 @@ def main( argv=None ):
         return 0
     asks = _asks( names )
     members = e2e.load_sample( args.sample, args.sample_sha )
-    items   = e2e.load_needs( args.needs, args.needs_sha, members )
+    items   = e2e.load_needs( args.needs, args.needs_sha, members, args.sample_sha )
     twins   = e2e.load_twins( args.manifest, args.manifest_sha )
     env     = _open_env( root, args.data, args.ledger, args.live, asks, args.pack_size )
     if args.command == "canary":

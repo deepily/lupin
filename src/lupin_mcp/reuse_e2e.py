@@ -65,19 +65,22 @@ def load_sample( path, expected_sha=SAMPLE_SHA256 ):
     return members
 
 
-def load_needs( path, expected_sha, members ):
+def load_needs( path, expected_sha, members, sample_sha ):
     """
     Read the frozen need sentences.
 
     Requires:
-        - members is the sample's member list, in its frozen order
+        - members is the sample's member list, in its frozen order; sample_sha is the sha256 of the sample file
     Ensures:
         - returns [ { member, need } ] in the sample's order, one per member
     Raises:
-        - FrozenInputRefused for a wrong hash, a wrong format, a count other than 100, an order that differs from the sample's, or an empty need
+        - FrozenInputRefused for a wrong hash, a wrong format, a sample_sha256 in the document that is missing or is not sample_sha,
+          a count other than 100, an order that differs from the sample's, or an empty need
     """
     record = _read_checked( path, expected_sha, "needs file" )
     if record[ "format" ] != NEEDS_FORMAT: raise FrozenInputRefused( f"needs file format is {record[ 'format' ]!r}, expected {NEEDS_FORMAT!r}" )
+    if "sample_sha256" not in record or record[ "sample_sha256" ] != sample_sha:
+        raise FrozenInputRefused( f"needs file names sample_sha256 {record[ 'sample_sha256' ] if 'sample_sha256' in record else None!r}, the sample is {sample_sha}" )
     rows = record[ "needs" ]
     if len( rows ) != MEMBERS: raise FrozenInputRefused( f"needs file holds {len( rows )} needs; the run expects {MEMBERS}" )
     if [ r[ "member" ] for r in rows ] != list( members ): raise FrozenInputRefused( "the needs file's members differ from the sample's, or are in another order" )
