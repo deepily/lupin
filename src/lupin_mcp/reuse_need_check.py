@@ -97,8 +97,12 @@ def identifier_tokens( rec ):
         - the tokens are the dotted parts of its id, its file stem and its argument names, each whole
         - a word that is only a piece of one of those names is not a token
     """
-    names = set( rec[ "id" ].split( "." ) ) | { pathlib.PurePosixPath( rec[ "file" ] ).stem } | _argument_names( rec[ "sig" ] )
-    return { n.lower() for n in names }
+    return _name_tokens( rec ) | { n.lower() for n in _argument_names( rec[ "sig" ] ) }
+
+
+def _name_tokens( rec ):
+    """Ensures: returns the lowercase dotted id parts and file stem of one symbol record."""
+    return { n.lower() for n in set( rec[ "id" ].split( "." ) ) | { pathlib.PurePosixPath( rec[ "file" ] ).stem } }
 
 
 def _words( text ):
@@ -152,7 +156,8 @@ def check_need( member_id, need, index, groups ):
     tokens = set( re.findall( r"[a-z0-9_]+", need.lower() ) )
     tokens |= { p for t in tokens for p in t.split( "_" ) if p }
     hits   = sorted( tokens & banned )
-    if hits: out.append( { "check": "identifier", "detail": "identifier tokens: " + ", ".join( hits ) } )
+    twin_names = set().union( *[ _name_tokens( _record( index, t ) ) for t in twins ] ) - identifier_tokens( rec )
+    if hits: out.append( { "check": "identifier", "detail": "identifier tokens: " + ", ".join( hits ), "words": [ h for h in hits if h not in twin_names ] } )
     run = shared_run( need, entry_text_of( rec ) )
     if run: out.append( { "check": "member_text_run", "detail": f"4-word run shared with the member: {run}" } )
     for t in twins:
@@ -192,8 +197,17 @@ def check_all( needs, sample_ids, index, groups ):
 
 
 def resend_list( results ):
-    """Ensures: returns the member id and check names of each failed row, nothing else."""
-    return [ { "member": r[ "member" ], "failed": sorted( { f[ "check" ] for f in r[ "failures" ] } ) } for r in results[ "rows" ] if not r[ "ok" ] ]
+    """
+    Build the entries sent to the need writer.
+
+    Ensures:
+        - returns { member, failed, avoid_words } for each failed row, and no other key
+        - avoid_words holds only the offending words of an identifier failure
+        - a word that is only a twin's id part or file stem is left out
+        - a run failure adds no word
+    """
+    return [ { "member": r[ "member" ], "failed": sorted( { f[ "check" ] for f in r[ "failures" ] } ),
+               "avoid_words": sorted( { w for f in r[ "failures" ] for w in f.get( "words", [] ) } ) } for r in results[ "rows" ] if not r[ "ok" ] ]
 
 
 def load_sample_ids( path ):
