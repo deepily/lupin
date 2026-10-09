@@ -52,6 +52,7 @@ def test_the_new_question_asks_no_page_questions_even_when_the_context_has_pages
     write_wiki( env[ 0 ] )
     client, ctx, rec = pair_run( env )
     assert ctx.pages and rec[ "route" ] == "full" and rec[ "stats" ][ "stages" ][ 0 ][ "stage" ] == "all"
+    assert rec[ "page_prompt_template" ] is None
     assert all( q[ "type" ] in ( "noul", "score" ) for b in client.bodies for q in b[ "questions" ].values() )
 
 
