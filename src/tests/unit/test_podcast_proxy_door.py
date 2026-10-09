@@ -235,3 +235,30 @@ def test_the_server_path_is_where_the_opened_file_lives_not_the_spelling_that_fo
     cfg = scope[ "registry" ][ "demo" ]
     monkeypatch.setattr( docs_files, "_resolve_scoped", lambda sent, registry: ( "demo", cfg, "io/tmp/real.md", str( alias / "io" / "tmp" / "real.md" ) ) )
     assert _door( scope, "demo/io/tmp/real.md" )[ "server_path" ] == os.path.realpath( path )
+
+
+@pytest.mark.parametrize( "path,code", [
+    ( "",                          "bad_path" ),
+    ( "summary.md",                "bad_path" ),
+    ( "demo/io/tmp/gone.md",       "not_found" ),
+    ( "demo/io/tmp/folder.md",     "not_found" ),
+    ( "demo/src/code.md",          "viewer_refused" ),
+    ( "demo/io/tmp/.env",          "viewer_refused" ),
+    ( "nowhere/io/tmp/a.md",       "viewer_refused" ),
+    ( "demo/io/tmp/picture.png",   "wrong_kind" ),
+    ( "demo/io/tmp/key.md",        "credential" ),
+    ( "demo/io/tmp/bytes.md",      "unreadable" ),
+    ( "demo/io/tmp/huge.md",       "too_large" ),
+] )
+def test_each_door_refusal_carries_its_own_code( scope, monkeypatch, path, code ):
+    monkeypatch.setattr( pp, "MAX_BYTES", 100 )
+    ( scope[ "root" ] / "io" / "tmp" / "folder.md" ).mkdir()
+    _put( scope, "src/code.md" ); _put( scope, "io/tmp/.env", "K=v" ); _put( scope, "io/tmp/picture.png", "x" )
+    _put( scope, "io/tmp/key.md", PEM ); _put( scope, "io/tmp/huge.md", "x" * 101 )
+    ( scope[ "root" ] / "io" / "tmp" / "bytes.md" ).write_bytes( b"\xff\xfe\x00bad\x80" )
+    with pytest.raises( pp.DoorRefusal ) as refusal: _door( scope, path )
+    assert refusal.value.code == code and refusal.value.message == str( refusal.value )
+
+
+def test_the_refusal_body_has_exactly_a_code_and_a_message():
+    assert pp.refusal_detail( "spent", "used" ) == { "code": "spent", "message": "used" }

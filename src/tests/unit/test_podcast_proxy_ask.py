@@ -166,26 +166,33 @@ def test_the_card_is_saved_before_it_is_pushed_and_marked_delivered_or_created( 
 def test_an_actor_without_a_session_id_is_refused_and_nothing_is_made( world ):
     _file( world )
     answer = _ask( world, actor="maya" )
-    assert answer.status_code == 400 and "session id" in answer.json()[ "detail" ]
+    assert answer.status_code == 400 and answer.json()[ "detail" ][ "code" ] == "bad_actor" and "session id" in answer.json()[ "detail" ][ "message" ]
     assert world[ "cards" ].created == [ ] and world[ "queue" ].pushed == [ ]
 
 
-@pytest.mark.parametrize( "path,why", [
-    ( "demo/io/tmp/gone.md",     "Path not found" ),
-    ( "demo/src/code.md",        "not in scope whitelist" ),
-    ( "demo/io/tmp/.env",        "secrets blocklist" ),
-    ( "nowhere/io/tmp/a.md",     "Unknown project" ),
-    ( "summary.md",              "not a scoped path" ),
-    ( "demo/io/tmp/picture.png", "A podcast reads" ),
-    ( "demo/io/tmp/key.md",      "credential material" ),
+@pytest.mark.parametrize( "path,code,why", [
+    ( "demo/io/tmp/gone.md",     "not_found",      "Path not found" ),
+    ( "demo/src/code.md",        "viewer_refused", "not in scope whitelist" ),
+    ( "demo/io/tmp/.env",        "viewer_refused", "secrets blocklist" ),
+    ( "nowhere/io/tmp/a.md",     "viewer_refused", "Unknown project" ),
+    ( "summary.md",              "bad_path",       "not a scoped path" ),
+    ( "demo/io/tmp/picture.png", "wrong_kind",     "A podcast reads" ),
+    ( "demo/io/tmp/key.md",      "credential",     "credential material" ),
+    ( "demo/io/tmp/bytes.md",    "unreadable",     "could not be read or decoded" ),
+    ( "demo/io/tmp/huge.md",     "too_large",      "too long for a podcast" ),
 ] )
-def test_every_door_refusal_is_a_400_that_names_the_path_and_makes_no_card( world, path, why ):
+def test_every_door_refusal_is_a_400_with_its_code_that_names_the_path_and_makes_no_card( world, monkeypatch, path, code, why ):
+    monkeypatch.setattr( pp, "MAX_BYTES", 100 )
     _file( world, "src/code.md" )
     _file( world, "io/tmp/.env", "KEY=value" )
     _file( world, "io/tmp/picture.png", "x" )
     _file( world, "io/tmp/key.md", PEM )
+    ( world[ "root" ] / "io" / "tmp" / "bytes.md" ).write_bytes( b"\xff\xfe\x00bad\x80" )
+    _file( world, "io/tmp/huge.md", "x" * 101 )
     answer = _ask( world, path=path )
-    assert answer.status_code == 400 and why in answer.json()[ "detail" ] and path in answer.json()[ "detail" ]
+    detail = answer.json()[ "detail" ]
+    assert answer.status_code == 400 and detail[ "code" ] == code and why in detail[ "message" ] and path in detail[ "message" ]
+    assert set( detail ) == { "code", "message" }
     assert world[ "cards" ].created == [ ] and world[ "queue" ].pushed == [ ]
 
 
@@ -193,7 +200,7 @@ def test_a_missing_operator_account_is_a_404_and_makes_no_card( world, monkeypat
     _file( world )
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: None )
     answer = _ask( world )
-    assert answer.status_code == 404 and "operator's account" in answer.json()[ "detail" ]
+    assert answer.status_code == 404 and answer.json()[ "detail" ][ "code" ] == "no_operator" and "operator's account" in answer.json()[ "detail" ][ "message" ]
     assert world[ "cards" ].created == []
 
 
@@ -202,7 +209,8 @@ def test_a_card_already_waiting_for_this_file_is_a_409_naming_it( world ):
     waiting = Notification( id=uuid.uuid4(), sender_id="x", recipient_id=OPERATOR_ID, message="m", type="custom", priority="high" )
     world[ "cards" ].waiting = waiting
     answer = _ask( world )
-    assert answer.status_code == 409 and str( waiting.id ) in answer.json()[ "detail" ]
+    detail = answer.json()[ "detail" ]
+    assert answer.status_code == 409 and detail[ "code" ] == "waiting_card" and detail[ "card_id" ] == str( waiting.id ) and str( waiting.id ) in detail[ "message" ]
     assert world[ "cards" ].created == [ ] and world[ "queue" ].pushed == [ ]
     assert world[ "cards" ].asked == ( "podcast_proxy_start", "demo/io/tmp/summary.md", hashlib.sha256( path.read_bytes() ).hexdigest() )
 

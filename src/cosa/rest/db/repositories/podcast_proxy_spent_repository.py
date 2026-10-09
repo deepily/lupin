@@ -60,3 +60,7 @@ class PodcastProxySpentRepository( BaseRepository[ PodcastProxySpentCard ] ):
     def is_spent( self, card_id: uuid.UUID ) -> bool:
         """True when a row exists for this card id."""
         return self.session.get( PodcastProxySpentCard, card_id ) is not None
+
+    def get( self, card_id: uuid.UUID ) -> Optional[ PodcastProxySpentCard ]:
+        """The spent row for this card, or None when the card has not started a job."""
+        return self.session.get( PodcastProxySpentCard, card_id )

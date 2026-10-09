@@ -28,6 +28,8 @@ The seat could already read that file as the same user.
 
 import hashlib
 import os
+import shutil
+import uuid
 
 from fastapi import HTTPException
 
@@ -51,7 +53,27 @@ MAX_AGE_DEFAULT = 900
 
 
 class DoorRefusal( Exception ):
-    """A podcast request the door refuses. The message is the sentence the caller reads."""
+    """
+    A podcast request the door refuses.
+
+    `code` is the machine-readable word a client matches on: bad_path, not_found, viewer_refused,
+    wrong_kind, too_large, credential or unreadable. `message` is the sentence a person reads.
+    """
+
+    def __init__( self, code, message ):
+        super().__init__( message )
+        self.code, self.message = code, message
+
+
+def refusal_detail( code, message ):
+    """The body every refusal carries: { code, message }. Clients match on the code."""
+    return { "code": code, "message": message }
+
+
+def _viewer_refusal( sent, refusal ):
+    """The DoorRefusal for a viewer refusal: not_found for a 404, otherwise viewer_refused."""
+    code = "not_found" if refusal.status_code == 404 else "viewer_refused"
+    return DoorRefusal( code, f"'{sent}' was refused: {refusal.detail}." )
 
 
 def _viewer():
@@ -80,7 +102,7 @@ def _read_whole( fd ):
         chunk = os.read( fd, _READ_CHUNK )
         if not chunk: break
         total += len( chunk )
-        if total > MAX_BYTES: raise DoorRefusal( f"The file is longer than {MAX_BYTES // ( 1024 * 1024 )} MiB, which is too long for a podcast." )
+        if total > MAX_BYTES: raise DoorRefusal( "too_large", f"The file is longer than {MAX_BYTES // ( 1024 * 1024 )} MiB, which is too long for a podcast." )
         chunks.append( chunk )
     return b"".join( chunks )
 
@@ -110,10 +132,10 @@ def check_source( scope_path, registry=None, keep_content=False ):
         - DoorRefusal
     """
     if not isinstance( scope_path, str ) or not scope_path.strip():
-        raise DoorRefusal( "A podcast needs a document path in the form <scope>/<path>, and none was given." )
+        raise DoorRefusal( "bad_path", "A podcast needs a document path in the form <scope>/<path>, and none was given." )
     sent = scope_path.strip()
     if "/" not in sent.lstrip( "/" ):
-        raise DoorRefusal( f"'{sent}' is not a scoped path. Send it as <scope>/<path within scope>." )
+        raise DoorRefusal( "bad_path", f"'{sent}' is not a scoped path. Send it as <scope>/<path within scope>." )
     viewer = _viewer()
     if registry is None: registry = viewer._get_scope_registry()
 
@@ -121,27 +143,27 @@ def check_source( scope_path, registry=None, keep_content=False ):
         scope, cfg, _, full_path = viewer._resolve_scoped( sent, registry )
         fd = viewer._open_judged_file( full_path, cfg )
     except HTTPException as refusal:
-        raise DoorRefusal( f"'{sent}' was refused: {refusal.detail}." ) from refusal
+        raise _viewer_refusal( sent, refusal ) from refusal
 
     try:
         landed = landed_path_of_fd( fd )
         data   = _read_whole( fd )
     except DoorRefusal as refusal:
-        raise DoorRefusal( f"'{sent}' was refused: {refusal}" ) from refusal
+        raise DoorRefusal( refusal.code, f"'{sent}' was refused: {refusal}" ) from refusal
     finally:
         os.close( fd )
 
     extension = os.path.splitext( landed )[ 1 ].lower()
     if extension not in ALLOWED_SOURCE_EXTENSIONS:
-        raise DoorRefusal( f"'{sent}' is a {extension or 'no-extension'} file. A podcast reads {', '.join( ALLOWED_SOURCE_EXTENSIONS )}." )
+        raise DoorRefusal( "wrong_kind", f"'{sent}' is a {extension or 'no-extension'} file. A podcast reads {', '.join( ALLOWED_SOURCE_EXTENSIONS )}." )
     try:
         verdict = "credential" if _prefix_looks_like_credential( data.decode( "utf-8" ) ) else "clean"
     except Exception:
         verdict = "unreadable"
     if verdict == "credential":
-        raise DoorRefusal( f"'{sent}' was refused: its content is credential material." )
+        raise DoorRefusal( "credential", f"'{sent}' was refused: its content is credential material." )
     if verdict == "unreadable":
-        raise DoorRefusal( f"'{sent}' could not be read or decoded as text, so it cannot be judged." )
+        raise DoorRefusal( "unreadable", f"'{sent}' could not be read or decoded as text, so it cannot be judged." )
 
     rel   = landed_relative_path( landed, cfg.root )
     facts = { "scope": scope, "rel": rel, "name": os.path.basename( rel ), "server_path": landed,
@@ -243,3 +265,120 @@ def card_text( payload ):
         f"{promotion_gate.UNANSWERED_MEANS}"
     )
     return question, abstract
+
+
+PAYLOAD_KEYS = frozenset( { "kind", "command", "scope_path", "server_path", "name", "size", "sha256", "asked_by", "asked_by_session" } )
+
+
+class StartRefusal( Exception ):
+    """A start the server refuses: HTTP status, the client-facing code, and the message."""
+
+    def __init__( self, status, code, message ):
+        super().__init__( message )
+        self.status, self.code, self.message = status, code, message
+
+
+def start_refusal( card, actor_session, now, max_age ):
+    """
+    None when the stored card lets this session start its job, else the refusal.
+
+    Requires:
+        - card is the Notification row read by the id the caller cited, or None when no row has it
+        - actor_session is the caller's session id; now is aware; max_age is the INI age in seconds
+
+    Ensures:
+        - returns None only when every one of these holds: the card exists and carries the payload
+          this feature's ask writes, no more and no less; it asked a question; it was answered; the answer is a yes a person gave,
+          not the timed-out default; the server saw it arrive on the operator's own login; the caller is the
+          session that asked; the card is no older than max_age
+        - returns a StartRefusal otherwise, whose code names the first failed condition
+        - the card's message and abstract are never read: they are text, and the payload is what the server wrote
+    """
+    if card is None:
+        return StartRefusal( 404, "no_card", "No card with that id exists, so the podcast is not started." )
+    payload = card.payload if isinstance( card.payload, dict ) else { }
+    if payload.get( "kind" ) != CARD_KIND or set( payload ) != PAYLOAD_KEYS or payload.get( "command" ) != COMMAND:
+        return StartRefusal( 403, "bad_card", "That card was not made by the server for a podcast, so the podcast is not started." )
+    if card.response_requested is not True:
+        return StartRefusal( 403, "bad_card", "That notification asked no question, so it cannot approve a podcast." )
+    answer = card.response_value if isinstance( card.response_value, dict ) else { }
+    if card.responded_at is None or card.state != "responded":
+        return StartRefusal( 403, "not_answered", "That card has no answer yet, so the podcast is not started." )
+    if answer.get( "source" ) == "timeout_default":
+        return StartRefusal( 403, "default_answer", "That card was settled by its timed-out default, not by an answer, so the podcast is not started." )
+    if str( answer.get( "value", "" ) ).strip().lower() != "yes":
+        return StartRefusal( 403, "not_yes", "The answer on that card was not yes, so the podcast is not started." )
+    answered_by = answer.get( "answered_by" )
+    if not promotion_gate.answer_posted_by_the_operator( answered_by ):
+        return StartRefusal( 403, "wrong_login", f"That card was answered by {promotion_gate.describe_who_answered( answered_by )}, "
+                                                     f"not by the operator's own login, so the podcast is not started." )
+    if payload[ "asked_by_session" ] != actor_session:
+        return StartRefusal( 403, "wrong_session", f"That card was asked by {payload[ 'asked_by' ]}, and only that session starts it." )
+    if card.created_at is None or ( now - card.created_at ).total_seconds() > max_age:
+        return StartRefusal( 403, "too_old", f"That card is older than {max_age} seconds, so the yes has expired. Ask again." )
+    return None
+
+
+def file_changed_refusal( payload, facts ):
+    """
+    None when the file now matches what the card said, else the refusal.
+
+    Requires:
+        - payload is the stored card payload; facts is what check_source measured just now
+
+    Ensures:
+        - returns None only when the content hash, the size and the server path all equal the card's
+        - otherwise returns a 409 hash_mismatch StartRefusal naming the file
+    """
+    for key in ( "sha256", "size", "server_path" ):
+        if facts[ key ] != payload[ key ]:
+            return StartRefusal( 409, "hash_mismatch", f"{payload[ 'scope_path' ]} is not the file Rick said yes to ({key} differs), so the podcast is not started. Ask again." )
+    return None
+
+
+def write_copy( directory, card_id, name, content ):
+    """
+    Write the copy the job will read, once, under a folder named for the card.
+
+    Requires:
+        - directory is the folder that holds all podcast proxy copies; name is a file name with no folder part
+        - content is the bytes the door judged and hashed
+
+    Ensures:
+        - returns the absolute path of the new file, mode 0640, in a folder made for this card
+        - a stale copy of the same card is removed first, and the new file is created exclusively, so nothing is
+          written through a link that someone planted in its place
+    """
+    folder = os.path.join( directory, str( card_id ) )
+    os.makedirs( folder, mode=0o750, exist_ok=True )
+    path = os.path.join( folder, os.path.basename( name ) )
+    if os.path.lexists( path ): os.unlink( path )
+    fd   = os.open( path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640 )
+    with os.fdopen( fd, "wb" ) as handle: handle.write( content )
+    return path
+
+
+def card_state( card, now ):
+    """
+    Where a podcast card stands, in one word, for a client that resumes with only the card id.
+
+    Requires:
+        - card is a Notification written by the ask door; now is aware
+
+    Ensures:
+        - returns "waiting" for an open question that has not expired
+        - "yes" only for a yes a person gave on the operator's own login; "wrong_login" for a yes from anyone else
+        - "no" for a person's no, "default_answer" for the timed-out default, "expired" for a card that timed out unanswered
+    """
+    answer = card.response_value if isinstance( card.response_value, dict ) else { }
+    if card.responded_at is None or card.state != "responded":
+        if card.state == "expired" or ( card.expires_at is not None and card.expires_at <= now ): return "expired"
+        return "waiting"
+    if answer.get( "source" ) == "timeout_default": return "default_answer"
+    if str( answer.get( "value", "" ) ).strip().lower() != "yes": return "no"
+    return "yes" if promotion_gate.answer_posted_by_the_operator( answer.get( "answered_by" ) ) else "wrong_login"
+
+
+def remove_copy( directory, card_id ):
+    """Remove the folder write_copy made for a card. Best effort; it never raises."""
+    shutil.rmtree( os.path.join( directory, str( card_id ) ), ignore_errors=True )
