@@ -9,6 +9,7 @@ It never sees a twin, a group, the manifest or a Jev answer, and it makes no Jev
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -18,7 +19,9 @@ from dataclasses import dataclass
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock
 from claude_agent_sdk import query as sdk_query
 
+import cosa.utils.util as cu
 from cosa.agents.shared.sdk_error_result import error_result_text
+from cosa.repo.doc_lint import model_transport as mt
 from cosa.repo.symindex import need_input as ni
 
 DEFAULT_MODEL    = "claude-sonnet-5-5"
@@ -58,13 +61,25 @@ async def sdk_reply( prompt, system_prompt, model=DEFAULT_MODEL ):
         - the Claude Code login is present on this host
 
     Ensures:
+        - runs with the hermetic profile of the model transport: no hooks, no CLAUDE.md, no memory,
+          no setting sources, no MCP servers, no skills
         - returns a Reply whose text joins every assistant text block
         - missing cost or usage in the result reads as zero
 
     Raises:
         - RuntimeError carrying the CLI's own text when the result is an error
+        - RuntimeError when the stream ends with no result message
     """
-    options = ClaudeAgentOptions( model=model, system_prompt=system_prompt, tools=[], permission_mode="default", max_turns=3 )
+    options = ClaudeAgentOptions(
+        model           = model,
+        system_prompt   = system_prompt,
+        tools           = list( mt.NO_TOOLS ),
+        permission_mode = mt.PERMISSION_MODE,
+        max_turns       = 3,
+        cwd             = cu.get_project_root(),
+        setting_sources = list( mt.SETTING_SOURCES ),
+        extra_args      = dict( mt.ISOLATION_ARGS ),
+    )
     pieces  = []
     result  = None
     async for message in sdk_query( prompt=prompt, options=options ):
@@ -73,6 +88,7 @@ async def sdk_reply( prompt, system_prompt, model=DEFAULT_MODEL ):
         elif isinstance( message, ResultMessage ):
             if message.is_error: raise RuntimeError( error_result_text( message ) )
             result = message
+    if result is None: raise RuntimeError( "the stream ended with no result message" )
     usage = result.usage or {}
     return Reply(
         text          = "".join( pieces ),
@@ -90,7 +106,7 @@ def extract_sentence( reply_text ):
 
 def check_form( sentence, need ):
     """
-    Check the form rules this tool can see: opener, length, one sentence, no leftover names.
+    Check the form rules this tool can see: opener, length, one sentence, no names.
 
     Requires:
         - need is the NeedInput the sentence was written from
@@ -105,8 +121,10 @@ def check_form( sentence, need ):
     if not MIN_WORDS <= len( sentence.split() ) <= MAX_WORDS: kinds.add( "word_count" )
     if not sentence.endswith( ( ".", "?", "!" ) ) or SENTENCE_BREAK.search( sentence ): kinds.add( "one_sentence" )
     if PLACEHOLDER.search( sentence ): kinds.add( "placeholder" )
+    opener = OPENERS[ need.kind ]
+    body   = sentence[ len( opener ): ] if sentence.startswith( opener ) else sentence
     for name in need.forbidden:
-        if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", sentence ): kinds.add( "own_identifier" )
+        if re.search( r"(?<![A-Za-z0-9_])" + re.escape( name ) + r"(?![A-Za-z0-9_])", body ): kinds.add( "own_identifier" )
     return sorted( kinds )
 
 
@@ -125,8 +143,9 @@ def build_prompt( need, failures=None ):
         f"Write one sentence that begins \"{OPENERS[ need.kind ]}\" and says what it does and what it returns, "
         f"in plain words, {MIN_WORDS} to {MAX_WORDS} words. Describe the job, not the steps, "
         "and do not copy phrases from its docstring. The plainest words for its inputs, such as "
-        "text, data, value, item, name, path, result, may be names in the original code, so use a more "
-        "specific everyday word for them.\n\n"
+        "text, data, value, item, name, path, result, function, class, method, type, may be names in the original code, so use a more "
+        "specific everyday word for them. Use the opening phrase once and do not use the words "
+        "function, class or method anywhere else.\n\n"
         f"{need.text}\n"
     )
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
@@ -208,6 +227,31 @@ async def run_members( member_ids, src_root, out_dir, reply_fn, redo=None, max_a
     return records
 
 
+def needs_document( run_dir, member_ids, sample_sha256 ):
+    """
+    Assemble the needs document the end-to-end driver reads.
+
+    Requires:
+        - run_dir holds the files run_members wrote for member_ids, in this order
+
+    Ensures:
+        - returns { format, sample_sha256, needs } with one entry per member in member_ids order
+        - each entry carries member, need, kind, writer_job_id, attempts and rewrites
+
+    Raises:
+        - ValueError when a member has no file or no accepted need
+    """
+    needs = []
+    for index, member_id in enumerate( member_ids, start=1 ):
+        path = os.path.join( run_dir, f"{index:03d}-{member_id}.json" )
+        if not os.path.exists( path ): raise ValueError( f"no accepted need for {member_id}: no file" )
+        with open( path, encoding="utf-8" ) as handle: record = json.load( handle )
+        if not record[ "ok" ]: raise ValueError( f"no accepted need for {member_id}: last run failed" )
+        needs.append( { "member": member_id, "need": record[ "need" ], "kind": record[ "kind" ], "writer_job_id": record[ "job_id" ],
+                        "attempts": len( record[ "attempts" ] ), "rewrites": record[ "rewrites" ] } )
+    return { "format": "reuse-e2e-needs-1", "sample_sha256": sample_sha256, "needs": needs }
+
+
 def sample_members( sample_path ):
     """
     Read the member ids from the frozen sample file, strata in file order.
@@ -239,11 +283,17 @@ def main( argv=None, reply_fn=None ):
     parser.add_argument( "--limit", type=int, default=None )
     parser.add_argument( "--model", default=DEFAULT_MODEL )
     parser.add_argument( "--max-attempts", type=int, default=MAX_ATTEMPTS )
+    parser.add_argument( "--assemble", default=None, help="write the needs document here and make no model call" )
     parser.add_argument( "--redo-file", default=None, help="json list of {member, check}; those members are rewritten" )
     args = parser.parse_args( argv )
 
     src_root = args.src_root or os.environ[ "LUPIN_ROOT" ] + "/src"
     members  = sample_members( args.sample )[ :args.limit ]
+    if args.assemble:
+        with open( args.sample, "rb" ) as handle: sample_sha = hashlib.sha256( handle.read() ).hexdigest()
+        with open( args.assemble, "w", encoding="utf-8" ) as handle:
+            json.dump( needs_document( args.out, members, sample_sha ), handle, indent=2 )
+        return 0
     redo     = {}
     if args.redo_file:
         with open( args.redo_file, encoding="utf-8" ) as handle: rows = json.load( handle )

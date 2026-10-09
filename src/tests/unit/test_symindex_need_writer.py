@@ -152,8 +152,8 @@ def test_needs_document_refuses_a_missing_or_failed_member( src_root, tmp_path )
     asyncio.run( nw.run_members( [ "pk.mod.parse_result_block" ], src_root, str( out ), FakeQuery( [ "bad.", "bad.", "bad." ] ) ) )
     with pytest.raises( ValueError, match="no accepted need" ):
         nw.needs_document( str( out ), [ "pk.mod.parse_result_block" ], "x" )
-    with pytest.raises( ValueError, match="no accepted need" ):
-        nw.needs_document( str( out ), [ "pk.mod.parse_result_block", "pk.mod.BlockReader" ], "x" )
+    with pytest.raises( ValueError, match="no file" ):
+        nw.needs_document( str( tmp_path / "empty-run" ), [ "pk.mod.parse_result_block" ], "x" )
 
 
 def test_main_assemble_writes_the_document( src_root, tmp_path ):
