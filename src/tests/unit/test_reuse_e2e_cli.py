@@ -31,7 +31,7 @@ class Setup:
         self.ledger  = tmp_path / "ledger.jsonl"
         members      = IDS[ :100 ]
         sample       = { "strata": { "has_exact_cluster": { "members": members[ :58 ] }, "near_only": { "members": members[ 58: ] } } }
-        needs        = { "format": e2e.NEEDS_FORMAT, "needs": [ { "member": m, "need": f"A function number {i} that does a distinct job." } for i, m in enumerate( members ) ] }
+        needs        = { "format": e2e.NEEDS_FORMAT, "sample_sha256": hashlib.sha256( json.dumps( sample, sort_keys=True ).encode( "utf-8" ) ).hexdigest(), "needs": [ { "member": m, "need": f"A function number {i} that does a distinct job." } for i, m in enumerate( members ) ] }
         manifest     = { "exact": [ { "members": [ { "id": IDS[ i ] }, { "id": IDS[ i + 100 ] } ] } for i in range( 5 ) ], "near": [] }
         self.sample  = tmp_path / "sample.json";   self.sample_sha   = put( self.sample, sample )
         self.needs   = tmp_path / "needs.json";    self.needs_sha    = put( self.needs, needs )

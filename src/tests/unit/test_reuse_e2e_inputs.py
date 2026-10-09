@@ -56,33 +56,33 @@ def test_a_sample_with_the_wrong_stratum_sizes_or_a_repeated_member_is_refused( 
 
 
 def needs_record( members, **over ):
-    return { "format": "reuse-e2e-needs-1", "needs": [ { "member": m, "need": f"A function number {i} that returns a value.", "writer_job_id": f"job-{i}" } for i, m in enumerate( members ) ], **over }
+    return { "format": "reuse-e2e-needs-1", "sample_sha256": LITERAL, "needs": [ { "member": m, "need": f"A function number {i} that returns a value.", "writer_job_id": f"job-{i}" } for i, m in enumerate( members ) ], **over }
 
 
 def test_the_needs_file_must_match_the_sample_members_in_the_same_order( tmp_path ):
     members = e2e.load_sample( FIXTURE )
     path    = tmp_path / "needs.json"
     sha     = write( path, needs_record( members ) )
-    got     = e2e.load_needs( path, sha, members )
+    got     = e2e.load_needs( path, sha, members, LITERAL )
     assert [ g[ "member" ] for g in got ] == members and all( g[ "need" ] for g in got ) and len( got ) == 100
     swapped = list( members ); swapped[ 0 ], swapped[ 1 ] = swapped[ 1 ], swapped[ 0 ]
     sha = write( path, needs_record( swapped ) )
-    with pytest.raises( e2e.FrozenInputRefused, match="order" ): e2e.load_needs( path, sha, members )
+    with pytest.raises( e2e.FrozenInputRefused, match="order" ): e2e.load_needs( path, sha, members, LITERAL )
     sha = write( path, needs_record( members[ :99 ] ) )
-    with pytest.raises( e2e.FrozenInputRefused, match="100" ): e2e.load_needs( path, sha, members )
+    with pytest.raises( e2e.FrozenInputRefused, match="100" ): e2e.load_needs( path, sha, members, LITERAL )
 
 
 def test_the_needs_file_is_refused_for_a_wrong_hash_a_wrong_format_or_an_empty_need( tmp_path ):
     members = e2e.load_sample( FIXTURE )
     path    = tmp_path / "needs.json"
     sha     = write( path, needs_record( members ) )
-    with pytest.raises( e2e.FrozenInputRefused, match="sha256" ): e2e.load_needs( path, "0" * 64, members )
+    with pytest.raises( e2e.FrozenInputRefused, match="sha256" ): e2e.load_needs( path, "0" * 64, members, LITERAL )
     sha = write( path, needs_record( members, format="other" ) )
-    with pytest.raises( e2e.FrozenInputRefused, match="format" ): e2e.load_needs( path, sha, members )
+    with pytest.raises( e2e.FrozenInputRefused, match="format" ): e2e.load_needs( path, sha, members, LITERAL )
     rec = needs_record( members )
     rec[ "needs" ][ 5 ][ "need" ] = "   "
     sha = write( path, rec )
-    with pytest.raises( e2e.FrozenInputRefused, match="empty need" ): e2e.load_needs( path, sha, members )
+    with pytest.raises( e2e.FrozenInputRefused, match="empty need" ): e2e.load_needs( path, sha, members, LITERAL )
 
 
 def test_twins_are_read_from_the_manifest_after_its_hash_is_checked( tmp_path ):
@@ -174,3 +174,29 @@ def test_the_paired_comparison_leaves_out_a_member_whose_search_was_not_run():
     rows = [ search( "a", "old", hit=True ), search( "a", "new", "not_run" ), search( "b", "old", hit=True ), search( "b", "new", hit=False ) ]
     pair = e2e.paired( rows, "old", "new" )[ "on_shortlist" ]
     assert pair == { "only_old": 1, "only_new": 0, "both": 0, "neither": 0, "p": 1.0 }                                  # only b is counted
+
+
+def need_check_document( sample_sha, needs ):
+    """The writer's document, copied from needs_document in test_reuse_need_check.py (4384a96c9)."""
+    return { "format": e2e.NEEDS_FORMAT, "sample_sha256": sample_sha,
+             "needs": [ { "member": i, "need": n, "kind": "function", "writer_job_id": "j-" + str( k ), "attempts": 1, "rewrites": 0 } for k, ( i, n ) in enumerate( needs.items() ) ] }
+
+
+def test_a_document_in_the_writers_shape_loads_with_its_sample_hash_checked( tmp_path ):
+    members = e2e.load_sample( FIXTURE )
+    path    = tmp_path / "needs.json"
+    sha     = write( path, need_check_document( LITERAL, { m: f"A function number {i} that does a thing." for i, m in enumerate( members ) } ) )
+    got     = e2e.load_needs( path, sha, members, LITERAL )
+    assert len( got ) == 100 and got[ 0 ] == { "member": members[ 0 ], "need": "A function number 0 that does a thing." }
+
+
+def test_a_needs_document_written_for_another_sample_or_naming_none_is_refused( tmp_path ):
+    members = e2e.load_sample( FIXTURE )
+    path    = tmp_path / "needs.json"
+    needs   = { m: f"A function number {i} that does a thing." for i, m in enumerate( members ) }
+    sha     = write( path, need_check_document( "1" * 64, needs ) )
+    with pytest.raises( e2e.FrozenInputRefused, match="sample_sha256" ): e2e.load_needs( path, sha, members, LITERAL )
+    record = need_check_document( LITERAL, needs )
+    del record[ "sample_sha256" ]
+    sha = write( path, record )
+    with pytest.raises( e2e.FrozenInputRefused, match="sample_sha256" ): e2e.load_needs( path, sha, members, LITERAL )
