@@ -548,3 +548,30 @@ class TestSweProxyConfigFactory:
         assert result[ "deployment_cap_level" ] == 3
         assert result[ "destructive_cap_level" ] == 3
         assert result[ "architecture_cap_level" ] == 3
+
+
+class TestShippedAskBeforeActValue:
+    """The shipped INI value of the ask-before-act switch is off."""
+
+    KEY = "swe engineering proxy ask before act"
+
+    def _values( self, relative_path ):
+        """Return every right-hand side the key has in the file at relative_path."""
+        import cosa.utils.util as cu
+
+        values = []
+        with open( cu.get_project_root() + relative_path ) as ini_file:
+            for line in ini_file:
+                if line.strip().startswith( self.KEY ):
+                    values.append( line.split( "=", 1 )[ 1 ].strip() )
+        return values
+
+    def test_lupin_app_ini_ships_the_switch_false_everywhere_it_is_set( self ):
+        """Every occurrence in src/conf/lupin-app.ini is false, and there is at least one."""
+        values = self._values( "/src/conf/lupin-app.ini" )
+        assert values != [], "the key is missing from lupin-app.ini"
+        assert values == [ "false" ] * len( values ), f"shipped value must be false, got {values}"
+
+    def test_splainer_ini_documents_the_key( self ):
+        """The splainer file carries one explanation for the key."""
+        assert len( self._values( "/src/conf/lupin-app-splainer.ini" ) ) == 1
