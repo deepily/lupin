@@ -25,7 +25,7 @@ def record_of( members=MEMBERS ):
     """Ensures: a negatives record: one twin, three lexical and two random candidates each."""
     out = {}
     for i, m in enumerate( members ):
-        out[ m ] = { "twins": [ IDS[ i + 50 ] ], "lexical": [ IDS[ i + 60 ], IDS[ i + 61 ], IDS[ i + 62 ] ], "random": [ IDS[ i + 70 ], IDS[ i + 71 ] ], "held_out": [] }
+        out[ m ] = { "twins": [ IDS[ i + 50 ] ], "lexical": [ { "id": IDS[ i + k ], "score": 0.5 } for k in ( 60, 61, 62 ) ], "random": [ IDS[ i + 70 ], IDS[ i + 71 ] ], "held_out": [] }
     return { "format": "stage2-negatives-1", "members": out }
 
 
@@ -83,7 +83,7 @@ def test_the_plan_refuses_a_wrong_hash_a_wrong_format_an_unindexed_id_and_a_memb
     with pytest.raises( s2.e2e.FrozenInputRefused, match="sha256" ): s2.load_plan( path, "0" * 64, by_id )
     bad = record_of(); bad[ "format" ] = "other"
     with pytest.raises( s2.e2e.FrozenInputRefused, match="format" ): s2.load_plan( path, put( path, bad ), by_id )
-    bad = record_of(); bad[ "members" ][ IDS[ 0 ] ][ "lexical" ].append( "cosa.nowhere.gone" )
+    bad = record_of(); bad[ "members" ][ IDS[ 0 ] ][ "lexical" ].append( { "id": "cosa.nowhere.gone", "score": 0.5 } )
     with pytest.raises( s2.e2e.FrozenInputRefused, match="not in the index" ): s2.load_plan( path, put( path, bad ), by_id )
     bad = record_of(); bad[ "members" ][ "cosa.nowhere.member" ] = bad[ "members" ].pop( IDS[ 0 ] )
     with pytest.raises( s2.e2e.FrozenInputRefused, match="not in the index" ): s2.load_plan( path, put( path, bad ), by_id )
@@ -199,7 +199,7 @@ def test_a_run_with_no_root_is_refused( monkeypatch, capsys ):
 def test_the_member_listed_among_its_own_candidates_is_never_asked_about_itself( tmp_path ):
     scratch = Env( tmp_path )
     record = record_of( MEMBERS[ :1 ] )
-    record[ "members" ][ IDS[ 0 ] ][ "lexical" ].append( IDS[ 0 ] )
+    record[ "members" ][ IDS[ 0 ] ][ "lexical" ].append( { "id": IDS[ 0 ], "score": 0.5 } )
     path = tmp_path / "negatives.json"
     sha  = put( path, record )
     items, _ = s2.load_plan( path, sha, by_id_of( scratch ) )

@@ -39,6 +39,7 @@ def load_plan( path, expected_sha, by_id ):
     Requires:
         - by_id maps every sendable id to its symbol dict
     Ensures:
+        - the record is the negatives writer's: twins and random are id strings, lexical rows are { id, score }
         - returns ( items, twins ): items are { member, need, entries } sorted by member, entries being its twins,
           lexical neighbours and random draws in that order, each once and never the member
         - need is the member's own entry text; twins maps a member to the set of its twins' ids
@@ -51,7 +52,7 @@ def load_plan( path, expected_sha, by_id ):
     for member in sorted( record[ "members" ] ):
         if member not in by_id: raise e2e.FrozenInputRefused( f"member {member!r} is not in the index" )
         mine, ids = record[ "members" ][ member ], []
-        for i in mine[ "twins" ] + mine[ "lexical" ] + mine[ "random" ]:
+        for i in mine[ "twins" ] + [ r[ "id" ] for r in mine[ "lexical" ] ] + mine[ "random" ]:
             if i not in by_id: raise e2e.FrozenInputRefused( f"candidate {i!r} of {member!r} is not in the index" )
             if i != member and i not in ids: ids.append( i )
         if not ids: raise e2e.FrozenInputRefused( f"member {member!r} has no candidate" )
