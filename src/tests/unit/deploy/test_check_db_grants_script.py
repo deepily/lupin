@@ -151,6 +151,30 @@ def test_the_repair_checks_the_secret_files_again_and_does_not_hide_a_gap( stub,
     assert ( tmp_path / "args.log" ).read_text().count( "--secrets-dir /etc/lupin/secrets" ) == 2, "the recheck dropped the directory"
 
 
+def _recheck_python( tmp_path ):
+    """A stand-in interpreter: red check, working repair, then an unsearchable directory."""
+    fake = tmp_path / "recheck-python"
+    fake.write_text( "#!/bin/sh\necho \"$@\" >> " + str( tmp_path ) + "/args.log\n"
+                     "case \"$*\" in *grants-only*) exit 0;; esac\n"
+                     "n=$(grep -c -e '--check' " + str( tmp_path ) + "/args.log)\n"
+                     "[ \"$n\" -eq 1 ] && exit 1\nexit 5\n" )
+    fake.chmod( 0o755 )
+    return fake
+
+
+def test_a_repair_that_works_on_a_host_that_cannot_search_the_directory_exits_four_not_one( stub, tmp_path ):
+    fake = _recheck_python( tmp_path )
+    done = _helper( stub( "clean", DB_GRANTS_PYTHON=str( fake ), DB_GRANTS_SECRETS_DIR="/etc/lupin/secrets" ), "--repair" )
+    assert done.returncode == 4 and "repaired" in done.stderr and "NOT checked" in done.stderr, done.stderr
+    assert "STILL RED" not in done.stderr
+
+
+def test_a_bounce_after_that_repair_warns_and_exits_zero( stub, tmp_path ):
+    fake = _recheck_python( tmp_path )
+    done = _bounce( stub( "clean", DB_GRANTS_PYTHON=str( fake ), DB_GRANTS_SECRETS_DIR="/etc/lupin/secrets", LUPIN_DB_GRANTS_REPAIR="on" ) )
+    assert done.returncode == 0 and "NOT checked" in done.stderr and "still lack grants" not in done.stderr
+
+
 def test_an_unknown_argument_exits_two_and_help_exits_zero( stub ):
     assert _helper( stub( "clean" ), "--bogus" ).returncode == 2
     helped = _helper( stub( "clean" ), "--help" )

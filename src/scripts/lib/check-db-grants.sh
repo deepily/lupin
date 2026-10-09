@@ -47,13 +47,15 @@ SECRETS_DIR="${DB_GRANTS_SECRETS_DIR-/etc/lupin/secrets}"
 SECRETS_ARGS=()
 if [ -n "$SECRETS_DIR" ]; then SECRETS_ARGS=( --secrets-dir "$SECRETS_DIR" ); fi
 
+not_checked() {
+    echo "check-db-grants: ${1}, but the secret files in ${SECRETS_DIR} were NOT checked (this login cannot search the directory)" >&2
+    exit 4
+}
+
 check_out="$( roles --check ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} 2>&1 )"; rc=$?
 echo "$check_out"
 if [ "$rc" -eq 0 ]; then exit 0; fi
-if [ "$rc" -eq 5 ]; then
-    echo "check-db-grants: the grants are clean, but the secret files in ${SECRETS_DIR} were NOT checked (this login cannot search the directory)" >&2
-    exit 4
-fi
+if [ "$rc" -eq 5 ]; then not_checked "the grants are clean"; fi
 if [ "$rc" -ne 1 ]; then
     echo "check-db-grants: the check could not run (exit ${rc}); grants were not verified" >&2
     exit 2
@@ -68,5 +70,6 @@ fi
 recheck_out="$( roles --check ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} 2>&1 )"; rc=$?
 echo "$recheck_out"
 if [ "$rc" -eq 0 ]; then echo "check-db-grants: repaired"; exit 0; fi
+if [ "$rc" -eq 5 ]; then not_checked "the grants are repaired"; fi
 echo "check-db-grants: STILL RED after the repair (exit ${rc}); the roles need the full provisioning" >&2
 exit 1
