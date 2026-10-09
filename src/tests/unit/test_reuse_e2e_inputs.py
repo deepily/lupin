@@ -200,3 +200,9 @@ def test_a_needs_document_written_for_another_sample_or_naming_none_is_refused( 
     del record[ "sample_sha256" ]
     sha = write( path, record )
     with pytest.raises( e2e.FrozenInputRefused, match="sample_sha256" ): e2e.load_needs( path, sha, members, LITERAL )
+
+
+def test_a_ledger_stop_after_the_last_answer_is_not_a_cause_of_an_incomplete_search():
+    assert e2e.incomplete_causes( result_of(), False, True ) == []                                                   # nothing failed or was left unasked: the ledger flag alone changes nothing
+    assert e2e.incomplete_causes( result_of( stats=stats( failed=1 ) ), False, True ) == [ "ledger", "CALL_FAILED" ]
+    assert e2e.incomplete_causes( result_of( stats=stats( not_checked=1 ) ), False, True ) == [ "ledger" ]

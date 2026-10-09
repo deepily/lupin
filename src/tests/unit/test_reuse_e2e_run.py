@@ -409,3 +409,11 @@ def test_a_ceiling_refusal_after_a_failed_attempt_stops_the_run_at_that_search( 
     rec = run.run_searches( scratch.env(), "e2e-run", items_of( 5 ), twins_of( 5 ), 10 ** 6 )
     assert rec[ "searches" ][ 1 ][ "causes" ] == [ "ceiling", "CALL_FAILED" ] and rec[ "stopped" ] == { "reason": "ceiling", "after": 2 }
     assert [ s[ "status" ] for s in rec[ "searches" ][ 2: ] ] == [ "not_run" ] * 3
+
+
+def test_the_new_question_sweeps_every_other_entry_and_never_shows_the_member( tmp_path ):
+    scratch = Env( tmp_path, asks={ "new": run.ask_new } )
+    run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
+    member = rt.entry_text( next( e for e in rt.prepare( rt.ReuseContext( scratch.root, scratch.data ) )[ 1 ] if e[ "id" ] == IDS[ 0 ] ) )
+    assert scratch.texts and len( scratch.texts ) >= 2 * ( WIDE - 1 )                                              # two questions for each of the other entries were sent
+    assert not any( member in t for t in scratch.texts )
