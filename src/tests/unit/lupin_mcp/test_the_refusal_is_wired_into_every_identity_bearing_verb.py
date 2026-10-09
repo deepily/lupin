@@ -45,7 +45,7 @@ class _Reached( Exception ):
 
 
 # Tools that do not call the refusal, each with the reason. A reason is a claim to check, not a pass.
-# "RULING OWED" marks a tool that writes under the seat's name and has no ruling yet (follow-up row).
+# No entry may read "RULING OWED": Rick ruled on 2026-10-09 that every identity-bearing tool refuses.
 EXEMPT = {
     "ask_multiple_choice"   : "asks the user; the sender id rides the notification (not read further)",
     "ask_open_ended_batch"  : "asks the user; the sender id rides the notification (not read further)",
@@ -59,24 +59,21 @@ EXEMPT = {
     "commons_read"          : "read-only (docstring tag READ)",
     "commons_who"           : "read-only (docstring tag READ)",
     "dm_get"                : "read-only (docstring tag READ); whether the server marks anything delivered on read was not checked",
-    "dm_list"               : "RULING OWED: reads the resolved session's inbox, so a borrowed identity reads a colleague's; server-side marking on read not checked",
     "list_spawned_sessions" : "read-only (docstring tag READ)",
     "task_get"              : "read-only (docstring tag READ)",
     "task_promotion_status" : "read-only (docstring tag READ)",
     "task_query"            : "read-only (docstring tag READ)",
     "get_session_info"      : "returns this session's own identity and writes nothing",
-    "enable_speakerphone"   : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
-    "disable_speakerphone"  : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
-    "request_persona"       : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
-    "spawn_sessions"        : "RULING OWED: host-side spawn of sessions by this manager; not read further",
-    "commons_ask_async"     : "RULING OWED: posts under the seat's name; not read further",
-    "commons_ask_sync"      : "RULING OWED: posts under the seat's name; not read further",
 }
 
 # Wired tools whose implementation is not a module symbol named <tool>_impl, so a sentinel cannot be placed.
-# They are proved by the first-statement check here; commons_post and set_session_topic are also driven
-# in test_commons_post_and_set_session_topic_refuse_a_borrowed_identity.py, where the body's own seams are stubbed.
-NO_IMPL_SYMBOL = { "self_respin", "dismiss_sessions", "commons_post", "set_session_topic" }
+# They are proved by the first-statement check here and driven in two sibling files, where the body's own
+# seams are stubbed: test_commons_post_and_set_session_topic_refuse_a_borrowed_identity.py and
+# test_speakerphone_persona_and_spawn_refuse_a_borrowed_identity.py.
+NO_IMPL_SYMBOL = {
+    "self_respin", "dismiss_sessions", "commons_post", "set_session_topic",
+    "enable_speakerphone", "disable_speakerphone", "request_persona", "spawn_sessions",
+}
 
 TOOLS = asyncio.run( m.mcp.get_tools() )
 
@@ -128,15 +125,22 @@ def _call( verb, kwargs ):
 
 
 def test_the_discovery_found_the_verbs_it_is_meant_to_find():
-    """Pin the measured floor (15 wired, 39 registered): a loop over nothing passes."""
-    assert len( TOOLS ) >= 39 and len( WIRED ) >= 15
+    """Pin the measured floor (22 wired, 39 registered): a loop over nothing passes."""
+    assert len( TOOLS ) >= 39 and len( WIRED ) >= 22
     assert "podcast_for_rick" in WIRED and "_dm_send_fn" in WIRED
     assert { "dm_respond", "commons_post", "set_session_topic" } <= set( WIRED )
+    assert { "dm_list", "commons_ask_sync", "commons_ask_async", "enable_speakerphone", "disable_speakerphone",
+             "request_persona", "spawn_sessions" } <= set( WIRED )
 
 
 def test_every_registered_tool_is_wired_or_exempt():
     unclassified = sorted( set( TOOLS ) - set( WIRED ) - set( EXEMPT ) )
     assert not unclassified, f"registered but neither wired nor exempt: {unclassified}; call the refusal or add it to EXEMPT with a reason"
+
+
+def test_no_exemption_is_still_awaiting_a_ruling():
+    """Every identity-bearing tool refuses, so no exemption may say it awaits a ruling."""
+    assert not sorted( key for key, reason in EXEMPT.items() if "RULING OWED" in reason )
 
 
 def test_no_tool_is_both_wired_and_exempt():
