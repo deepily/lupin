@@ -318,11 +318,31 @@ def test_two_starts_at_the_same_moment_queue_exactly_one_job( world ):
 
 # ---- the queue fails after the claim: undo it, say so, let the same card try again ----
 
+def test_a_queue_failure_is_logged_with_its_cause_and_the_answer_keeps_it_out( world, capsys ):
+    card = _card( world )
+    world[ "flow" ].raises = RuntimeError( "connection to /var/lib/secret.sock refused" )
+    answer = _start( world, card.id )
+    assert "secret.sock" not in answer.text
+    assert "secret.sock" in capsys.readouterr().out
+
+
+def test_a_claim_with_no_job_is_claimed_no_job_on_start_and_on_status_and_is_not_released( world ):
+    card = _card( world )
+    with world[ "sessions" ]() as session:
+        assert PodcastProxySpentRepository( session ).claim( card.id, ACTOR, "demo/io/tmp/summary.md", "0" * 64 )
+        session.commit()
+    answer = _start( world, card.id )
+    assert answer.status_code == 409 and _code( answer ) == "claimed_no_job" and "no podcast was started" in answer.json()[ "detail" ][ "message" ]
+    assert world[ "flow" ].calls == [ ] and len( _spent( world ) ) == 1 and _spent( world )[ 0 ].job_id is None
+    status = _status( world, card.id ).json()
+    assert status[ "state" ] == "claimed_no_job" and status[ "spent" ] is True and status[ "job_id" ] is None
+
+
 def test_a_queue_that_raises_releases_the_claim_and_the_card_can_start_again( world ):
     card = _card( world )
     world[ "flow" ].raises = RuntimeError( "the queue is down" )
     answer = _start( world, card.id )
-    assert answer.status_code == 502 and _code( answer ) == "queue_failed" and "the queue is down" in answer.json()[ "detail" ][ "message" ]
+    assert answer.status_code == 502 and _code( answer ) == "queue_failed" and "the queue is down" not in answer.text
     assert "start the same card again" in answer.json()[ "detail" ][ "message" ] and _spent( world ) == [ ]
     assert not ( world[ "copies" ] / str( card.id ) ).exists(), "the failed start left its copy behind"
     world[ "flow" ].raises = None

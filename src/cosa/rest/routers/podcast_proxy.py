@@ -205,8 +205,11 @@ def start_a_podcast(
           exactly as `proxy.start_refusal` judges the stored card
         - 409 file_refused when the door now refuses the file, 409 hash_mismatch when its bytes are not those of the yes
         - 409 spent when the card already started a job, however many starts raced
+        - 409 claimed_no_job when an earlier start claimed the card and recorded no job: no podcast was started, the
+          claim is not released here (a release racing a slow queue call could start two jobs), and Rick is asked again
         - the spent record is committed before the job is queued; when queuing fails it is released and the answer
-          is 502 queue_failed, so a yes is never burnt without a job and without a word
+          is 502 queue_failed with a fixed sentence, the cause going to the server log. A crash between the claim and
+          the release leaves the claim, which the next start answers as claimed_no_job
         - otherwise returns { card_id, job_id, status, name, queue_position } for a job built for the card's
           recipient from a copy of the judged bytes
     """
@@ -235,7 +238,12 @@ def start_a_podcast(
         raise _refuse( 404, "no_operator", "The operator's account was not found, so the job cannot be built." )
 
     with get_db() as session:
-        won = PodcastProxySpentRepository( session ).claim( payload.card_id, payload.actor, stored[ "scope_path" ], stored[ "sha256" ] )
+        spent_rows = PodcastProxySpentRepository( session )
+        won        = spent_rows.claim( payload.card_id, payload.actor, stored[ "scope_path" ], stored[ "sha256" ] )
+        earlier    = None if won else spent_rows.get( payload.card_id )
+        no_job     = earlier is not None and earlier.job_id is None
+    if not won and no_job:
+        raise _refuse( 409, "claimed_no_job", "That card was claimed, but no podcast was started from it. Ask Rick again with a new card." )
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
 
@@ -256,7 +264,8 @@ def start_a_podcast(
         proxy.remove_copy( copy_directory(), payload.card_id )
         with get_db() as session:
             PodcastProxySpentRepository( session ).release( payload.card_id )
-        raise _refuse( 502, "queue_failed", f"The job could not be queued: {failure}. The yes is still good; start the same card again." )
+        print( f"[podcast-proxy] queue failed for card {payload.card_id}: {failure!r}" )
+        raise _refuse( 502, "queue_failed", "The job could not be queued. The yes is still good; start the same card again." )
 
     with get_db() as session:
         PodcastProxySpentRepository( session ).record_job( payload.card_id, result[ "job_id" ] )
@@ -280,7 +289,8 @@ def podcast_card_status(
     Ensures:
         - 404 no_card when the id names no card, or a card this feature did not write
         - otherwise returns { card_id, scope_path, name, size, sha256, asked_by_session, state, expires_at, spent, job_id }
-          with state one of waiting, yes, no, default_answer, expired, wrong_login
+          with state one of waiting, yes, no, default_answer, expired, wrong_login, claimed_no_job
+        - state is claimed_no_job when a start claimed the card and no job was recorded: no podcast was started, and Rick must be asked again
         - spent is True once a start claimed the card; job_id is that start's job, or None before it exists
         - every value comes from the stored payload, the stored answer and the spent record
     """
@@ -293,6 +303,7 @@ def podcast_card_status(
         expires = card.expires_at.isoformat() if card.expires_at is not None else None
         spent   = PodcastProxySpentRepository( session ).get( card_id )
         job_id  = spent.job_id if spent is not None else None
+        if spent is not None and job_id is None: state = "claimed_no_job"
     return { "card_id": str( card_id ), "scope_path": stored[ "scope_path" ], "name": stored[ "name" ], "size": stored[ "size" ],
              "sha256": stored[ "sha256" ], "asked_by_session": stored[ "asked_by_session" ], "state": state,
              "expires_at": expires, "spent": spent is not None, "job_id": job_id }
