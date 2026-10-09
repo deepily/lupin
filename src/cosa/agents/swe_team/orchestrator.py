@@ -202,7 +202,8 @@ class SweTeamOrchestrator:
         self._user_email          = None    # Set from job context when available
 
         # Decision proxy (Phase 4 + Phase 5 INI integration)
-        self.proxy = None
+        self.proxy          = None
+        self._ask_before_act = False
         if self.config.trust_mode != "disabled":
             try:
                 from .proxy import EngineeringStrategy
@@ -222,6 +223,8 @@ class SweTeamOrchestrator:
                     swe_cfg   = swe_proxy_config_from_config_mgr( cfg_mgr )
                 except Exception as e:
                     logger.warning( f"INI config read failed, using defaults: {e}" )
+
+                self._ask_before_act = swe_cfg.get( "ask_before_act", False )
 
                 # Build TrustTracker with INI values
                 trust_tracker = TrustTracker(
@@ -315,6 +318,7 @@ class SweTeamOrchestrator:
         Ensures:
             - Returns bool (True if approved, False otherwise)
             - Proxy evaluate() called for all non-disabled modes
+            - An "act" answer auto-approves only when the ask-before-act switch is off
             - Trust feedback recorded after every user decision
             - Falls through to ask_confirmation when proxy is None
 
@@ -341,7 +345,7 @@ class SweTeamOrchestrator:
         # Step 2: Act autonomously in active mode at sufficient trust
         if proxy_result and self.proxy.trust_mode not in ( "shadow", "disabled" ):
 
-            if proxy_result.action == "act":
+            if proxy_result.action == "act" and not self._ask_before_act:
                 await self._notify( team_io,
                     message  = f"[Auto-approved by proxy] {question[ :80 ]}",
                     role     = role,

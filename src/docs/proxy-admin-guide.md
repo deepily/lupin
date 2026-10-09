@@ -154,10 +154,15 @@ connected: <cause>`. This is the ruling "Proxy answers". It is one constant,
 would make the proxy defer on doubt. The sessions answer is reused for 10 seconds, so a
 connection that opens or closes can take that long to be seen.
 
-**Limit.** Only the Decision Proxy process consults this. The SWE team orchestrator asks
-the same strategy in-process. At an `act` decision it still auto-approves without checking
-hours or connection. That is recorded as a finding in
-`io/tmp/2026.10.08-john-smartrouter-wiring-plan.md`.
+**The SWE team gate has its own switch.** The SWE team orchestrator asks the same strategy
+in-process. At an `act` decision it approves without asking anyone, whatever the hour.
+The key `swe engineering proxy ask before act` changes that. It ships `false`, which keeps
+today's behaviour. Set it `true` and an `act` decision no longer approves by itself.
+The gate sends the question as a notification, the route the Decision Proxy watches.
+The proxy then answers when you are away and defers when you are connected. Other decision kinds (suggest, defer, shadow) behave the same either way. The
+orchestrator reads the key when a SWE job starts.
+
+Not measured: whether any SWE job runs in active trust mode today.
 
 ---
 

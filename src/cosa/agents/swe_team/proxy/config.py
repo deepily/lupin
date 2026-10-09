@@ -35,6 +35,10 @@ DEFAULT_TESTING_CAP_LEVEL       = 5
 DEFAULT_DEPS_CAP_LEVEL          = 5
 DEFAULT_GENERAL_CAP_LEVEL       = 5
 
+# When True, a proxy "act" answer no longer approves on its own: the gate asks
+# through the notification route (the decision proxy answers when the human is away).
+DEFAULT_ASK_BEFORE_ACT          = False
+
 
 # ============================================================================
 # Factory: INI Config → SWE Proxy Config Dict
@@ -48,7 +52,8 @@ def swe_proxy_config_from_config_mgr( config_mgr ):
         - config_mgr is a ConfigurationManager instance with LUPIN_CONFIG_MGR_CLI_ARGS
 
     Ensures:
-        - Returns dict with 4 SWE-specific proxy config values
+        - Returns dict with 5 SWE-specific proxy config values
+        - ask_before_act is a bool, False unless the INI key is true
         - accepted_senders is parsed as comma-separated list (stripped)
         - Falls back to module-level defaults for any missing keys
 
@@ -69,4 +74,5 @@ def swe_proxy_config_from_config_mgr( config_mgr ):
         "deployment_cap_level"   : config_mgr.get( "swe engineering proxy deployment cap level",   default=DEFAULT_DEPLOYMENT_CAP_LEVEL,   return_type="int" ),
         "destructive_cap_level"  : config_mgr.get( "swe engineering proxy destructive cap level",  default=DEFAULT_DESTRUCTIVE_CAP_LEVEL,  return_type="int" ),
         "architecture_cap_level" : config_mgr.get( "swe engineering proxy architecture cap level", default=DEFAULT_ARCHITECTURE_CAP_LEVEL, return_type="int" ),
+        "ask_before_act"         : config_mgr.get( "swe engineering proxy ask before act",         default=DEFAULT_ASK_BEFORE_ACT,         return_type="boolean" ),
     }

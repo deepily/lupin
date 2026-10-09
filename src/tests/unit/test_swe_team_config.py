@@ -503,7 +503,7 @@ class TestSweProxyConfigFactory:
     """Tests for swe_proxy_config_from_config_mgr factory function."""
 
     def test_factory_returns_all_expected_keys( self ):
-        """Factory returns dict with all 4 SWE-specific keys."""
+        """Factory returns dict with all 5 SWE-specific keys."""
         from unittest.mock import MagicMock
         from cosa.agents.swe_team.proxy.config import swe_proxy_config_from_config_mgr
 
@@ -514,7 +514,7 @@ class TestSweProxyConfigFactory:
 
         expected_keys = {
             "accepted_senders", "deployment_cap_level",
-            "destructive_cap_level", "architecture_cap_level",
+            "destructive_cap_level", "architecture_cap_level", "ask_before_act",
         }
         assert set( result.keys() ) == expected_keys
 
