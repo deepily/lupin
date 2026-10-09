@@ -23,9 +23,15 @@ from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 _E2E_UI = Path( __file__ ).resolve().parents[ 1 ] / "e2e_ui"
 if str( _E2E_UI ) not in sys.path: sys.path.insert( 0, str( _E2E_UI ) )
 
+# The e2e_ui conftest pins the Testing config block in os.environ when it is imported. Pytest imports this file
+# during collection, before any test runs, so that pin would stay for the whole unit run. Put the variable back.
+_CONFIG_VAR    = "LUPIN_CONFIG_MGR_CLI_ARGS"
+_CONFIG_BEFORE = os.environ.get( _CONFIG_VAR )
 _spec = importlib.util.spec_from_file_location( "e2e_ui_conftest_under_test", _E2E_UI / "conftest.py" )
 _conftest = importlib.util.module_from_spec( _spec )
 _spec.loader.exec_module( _conftest )
+if _CONFIG_BEFORE is None: os.environ.pop( _CONFIG_VAR, None )
+else:                      os.environ[ _CONFIG_VAR ] = _CONFIG_BEFORE
 _FIXTURE = _conftest.assert_snapshot_height_tolerant._get_wrapped_function()
 
 GREY = ( 120, 120, 120, 255 )
@@ -76,3 +82,8 @@ def test_a_mismatch_over_the_tolerance_still_fails_and_saves_its_pictures( drive
     assert capsys.readouterr().out == "", "a failure must not print the forgiven line"
     assert driven.recorded == [ ]
     assert ( driven.failures / "test_card_visual" / "test_card" / f"actual_{NAME}" ).is_file(), "the failing capture was not saved"
+
+
+def test_loading_the_e2e_conftest_leaves_the_config_block_as_it_was():
+    assert os.environ.get( _CONFIG_VAR ) == _CONFIG_BEFORE
+    assert _CONFIG_BEFORE is None or "Testing" not in _CONFIG_BEFORE
