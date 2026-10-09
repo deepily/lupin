@@ -21,6 +21,7 @@ import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
 import type { TransitionExtras } from "../render/taskVerbs";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
+import { alreadyAtTarget } from "./alreadyAtTarget";
 
 /**
  * Raised when the transition door answers "Rick has not been asked yet".
@@ -326,6 +327,11 @@ class TaskListStoreImpl implements TaskListStore {
         throw new AwaitingHumanApprovalError( String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ) );
       }
       return undefined;
+    } ).catch( async ( err: unknown ) => {
+      // Row 71a11ed7: the optimistic row already shows `toStatus`; if the server says the row is
+      // there, keep it. Any other rejection (including the 202 error above) rethrows to rollback.
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return undefined;
+      throw err;
     } );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }

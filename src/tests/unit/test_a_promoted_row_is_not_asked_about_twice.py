@@ -315,3 +315,33 @@ def test_a_refused_row_stays_askable_and_that_is_correct( client, repo, settings
     _post( client, item, "queued", MANAGER )
 
     assert len( gate[ "asks" ] ) == 2, "a refused row must remain promotable"
+
+
+# Bug 71a11ed7, server half.
+def test_a_second_approve_writes_no_second_event_and_answers_422( client, repo, settings, gate ):
+    """
+    A repeat approve answers 422 and writes no second event.
+
+    The page used to show "Approve refused" for an approve that had taken effect.
+    It now re-reads the row and treats a row already at the target as approved.
+    That is sound only while the server keeps this contract.
+    The first approve is a 200 that writes one event.
+    The repeat is a 422 that writes nothing.
+
+    The count is read off apply_transition, the one call that writes the audit event.
+    A second event therefore cannot hide behind a 422 body.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    item = _item( status="not_approved" )
+    _armed( repo, item )
+
+    r1 = _post( client, item, "queued", MANAGER )
+    assert r1.status_code == 200, r1.text
+    assert repo.apply_transition.call_count == 1, "the first approve must write exactly one event"
+
+    item.status = "queued"
+    r2 = _post( client, item, "queued", MANAGER )
+
+    assert r2.status_code == 422, r2.text
+    assert "no-op transition 'queued'->'queued'" in r2.text
+    assert repo.apply_transition.call_count == 1, "the repeat wrote a second event"

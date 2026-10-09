@@ -290,14 +290,17 @@ function holdingStore(): { store: any; issued: Issued[] } {
 // run, so a NEW mutating call site added to either client reddens here instead of
 // shipping unwatched.
 
-test( "CENSUS: the legacy card's mutating row-request surface is exactly the two doors driven below", () => {
+test( "CENSUS: the legacy card's per-row request surface is the two mutating doors driven below plus one read", () => {
   const src = readFileSync( NOTIFICATIONS_JS, "utf8" );
   // Every authedFetch against a task ROW — the `${` is what distinguishes a per-row
   // endpoint from the flow-ratio singletons, which are out of scope by construction.
   const sites = [ ...src.matchAll( /authedFetch\(\s*`\/api\/tasks\/\$\{[^`]*`/g ) ].map( m => m[ 0 ] );
-  assert.equal( sites.length, 2,
-    `the legacy card now has ${ sites.length } per-row request sites, not 2. A new one has ` +
-    `appeared and nothing in this file drives it:\n  ${ sites.join( "\n  " ) }` );
+  // Row 71a11ed7: the third site is `_rowIsAlreadyAt`, a bare GET that re-reads one row after a 422.
+  // It mutates nothing, so it is counted here and driven by
+  // a_refused_approve_on_a_row_already_queued_is_a_success.test.ts, not below.
+  assert.equal( sites.length, 3,
+    `the legacy card now has ${ sites.length } per-row request sites, not 3 (two mutating doors and the ` +
+    `row re-read). A new one has appeared and nothing in this file drives it:\n  ${ sites.join( "\n  " ) }` );
   // Both must encode. This is asserted on the SOURCE as well as driven below, because the
   // drive can only ever speak for the paths it exercises.
   for ( const site of sites ) {

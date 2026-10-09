@@ -31,6 +31,7 @@ import { deriveTaskActor } from "../render/taskListModel";
 import type { TaskPatchFields } from "./TaskListStore";
 import type { TransitionExtras } from "../render/taskVerbs";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
+import { alreadyAtTarget } from "./alreadyAtTarget";
 
 /**
  * Narrowed ApiClient surface. `get` feeds the poll; `post` carries the batch
@@ -334,6 +335,8 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
       }
       return { ok: true };
     } catch ( err ) {
+      // Row 71a11ed7: a refused transition on a row already at the target is a success.
+      if ( await alreadyAtTarget( this.api, id, toStatus, err ) ) return { ok: true };
       return { ok: false, message: holdingRefusalMessage( err ) };
     }
   }

@@ -11619,6 +11619,12 @@ class NotificationsUI {
                 return { ok: false, pending: true, ticketId: ticketId, message: "Waiting on Rick — he has not been asked yet." };
             }
             if ( response.ok ) return { ok: true };
+            // 🔴 ROW 71a11ed7 — A REFUSED TRANSITION ON A ROW ALREADY AT THE TARGET IS A SUCCESS.
+            // A second approve landed after the first had committed; the server wrote nothing and
+            // said "no-op queued->queued", and this page showed that as "Approve refused" for a
+            // promotion that worked. The server's message is unchanged (other callers read it); the
+            // page takes its advice and re-reads the row. The test is the row's STATUS, never the text.
+            if ( response.status === 422 && await this._rowIsAlreadyAt( taskId, toStatus ) ) return { ok: true };
             let detail = `${response.status}`;
             try {
                 const body = await response.json();
@@ -11627,6 +11633,25 @@ class NotificationsUI {
             return { ok: false, message: detail };
         } catch ( e ) {
             return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    async _rowIsAlreadyAt( taskId, toStatus ) {
+        /**
+         * True iff GET /api/tasks/{id} says the row's status is already `toStatus`.
+         *
+         * Ensures:
+         *     - one read, only ever called after a 422
+         *     - false when the read fails or answers a non-2xx: the original refusal then stands
+         *     - never throws
+         */
+        try {
+            const response = await this.authedFetch( `/api/tasks/${encodeURIComponent( taskId )}` );
+            if ( !response.ok ) return false;
+            const row = await response.json();
+            return !!row && row.status === toStatus;
+        } catch ( e ) {
+            return false;
         }
     }
 
@@ -14671,6 +14696,14 @@ class NotificationsUI {
         // The restore is in a `finally` and may land on a DETACHED button — `refreshTaskList`
         // repaints the pane out from under it. That is harmless by design, and cheaper than
         // re-finding the row to avoid it.
+        // 🔴 ROW 71a11ed7 — THE GUARD LIVES ON THE PAGE, NOT ON THE BUTTON. The button below is
+        // disabled for the round trip, but a repaint (task_store_changed, the priority refresh) can
+        // replace it with a fresh live Submit while the first request is still out, and a second
+        // press then fires a second transition. Keyed by row + verb so another row is unaffected.
+        const inFlightKey = `${taskId}:${verb}`;
+        if ( !this._verbInFlight ) this._verbInFlight = new Set();
+        if ( this._verbInFlight.has( inFlightKey ) ) return;
+        this._verbInFlight.add( inFlightKey );
         const resting = button ? button.textContent : "";
         if ( button ) {
             button.disabled    = true;
@@ -14680,6 +14713,7 @@ class NotificationsUI {
         try {
             result = await this._transitionTask( taskId, needs.status, extras );
         } finally {
+            this._verbInFlight.delete( inFlightKey );
             if ( button ) {
                 button.disabled    = false;
                 button.textContent = resting;
