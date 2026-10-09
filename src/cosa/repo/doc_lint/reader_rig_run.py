@@ -428,10 +428,13 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
         - when a cap stops a call, halt["reason"] takes its message; that pair and every later pair, in this
           file and the next, make no call and are recorded unscored on both texts with step "cap"
         - returns { old_scores, new_scores, old_total, new_total, compared, dropped, old_answered, new_answered,
-          unscored_records, salvaged_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
+          unscored_records, salvaged_records, by_question, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
         - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raws
         - each salvaged record holds file, text, run, id, the score taken and the raw reply cut by cut_raw to its head and tail; only
           pairs that were compared get one, since only they are in the totals
+        - by_question is { question id: { old, new, old_total, new_total } } in the group's order; old and new list that
+          text's score for each run, 1 or 0, or None when that text was not scored (failed or stopped by a cap); the
+          two totals add only the pairs that were compared, so over the questions they sum to the file's old_total and new_total
         - old_mean and new_mean are None when nothing was compared
         - passes is None when any pair was dropped, else new_total >= old_total
     """
@@ -440,6 +443,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
     per_run   = { "old": [], "new": [] }
     records   = []
     salvaged  = []
+    by_question = { q[ "id" ]: { "old": [], "new": [], "old_total": 0, "new_total": 0 } for q in group }
     compared  = 0
     dropped   = 0
     for run in range( config.runs ):
@@ -455,6 +459,8 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
                 stopped = { "step": "cap", "error": halt[ "reason" ], "raws": [] }
                 outcome = ( ( None, stopped, None ), ( None, stopped, None ) )
             ( old, old_failure, old_salvage ), ( new, new_failure, new_salvage ) = outcome
+            by_question[ q[ "id" ] ][ "old" ].append( old )
+            by_question[ q[ "id" ] ][ "new" ].append( new )
             for label, failure in ( ( "old", old_failure ), ( "new", new_failure ) ):
                 if failure is not None: records.append( dict( failure, file=path, text=label, run=run, id=q[ "id" ] ) )
             answered[ "old" ] += old is not None
@@ -468,11 +474,13 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             run_compared += 1
             run_totals[ "old" ] += old
             run_totals[ "new" ] += new
+            by_question[ q[ "id" ] ][ "old_total" ] += old
+            by_question[ q[ "id" ] ][ "new_total" ] += new
         for label in ( "old", "new" ):
             totals[ label ] += run_totals[ label ]
             per_run[ label ].append( run_totals[ label ] / run_compared if run_compared else None )
     return { "old_scores": per_run[ "old" ], "new_scores": per_run[ "new" ], "old_total": totals[ "old" ], "new_total": totals[ "new" ],
-             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records, "salvaged_records": salvaged,
+             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records, "salvaged_records": salvaged, "by_question": by_question,
              "old_mean": totals[ "old" ] / compared if compared else None, "new_mean": totals[ "new" ] / compared if compared else None,
              "passes": None if dropped else totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
 
