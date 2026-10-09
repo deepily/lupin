@@ -84,7 +84,7 @@ def test_word_count_bounds( src_root ):
     short = "A function that returns nothing."
     long  = "A function that " + " ".join( ["word"] * 40 ) + "."
     edge8 = "A function that does one small job ok."
-    edge40 = "A function that " + " ".join( ["word"] * 34 ) + " end."
+    edge40 = "A function that " + " ".join( ["word"] * 36 ) + " end."
     assert nw.check_form( short, _input( src_root ) ) == [ "word_count" ]
     assert nw.check_form( long, _input( src_root ) )  == [ "word_count" ]
     assert len( edge8.split() ) == 8 and nw.check_form( edge8, _input( src_root ) ) == []
@@ -187,6 +187,7 @@ def test_run_members_redo_replaces_only_named_members( src_root, tmp_path ):
     records = asyncio.run( nw.run_members( ids, src_root, str( out ), redo, redo={ "pk.mod.parse_result_block": [ "own_identifier" ] } ) )
     assert len( redo.prompts ) == 1 and "own_identifier" in redo.prompts[ 0 ]
     assert "gives back" in records[ 0 ][ "need" ] and records[ 1 ][ "need" ].startswith( "A class" )
+    assert [ r[ "rewrites" ] for r in records ] == [ 1, 0 ]
 
 
 def test_run_members_rejects_duplicate_ids( src_root, tmp_path ):
@@ -206,6 +207,7 @@ def _fake_sdk( messages, seen ):
 def test_sdk_reply_runs_with_tools_off_and_reads_the_result( monkeypatch ):
     seen     = []
     messages = [
+        object(),
         AssistantMessage( content=[ TextBlock( text="A function that " ), TextBlock( text="does it." ) ], model="m" ),
         ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="sess-9",
                        total_cost_usd=0.25, usage={ "input_tokens": 7, "output_tokens": 3 } ),
