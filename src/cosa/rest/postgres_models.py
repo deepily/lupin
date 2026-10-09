@@ -1319,6 +1319,29 @@ class ApprovalSetting( Base ):
                             server_default=func.now(), onupdate=func.now() )
 
 
+class PodcastProxySpentCard( Base ):
+    """
+    A podcast proxy card that has already started its one job.
+
+    Requires:
+        - card_id is the notification id of the yes/no card the server made for a seat's podcast ask
+
+    Ensures:
+        - one row per card: the primary key is the uniqueness rule, so two starts at once cannot both insert
+        - the row is written before the job is queued and removed again if queuing fails
+        - there is no foreign key to notifications, so a notification cleanup cannot erase the record
+        - job_id is filled in once the job exists
+    """
+    __tablename__ = "podcast_proxy_spent_cards"
+
+    card_id    = Column( UUID( as_uuid=True ), primary_key=True )
+    spent_at   = Column( DateTime( timezone=True ), nullable=False, server_default=func.now() )
+    started_by = Column( String( 255 ), nullable=False )
+    scope_path = Column( Text, nullable=False )
+    sha256     = Column( String( 64 ), nullable=False )
+    job_id     = Column( String( 64 ), nullable=True )
+
+
 class TaskItem( Base ):
     """
     Task-store item: one row per obligation in the unified task store.

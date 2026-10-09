@@ -268,4 +268,7 @@ def test_the_waiting_card_query_filters_on_kind_path_hash_state_and_expiry():
 
 def test_the_assembled_application_serves_the_ask_door():
     from lupin_app.main import app
-    assert "/api/podcast-proxy/ask" in { getattr( route, "path", "" ) for route in app.routes }
+    verbs = set()
+    for route in app.routes:
+        if getattr( route, "path", "" ) == "/api/podcast-proxy/ask": verbs |= set( route.methods )
+    assert verbs == { "POST" }
