@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-09-23-to-10-05](2026-09-23-to-10-05-history.md) | Sep 23 – Oct 5, 2026 | 19 entries | Mr. Radio's and Cheech's manager sessions of 2026-09-23 through 10-05, moved verbatim; not summarised here, read the entry titles |
 | [2026-09-06-to-19](2026-09-06-to-19-history.md) | Sep 6 – Sep 19, 2026 | 13 entries | Mr. Radio's manager sessions of 2026-09-06 through 09-19, moved verbatim; not summarised here, read the entry titles |
 | [2026-08-30-to-09-05](2026-08-30-to-09-05-history.md) | Aug 30 – Sep 5, 2026 | 9 sessions | Five tools with one shape (a clean exit meaning nothing happened); the checked-hash control going live; the audio socket that never reused the queue session id; four wrong numbers in an evening; workers refusing easier assertions and a memento five hours stale; one ask starving every other verb |
 | [2026-08-21-to-29](2026-08-21-to-29-history.md) | Aug 21 – Aug 29, 2026 | 8 sessions | Two branches that looked like one; a manager self-respun six times and another nine; the monopolize slot that answers an identity question and not an idleness one; stale bytecode defeating mutation testing in both directions; checked-hash invalidation ruled repo-wide; the coverage gate joining the merge pyramid; and the worktree artifacts a tier cannot see |
