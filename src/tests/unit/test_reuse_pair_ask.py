@@ -41,7 +41,7 @@ def test_pair_ask_returns_each_answer_with_provides_coverage_and_score( env ):
     one = out[ "answered" ][ "cosa.feeds.parse_feed" ]
     assert set( one ) == { "provides", "coverage", "score" } and one[ "provides" ] > out[ "answered" ][ "cosa.mathx.add" ][ "provides" ]
     assert one[ "score" ] > out[ "answered" ][ "cosa.mathx.add" ][ "score" ] > 0 and one[ "coverage" ] > out[ "answered" ][ "cosa.mathx.add" ][ "coverage" ]
-    assert set( out[ "stats" ] ) == { "failed", "not_checked", "stopped_by", "requests", "attempt_counts" } and out[ "stats" ][ "requests" ] == 1
+    assert set( out[ "stats" ] ) == { "failed", "not_checked", "stopped_by", "requests", "attempt_counts" } and out[ "stats" ][ "requests" ] == 1 and out[ "stats" ][ "stopped_by" ] is None
 
 
 def test_pair_ask_separates_a_malformed_entry_from_an_unasked_one( env ):
@@ -70,3 +70,14 @@ def test_the_stage_two_driver_turns_a_pair_sweep_into_rows( env ):
     rows    = { r[ "candidate" ]: r for r in out[ "rows" ] }
     assert sorted( rows ) == sorted( e[ "id" ] for e in entries ) and rows[ "cosa.feeds.parse_feed" ][ "provides" ] > rows[ "cosa.mathx.add" ][ "provides" ]
     assert out[ "shortlist" ][ 0 ] == { "id": "cosa.feeds.parse_feed" } and all( r[ "unasked" ] is False for r in rows.values() )
+
+
+def test_pair_ask_reports_why_the_sweep_stopped_when_the_model_named_is_not_the_model_served( env ):
+    class Other( fake.PairFake ):
+        def post_with_meta( self, body ):
+            response, meta = super().post_with_meta( body )
+            return dict( response, model="jev-other" ), meta
+    entries = entries_of( env )
+    out     = rp.pair_ask( packed_ctx( env, Other( entries ) ), NEED, entries )
+    assert out[ "stats" ][ "stopped_by" ] == "model_mismatch" and out[ "answered" ] == {} and out[ "stats" ][ "failed" ] == len( entries )
+    assert out[ "unasked" ] == [ e[ "id" ] for e in entries ]
