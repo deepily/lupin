@@ -66,6 +66,7 @@ def _run( drift_rc=None, extra_args=(), recreate_args=RECREATE_ARGS ):
     env[ "PATH" ]                = str( fakebin ) + os.pathsep + env[ "PATH" ]
     env[ "UNWARNED_PAUSE_SECS" ] = "0"
     env[ "LUPIN_DB_GRANTS_CHECK" ]  = "skip"     # the grants step has its own tests; these assert the exact docker calls
+    env[ "LUPIN_CLAUDE_LOGIN_CHECK" ] = "skip"     # the login step has its own tests (test_dev_claude_login_check.py)
     env[ "HEALTH_CONSECUTIVE" ]  = "1"
     result = subprocess.run( [ "bash", _SCRIPT, *extra_args ], env=env, capture_output=True, text=True, timeout=30 )
     issued = calls.read_text().splitlines() if calls.exists() else [ ]

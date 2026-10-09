@@ -326,6 +326,18 @@ if "${SCRIPT_DIR}/lib/wait-for-health.sh" "${health_args[@]}"; then
     else
         log "OK: $CONTAINER healthy in ${elapsed}s — ${HEALTH_CONSECUTIVE} consecutive health checks. The server's startup hook emits the all-clear."
     fi
+    # The Claude login in this container: warn only. A bounce cannot renew a login and the server is healthy,
+    # so the exit code does not change. LUPIN_CLAUDE_LOGIN_CHECK=skip turns the step off (tests that stub docker set it).
+    if [ "${LUPIN_CLAUDE_LOGIN_CHECK:-on}" != "skip" ]; then
+        login_fails=0
+        run_cmd()  { "$@"; }
+        say_ok()   { if [ "$QUIET" -eq 0 ]; then echo "$1"; fi; }
+        say_fail() { echo "WARNING: $1" >&2; login_fails=$(( login_fails + 1 )); }
+        remedy()   { echo "         remedy: $1" >&2; }
+        # shellcheck source=lib/claude-login-probe.sh
+        source "${SCRIPT_DIR}/lib/claude-login-probe.sh"
+        probe_claude_login "$CONTAINER"
+    fi
     # The database roles' grants: check, and repair once when LUPIN_DB_GRANTS_REPAIR=on (off until the one-time
     # apply has been run by hand). The server is already up, so this never undoes the bounce: a red answer is
     # reported, and it sets the exit code only after a repair attempt that left the roles short.

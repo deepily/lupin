@@ -50,7 +50,7 @@ from enum import Enum
 from typing import Optional, Callable, Any, TypedDict
 from datetime import datetime
 
-from cosa.agents.shared.sdk_error_result import error_result_text, raise_error_result
+from cosa.agents.shared.sdk_error_result import error_result_text, login_hint, raise_error_result
 
 logger = logging.getLogger( __name__ )
 
@@ -363,9 +363,9 @@ class ClaudeCodeDispatcher:
 
             if final_result and final_result.get( "is_error" ):
                 # The CLI's own text lives in the result line, not in stderr; any exit code
-                error = error_result_text( SimpleNamespace(
+                error = login_hint( error_result_text( SimpleNamespace(
                     subtype=final_result.get( "subtype" ), result=final_result.get( "result" ),
-                    errors=final_result.get( "errors" ) ) )
+                    errors=final_result.get( "errors" ) ) ) )
                 if stderr_data: error += f"; stderr: {stderr_data.decode()[ :500 ]}"
                 return TaskResult(
                     task_id=task.id,
