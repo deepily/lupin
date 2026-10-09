@@ -545,7 +545,7 @@ case "$test_login_state" in
         report pass WARN "$( basename "$ENV_FILE" ) supplies LUPIN_TEST_DB_PASSWORD (value not shown)" ;;
     PLAIN)
         report fail WARN "$( basename "$ENV_FILE" ) does not supply LUPIN_TEST_DB_PASSWORD — tests that create databases run as DB_USER (plain mode)" \
-                      "put the lupin-db-test-password secret in it: LUPIN_TEST_DB_PASSWORD=\$(gcloud secrets versions access latest --secret=lupin-db-test-password), then recreate the container; the lupin_test user and the template database must already exist on Cloud SQL" ;;
+                      "put the VALUE of the Secret Manager secret lupin-db-test-password on a LUPIN_TEST_DB_PASSWORD= line in it (an env file does not run commands, so paste the value; fetch it with: gcloud secrets versions access latest --secret=lupin-db-test-password), then recreate the container; the lupin_test user and the template database must already exist on Cloud SQL" ;;
     *)
         report unknown WARN "$( basename "$ENV_FILE" ) could not be read, so LUPIN_TEST_DB_PASSWORD is unchecked" \
                       "check that $ENV_FILE exists and is readable by this user" ;;

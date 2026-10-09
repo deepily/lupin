@@ -19,6 +19,7 @@ DRIVER = """
 source "$PROBE"
 say_ok()   { echo "OK: $1"; }
 say_fail() { echo "FAIL: $1"; }
+say_warn() { echo "WARN: $1"; }
 remedy()   { echo "REMEDY: $1"; }
 probe_test_login_secret
 """
@@ -70,3 +71,25 @@ def test_the_probe_never_reads_the_content( tmp_path ):
 def test_the_preflight_script_runs_the_probe_after_the_grants_probe():
     text = open( SCRIPT ).read()
     assert text.index( "probe_db_grants\n" ) < text.index( "probe_test_login_secret\n" ) < text.index( "# ── Summary" )
+
+
+@pytest.mark.skipif( os.geteuid() == 0, reason="root searches every directory" )
+def test_a_directory_this_login_cannot_search_is_a_warning_not_a_missing_file( tmp_path ):
+    folder = tmp_path / "secrets"
+    folder.mkdir()
+    path = folder / "db_test_password"
+    path.write_text( "pw" )
+    path.chmod( 0o440 )
+    folder.chmod( 0o000 )
+    try: out = _run( path )
+    finally: folder.chmod( 0o750 )
+    assert out.startswith( "WARN: test login secret" ) and "cannot search" in out
+    assert "is missing" not in out and "FAIL" not in out
+    assert f"member of group {os.getgid()}" in out and "busybox stat" in out
+
+
+def test_the_default_path_is_the_test_password_file_in_the_secrets_directory():
+    env = { k: v for k, v in os.environ.items() if not k.startswith( "TEST_LOGIN_SECRET" ) }
+    env[ "PROBE" ] = PROBE
+    out = subprocess.run( [ "bash", "-c", DRIVER ], env=env, capture_output=True, text=True, timeout=30 ).stdout
+    assert "/etc/lupin/secrets/db_test_password" in out and "db_app_password" not in out

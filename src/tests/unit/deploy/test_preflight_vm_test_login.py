@@ -51,3 +51,13 @@ def test_the_runner_reports_the_three_states_as_warn_tier_and_names_the_secret()
     assert block.count( "WARN" ) >= 3 and "BLOCK" not in block
     assert "lupin-db-test-password" in block and "report pass" in block and "report unknown" in block
     assert subprocess.run( [ "bash", "-n", RUNNER ] ).returncode == 0
+
+
+def test_the_plain_case_is_a_warning_and_names_the_right_secret_and_asks_for_the_value():
+    text  = open( RUNNER ).read()
+    block = text[ text.index( "# B8 —" ): text.index( "if layer_runs B; then" ) ]
+    plain = block[ block.index( "PLAIN)" ): block.index( "*)" ) ]
+    assert "report fail WARN" in plain and "report pass" not in plain and "BLOCK" not in plain
+    assert "lupin-db-test-password" in plain and "lupin-db-password" not in plain.replace( "lupin-db-test-password", "" )
+    assert "VALUE" in plain and "does not run commands" in plain
+    assert "LUPIN_TEST_DB_PASSWORD=$(" not in block, "an env file does not run a command substitution"
