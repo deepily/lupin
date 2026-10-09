@@ -251,6 +251,21 @@ def test_a_redo_prompt_carries_no_word_until_the_writer_has_used_one( src_root )
     assert 'the word "' not in fake.prompts[ 0 ]
 
 
+# --- word count on retry ---------------------------------------------------
+
+def test_retry_after_word_count_says_how_many_words_the_last_sentence_had( src_root ):
+    long = "A function that " + " ".join( ["word"] * 45 ) + "."
+    fake = FakeQuery( [ long, GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake ) )
+    assert "had 49 words" in fake.prompts[ 1 ] and "8 to 40" in fake.prompts[ 1 ]
+
+
+def test_retry_for_another_kind_carries_no_word_count( src_root ):
+    fake = FakeQuery( [ "Reads things quickly in a single pass over everything it is given here.", GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake ) )
+    assert " words" not in fake.prompts[ 1 ].split( "rejected" )[ 1 ]
+
+
 # --- write_need -------------------------------------------------------------
 
 def test_write_need_accepts_first_good_reply( src_root ):
