@@ -199,6 +199,12 @@ def test_a_waiting_card_for_the_same_file_is_named_not_asked_twice( repos ):
     assert out[ "reason" ] == "card_already_waiting" and out[ "detail" ] == "card abc waits"
 
 
+def test_a_waiting_card_named_in_its_own_field_is_offered_for_resume( repos ):
+    waiting = { "status": "error", "http_status": 409, "detail": { "code": "card_waiting", "message": "m", "card_id": "c7" } }
+    out = run( Server( waiting, [] ), repos )
+    assert out[ "reason" ] == "card_already_waiting" and out[ "card_id" ] == "c7" and "card_id=c7" in out[ "retry" ]
+
+
 def test_a_refused_path_never_reaches_the_server( repos ):
     server = Server( ASK(), [] )
     out = pfr.podcast_for_rick_impl( "http://s", "key", "a", "relative.md", request_fn=server.request, sleep_fn=server.sleep, now_fn=server.clock )

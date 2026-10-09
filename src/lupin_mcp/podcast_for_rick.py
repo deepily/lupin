@@ -150,7 +150,7 @@ def podcast_for_rick_impl(
         - returns { status: "expired", card_id } when the card's expiry passes unanswered
         - returns { status: "error", reason, detail } for a path refusal, a refused ask, a refused start, or an unreadable card
         - reason is the server's detail.code when it sent one; prose is never parsed
-        - a card already waiting for the same file surfaces as reason "card_already_waiting"
+        - a card already waiting for the same file surfaces as reason "card_already_waiting", with its card_id and a resume hint when the server names it
         - a refused start for queue_failed adds a retry hint: the card is still valid
         - a card_id that belongs to a different file than host_path is refused before any poll or start
         - a card the server reports as spent is refused with its job id, and start is not called
@@ -178,7 +178,12 @@ def podcast_for_rick_impl(
             refused = { **asked, "stage": "ask" }
             code    = _code_of( asked )
             if code is not None: refused[ "reason" ] = code
-            if asked.get( "http_status" ) == 409: refused[ "reason" ] = "card_already_waiting"
+            if asked.get( "http_status" ) == 409:
+                refused[ "reason" ] = "card_already_waiting"
+                waiting = asked[ "detail" ].get( "card_id" ) if isinstance( asked.get( "detail" ), dict ) else None
+                if waiting:
+                    refused[ "card_id" ] = waiting
+                    refused[ "retry" ] = f"A card for this file already waits: call podcast_for_rick with card_id={waiting} to resume it."
             return refused
         card_id = asked.get( "card_id" )
     else:
