@@ -374,7 +374,7 @@ def test_the_ruling_note_marks_the_rule_as_the_managers_and_open_to_change():
 def test_the_cli_resolves_a_proposed_class_file_into_final_classes( tmp_path, capsys ):
     root     = _repo( tmp_path, { A: "# a\n", B: "# b\n", "src/docs/guide.md": "see %s\n" % A } )
     proposed = tmp_path / "proposed.tsv"
-    proposed.write_text( "%s\thistory\n%s\thistory\n" % ( A, B ), encoding="utf-8" )
+    proposed.write_text( "%s\thistory\n\n%s\thistory\textra column\n" % ( A, B ), encoding="utf-8" )
     assert rnd_gate0.main( [ "--repo-root", str( root ), "--proposed", str( proposed ) ] ) == 0
     lines = capsys.readouterr().out.splitlines()
     assert lines[ 0 ].split( "\t" ) == [ "path", "proposed", "class", "holds", "passes" ]
