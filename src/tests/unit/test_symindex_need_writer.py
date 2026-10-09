@@ -122,6 +122,17 @@ def test_prompt_holds_stripped_text_and_rules( src_root ):
     assert "parse_result_block" not in prompt
 
 
+def test_prompt_warns_off_plain_input_words_without_naming_this_members_names( src_root ):
+    prompt = nw.build_prompt( _input( src_root ) )
+    assert "text, data, value" in prompt
+    assert "raw_text" not in prompt and "strict" not in prompt
+
+
+def test_retry_hint_for_own_identifier_says_a_plain_word_may_be_a_name( src_root ):
+    assert "plain everyday word" in nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ] )
+    assert "plain everyday word" not in nw.build_prompt( _input( src_root ), failures=[ "opener" ] )
+
+
 def test_retry_prompt_names_kind_of_failure_only( src_root ):
     prompt = nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ] )
     assert "own_identifier" in prompt
