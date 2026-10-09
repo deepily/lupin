@@ -225,3 +225,13 @@ def test_a_link_inside_the_scope_reports_the_file_it_lands_on( scope ):
     os.symlink( scope[ "root" ] / "io" / "tmp" / "real.md", scope[ "root" ] / "io" / "tmp" / "alias.md" )
     facts = _door( scope, "demo/io/tmp/alias.md" )
     assert facts[ "rel" ] == "io/tmp/real.md" and facts[ "name" ] == "real.md"
+
+
+def test_the_server_path_is_where_the_opened_file_lives_not_the_spelling_that_found_it( scope, monkeypatch, tmp_path ):
+    from cosa.rest.routers import docs_files
+    path  = _put( scope, "io/tmp/real.md" )
+    alias = tmp_path / "alias-root"
+    os.symlink( scope[ "root" ], alias )
+    cfg = scope[ "registry" ][ "demo" ]
+    monkeypatch.setattr( docs_files, "_resolve_scoped", lambda sent, registry: ( "demo", cfg, "io/tmp/real.md", str( alias / "io" / "tmp" / "real.md" ) ) )
+    assert _door( scope, "demo/io/tmp/real.md" )[ "server_path" ] == os.path.realpath( path )
