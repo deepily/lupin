@@ -287,6 +287,59 @@ def test_retry_for_another_kind_carries_no_word_count( src_root ):
     assert " words" not in fake.prompts[ 1 ].split( "rejected" )[ 1 ]
 
 
+# --- avoid words from the checker's resend list -----------------------------
+
+def test_prompt_names_each_avoid_word_and_nothing_else( src_root ):
+    prompt = nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ], avoid_words=[ "ledger", "unique" ] )
+    assert 'Do not use the word "ledger".' in prompt and 'Do not use the word "unique".' in prompt
+    assert prompt.count( "Do not use the word" ) == 2
+
+
+def test_prompt_without_avoid_words_has_no_such_sentence( src_root ):
+    assert "Do not use the word" not in nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ] )
+
+
+def test_avoid_words_must_be_bare_lower_case_words( src_root ):
+    for bad in ( "Ledger", "two words", "snake_case", "", "ledger.", "a1" ):
+        with pytest.raises( ValueError, match="bare lower-case" ):
+            nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ], avoid_words=[ bad ] )
+
+
+def test_write_need_gives_avoid_words_to_every_prompt( src_root ):
+    fake = FakeQuery( [ "Reads things.", GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake, failures=[ "own_identifier" ], avoid_words=[ "ledger" ] ) )
+    assert all( 'Do not use the word "ledger".' in prompt for prompt in fake.prompts ) and len( fake.prompts ) == 2
+
+
+def test_resend_list_maps_checks_and_keeps_avoid_words_for_identifier_only():
+    rows = [ { "member": "pk.a", "failed": [ "identifier" ], "avoid_words": [ "ledger" ] },
+             { "member": "pk.b", "failed": [ "member_text_run", "twin_text_run" ], "avoid_words": [ "ignored" ] },
+             { "member": "pk.c", "failed": [ "identifier", "member_text_run" ] } ]
+    redo, avoid = nw.redo_from_resend_list( rows )
+    assert redo == { "pk.a": [ "own_identifier" ], "pk.b": [ "member_text_run", "twin_text_run" ], "pk.c": [ "own_identifier", "member_text_run" ] }
+    assert avoid == { "pk.a": [ "ledger" ] }
+
+
+def test_run_members_passes_avoid_words_to_the_redo_prompt( src_root, tmp_path ):
+    out = tmp_path / "run"
+    ids = [ "pk.mod.parse_result_block" ]
+    asyncio.run( nw.run_members( ids, src_root, str( out ), FakeQuery( [ GOOD ] ) ) )
+    fake = FakeQuery( [ GOOD.replace( "returns", "gives back" ) ] )
+    asyncio.run( nw.run_members( ids, src_root, str( out ), fake, redo={ ids[ 0 ]: [ "own_identifier" ] }, avoid={ ids[ 0 ]: [ "ledger" ] } ) )
+    assert 'Do not use the word "ledger".' in fake.prompts[ 0 ]
+
+
+def test_main_resend_list_rewrites_the_named_member_with_its_avoid_words( src_root, tmp_path ):
+    out  = tmp_path / "out"
+    base = [ "--sample", _sample_file( tmp_path ), "--src-root", src_root, "--out", str( out ), "--limit", "1" ]
+    assert nw.main( base, reply_fn=FakeQuery( [ GOOD ] ) ) == 0
+    resend = tmp_path / "resend.json"
+    resend.write_text( json.dumps( [ { "member": "pk.mod.parse_result_block", "failed": [ "identifier" ], "avoid_words": [ "ledger" ] } ] ) )
+    fake = FakeQuery( [ GOOD.replace( "returns", "gives back" ) ] )
+    assert nw.main( base + [ "--resend-list", str( resend ) ], reply_fn=fake ) == 0
+    assert 'Do not use the word "ledger".' in fake.prompts[ 0 ] and "Failure kinds: own_identifier" in fake.prompts[ 0 ]
+
+
 # --- write_need -------------------------------------------------------------
 
 def test_write_need_accepts_first_good_reply( src_root ):
