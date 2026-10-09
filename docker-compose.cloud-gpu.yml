@@ -23,6 +23,7 @@
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
 #   DB_USER=lupin_app  DB_NAME=lupin_db_test
+#   LUPIN_TEST_DB_PASSWORD=<from Secret Manager `lupin-db-test-password`>  (empty = tests create databases as DB_USER)
 #
 # Launch:
 #   docker compose -f docker-compose.cloud-gpu.yml --env-file cloud-gpu.env up -d
@@ -241,6 +242,11 @@ services:
       DB_USER: ${DB_USER:-lupin_app}
       DB_NAME: ${DB_NAME:-lupin_db_test}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
+      # Row 80513825: the test role's login, for tests that create databases (cosa.utils.dotenv_password.clone_login).
+      # Optional. Empty password means plain mode: the tests create databases as the app login, as before.
+      # Set it from Secret Manager `lupin-db-test-password` at deploy to make them clone the vector template.
+      LUPIN_TEST_DB_USER: ${LUPIN_TEST_DB_USER:-lupin_test}
+      LUPIN_TEST_DB_PASSWORD: ${LUPIN_TEST_DB_PASSWORD:-}
       LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
       # JWT signing secret (row adce3547 / bug 8df98a96, 2026-08-18). REQUIRED, and
       # `:?` rather than a default for a reason. HISTORY, because it explains the shape:

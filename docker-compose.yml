@@ -472,6 +472,8 @@ services:
       - "1002"
     secrets:
       - db_app_password
+      # Row 80513825: the test role's password, for the tests that create databases. This service only.
+      - db_test_password
     command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
     ports:
       - "8000:7999"
@@ -656,6 +658,12 @@ services:
       # ⚠️ Applying this before /etc/lupin/secrets/db_app_password exists stops this service.
       DB_USER: lupin_app
       DB_PASSWORD_FILE: /run/secrets/db_app_password
+      # The test role's own login, read by cosa.utils.dotenv_password.clone_login. Tests that create a database
+      # make it through this login, which may create databases; the server itself stays lupin_app. The file is
+      # made by `provision-db-roles.sh --secrets-dir /etc/lupin/secrets` (one sudo command, every host) and
+      # checked by preflight-test-container.sh. ⚠️ Applying this before the file exists stops this service.
+      LUPIN_TEST_DB_USER: lupin_test
+      LUPIN_TEST_DB_PASSWORD_FILE: /run/secrets/db_test_password
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       # The model-server client's own credential — NOT the notifications key
@@ -787,6 +795,8 @@ services:
 secrets:
   db_app_password:
     file: /etc/lupin/secrets/db_app_password
+  db_test_password:
+    file: /etc/lupin/secrets/db_test_password
 
 volumes:
   pgadmin_data:

@@ -14,6 +14,7 @@ variable "secret_ids" {
   default = [
     "lupin-jwt-secret-key",
     "lupin-db-password",
+    "lupin-db-test-password",   # row 80513825: the lupin_test role, for tests that create databases
     "lupin-anthropic-api-key-firewalled",
     "lupin-openai-api-key",
     "lupin-groq-api-key",

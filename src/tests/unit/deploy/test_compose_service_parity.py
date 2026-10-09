@@ -310,6 +310,19 @@ KNOWN_DIVERGENT_ENV = {
         "cloud-gpu" : "2026-10-03 (row 80513825) — the VM has no /etc/lupin/secrets; its password "
                       "arrives as DB_PASSWORD from Secret Manager. See DB_PASSWORD.",
     },
+    "LUPIN_TEST_DB_USER": {
+        "dev-dev" : "2026-10-08 (row 80513825) — only the test server creates databases through the test login.",
+    },
+    "LUPIN_TEST_DB_PASSWORD_FILE": {
+        "dev-dev"   : "2026-10-08 (row 80513825) — only the test server mounts the test role file.",
+        "cloud-gpu" : "2026-10-08 — the VM has no /etc/lupin/secrets; its test password arrives as "
+                      "LUPIN_TEST_DB_PASSWORD from Secret Manager.",
+    },
+    "LUPIN_TEST_DB_PASSWORD": {
+        "dev-dev"  : "2026-10-08 (row 80513825) — dev and test read the test password from a file "
+                     "(LUPIN_TEST_DB_PASSWORD_FILE); only the VM takes it through the env.",
+        "dev-test" : "2026-10-08 — same.",
+    },
     "CLOUD_SQL_CONNECTION_NAME": {
         "dev-dev"  : "2026-07-26 — no Cloud SQL on dev.",
         "dev-test" : "2026-07-26 — same.",
