@@ -552,6 +552,11 @@ class TestTaskQueryImpl:
         assert calls[ "params" ] == { }
         assert calls[ "json" ]   is None
 
+    def test_blocked_by_persona_is_sent_when_set( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, blocked_by_persona="tiffany", terse=True )
+        assert calls[ "params" ] == { "blocked_by_persona": "tiffany", "terse": "true" }
+
     def test_set_filters_sent_unset_omitted( self, capture_request ):
         calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
         task_query_impl(

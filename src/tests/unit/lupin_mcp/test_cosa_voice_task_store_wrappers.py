@@ -260,6 +260,7 @@ class TestTaskQueryWrapper:
             "project"             : None,
             "item_class"          : None,
             "correlation_key"     : None,
+            "blocked_by_persona"  : None,
             "limit"               : None,
             "offset"              : None,
             "terse"               : False,                     # §G: defaults off (full rows)
@@ -273,7 +274,7 @@ class TestTaskQueryWrapper:
         monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
         cv.task_query.fn( owner_persona="sam", status="queued", gate_class="operator",
                           accountable_manager="tiberius", project="lupin", item_class="gate",
-                          correlation_key="todo:abc123", limit=7, offset=14 )
+                          correlation_key="todo:abc123", blocked_by_persona="tiffany", limit=7, offset=14 )
         assert captured[ "owner_persona" ]       == "sam"
         assert captured[ "status" ]              == "queued"
         assert captured[ "gate_class" ]          == "operator"
@@ -281,6 +282,7 @@ class TestTaskQueryWrapper:
         assert captured[ "project" ]             == "lupin"
         assert captured[ "item_class" ]          == "gate"
         assert captured[ "correlation_key" ]     == "todo:abc123"
+        assert captured[ "blocked_by_persona" ]  == "tiffany"
         assert captured[ "limit" ]               == 7
         assert captured[ "offset" ]              == 14
         assert captured[ "terse" ]               is False     # default when unset
