@@ -73,12 +73,16 @@ def world( monkeypatch, tmp_path ):
         yield MagicMock()
     monkeypatch.setattr( door, "get_db", fake_db )
     monkeypatch.setattr( door, "get_voice_persona", lambda sid: PERSONA if sid == SESSION_ID else None )
-    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: { "sender_id": f"claude.code@lupin.deepily.ai#{sid}" } if sid == SESSION_ID else None )
+    looked_up = [ ]
+    def bridge( sid, check_pid=True ):
+        looked_up.append( check_pid )
+        return { "sender_id": f"claude.code@cosa.deepily.ai#{sid}" } if sid == SESSION_ID else None
+    monkeypatch.setattr( door, "find_session_by_id", bridge )
     monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: NOW ) } ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: { "id": str( OPERATOR_ID ) } )
     monkeypatch.setattr( "lupin_cli.notifications.notification_models.resolve_target_user", lambda *a, **k: "rick@example.com" )
-    return { "root": root, "cards": cards, "queue": queue, "ws": ws }
+    return { "root": root, "cards": cards, "queue": queue, "ws": ws, "looked_up": looked_up }
 
 
 def _file( world, rel="io/tmp/summary.md", text="# A summary\n\nSome words, enough to hear.\n" ):
@@ -115,7 +119,7 @@ def test_a_seat_asking_makes_one_card_the_server_wrote_and_pushes_it( world ):
     assert card.recipient_id == OPERATOR_ID and card.response_requested is True
     assert card.response_type == "yes_no" and card.response_default == "no" and card.priority == "high"
     assert card.timeout_seconds == 900 and card.expires_at == datetime( 2026, 10, 8, 21, 15, tzinfo=timezone.utc )
-    assert card.sender_id == f"claude.code@lupin.deepily.ai#{SESSION_ID}"
+    assert card.sender_id == f"claude.code@cosa.deepily.ai#{SESSION_ID}"
     assert answer.json() == { "card_id": str( card.id ), "name": "summary.md", "size": path.stat().st_size, "sha256": digest,
                               "asked_by": f"Maya ({SESSION_ID})", "expires_at": "2026-10-08T21:15:00+00:00", "pushed": True }
 
@@ -288,7 +292,8 @@ def test_the_card_files_under_the_asking_seats_own_sender_with_its_persona( worl
     _file( world )
     _ask( world )
     card, pushed = world[ "cards" ].created[ 0 ], world[ "queue" ].pushed[ 0 ]
-    assert card.sender_id == pushed[ "sender_id" ] == f"claude.code@lupin.deepily.ai#{SESSION_ID}"
+    assert card.sender_id == pushed[ "sender_id" ] == f"claude.code@cosa.deepily.ai#{SESSION_ID}"
+    assert world[ "looked_up" ] == [ False ], "the server runs in a container, so the bridge lookup must not check pids"
     assert card.sender_persona == pushed[ "sender_persona" ] == "Maya" and card.sender_icon == pushed[ "sender_icon" ] == "🌻"
     assert pushed[ "voice_persona" ] == PERSONA
 
