@@ -144,3 +144,9 @@ def test_the_wilson_interval_and_the_exact_mcnemar_p_match_hand_computed_values(
     assert e2e.mcnemar_exact( 5, 0 ) == 0.0625
     assert e2e.mcnemar_exact( 3, 3 ) == 1.0
     assert round( e2e.mcnemar_exact( 9, 2 ), 6 ) == 0.065430
+
+
+def test_a_file_with_the_right_hash_that_is_not_json_is_refused( tmp_path ):
+    path = tmp_path / "sample.json"
+    path.write_text( "not json", encoding="utf-8" )
+    with pytest.raises( e2e.FrozenInputRefused, match="not JSON" ): e2e.load_sample( path, sha_of( "not json" ) )
