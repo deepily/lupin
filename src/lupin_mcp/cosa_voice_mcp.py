@@ -4146,6 +4146,7 @@ def dm_list(
 # workflow/task-store-discipline.md.
 
 from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_ask_unpark_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
+from lupin_mcp.podcast_for_rick import podcast_for_rick_impl
 
 
 def _task_store_identity() -> str:
@@ -4677,6 +4678,47 @@ def task_ask_unpark(
         api_key      = _mcp_outbound_api_key(),
         actor        = _task_store_identity(),
         task_id      = task_id,
+    )
+
+
+@mcp.tool
+@_offloaded_tool
+def podcast_for_rick(
+    path : str,
+) -> dict:
+    """
+    Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
+
+    One call does the exchange. The server checks the file and makes the card, which shows Rick the file's
+    name and size. This tool polls the card until he answers or it expires, then starts the job.
+    It blocks until then, up to about 10 minutes. Only a yes that a person gave starts anything.
+
+    Args:
+        path: Absolute path to a file in the main checkout of a registered repo. A file inside a
+            git worktree is refused, because the server cannot see it: write it to the main checkout's io/tmp.
+
+    Returns:
+        { status: "started", card_id, ... } after a yes and a successful start;
+        { status: "declined", card_id } for a no or neither;
+        { status: "default_used", card_id } when the card timed out on its default;
+        { status: "expired", card_id } when nobody answered in time;
+        or { status: "error", reason, detail, stage? } with reasons path_not_absolute, file_not_found,
+        outside_any_repo, inside_a_worktree, card_already_waiting, ask_answer_malformed, card_unreadable,
+        card_already_spent, or the server's own refusal verbatim.
+
+    The actor is not a parameter: it is stamped from the session bridge.
+
+    Example:
+        podcast_for_rick(path="/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/2026.10.08-summary.md")
+    """
+    refusal = _refuse_borrowed_identity( "podcast_for_rick" )
+    if refusal is not None: return refusal
+
+    return podcast_for_rick_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        host_path    = path,
     )
 
 
