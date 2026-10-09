@@ -265,6 +265,7 @@ def test_a_too_long_sentence_is_told_to_aim_ten_under_the_limit_by_dropping_a_de
     fake = FakeQuery( [ long, GOOD ] )
     asyncio.run( nw.write_need( _input( src_root ), fake ) )
     assert "Aim for 30 words or fewer by leaving out the least important detail." in fake.prompts[ 1 ]
+    assert "Say a little more" not in fake.prompts[ 1 ]
 
 
 def test_a_too_short_sentence_is_told_to_say_more_and_not_to_cut( src_root ):
