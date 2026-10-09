@@ -11,6 +11,7 @@ import pytest
 
 from lupin_mcp import reuse_e2e_run as e2r
 from lupin_mcp import reuse_ledger as rl
+from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
 from lupin_mcp import reuse_stage2_fit as fit
@@ -289,3 +290,22 @@ def test_the_plan_reads_the_record_the_negatives_writer_really_writes( tmp_path 
         got  = [ e[ "id" ] for e in item[ "entries" ] ]
         assert got == [ c for k, c in enumerate( want ) if c != item[ "member" ] and c not in want[ :k ] ]
         assert twins[ item[ "member" ] ] == set( mine[ "twins" ] )
+
+
+def test_the_canary_on_the_real_stand_in_completes_the_new_question_with_tokens_spent( tmp_path, monkeypatch ):
+    # no stub for the new question: s2.NEW_PAIR_ASK is the real pair_ask and the transport is the real StandIn
+    assert s2.NEW_PAIR_ASK is rp.pair_ask
+    raised, real = [], rr.StandIn.post_with_meta
+    def recording( self, body ):
+        try: return real( self, body )
+        except Exception as e: raised.append( f"{type( e ).__name__}: {e}" ); raise
+    monkeypatch.setattr( rr.StandIn, "post_with_meta", recording )
+    scratch = Env( tmp_path, asks={ "old": s2.ask_old_pairs, "new": s2.ask_new_pairs } )
+    items, twins = plan_of( scratch, tmp_path )
+    spec = s2.spec_for( len( items ), 5_000_000 )
+    e2r.run_canary( scratch.env(), items, twins, 10 ** 8, spec=spec )
+    run = json.loads( ( scratch.data / "e2e-results" / "s2-canary.json" ).read_text() )
+    new = [ s for s in run[ "searches" ] if s[ "question" ] == "new" ]
+    assert raised == []
+    assert len( new ) == 5
+    assert all( s[ "status" ] == "complete" and s[ "causes" ] == [] and s[ "tokens" ] > 0 and s[ "requests" ] > 0 for s in new )
