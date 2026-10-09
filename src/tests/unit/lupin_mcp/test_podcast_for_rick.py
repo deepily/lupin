@@ -322,6 +322,14 @@ def test_the_actor_binds_to_the_stable_session_id_not_the_current_one( stamped, 
     assert captured[ "actor" ] == "tiffany 641d31ee"
 
 
+def test_the_actor_is_the_same_before_and_after_a_clear( stamped, monkeypatch ):
+    stable = "641d31ee-8b4c-4349-b241-9560e294a2ce"
+    monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "stable_session_id": stable } )
+    before = cv._podcast_actor()
+    monkeypatch.setattr( cv, "SESSION_ID", "c0ffee01" )   # a /clear gives the seat a new current id
+    assert cv._podcast_actor() == before == "tiffany 641d31ee"
+
+
 def test_without_a_stable_id_the_actor_falls_back_to_the_current_session( stamped, monkeypatch ):
     monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "stable_session_id": "" } )
     assert cv._podcast_actor() == "tiffany 641d31ee"

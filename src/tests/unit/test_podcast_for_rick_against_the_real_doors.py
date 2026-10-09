@@ -7,6 +7,8 @@ The fakes are the notification table, the spent-card database (a SQLite file), t
 the job queue. The queue is stubbed at the submit call, so nothing here buys audio.
 """
 import subprocess
+import sys
+import types
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -35,14 +37,31 @@ ACTOR       = f"maya {SESSION_ID}"
 RICK        = "rick@example.com"
 OPERATOR    = { "user_id": "u-1", "account_email": RICK, "method": "jwt" }
 PERSONA     = { "name": "Maya", "icon": "x", "voice_id": "v1" }
+STABLE_ID    = "b9537836-25ae-4da8-8b49-a7eb248912ad"
+RESPUN_ID    = "c0ffee01"
+OTHER_ID     = "0badc0de"
+OTHER_STABLE = "0badc0de-1111-4222-8333-444444444444"
+
+
+CLOCK = { "now": NOW }   # the doors' clock; a test moves it to age a card
 
 
 class Cards:
-    """The notification table: ask creates, the status doors read, the test plays the operator."""
-    def __init__( self ): self.rows, self.waiting = { }, None
+    """
+    The notification table. Ask creates, the status doors read, the answer route updates.
+
+    find_live_podcast_card mirrors the real query's conditions: the same kind, the same path, the same
+    bytes (sha256), still unanswered and not yet expired. The real query uses Postgres JSON operators, which
+    SQLite cannot run, so the conditions are held here and the operators are not.
+    """
+    def __init__( self ): self.rows = { }
     def __call__( self, session ): return self
     def find_live_podcast_card( self, kind, scope_path, sha256, now ):
-        return next( ( c for c in self.rows.values() if c.payload and c.payload.get( "scope_path" ) == scope_path and c.state != "responded" ), None )
+        def live( card ):
+            payload = card.payload or { }
+            return ( payload.get( "kind" ) == kind and payload.get( "scope_path" ) == scope_path and payload.get( "sha256" ) == sha256
+                     and card.state != "responded" and card.expires_at is not None and card.expires_at > now )
+        return next( ( c for c in self.rows.values() if live( c ) ), None )
     def create_notification( self, **fields ):
         card = Notification( id=uuid.uuid4(), created_at=NOW, state="created", **fields )
         self.rows[ card.id ] = card
@@ -50,7 +69,13 @@ class Cards:
     def update_state( self, card_id, state ): self.rows[ card_id ].state = state
     def get_by_id( self, card_id ): return self.rows.get( card_id )
 
+    def update_response( self, card_id, response_value ):
+        card = self.rows[ card_id ]
+        card.state, card.responded_at, card.response_value = "responded", CLOCK[ "now" ], response_value
+        return card
+
     def answer( self, card_id, value="yes", source="ui", answered_by=None ):
+        """Write an answer onto the row; only the timed-out default needs this."""
         card = self.rows[ uuid.UUID( str( card_id ) ) ]
         card.state, card.responded_at = "responded", NOW + timedelta( seconds=30 )
         card.response_value = { "value": value, "source": source, "answered_by": answered_by or dict( OPERATOR ) }
@@ -71,6 +96,7 @@ class Queue:
 
 class Ws:
     def is_user_connected( self, user_id ): return True
+    def emit_to_user_or_listener_sync( self, **kwargs ): pass
 
 
 def git( cwd, *args ):
@@ -113,9 +139,17 @@ def world( monkeypatch, tmp_path ):
         monkeypatch.setattr( module, "NotificationRepository", cards )
         monkeypatch.setattr( module, "get_db", fake_db )
     monkeypatch.setattr( notification_routes, "get_local_timestamp", lambda: NOW.isoformat() )
-    monkeypatch.setattr( door, "get_voice_persona", lambda sid: PERSONA if sid == SESSION_ID else None )
-    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: { "sender_id": f"claude.code@cosa.deepily.ai#{sid}" } if sid == SESSION_ID else None )
-    monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: NOW ) } ) )
+    monkeypatch.setattr( door, "get_voice_persona", lambda sid: PERSONA if sid in ( SESSION_ID, RESPUN_ID ) else None )
+    # Two ids of ONE seat (before and after a /clear) share a stable id; another seat has its own.
+    seats = {
+        SESSION_ID : { "sender_id": f"claude.code@cosa.deepily.ai#{SESSION_ID}", "stable_session_id": STABLE_ID },
+        RESPUN_ID  : { "sender_id": f"claude.code@cosa.deepily.ai#{RESPUN_ID}", "stable_session_id": STABLE_ID },
+        OTHER_ID   : { "sender_id": f"claude.code@cosa.deepily.ai#{OTHER_ID}", "stable_session_id": OTHER_STABLE },
+    }
+    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: seats.get( sid ) )
+    CLOCK[ "now" ] = NOW
+    monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: CLOCK[ "now" ] ) } ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", types.SimpleNamespace( config_mgr=types.SimpleNamespace( get=lambda key, default=None, return_type=None: default ) ) )
     monkeypatch.setattr( door, "copy_directory", lambda: str( tmp_path / "copies" ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
     monkeypatch.setattr( gate, "approver_persona_for_account", lambda email: { RICK: "rick" }.get( email ) )
@@ -131,12 +165,21 @@ def world( monkeypatch, tmp_path ):
     app.dependency_overrides[ door.get_notification_queue ] = lambda: Queue()
     app.dependency_overrides[ door.get_websocket_manager ]  = lambda: Ws()
     app.dependency_overrides[ door.get_ask_flow ]           = lambda: flow
+    app.dependency_overrides[ notification_routes.get_websocket_manager ] = lambda: Ws()
     client = TestClient( app )
+
+    # Rick's browser: the same real routers, but the request arrives on his login (no API key), as the page sends it.
+    browser = FastAPI()
+    browser.include_router( notification_routes.router )
+    browser.dependency_overrides[ require_api_key_or_jwt ]      = lambda: OPERATOR[ "user_id" ]
+    browser.dependency_overrides[ authenticated_account_email ] = lambda: RICK
+    browser.dependency_overrides[ notification_routes.get_websocket_manager ] = lambda: Ws()
+    rick = TestClient( browser )
 
     # The tool's real transport (task_store_request) with only the HTTP call routed into the app.
     monkeypatch.setattr( tst.requests, "request", lambda method, url, headers=None, json=None, params=None, timeout=None:
                          client.request( method, url.replace( "http://s", "" ), json=json ) )
-    return { "path": path, "root": root, "cards": cards, "flow": flow, "sessions": sessions, "tmp": tmp_path }
+    return { "path": path, "root": root, "cards": cards, "flow": flow, "sessions": sessions, "tmp": tmp_path, "rick": rick, "seat": client }
 
 
 class Clock:
@@ -155,19 +198,31 @@ def call( world, clock, host_path=None, card_id="", actor=ACTOR ):
 def only_card( world ): return next( iter( world[ "cards" ].rows.values() ) )
 
 
+def rick_answers( world, value="yes", card_id=None ):
+    """Rick answers the way his page does: through the real answer route, on his login."""
+    card_id = card_id or only_card( world ).id
+    answered = world[ "rick" ].post( "/api/notify/response", json={ "notification_id": str( card_id ), "response_value": value } )
+    assert answered.status_code == 200, answered.text
+    return answered
+
+
 def test_a_yes_from_the_operator_starts_one_job_through_the_real_doors( world ):
-    clock = Clock( lambda n: world[ "cards" ].answer( only_card( world ).id ) if n == 2 else None )
+    clock = Clock( lambda n: rick_answers( world ) if n == 2 else None )
     out = call( world, clock )
     assert out[ "status" ] == "started" and out[ "job_id" ] == "pg-1a2b3c4d" and out[ "card_id" ] == str( only_card( world ).id )
     assert len( world[ "flow" ].calls ) == 1 and clock.sleeps == 2
     assert only_card( world ).payload[ "scope_path" ] == "demo/io/tmp/summary.md"
 
 
-@pytest.mark.parametrize( "value,source,status", [ ( "no", "ui", "declined" ), ( "neither", "ui", "declined" ), ( "yes", "timeout_default", "default_used" ) ] )
-def test_an_answer_that_is_not_a_persons_yes_starts_nothing( world, value, source, status ):
-    clock = Clock( lambda n: world[ "cards" ].answer( only_card( world ).id, value=value, source=source ) )
-    assert call( world, clock )[ "status" ] == status
+@pytest.mark.parametrize( "value,status", [ ( "no", "declined" ), ( "neither", "declined" ) ] )
+def test_an_answer_that_is_not_a_yes_starts_nothing( world, value, status ):
+    assert call( world, Clock( lambda n: rick_answers( world, value ) ) )[ "status" ] == status
     assert world[ "flow" ].calls == []
+
+
+def test_a_timed_out_default_starts_nothing_even_when_it_says_yes( world ):
+    clock = Clock( lambda n: world[ "cards" ].answer( only_card( world ).id, value="yes", source="timeout_default" ) )
+    assert call( world, clock )[ "status" ] == "default_used" and world[ "flow" ].calls == []
 
 
 def test_an_unanswered_card_expires_where_the_server_says_and_starts_nothing( world ):
@@ -177,24 +232,43 @@ def test_an_unanswered_card_expires_where_the_server_says_and_starts_nothing( wo
 
 def test_a_file_changed_after_the_yes_is_the_servers_hash_mismatch_and_starts_nothing( world ):
     def answer_then_change( n ):
-        world[ "cards" ].answer( only_card( world ).id )
+        rick_answers( world )
         world[ "path" ].write_text( "# Different\n\nOther words.\n" )
     out = call( world, Clock( answer_then_change ) )
     assert out[ "reason" ] == "hash_mismatch" and out[ "stage" ] == "start" and world[ "flow" ].calls == []
 
 
 def test_a_card_answered_by_the_wrong_login_is_refused_with_the_servers_code( world ):
-    odd = { "user_id": "u-2", "account_email": None, "method": "api_key" }
-    out = call( world, Clock( lambda n: world[ "cards" ].answer( only_card( world ).id, answered_by=odd ) ) )
+    def the_seat_answers_its_own_card( n ):   # on the API key, the way a seat would, not on Rick's login
+        posted = world[ "seat" ].post( "/api/notify/response", headers={ "X-API-Key": "k" },
+                                       json={ "notification_id": str( only_card( world ).id ), "response_value": "yes" } )
+        assert posted.status_code == 200, posted.text
+    out = call( world, Clock( the_seat_answers_its_own_card ) )
     assert out[ "reason" ] == "wrong_login" and world[ "flow" ].calls == []
 
 
 def test_another_seat_cannot_start_the_card_it_did_not_ask( world ):
     first = call( world, Clock() )
-    world[ "cards" ].answer( first[ "card_id" ] )
-    out = call( world, Clock(), card_id=first[ "card_id" ], actor="sam 0badc0de", host_path="" )
+    rick_answers( world, card_id=first[ "card_id" ] )
+    out = call( world, Clock(), card_id=first[ "card_id" ], actor=f"sam {OTHER_ID}", host_path="" )
     assert out[ "reason" ] == "wrong_session" and out[ "stage" ] == "start"
     assert world[ "flow" ].calls == []
+
+
+def test_a_re_spun_seat_resumes_its_own_card_through_the_real_door( world ):
+    asked = call( world, Clock() )                                        # asked as session b9537836
+    assert asked[ "status" ] == "expired"
+    rick_answers( world, card_id=asked[ "card_id" ] )
+    # After a /clear the seat's current id is c0ffee01; its stable id is unchanged, and the bridge knows both.
+    out = call( world, Clock(), card_id=asked[ "card_id" ], actor=f"maya {RESPUN_ID}", host_path="" )
+    assert out[ "status" ] == "started" and out[ "job_id" ] == "pg-1a2b3c4d"
+    assert len( world[ "flow" ].calls ) == 1
+
+
+def test_a_re_spun_seat_asking_again_finds_the_waiting_card_of_its_earlier_self( world ):
+    first = call( world, Clock() )
+    again = call( world, Clock(), actor=f"maya {RESPUN_ID}" )
+    assert again[ "reason" ] == "card_already_waiting" and again[ "card_id" ] == first[ "card_id" ]
 
 
 def test_a_second_ask_for_the_same_waiting_file_names_the_card_to_resume( world ):
@@ -206,7 +280,7 @@ def test_a_second_ask_for_the_same_waiting_file_names_the_card_to_resume( world 
 
 def test_a_queue_failure_releases_the_card_and_a_resume_starts_the_one_job( world ):
     world[ "flow" ].raises = RuntimeError( "the queue is down" )
-    out = call( world, Clock( lambda n: world[ "cards" ].answer( only_card( world ).id ) ) )
+    out = call( world, Clock( lambda n: rick_answers( world ) ) )
     assert out[ "reason" ] == "queue_failed" and "card_id=" in out[ "retry" ]
 
     world[ "flow" ].raises = None
@@ -216,7 +290,7 @@ def test_a_queue_failure_releases_the_card_and_a_resume_starts_the_one_job( worl
 
 
 def test_resuming_a_spent_card_reports_its_job_and_queues_nothing( world ):
-    started = call( world, Clock( lambda n: world[ "cards" ].answer( only_card( world ).id ) ) )
+    started = call( world, Clock( lambda n: rick_answers( world ) ) )
     again   = call( world, Clock(), card_id=started[ "card_id" ], host_path="" )
     assert again[ "reason" ] == "card_already_spent" and again[ "job_id" ] == "pg-1a2b3c4d"
     assert len( world[ "flow" ].calls ) == 1
@@ -240,6 +314,6 @@ def test_the_server_refuses_a_file_the_viewer_blocks_and_the_tool_passes_its_cod
 
 def test_a_card_for_the_same_file_as_the_path_resumes_through_the_real_card_door( world ):
     first = call( world, Clock() )
-    world[ "cards" ].answer( first[ "card_id" ] )
+    rick_answers( world, card_id=first[ "card_id" ] )
     out = call( world, Clock(), card_id=first[ "card_id" ] )
     assert out[ "status" ] == "started" and len( world[ "flow" ].calls ) == 1
