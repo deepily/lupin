@@ -52,7 +52,6 @@ EXEMPT = {
     "ask_yes_no"            : "asks the user; the sender id rides the notification (not read further)",
     "converse"              : "speaks to the user; the sender id rides the notification (not read further)",
     "notify"                : "announces to the user; the sender id rides the notification (not read further)",
-    "set_session_topic"     : "RULING OWED: writes session_topic into the resolved session's bridge file, then notifies",
     "check_exists"          : "reuse-wiki lookup, per its docstring (not read further)",
     "fetch_similar"         : "reuse-wiki lookup, per its docstring (not read further)",
     "read_capability"       : "reuse-wiki page read, per its docstring (not read further)",
@@ -70,15 +69,14 @@ EXEMPT = {
     "disable_speakerphone"  : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
     "request_persona"       : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
     "spawn_sessions"        : "RULING OWED: host-side spawn of sessions by this manager; not read further",
-    "commons_post"          : "RULING OWED: posts under the seat's session id and persona, no refusal call",
     "commons_ask_async"     : "RULING OWED: posts under the seat's name; not read further",
     "commons_ask_sync"      : "RULING OWED: posts under the seat's name; not read further",
-    "dm_respond"            : "RULING OWED: a dm_send with mandatory threading, no refusal call",
 }
 
 # Wired tools whose implementation is not a module symbol named <tool>_impl, so a sentinel cannot be placed.
-# They are proved by the first-statement check alone; calling them unwired would run real code.
-NO_IMPL_SYMBOL = { "self_respin", "dismiss_sessions" }
+# They are proved by the first-statement check here; commons_post and set_session_topic are also driven
+# in test_commons_post_and_set_session_topic_refuse_a_borrowed_identity.py, where the body's own seams are stubbed.
+NO_IMPL_SYMBOL = { "self_respin", "dismiss_sessions", "commons_post", "set_session_topic" }
 
 TOOLS = asyncio.run( m.mcp.get_tools() )
 
@@ -130,9 +128,10 @@ def _call( verb, kwargs ):
 
 
 def test_the_discovery_found_the_verbs_it_is_meant_to_find():
-    """Pin the measured floor (12 wired, 39 registered): a loop over nothing passes."""
-    assert len( TOOLS ) >= 39 and len( WIRED ) >= 12
+    """Pin the measured floor (15 wired, 39 registered): a loop over nothing passes."""
+    assert len( TOOLS ) >= 39 and len( WIRED ) >= 15
     assert "podcast_for_rick" in WIRED and "_dm_send_fn" in WIRED
+    assert { "dm_respond", "commons_post", "set_session_topic" } <= set( WIRED )
 
 
 def test_every_registered_tool_is_wired_or_exempt():
