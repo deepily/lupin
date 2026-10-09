@@ -24,6 +24,9 @@ the refusal discriminates rather than merely fires.
 
 VENUE: :7999-eligible — monkeypatched module globals, no server, no network, no writes.
 """
+import asyncio
+import inspect
+
 import pytest
 
 from lupin_mcp import cosa_voice_mcp as m
@@ -42,7 +45,14 @@ VERBS = [
     ( "task_amend",      "task_amend_impl",      dict( task_id="abc12345", note="n" ) ),
     ( "task_request",    "task_request_impl",    dict( task_id="abc12345", move="admit", reason="r" ) ),
     ( "task_ask_unpark", "task_ask_unpark_impl", dict( task_id="abc12345" ) ),
+    ( "podcast_for_rick", "podcast_for_rick_impl", dict( path="/x/y.md" ) ),
 ]
+
+
+def _call( verb, kwargs ):
+    """Call a verb and run the coroutine an offloaded (async) verb returns."""
+    result = getattr( m, verb ).fn( **kwargs )
+    return asyncio.run( result ) if inspect.iscoroutine( result ) else result
 
 
 @pytest.fixture
@@ -62,7 +72,7 @@ def test_the_verb_REFUSES_and_never_reaches_its_impl( verb, impl, kwargs, borrow
 
     monkeypatch.setattr( m, impl, _sentinel )
 
-    result = getattr( m, verb ).fn( **kwargs )
+    result = _call( verb, kwargs )
 
     assert isinstance( result, dict ), f"{verb} returned {type(result)}, not a refusal dict"
     assert result[ "reason" ] == "borrowed_identity", f"{verb} was not refused: {result}"
@@ -80,7 +90,7 @@ def test_NEGATIVE_CONTROL_a_definitive_identity_reaches_the_impl( verb, impl, kw
     monkeypatch.setattr( m, impl, _sentinel )
 
     with pytest.raises( _Reached ):
-        getattr( m, verb ).fn( **kwargs )
+        _call( verb, kwargs )
 
 
 def test_dm_send_is_wired_too( borrowed, monkeypatch ):
