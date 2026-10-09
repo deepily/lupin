@@ -27,11 +27,20 @@ import os
 
 from fastapi import HTTPException
 
+from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.routers._scope_registry import credential_verdict
 from cosa.rest.routers._pinned_open import PROC_FD
 from cosa.rest.v2.source_document import ALLOWED_SOURCE_EXTENSIONS
 
 _READ_CHUNK = 1024 * 1024
+
+# The two words that mark a card as this feature's. The server writes both; the start door reads them back.
+CARD_KIND = "podcast_proxy_start"
+COMMAND   = "agent router go to podcast generator"
+
+# How long a yes stays good, and how long the card waits for an answer. The INI key overrides it.
+MAX_AGE_KEY     = "podcast proxy card max age seconds"
+MAX_AGE_DEFAULT = 900
 
 
 class DoorRefusal( Exception ):
@@ -109,3 +118,96 @@ def check_source( scope_path, registry=None ):
 
     return { "scope": scope, "rel": rel, "name": os.path.basename( rel ), "server_path": full_path,
              "size": size, "sha256": digest.hexdigest() }
+
+
+def max_age_seconds( config_mgr=None ):
+    """
+    How many seconds a podcast card stays good, from the INI key.
+
+    Requires:
+        - config_mgr, when given, answers get( key, default=, return_type= ); None builds the server's own
+
+    Ensures:
+        - returns a positive int; a missing key gives MAX_AGE_DEFAULT
+        - raises ValueError for a value of zero or less, because a card that is old on arrival starts nothing
+    """
+    if config_mgr is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    seconds = config_mgr.get( MAX_AGE_KEY, default=MAX_AGE_DEFAULT, return_type="int" )
+    if seconds <= 0: raise ValueError( f"'{MAX_AGE_KEY}' must be positive, got {seconds}" )
+    return seconds
+
+
+def human_size( size ):
+    """The size in the unit a person reads: bytes, KiB or MiB, with one decimal above bytes."""
+    if size < 1024: return f"{size} bytes"
+    if size < 1024 * 1024: return f"{size / 1024:.1f} KiB"
+    return f"{size / ( 1024 * 1024 ):.1f} MiB"
+
+
+def asker_label( session_id, persona_name ):
+    """
+    Who the card says is asking, built from the server's own facts.
+
+    Requires:
+        - session_id is the id parsed from the caller's actor string; persona_name is what the session bridge
+          knows for that id, or None
+
+    Ensures:
+        - returns "<persona> (<session id>)" when the bridge knows the session
+        - otherwise returns "an unrecognized session (<session id>)"
+        - the caller's actor string is never part of the result: only the id parsed from it is
+    """
+    if persona_name: return f"{persona_name} ({session_id})"
+    return f"an unrecognized session ({session_id})"
+
+
+def card_payload( facts, asker ):
+    """
+    The binding a podcast card carries in its payload, written by the server.
+
+    Requires:
+        - facts is the dict check_source returned; asker is the label asker_label made
+
+    Ensures:
+        - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by }
+        - every value comes from the server: the file's measured facts, the constant command, and the label
+    """
+    return {
+        "kind"       : CARD_KIND,
+        "command"    : COMMAND,
+        "scope_path" : f"{facts[ 'scope' ]}/{facts[ 'rel' ]}",
+        "server_path": facts[ "server_path" ],
+        "name"       : facts[ "name" ],
+        "size"       : facts[ "size" ],
+        "sha256"     : facts[ "sha256" ],
+        "asked_by"   : asker,
+    }
+
+
+def card_text( payload ):
+    """
+    The question and the card abstract Rick reads, built from the stored payload alone.
+
+    Requires:
+        - payload is a card_payload dict
+
+    Ensures:
+        - returns a (question, abstract) pair
+        - both name the file, its size and who asked; the abstract also names who will start it
+        - the abstract ends with `UNANSWERED_MEANS`, because silence refuses here as everywhere
+        - the question carries no path and no hash, which a voice would read as noise
+    """
+    size = human_size( payload[ "size" ] )
+    question = f"{payload[ 'asked_by' ]} asks for a podcast of {payload[ 'name' ]}, {size}. Start it?"
+    abstract = (
+        f"**Make a podcast**\n\n"
+        f"- file: `{payload[ 'scope_path' ]}`\n"
+        f"- size: {size}, SHA-256 `{payload[ 'sha256' ][ :12 ]}`\n"
+        f"- asked by: {payload[ 'asked_by' ]}\n"
+        f"- will be started by: {payload[ 'asked_by' ]}, once you say yes\n"
+        f"- the script is written first and a Script Review card follows; audio is bought after that\n\n"
+        f"{promotion_gate.UNANSWERED_MEANS}"
+    )
+    return question, abstract

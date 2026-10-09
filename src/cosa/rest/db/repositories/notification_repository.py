@@ -188,6 +188,27 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.expires_at                  >  now,
         ).order_by( desc( Notification.created_at ) ).first()
 
+    def find_live_podcast_card( self, kind: str, scope_path: str, sha256: str, now: datetime ) -> Optional[Notification]:
+        """
+        The newest podcast card for this file and these bytes that is still waiting for an answer.
+
+        Requires:
+            - kind is the card kind the server writes; scope_path and sha256 name the file as the card stored them; now is aware
+
+        Ensures:
+            - matches only a card whose server-written payload carries this kind, path and hash
+            - a card is live while it asked a question, is created or delivered, and has not expired
+            - an answered or expired card is not returned; returns None when there is none
+        """
+        return self.session.query( Notification ).filter(
+            Notification.payload[ "kind" ].astext       == kind,
+            Notification.payload[ "scope_path" ].astext == scope_path,
+            Notification.payload[ "sha256" ].astext     == sha256,
+            Notification.response_requested.is_( True ),
+            Notification.state.in_( ( "created", "delivered" ) ),
+            Notification.expires_at                     >  now,
+        ).order_by( desc( Notification.created_at ) ).first()
+
     def get_by_recipient( self, recipient_id: uuid.UUID, limit: int = 100, offset: int = 0 ) -> List[Notification]:
         """
         Get notifications for a recipient.
