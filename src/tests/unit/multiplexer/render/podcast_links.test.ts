@@ -158,7 +158,7 @@ for ( const mode of [ "vertical", "horizontal" ] as Mode[] ) {
     const ev = click( plant( shell.querySelector( "#sender-cards-container" ) as Element, LISTEN, "🎧 Listen" ) );
     assert.equal( ev.defaultPrevented, false );
     assert.deepEqual( win.opens, [] );
-    assert.equal( document.getElementById( PODCAST_OVERLAY_ID ), null );
+    assert.ok( document.getElementById( PODCAST_OVERLAY_ID ) === null, "a Listen click must not open the floating player" );
     assert.equal( log.fetches.length, 0 );
   } );
 }
@@ -168,7 +168,7 @@ test( "unmounting the renderer stops it claiming podcast links", () => {
   activeRenderer.unmount(); activeRenderer = null;
   const ev = click( plant( shell, PLAY, "Play" ) );
   assert.equal( ev.defaultPrevented, false );
-  assert.equal( document.getElementById( PODCAST_OVERLAY_ID ), null );
+  assert.ok( document.getElementById( PODCAST_OVERLAY_ID ) === null, "an unmounted renderer must not open the floating player" );
 } );
 
 // ===== the predicates =====
@@ -210,7 +210,7 @@ test( "showPodcastOverlay: single instance, autoplay added once, only the X clos
   assert.equal( frame.getAttribute( "src" ), PLAY + "&autoplay=1", "the flag is not doubled" );
   assert.equal( frame.getAttribute( "allow" ), "autoplay" );
   ( document.querySelector( "[data-testid=podcast-overlay-dismiss]" ) as HTMLElement ).click();
-  assert.equal( document.getElementById( PODCAST_OVERLAY_ID ), null );
+  assert.ok( document.getElementById( PODCAST_OVERLAY_ID ) === null, "the dismiss button must remove the floating player" );
   dismissPodcastOverlay();   // a second dismiss is a no-op
 } );
 
@@ -277,7 +277,7 @@ test( "handlePodcastLinkClick: unrelated clicks are not claimed", () => {
   const frameHost = document.createElement( "iframe" ); pane.appendChild( frameHost );
   const inner = { closest: ( sel: string ) => sel === "a[href]" ? plant( host, PLAY, "p" ) : frameHost, preventDefault() {} };
   assert.equal( handlePodcastLinkClick( { target: inner, preventDefault() { throw new Error( "must not claim" ); } } as unknown as Event, deps ), false );
-  assert.equal( document.getElementById( PODCAST_OVERLAY_ID ), null );
+  assert.ok( document.getElementById( PODCAST_OVERLAY_ID ) === null, "a click inside the pane iframe must not open the floating player" );
 } );
 
 test( "a Play Here link with no text still opens the player, titled Podcast", () => {
