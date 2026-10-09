@@ -192,3 +192,54 @@ def test_the_command_line_refuses_the_new_question_while_it_is_unwired_and_a_mis
 def test_a_run_with_no_root_is_refused( monkeypatch, capsys ):
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
     assert s2.cli( [ "status" ] ) == 2 and "--root" in capsys.readouterr().err
+
+
+def test_the_member_listed_among_its_own_candidates_is_never_asked_about_itself( tmp_path ):
+    scratch = Env( tmp_path )
+    record = record_of( MEMBERS[ :1 ] )
+    record[ "members" ][ IDS[ 0 ] ][ "lexical" ].append( IDS[ 0 ] )
+    path = tmp_path / "negatives.json"
+    sha  = put( path, record )
+    items, _ = s2.load_plan( path, sha, by_id_of( scratch ) )
+    assert IDS[ 0 ] not in [ e[ "id" ] for e in items[ 0 ][ "entries" ] ]
+
+
+def test_a_candidate_the_new_question_left_unasked_or_answered_wrongly_gets_a_row_that_says_which( tmp_path, monkeypatch ):
+    def partial( ctx, need, entries ):
+        ids = [ e[ "id" ] for e in entries ]
+        return { "answered": { i: { "provides": 0.5, "coverage": 0.5, "score": 1.0 } for i in ids[ 2: ] }, "unasked": [ ids[ 0 ] ], "malformed": [ { "id": ids[ 1 ], "reasons": [ "provides: bad", "coverage: bad" ] } ],
+                 "stats": { "failed": 1, "not_checked": 0, "stopped_by": None, "requests": 1, "attempt_counts": { "n429": 0, "n529": 0 } } }
+    monkeypatch.setattr( s2, "NEW_PAIR_ASK", partial )
+    scratch = Env( tmp_path, asks={ "new": s2.ask_new_pairs } )
+    items, twins = plan_of( scratch, tmp_path )
+    rec  = e2r.run_searches( scratch.env(), "s2-run", items[ :1 ], twins, 10 ** 8 )
+    rows = rec[ "searches" ][ 0 ][ "rows" ]
+    assert ( rows[ 0 ][ "unasked" ], rows[ 0 ][ "malformed" ] ) == ( True, None )
+    assert ( rows[ 1 ][ "unasked" ], rows[ 1 ][ "malformed" ] ) == ( False, "provides: bad; coverage: bad" ) and rows[ 2 ][ "provides" ] == 0.5
+    assert rec[ "searches" ][ 0 ][ "causes" ] == [ "CALL_FAILED", "MALFORMED_ANSWER" ]
+
+
+def test_an_unknown_question_name_is_refused_on_the_command_line( tmp_path, capsys ):
+    scratch = Env( tmp_path )
+    assert s2.cli( command_args( scratch, tmp_path, "canary", "--ceiling", "100000000", "--estimate-tokens", "5000000", extra=[ "--questions", "other" ] ) ) == 2
+    assert "not one of" in capsys.readouterr().err
+
+
+def test_an_old_answer_that_is_missing_or_wrong_gives_a_row_that_says_which( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": s2.ask_old_pairs } )
+    inner   = scratch.factory
+    def damaging( budget ):
+        transport = inner( budget )
+        class Damage:
+            def post_with_meta( self, body ):
+                response, meta = transport.post_with_meta( body )
+                keys = list( response[ "answers" ] )
+                del response[ "answers" ][ keys[ 0 ] ]
+                response[ "answers" ][ keys[ 1 ] ] = { "probabilities": { "reuse": 3.0, "extend": 0.0, "unrelated": 0.0 } }
+                return response, meta
+        return Damage()
+    scratch.factory = damaging
+    items, twins = plan_of( scratch, tmp_path )
+    rows = e2r.run_searches( scratch.env(), "s2-run", items[ :1 ], twins, 10 ** 8 )[ "searches" ][ 0 ][ "rows" ]
+    assert rows[ 0 ][ "unasked" ] is True and rows[ 0 ][ "p_overlap" ] is None
+    assert rows[ 1 ][ "malformed" ] is not None and rows[ 1 ][ "p_overlap" ] is None and rows[ 2 ][ "p_overlap" ] is not None

@@ -28,6 +28,7 @@ CANARY_MEMBERS   = 5
 CANARY_NAME      = "e2e-canary"
 RUN_NAME         = "e2e-run"
 ESTIMATE_TOKENS  = 420_000_000
+E2E_SPEC         = { "prefix": "e2e", "members": e2e.MEMBERS, "estimate": ESTIMATE_TOKENS, "canary_members": CANARY_MEMBERS }
 ESTIMATE_FACTOR  = 1.5
 WINDOW_SEARCHES  = 20
 MAX_INCOMPLETE   = 5
@@ -120,6 +121,7 @@ def _search( env, ctx, budget, item, question, twins ):
         rec.update( receipt_id=result[ "receipt_id" ], requests=stats[ "requests" ], unasked=stats[ "failed" ] + stats[ "not_checked" ],
                     n429=counts[ "n429" ] if counts else 0, n529=counts[ "n529" ] if counts else 0,
                     read=e2e.read_search( result, twins.get( item[ "member" ], set() ) ) )
+        if "rows" in result: rec[ "rows" ] = result[ "rows" ]
     return rec
 
 
@@ -186,13 +188,15 @@ def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior
     return { **record, "totals": _totals( record[ "searches" ], budget ) }
 
 
-def _canary_path( env ): return env.results_dir / f"{CANARY_NAME}.canary.json"
+def _canary_path( env, spec ): return env.results_dir / f"{spec[ 'prefix' ]}-canary.canary.json"
 
 
-def run_canary( env, items, twins, ceiling_tokens ):
+def run_canary( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
     """
     Ask the first five members, both questions, and write the numbers a person reads first.
 
+    Requires:
+        - spec is { prefix, members, estimate, canary_members }: the run names, the members the full run covers, its token estimate and the canary's size
     Ensures:
         - writes the run file and the canary file, with `approved` empty, and returns the canary report
         - the report holds the ledger total read before the first send, tokens, requests, unasked, 429 and 529 counts, wall time,
@@ -200,23 +204,37 @@ def run_canary( env, items, twins, ceiling_tokens ):
         - the allowance is the smaller of 1.5 times the estimate and the ledger's remaining allowance after the canary
         - tripped names each crossing: projection_over_allowance, incomplete, stopped
     """
-    run = run_searches( env, CANARY_NAME, items[ :CANARY_MEMBERS ], twins, ceiling_tokens, kind="canary" )
+    name = f"{spec[ 'prefix' ]}-canary"
+    run  = run_searches( env, name, items[ :spec[ "canary_members" ] ], twins, ceiling_tokens, kind="canary" )
     limit, total = env.ledger.snapshot()
     tokens = run[ "totals" ][ "spent_tokens" ]
     asked  = len( run[ "members" ] )
-    projection = tokens * e2e.MEMBERS // asked
-    allowance  = min( int( ESTIMATE_FACTOR * ESTIMATE_TOKENS ), limit - total )
+    projection = tokens * spec[ "members" ] // asked
+    allowance  = min( int( ESTIMATE_FACTOR * spec[ "estimate" ] ), limit - total )
     tripped = [ name for name, hit in ( ( "projection_over_allowance", projection > allowance ), ( "incomplete", run[ "totals" ][ "complete" ] != run[ "totals" ][ "searches" ] ),
                                         ( "stopped", run[ "stopped" ] is not None ) ) if hit ]
-    report = { "format": CANARY_FORMAT, "run_name": CANARY_NAME, "members": asked, "searches": run[ "totals" ][ "searches" ], "ledger_total_before": run[ "ledger_total_before" ],
+    report = { "format": CANARY_FORMAT, "run_name": name, "members": asked, "searches": run[ "totals" ][ "searches" ], "ledger_total_before": run[ "ledger_total_before" ],
                "ledger_limit": run[ "ledger_limit" ], "tokens": tokens, "projection_tokens": projection, "allowance_tokens": allowance, "requests": run[ "totals" ][ "requests" ],
                "unasked": run[ "totals" ][ "unasked" ], "n429": sum( s[ "n429" ] for s in run[ "searches" ] ), "n529": sum( s[ "n529" ] for s in run[ "searches" ] ),
                "wall_seconds": round( sum( s[ "wall_seconds" ] for s in run[ "searches" ] ), 3 ), "tripped": tripped, "approved": None }
-    _write_json( _canary_path( env ), report )
+    _write_json( _canary_path( env, spec ), report )
     return report
 
 
-def approve_canary( env, by, why ):
+def canary_line( report ):
+    """Ensures: returns the one line that says what the canary read and what it found."""
+    return ( f"canary {report[ 'run_name' ]}: ledger total before the first send: {report[ 'ledger_total_before' ]} of {report[ 'ledger_limit' ]}; searches {report[ 'searches' ]}, "
+             f"tokens {report[ 'tokens' ]}, projection {report[ 'projection_tokens' ]} against allowance {report[ 'allowance_tokens' ]}, requests {report[ 'requests' ]}, "
+             f"unasked {report[ 'unasked' ]}, 429 {report[ 'n429' ]}, 529 {report[ 'n529' ]}, wall {report[ 'wall_seconds' ]}s, tripped {report[ 'tripped' ]}" )
+
+
+def run_line( t ):
+    """Ensures: returns the one line that says how a run ended."""
+    return ( f"run {t[ 'run_name' ]}: state {t[ 'state' ]}, stopped {t[ 'stopped' ]}, complete {t[ 'totals' ][ 'complete' ]}, incomplete {t[ 'totals' ][ 'incomplete' ]}, "
+             f"not run {t[ 'totals' ][ 'not_run' ]}, spent {t[ 'totals' ][ 'spent_tokens' ]}" )
+
+
+def approve_canary( env, by, why, spec=E2E_SPEC ):
     """
     Record that a person read the canary and let the rest run.
 
@@ -226,7 +244,7 @@ def approve_canary( env, by, why ):
         - CanaryTripped when the canary crossed a number; it is never approved
     """
     if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise s1.DriverRefused( "by and why must say who approved the canary and why" )
-    path = _canary_path( env )
+    path = _canary_path( env, spec )
     if not path.exists(): raise s1.CanaryNotApproved( "no canary was run" )
     report = json.loads( path.read_text( encoding="utf-8" ) )
     if report[ "approved" ] is not None: raise s1.DriverRefused( "the canary is already approved" )
@@ -235,7 +253,7 @@ def approve_canary( env, by, why ):
     _write_json( path, report )
 
 
-def run_full( env, items, twins, ceiling_tokens ):
+def run_full( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
     """
     Run the members after the canary's five, once the canary is approved.
 
@@ -244,10 +262,11 @@ def run_full( env, items, twins, ceiling_tokens ):
     Raises:
         - CanaryNotApproved when there is no approved canary
     """
-    path = _canary_path( env )
+    path = _canary_path( env, spec )
     if not path.exists() or json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is None: raise s1.CanaryNotApproved( "the canary has not been approved" )
-    prior = json.loads( ( env.results_dir / f"{CANARY_NAME}.json" ).read_text( encoding="utf-8" ) )[ "searches" ]
-    return run_searches( env, RUN_NAME, items[ CANARY_MEMBERS: ], twins, ceiling_tokens, prior=prior, canary_run=CANARY_NAME )
+    canary = f"{spec[ 'prefix' ]}-canary"
+    prior  = json.loads( ( env.results_dir / f"{canary}.json" ).read_text( encoding="utf-8" ) )[ "searches" ]
+    return run_searches( env, f"{spec[ 'prefix' ]}-run", items[ spec[ "canary_members" ]: ], twins, ceiling_tokens, prior=prior, canary_run=canary )
 
 
 def ask_old( ctx, item ):
@@ -367,17 +386,12 @@ def main( argv=None ):
     twins   = e2e.load_twins( args.manifest, args.manifest_sha )
     env     = _open_env( root, args.data, args.ledger, args.live, asks, args.pack_size )
     if args.command == "canary":
-        report = run_canary( env, items, twins, args.ceiling )
-        print( f"canary {report[ 'run_name' ]}: ledger total before the first send: {report[ 'ledger_total_before' ]} of {report[ 'ledger_limit' ]}; searches {report[ 'searches' ]}, "
-               f"tokens {report[ 'tokens' ]}, projection {report[ 'projection_tokens' ]} against allowance {report[ 'allowance_tokens' ]}, requests {report[ 'requests' ]}, "
-               f"unasked {report[ 'unasked' ]}, 429 {report[ 'n429' ]}, 529 {report[ 'n529' ]}, wall {report[ 'wall_seconds' ]}s, tripped {report[ 'tripped' ]}" )
+        print( canary_line( run_canary( env, items, twins, args.ceiling ) ) )
     elif args.command == "approve":
         approve_canary( env, args.by, args.why )
         print( f"canary approved by {args.by}" )
     elif args.command == "run":
-        t = run_full( env, items, twins, args.ceiling )
-        print( f"run {t[ 'run_name' ]}: state {t[ 'state' ]}, stopped {t[ 'stopped' ]}, complete {t[ 'totals' ][ 'complete' ]}, incomplete {t[ 'totals' ][ 'incomplete' ]}, "
-               f"not run {t[ 'totals' ][ 'not_run' ]}, spent {t[ 'totals' ][ 'spent_tokens' ]}" )
+        print( run_line( run_full( env, items, twins, args.ceiling ) ) )
     else:
         searches = []
         for name in ( CANARY_NAME, RUN_NAME ):
