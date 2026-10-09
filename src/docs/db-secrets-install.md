@@ -39,6 +39,12 @@ A refusal prints the reason and a line such as `done: copy of the payload; did n
 
 `--check` answers 0 (all in place), 1 (something missing or different) or 2 (could not look: not root, or not run through sudo). Run it as `sudo ... --check` to see all three pieces.
 
+## Limits
+
+- Run it from a checkout only you can write. It runs as root and imports the payload from that checkout.
+- The sudoers file holds one operator. A second operator who runs it replaces the first one's line.
+- A broken sibling file in `/etc/sudoers.d` makes it refuse with code 27 after the copy was made. The message says what was done.
+
 ## What stays manual
 
 - Creating `/etc/lupin/secrets/db_app_password` (the runbook's app-password step) and `~/.lupin/db_test_pw`, which must hold the password `lupin_test` was given.
