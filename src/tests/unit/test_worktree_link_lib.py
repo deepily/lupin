@@ -116,6 +116,7 @@ def test_the_library_reads_the_list_without_a_pipe():
     reads = [ ln for ln in code.splitlines() if "worktree list --porcelain" in ln ]
     assert len( reads ) == 1, f"expected one line that reads the worktree list, got {reads}"
     assert "|" not in reads[ 0 ], "git worktree list must not feed any reader through a pipe"
+    assert "2>/dev/null" in reads[ 0 ], "git's error text must not reach the caller's output"
     assert reads[ 0 ].lstrip().startswith( ( 'if ! WT_LIST="$( git -C "$dir" worktree list --porcelain', 'WT_LIST="$( git -C "$dir" worktree list --porcelain' ) )
 
 
