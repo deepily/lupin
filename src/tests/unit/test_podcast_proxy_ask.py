@@ -327,7 +327,7 @@ def test_a_seat_the_bridge_does_not_know_files_under_the_gates_own_sender_with_n
     assert card.sender_persona is None and card.sender_icon is None and pushed[ "voice_persona" ] is None
 
 
-@pytest.mark.parametrize( "value,expected", [ ( "true", True ), ( "1", True ), ( " YES ", True ), ( "false", False ), ( "", False ), ( "0", False ) ] )
+@pytest.mark.parametrize( "value,expected", [ ( "true", True ), ( "1", True ), ( " YES ", True ), ( "false", False ), ( "off", False ), ( "no", False ), ( "", False ), ( "0", False ) ] )
 def test_the_dry_run_environment_variable_can_only_turn_the_switch_on( monkeypatch, value, expected ):
     class Config:
         def get( self, key, default=None, return_type=None ): return False
