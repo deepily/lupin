@@ -2083,6 +2083,7 @@ def _project_awaiting_response( n, now ) -> Optional[dict]:
         - timeout_seconds is the whole seconds left to the row's expiry, rounded up, so a page restarts its countdown where the server's clock stands
         - a row with no expires_at keeps its own timeout_seconds
         - suppress_ding is true, since a card the user was never told about must not ring on page load
+        - the caller adds voice_persona, which needs the session bridge
     """
     if n.expires_at is not None:
         left = ( n.expires_at - now ).total_seconds()
@@ -2146,8 +2147,14 @@ async def get_awaiting_response_notifications(
             with get_db() as session:
                 repo = NotificationRepository( session )
                 now  = datetime.now( timezone.utc )
-                rows = [ _project_awaiting_response( n, now ) for n in repo.get_pending_for_recipient( recipient_uuid ) if not n.is_hidden ]
-                return [ row for row in rows if row is not None ]
+                awaiting = []
+                for n in repo.get_pending_for_recipient( recipient_uuid ):
+                    row = None if n.is_hidden else _project_awaiting_response( n, now )
+                    if row is None: continue
+                    # A live push carries the sender's persona under this key; the cards read it for their badge.
+                    row[ "voice_persona" ] = _voice_persona_for_sender_id( n.sender_id )
+                    awaiting.append( row )
+                return awaiting
 
         notifications = await asyncio.to_thread( _fetch_awaiting_sync )
         return {

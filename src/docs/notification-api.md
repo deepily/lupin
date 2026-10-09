@@ -999,7 +999,7 @@ Both pages call it at load, so a card filed while the page was closed is drawn a
 Shape: `{ status, awaiting_count, notifications, timestamp }`. Each notification carries `id`, `sender_id`,
 `sender_persona`, `sender_icon`, `title`, `message`, `abstract`, `type`, `priority`, `job_id`, `payload`,
 `state`, `response_requested` (always true), `response_type`, `response_default`, `response_options`,
-`timeout_seconds`, `suppress_ding` (always true) and `created_at`.
+`timeout_seconds`, `suppress_ding` (always true), `created_at` and `voice_persona` (the sender's persona from the session bridge, or null, under the key a live push uses).
 
 - `timeout_seconds` is the whole seconds left to the row's expiry, rounded up, so a page restarts its countdown where the server's clock stands. A row with no expiry keeps its own timeout.
 - A row past its expiry, or soft-hidden, is left out. A row the user has answered is not waiting, so it is left out too.

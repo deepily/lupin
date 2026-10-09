@@ -71,6 +71,14 @@ test("each waiting card is added in list order, with the fields a push would car
   assert.equal(a.state, "pending");
 });
 
+test("a card carries the sender's persona under the key a push uses, and a null persona stays absent", () => {
+  const { store } = setup();
+  const persona = { name: "tiffany", voice_id: "v1", icon: "💍", color: "#FFD600", borrowed: false };
+  store.hydrateAwaiting([ card("a", { voice_persona: persona }), card("b", { voice_persona: null as unknown as undefined }) ]);
+  assert.deepEqual(store.getById("a")!.voice_persona, persona, "the badge reads this");
+  assert.equal("voice_persona" in store.getById("b")!, false, "a server null must not become a stored null");
+});
+
 test("the first card takes the slot and its countdown starts at the server's remaining time", () => {
   const { store } = setup();
   store.hydrateAwaiting([ card("a", { timeout_seconds: 41 }), card("b") ]);

@@ -39,12 +39,36 @@ def _open_multiplexer( page ):
     )
 
 
+_PERSONA = { "name": "tiffany", "display_name": "Tiffany", "voice_id": "e2e-voice", "icon": "💍", "color": "#FFD600", "borrowed": False }
+
+
+def _give_the_card_a_persona( page, card_id, seen ):
+    """
+    Add a persona to the real answer for one card.
+
+    The persona comes from the session bridge, which the test server lacks for the seeded sender.
+    The answer is fetched for real and only that card's `voice_persona` is filled in.
+    So the page's own path from the answer to the badge is what the test watches.
+    `seen` collects the real answer's keys.
+    """
+    def patch( route ):
+        response = route.fetch()
+        body     = response.json()
+        for item in body[ "notifications" ]:
+            seen.append( sorted( item.keys() ) )
+            if item[ "id" ] == card_id: item[ "voice_persona" ] = _PERSONA
+        route.fulfill( response=response, json=body )
+    page.route( "**/api/notifications/awaiting-response", patch )
+
+
 @pytest.mark.parametrize( "answer", [ "yes", "no" ] )
 def test_a_card_filed_before_the_page_opened_is_drawn_at_load( logged_in_page, test_user_credentials, answer ):
     page = logged_in_page
     question, abstract, payload = build_card()
     card_id = seed_waiting_card( test_user_credentials[ "email" ], question, abstract, payload )
 
+    seen = []
+    _give_the_card_a_persona( page, card_id, seen )
     _open_multiplexer( page )
 
     widget = page.locator( f"[data-testid='multiplexer-action-required'][data-id-hash='{card_id}']" )
@@ -54,6 +78,8 @@ def test_a_card_filed_before_the_page_opened_is_drawn_at_load( logged_in_page, t
     assert question in drawn, "the card must show the builder's question"
     assert payload[ "name" ] in drawn
     assert human_size( payload[ "size" ] ) in drawn
+    assert "voice_persona" in seen[ 0 ], "the real answer must carry the persona key a push carries"
+    assert widget.locator( ".persona-badge-name" ).inner_text() == _PERSONA[ "name" ], "the card must show its sender's persona badge"
     assert widget.locator( ".action-required-btn-yes" ).count() == 1
     assert widget.locator( ".action-required-btn-no" ).count() == 1
 

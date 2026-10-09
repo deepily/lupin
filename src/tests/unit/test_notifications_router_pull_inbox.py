@@ -245,6 +245,7 @@ class TestTheAwaitingResponseInbox:
             "timeout_seconds"    : card[ "timeout_seconds" ],
             "suppress_ding"      : True,
             "created_at"         : "CREATED-AT-VALUE",
+            "voice_persona"      : None,
         }
 
     def test_the_timeout_is_the_time_left_to_the_expiry_and_not_the_original_timeout( self, harness ):
@@ -267,6 +268,15 @@ class TestTheAwaitingResponseInbox:
     def test_a_hidden_card_is_left_out( self, harness ):
         harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=60, is_hidden=True ), _Waiting( expires_in=60 ) ] )
         assert harness.client.get( "/api/notifications/awaiting-response" ).json()[ "awaiting_count" ] == 1
+
+    def test_each_card_carries_the_persona_of_its_own_sender( self, harness, monkeypatch ):
+        import cosa.rest.routers.notifications as router
+        personas = { "SENDER-ONE": { "name": "one" }, "SENDER-TWO": { "name": "two" } }
+        monkeypatch.setattr( router, "_voice_persona_for_sender_id", lambda sender_id: personas[ sender_id ] )
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=60, sender_id="SENDER-ONE" ),
+                                                              _Waiting( expires_in=60, sender_id="SENDER-TWO" ) ] )
+        cards = harness.client.get( "/api/notifications/awaiting-response" ).json()[ "notifications" ]
+        assert [ c[ "voice_persona" ] for c in cards ] == [ { "name": "one" }, { "name": "two" } ]
 
     def test_a_card_with_no_expiry_keeps_its_own_timeout( self, harness ):
         harness.repo.returns( "get_pending_for_recipient", [ _Waiting() ] )
