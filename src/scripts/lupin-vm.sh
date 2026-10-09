@@ -169,6 +169,13 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           DEEPILY_PROJECTS_DIR + LUPIN_CC_VENV (operator-owned CC venv) +
                           LUPIN_DEV_EMAIL (notify target-user), and
                           create ~/.lupin/config (lupin CLI) if absent. Re-run anytime. Idempotent.
+  push-test-login         put the test role's password into the VM's cloud-gpu.env as the line
+                          LUPIN_TEST_DB_PASSWORD=. Reads Secret Manager lupin-db-test-password with your
+                          own gcloud login and sends the value to the VM on stdin: it is never in a
+                          command line, a log or this verb's output. Keeps the file's owner and mode,
+                          replaces the line if present, appends it if not, and says only set /
+                          replaced / unchanged. It does not recreate the container. The Cloud SQL
+                          lupin_test role and the template database must already exist.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -1183,6 +1190,50 @@ echo '== done — open a fresh shell (or: source ~/.bashrc) to pick up aliases +
             gcloud compute ssh "$VM_NAME" \
                 --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
                 --command "$RCMD_ENV"
+        fi
+        ;;
+
+    push-test-login)
+        # Row 80513825. The VM's env file is VM-local and hand-written (see vm-unversioned-manifest.tsv), so
+        # push-env, which writes ~/.bashrc exports, is the wrong door. The value rides on ssh's stdin; the
+        # command string below holds no secret, so it is safe to log and to show in a process list.
+        require_project
+        TL_SECRET="lupin-db-test-password"
+        TL_ENV_PATH="$VM_ROOT/$ENV_FILE"
+        read -r -d '' RCMD_TL <<TLEOF || true
+set -e
+f='$TL_ENV_PATH'
+sudo test -f "\$f" || { echo "no \$f on the VM; create it first" >&2; exit 3; }
+IFS= read -r pw
+[ -n "\$pw" ] || { echo "no value arrived on stdin" >&2; exit 4; }
+owner=\$(sudo stat -c '%u:%g' "\$f"); mode=\$(sudo stat -c '%a' "\$f")
+new=\$(mktemp)
+trap 'rm -f "\$new"' EXIT
+sudo cat "\$f" | PW="\$pw" awk 'BEGIN { pw = ENVIRON["PW"]; done = 0 }
+    index(\$0, "LUPIN_TEST_DB_PASSWORD=") == 1 { if (!done) { print "LUPIN_TEST_DB_PASSWORD=" pw; done = 1 } next }
+    { print }
+    END { if (!done) print "LUPIN_TEST_DB_PASSWORD=" pw }' > "\$new"
+if sudo cmp -s "\$new" "\$f"; then echo "LUPIN_TEST_DB_PASSWORD: unchanged"; exit 0; fi
+had=no; if sudo grep -q '^LUPIN_TEST_DB_PASSWORD=' "\$f"; then had=yes; fi
+sudo install -o "\${owner%:*}" -g "\${owner#*:}" -m "\$mode" "\$new" "\$f"
+if [ "\$had" = yes ]; then echo "LUPIN_TEST_DB_PASSWORD: replaced"; else echo "LUPIN_TEST_DB_PASSWORD: set"; fi
+TLEOF
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TL_SECRET with your gcloud login, then send it on stdin over IAP ssh to $VM_NAME to set LUPIN_TEST_DB_PASSWORD in $TL_ENV_PATH. The remote command, which holds no secret:"
+            printf '%s\n' "$RCMD_TL" | sed 's/^/    /'
+        else
+            tl_value="$( gcloud secrets versions access latest --secret="$TL_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TL_SECRET (needs your IAM access to it)"
+            [ -n "$tl_value" ] || die "Secret Manager $TL_SECRET has no value; add one first"
+            # An env file is read by compose, not a shell: refuse anything it could misread. The value is never printed.
+            case "$tl_value" in
+                *[!A-Za-z0-9._~@%+=/-]*) die "the value of $TL_SECRET has characters an env file may misread; use letters, digits and . _ ~ @ % + = / -" ;;
+            esac
+            printf '%s\n' "$tl_value" | gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_TL"
+            unset tl_value
+            log "done. The container reads the env file at create: recreate it to apply (lupin-vm.sh deploy, or svc up -d --force-recreate)."
         fi
         ;;
 
