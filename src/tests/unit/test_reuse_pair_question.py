@@ -138,3 +138,10 @@ def test_replaying_a_pair_receipt_on_a_context_without_the_packed_path_is_a_name
     plain     = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=None )
     out       = rt.replay_impl( rec[ "id" ], plain )
     assert out[ "status" ] == "error" and out[ "error" ] == "PAIR_NEEDS_PACKED"
+
+
+def test_the_receipt_shows_the_first_reason_of_an_entry_with_two( env ):
+    bad = "cosa.mathx.add"
+    _, _, rec = pair_run( env, wrong={ "provides": { bad } }, omit={ "coverage": { bad } } )
+    one, = rec[ "malformed" ]
+    assert one[ "id" ] == bad and one[ "reason" ].startswith( "provides:" ) and "not 'noul'" in one[ "reason" ]
