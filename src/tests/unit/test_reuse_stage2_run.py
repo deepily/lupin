@@ -269,3 +269,23 @@ def test_the_unwired_new_question_is_refused_by_the_name_check_before_any_ask_ru
     with pytest.raises( s1.DriverRefused, match="not wired" ): s2._asks( [ "new" ] )
     with pytest.raises( s1.DriverRefused, match="not one of" ): s2._asks( [ "other" ] )
     assert list( s2._asks( [ "old" ] ) ) == [ "old" ]
+
+
+def test_the_plan_reads_the_record_the_negatives_writer_really_writes( tmp_path ):
+    # the writer's own output on the real slice: lexical rows are { id, score }, twins and random are id strings
+    from lupin_mcp import reuse_stage2_negatives as ng
+    from tests.unit.test_reuse_stage2_negatives import _inputs
+    manifest, symbols, old = _inputs( tmp_path )
+    out = tmp_path / "written.json"
+    assert ng.main( [ "--manifest", str( manifest ), "--symbols", str( symbols ), "--old-stage2", str( old ), "--out", str( out ) ] ) == 0
+    written = json.loads( out.read_text() )[ "members" ]
+    assert any( v[ "lexical" ] for v in written.values() )                                                           # the loop below must have a dict row to choke on
+    kept, _ = rt.sendable( [ json.loads( l ) for l in symbols.read_text().splitlines() if l.strip() ] )
+    items, twins = s2.load_plan( out, hashlib.sha256( out.read_bytes() ).hexdigest(), { r[ "id" ]: r for r in kept } )
+    assert [ i[ "member" ] for i in items ] == sorted( written )
+    for item in items:
+        mine = written[ item[ "member" ] ]
+        want = [ c for c in mine[ "twins" ] + [ r[ "id" ] for r in mine[ "lexical" ] ] + mine[ "random" ] ]
+        got  = [ e[ "id" ] for e in item[ "entries" ] ]
+        assert got == [ c for k, c in enumerate( want ) if c != item[ "member" ] and c not in want[ :k ] ]
+        assert twins[ item[ "member" ] ] == set( mine[ "twins" ] )
