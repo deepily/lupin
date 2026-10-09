@@ -234,22 +234,40 @@ def run_line( t ):
              f"not run {t[ 'totals' ][ 'not_run' ]}, spent {t[ 'totals' ][ 'spent_tokens' ]}" )
 
 
-def approve_canary( env, by, why, spec=E2E_SPEC ):
+def approve_canary( env, by, why, spec=E2E_SPEC, revised_estimate=None ):
     """
     Record that a person read the canary and let the rest run.
 
+    Requires:
+        - revised_estimate is None, or a positive whole number of tokens that replaces the spec's estimate
+    Ensures:
+        - a revised estimate is accepted only for a canary whose tripped list is exactly projection_over_allowance, and only when
+          the projection is within the allowance it gives: the smaller of 1.5 times it and the ledger's remaining allowance now
+        - the approval then keeps the old estimate, the new one and that allowance beside by, why and at; the measurement is untouched
     Raises:
-        - DriverRefused for a missing by or why, or a canary already approved
+        - DriverRefused for a missing by or why, a canary already approved, a revised estimate that is not a positive whole number,
+          or a revised estimate for a canary that tripped nothing
         - CanaryNotApproved when no canary was run
-        - CanaryTripped when the canary crossed a number; it is never approved
+        - CanaryTripped when the canary crossed a number a revised estimate cannot clear, or the projection is still above the revised allowance
     """
     if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise s1.DriverRefused( "by and why must say who approved the canary and why" )
     path = _canary_path( env, spec )
     if not path.exists(): raise s1.CanaryNotApproved( "no canary was run" )
     report = json.loads( path.read_text( encoding="utf-8" ) )
     if report[ "approved" ] is not None: raise s1.DriverRefused( "the canary is already approved" )
-    if report[ "tripped" ]: raise s1.CanaryTripped( f"the canary tripped: {', '.join( report[ 'tripped' ] )}" )
-    report[ "approved" ] = { "by": by, "why": why, "at": env.clock() }
+    if revised_estimate is not None and ( type( revised_estimate ) is not int or revised_estimate < 1 ):
+        raise s1.DriverRefused( f"a revised estimate is a positive whole number of tokens, got {revised_estimate!r}" )
+    approval = { "by": by, "why": why, "at": env.clock() }
+    if revised_estimate is not None and not report[ "tripped" ]: raise s1.DriverRefused( "nothing tripped, so there is no estimate to revise" )
+    if report[ "tripped" ]:
+        if revised_estimate is None or report[ "tripped" ] != [ "projection_over_allowance" ]:
+            raise s1.CanaryTripped( f"the canary tripped: {', '.join( report[ 'tripped' ] )}" )
+        limit, total = env.ledger.snapshot()
+        allowance    = min( int( ESTIMATE_FACTOR * revised_estimate ), limit - total )
+        if report[ "projection_tokens" ] > allowance:
+            raise s1.CanaryTripped( f"the canary's projection {report[ 'projection_tokens' ]} is above the allowance {allowance} that a revised estimate of {revised_estimate} gives" )
+        approval[ "revised_estimate" ] = { "old": spec[ "estimate" ], "new": revised_estimate, "allowance_tokens": allowance }
+    report[ "approved" ] = approval
     _write_json( path, report )
 
 
@@ -346,6 +364,7 @@ def _parser():
         if name == "approve":
             p.add_argument( "--by", required=True )
             p.add_argument( "--why", required=True )
+            p.add_argument( "--revised-estimate", type=int, default=None )
     return ap
 
 
@@ -393,7 +412,7 @@ def main( argv=None ):
     if args.command == "canary":
         print( canary_line( run_canary( env, items, twins, args.ceiling ) ) )
     elif args.command == "approve":
-        approve_canary( env, args.by, args.why )
+        approve_canary( env, args.by, args.why, revised_estimate=args.revised_estimate )
         print( f"canary approved by {args.by}" )
     elif args.command == "run":
         print( run_line( run_full( env, items, twins, args.ceiling ) ) )

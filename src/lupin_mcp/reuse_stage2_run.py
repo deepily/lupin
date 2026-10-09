@@ -174,6 +174,7 @@ def _parser():
         if name == "approve":
             p.add_argument( "--by", required=True )
             p.add_argument( "--why", required=True )
+            p.add_argument( "--revised-estimate", type=int, default=None )
         if name == "rows": p.add_argument( "--out", required=True )
     return ap
 
@@ -205,7 +206,7 @@ def main( argv=None, loader=None ):
     env  = e2r._open_env( root, args.data, args.ledger, args.live, asks, args.pack_size )
     if args.command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, twins, args.ceiling, spec=spec ) ) )
     elif args.command == "approve":
-        e2r.approve_canary( env, args.by, args.why, spec=spec )
+        e2r.approve_canary( env, args.by, args.why, spec=spec, revised_estimate=args.revised_estimate )
         print( f"canary approved by {args.by}" )
     elif args.command == "run": print( e2r.run_line( e2r.run_full( env, items, twins, args.ceiling, spec=spec ) ) )
     else:
