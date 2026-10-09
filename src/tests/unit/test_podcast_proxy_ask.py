@@ -325,3 +325,18 @@ def test_a_seat_the_bridge_does_not_know_files_under_the_gates_own_sender_with_n
     card, pushed = world[ "cards" ].created[ 0 ], world[ "queue" ].pushed[ 0 ]
     assert card.sender_id == pushed[ "sender_id" ] and card.sender_id.endswith( "#0badc0de" )
     assert card.sender_persona is None and card.sender_icon is None and pushed[ "voice_persona" ] is None
+
+
+@pytest.mark.parametrize( "value,expected", [ ( "true", True ), ( "1", True ), ( " YES ", True ), ( "false", False ), ( "", False ), ( "0", False ) ] )
+def test_the_dry_run_environment_variable_can_only_turn_the_switch_on( monkeypatch, value, expected ):
+    class Config:
+        def get( self, key, default=None, return_type=None ): return False
+    monkeypatch.setenv( "LUPIN_PODCAST_PROXY_DRY_RUN", value )
+    assert pp.dry_run_enabled( Config() ) is expected
+
+
+def test_with_no_environment_variable_the_ini_decides( monkeypatch ):
+    class Config:
+        def get( self, key, default=None, return_type=None ): return True
+    monkeypatch.delenv( "LUPIN_PODCAST_PROXY_DRY_RUN", raising=False )
+    assert pp.dry_run_enabled( Config() ) is True

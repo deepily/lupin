@@ -52,6 +52,7 @@ MAX_AGE_KEY     = "podcast proxy card max age seconds"
 MAX_AGE_DEFAULT = 900
 DRY_RUN_KEY     = "podcast proxy dry run"
 DRY_RUN_STATUS  = "dry run"
+DRY_RUN_ENV     = "LUPIN_PODCAST_PROXY_DRY_RUN"
 
 
 class DoorRefusal( Exception ):
@@ -203,9 +204,12 @@ def dry_run_enabled( config_mgr=None ):
         - config_mgr, when given, answers get( key, default=, return_type= ); None builds the server's own
 
     Ensures:
-        - returns True only when the key is set to true; a missing key gives False
+        - returns True when the environment variable LUPIN_PODCAST_PROXY_DRY_RUN is "true", "1" or "yes", whatever the INI says
+        - otherwise returns True only when the INI key is set to true; a missing key gives False
+        - the variable can only turn the switch on, so an unset or other value leaves the INI in charge
         - a dry run does every check and writes the spent-card row, and queues nothing
     """
+    if os.environ.get( DRY_RUN_ENV, "" ).strip().lower() in ( "true", "1", "yes" ): return True
     if config_mgr is None:
         from cosa.config.configuration_manager import ConfigurationManager
         config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
