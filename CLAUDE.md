@@ -360,6 +360,13 @@ Suites that qualify:
   and 28.0s (7 tests) in one run (2026-10-08, at 53ba759b9); with docker hidden every test skips (0.4s each).
   Re-time them rather than trusting those figures. They are not in `docker_smoke`'s list of three, so a
   skip there is not yet a failure.
+- `src/tests/smoke/test_podcast_proxy_spent_cards_real_postgres.py` — the spent-card claim race on a real
+  Postgres. It reuses the rollback file's throwaway container and its name and label guards, and connects
+  with psycopg2 over the container's bridge address (no port is published). The address is refused when empty or
+  when it is the real database's host, and the login password is random and never written to disk. The container
+  is removed with its volumes at the end, so nothing persists and no monopoly is needed. With docker the four
+  tests took about 8s in one run (2026-10-08, at b9d89658f); with docker hidden three skip and one passes (0.2s).
+  Re-time it rather than trusting those figures. It is not in `docker_smoke`'s list, so a skip there is not yet a failure.
 - `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
 
 ### :8000 (test) — monopolize mode, scheduled only

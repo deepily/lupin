@@ -596,6 +596,18 @@ The fleet-wide on/off switch for the Stop-hook poke (row 3526fb95). A plain swit
 | GET | `/api/heartbeat/poke-mute` | API key or JWT | Read the switch: `{ muted, set_by, set_at }`. A missing or unreadable switch file reads as not muted. |
 | PUT | `/api/heartbeat/poke-mute` | Admin JWT | Body `{ muted }` (a JSON boolean, else 422). Returns the state as read back. 403 for a signed-in user without the admin role, 403 for a caller presenting only `X-API-Key` (a Claude session may read the switch and may not flip it), 401 with no credentials. Each flip appends one line to `heartbeat-poke-mute.log` beside the switch file. |
 
+## 25b. Podcast Proxy (`/api/podcast-proxy/*`)
+
+A seat asks for a podcast of a document on the operator's behalf. The server judges the file, writes the yes/no card itself, and starts the job only after the operator's own yes. Every refusal is `{ detail: { code, message } }`. The card binds to the seat's stable session id and the actor is `<persona> <first 8 hex of the stable id>`; that check is a courtesy, and the lock is the operator's yes bound to the file's hash plus one spent-card row per card. Auth for all three: X-API-Key or Bearer JWT.
+
+| Method | Path | Summary |
+|--------|------|---------|
+| POST | `/api/podcast-proxy/ask` | Body `{ path, actor }`, `path` in doc-viewer form `<scope>/<path>`. Judges the file, files a yes/no card whose default is no, returns `{ card_id, name, size, sha256, asked_by, expires_at, pushed }`. 400 `bad_actor` or a door code (`bad_path`, `not_found`, `viewer_refused`, `wrong_kind`, `too_large`, `credential`, `unreadable`); 404 `no_operator`; 409 `waiting_card` with `card_id` beside the code when a live card for the same bytes exists. |
+| POST | `/api/podcast-proxy/start` | Body `{ card_id, actor }`. Re-checks the stored card and the file, spends the card once, queues the job from a copy of the judged bytes, returns `{ card_id, job_id, status, name, queue_position }`. 404 `no_card`, `no_operator`; 400 `bad_actor`; 403 `bad_card`, `not_answered`, `default_answer`, `not_yes`, `wrong_login`, `wrong_session`, `too_old`; 409 `file_refused`, `hash_mismatch`, `spent`, `claimed_no_job` (a start is under way or one did not finish: read the card status before asking again); 502 `queue_failed` (fixed sentence, cause in the server log; the same card may retry). |
+| GET | `/api/podcast-proxy/card/{card_id}` | Where a card stands: `{ card_id, scope_path, name, size, sha256, asked_by_session, state, expires_at, spent, job_id }`, with `state` one of `waiting`, `yes`, `no`, `default_answer`, `expired`, `wrong_login`, `claimed_no_job`. 404 `no_card`. |
+
+---
+
 ## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
 
 > Managers ASK Rick to move a row; only Rick answers (row c9fafb9d). **Sword of Damocles** (row ab8c5728): while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns, and Rick's approval drops it in the same transaction as the admit. Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor. Plan: `src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.
