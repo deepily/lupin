@@ -116,7 +116,6 @@ no DML, no revision file.
 """
 
 import os
-from unittest import mock
 
 import pytest
 
@@ -140,6 +139,9 @@ INCIDENT_TABLE  = "task_items"
 INCIDENT_COLUMN = "park_reason_captured_at"
 
 SYNTHETIC_COLUMN = "seat2_control_a_synthetic"
+
+
+_LOGIN_ROOT = None   # where the .env is read from; None is the project root, a test points it at a scratch one
 
 
 def resolve_migration_built_database_url( environ=None ):
@@ -179,11 +181,11 @@ def resolve_migration_built_database_url( environ=None ):
 
     from cosa.rest.db.database import get_database_url
 
-    # Force the testing branch of the builder and strip the two vars that could
-    # redirect it elsewhere. patch.dict restores os.environ on exit.
-    with mock.patch.dict( os.environ, { "LUPIN_ENV": "testing" }, clear=False ):
-        os.environ.pop( "DATABASE_URL", None )
-        os.environ.pop( "DB_NAME", None )
+    # Force the testing branch of the builder, strip the two vars that could redirect it elsewhere,
+    # and take the test role's login: the one chosen at startup is the host role, which has no CONNECT
+    # on lupin_db_test. Everything is restored on exit.
+    from tests.helpers.testing_venue import reselected_for_testing
+    with reselected_for_testing( _LOGIN_ROOT ):
         return get_database_url()
 
 
@@ -554,9 +556,27 @@ def test_url_defaults_to_the_testing_database_and_ignores_shell_overrides( monke
 
     assert "lupin_db_test" in url
     assert "should" not in url
-    # patch.dict restored the caller's environment on the way out.
+    # The caller's environment was restored on the way out.
     assert os.environ[ "DATABASE_URL" ] == "postgresql://should/not/win"
     assert os.environ[ "LUPIN_ENV" ] == "development"
+
+
+def test_the_url_carries_the_test_role_when_the_startup_login_was_the_host_role( monkeypatch, tmp_path ):
+    """The host role may not connect to lupin_db_test, so the comparison must name the test role."""
+    import sys
+    from cosa.utils import dotenv_password
+    for key in ( "DB_USER", "DB_PASSWORD", "LUPIN_ENV", "DATABASE_URL", "DB_NAME" ):
+        monkeypatch.setenv( key, "placeholder" )
+        monkeypatch.delenv( key )
+    monkeypatch.delenv( URL_OVERRIDE_ENV, raising=False )
+    monkeypatch.setattr( dotenv_password, "_SEEDED", { } )
+    ( tmp_path / ".env" ).write_text( "LUPIN_HOST_DB_USER=lupin_host\nLUPIN_HOST_DB_PASSWORD=hostpw\n"
+                                      "LUPIN_TEST_DB_USER=lupin_test\nLUPIN_TEST_DB_PASSWORD=testpw\n" )
+    dotenv_password.seed_db_password_from_dotenv( root=str( tmp_path ) )
+    monkeypatch.setattr( sys.modules[ __name__ ], "_LOGIN_ROOT", str( tmp_path ) )
+    url = resolve_migration_built_database_url()
+    assert "lupin_test:testpw@" in url and "lupin_db_test" in url, url
+    assert os.environ[ "DB_USER" ] == "lupin_host", "the host login was not put back"
 
 
 def test_read_stamped_revision_degrades_to_none_when_the_query_fails():
