@@ -36,13 +36,13 @@ def vm( tmp_path ):
     calls = tmp_path / "calls.log"
     ( tmp_path / "gcloud" ).write_text( GCLOUD )
     ( tmp_path / "gcloud" ).chmod( 0o755 )
-    ( tmp_path / "sudo" ).write_text( '#!/bin/bash\nexec "$@"\n' )
+    ( tmp_path / "sudo" ).write_text( '#!/bin/bash\n[ -n "$STUB_SUDO_FAILS" ] && [ "$1" = "$STUB_SUDO_FAILS" ] && exit 1\nexec "$@"\n' )
     ( tmp_path / "sudo" ).chmod( 0o755 )
     ( tmp_path / "install" ).write_text( '#!/bin/bash\necho "$*" >> "$STUB_INSTALL"\nexec /usr/bin/install "$@"\n' )
     ( tmp_path / "install" ).chmod( 0o755 )
-    def run( *args, secret=FAKE_VALUE, project="proj-x", secret_fails="" ):
+    def run( *args, secret=FAKE_VALUE, project="proj-x", secret_fails="", sudo_fails="" ):
         env = { "PATH": f"{tmp_path}:{os.environ[ 'PATH' ]}", "HOME": str( tmp_path ), "STUB_CALLS": str( calls ),
-                "STUB_SECRET": secret, "STUB_SECRET_FAILS": secret_fails, "STUB_ENV": str( env_file ),
+                "STUB_SECRET": secret, "STUB_SECRET_FAILS": secret_fails, "STUB_SUDO_FAILS": sudo_fails, "STUB_ENV": str( env_file ),
                 "STUB_INSTALL": str( tmp_path / "install.log" ) }
         if project is not None: env[ "LUPIN_GCP_PROJECT_ID" ] = project
         done = subprocess.run( [ "bash", str( SCRIPT ), *args ], capture_output=True, text=True, env=env )
@@ -138,3 +138,11 @@ def test_the_vm_preflight_remedy_names_the_verb():
     text  = open( SCRIPT.parent / "preflight-vm.sh" ).read()
     block = text[ text.index( "# B8 —" ): text.index( "if layer_runs B; then" ) ]
     assert "lupin-vm.sh push-test-login" in block[ block.index( "PLAIN)" ): block.index( "*)" ) ]
+
+
+def test_a_failed_read_of_the_env_file_leaves_it_untouched_and_does_not_say_set( vm ):
+    """A failed read must not lead to writing back only the password line."""
+    vm.env_file.write_text( "A=1\nB=2\n" )
+    done, _ = vm( "push-test-login", sudo_fails="cat" )
+    assert done.returncode != 0 and "LUPIN_TEST_DB_PASSWORD: set" not in done.stdout
+    assert vm.env_file.read_text() == "A=1\nB=2\n"

@@ -1207,12 +1207,13 @@ sudo test -f "\$f" || { echo "no \$f on the VM; create it first" >&2; exit 3; }
 IFS= read -r pw
 [ -n "\$pw" ] || { echo "no value arrived on stdin" >&2; exit 4; }
 owner=\$(sudo stat -c '%u:%g' "\$f"); mode=\$(sudo stat -c '%a' "\$f")
-new=\$(mktemp)
-trap 'rm -f "\$new"' EXIT
-sudo cat "\$f" | PW="\$pw" awk 'BEGIN { pw = ENVIRON["PW"]; done = 0 }
+new=\$(mktemp); cur=\$(mktemp)
+trap 'rm -f "\$new" "\$cur"' EXIT
+sudo cat "\$f" > "\$cur"
+PW="\$pw" awk 'BEGIN { pw = ENVIRON["PW"]; done = 0 }
     index(\$0, "LUPIN_TEST_DB_PASSWORD=") == 1 { if (!done) { print "LUPIN_TEST_DB_PASSWORD=" pw; done = 1 } next }
     { print }
-    END { if (!done) print "LUPIN_TEST_DB_PASSWORD=" pw }' > "\$new"
+    END { if (!done) print "LUPIN_TEST_DB_PASSWORD=" pw }' "\$cur" > "\$new"
 if sudo cmp -s "\$new" "\$f"; then echo "LUPIN_TEST_DB_PASSWORD: unchanged"; exit 0; fi
 had=no; if sudo grep -q '^LUPIN_TEST_DB_PASSWORD=' "\$f"; then had=yes; fi
 sudo install -o "\${owner%:*}" -g "\${owner#*:}" -m "\$mode" "\$new" "\$f"
