@@ -309,3 +309,30 @@ def test_the_canary_on_the_real_stand_in_completes_the_new_question_with_tokens_
     assert raised == []
     assert len( new ) == 5
     assert all( s[ "status" ] == "complete" and s[ "causes" ] == [] and s[ "tokens" ] > 0 and s[ "requests" ] > 0 for s in new )
+
+
+def test_a_canary_that_tripped_only_on_the_projection_is_approved_with_a_revised_estimate_through_the_command_line( tmp_path, capsys ):
+    scratch = Env( tmp_path )
+    both    = [ "--questions", "old,new" ]
+    def step( *command, estimate="1000" ): return s2.cli( command_args( scratch, tmp_path, *command, "--estimate-tokens", estimate, extra=both ) )
+    canary_path = scratch.data / "e2e-results" / "s2-canary.canary.json"
+    assert step( "canary", "--ceiling", "100000000" ) == 0
+    before = canary_path.read_bytes()
+    report = json.loads( before )
+    assert report[ "tripped" ] == [ "projection_over_allowance" ] and report[ "approved" ] is None
+    projection = report[ "projection_tokens" ]
+    capsys.readouterr()
+    assert step( "approve", "--by", "cheech", "--why", "read" ) == 2 and "tripped" in capsys.readouterr().err                          # no revised estimate: never approved
+    assert step( "approve", "--by", "cheech", "--why", "read", "--revised-estimate", str( projection // 3 ) ) == 2                       # 1.5 times that is under the projection
+    assert "above" in capsys.readouterr().err and json.loads( canary_path.read_text() )[ "approved" ] is None
+    assert step( "run", "--ceiling", "100000000" ) == 2
+    assert step( "approve", "--by", "cheech", "--why", "my estimate was low", "--revised-estimate", str( projection ) ) == 0
+    approved = json.loads( canary_path.read_text() )
+    assert approved[ "approved" ][ "by" ] == "cheech" and approved[ "approved" ][ "why" ] == "my estimate was low"
+    assert approved[ "approved" ][ "revised_estimate" ] == { "old": 1000, "new": projection, "allowance_tokens": int( 1.5 * projection ) }
+    assert { k: v for k, v in approved.items() if k != "approved" } == { k: v for k, v in report.items() if k != "approved" }         # the measurement itself is untouched
+    assert before != canary_path.read_bytes()
+    assert step( "run", "--ceiling", "100000000" ) == 0
+    out_path = tmp_path / "rows.json"
+    assert s2.cli( command_args( scratch, tmp_path, "rows", "--estimate-tokens", "1000", "--out", str( out_path ), extra=both ) ) == 0
+    assert len( json.loads( out_path.read_text( encoding="utf-8" ) )[ "rows" ] ) == 12 * 6

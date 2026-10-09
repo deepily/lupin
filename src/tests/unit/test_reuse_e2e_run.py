@@ -432,3 +432,23 @@ def test_the_canary_on_the_real_stand_in_completes_both_questions_with_the_real_
     assert raised == []
     assert [ s[ "question" ] for s in searches ] == [ "old", "new" ] * 5
     assert all( s[ "status" ] == "complete" and s[ "causes" ] == [] and s[ "tokens" ] > 0 for s in searches )
+
+
+def test_a_revised_estimate_never_approves_a_canary_that_tripped_on_anything_else_or_on_nothing( tmp_path ):
+    broken = Env( tmp_path, tag="a", asks={ "old": failing( failed=1 ) } )
+    run.run_canary( broken.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    report = json.loads( ( broken.data / "e2e-results" / "e2e-canary.canary.json" ).read_text() )
+    assert "incomplete" in report[ "tripped" ]
+    with pytest.raises( s1.CanaryTripped, match="incomplete" ): run.approve_canary( broken.env(), "cheech", "read", revised_estimate=10 ** 12 )
+    assert json.loads( ( broken.data / "e2e-results" / "e2e-canary.canary.json" ).read_text() )[ "approved" ] is None
+    fine = Env( tmp_path, tag="b", asks={ "old": ask_old } )
+    run.run_canary( fine.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    with pytest.raises( s1.DriverRefused, match="nothing tripped" ): run.approve_canary( fine.env(), "cheech", "read", revised_estimate=10 ** 12 )
+
+
+@pytest.mark.parametrize( "bad", [ 0, -5, True, "7", 1.5 ] )
+def test_a_revised_estimate_is_a_positive_whole_number( tmp_path, monkeypatch, bad ):
+    monkeypatch.setitem( run.E2E_SPEC, "estimate", 1000 )
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    with pytest.raises( s1.DriverRefused, match="positive whole number" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=bad )

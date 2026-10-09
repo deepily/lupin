@@ -135,3 +135,22 @@ def test_a_refused_new_question_is_refused_before_any_run_is_opened_or_request_i
     assert run.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--questions", "old,new" ] ) ) == 2
     assert not ( setup.data / "e2e-results" ).exists() and rl.AccountLedger( setup.ledger ).snapshot() == before
     with pytest.raises( s1.DriverRefused, match="not wired" ): run._asks( [ "new" ] )
+
+
+def test_a_canary_that_tripped_only_on_the_projection_is_approved_with_a_revised_estimate_through_the_command_line( setup, monkeypatch, capsys ):
+    monkeypatch.setitem( run.E2E_SPEC, "estimate", 1000 )                                      # an estimate set too low, as the live one was
+    canary_path = setup.data / "e2e-results" / "e2e-canary.canary.json"
+    assert run.cli( setup.args( "canary", "--ceiling", "100000000" ) ) == 0
+    report = json.loads( canary_path.read_text() )
+    assert report[ "tripped" ] == [ "projection_over_allowance" ]
+    projection = report[ "projection_tokens" ]
+    capsys.readouterr()
+    assert run.cli( setup.args( "approve", "--by", "cheech", "--why", "read" ) ) == 2 and "tripped" in capsys.readouterr().err
+    assert run.cli( setup.args( "approve", "--by", "cheech", "--why", "read", "--revised-estimate", str( projection // 3 ) ) ) == 2
+    assert "above" in capsys.readouterr().err and json.loads( canary_path.read_text() )[ "approved" ] is None
+    assert run.cli( setup.args( "run", "--ceiling", "100000000" ) ) == 2
+    assert run.cli( setup.args( "approve", "--by", "cheech", "--why", "my estimate was low", "--revised-estimate", str( projection ) ) ) == 0
+    approved = json.loads( canary_path.read_text() )[ "approved" ]
+    assert approved[ "revised_estimate" ] == { "old": 1000, "new": projection, "allowance_tokens": int( 1.5 * projection ) } and approved[ "by" ] == "cheech"
+    assert run.cli( setup.args( "run", "--ceiling", "300000000" ) ) == 0
+    assert run.cli( setup.args( "report" ) ) == 0
