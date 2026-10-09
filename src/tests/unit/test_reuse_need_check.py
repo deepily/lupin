@@ -60,16 +60,20 @@ def test_two_separate_groups_do_not_merge():
 
 # ---- identifier tokens ----
 
-def test_identifier_tokens_hold_id_parts_file_stem_arguments_and_their_subparts():
+def test_identifier_tokens_are_whole_names_and_never_their_pieces():
     t = nc.identifier_tokens( INDEX[ A ] )
-    assert { "cosa", "alpha", "mod_a", "parser", "read_items", "source_url", "limit", "self" } <= t
-    assert { "items", "read", "source" } <= t                      # snake_case parts of 4 or more characters
-    assert "url" not in t and "mod" not in t                      # 3 characters: below the floor
+    assert { "cosa", "alpha", "mod_a", "parser", "read_items", "source_url", "limit", "self" } == t
+    assert not ( { "items", "read", "source", "url" } & t )       # a word inside a name is not banned
 
 
-def test_camel_case_parts_and_star_arguments_count():
+def test_camel_case_names_and_star_arguments_count_whole():
     t = nc.identifier_tokens( { "id": "p.CamelCaseThing.run", "sig": "( *chunks, **extras, key )", "doc": "", "file": "p/x.py" } )
-    assert { "camel", "case", "thing", "chunks", "extras", "key" } <= t
+    assert { "camelcasething", "chunks", "extras", "key" } <= t and "camel" not in t
+
+
+def test_a_plain_word_that_is_only_a_piece_of_an_identifier_passes():
+    need = "A function that will read the items from a source and returns the number of them."
+    assert nc.check_need( A, need, INDEX, nc.twin_groups( MANIFEST ) ) == []
 
 
 def test_a_signature_that_does_not_parse_still_yields_its_words():
@@ -122,13 +126,13 @@ def test_the_members_own_identifier_fails_and_the_token_is_named():
 
 
 def test_a_twin_identifier_reached_only_through_the_group_fails():
-    f = nc.check_need( A, "A function that can scan text and returns the list of articles it holds.", INDEX, nc.twin_groups( MANIFEST ) )
-    assert [ x[ "check" ] for x in f ] == [ "identifier" ]       # scan comes from C, linked to A only through B
-    assert "scan" in f[ 0 ][ "detail" ]
+    f = nc.check_need( A, "A function that can call scan_lines on text and returns the list of articles it holds.", INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ]       # scan_lines comes from C, linked to A only through B
+    assert "scan_lines" in f[ 0 ][ "detail" ]
 
 
 def test_the_same_need_is_clean_for_a_member_outside_that_group():
-    assert nc.check_need( D, "A function that can scan text and returns the list of articles it holds.", INDEX, nc.twin_groups( MANIFEST ) ) == []
+    assert nc.check_need( D, "A function that can call scan_lines on text and returns the list of articles it holds.", INDEX, nc.twin_groups( MANIFEST ) ) == []
 
 
 def test_a_run_shared_with_the_member_text_fails():
@@ -172,15 +176,15 @@ def test_check_all_refuses_to_loop_over_an_empty_sample():
 
 
 def test_the_resend_list_holds_only_member_ids_and_check_names_and_never_a_twin():
-    bad = "A function that can scan text and calls fetch_rows to return the list of articles it holds."
+    bad = "A function that can call scan_lines on text and calls fetch_rows to return the list of articles it holds."
     res = nc.check_all( { A: bad, D: GOOD }, [ A, D ], INDEX, nc.twin_groups( MANIFEST ) )
-    assert "fetch_rows" in json.dumps( res ) and "scan" in json.dumps( res )
+    assert "fetch_rows" in json.dumps( res ) and "scan_lines" in json.dumps( res )
     resend = nc.resend_list( res )
     assert resend == [ { "member": A, "failed": [ "identifier" ] } ]
     text = json.dumps( resend )
     for twin in ( B, C ):
         assert twin not in text
-    for token in ( "scan", "fetch_rows" ):
+    for token in ( "scan_lines", "fetch_rows" ):
         assert token not in text
 
 
@@ -212,11 +216,11 @@ def test_main_writes_both_files_and_exits_zero_when_all_pass( tmp_path ):
 
 
 def test_main_exits_one_and_keeps_the_token_out_of_the_resend_file( tmp_path ):
-    args = write_inputs( tmp_path, { A: "A function that can scan text and returns the list of articles it holds.", D: GOOD } )
+    args = write_inputs( tmp_path, { A: "A function that can call scan_lines on text and returns the list of articles it holds.", D: GOOD } )
     assert nc.main( args ) == 1
     full   = ( tmp_path / "out" / "check-results.json" ).read_text()
     resend = ( tmp_path / "out" / "resend-list.json" ).read_text()
-    assert "scan" in full and "scan" not in resend and C not in resend
+    assert "scan_lines" in full and "scan_lines" not in resend and C not in resend
 
 
 def test_main_exits_one_when_the_sample_is_not_the_stated_size( tmp_path ):
@@ -351,7 +355,7 @@ def test_a_twin_missing_from_the_index_exits_two_and_names_it( tmp_path, capsys 
 
 def test_the_file_stem_is_banned_even_when_no_id_part_carries_it():
     rec = { "id": "p.f", "sig": "( )", "doc": "", "file": "p/special_stem.py" }
-    assert { "special_stem", "special", "stem" } <= nc.identifier_tokens( rec )
+    assert "special_stem" in nc.identifier_tokens( rec ) and "special" not in nc.identifier_tokens( rec )
     index = { "p.f": rec }
     f = nc.check_need( "p.f", "A function that returns the special_stem values it holds for every caller today.", index, {} )
     assert [ x[ "check" ] for x in f ] == [ "identifier" ] and "special_stem" in f[ 0 ][ "detail" ]
@@ -371,8 +375,8 @@ def test_a_run_shared_with_a_later_twin_is_found_and_names_that_twin():
 
 
 def test_a_need_word_joined_by_underscores_is_split_before_it_is_compared():
-    f = nc.check_need( A, "A function that returns wrapped_items values and counts them for each of the records.", INDEX, nc.twin_groups( MANIFEST ) )
-    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and "items" in f[ 0 ][ "detail" ]
+    f = nc.check_need( A, "A function that returns my_limit_value values and counts them for each of the records.", INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and "limit" in f[ 0 ][ "detail" ]
 
 
 # ---- the real files, through the real readers (outside git: skipped when absent) ----
