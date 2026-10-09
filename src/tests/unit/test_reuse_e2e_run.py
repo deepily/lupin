@@ -1,0 +1,256 @@
+"""
+The end-to-end runner on a stand-in: order, ceiling, ledger, canary and stop rules.
+
+The index is generated: 105 small functions, so a run of 100 members has a member to leave out each time.
+Every transport is a stand-in and the ledger is a scratch file. Nothing reaches Jev.
+"""
+import json
+import math
+
+import pytest
+
+from lupin_mcp import reuse_e2e as e2e
+from lupin_mcp import reuse_e2e_run as run
+from lupin_mcp import reuse_ledger as rl
+from lupin_mcp import reuse_stage1 as s1
+from lupin_mcp import reuse_stage1_run as rr
+from lupin_mcp import reuse_tools as rt
+
+WIDE = 105
+IDS  = [ f"cosa.wide.f{i:03d}" for i in range( WIDE ) ]
+
+
+def make_wide_repo( base ):
+    """Ensures: writes a lupin-shaped tree of 105 public functions; returns its path."""
+    root = base / "lupin"
+    ( root / "src" / "cosa" ).mkdir( parents=True )
+    ( root / "src" / "lupin_mcp" ).mkdir( parents=True )
+    ( root / "src" / "lupin_mcp" / "tool.py" ).write_text( 'def serve( x ):\n    """Serve a thing."""\n    return x\n', encoding="utf-8" )
+    body = "\n\n".join( f'def f{i:03d}( x ):\n    """Does the distinct job number {i} for a caller."""\n    return x + {i}' for i in range( WIDE ) )
+    ( root / "src" / "cosa" / "wide.py" ).write_text( body + "\n", encoding="utf-8" )
+    return root
+
+
+def ask_old( ctx, item ): return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx )
+def ask_new( ctx, item ): return rt.sweep_need_impl( item[ "need" ] + " (new question)", item[ "member" ], ctx )
+
+
+class Env:
+    """A scratch environment: repo, data, ledger, a counting stand-in transport."""
+
+    def __init__( self, tmp_path, limit=10 ** 9, asks=None, pack_size=50, tag="a" ):
+        self.root   = make_wide_repo( tmp_path / tag )
+        self.data   = tmp_path / tag / "data"
+        self.path   = tmp_path / tag / "ledger.jsonl"
+        rl.AccountLedger.create( self.path, limit, "test", "scratch" )
+        self.posts  = []
+        self.asks   = asks or { "old": ask_old, "new": ask_new }
+        self.pack   = pack_size
+
+    def factory( self, budget ):
+        inner, posts = rr.StandIn( budget ), self.posts
+        class Counting:
+            def post_with_meta( self, body ):
+                posts.append( len( body[ "questions" ] ) )
+                return inner.post_with_meta( body )
+        return Counting()
+
+    def env( self ):
+        return run.E2EEnv( self.root, self.data, rl.AccountLedger( self.path ), self.asks, transport_factory=self.factory, pack_size=self.pack )
+
+
+def items_of( n, start=0 ): return [ { "member": IDS[ start + i ], "need": f"A function number {start + i} that does a distinct job." } for i in range( n ) ]
+
+
+def twins_of( n ): return { IDS[ i ]: { IDS[ ( i + 1 ) % WIDE ] } for i in range( n ) }
+
+
+def test_a_run_asks_member_by_member_both_questions_and_every_search_is_complete( tmp_path ):
+    scratch = Env( tmp_path )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 6 ), twins_of( 6 ), 10 ** 8 )
+    order   = [ ( s[ "member" ], s[ "question" ] ) for s in rec[ "searches" ] ]
+    assert order == [ ( IDS[ i ], q ) for i in range( 6 ) for q in ( "old", "new" ) ]
+    assert len( rec[ "searches" ] ) == 12 and all( s[ "status" ] == "complete" and s[ "causes" ] == [] for s in rec[ "searches" ] )
+    assert all( s[ "tokens" ] > 0 and s[ "requests" ] > 0 and s[ "receipt_id" ] for s in rec[ "searches" ] )
+    assert rec[ "stopped" ] is None and rec[ "kind" ] == "run" and rec[ "pack_size" ] == 50
+    assert ( scratch.data / "e2e-results" / "e2e-run.json" ).exists()
+
+
+def test_a_search_leaves_out_its_member_and_sweeps_every_other_entry_in_packs_of_fifty( tmp_path ):
+    scratch = Env( tmp_path )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
+    entries = WIDE + 1 - 1                                                                      # the generated functions plus serve(), less the member
+    assert scratch.posts and sum( scratch.posts ) == entries * 2                                # two searches, each asking every other entry once
+    assert sorted( scratch.posts ) == sorted( [ 50, 50, entries - 100 ] * 2 )
+    assert [ s[ "requests" ] for s in rec[ "searches" ] ] == [ math.ceil( entries / 50 ) ] * 2
+
+
+def test_a_hundred_members_run_to_the_end_at_packs_of_fifty_on_the_stand_in( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    assert len( rec[ "searches" ] ) == 100 and all( s[ "status" ] == "complete" for s in rec[ "searches" ] )
+    assert rec[ "pack_size" ] == 50 and rec[ "totals" ][ "complete" ] == 100 and rec[ "totals" ][ "not_run" ] == 0
+
+
+def test_the_ledger_holds_what_the_run_spent_and_the_run_is_closed( tmp_path ):
+    scratch = Env( tmp_path )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 3 ), twins_of( 3 ), 10 ** 8 )
+    limit, total = rl.AccountLedger( scratch.path ).snapshot()
+    assert total == rec[ "totals" ][ "spent_tokens" ] == sum( s[ "tokens" ] for s in rec[ "searches" ] ) and total > 0 and limit == 10 ** 9
+    with pytest.raises( s1.DriverRefused ): run.run_searches( scratch.env(), "e2e-run", items_of( 3 ), twins_of( 3 ), 10 ** 8 )     # the name was used
+
+
+def test_the_ceiling_stops_the_whole_run_and_what_it_did_not_start_is_not_run_rather_than_failed( tmp_path ):
+    probe  = Env( tmp_path, tag="probe", asks={ "old": ask_old } )
+    one    = run.run_searches( probe.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )[ "searches" ][ 0 ][ "tokens" ]
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 8 ), twins_of( 8 ), int( one * 2.4 ) )
+    states  = [ s[ "status" ] for s in rec[ "searches" ] ]
+    cut     = states.index( "incomplete" )
+    assert cut >= 1 and states[ :cut ] == [ "complete" ] * cut and states[ cut + 1: ] == [ "not_run" ] * ( 7 - cut )
+    assert rec[ "searches" ][ cut ][ "causes" ] == [ "ceiling" ] and rec[ "searches" ][ cut + 1 ][ "causes" ] == [ "ceiling" ]
+    assert rec[ "stopped" ] == { "reason": "ceiling", "after": cut + 1 } and rec[ "totals" ][ "not_run" ] == 7 - cut
+    assert rec[ "totals" ][ "spent_tokens" ] <= int( one * 2.4 )
+
+
+def test_a_run_whose_ceiling_with_the_ledger_total_passes_the_account_limit_is_refused_with_no_request( tmp_path ):
+    scratch = Env( tmp_path, limit=1500 )
+    with pytest.raises( rl.AccountLimitReached ): run.run_searches( scratch.env(), "e2e-run", items_of( 2 ), twins_of( 2 ), 5000 )
+    assert scratch.posts == [] and not ( scratch.data / "e2e-results" ).exists()
+
+
+def test_two_runs_whose_ceilings_each_fit_but_not_together_refuse_the_second_with_no_request( tmp_path ):
+    scratch = Env( tmp_path, limit=400000, asks={ "old": ask_old } )
+    run.run_searches( scratch.env(), "e2e-one", items_of( 1 ), twins_of( 1 ), 250000 )
+    before = len( scratch.posts )
+    with pytest.raises( rl.AccountLimitReached ): run.run_searches( scratch.env(), "e2e-two", items_of( 1, 1 ), twins_of( 2 ), 250000 )
+    assert len( scratch.posts ) == before
+
+
+def test_an_unreadable_ledger_refuses_the_run_before_any_request( tmp_path ):
+    scratch = Env( tmp_path )
+    scratch.path.write_text( "not a ledger\n", encoding="utf-8" )
+    with pytest.raises( rl.LedgerUnreadable ): run.run_searches( scratch.env(), "e2e-run", items_of( 2 ), twins_of( 2 ), 10 ** 6 )
+    assert scratch.posts == []
+
+
+def failing( failed=0, malformed=None, stopped=None, left=0 ):
+    def ask( ctx, item ):
+        return { "status": "ok", "verdict": "UNCERTAIN_READ_SOURCE", "shortlist": [], "nearest": [], "receipt_id": "r" * 16, "malformed": malformed or [],
+                 "stats": { "failed": failed, "not_checked": left, "stopped_by": stopped, "requests": 1, "attempt_counts": { "n429": 2, "n529": 1 } } }
+    return ask
+
+
+def test_each_incomplete_search_carries_its_causes_apart_and_a_miss_is_not_a_complete_search( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing( failed=2, malformed=[ { "id": "x", "reason": "r" } ] ) } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 2 ), twins_of( 2 ), 10 ** 6 )
+    assert [ s[ "causes" ] for s in rec[ "searches" ] ] == [ [ "CALL_FAILED", "MALFORMED_ANSWER" ] ] * 2
+    assert all( s[ "status" ] == "incomplete" for s in rec[ "searches" ] ) and rec[ "totals" ][ "complete" ] == 0
+    assert rec[ "searches" ][ 0 ][ "n429" ] == 2 and rec[ "searches" ][ 0 ][ "n529" ] == 1
+
+
+def test_more_than_five_incomplete_searches_among_the_first_twenty_stop_the_run( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing( failed=1 ) } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 30 ), twins_of( 30 ), 10 ** 6 )
+    states  = [ s[ "status" ] for s in rec[ "searches" ] ]
+    assert states[ :6 ] == [ "incomplete" ] * 6 and states[ 6: ] == [ "not_run" ] * 24
+    assert rec[ "stopped" ] == { "reason": "reliability", "after": 6 } and rec[ "searches" ][ 10 ][ "causes" ] == [ "reliability" ]
+
+
+def test_exactly_five_incomplete_searches_among_the_first_twenty_do_not_stop_the_run( tmp_path ):
+    state = { "n": 0 }
+    def flaky( ctx, item ):
+        state[ "n" ] += 1
+        return failing( failed=1 if state[ "n" ] <= 5 else 0 )( ctx, item )
+    scratch = Env( tmp_path, asks={ "old": flaky } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 25 ), twins_of( 25 ), 10 ** 6 )
+    assert rec[ "stopped" ] is None and rec[ "totals" ][ "incomplete" ] == 5 and rec[ "totals" ][ "not_run" ] == 0
+
+
+def test_the_window_counts_searches_not_members_so_two_questions_fill_it_in_ten_members( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing(), "new": failing( failed=1 ) } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 20 ), twins_of( 20 ), 10 ** 6 )
+    assert rec[ "stopped" ] == { "reason": "reliability", "after": 12 }                              # old and new alternate: the sixth incomplete is search 12
+
+
+def test_a_run_with_nothing_to_ask_or_a_repeated_member_is_refused_before_the_ledger_opens( tmp_path ):
+    scratch = Env( tmp_path )
+    with pytest.raises( s1.DriverRefused ): run.run_searches( scratch.env(), "e2e-run", [], {}, 10 ** 6 )
+    with pytest.raises( s1.DriverRefused ): run.run_searches( scratch.env(), "e2e-run", items_of( 1 ) + items_of( 1 ), twins_of( 1 ), 10 ** 6 )
+    assert rl.AccountLedger( scratch.path ).total() == 0 and scratch.posts == []
+
+
+def test_the_canary_asks_five_members_with_both_questions_and_reports_what_was_read_before_the_first_send( tmp_path ):
+    scratch = Env( tmp_path )
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    assert report[ "members" ] == 5 and report[ "searches" ] == 10 and report[ "ledger_total_before"] == 0 and report[ "ledger_limit" ] == 10 ** 9
+    assert report[ "tokens" ] > 0 and report[ "projection_tokens" ] == report[ "tokens" ] * 20 and report[ "approved" ] is None
+    assert report[ "unasked" ] == 0 and report[ "requests" ] == 30 and set( report ) >= { "n429", "n529", "wall_seconds", "allowance_tokens", "tripped" }
+    assert report[ "tripped" ] == [] and ( scratch.data / "e2e-results" / "e2e-canary.canary.json" ).exists()
+
+
+def test_the_projection_is_held_against_the_smaller_of_one_and_a_half_times_the_estimate_and_the_ledger_remainder( tmp_path ):
+    scratch = Env( tmp_path, limit=200000 )
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5 )
+    assert report[ "allowance_tokens" ] == min( int( 1.5 * run.ESTIMATE_TOKENS ), 200000 - report[ "tokens" ] )
+    assert "projection_over_allowance" in report[ "tripped" ]
+
+
+def test_a_canary_with_an_incomplete_search_is_tripped_and_cannot_be_approved( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing( failed=1 ) } )
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 6 )
+    assert "incomplete" in report[ "tripped" ]
+    with pytest.raises( s1.CanaryTripped ): run.approve_canary( scratch.env(), "cheech", "read it" )
+
+
+def test_the_full_run_waits_for_an_approved_canary_and_then_runs_the_remaining_members( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    with pytest.raises( s1.CanaryNotApproved ): run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    run.approve_canary( scratch.env(), "cheech", "tokens read" )
+    with pytest.raises( s1.DriverRefused ): run.approve_canary( scratch.env(), "cheech", "again" )
+    rec = run.run_full( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 9 )
+    assert [ s[ "member" ] for s in rec[ "searches" ] ] == IDS[ 5:100 ] and rec[ "kind" ] == "run" and rec[ "totals" ][ "complete" ] == 95   # the canary's five are not asked twice
+    assert rec[ "canary_run" ] == "e2e-canary"
+
+
+def test_approval_needs_a_name_and_a_reason_and_a_canary_that_ran( tmp_path ):
+    scratch = Env( tmp_path )
+    with pytest.raises( s1.CanaryNotApproved ): run.approve_canary( scratch.env(), "cheech", "why" )
+    run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8 )
+    with pytest.raises( s1.DriverRefused ): run.approve_canary( scratch.env(), "", "why" )
+    with pytest.raises( s1.DriverRefused ): run.approve_canary( scratch.env(), "cheech", "" )
+
+
+def test_an_ask_that_raises_is_recorded_as_an_error_search_and_the_error_goes_on( tmp_path ):
+    def boom( ctx, item ): raise RuntimeError( "scratch failure" )
+    scratch = Env( tmp_path, asks={ "old": boom } )
+    with pytest.raises( RuntimeError, match="scratch failure" ): run.run_searches( scratch.env(), "e2e-run", items_of( 2 ), twins_of( 2 ), 10 ** 6 )
+    rec = json.loads( ( scratch.data / "e2e-results" / "e2e-run.json" ).read_text( encoding="utf-8" ) )
+    assert rec[ "state" ] == "error" and rec[ "searches" ][ -1 ][ "status" ] == "error" and rec[ "searches" ][ -1 ][ "causes" ] == [ "ERROR:RuntimeError" ]
+
+
+def test_the_figures_count_an_incomplete_search_as_a_miss_and_give_complete_only_beside_them( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 10 ), twins_of( 10 ), 10 ** 8 )
+    rec[ "searches" ][ 0 ].update( status="incomplete", causes=[ "CALL_FAILED" ], read={ "verdict": "UNCERTAIN_READ_SOURCE", "on_shortlist": False, "ranked_first": False, "top_ten": False } )
+    fig = e2e.figures( rec[ "searches" ], [ "old" ] )[ "old" ]
+    assert fig[ "n_run" ] == 10 and fig[ "complete" ] == 9 and fig[ "incomplete" ] == 1
+    assert fig[ "on_shortlist" ][ "n" ] == 10 and fig[ "on_shortlist_complete" ][ "n" ] == 9 and fig[ "on_shortlist" ][ "interval" ][ 0 ] is not None
+    assert fig[ "causes" ] == { "CALL_FAILED": 1 }
+
+
+def test_the_paired_comparison_counts_members_where_only_one_question_found_the_twin():
+    def s( member, question, hit ): return { "member": member, "question": question, "status": "complete", "causes": [], "tokens": 10, "requests": 1, "unasked": 0,
+                                           "read": { "verdict": "NEW", "on_shortlist": hit, "ranked_first": hit, "top_ten": hit } }
+    rows = [ s( "a", "old", True ), s( "a", "new", False ), s( "b", "old", False ), s( "b", "new", True ), s( "c", "old", True ), s( "c", "new", True ), s( "d", "old", False ), s( "d", "new", False ) ]
+    pair = e2e.paired( rows, "old", "new" )
+    assert pair[ "on_shortlist" ] == { "only_old": 1, "only_new": 1, "both": 1, "neither": 1, "p": 1.0 }
+
+
+def test_the_reliability_window_counts_the_canary_searches_that_came_before_the_run( tmp_path ):
+    prior   = [ { "status": "incomplete" } ] * 4 + [ { "status": "complete" } ] * 6
+    scratch = Env( tmp_path, asks={ "old": failing( failed=1 ) } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 10 ), twins_of( 10 ), 10 ** 6, prior=prior )
+    assert rec[ "stopped" ] == { "reason": "reliability", "after": 2 }                               # 4 earlier + 2 here is the sixth incomplete
