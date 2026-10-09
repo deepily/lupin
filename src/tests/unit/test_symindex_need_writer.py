@@ -260,6 +260,20 @@ def test_retry_after_word_count_says_how_many_words_the_last_sentence_had( src_r
     assert "Your last sentence had 48 words; it must have 8 to 40." in fake.prompts[ 1 ]
 
 
+def test_a_too_long_sentence_is_told_to_aim_ten_under_the_limit_by_dropping_a_detail( src_root ):
+    long = "A function that " + " ".join( ["word"] * 45 ) + "."
+    fake = FakeQuery( [ long, GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake ) )
+    assert "Aim for 30 words or fewer by leaving out the least important detail." in fake.prompts[ 1 ]
+
+
+def test_a_too_short_sentence_is_told_to_say_more_and_not_to_cut( src_root ):
+    fake = FakeQuery( [ "A function that returns nothing.", GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake ) )
+    assert "had 5 words" in fake.prompts[ 1 ] and "Say a little more." in fake.prompts[ 1 ]
+    assert "leaving out" not in fake.prompts[ 1 ]
+
+
 def test_a_redo_prompt_for_word_count_has_no_last_sentence_length_yet( src_root ):
     fake = FakeQuery( [ GOOD ] )
     asyncio.run( nw.write_need( _input( src_root ), fake, failures=[ "word_count" ] ) )
