@@ -15,8 +15,8 @@ from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
-from tests.unit.test_reuse_pack_route import PackedFake, env, no_jev_key, packed_ctx, probs_of  # noqa: F401  (env and no_jev_key are fixtures)
-from tests.unit.test_reuse_page_first import HIT
+from tests.unit.test_reuse_pack_route import PAGE_TEXTS, PackedFake, env, no_jev_key, packed_ctx, probs_of  # noqa: F401  (env and no_jev_key are fixtures)
+from tests.unit.test_reuse_page_first import HIT, write_wiki
 from tests.unit.test_reuse_tools import FEEDS_TEXT, UNREL
 
 NEED = "read an RSS feed [flip]"
@@ -87,6 +87,22 @@ def test_ask_repeat_needs_a_packed_context_and_a_known_member( env ):
     with pytest.raises( ValueError, match="packed" ): rf.ask_repeat( plain, NEED, "cosa.mathx.add", 1 )
     assert rf.ask_repeat( packed_ctx( env, fake ), NEED, "cosa.nowhere.gone", 1 ) == { "status": "error", "error": "UNKNOWN_ENTRY", "entry": "cosa.nowhere.gone" }
     assert rf.ask_repeat( packed_ctx( env, fake ), "  ", "cosa.mathx.add", 1 ) == { "status": "error", "error": "EMPTY_NEED" } and fake.bodies == []
+
+
+def test_a_repeat_runs_the_full_sweep_and_never_asks_a_page( env ):
+    write_wiki( env[ 0 ] )                                                                   # two pages the page route could ask about
+    fake = PackedFake( NEED )
+    r    = rf.ask_repeat( packed_ctx( env, fake ), NEED, "cosa.mathx.add", 1 )
+    asked = [ q[ "instructions" ] for body in fake.bodies for q in body[ "questions" ].values() ]
+    assert r[ "stats" ][ "route" ] == "full" and fake.unexpected == []
+    assert asked and not any( page in text for page in PAGE_TEXTS for text in asked )          # page questions may not carry the repeat number, so none may be sent
+
+
+def test_asking_a_repeat_leaves_the_callers_context_as_it_was( env ):
+    ctx    = packed_ctx( env, FlippingFake( NEED ) )
+    before = ( ctx.sweeper, ctx.pack_size )
+    rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 2 )
+    assert ( ctx.sweeper, ctx.pack_size ) == before                                           # the repeat's sweeper lives on a copy only
 
 
 def test_steady_answers_have_a_zero_flip_rate_with_an_upper_bound_and_pass():
