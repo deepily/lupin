@@ -52,7 +52,7 @@ class Reply:
 
 async def sdk_reply( prompt, system_prompt, model=DEFAULT_MODEL ):
     """
-    Make one tools-off, one-turn call and return its text and telemetry.
+    Make one tools-off, short call and return its text and telemetry.
 
     Requires:
         - the Claude Code login is present on this host
@@ -64,7 +64,7 @@ async def sdk_reply( prompt, system_prompt, model=DEFAULT_MODEL ):
     Raises:
         - RuntimeError carrying the CLI's own text when the result is an error
     """
-    options = ClaudeAgentOptions( model=model, system_prompt=system_prompt, tools=[], permission_mode="default", max_turns=1 )
+    options = ClaudeAgentOptions( model=model, system_prompt=system_prompt, tools=[], permission_mode="default", max_turns=3 )
     pieces  = []
     result  = None
     async for message in sdk_query( prompt=prompt, options=options ):
@@ -150,7 +150,13 @@ async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None )
     attempts = []
     record   = { "member_id": need.member_id, "kind": need.kind, "ok": False, "need": None, "job_id": None, "rewrites": 0 }
     for _ in range( max_attempts ):
-        reply    = await reply_fn( build_prompt( need, failures ), SYSTEM_PROMPT )
+        try:
+            reply = await reply_fn( build_prompt( need, failures ), SYSTEM_PROMPT )
+        except RuntimeError as error:
+            attempts.append( { "reply": str( error ), "failures": [ "call_error" ], "session_id": None, "cost_usd": 0.0,
+                               "input_tokens": 0, "output_tokens": 0 } )
+            failures = None
+            continue
         sentence = extract_sentence( reply.text )
         failures = check_form( sentence, need )
         attempts.append( { "reply": reply.text, "failures": failures, "session_id": reply.session_id, "cost_usd": reply.cost_usd,
