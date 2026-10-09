@@ -12,6 +12,8 @@ import json
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
+import cosa.utils.util as cu
+from cosa.repo.doc_lint import model_transport as mt
 from cosa.repo.symindex import need_input as ni
 from cosa.repo.symindex import need_writer as nw
 
@@ -110,6 +112,58 @@ def test_own_identifier_fails( src_root ):
 def test_check_form_reports_every_failure_kind_once( src_root ):
     kinds = nw.check_form( "Reads raw_text NAME.", _input( src_root ) )
     assert kinds == sorted( set( kinds ) ) and set( kinds ) >= { "opener", "word_count", "placeholder", "own_identifier" }
+
+
+# --- opener words ---------------------------------------------------------
+
+def test_opener_words_do_not_count_as_a_member_name( tmp_path ):
+    pkg = tmp_path / "pk"
+    pkg.mkdir()
+    ( pkg / "__init__.py" ).write_text( "" )
+    ( pkg / "m.py" ).write_text( "def run( function, other ):\n    return function( other )\n" )
+    need = ni.build_input( "pk.m.run", str( tmp_path ) )
+    assert "function" in need.forbidden
+    ok = "A function that calls the callable it is given on the second value and returns whatever that call returns."
+    assert nw.check_form( ok, need ) == []
+    assert nw.check_form( ok.replace( "second value", "function value" ), need ) == [ "own_identifier" ]
+
+
+def test_prompt_allows_the_opener_and_bans_the_kind_words_elsewhere( src_root ):
+    method_prompt = nw.build_prompt( _input( src_root, "pk.mod.BlockReader.read_block" ) )
+    assert 'begins "A method that "' in method_prompt
+    assert "function, class, method" in method_prompt
+    assert 'begins "A function that "' in nw.build_prompt( _input( src_root ) )
+
+
+# --- assemble ---------------------------------------------------------------
+
+def test_needs_document_has_rios_format_and_the_sample_order( src_root, tmp_path ):
+    out = tmp_path / "run"
+    ids = [ "pk.mod.parse_result_block", "pk.mod.BlockReader" ]
+    asyncio.run( nw.run_members( ids, src_root, str( out ), FakeQuery( [ GOOD, GOOD.replace( "function", "class" ) ] ) ) )
+    document = nw.needs_document( str( out ), ids, "abc123" )
+    assert document[ "format" ] == "reuse-e2e-needs-1" and document[ "sample_sha256" ] == "abc123"
+    assert [ n[ "member" ] for n in document[ "needs" ] ] == ids
+    assert document[ "needs" ][ 0 ][ "need" ] == GOOD and document[ "needs" ][ 0 ][ "writer_job_id" ] == "job-1"
+
+
+def test_needs_document_refuses_a_missing_or_failed_member( src_root, tmp_path ):
+    out = tmp_path / "run"
+    asyncio.run( nw.run_members( [ "pk.mod.parse_result_block" ], src_root, str( out ), FakeQuery( [ "bad.", "bad.", "bad." ] ) ) )
+    with pytest.raises( ValueError, match="no accepted need" ):
+        nw.needs_document( str( out ), [ "pk.mod.parse_result_block" ], "x" )
+    with pytest.raises( ValueError, match="no accepted need" ):
+        nw.needs_document( str( out ), [ "pk.mod.parse_result_block", "pk.mod.BlockReader" ], "x" )
+
+
+def test_main_assemble_writes_the_document( src_root, tmp_path ):
+    out = tmp_path / "out"
+    base = [ "--sample", _sample_file( tmp_path ), "--src-root", src_root, "--out", str( out ) ]
+    nw.main( base, reply_fn=FakeQuery( [ GOOD, GOOD.replace( "function", "class" ) ] ) )
+    target = tmp_path / "needs.json"
+    assert nw.main( base + [ "--assemble", str( target ) ] ) == 0
+    document = json.loads( target.read_text() )
+    assert len( document[ "needs" ] ) == 2 and len( document[ "sample_sha256" ] ) == 64
 
 
 # --- build_prompt -----------------------------------------------------------
@@ -244,6 +298,40 @@ def test_sdk_reply_runs_with_tools_off_and_reads_the_result( monkeypatch ):
     assert reply == nw.Reply( text="A function that does it.", session_id="sess-9", cost_usd=0.25, input_tokens=7, output_tokens=3 )
     assert seen[ 0 ].tools == [] and seen[ 0 ].permission_mode == "default" and seen[ 0 ].system_prompt == "s"
     assert seen[ 0 ].max_turns == 3
+
+
+def test_sdk_reply_options_are_the_hermetic_profile_of_the_model_transport( monkeypatch ):
+    seen     = []
+    messages = [ ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="s" ) ]
+    monkeypatch.setattr( nw, "sdk_query", _fake_sdk( messages, seen ) )
+    asyncio.run( nw.sdk_reply( "p", "s" ) )
+    options = seen[ 0 ]
+    settings = json.loads( options.extra_args[ "settings" ] )
+    assert options.setting_sources == [] and options.tools == []
+    assert settings[ "disableAllHooks" ] is True and settings[ "autoMemoryEnabled" ] is False
+    assert any( pattern.endswith( "CLAUDE.md" ) for pattern in settings[ "claudeMdExcludes" ] )
+    assert "strict-mcp-config" in options.extra_args and "disable-slash-commands" in options.extra_args
+    assert options.extra_args == mt.ISOLATION_ARGS and options.cwd == cu.get_project_root()
+    assert options.permission_mode == mt.PERMISSION_MODE
+
+
+def test_sdk_reply_raises_when_the_stream_has_no_result( monkeypatch ):
+    monkeypatch.setattr( nw, "sdk_query", _fake_sdk( [ AssistantMessage( content=[ TextBlock( text="x" ) ], model="m" ) ], [] ) )
+    with pytest.raises( RuntimeError, match="no result message" ):
+        asyncio.run( nw.sdk_reply( "p", "s" ) )
+
+
+def test_write_need_counts_a_stream_with_no_result_as_a_failed_call( src_root, monkeypatch ):
+    streams = [ [ AssistantMessage( content=[ TextBlock( text="x" ) ], model="m" ) ],
+                [ AssistantMessage( content=[ TextBlock( text=GOOD ) ], model="m" ),
+                  ResultMessage( subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1, session_id="ok" ) ] ]
+
+    async def fake( prompt, options ):
+        for message in streams.pop( 0 ): yield message
+
+    monkeypatch.setattr( nw, "sdk_query", fake )
+    record = asyncio.run( nw.write_need( _input( src_root ), nw.sdk_reply ) )
+    assert record[ "ok" ] is True and record[ "attempts" ][ 0 ][ "failures" ] == [ "call_error" ]
 
 
 def test_sdk_reply_raises_on_an_error_result( monkeypatch ):
