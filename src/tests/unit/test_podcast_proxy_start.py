@@ -332,10 +332,19 @@ def test_a_claim_with_no_job_is_claimed_no_job_on_start_and_on_status_and_is_not
         assert PodcastProxySpentRepository( session ).claim( card.id, ACTOR, "demo/io/tmp/summary.md", "0" * 64 )
         session.commit()
     answer = _start( world, card.id )
-    assert answer.status_code == 409 and _code( answer ) == "claimed_no_job" and "no podcast was started" in answer.json()[ "detail" ][ "message" ]
+    assert answer.status_code == 409 and _code( answer ) == "claimed_no_job" and answer.json()[ "detail" ][ "message" ] == "A start of that card is under way, or one did not finish. Read the card status again before asking Rick."
     assert world[ "flow" ].calls == [ ] and len( _spent( world ) ) == 1 and _spent( world )[ 0 ].job_id is None
     status = _status( world, card.id ).json()
     assert status[ "state" ] == "claimed_no_job" and status[ "spent" ] is True and status[ "job_id" ] is None
+
+
+def test_a_second_start_during_the_queue_call_is_told_a_start_is_under_way_and_starts_nothing( world ):
+    card, seen = _card( world ), [ ]
+    world[ "flow" ].hook = lambda: seen.append( _start( world, card.id ) )
+    first = _start( world, card.id )
+    assert first.status_code == 200 and len( world[ "flow" ].calls ) == 1
+    assert seen[ 0 ].status_code == 409 and _code( seen[ 0 ] ) == "claimed_no_job"
+    assert "under way" in seen[ 0 ].json()[ "detail" ][ "message" ] and len( _spent( world ) ) == 1
 
 
 def test_a_queue_that_raises_releases_the_claim_and_the_card_can_start_again( world ):

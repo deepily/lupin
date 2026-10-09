@@ -205,8 +205,8 @@ def start_a_podcast(
           exactly as `proxy.start_refusal` judges the stored card
         - 409 file_refused when the door now refuses the file, 409 hash_mismatch when its bytes are not those of the yes
         - 409 spent when the card already started a job, however many starts raced
-        - 409 claimed_no_job when an earlier start claimed the card and recorded no job: no podcast was started, the
-          claim is not released here (a release racing a slow queue call could start two jobs), and Rick is asked again
+        - 409 claimed_no_job when an earlier start claimed the card and recorded no job: that start is still under way,
+          or it did not finish. The claim is not released here, because a release racing a slow queue call could start two jobs
         - the spent record is committed before the job is queued; when queuing fails it is released and the answer
           is 502 queue_failed with a fixed sentence, the cause going to the server log. A crash between the claim and
           the release leaves the claim, which the next start answers as claimed_no_job
@@ -243,7 +243,7 @@ def start_a_podcast(
         earlier    = None if won else spent_rows.get( payload.card_id )
         no_job     = earlier is not None and earlier.job_id is None
     if not won and no_job:
-        raise _refuse( 409, "claimed_no_job", "That card was claimed, but no podcast was started from it. Ask Rick again with a new card." )
+        raise _refuse( 409, "claimed_no_job", "A start of that card is under way, or one did not finish. Read the card status again before asking Rick." )
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
 
@@ -290,7 +290,7 @@ def podcast_card_status(
         - 404 no_card when the id names no card, or a card this feature did not write
         - otherwise returns { card_id, scope_path, name, size, sha256, asked_by_session, state, expires_at, spent, job_id }
           with state one of waiting, yes, no, default_answer, expired, wrong_login, claimed_no_job
-        - state is claimed_no_job when a start claimed the card and no job was recorded: no podcast was started, and Rick must be asked again
+        - state is claimed_no_job when a start claimed the card and no job is recorded yet: a start is under way, or one did not finish
         - spent is True once a start claimed the card; job_id is that start's job, or None before it exists
         - every value comes from the stored payload, the stored answer and the spent record
     """
