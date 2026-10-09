@@ -401,6 +401,35 @@ async def score_pair( old_text, new_text, question, config, run, ledger, query_f
     return old, await score_question( new_text, question, config, run, ledger, query_fn, salvage )
 
 
+class ServedLedger:
+    """
+    Wrap a ledger and remember which grades it held before the wrap were read back.
+
+    Requires:
+        - inner is a harness_runner.Ledger
+
+    Ensures:
+        - get and put behave as the inner ledger's do
+        - reused holds each grade key the inner ledger already held at wrap time and get has since returned
+        - a grade written after the wrap is never in reused, so a repeated answer inside one run is not counted
+    """
+
+    def __init__( self, inner ):
+        self.inner  = inner
+        self.prior  = { k for k in inner.entries if k.startswith( "grade|" ) }
+        self.reused = set()
+
+    def get( self, key ):
+        """Return the inner ledger's value for key, noting a read of a grade held before the wrap."""
+        value = self.inner.get( key )
+        if value is not None and key in self.prior: self.reused.add( key )
+        return value
+
+    def put( self, key, value, timing=None ):
+        """Store a finished call in the inner ledger."""
+        self.inner.put( key, value, timing )
+
+
 def verdict_word( old_total, new_total, dropped ):
     """
     Name the outcome in capitals: incomplete, pass or fail.
@@ -440,7 +469,9 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
           two totals add only the pairs that were compared, so over the questions they sum to the file's old_total and new_total
         - old_mean and new_mean are None when nothing was compared
         - passes is None when any pair was dropped, else new_total >= old_total
+        - grades_from_ledger counts the distinct grades the ledger held before this file was scored and this file read back
     """
+    counted   = ServedLedger( ledger ) if ledger is not None else None
     totals    = { "old": 0, "new": 0 }
     answered  = { "old": 0, "new": 0 }
     per_run   = { "old": [], "new": [] }
@@ -455,7 +486,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             outcome = None
             if halt[ "reason" ] is None:
                 try:
-                    outcome = await score_pair( old_text, new_text, q, config, run, ledger, query_fn, salvage )
+                    outcome = await score_pair( old_text, new_text, q, config, run, counted, query_fn, salvage )
                 except model_transport.CallBudgetExceeded as e:
                     halt[ "reason" ] = str( e )
             if outcome is None:
@@ -483,7 +514,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
             totals[ label ] += run_totals[ label ]
             per_run[ label ].append( run_totals[ label ] / run_compared if run_compared else None )
     return { "old_scores": per_run[ "old" ], "new_scores": per_run[ "new" ], "old_total": totals[ "old" ], "new_total": totals[ "new" ],
-             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records, "salvaged_records": salvaged, "by_question": by_question,
+             "compared": compared, "dropped": dropped, "old_answered": answered[ "old" ], "new_answered": answered[ "new" ], "unscored_records": records, "salvaged_records": salvaged, "by_question": by_question, "grades_from_ledger": 0 if counted is None else len( counted.reused ),
              "old_mean": totals[ "old" ] / compared if compared else None, "new_mean": totals[ "new" ] / compared if compared else None,
              "passes": None if dropped else totals[ "new" ] >= totals[ "old" ], "verdict": verdict_word( totals[ "old" ], totals[ "new" ], dropped ) }
 
@@ -554,6 +585,7 @@ def main( argv, query_fn=None ):
           pairs after it are recorded unscored with step "cap", and the exit code is 3
         - a rerun against a full ledger makes zero calls
         - with --dry-run no model is contacted and nothing is written
+        - the report holds grades_from_ledger; with --strict-grader and above zero the run prints that the strict figure is not valid unless the ledger was strict throughout
         - the report holds both full shas, the questions file's sha256, the model ids, runs and the
           rig's prompt version
 
@@ -599,10 +631,12 @@ def main( argv, query_fn=None ):
     for f, r in per_file.items(): print( f"{f}: questions={counts[ f ]} compared={r[ 'compared' ]} dropped={r[ 'dropped' ]} salvaged={len( r[ 'salvaged_records' ] )} old_total={r[ 'old_total' ]} new_total={r[ 'new_total' ]} verdict={r[ 'verdict' ]}" )
     print( f"overall: questions={overall[ 'questions' ]} compared={overall[ 'compared' ]} dropped={overall[ 'dropped' ]} salvaged={overall[ 'salvaged' ]} old_total={overall[ 'old_total' ]} new_total={overall[ 'new_total' ]} verdict={overall[ 'verdict' ]}" )
     for model, n in spent.items(): print( f"calls spent {model}: {n}" )
+    from_ledger = sum( r[ "grades_from_ledger" ] for r in per_file.values() )
+    if args.strict_grader and from_ledger: print( f"strict figure not valid unless the ledger was strict throughout: {from_ledger} grades from the ledger" )
     if args.out is not None:
         report = { "old_rev": old_sha, "new_rev": new_sha, "questions_sha256": questions_sha, "reader_model": args.reader_model,
                    "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION,
-                   "attempts": ATTEMPTS, "strict_grader": args.strict_grader, "salvage_scope": "calls made in this run only: a grade cached by an earlier run is not recounted", "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "calls_spent": spent }
+                   "attempts": ATTEMPTS, "strict_grader": args.strict_grader, "salvage_scope": "calls made in this run only: a grade cached by an earlier run is not recounted", "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "grades_from_ledger": from_ledger, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
     if overall[ "dropped" ]:
         if args.out is None:

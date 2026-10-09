@@ -848,8 +848,9 @@ def test_a_rerun_from_the_ledger_gives_the_same_totals_and_the_same_question_sco
     again = FakeModels()
     code, _ = run( repo, [ QA, QB1 ], again, **{ "--out": second } )
     a, b = json.load( open( first ) ), json.load( open( second ) )
-    assert code == 0 and again.calls == [] and a[ "files" ] == b[ "files" ] and a[ "overall" ] == b[ "overall" ]
-    assert "by_question" in b[ "files" ][ "src/mod_a.py" ]
+    served = lambda files: { f: { k: v for k, v in r.items() if k != "grades_from_ledger" } for f, r in files.items() }      # a rerun reads grades the first run wrote: that count is meant to differ
+    assert code == 0 and again.calls == [] and served( a[ "files" ] ) == served( b[ "files" ] ) and a[ "overall" ] == b[ "overall" ]
+    assert "by_question" in b[ "files" ][ "src/mod_a.py" ] and ( a[ "grades_from_ledger" ], b[ "grades_from_ledger" ] ) == ( 0, 3 )      # mod_a old and new, and mod_b once: its two texts are identical and share one grade
 
 
 def test_a_cap_stopped_pair_shows_none_on_both_sides( repo ):
