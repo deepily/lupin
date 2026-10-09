@@ -86,11 +86,35 @@
             display: none;
         }
 
+        /* Row e23b9ed6 — the podcast button's success line must not read as an error. */
+        .doc-download-status.is-ok {
+            color: #166534;
+        }
+
         /* Ticket 416d4b00 — the bar now carries up to three buttons, each hidden on its
            own: 📁 Folder and ⬇ Download on a file, ⬆ Upload on a folder (admins only). */
         .doc-toolbar-buttons {
             display: flex;
             gap: 6px;
+        }
+
+        /* Row e23b9ed6 — the in-page confirmation before a podcast starts (never a browser dialog). */
+        .doc-podcast-confirm {
+            font-size: 12px;
+            color: #1f2937;
+            background: rgb( 255, 255, 255, 0.95 );
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-width: 520px;
+        }
+
+        .doc-podcast-confirm[hidden] {
+            display: none;
         }
 
         .doc-upload-status {
@@ -394,6 +418,17 @@
                     <button type="button" id="doc-download-btn" class="doc-download-btn"
                             data-testid="doc-download-btn" hidden
                             title="Download the original file, without the viewer around it">⬇ Download</button>
+                    <button type="button" id="doc-podcast-btn" class="doc-download-btn"
+                            data-testid="doc-podcast-btn" hidden
+                            title="Make a podcast of this file">🎙 Make a podcast</button>
+                </div>
+                <div id="doc-podcast-confirm" class="doc-podcast-confirm" data-testid="doc-podcast-confirm"
+                     role="group" aria-label="Confirm the podcast" hidden>
+                    <span id="doc-podcast-text" data-testid="doc-podcast-text"></span>
+                    <button type="button" id="doc-podcast-yes" class="doc-download-btn"
+                            data-testid="doc-podcast-yes">Yes, make it</button>
+                    <button type="button" id="doc-podcast-cancel" class="doc-download-btn"
+                            data-testid="doc-podcast-cancel">Cancel</button>
                 </div>
                 <span id="doc-download-status" class="doc-download-status" role="status"></span>
                 <div id="doc-upload-status" class="doc-upload-status" role="status"
@@ -407,6 +442,9 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
+    <!-- Row e23b9ed6: the "Make a podcast" button's logic. Built by src/scripts/build-doc-podcast.sh from
+         js/multiplexer/docPodcast/. A missing bundle leaves the page exactly as it was, with no button. -->
+    <script type="module" src="/static/dist/doc-podcast/doc-podcast.js"></script>
     <!--
         Path-prefix dispatch.
 
@@ -618,6 +656,10 @@
                     wireCopy( fetchUrl, copyable );
                     if ( copyable ) preloadRawText( response );
                     wireFolder( folderPathFor( rawPath, apiPath === '/api/io/file' && firstSeg !== 'io' ) );
+                    // Row e23b9ed6: tell the podcast bundle a FILE is showing. It may not have loaded yet, so
+                    // leave the path where it reads it at boot as well as firing the event.
+                    window.__docViewerFilePath = rawPath;
+                    document.dispatchEvent( new CustomEvent( 'doc-viewer-file', { detail: { path: rawPath } } ) );
                 }
 
                 // Polymorphic dispatch by Content-Type:

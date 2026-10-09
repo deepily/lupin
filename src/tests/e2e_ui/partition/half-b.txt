@@ -22,6 +22,7 @@ src/tests/e2e_ui/test_commons_activity_filters_and_strip_chrono.py
 src/tests/e2e_ui/test_dm_recent_activity.py
 src/tests/e2e_ui/test_doc_viewer_directory.py
 src/tests/e2e_ui/test_doc_viewer_multi_repo.py
+src/tests/e2e_ui/test_doc_viewer_podcast_button.py
 src/tests/e2e_ui/test_doc_viewer_scope_discovery.py
 src/tests/e2e_ui/test_epic_board_card.py
 src/tests/e2e_ui/test_fleet_status_panel.py
