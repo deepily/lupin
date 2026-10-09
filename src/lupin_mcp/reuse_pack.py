@@ -9,6 +9,8 @@ import concurrent.futures
 
 from cosa.repo.doc_lint import jev_transport as jt
 from lupin_mcp import reuse_ceiling as rc
+from lupin_mcp import reuse_pair as rpair
+from lupin_mcp import reuse_pair_request as rpr
 from lupin_mcp import reuse_tools as rt
 
 SHAPE           = "packed-choice-1"                           # names the body layout; a new layout needs a new name
@@ -17,6 +19,7 @@ WORKERS_MIN     = 4
 WORKERS_MAX     = 8
 WORKERS_DEFAULT = 6
 KEY_MODES       = ( "candidate", "stage1" )
+KINDS           = ( "choice", "pair" )                        # the three-way Choice, or the Noul and Score question
 
 
 def question_key( entry_id ):
@@ -107,7 +110,7 @@ def pack_key( body ):
 def _row( request_hash, entries, parent ):
     """Ensures: returns a request row before the request is sent, with every outcome field empty."""
     return { "request_hash": request_hash, "size": len( entries ), "ids": [ e[ "id" ] for e in entries ], "split_from": parent, "status": None,
-             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "http": None, "http_status": None, "attempt_log": [], "error": None, "model": None }
+             "attempts": 0, "tokens_in": None, "tokens_out": None, "unasked": [], "malformed": [], "http": None, "http_status": None, "attempt_log": [], "error": None, "model": None }
 
 
 def _post( transport, body ):
@@ -116,7 +119,26 @@ def _post( transport, body ):
     return transport.post( body ), None
 
 
-def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, budget=None, parent=None, breaker=None ):
+def _build( kind, need, entries, template, model ):
+    """Ensures: returns ( body, qmap ) for the kind of question asked."""
+    if kind == "pair": return rpr.pair_request( need, entries, model )
+    return pack_request( entries=entries, need=need, template=template, model=model )
+
+
+def _read( kind, response, qmap ):
+    """
+    Read one response for the kind of question.
+
+    Ensures:
+        - returns ( answered, unasked, malformed ): answered maps an id to the fields its answer adds to { id }
+        - the choice kind has no malformed entries here; its probabilities are checked by the verdict
+    """
+    if kind == "pair": return rpair.pair_answers( response, qmap )
+    answered, unasked = pack_answers( response, qmap )
+    return { i: { "probabilities": p } for i, p in answered.items() }, unasked, []
+
+
+def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, budget=None, parent=None, breaker=None, kind="choice" ):
     """
     Send one pack and account for every entry in it.
 
@@ -125,11 +147,14 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         - transport has post_with_meta( body ) returning ( response, meta ), or post( body )
         - budget, when given, is a TokenBudget; attempts are read from its tally
         - parent is the request hash of the pack this one was split from, or None
+        - kind is "choice" (the three-way question) or "pair" (a Noul and a Score for each entry)
         - breaker, when given, is a RefusalBreaker; it hears a 422 of a top-level pack once, under that pack's hash,
           and every answered request
     Ensures:
-        - returns { answers, failed, not_reached, rows }: answers are { id, probabilities } in entry order
+        - returns { answers, failed, not_reached, rows }: answers are { id, probabilities } in entry order; for the
+          pair kind they are { id, provides, coverage, score, confidence, probabilities }
         - an entry is answered only when its answer is present; every other entry is failed, never unrelated
+        - a pair entry whose answer is present and wrong is failed, listed in the row's malformed, and its valid half is not used
         - a 422 splits the pack in half and resends each half, the larger half second; a 422 on one entry
           fails that entry
         - an attempt refused by the budget before any HTTP leaves the pack not reached
@@ -141,13 +166,14 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         - rows lists this request first, then the rows of its halves, each with status answered, failed,
           refused or not_reached, its attempts, its reported tokens and the ids it asked about
     Raises:
-        - ValueError for an empty pack
+        - ValueError for an empty pack or a kind other than choice or pair
         - ReuseError BAD_SPEND_LIMIT for a live transport whose budget is not a TokenBudget; nothing is posted
     """
+    if kind not in KINDS: raise ValueError( f"kind must be one of {KINDS}, got {kind!r}" )
     if not entries: raise ValueError( "a pack cannot be empty" )
     if isinstance( transport, rt.LiveJevTransport ) and not isinstance( transport.budget, rc.TokenBudget ):
         raise rt.ReuseError( "BAD_SPEND_LIMIT", "a live packed send needs a TokenBudget on its transport" )
-    body, qmap = pack_request( entries=entries, need=need, template=template, model=model )
+    body, qmap = _build( kind, need, entries, template, model )
     row        = _row( pack_key( body ), entries, parent )
     if breaker is not None and breaker.stopped:
         row[ "status" ] = "not_reached"
@@ -172,14 +198,15 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
             row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, model=served, status="failed", error="ModelMismatch" )
             if breaker is not None: breaker.mismatched( served )
             return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
-        answered, unasked = pack_answers( response, qmap )
+        answered, unasked, malformed = _read( kind, response, qmap )
         if meta is not None and "attempt_log" in meta: row[ "attempt_log" ] = meta[ "attempt_log" ]
-        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked,
+        row.update( http=meta, tokens_in=usage[ 0 ] if usage else None, tokens_out=usage[ 1 ] if usage else None, unasked=unasked, malformed=malformed,
                     model=response[ "model" ] if isinstance( response, dict ) and "model" in response else None )
         row[ "status" ] = "answered" if answered else "failed"
         if not answered: row[ "error" ] = "NoAnswers"
         elif breaker is not None: breaker.answered()
-        return { "answers": [ { "id": i, "probabilities": answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked, "not_reached": [], "rows": [ row ] }
+        return { "answers": [ { "id": i, **answered[ i ] } for i in row[ "ids" ] if i in answered ], "failed": unasked + [ m[ "id" ] for m in malformed ],
+                 "not_reached": [], "rows": [ row ] }
     if metered: budget.fail_request()
     if isinstance( error, ( jt.JevConfigError, jt.JevCallError ) ):
         row[ "http_status" ], row[ "attempt_log" ] = error.status, error.attempt_log
@@ -188,8 +215,8 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
         if breaker is not None and parent is None: breaker.refused( row[ "request_hash" ] )          # the halves of this pack are one family
         if len( entries ) == 1: return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
         half  = len( entries ) // 2
-        left  = send_pack( transport, need, entries[ :half ], template, model, budget, row[ "request_hash" ], breaker )
-        right = send_pack( transport, need, entries[ half: ], template, model, budget, row[ "request_hash" ], breaker )
+        left  = send_pack( transport, need, entries[ :half ], template, model, budget, row[ "request_hash" ], breaker, kind )
+        right = send_pack( transport, need, entries[ half: ], template, model, budget, row[ "request_hash" ], breaker, kind )
         return { "answers": left[ "answers" ] + right[ "answers" ], "failed": left[ "failed" ] + right[ "failed" ],
                  "not_reached": left[ "not_reached" ] + right[ "not_reached" ], "rows": [ row ] + left[ "rows" ] + right[ "rows" ] }
     if not sent and row[ "attempts" ] == 0:
