@@ -105,3 +105,19 @@ def test_a_reuse_error_while_sweeping_comes_back_as_an_error_result( env, monkey
     def refuse( ctx ): raise rt.ReuseError( "SNAPSHOT_CORRUPT", "scratch" )
     monkeypatch.setattr( rt, "prepare", refuse )
     assert rt.sweep_need_impl( "add two numbers", None, ctx_of( env, PageFake( "x" ) ) ) == { "status": "error", "error": "SNAPSHOT_CORRUPT", "detail": "scratch" }
+
+
+def test_a_padded_need_is_stored_and_asked_without_its_padding( env ):
+    write_wiki( env[ 0 ] )
+    need = "add two numbers [padded]"
+    fake = PageFake( need )
+    r    = rt.sweep_need_impl( f"  {need}\n", None, ctx_of( env, fake ) )
+    assert r[ "status" ] == "ok" and fake.unexpected == [] and receipt_of( env, r )[ "query" ] == need
+
+
+def test_an_unknown_excluded_id_on_a_tree_that_is_not_lupin_gets_the_tree_answer_not_unknown_entry( tmp_path ):
+    root = tmp_path / "plain"
+    root.mkdir()
+    ctx  = rt.ReuseContext( root, tmp_path / "data", out_dir=tmp_path / "out", transport=PageFake( "x" ) )
+    r    = rt.sweep_need_impl( "add two numbers", "cosa.nowhere.gone", ctx )
+    assert r[ "status" ] == "ok" and r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NOT_LUPIN_TREE" in r[ "causes" ]
