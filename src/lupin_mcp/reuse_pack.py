@@ -375,6 +375,27 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }
 
 
+def pair_ask( ctx, need, entries ):
+    """
+    Ask the new question about the given candidates only, for the stage-two driver.
+
+    Requires:
+        - ctx has a pack_size and a transport; entries are symbol dicts with id, sig and doc
+    Ensures:
+        - returns { answered, unasked, malformed, stats }: answered maps an id to its provides, coverage and score
+        - malformed lists { id, reasons } for an entry whose answer was present and wrong; unasked lists the ids
+          that got no answer and were not malformed
+        - stats holds failed, not_checked, stopped_by, requests and attempt_counts, as the old question's pairs do
+    """
+    sw      = sweep_packed( ctx, need, entries, ctx.pack_size, kind="pair" )
+    answered = { a[ "id" ]: { "provides": a[ "provides" ], "coverage": a[ "coverage" ], "score": a[ "score" ] } for a in sw[ "answers" ] }
+    bad     = { m[ "id" ] for m in sw[ "malformed" ] }
+    stats   = { "failed": len( sw[ "failed" ] ), "not_checked": len( sw[ "not_reached" ] ), "stopped_by": sw[ "stopped_by" ], "requests": sw[ "requests" ],
+                "attempt_counts": rt.attempt_counts( sw[ "attempt_logs" ] ) }
+    return { "answered": answered, "unasked": [ e[ "id" ] for e in entries if e[ "id" ] not in answered and e[ "id" ] not in bad ],
+             "malformed": sw[ "malformed" ], "stats": stats }
+
+
 def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None, kind="choice" ):
     """
     Make the sweeper a ReuseContext takes for the packed path.

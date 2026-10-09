@@ -101,7 +101,8 @@ def test_the_old_question_asks_only_the_candidates_and_gives_a_row_for_each( tmp
         assert search[ "read" ]["verdict"] == "STAGE2"
 
 
-def test_the_new_question_is_refused_until_it_is_wired( tmp_path ):
+def test_the_new_question_is_refused_until_it_is_wired( tmp_path, monkeypatch ):
+    monkeypatch.setattr( s2, "NEW_PAIR_ASK", None )
     scratch = Env( tmp_path, asks={ "new": s2.ask_new_pairs } )
     items, twins = plan_of( scratch, tmp_path )
     with pytest.raises( s1.DriverRefused, match="not wired" ): e2r.run_searches( scratch.env(), "s2-run", items[ :1 ], twins, 10 ** 8 )
@@ -182,7 +183,8 @@ def test_the_command_line_runs_canary_approval_run_and_rows_on_the_stand_in( tmp
     assert len( rows ) == 12 * 6 and "rows written" in capsys.readouterr().out
 
 
-def test_the_command_line_refuses_the_new_question_while_it_is_unwired_and_a_missing_estimate( tmp_path, capsys ):
+def test_the_command_line_refuses_the_new_question_while_it_is_unwired_and_a_missing_estimate( tmp_path, capsys, monkeypatch ):
+    monkeypatch.setattr( s2, "NEW_PAIR_ASK", None )
     scratch = Env( tmp_path )
     assert s2.cli( command_args( scratch, tmp_path, "canary", "--ceiling", "100000000", "--estimate-tokens", "5000000", extra=[ "--questions", "old,new" ] ) ) == 2
     assert "not wired" in capsys.readouterr().err

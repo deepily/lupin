@@ -1162,7 +1162,7 @@ def check_exists_impl( need, ctx ):
         return { "status": "error", "error": e.name, "detail": e.detail }
 
 
-def sweep_need_impl( need, exclude_id, ctx ):
+def sweep_need_impl( need, exclude_id, ctx, question="choice" ):
     """
     Sweep every entry for a free-text need, with the page route off.
 
@@ -1173,13 +1173,14 @@ def sweep_need_impl( need, exclude_id, ctx ):
         - returns the same shape as check_exists_impl, from a receipt marked sweep_only that names exclude_id
         - every sendable entry but exclude_id is asked; no page is asked
         - an exclude_id that is not in the index returns { status: error, error: UNKNOWN_ENTRY, entry } before any request
+        - question is passed to run_question, so "provides" asks the Noul and Score pair
     """
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
     try:
         prepared = prepare( ctx )
         if exclude_id is not None and not any( e[ "id" ] == exclude_id for e in prepared[ 1 ] ) and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
             return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": exclude_id }
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=True ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=True, question=question ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 

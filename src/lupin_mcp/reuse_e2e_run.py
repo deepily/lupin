@@ -274,7 +274,12 @@ def ask_old( ctx, item ):
     return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx )
 
 
-NEW_ASK = None                                              # the new question's ask; step 3 sets it, and until then "new" is refused
+def ask_new( ctx, item ):
+    """Ensures: returns the public result of the new question's full sweep, the member left out."""
+    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx, question="provides" )
+
+
+NEW_ASK = ask_new                                           # the new question's ask; set to None and "new" is refused
 
 FIRST_LINE = ( "100 searches, one per twin group, drawn from 151 groups of Python structural clones (exact and near); no TypeScript or JavaScript; "
                "no conceptual duplicates. This measures recall on clones, an upper bound for the harder case." )

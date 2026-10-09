@@ -87,6 +87,7 @@ def test_the_stand_in_folder_is_marked_and_a_live_run_will_not_read_it( setup ):
 
 
 def test_the_new_question_is_refused_until_it_is_wired_and_runs_once_it_is( setup, monkeypatch, capsys ):
+    monkeypatch.setattr( run, "NEW_ASK", None )
     assert run.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--questions", "old,new" ] ) ) == 2
     assert "new question is not wired" in capsys.readouterr().err
     monkeypatch.setattr( run, "NEW_ASK", lambda ctx, item: ask_old( ctx, { **item, "need": item[ "need" ] + " (new)" } ) )

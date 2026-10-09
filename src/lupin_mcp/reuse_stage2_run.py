@@ -14,6 +14,7 @@ import sys
 from cosa.repo.symindex import verdict as vd
 from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_e2e_run as e2r
+from lupin_mcp import reuse_pack
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
 from lupin_mcp import reuse_stage2_fit as fit
@@ -23,7 +24,7 @@ NEGATIVES_FORMAT = "stage2-negatives-1"
 ROWS_FORMAT      = "stage2-rows-1"
 PREFIX           = "s2"
 SHORTLIST_CUT    = 0.5
-NEW_PAIR_ASK     = None                         # step 3 sets it: ask( ctx, need, entries ) -> { answered, unasked, malformed, stats }
+NEW_PAIR_ASK     = reuse_pack.pair_ask          # ask( ctx, need, entries ) -> { answered, unasked, malformed, stats }; None refuses "new"
 
 
 def spec_for( members, estimate_tokens ):
