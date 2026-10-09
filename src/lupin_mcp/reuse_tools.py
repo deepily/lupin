@@ -121,7 +121,7 @@ def request_hash( body ):
     return sha( canonical( body ) )
 
 
-def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None ):
+def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None, sweep_only=False, exclude_id=None ):
     """
     Ensures:
         - returns 16 hex characters identifying one question against one set of inputs
@@ -132,10 +132,12 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
           receipt of the same question, and a complete one never hides an incomplete one
         - the tool version is part of the id (the module's TOOL_VERSION when none is given), and so is the request
           shape when there is one; with no shape the id is the one the old path has always produced
+        - a sweep-only question carries that mark and its excluded id in the id; any other question's id is unchanged
     """
     fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
                "model": model, "policy": policy, "prompt_template_hash": template_hash, "causes": list( causes ) }
     if request_shape is not None: fields[ "request_shape" ] = request_shape
+    if sweep_only: fields[ "sweep_only" ], fields[ "exclude_id" ] = True, exclude_id
     return sha( canonical( fields ), 16 )
 
 
@@ -877,7 +879,8 @@ def load_receipt( ctx, rid ):
         r = json.loads( p.read_text( encoding="utf-8" ) )
         ok = _receipt_shape_ok( r )
         again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ],
-                            r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None ) if ok else None
+                            r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None,
+                            "sweep_only" in r, r[ "exclude_id" ] if "sweep_only" in r else None ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
     if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
@@ -1015,16 +1018,17 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
     return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out, "sweeps": swept }
 
 
-def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None ):
+def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False ):
     """
     Run one sweep-based question end to end and store its receipt.
 
     Ensures:
         - everything _run_question ensures
         - a single-use context closes its run in the ledger when the question ends, however it ends
+        - sweep_only turns the page route off for a check_exists question, so every entry is asked
     """
     try:
-        return _run_question( ctx, tool, query, need, exclude_id, write, prepared )
+        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only )
     finally:
         _finish( ctx )
 
@@ -1036,7 +1040,7 @@ def _finish( ctx ):
     if isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): ctx.transport.budget.end()
 
 
-def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
+def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1050,10 +1054,11 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
         - a sweep is skipped when NOT_LUPIN_TREE, INDEX_STALE or KEY_UNREADABLE already decides
           UNCERTAIN_READ_SOURCE without one
         - `prepared` is the result of prepare(), when the caller already has it
+        - with sweep_only the receipt records sweep_only and exclude_id, and both are part of its id
         - with write=False nothing is stored (used by replay at HEAD)
     """
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
-    pages = ctx.pages if tool == "check_exists" else []                    # fetch_similar lists neighbours, so it sweeps every entry
+    pages = ctx.pages if tool == "check_exists" and not sweep_only else []                    # fetch_similar lists neighbours, so it sweeps every entry
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
@@ -1067,7 +1072,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
     template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
     packed        = ctx.sweeper is not None
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
-    rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ], version, ctx.request_shape if packed else None ),
+    rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ], version, ctx.request_shape if packed else None, sweep_only, exclude_id ),
             "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
             "policy": vd.POLICY, "prompt_template_hash": template_hash, "prompt_template": ctx.template,
             "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
@@ -1085,6 +1090,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared ):
                        "attempt_counts": attempt_counts( [ log for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] ] ),
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
+    if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     if packed:
         rec[ "request_shape" ] = ctx.request_shape
         rec[ "pack_size" ]     = ctx.pack_size
@@ -1115,6 +1121,28 @@ def check_exists_impl( need, ctx ):
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
     try:
         return _public( run_question( ctx, "check_exists", need.strip(), need.strip() ) )
+    except ReuseError as e:
+        return { "status": "error", "error": e.name, "detail": e.detail }
+
+
+def sweep_need_impl( need, exclude_id, ctx ):
+    """
+    Sweep every entry for a free-text need, with the page route off.
+
+    Requires:
+        - need is a non-empty description of the capability
+        - exclude_id is None, or a symbol id of a healthy index (the member whose twin is sought)
+    Ensures:
+        - returns the same shape as check_exists_impl, from a receipt marked sweep_only that names exclude_id
+        - every sendable entry but exclude_id is asked; no page is asked
+        - an exclude_id that is not in the index returns { status: error, error: UNKNOWN_ENTRY, entry } before any request
+    """
+    if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
+    try:
+        prepared = prepare( ctx )
+        if exclude_id is not None and not any( e[ "id" ] == exclude_id for e in prepared[ 1 ] ) and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
+            return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": exclude_id }
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=True ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
@@ -1212,6 +1240,8 @@ def replay_impl( rid, ctx ):
         if stored[ "tool" ] == "fetch_similar":
             need    = next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
+        sweep_only = "sweep_only" in stored
+        if sweep_only and stored[ "exclude_id" ] is not None: entries = [ e for e in entries if e[ "id" ] != stored[ "exclude_id" ] ]
         hard    = set( stored[ "flags" ] ) & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
         if hard or not entries:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
@@ -1228,7 +1258,8 @@ def replay_impl( rid, ctx ):
             d     = _route( frozen_ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
-        head = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else None, write=False )
+        exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else ( stored[ "exclude_id" ] if sweep_only else None )
+        head    = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
     return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": fz,

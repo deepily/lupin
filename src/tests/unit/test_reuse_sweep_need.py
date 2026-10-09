@@ -82,12 +82,12 @@ def test_the_cache_key_carries_the_need_so_a_new_need_is_asked_again_and_the_sam
     need_a, need_b = "add two numbers [cache-a]", "add two numbers [cache-b]"
     fake = PageFake( need_a )
     fake.table.update( PageFake( need_b ).table )
-    first  = rt.sweep_need_impl( need_a, None, ctx_of( env, fake ) )
-    again  = rt.sweep_need_impl( need_a, None, ctx_of( env, fake ) )
-    second = rt.sweep_need_impl( need_b, None, ctx_of( env, fake ) )
-    assert ( first[ "stats" ][ "calls" ], first[ "stats" ][ "cache_hits" ] ) == ( 3, 0 )
-    assert ( again[ "stats" ][ "calls" ], again[ "stats" ][ "cache_hits" ] ) == ( 0, 3 )
-    assert ( second[ "stats" ][ "calls" ], second[ "stats" ][ "cache_hits" ] ) == ( 3, 0 )
+    rt.sweep_need_impl( need_a, None, ctx_of( env, fake ) )
+    assert len( fake.seen ) == 3
+    rt.sweep_need_impl( need_a, None, ctx_of( env, fake ) )
+    assert len( fake.seen ) == 3                                                                 # the same need: served from the cache
+    rt.sweep_need_impl( need_b, None, ctx_of( env, fake ) )
+    assert len( fake.seen ) == 6                                                                 # a new need: asked again
 
 
 def test_a_sweep_need_receipt_replays_frozen_and_at_head_with_the_same_exclusion( env ):
@@ -99,3 +99,9 @@ def test_a_sweep_need_receipt_replays_frozen_and_at_head_with_the_same_exclusion
     rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] } and fake.unexpected == []
     assert MATHX_TEXT not in fake.seen and FEEDS_PAGE not in fake.seen                           # neither re-run asked the member or a page
+
+
+def test_a_reuse_error_while_sweeping_comes_back_as_an_error_result( env, monkeypatch ):
+    def refuse( ctx ): raise rt.ReuseError( "SNAPSHOT_CORRUPT", "scratch" )
+    monkeypatch.setattr( rt, "prepare", refuse )
+    assert rt.sweep_need_impl( "add two numbers", None, ctx_of( env, PageFake( "x" ) ) ) == { "status": "error", "error": "SNAPSHOT_CORRUPT", "detail": "scratch" }
