@@ -47,7 +47,7 @@ import shlex
 import subprocess
 import sys
 
-from cosa.utils import db_grants
+from cosa.utils import db_grants, db_secret_files
 
 SQL_RELATIVE_PATH = "src/scripts/sql/init-db-roles.sql"
 
@@ -114,7 +114,7 @@ def build_psql_stdin( app_pw, host_pw, test_pw, sql_text, reassign=False, redact
     return "\n".join( lines ) + "\n"
 
 
-def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
+def main( argv=None, run_fn=subprocess.run, out=sys.stdout, geteuid=os.geteuid, chown=os.chown ):
     """
     Plan or apply the role provisioning.
 
@@ -125,6 +125,9 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         - a bad password file, or an unreadable SQL file, returns 2 and prints why, before anything runs
         - with --check, --rollback or --grants-only no password file is read, and --reassign is refused
         - without either, all three password files are required
+        - --secrets-dir adds the root-owned secret files: written after a successful run, listed by a dry run,
+          checked by --check, and refused with --rollback, --grants-only, --drop-template and --reassign
+        - a run that would write them but is not root is refused before psql runs
     """
     parser = argparse.ArgumentParser( description=__doc__.split( "\n\n" )[ 0 ] )
     parser.add_argument( "--app-pw-file",  default=None )
@@ -139,13 +142,28 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
     direction.add_argument( "--grants-only", action="store_true", help="repeat the grants and default privileges, and make the template database if missing; no role or password is touched" )
     direction.add_argument( "--drop-template", action="store_true", help="remove the template database lupin_template_vector and nothing else" )
     parser.add_argument( "--apply", action="store_true", help="run it; without this the plan is only printed" )
+    parser.add_argument( "--secrets-dir", default=None, help="the directory of the compose secret files; see cosa.utils.db_secret_files" )
+    parser.add_argument( "--secrets-group-id", type=int, default=db_secret_files.GROUP_ID, help="group of the secret files; the compose services join it" )
     parser.add_argument( "--database", action="append", choices=db_grants.databases(), help="with --check: check only this database (repeatable)" )
     args = parser.parse_args( argv )
 
     if args.database and not args.check: parser.error( "--database is only meaningful with --check" )
+    if args.secrets_dir and ( args.rollback or args.grants_only or args.drop_template or args.reassign ):
+        parser.error( "--secrets-dir needs the full run: it cannot be combined with --rollback, --grants-only, --drop-template or --reassign" )
     if args.check:
         code, lines = db_grants.check_with_psql( args.psql, run_fn, which=args.database )
         for line in lines: print( line, file=out )
+        if args.secrets_dir:
+            values = None
+            if args.app_pw_file and args.test_pw_file:
+                try:
+                    values = db_secret_files.wanted( read_secret( args.app_pw_file ), read_secret( args.test_pw_file ) )
+                except ValueError as error:
+                    print( f"db_roles: {error}", file=out )
+                    return 2
+            gaps, notes = db_secret_files.check_files( args.secrets_dir, values, args.secrets_group_id )
+            for line in gaps + notes: print( line, file=out )
+            if gaps: code = max( code, 1 )
         return code
 
     app_pw = host_pw = test_pw = None
@@ -169,16 +187,25 @@ def main( argv=None, run_fn=subprocess.run, out=sys.stdout ):
         print( f"db_roles: SQL file {sql_path} could not be read: {error.__class__.__name__}", file=out )
         return 2
     command = shlex.split( args.psql ) + [ "-v", "ON_ERROR_STOP=1", "-q" ]
+    if args.secrets_dir and args.apply and geteuid() != 0:
+        print( "db_roles: writing the secret files needs root; nothing was run. Repeat the command with sudo.", file=out )
+        return 2
 
     if not args.apply:
         print( "db_roles: DRY RUN (nothing was run). Add --apply to run it.", file=out )
         print( "command: " + shlex.join( command ), file=out )
         print( "stdin:", file=out )
         print( build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, redact=True, rollback=args.rollback, grants_only=args.grants_only, drop_template=args.drop_template ), file=out, end="" )
+        if args.secrets_dir: print( "then, as root, in " + args.secrets_dir + ": " + ", ".join( db_secret_files.FILE_NAMES ), file=out )
         return 0
 
     stdin = build_psql_stdin( app_pw, host_pw, test_pw, sql_text, args.reassign, rollback=args.rollback, grants_only=args.grants_only, drop_template=args.drop_template )
-    return run_fn( command, input=stdin, text=True ).returncode
+    code = run_fn( command, input=stdin, text=True ).returncode
+    if code != 0 or not args.secrets_dir: return code
+    values = db_secret_files.wanted( app_pw, test_pw )
+    for name, what in db_secret_files.write_files( args.secrets_dir, values, args.secrets_group_id, geteuid, chown ).items():
+        print( f"db_roles: secret file {os.path.join( args.secrets_dir, name )}: {what}", file=out )
+    return 0
 
 
 if __name__ == "__main__":   # pragma: no cover  (thin entry point; main() is what is tested)
