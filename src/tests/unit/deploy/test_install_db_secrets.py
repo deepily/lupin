@@ -158,6 +158,11 @@ def test_refuses_without_a_sudo_operator_whose_name_agrees( world, env ):
     _refusal( world, 21, env )
 
 
+def test_refuses_root_s_own_shell_even_when_the_name_agrees( world ):
+    env = { "SUDO_UID": "0", "SUDO_USER": "op" }
+    assert "not from root's own shell" in _refusal( world, 21, env )
+
+
 def test_refuses_a_name_that_cannot_go_into_a_sudoers_line( world ):
     world.host.lookup = lambda uid: types.SimpleNamespace( pw_name="Bad Name\nx", pw_dir="/" )
     env = { "SUDO_UID": str( os.getuid() ), "SUDO_USER": "Bad Name\nx" }
