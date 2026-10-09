@@ -23,7 +23,8 @@
 #   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
 # Optional (defaults shown):
 #   DB_USER=lupin_app  DB_NAME=lupin_db_test
-#   LUPIN_TEST_DB_PASSWORD=<from Secret Manager `lupin-db-test-password`>  (empty = tests create databases as DB_USER)
+#   LUPIN_TEST_DB_PASSWORD=<from Secret Manager `lupin-db-test-password`>
+#   (empty means tests create databases as DB_USER)
 #
 # Launch:
 #   docker compose -f docker-compose.cloud-gpu.yml --env-file cloud-gpu.env up -d
