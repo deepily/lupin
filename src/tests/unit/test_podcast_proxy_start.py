@@ -150,6 +150,19 @@ def test_the_job_reads_a_copy_the_server_made_and_not_the_seats_file( world ):
     assert oct( os.stat( research ).st_mode & 0o777 ) == oct( 0o640 )
 
 
+def test_the_copy_holds_the_bytes_that_were_judged_even_if_the_file_changes_after_the_check( world, monkeypatch ):
+    card   = _card( world )
+    judged = world[ "path" ].read_bytes()
+    def operator_then_rewrite( user_id ):
+        world[ "path" ].write_bytes( b"# Swapped after the check\n\nDifferent words.\n" )
+        return { "id": user_id, "email": RICK }
+    monkeypatch.setattr( "cosa.rest.user_service.get_user_by_id", operator_then_rewrite )
+    answer = _start( world, card.id )
+    assert answer.status_code == 200, answer.text
+    research = world[ "flow" ].calls[ 0 ][ "args" ][ "research" ]
+    assert open( research, "rb" ).read() == judged and world[ "path" ].read_bytes() != judged
+
+
 def test_the_spent_record_names_the_card_the_starter_the_file_and_the_job( world ):
     card = _card( world )
     _start( world, card.id )
