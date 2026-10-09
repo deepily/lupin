@@ -186,11 +186,17 @@ def test_the_resend_list_holds_only_member_ids_and_check_names_and_never_a_twin(
 
 # ---- files and exit codes ----
 
+def needs_document( sample_sha, needs ):
+    """The one needs document shape the writer emits and the driver loads."""
+    return { "format": nc.NEEDS_FORMAT, "sample_sha256": sample_sha,
+             "needs": [ { "member": i, "need": n, "kind": "function", "writer_job_id": "j-" + str( k ), "attempts": 1, "rewrites": 0 } for k, ( i, n ) in enumerate( needs.items() ) ] }
+
+
 def write_inputs( tmp_path, needs ):
-    ( tmp_path / "needs.json" ).write_text( json.dumps( { i: { "need": n, "job_id": "j-" + str( k ) } for k, ( i, n ) in enumerate( needs.items() ) } ) )
     ( tmp_path / "manifest.json" ).write_text( json.dumps( MANIFEST ) )
     ( tmp_path / "symbols.jsonl" ).write_text( "\n".join( json.dumps( r ) for r in INDEX.values() ) + "\n" )
     ( tmp_path / "sample.json" ).write_text( json.dumps( { "strata": { "one": { "members": [ A ] }, "two": { "members": [ D ] } } } ) )
+    ( tmp_path / "needs.json" ).write_text( json.dumps( needs_document( nc.file_sha256( tmp_path / "sample.json" ), needs ) ) )
     return [ "--needs", str( tmp_path / "needs.json" ), "--manifest", str( tmp_path / "manifest.json" ), "--index", str( tmp_path / "symbols.jsonl" ),
              "--sample", str( tmp_path / "sample.json" ), "--out-dir", str( tmp_path / "out" ),
              "--sample-sha256", nc.file_sha256( tmp_path / "sample.json" ), "--manifest-sha256", nc.file_sha256( tmp_path / "manifest.json" ), "--size", "2" ]
@@ -286,14 +292,46 @@ def test_the_pinned_default_shas_are_the_ones_in_plan_section_12_1():
     assert nc.DEFAULT_MANIFEST_SHA.startswith( "bfbfceab" ) and len( nc.DEFAULT_MANIFEST_SHA ) == 64
 
 
-@pytest.mark.parametrize( "row", [ "just a string", { "text": "wrong key" }, { "need": 7 } ] )
-def test_a_needs_row_without_a_text_exits_two_naming_the_member( tmp_path, row, capsys ):
+def rewrite_doc( tmp_path, change ):
+    doc = json.loads( ( tmp_path / "needs.json" ).read_text() )
+    change( doc )
+    ( tmp_path / "needs.json" ).write_text( json.dumps( doc ) )
+
+
+@pytest.mark.parametrize( "row", [ "just a string", { "member": A, "text": "wrong key" }, { "member": A, "need": 7 }, { "need": GOOD }, { "member": 3, "need": GOOD } ] )
+def test_a_needs_entry_without_a_member_and_a_text_exits_two( tmp_path, row, capsys ):
     args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
-    raw  = json.loads( ( tmp_path / "needs.json" ).read_text() )
-    raw[ A ] = row
-    ( tmp_path / "needs.json" ).write_text( json.dumps( raw ) )
+    rewrite_doc( tmp_path, lambda d: d[ "needs" ].__setitem__( 0, row ) )
     assert nc.main( args ) == 2
-    assert A in capsys.readouterr().out and not ( tmp_path / "out" ).exists()
+    assert "entry 0" in capsys.readouterr().out and not ( tmp_path / "out" ).exists()
+
+
+def test_a_member_named_twice_in_the_document_exits_two( tmp_path, capsys ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    rewrite_doc( tmp_path, lambda d: d[ "needs" ].append( dict( d[ "needs" ][ 0 ] ) ) )
+    assert nc.main( args ) == 2
+    assert A in capsys.readouterr().out
+
+
+@pytest.mark.parametrize( "key, value, word", [ ( "format", "reuse-e2e-needs-2", "format" ), ( "sample_sha256", "0" * 64, "sample_sha256" ), ( "needs", {}, "needs" ) ] )
+def test_a_document_with_the_wrong_format_sample_sha_or_list_exits_two( tmp_path, key, value, word, capsys ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    rewrite_doc( tmp_path, lambda d: d.__setitem__( key, value ) )
+    assert nc.main( args ) == 2
+    assert word in capsys.readouterr().out and not ( tmp_path / "out" ).exists()
+
+
+def test_the_old_member_keyed_shape_is_refused_not_read( tmp_path ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    ( tmp_path / "needs.json" ).write_text( json.dumps( { A: { "need": GOOD, "job_id": "j" }, D: { "need": GOOD, "job_id": "k" } } ) )
+    assert nc.main( args ) == 2
+
+
+def test_load_needs_returns_member_to_text_in_document_order( tmp_path ):
+    p = tmp_path / "n.json"
+    p.write_text( json.dumps( needs_document( "ab" * 32, { D: "text d", A: "text a" } ) ) )
+    got = nc.load_needs( p, "ab" * 32 )
+    assert list( got.items() ) == [ ( D, "text d" ), ( A, "text a" ) ]
 
 
 def test_a_needs_file_that_is_a_list_exits_two( tmp_path ):
