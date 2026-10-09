@@ -9,9 +9,9 @@
 
 ---
 
-## Warning: read this first — what changed (brain integration)
+## Read this first — what changed (brain integration)
 
-Registration and routing were rebuilt. **Parts of this long document still describe
+Warning: Registration and routing were rebuilt. **Parts of this long document still describe
 the old world**. Where they disagree with the seven statements below, these win, and
 the sections that were actually wrong have been corrected in place and marked.
 
@@ -1652,9 +1652,9 @@ AGENTIC_AGENTS = {
 
 **Optional field**: `special_handlers` — for advanced input resolution (e.g., `"research": "fuzzy_file_match"` in the podcast generator).
 
-### Factory Registration — Warning: still `REQUIRED`, and it is the last hand-edited branch
+### Factory Registration — still `REQUIRED`, and it is the last hand-edited branch
 
-**Add your construction branch to `create_agentic_job()` in
+Warning: **Add your construction branch to `create_agentic_job()` in
 `src/cosa/rest/agentic_job_factory.py`**. This survived the brain integration and is
 the one place a command-name `elif` is still correct. Verified in the tree:
 eleven branches live.

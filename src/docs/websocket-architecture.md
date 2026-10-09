@@ -154,7 +154,7 @@ Second, the installed defaults are finite and sum to less than the wake window r
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `resolve_device_slot` | `(user_id, client_type, device_id=None) -> Optional[tuple]` | **Static**. The slot a session claims, or `None`. Returns `None` when `user_id` is falsy or `client_type` is not exactly `"mobile"`. Otherwise `( user_id, device_id or "mobile" )`. `Warning: client_type` here is the **normalized** marker out of `session_client_types`, never the raw `auth_request` value — `connect()` reads the marker it just pinned. So the slot and the FCM wake trigger cannot disagree about what counts as mobile |
+| `resolve_device_slot` | `(user_id, client_type, device_id=None) -> Optional[tuple]` | **Static**. The slot a session claims, or `None`. Returns `None` when `user_id` is falsy or `client_type` is not exactly `"mobile"`. Otherwise `( user_id, device_id or "mobile" )`. Warning: `client_type` here is the **normalized** marker out of `session_client_types`, never the raw `auth_request` value — `connect()` reads the marker it just pinned. So the slot and the FCM wake trigger cannot disagree about what counts as mobile |
 | `device_slot_of` | `(session_id) -> Optional[tuple]` | The slot this session holds, or `None` |
 | `slot_holder` | `(user_id, slot) -> Optional[str]` | The session currently holding `slot`, or `None`. Scans **one user's** sessions rather than a reverse index (see the `session_device_slots` attribute row for why). Only sessions holding a live connection count, so a `register_session_user` pre-registration can neither be displaced nor block a claim |
 
