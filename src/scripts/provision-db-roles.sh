@@ -16,6 +16,9 @@
 #   The repair after a migration or a test made a table the roles cannot reach (no password files, no root):
 #   src/scripts/provision-db-roles.sh --psql "<same as above>" --grants-only [--apply]
 #
+#   The compose secret files, written after the psql step (needs root; the dry run lists them):
+#   sudo src/scripts/provision-db-roles.sh <the full-run options above> --secrets-dir /etc/lupin/secrets [--secrets-group-id 1002] [--apply]
+#
 #   The read-only check, exit 1 on a gap (it prints each gap and the repair command above):
 #   src/scripts/provision-db-roles.sh --psql "<same as above>" --check
 #
