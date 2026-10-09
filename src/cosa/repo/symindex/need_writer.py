@@ -148,7 +148,8 @@ def build_prompt( need, failures=None, own_words=None, last_words=None ):
         - holds the stripped text and the form rules
         - when failures is given, ends with a note naming only the kinds of failure
         - own_words, when given, are named in that note; each must be one of the member's own names
-        - last_words, when given with a word_count failure, states the length of the last sentence
+        - last_words, when given with a word_count failure, states the length of the last sentence and
+          tells a long one to aim ten words under the limit, a short one to say a little more
 
     Raises:
         - ValueError when an own word is not one of the member's own names
@@ -170,6 +171,8 @@ def build_prompt( need, failures=None, own_words=None, last_words=None ):
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
     if failures and "word_count" in failures and last_words is not None:
         prompt += f" Your last sentence had {last_words} words; it must have {MIN_WORDS} to {MAX_WORDS}."
+        if last_words > MAX_WORDS: prompt += f" Aim for {MAX_WORDS - 10} words or fewer by leaving out the least important detail."
+        if last_words < MIN_WORDS: prompt += " Say a little more."
     if failures and "own_identifier" in failures:
         for word in own_words or []: prompt += f' In your last sentence the word "{word}" is a name in the original code; do not use it.'
         prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it. Words that often double as names in code include limit, error, state, job, mode, store, seed, minutes, code, agent, result, budget; say those ideas in other words."
