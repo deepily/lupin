@@ -61,6 +61,7 @@ def write_files( directory, values, group_id=GROUP_ID, geteuid=os.geteuid, chown
     Ensures:
         - refuses the whole run, writing nothing, when the caller is not root
         - creates the directory with mode 0750, owner root, group group_id, when it is missing
+        - tightens an existing directory that has another mode or owner, and reports it as "directory": "repaired"
         - a file holding the right value, mode and owner is left alone and reported "unchanged"
         - otherwise the file is written beside itself, set to mode 0440 root:group_id, then renamed into place,
           and reported "written" when it was absent or "repaired" when it was wrong
@@ -75,6 +76,10 @@ def write_files( directory, values, group_id=GROUP_ID, geteuid=os.geteuid, chown
         chown( directory, 0, group_id )
         os.chmod( directory, DIR_MODE )
     report = { }
+    if _dir_gaps( directory, group_id ):
+        chown( directory, 0, group_id )
+        os.chmod( directory, DIR_MODE )
+        report[ "directory" ] = "repaired"
     for name, password in values.items():
         path = os.path.join( directory, name )
         state = _state( path, password, group_id )
@@ -82,12 +87,24 @@ def write_files( directory, values, group_id=GROUP_ID, geteuid=os.geteuid, chown
             report[ name ] = "unchanged"
             continue
         temp = path + ".new"
-        with open( temp, "w" ) as handle: handle.write( password + "\n" )
+        if os.path.lexists( temp ): os.unlink( temp )
+        # Created at 0440 and exclusively, so the password is never in a file others can read or in a followed link.
+        with os.fdopen( os.open( temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, MODE ), "w" ) as handle: handle.write( password + "\n" )
         os.chmod( temp, MODE )
         chown( temp, 0, group_id )
         os.replace( temp, path )
         report[ name ] = "written" if state == "absent" else "repaired"
     return report
+
+
+def _dir_gaps( directory, group_id ):
+    """Return the lines saying how the directory differs from mode 0750 and owner root:group_id."""
+    gaps  = [ ]
+    mode  = stat.S_IMODE( os.stat( directory ).st_mode )
+    owner = _owner_of( directory )
+    if mode != DIR_MODE: gaps.append( f"secret directory {directory} has mode {mode:04o}, expected {DIR_MODE:04o}" )
+    if owner != ( 0, group_id ): gaps.append( f"secret directory {directory} is owned by {owner[ 0 ]}:{owner[ 1 ]}, expected 0:{group_id}" )
+    return gaps
 
 
 def _state( path, password, group_id ):
@@ -116,9 +133,16 @@ def check_files( directory, values=None, group_id=GROUP_ID ):
         - the first gap-line set ends with one remedy line
         - a file this login cannot read is a note, not a gap: the service group may read it and a seat may not
         - the content is compared only when values is given, and a note says so when it is not
+        - a directory that is not mode 0750 and owner root:group_id is a gap too
+        - a directory this login cannot search gives one note and no gap: the files cannot be seen, which is
+          not the same as absent
         - never raises and prints no password
     """
     gaps, notes = [ ], [ ]
+    if os.path.isdir( directory ) and not os.access( directory, os.X_OK ):
+        notes.append( f"note: {directory} cannot be searched by this login, so the secret files were not checked; run this as root or as a member of group {group_id}" )
+        return gaps, notes
+    if os.path.isdir( directory ): gaps.extend( _dir_gaps( directory, group_id ) )
     for name in FILE_NAMES:
         path = os.path.join( directory, name )
         if not os.path.lexists( path ):

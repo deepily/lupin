@@ -294,3 +294,61 @@ def test_a_check_without_the_flag_does_not_touch_the_files( tmp_path, grants_cle
     out = io.StringIO()
     assert db_roles.main( [ "--psql", "x", "--check" ], run_fn=Psql(), out=out ) == 0
     assert "secret file" not in out.getvalue()
+
+
+# ---- the review of the first stack: the temp file, the directory, and a directory this login cannot search ----
+
+def test_the_temp_file_is_never_readable_by_others_while_it_holds_the_password( tmp_path, owners, monkeypatch ):
+    target, seen = tmp_path / "secrets", [ ]
+    real = os.chmod
+    def spy( path, mode ):
+        if str( path ).endswith( ".new" ): seen.append( os.stat( path ).st_mode & 0o777 )
+        real( path, mode )
+    monkeypatch.setattr( os, "chmod", spy )
+    old = os.umask( 0o022 )
+    try: _write( target, owners )
+    finally: os.umask( old )
+    assert seen == [ 0o440, 0o440 ], f"the temp files had these modes before the chmod: {[ oct( m ) for m in seen ]}"
+
+
+def test_a_planted_temp_link_is_replaced_not_followed( tmp_path, owners ):
+    target = tmp_path / "secrets"
+    _write( target, owners )
+    victim = tmp_path / "victim"
+    victim.write_text( "keep me\n" )
+    os.symlink( str( victim ), target / ( sf.TEST_FILE + ".new" ) )
+    _poke( target / sf.TEST_FILE, "stale\n" )
+    assert _write( target, owners )[ sf.TEST_FILE ] == "repaired"
+    assert victim.read_text() == "keep me\n", "the write went through the planted link"
+
+
+def test_an_existing_directory_with_another_mode_is_tightened_and_reported( tmp_path, owners ):
+    target = tmp_path / "secrets"
+    target.mkdir( mode=0o755 )
+    os.chmod( target, 0o755 )
+    report = _write( target, owners )
+    assert report[ "directory" ] == "repaired" and oct( os.stat( target ).st_mode & 0o777 ) == oct( 0o750 )
+    assert _write( target, owners ) == { sf.APP_FILE: "unchanged", sf.TEST_FILE: "unchanged" }, "a right directory is not reported again"
+
+
+def test_the_check_reports_a_directory_with_the_wrong_mode_or_owner( tmp_path, owners ):
+    target = tmp_path / "secrets"
+    _write( target, owners )
+    os.chmod( target, 0o755 )
+    gaps, _ = sf.check_files( str( target ), VALUES )
+    assert any( "secret directory" in line and "mode 0755, expected 0750" in line for line in gaps )
+    os.chmod( target, 0o750 )
+    owners.owner[ str( target ) ] = ( 1000, 1000 )
+    gaps, _ = sf.check_files( str( target ), VALUES )
+    assert any( "secret directory" in line and "owned by 1000:1000, expected 0:1002" in line for line in gaps )
+
+
+@pytest.mark.skipif( os.geteuid() == 0, reason="root searches every directory" )
+def test_a_directory_this_login_cannot_search_gives_a_note_and_no_gap( tmp_path, owners ):
+    target = tmp_path / "secrets"
+    _write( target, owners )
+    os.chmod( target, 0o000 )
+    try: gaps, notes = sf.check_files( str( target ), VALUES )
+    finally: os.chmod( target, 0o750 )
+    assert gaps == [ ], f"files inside an unsearchable directory were called gaps: {gaps}"
+    assert len( notes ) == 1 and "cannot be searched" in notes[ 0 ] and "group 1002" in notes[ 0 ]
