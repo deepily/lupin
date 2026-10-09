@@ -121,3 +121,9 @@ def test_an_unknown_excluded_id_on_a_tree_that_is_not_lupin_gets_the_tree_answer
     ctx  = rt.ReuseContext( root, tmp_path / "data", out_dir=tmp_path / "out", transport=PageFake( "x" ) )
     r    = rt.sweep_need_impl( "add two numbers", "cosa.nowhere.gone", ctx )
     assert r[ "status" ] == "ok" and r[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NOT_LUPIN_TREE" in r[ "causes" ]
+
+
+def test_a_read_capability_receipt_keeps_the_id_it_had_before_the_sweep_only_mark_existed( env ):
+    write_wiki( env[ 0 ] )
+    r = rt.read_capability_impl( [ "feeds-page" ], ctx_of( env, PageFake( "x" ) ) )
+    assert r[ "receipt_id" ] == "26728d82da88bcac"
