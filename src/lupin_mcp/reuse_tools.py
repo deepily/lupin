@@ -39,6 +39,7 @@ from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_
 TOOL_VERSION = "1"                                              # receipts of the one-request-per-entry path
 PACKED_TOOL_VERSION = "2"                                       # receipts of the packed path; both load until the old path is removed
 TOOL_VERSIONS = ( TOOL_VERSION, PACKED_TOOL_VERSION )
+QUESTIONS     = ( "choice", "provides" )                         # the three-way Choice, or the Noul and Score question
 MAX_PACK_SIZE = 10_000                                          # more than the catalogue holds; the bound only refuses nonsense
 PACK_SIZE_VARIABLE    = "LUPIN_REUSE_JEV_PACK_SIZE"
 CEILING_VARIABLE      = "LUPIN_REUSE_JEV_TOKEN_CEILING"
@@ -1018,7 +1019,7 @@ def _route( ctx, need, entries, pages, flags, frozen=False, plan=None, template=
     return { "route": "pages_then_full" if pages else "full", "sw": sw, "d": d, "deciding": entries, "stages": stages, "plan": plan_out, "sweeps": swept }
 
 
-def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False ):
+def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=None, sweep_only=False, question="choice" ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1028,7 +1029,7 @@ def run_question( ctx, tool, query, need, exclude_id=None, write=True, prepared=
         - sweep_only turns the page route off for a check_exists question, so every entry is asked
     """
     try:
-        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only )
+        return _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only, question )
     finally:
         _finish( ctx )
 
@@ -1040,7 +1041,26 @@ def _finish( ctx ):
     if isinstance( ctx.transport.budget, reuse_ceiling.TokenBudget ): ctx.transport.budget.end()
 
 
-def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False ):
+def _route_pair( ctx, need, entries, flags, frozen=False, model=None, policy=None, gaps=None ):
+    """
+    Decide one question by the Noul and Score pair: one sweep of every entry, no page stage.
+
+    Requires:
+        - ctx has a pack_size; the sweep is the packed one in the pair kind
+        - when frozen, every answer must already be cached, except the ids in `gaps`
+    Ensures:
+        - returns the same shape as _route, with route "full" and no plan
+        - the verdict is decide_provides over the answers; an entry that failed, was malformed or was too large to send is a gap
+    """
+    from lupin_mcp import reuse_pack                                           # imported here: it imports this module
+    policy = vd.POLICY_PROVIDES if policy is None else policy
+    sw     = reuse_pack.packed_sweeper( ctx.pack_size, kind="pair" )( ctx, need, entries, frozen=frozen, model=model, gaps=gaps )
+    asked  = [ { "id": a[ "id" ], "provides": a[ "provides" ], "coverage": a[ "probabilities" ] } for a in sw[ "answers" ] ]
+    d      = vd.decide_provides( asked, [ e[ "id" ] for e in entries ], sw[ "failed" ], flags, policy )
+    return { "route": "full", "sw": sw, "d": d, "deciding": entries, "stages": [ _stage( "all", sw, len( entries ) ) ], "plan": None, "sweeps": [ sw ] }
+
+
+def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice" ):
     """
     Run one sweep-based question end to end and store its receipt.
 
@@ -1056,25 +1076,37 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
         - `prepared` is the result of prepare(), when the caller already has it
         - with sweep_only the receipt records sweep_only and exclude_id, and both are part of its id
         - with write=False nothing is stored (used by replay at HEAD)
+        - question "provides" asks the Noul and Score pair on the packed path: one sweep of every entry, no page stage,
+          the receipt names the question and carries its policy, template and shape
+    Raises:
+        - ReuseError BAD_QUESTION for a question other than choice or provides
+        - ReuseError PAIR_NEEDS_PACKED for the pair question on a context with no packed path, before anything is sent
     """
+    if question not in QUESTIONS: raise ReuseError( "BAD_QUESTION", f"question must be one of {QUESTIONS}, got {question!r}" )
+    pair = question == "provides"
+    if pair and ( ctx.sweeper is None or ctx.pack_size is None ): raise ReuseError( "PAIR_NEEDS_PACKED", "the provides question is asked on the packed path only" )
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
-    pages = ctx.pages if tool == "check_exists" and not sweep_only else []                    # fetch_similar lists neighbours, so it sweeps every entry
+    pages = ctx.pages if tool == "check_exists" and not sweep_only and not pair else []     # fetch_similar lists neighbours, so it sweeps every entry
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
     if entries and not hard:
-        routed = _route( ctx, need, entries, pages, flags )
+        routed = _route_pair( ctx, need, entries, flags ) if pair else _route( ctx, need, entries, pages, flags )
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
-        routed = { "route": "none", "sw": none, "d": vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None, "sweeps": [] }
+        routed = { "route": "none", "sw": none, "d": vd.decide_provides( [], [], [], flags ) if pair else vd.decide( [], [], [], flags ), "deciding": entries, "stages": [], "plan": None, "sweeps": [] }
     sw, d, plan = routed[ "sw" ], routed[ "d" ], routed[ "plan" ]
-    template_hash = prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
+    from lupin_mcp import reuse_pair_request as rpr                            # imported here: it imports this module
+    template      = rpr.PAIR_TEMPLATE if pair else ctx.template
+    policy        = vd.POLICY_PROVIDES if pair else vd.POLICY
+    shape         = rpr.SHAPE if pair else ctx.request_shape
+    template_hash = rpr.template_hash() if pair else prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
     packed        = ctx.sweeper is not None
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
-    rec = { "id": receipt_id( tool, query, sha_, ctx.model, vd.POLICY, template_hash, d[ "causes" ], version, ctx.request_shape if packed else None, sweep_only, exclude_id ),
+    rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id ),
             "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
-            "policy": vd.POLICY, "prompt_template_hash": template_hash, "prompt_template": ctx.template,
+            "policy": policy, "prompt_template_hash": template_hash, "prompt_template": template,
             "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
             "flags": sorted( flags ), "verdict": d[ "verdict" ], "cause": d[ "cause" ], "causes": d[ "causes" ],
             "shortlist": _shortlist_view( d[ "shortlist" ], by_id ), "shortlist_total": d[ "shortlist_total" ],
@@ -1092,10 +1124,13 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     if packed:
-        rec[ "request_shape" ] = ctx.request_shape
+        rec[ "request_shape" ] = shape
         rec[ "pack_size" ]     = ctx.pack_size
         rec[ "requests" ]      = [ { "stage": st[ "stage" ], **row } for st, swept_ in zip( routed[ "stages" ], routed[ "sweeps" ] ) for row in swept_[ "rows" ] ]
         rec[ "stats" ][ "requests" ] = len( rec[ "requests" ] )
+    if pair:
+        rec[ "question" ]          = question
+        rec[ "stats" ][ "oversize" ] = sw[ "oversize" ] if "oversize" in sw else []                  # the empty sweep of a hard flag has no such key
     return store_receipt( ctx, rec ) if write else rec
 
 
@@ -1232,6 +1267,7 @@ def replay_impl( rid, ctx ):
     """
     try:
         stored = load_receipt( ctx, rid )
+        question = stored[ "question" ] if "question" in stored else "choice"          # a receipt from before the new question has none
         if stored[ "tool" ] == "read_capability":
             return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": None, "head": None, "differences": { "frozen": [], "head": [] } }
         entries, _ = load_snapshot( ctx, stored[ "index_sha" ] )
@@ -1255,11 +1291,15 @@ def replay_impl( rid, ctx ):
             from lupin_mcp import reuse_pack                                                          # imported here: it imports this module
             frozen_ctx = copy.copy( ctx )
             frozen_ctx.sweeper = reuse_pack.packed_sweeper( stored[ "pack_size" ] ) if stored[ "tool_version" ] == PACKED_TOOL_VERSION else None    # a receipt replays on the path that wrote it
-            d     = _route( frozen_ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
+            frozen_ctx.pack_size = stored[ "pack_size" ] if stored[ "tool_version" ] == PACKED_TOOL_VERSION else None
+            if question == "provides":
+                d = _route_pair( frozen_ctx, need, entries, set( stored[ "flags" ] ), frozen=True, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
+            else:
+                d = _route( frozen_ctx, need, entries, plan[ "asked" ] if plan else [], set( stored[ "flags" ] ), frozen=True, plan=plan,
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else ( stored[ "exclude_id" ] if sweep_only else None )
-        head    = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only )
+        head    = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
     return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": fz,
