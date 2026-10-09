@@ -36,6 +36,7 @@ MIN_WORDS        = 8
 MAX_WORDS        = 40
 RUN_LENGTH       = 4                                              # John's number, not a measurement
 FORM_STARTS      = ( "a function that ", "a method that ", "a class that " )
+RESEND_NAME      = { "member_text_run": "text_run", "twin_text_run": "text_run" }       # one neutral name: a twin is not mentioned to the writer
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
 
 
@@ -157,7 +158,9 @@ def check_need( member_id, need, index, groups ):
     tokens |= { p for t in tokens for p in t.split( "_" ) if p }
     hits   = sorted( tokens & banned )
     twin_names = set().union( *[ _name_tokens( _record( index, t ) ) for t in twins ] ) - identifier_tokens( rec )
-    if hits: out.append( { "check": "identifier", "detail": "identifier tokens: " + ", ".join( hits ), "words": [ h for h in hits if h not in twin_names ] } )
+    written    = set( re.findall( r"[a-z0-9_]+", need.lower() ) )
+    words      = sorted( { h if h in written else min( w for w in written if h in w.split( "_" ) ) for h in hits if h not in twin_names } )
+    if hits: out.append( { "check": "identifier", "detail": "identifier tokens: " + ", ".join( hits ), "words": words } )
     run = shared_run( need, entry_text_of( rec ) )
     if run: out.append( { "check": "member_text_run", "detail": f"4-word run shared with the member: {run}" } )
     for t in twins:
@@ -202,12 +205,13 @@ def resend_list( results ):
 
     Ensures:
         - returns { member, failed, avoid_words } for each failed row, and no other key
-        - avoid_words holds only the offending words of an identifier failure
+        - both run checks appear as the one name text_run, so the writer is not told a twin exists
+        - avoid_words holds only words of identifier rows, each a whole word written in the need
         - a word that is only a twin's id part or file stem is left out
-        - a run failure adds no word
     """
-    return [ { "member": r[ "member" ], "failed": sorted( { f[ "check" ] for f in r[ "failures" ] } ),
-               "avoid_words": sorted( { w for f in r[ "failures" ] for w in f.get( "words", [] ) } ) } for r in results[ "rows" ] if not r[ "ok" ] ]
+    names = lambda r: sorted( { RESEND_NAME.get( f[ "check" ], f[ "check" ] ) for f in r[ "failures" ] } )
+    words = lambda r: sorted( { w for f in r[ "failures" ] if f[ "check" ] == "identifier" for w in f[ "words" ] } )
+    return [ { "member": r[ "member" ], "failed": names( r ), "avoid_words": words( r ) } for r in results[ "rows" ] if not r[ "ok" ] ]
 
 
 def load_sample_ids( path ):
