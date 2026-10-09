@@ -192,7 +192,8 @@ def write_inputs( tmp_path, needs ):
     ( tmp_path / "symbols.jsonl" ).write_text( "\n".join( json.dumps( r ) for r in INDEX.values() ) + "\n" )
     ( tmp_path / "sample.json" ).write_text( json.dumps( { "strata": { "one": { "members": [ A ] }, "two": { "members": [ D ] } } } ) )
     return [ "--needs", str( tmp_path / "needs.json" ), "--manifest", str( tmp_path / "manifest.json" ), "--index", str( tmp_path / "symbols.jsonl" ),
-             "--sample", str( tmp_path / "sample.json" ), "--out-dir", str( tmp_path / "out" ), "--size", "2" ]
+             "--sample", str( tmp_path / "sample.json" ), "--out-dir", str( tmp_path / "out" ),
+             "--sample-sha256", nc.file_sha256( tmp_path / "sample.json" ), "--manifest-sha256", nc.file_sha256( tmp_path / "manifest.json" ), "--size", "2" ]
 
 
 def test_main_writes_both_files_and_exits_zero_when_all_pass( tmp_path ):
@@ -249,6 +250,79 @@ def test_load_index_keeps_one_record_per_id( tmp_path ):
     p = tmp_path / "s.jsonl"
     p.write_text( json.dumps( INDEX[ A ] ) + "\n\n" + json.dumps( INDEX[ D ] ) + "\n" )
     assert sorted( nc.load_index( p ) ) == sorted( [ A, D ] )
+
+
+def test_the_results_record_the_sha_of_all_three_inputs( tmp_path ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    assert nc.main( args ) == 0
+    full = json.loads( ( tmp_path / "out" / "check-results.json" ).read_text() )
+    for key, name in ( ( "needs_sha256", "needs.json" ), ( "sample_sha256", "sample.json" ), ( "manifest_sha256", "manifest.json" ) ):
+        assert full[ key ] == nc.file_sha256( tmp_path / name )
+
+
+@pytest.mark.parametrize( "flag", [ "--sample-sha256", "--manifest-sha256" ] )
+def test_a_sample_or_manifest_that_is_not_the_pinned_file_exits_two_and_writes_nothing( tmp_path, flag, capsys ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    args[ args.index( flag ) + 1 ] = "0" * 64
+    assert nc.main( args ) == 2
+    assert not ( tmp_path / "out" ).exists()
+    assert flag[ 2: ].replace( "-", "_" ) in capsys.readouterr().out
+
+
+def test_the_pinned_default_shas_are_the_ones_in_plan_section_12_1():
+    assert nc.DEFAULT_SAMPLE_SHA.startswith( "5b6d84fc" ) and len( nc.DEFAULT_SAMPLE_SHA ) == 64
+    assert nc.DEFAULT_MANIFEST_SHA.startswith( "bfbfceab" ) and len( nc.DEFAULT_MANIFEST_SHA ) == 64
+
+
+@pytest.mark.parametrize( "row", [ "just a string", { "text": "wrong key" }, { "need": 7 } ] )
+def test_a_needs_row_without_a_text_exits_two_naming_the_member( tmp_path, row, capsys ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    raw  = json.loads( ( tmp_path / "needs.json" ).read_text() )
+    raw[ A ] = row
+    ( tmp_path / "needs.json" ).write_text( json.dumps( raw ) )
+    assert nc.main( args ) == 2
+    assert A in capsys.readouterr().out and not ( tmp_path / "out" ).exists()
+
+
+def test_a_needs_file_that_is_a_list_exits_two( tmp_path ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    ( tmp_path / "needs.json" ).write_text( "[]" )
+    assert nc.main( args ) == 2
+
+
+def test_a_twin_missing_from_the_index_exits_two_and_names_it( tmp_path, capsys ):
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    ( tmp_path / "symbols.jsonl" ).write_text( "\n".join( json.dumps( INDEX[ i ] ) for i in ( A, B, D ) ) + "\n" )     # C is gone
+    assert nc.main( args ) == 2
+    assert C in capsys.readouterr().out and not ( tmp_path / "out" ).exists()
+
+
+# ---- the four spots the review found unguarded ----
+
+def test_the_file_stem_is_banned_even_when_no_id_part_carries_it():
+    rec = { "id": "p.f", "sig": "( )", "doc": "", "file": "p/special_stem.py" }
+    assert { "special_stem", "special", "stem" } <= nc.identifier_tokens( rec )
+    index = { "p.f": rec }
+    f = nc.check_need( "p.f", "A function that returns the special_stem values it holds for every caller today.", index, {} )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and "special_stem" in f[ 0 ][ "detail" ]
+
+
+@pytest.mark.parametrize( "words, ok", [ ( 7, False ), ( 8, True ), ( 40, True ), ( 41, False ) ] )
+def test_the_word_count_limits_are_eight_and_forty_inclusive( words, ok ):
+    need = "A function that " + " ".join( [ "word" ] * ( words - 3 ) ) + "."
+    assert len( need.split() ) == words
+    assert ( nc.check_form( need ) is None ) is ok
+
+
+def test_a_run_shared_with_a_later_twin_is_found_and_names_that_twin():
+    f = nc.check_need( A, "A function that will walk text one line at a time and returns counts.", INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ x[ "check" ] for x in f ] == [ "twin_text_run" ]
+    assert C in f[ 0 ][ "detail" ] and B not in f[ 0 ][ "detail" ]                # the run is in C's text, the second twin
+
+
+def test_a_need_word_joined_by_underscores_is_split_before_it_is_compared():
+    f = nc.check_need( A, "A function that returns wrapped_items values and counts them for each of the records.", INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and "items" in f[ 0 ][ "detail" ]
 
 
 # ---- the real files, through the real readers (outside git: skipped when absent) ----
