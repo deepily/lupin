@@ -180,12 +180,47 @@ def test_the_resend_list_holds_only_member_ids_and_check_names_and_never_a_twin(
     res = nc.check_all( { A: bad, D: GOOD }, [ A, D ], INDEX, nc.twin_groups( MANIFEST ) )
     assert "fetch_rows" in json.dumps( res ) and "scan_lines" in json.dumps( res )
     resend = nc.resend_list( res )
-    assert resend == [ { "member": A, "failed": [ "identifier" ] } ]
+    assert resend == [ { "member": A, "failed": [ "identifier" ], "avoid_words": [] } ]        # scan_lines is a twin's name: withheld
     text = json.dumps( resend )
     for twin in ( B, C ):
         assert twin not in text
     for token in ( "scan_lines", "fetch_rows" ):
         assert token not in text
+
+
+# ---- the words a resend entry may carry ----
+
+def resend_for( need, member_id=A ):
+    res = nc.check_all( { member_id: need }, [ member_id ], INDEX, nc.twin_groups( MANIFEST ) )
+    return nc.resend_list( res )
+
+
+def test_a_word_that_is_the_members_own_argument_is_named_in_the_resend_entry():
+    assert resend_for( "A function that returns the limit it was given and counts the records it holds." ) == \
+        [ { "member": A, "failed": [ "identifier" ], "avoid_words": [ "limit" ] } ]
+
+
+def test_a_word_that_is_only_a_twins_argument_is_named_too():
+    assert resend_for( "A function that returns the chunks it was given and counts the records it holds." ) == \
+        [ { "member": A, "failed": [ "identifier" ], "avoid_words": [ "chunks" ] } ]
+
+
+def test_a_twins_id_part_or_file_stem_is_never_named():
+    for word in ( "scan_lines", "reader", "mod_c", "fetch_rows", "gamma" ):
+        got = resend_for( f"A function that returns the {word} it was given and counts the records it holds." )
+        assert got == [ { "member": A, "failed": [ "identifier" ], "avoid_words": [] } ], word
+
+
+def test_a_run_failure_carries_no_words_and_the_entry_has_exactly_three_keys():
+    got = resend_for( "A function that will parse a feed from a web address and return articles." )
+    assert got == [ { "member": A, "failed": [ "member_text_run" ], "avoid_words": [] } ]
+    assert set( got[ 0 ] ) == { "member", "failed", "avoid_words" }
+
+
+def test_a_run_and_a_word_together_name_the_word_and_not_the_run():
+    got = resend_for( "A function that will parse a feed from a web address and return the limit." )
+    assert got == [ { "member": A, "failed": [ "identifier", "member_text_run" ], "avoid_words": [ "limit" ] } ]
+    assert "parse a feed" not in json.dumps( got )
 
 
 # ---- files and exit codes ----
