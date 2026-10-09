@@ -28,6 +28,7 @@ NOW         = datetime( 2026, 10, 8, 21, 0, tzinfo=timezone.utc )
 OPERATOR_ID = uuid.UUID( "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" )
 SESSION_ID  = "b9537836"
 ACTOR       = f"maya {SESSION_ID}"
+PERSONA     = { "name": "Maya", "icon": "🌻", "voice_id": "v1" }
 PEM         = "-----" + "BEGIN PRIVATE KEY" + "-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" + "-----" + "END PRIVATE KEY" + "-----\n"
 
 
@@ -71,7 +72,8 @@ def world( monkeypatch, tmp_path ):
     def fake_db():
         yield MagicMock()
     monkeypatch.setattr( door, "get_db", fake_db )
-    monkeypatch.setattr( door, "get_voice_persona", lambda sid: { "name": "Maya" } if sid == SESSION_ID else None )
+    monkeypatch.setattr( door, "get_voice_persona", lambda sid: PERSONA if sid == SESSION_ID else None )
+    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: { "sender_id": f"claude.code@lupin.deepily.ai#{sid}" } if sid == SESSION_ID else None )
     monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: NOW ) } ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_email", lambda email: { "id": str( OPERATOR_ID ) } )
@@ -113,7 +115,7 @@ def test_a_seat_asking_makes_one_card_the_server_wrote_and_pushes_it( world ):
     assert card.recipient_id == OPERATOR_ID and card.response_requested is True
     assert card.response_type == "yes_no" and card.response_default == "no" and card.priority == "high"
     assert card.timeout_seconds == 900 and card.expires_at == datetime( 2026, 10, 8, 21, 15, tzinfo=timezone.utc )
-    assert card.sender_id.endswith( f"#{SESSION_ID}" )
+    assert card.sender_id == f"claude.code@lupin.deepily.ai#{SESSION_ID}"
     assert answer.json() == { "card_id": str( card.id ), "name": "summary.md", "size": path.stat().st_size, "sha256": digest,
                               "asked_by": f"Maya ({SESSION_ID})", "expires_at": "2026-10-08T21:15:00+00:00", "pushed": True }
 
@@ -280,3 +282,20 @@ def test_the_assembled_application_serves_the_ask_door():
     for route in app.routes:
         if getattr( route, "path", "" ) == "/api/podcast-proxy/ask": verbs |= set( route.methods )
     assert verbs == { "POST" }
+
+
+def test_the_card_files_under_the_asking_seats_own_sender_with_its_persona( world ):
+    _file( world )
+    _ask( world )
+    card, pushed = world[ "cards" ].created[ 0 ], world[ "queue" ].pushed[ 0 ]
+    assert card.sender_id == pushed[ "sender_id" ] == f"claude.code@lupin.deepily.ai#{SESSION_ID}"
+    assert card.sender_persona == pushed[ "sender_persona" ] == "Maya" and card.sender_icon == pushed[ "sender_icon" ] == "🌻"
+    assert pushed[ "voice_persona" ] == PERSONA
+
+
+def test_a_seat_the_bridge_does_not_know_files_under_the_gates_own_sender_with_no_persona( world ):
+    _file( world )
+    _ask( world, actor="ghost 0badc0de" )
+    card, pushed = world[ "cards" ].created[ 0 ], world[ "queue" ].pushed[ 0 ]
+    assert card.sender_id == pushed[ "sender_id" ] and card.sender_id.endswith( "#0badc0de" )
+    assert card.sender_persona is None and card.sender_icon is None and pushed[ "voice_persona" ] is None

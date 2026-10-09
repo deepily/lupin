@@ -262,3 +262,31 @@ def test_each_door_refusal_carries_its_own_code( scope, monkeypatch, path, code 
 
 def test_the_refusal_body_has_exactly_a_code_and_a_message():
     assert pp.refusal_detail( "spent", "used" ) == { "code": "spent", "message": "used" }
+
+
+def test_a_file_unlinked_between_the_open_and_the_readlink_is_a_refusal_not_a_crash( scope, monkeypatch ):
+    from cosa.rest.routers._pinned_open import PinnedPathUnlinked
+    _put( scope, "io/tmp/gone.md" )
+    def vanish( fd ): raise PinnedPathUnlinked( "/x (deleted)" )
+    monkeypatch.setattr( pp, "landed_path_of_fd", vanish )
+    with pytest.raises( pp.DoorRefusal ) as refusal: _door( scope, "demo/io/tmp/gone.md" )
+    assert refusal.value.code == "not_found" and "demo/io/tmp/gone.md" in str( refusal.value ) and "PinnedPathUnlinked" in str( refusal.value )
+
+
+def test_an_os_error_while_reading_the_opened_file_is_a_refusal_not_a_crash( scope, monkeypatch ):
+    _put( scope, "io/tmp/bad.md" )
+    def broken( fd, size ): raise OSError( 5, "input/output error" )
+    monkeypatch.setattr( pp.os, "read", broken )
+    with pytest.raises( pp.DoorRefusal ) as refusal: _door( scope, "demo/io/tmp/bad.md" )
+    assert refusal.value.code == "not_found" and "demo/io/tmp/bad.md" in str( refusal.value ) and "OSError" in str( refusal.value )
+    assert len( os.listdir( "/proc/self/fd" ) ) < 200
+
+
+def test_the_kind_is_judged_on_the_file_the_handle_opened_not_the_file_the_path_resolved_to( scope, monkeypatch ):
+    from cosa.rest.routers import docs_files
+    resolved = _put( scope, "io/tmp/looks-fine.md" )
+    swapped  = _put( scope, "io/tmp/really-a-picture.png", "x" )
+    real_open = docs_files._open_judged_file
+    monkeypatch.setattr( docs_files, "_open_judged_file", lambda full_path, cfg: real_open( str( swapped ), cfg ) )
+    with pytest.raises( pp.DoorRefusal, match="A podcast reads" ) as refusal: _door( scope, "demo/io/tmp/looks-fine.md" )
+    assert refusal.value.code == "wrong_kind" and resolved.exists()

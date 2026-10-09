@@ -25,7 +25,7 @@ from cosa.rest.db.repositories.podcast_proxy_spent_repository import PodcastProx
 from cosa.rest.middleware.api_key_auth import authenticated_account_email, require_api_key_or_jwt
 from cosa.rest.routers.notifications import get_notification_queue, get_websocket_manager
 from cosa.rest.routers.v2_ask import get_ask_flow
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona
+from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id, get_voice_persona
 
 router = APIRouter( prefix="/api/podcast-proxy", tags=[ "podcast-proxy" ] )
 
@@ -95,6 +95,7 @@ def ask_for_a_podcast(
         raise _refuse( 404, "no_operator", "The operator's account was not found, so no card can be sent." )
 
     persona    = get_voice_persona( session_id )
+    seat       = find_session_by_id( session_id, check_pid=False ) or { }
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
     ask_payload = proxy.card_payload( facts, asker, session_id )
     question, abstract = proxy.card_text( ask_payload )
@@ -105,10 +106,13 @@ def ask_for_a_podcast(
         waiting = cards.find_live_podcast_card( proxy.CARD_KIND, ask_payload[ "scope_path" ], facts[ "sha256" ], now )
         if waiting is not None:
             raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "waiting_card", f"A podcast card for this file is already waiting for an answer: {waiting.id}. Use it, or let it expire." ), "card_id": str( waiting.id ) } )
-        sender_id  = promotion_gate.promotion_ask_sender_id( session_id )
+        # The card files beside the asking seat's own cards: its sender id comes from its bridge, and its persona rides along.
+        sender_id  = seat.get( "sender_id" ) or promotion_gate.promotion_ask_sender_id( session_id )
         expires_at = now + timedelta( seconds=age )
         card = cards.create_notification(
             sender_id          = sender_id,
+            sender_persona     = persona.get( "name" ) if persona is not None else None,
+            sender_icon        = persona.get( "icon" ) if persona is not None else None,
             recipient_id       = uuid.UUID( str( operator[ "id" ] ) ),
             message            = question,
             type               = "custom",
@@ -142,6 +146,9 @@ def ask_for_a_podcast(
             timeout_seconds    = age,
             human_only         = True,
             sender_id          = sender_id,
+            voice_persona      = persona,
+            sender_persona     = persona.get( "name" ) if persona is not None else None,
+            sender_icon        = persona.get( "icon" ) if persona is not None else None,
             abstract           = abstract,
             payload            = ask_payload,
         )

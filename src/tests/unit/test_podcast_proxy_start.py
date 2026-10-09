@@ -377,3 +377,21 @@ def test_the_copies_live_under_io_podcast_proxy_in_the_project_root( monkeypatch
     from cosa.rest.routers import podcast_proxy as real
     import cosa.utils.util as cu
     assert real.copy_directory() == os.path.join( cu.get_project_root(), "io", "podcast-proxy" )
+
+
+def test_a_card_whose_stored_path_differs_from_the_file_now_is_a_hash_mismatch_even_with_equal_bytes( world ):
+    card = _card( world )
+    card.payload = dict( card.payload, server_path="/var/lupin/io/tmp/some-other-copy.md" )
+    answer = _start( world, card.id )
+    assert answer.status_code == 409 and _code( answer ) == "hash_mismatch" and "server_path" in answer.json()[ "detail" ][ "message" ]
+
+
+def test_a_planted_link_is_never_written_through_even_when_the_stale_copy_check_is_skipped( world, tmp_path, monkeypatch ):
+    folder = world[ "copies" ] / "planted"
+    folder.mkdir( parents=True )
+    victim = tmp_path / "victim.txt"
+    victim.write_text( "keep me" )
+    os.symlink( victim, folder / "summary.md" )
+    monkeypatch.setattr( pp.os.path, "lexists", lambda path: False )
+    with pytest.raises( FileExistsError ): pp.write_copy( str( world[ "copies" ] ), "planted", "summary.md", b"new bytes" )
+    assert victim.read_text() == "keep me"

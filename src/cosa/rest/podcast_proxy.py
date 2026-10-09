@@ -34,7 +34,7 @@ import uuid
 from fastapi import HTTPException
 
 from cosa.rest import task_promotion_gate as promotion_gate
-from cosa.rest.routers._pinned_open import landed_path_of_fd
+from cosa.rest.routers._pinned_open import PinnedPathGone, landed_path_of_fd
 from cosa.rest.routers._scope_registry import _prefix_looks_like_credential, landed_relative_path
 from cosa.rest.v2.source_document import ALLOWED_SOURCE_EXTENSIONS
 
@@ -150,6 +150,8 @@ def check_source( scope_path, registry=None, keep_content=False ):
         data   = _read_whole( fd )
     except DoorRefusal as refusal:
         raise DoorRefusal( refusal.code, f"'{sent}' was refused: {refusal}" ) from refusal
+    except ( PinnedPathGone, OSError ) as lost:
+        raise DoorRefusal( "not_found", f"'{sent}' was refused: the file went away or could not be read while it was being opened ({type( lost ).__name__})." ) from lost
     finally:
         os.close( fd )
 
