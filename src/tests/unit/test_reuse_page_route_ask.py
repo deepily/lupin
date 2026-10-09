@@ -54,12 +54,15 @@ def test_replay_of_a_page_route_receipt_leaves_the_member_out_and_agrees( env ):
     write_wiki( env[ 0 ] )
     for tag, pages, entries, route in ( ( "hit", { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT }, "pages" ), ( "miss", {}, {}, "pages_then_full" ) ):
         need = f"replay the page route [{tag}]"
-        ctx  = ctx_of( env, PageFake( need, pages, entries ) )
+        fake = PageFake( need, pages, entries )
+        ctx  = ctx_of( env, fake )
         r    = rt.page_route_need_impl( need, "cosa.mathx.add", ctx )
         assert receipt_of( env, r )[ "route" ] == route
+        fake.seen.clear()                                                                  # the replay's fresh run is the one under test: it sends only cache misses
         rep  = rt.replay_impl( r[ "receipt_id" ], ctx )                                   # the member was never cached: asking for it would be CACHE_MISSING
         assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == r[ "verdict" ] and rep[ "differences" ][ "frozen" ] == []
         assert rep[ "head" ][ "verdict" ] == r[ "verdict" ]
+        assert MATHX_TEXT not in fake.seen and fake.unexpected == []                      # the head run left the member out too
 
 
 def test_a_stored_page_route_receipt_with_no_exclusion_replays_as_before( env ):
@@ -110,7 +113,9 @@ def test_the_driver_asks_the_page_route_for_the_member_and_registers_the_pages_q
     need = "read an RSS feed [driver]"
     fake = PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT } )
     r    = run.ask_pages( ctx_of( env, fake ), { "need": need, "member": "cosa.mathx.add" } )
-    assert r[ "verdict" ] == "REUSE" and receipt_of( env, r )[ "exclude_id" ] == "cosa.mathx.add"
+    rec  = receipt_of( env, r )
+    assert r[ "verdict" ] == "REUSE" and rec[ "exclude_id" ] == "cosa.mathx.add"
+    assert rec[ "route" ] == "pages" and "sweep_only" not in rec                           # the sweep path also names the member; only the page route asks pages first
     assert run._asks( [ "old", "pages" ] ) == { "old": run.ask_old, "pages": run.ask_pages }
     assert run.QUESTION_NAMES == ( "old", "new" )                                          # the stage-two driver shares this tuple and keeps refusing "pages"
     with pytest.raises( s1.DriverRefused, match="not one of" ): run._asks( [ "bogus" ] )
