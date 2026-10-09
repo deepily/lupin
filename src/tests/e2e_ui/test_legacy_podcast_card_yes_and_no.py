@@ -70,6 +70,7 @@ def _push_card( page, email, question, abstract ):
             "timeout_seconds"    : 120,
             "sender_id"          : _SENDER_ID,
             "suppress_ding"      : "true",
+            "human_only"         : "true",
         },
         headers = { "Authorization": f"Bearer {token}" },
         stream  = True,
