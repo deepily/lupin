@@ -253,7 +253,8 @@ def main( argv=None ):
         groups   = twin_groups( json.loads( pathlib.Path( a.manifest ).read_text( encoding="utf-8" ) ) )
         index    = load_index( a.index )
         sample   = load_sample_ids( a.sample )
-        shas     = { "needs_sha256": file_sha256( a.needs ), "sample_sha256": file_sha256( a.sample ), "manifest_sha256": file_sha256( a.manifest ) }
+        shas     = { "needs_sha256": file_sha256( a.needs ), "sample_sha256": file_sha256( a.sample ), "manifest_sha256": file_sha256( a.manifest ),
+                     "index_generation": pathlib.Path( a.index ).resolve().parent.name, "index_sha256": file_sha256( a.index ) }
         for name, want in ( ( "sample_sha256", a.sample_sha256 ), ( "manifest_sha256", a.manifest_sha256 ) ):
             if shas[ name ] != want: raise ValueError( f"{name} is {shas[ name ]}, not the {want} named" )
         bad = sorted( k for k, v in raw.items() if not ( isinstance( v, dict ) and isinstance( v.get( "need" ), str ) ) )
