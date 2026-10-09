@@ -178,6 +178,7 @@ test( "isEmbeddedAudioHref: only the embed form, relative or absolute loopback, 
   assert.equal( isEmbeddedAudioHref( `/app/audio?path=${ENC}&embed=1&x=2` ), true );
   assert.equal( isEmbeddedAudioHref( `/app/audio?path=${ENC}&embed=10` ), false );
   assert.equal( isEmbeddedAudioHref( LISTEN ), false );
+  assert.equal( isEmbeddedAudioHref( "/app/audio?embed=1&path=a" ), false, "the prefix is the path form, not any audio query" );
   assert.equal( isEmbeddedAudioHref( "/app/docs?path=a&embed=1" ), false );
   assert.equal( isEmbeddedAudioHref( null ), false );
 } );
