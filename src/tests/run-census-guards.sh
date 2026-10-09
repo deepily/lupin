@@ -19,7 +19,12 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 cd "$PROJECT_ROOT" || exit 2
 
-PYTHON="${PYTHON:-$PROJECT_ROOT/.venv/bin/python}"
+export LUPIN_ROOT="$PROJECT_ROOT"
+export PYTHONPATH="$PROJECT_ROOT/src"
+
+source "$PROJECT_ROOT/src/scripts/lib/resolve-venv-pytest.sh"
+resolve_venv_pytest || exit $?
+
 FILES="$( git ls-files 'src/tests/unit/*' | grep -E '/test_(every_|[^/]*(census|_pin|pins|pinned))[^/]*\.py$' )"
 if [ -z "$FILES" ]; then
     echo "run-census-guards: the name match found no files; refusing to call that a pass" >&2
@@ -28,4 +33,4 @@ fi
 echo "run-census-guards: $( echo "$FILES" | wc -l ) files"
 
 # shellcheck disable=SC2086
-LUPIN_ROOT="$PROJECT_ROOT" PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON" -m pytest $FILES -q -p no:cacheprovider --no-cov
+"$PYTEST" $FILES -q -p no:cacheprovider --no-cov
