@@ -282,3 +282,26 @@ def test_an_error_result_makes_an_incomplete_search_with_its_own_cause_and_no_re
     scratch = Env( tmp_path, asks={ "old": refused } )
     rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )
     assert rec[ "searches" ][ 0 ][ "status" ] == "incomplete" and rec[ "searches" ][ 0 ][ "causes" ] == [ "ERROR:UNKNOWN_ENTRY" ] and rec[ "searches" ][ 0 ][ "read" ] is None
+
+
+def test_a_search_incomplete_by_malformed_answers_only_names_that_cause_and_not_call_failed( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing( malformed=[ { "id": "cosa.wide.f001", "reason": "sum" } ] ) } )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )
+    assert rec[ "searches" ][ 0 ][ "status" ] == "incomplete" and rec[ "searches" ][ 0 ][ "causes" ] == [ "MALFORMED_ANSWER" ]
+
+
+def test_a_real_sweep_with_one_malformed_stand_in_answer_is_incomplete_by_malformed_only( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    inner   = scratch.factory
+    def corrupting( budget ):
+        transport, real = inner( budget ), None
+        class Corrupt:
+            def post_with_meta( self, body ):
+                response, meta = transport.post_with_meta( body )
+                first = next( iter( response[ "answers" ] ) )
+                response[ "answers" ][ first ] = { "probabilities": { "reuse": 3.0, "extend": 0.0, "unrelated": 0.0 } }
+                return response, meta
+        return Corrupt()
+    scratch.factory = corrupting
+    rec = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
+    assert rec[ "searches" ][ 0 ][ "causes" ] == [ "MALFORMED_ANSWER" ] and rec[ "searches" ][ 0 ][ "status" ] == "incomplete"

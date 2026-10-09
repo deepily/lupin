@@ -6,16 +6,19 @@ rest is paid for. A search is complete or it is a miss, and the reason is kept a
 ledger, failed calls, malformed answers. Searches the ceiling or the stop rule never started are not run.
 The driver sends nothing itself: the transport is a factory, and a stand-in is the default in tests.
 """
+import argparse
 import collections
 import json
 import os
 import pathlib
+import sys
 import time
 
 from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_stage1 as s1
+from lupin_mcp import reuse_stage1_run as rr
 from lupin_mcp import reuse_ceiling as rc
 from lupin_mcp import reuse_tools as rt
 
@@ -245,3 +248,160 @@ def run_full( env, items, twins, ceiling_tokens ):
     if not path.exists() or json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is None: raise s1.CanaryNotApproved( "the canary has not been approved" )
     prior = json.loads( ( env.results_dir / f"{CANARY_NAME}.json" ).read_text( encoding="utf-8" ) )[ "searches" ]
     return run_searches( env, RUN_NAME, items[ CANARY_MEMBERS: ], twins, ceiling_tokens, prior=prior, canary_run=CANARY_NAME )
+
+
+def ask_old( ctx, item ):
+    """Ensures: returns the public result of the old question's full sweep, the member left out."""
+    return rt.sweep_need_impl( item[ "need" ], item[ "member" ], ctx )
+
+
+NEW_ASK = None                                              # the new question's ask; step 3 sets it, and until then "new" is refused
+
+FIRST_LINE = ( "100 searches, one per twin group, drawn from 151 groups of Python structural clones (exact and near); no TypeScript or JavaScript; "
+               "no conceptual duplicates. This measures recall on clones, an upper bound for the harder case." )
+
+
+def _asks( names ):
+    """
+    Turn the question names into asks, in order.
+
+    Raises:
+        - DriverRefused for a name that is not old or new, or for new while the new question is not wired
+    """
+    out = {}
+    for name in names:
+        if name not in QUESTION_NAMES: raise s1.DriverRefused( f"question {name!r} is not one of {QUESTION_NAMES}" )
+        if name == "new" and NEW_ASK is None: raise s1.DriverRefused( "the new question is not wired yet; run old only" )
+        out[ name ] = ask_old if name == "old" else NEW_ASK
+    return out
+
+
+def report_lines( searches, questions ):
+    """
+    Write the report as lines: the statement, each question's figures, the paired result.
+
+    Ensures:
+        - the first line is the statement of what the run is, in the words fixed in advance
+        - every figure is given with its count out of the searches run and a 95% Wilson interval, an incomplete search counting as a miss
+        - the searches run are stated out of the sample, and any not run are named
+    """
+    lines = [ FIRST_LINE ]
+    for q, fig in e2e.figures( searches, questions ).items():
+        lines.append( f"{q}: n run: {fig[ 'n_run' ]} of {e2e.MEMBERS}, complete {fig[ 'complete' ]}, incomplete {fig[ 'incomplete' ]}, not run {fig[ 'not_run' ]}" )
+        for key, label in ( ( "on_shortlist", "twin on the shortlist" ), ( "ranked_first", "twin ranked first" ), ( "top_ten", "twin in the top ten" ) ):
+            for suffix, note in ( ( "", "all run" ), ( "_complete", "complete only" ) ):
+                c = fig[ key + suffix ]
+                lines.append( f"  {label} ({note}): {c[ 'k' ]} of {c[ 'n' ]}, 95% interval {c[ 'interval' ]}" )
+        lines.append( f"  incomplete causes {fig[ 'causes' ]}; verdict classes {fig[ 'verdicts' ]}; unasked {fig[ 'unasked' ]}; requests {fig[ 'requests' ]}; "
+                      f"429 {fig[ 'n429' ]}, 529 {fig[ 'n529' ]}; dollars per search {fig[ 'usd_per_search' ]}" )
+    if len( questions ) == 2:
+        for key, row in e2e.paired( searches, questions[ 0 ], questions[ 1 ] ).items(): lines.append( f"paired {key}: {row}" )
+    return lines
+
+
+def _parser():
+    """Ensures: returns the command line parser."""
+    ap = argparse.ArgumentParser( description=__doc__ )
+    ap.add_argument( "--root" )
+    ap.add_argument( "--data" )
+    ap.add_argument( "--ledger" )
+    ap.add_argument( "--live", action="store_true" )
+    ap.add_argument( "--pack-size", type=int, default=50 )
+    ap.add_argument( "--questions", default="old" )
+    sub = ap.add_subparsers( dest="command", required=True )
+    for name in ( "status", "ledger-init", "canary", "approve", "run", "report" ):
+        p = sub.add_parser( name )
+        if name in ( "canary", "approve", "run", "report" ):
+            p.add_argument( "--sample", required=True )
+            p.add_argument( "--sample-sha", default=e2e.SAMPLE_SHA256 )
+            p.add_argument( "--needs", required=True )
+            p.add_argument( "--needs-sha", required=True )
+            p.add_argument( "--manifest", required=True )
+            p.add_argument( "--manifest-sha", default=e2e.MANIFEST_SHA256 )
+        if name in ( "canary", "run" ): p.add_argument( "--ceiling", type=int, required=True )
+        if name == "approve":
+            p.add_argument( "--by", required=True )
+            p.add_argument( "--why", required=True )
+    return ap
+
+
+def _open_env( root, data, ledger, live, asks, pack_size ):
+    """Ensures: returns the environment; a stand-in run gets a marked folder and the stand-in."""
+    data, ledger = rr.check_paths( root, data, ledger, live )
+    factory      = None
+    if not live:
+        data.mkdir( parents=True, exist_ok=True )
+        ( data / rr.STAND_IN_MARKER ).write_text( "written by a stand-in run; never read by a live one\n", encoding="utf-8" )
+        factory = rr.StandIn
+    return E2EEnv( root, data, rl.AccountLedger( ledger ), asks, transport_factory=factory, pack_size=pack_size )
+
+
+def main( argv=None ):
+    """
+    Run one step of the end-to-end run.
+
+    Ensures:
+        - returns 0 after the step; prints how it ended
+    Raises:
+        - the refusals of the checks and of the frozen inputs, before anything is created or sent
+    """
+    args = _parser().parse_args( argv )
+    root = args.root or os.environ.get( "LUPIN_ROOT" )
+    if not root: raise rr.RunnerRefused( "give --root, or set LUPIN_ROOT" )
+    if args.command == "ledger-init":
+        if args.live: raise rr.RunnerRefused( "ledger-init is for a stand-in run; the real ledger is created by hand, on the go" )
+        env = _open_env( root, args.data, args.ledger, False, {}, args.pack_size )
+        env.ledger.path.parent.mkdir( parents=True, exist_ok=True )
+        rl.AccountLedger.create( env.ledger.path, rl.ACCOUNT_LIMIT_TOKENS, "e2e-runner", "scratch ledger for a stand-in run" )
+        print( f"ledger created: {env.ledger.path}" )
+        return 0
+    names = [ n for n in args.questions.split( "," ) if n ]
+    rr.check_paths( root, args.data, args.ledger, args.live )                                    # a path refusal comes before the slow reads
+    if args.command == "status":
+        env = _open_env( root, args.data, args.ledger, args.live, {}, args.pack_size )
+        print( f"ledger {env.ledger.snapshot()}  pack size {env.pack_size}  questions {names}" )
+        return 0
+    asks = _asks( names )
+    members = e2e.load_sample( args.sample, args.sample_sha )
+    items   = e2e.load_needs( args.needs, args.needs_sha, members )
+    twins   = e2e.load_twins( args.manifest, args.manifest_sha )
+    env     = _open_env( root, args.data, args.ledger, args.live, asks, args.pack_size )
+    if args.command == "canary":
+        report = run_canary( env, items, twins, args.ceiling )
+        print( f"canary {report[ 'run_name' ]}: ledger total before the first send: {report[ 'ledger_total_before' ]} of {report[ 'ledger_limit' ]}; searches {report[ 'searches' ]}, "
+               f"tokens {report[ 'tokens' ]}, projection {report[ 'projection_tokens' ]} against allowance {report[ 'allowance_tokens' ]}, requests {report[ 'requests' ]}, "
+               f"unasked {report[ 'unasked' ]}, 429 {report[ 'n429' ]}, 529 {report[ 'n529' ]}, wall {report[ 'wall_seconds' ]}s, tripped {report[ 'tripped' ]}" )
+    elif args.command == "approve":
+        approve_canary( env, args.by, args.why )
+        print( f"canary approved by {args.by}" )
+    elif args.command == "run":
+        t = run_full( env, items, twins, args.ceiling )
+        print( f"run {t[ 'run_name' ]}: state {t[ 'state' ]}, stopped {t[ 'stopped' ]}, complete {t[ 'totals' ][ 'complete' ]}, incomplete {t[ 'totals' ][ 'incomplete' ]}, "
+               f"not run {t[ 'totals' ][ 'not_run' ]}, spent {t[ 'totals' ][ 'spent_tokens' ]}" )
+    else:
+        searches = []
+        for name in ( CANARY_NAME, RUN_NAME ):
+            path = env.results_dir / f"{name}.json"
+            if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
+        print( "\n".join( report_lines( searches, names ) ) )
+    return 0
+
+
+def cli( argv=None ):
+    """
+    Run main as a command line: a refusal is one line and exit code 2.
+
+    Ensures:
+        - returns main's own code when it works
+        - returns 2 after one line on the error stream for a refusal of the runner, the driver, the frozen inputs or the ledger
+        - any other error propagates untouched, so a crash is never read as a refusal
+    """
+    try: return main( argv )
+    except ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
+             e2e.FrozenInputRefused, rl.AccountLimitReached, rl.LedgerUnreadable ) as e:
+        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
+        return 2
+
+
+if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive
+    raise SystemExit( cli() )

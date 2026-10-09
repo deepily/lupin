@@ -37,6 +37,8 @@ class Setup:
         self.needs   = tmp_path / "needs.json";    self.needs_sha    = put( self.needs, needs )
         self.mani    = tmp_path / "manifest.json"; self.mani_sha     = put( self.mani, manifest )
 
+    def plain( self, command ): return [ "--root", str( self.root ), "--data", str( self.data ), "--ledger", str( self.ledger ), command ]
+
     def args( self, *command, live=False, extra=() ):
         base = [ "--root", str( self.root ) ] + ( [ "--live" ] if live else [ "--data", str( self.data ), "--ledger", str( self.ledger ) ] )
         inputs = [ "--sample", str( self.sample ), "--sample-sha", self.sample_sha, "--needs", str( self.needs ), "--needs-sha", self.needs_sha,
@@ -80,7 +82,7 @@ def test_the_canary_the_approval_the_run_and_the_report_go_through_the_command_l
 
 
 def test_the_stand_in_folder_is_marked_and_a_live_run_will_not_read_it( setup ):
-    assert ( setup.data / rr.STAND_IN_MARKER ).exists() or run.cli( setup.args( "status" ) ) == 0
+    assert run.cli( setup.plain( "status" ) ) == 0
     assert ( setup.data / rr.STAND_IN_MARKER ).exists()
 
 
@@ -100,6 +102,26 @@ def test_an_unknown_question_name_and_a_wrong_hash_are_refused_with_exit_two( se
 
 
 def test_status_prints_the_ledger_and_the_pack_size( setup, capsys ):
-    assert run.cli( setup.args( "status" ) ) == 0
+    assert run.cli( setup.plain( "status" ) ) == 0
     out = capsys.readouterr().out
     assert "pack size 50" in out and "ledger" in out
+
+
+def test_the_report_gives_the_paired_comparison_when_both_questions_ran( setup, monkeypatch, capsys ):
+    monkeypatch.setattr( run, "NEW_ASK", lambda ctx, item: ask_old( ctx, { **item, "need": item[ "need" ] + " (new)" } ) )
+    both = [ "--questions", "old,new" ]
+    assert run.cli( setup.args( "canary", "--ceiling", "100000000", extra=both ) ) == 0
+    assert run.cli( setup.args( "report", extra=both ) ) == 0
+    out = capsys.readouterr().out
+    assert "paired on_shortlist" in out and "paired ranked_first" in out and "paired top_ten" in out
+
+
+def test_a_live_environment_takes_the_real_paths_and_no_stand_in_transport( setup, monkeypatch, capsys ):
+    monkeypatch.setattr( rr, "check_paths", lambda root, data, ledger, live: ( setup.data, setup.ledger ) )
+    env = run._open_env( setup.root, None, None, True, {}, 50 )
+    assert env.live and env.transport_factory is not rr.StandIn
+
+
+def test_a_run_with_no_root_and_no_environment_root_is_refused( monkeypatch, capsys ):
+    monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+    assert run.cli( [ "status" ] ) == 2 and "--root" in capsys.readouterr().err
