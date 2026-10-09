@@ -417,3 +417,18 @@ def test_the_new_question_sweeps_every_other_entry_and_never_shows_the_member( t
     member = rt.entry_text( next( e for e in rt.prepare( rt.ReuseContext( scratch.root, scratch.data ) )[ 1 ] if e[ "id" ] == IDS[ 0 ] ) )
     assert scratch.texts and len( scratch.texts ) >= 2 * ( WIDE - 1 )                                              # two questions for each of the other entries were sent
     assert not any( member in t for t in scratch.texts )
+
+
+def test_the_canary_on_the_real_stand_in_completes_both_questions_with_the_real_asks( tmp_path, monkeypatch ):
+    # the driver's own asks (run.ask_old, run.ask_new), the real StandIn and the real TokenBudget run_canary builds: nothing patched but a recorder
+    raised, real = [], rr.StandIn.post_with_meta
+    def recording( self, body ):
+        try: return real( self, body )
+        except Exception as e: raised.append( f"{type( e ).__name__}: {e}" ); raise
+    monkeypatch.setattr( rr.StandIn, "post_with_meta", recording )
+    scratch = Env( tmp_path, asks=run._asks( [ "old", "new" ] ) )
+    run.run_canary( scratch.env(), items_of( 6 ), twins_of( 6 ), 10 ** 8 )
+    searches = json.loads( ( scratch.root.parent / "data" / "e2e-results" / "e2e-canary.json" ).read_text() )[ "searches" ]
+    assert raised == []
+    assert [ s[ "question" ] for s in searches ] == [ "old", "new" ] * 5
+    assert all( s[ "status" ] == "complete" and s[ "causes" ] == [] and s[ "tokens" ] > 0 for s in searches )
