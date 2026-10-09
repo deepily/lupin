@@ -2428,6 +2428,8 @@ Users submit responses via `POST /api/notify/response`.
 }
 ```
 
+**Who may answer**: only the addressee. The caller's user (the login, or the user owning the API key) must be the notification's `recipient_id`, or the door answers `403`. A proxy answering for someone must therefore be logged in as that someone.
+
 **Processing flow**:
 
 1. **Validation** -- `notification_id` and `response_value` are required. String
@@ -2450,7 +2452,9 @@ where users may step away and return after the timeout.
 
 | HTTP Status | Condition |
 |-------------|-----------|
+| `401` | No credential, or a bad one |
 | `404` | Notification not found |
+| `403` | The caller's user is not the notification's addressee (`recipient_id`). Checked after the 404 and before the state checks; nothing is written |
 | `400` | Already responded, or grace period exceeded |
 | `422` | Missing `notification_id` or `response_value` |
 | `400` | Response empty (after whitespace strip) |

@@ -36,7 +36,7 @@ OPERATOR_ID = uuid.UUID( "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" )
 SESSION_ID  = "b9537836"
 ACTOR       = f"maya {SESSION_ID}"
 RICK        = "rick@example.com"
-OPERATOR    = { "user_id": "u-1", "account_email": RICK, "method": "jwt" }
+OPERATOR    = { "user_id": str( OPERATOR_ID ), "account_email": RICK, "method": "jwt" }
 PERSONA     = { "name": "Maya", "icon": "x", "voice_id": "v1" }
 STABLE_ID    = "b9537836-25ae-4da8-8b49-a7eb248912ad"
 RESPUN_ID    = "c0ffee01"
@@ -240,12 +240,21 @@ def test_a_file_changed_after_the_yes_is_the_servers_hash_mismatch_and_starts_no
 
 
 def test_a_card_answered_by_the_wrong_login_is_refused_with_the_servers_code( world ):
+    # The door no longer lets a non-addressee's answer land (row 5a1e018c); an answer already stored by
+    # another login, from before that rule, is still refused by the gate that reads who answered.
+    seat_key = { "user_id": "test-user", "account_email": None, "method": "api_key" }
+    clock    = Clock( lambda n: world[ "cards" ].answer( only_card( world ).id, value="yes", answered_by=seat_key ) )
+    out      = call( world, clock )
+    assert out[ "reason" ] == "wrong_login" and world[ "flow" ].calls == []
+
+
+def test_the_seat_cannot_answer_its_own_card_on_the_api_key_the_door_refuses_it( world ):
     def the_seat_answers_its_own_card( n ):   # on the API key, the way a seat would, not on Rick's login
         posted = world[ "seat" ].post( "/api/notify/response", headers={ "X-API-Key": "k" },
                                        json={ "notification_id": str( only_card( world ).id ), "response_value": "yes" } )
-        assert posted.status_code == 200, posted.text
+        assert posted.status_code == 403, posted.text
     out = call( world, Clock( the_seat_answers_its_own_card ) )
-    assert out[ "reason" ] == "wrong_login" and world[ "flow" ].calls == []
+    assert out[ "status" ] == "expired" and world[ "flow" ].calls == [] and only_card( world ).state != "responded"
 
 
 def test_another_seat_cannot_start_the_card_it_did_not_ask( world ):

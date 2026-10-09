@@ -769,7 +769,7 @@ class TestSubmitNotificationResponse:
 
         # Override FastAPI dependencies. The answer door requires a credential (row
         # e20e249a); its refusal is pinned in test_the_answer_door_requires_a_credential_and_records_who.py.
-        app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+        app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "550e8400-e29b-41d4-a716-446655440000"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
 
         # Patch get_db to return our mock context manager
@@ -843,12 +843,13 @@ class TestSubmitNotificationResponse:
         mock_notification = MagicMock()
         mock_notification.id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440001" )
         mock_notification.state = "responded"
+        mock_notification.recipient_id = uuid_module.UUID( "550e8400-e29b-41d4-a716-446655440000" )   # the caller below is the addressee, so the refusal under test is the state one
 
         mock_ws_instance = AsyncMock()
 
         # Override FastAPI dependencies. The answer door requires a credential (row
         # e20e249a); its refusal is pinned in test_the_answer_door_requires_a_credential_and_records_who.py.
-        app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+        app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "550e8400-e29b-41d4-a716-446655440000"
         app.dependency_overrides[get_websocket_manager] = lambda: mock_ws_instance
 
         # Patch get_db to return our mock context manager

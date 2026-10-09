@@ -47,8 +47,8 @@ BOTH_HEADERS = { **JWT_HEADERS, **KEY_HEADERS }
 
 # What the server must record for each way in. Literals, not derived from `_answered_by`,
 # so a change to that function cannot also move the expectation.
-BY_LOGIN = { "user_id": "login-user", "account_email": OPERATOR_EMAIL, "method": "jwt" }
-BY_KEY   = { "user_id": "svc-user",   "account_email": None,           "method": "api_key" }
+BY_LOGIN = { "user_id": UID_STR, "account_email": OPERATOR_EMAIL, "method": "jwt" }
+BY_KEY   = { "user_id": UID_STR, "account_email": None,           "method": "api_key" }
 
 
 def _ctx_db():
@@ -120,12 +120,12 @@ def validators():
     The three validators the real credential dependencies call, and nothing above them.
 
     Ensures:
-        - a well-formed API key validates as "svc-user"
-        - a Bearer token validates as "login-user" whose email is OPERATOR_EMAIL
+        - a well-formed API key validates as the card's addressee (the door answers 403 to anyone else; see test_the_answer_door_is_addressee_only.py)
+        - a Bearer token validates as the same addressee, whose email is OPERATOR_EMAIL
         - yields the mocks so a test can prove a refusal never reached them
     """
-    key_check   = AsyncMock( return_value="svc-user" )
-    token_check = AsyncMock( return_value={ "uid": "login-user" } )
+    key_check   = AsyncMock( return_value=UID_STR )
+    token_check = AsyncMock( return_value={ "uid": UID_STR } )
     email_read  = Mock( return_value={ "email": OPERATOR_EMAIL } )
     with patch( "cosa.rest.middleware.api_key_auth.validate_api_key", new=key_check ), \
          patch( "cosa.rest.auth.verify_token", new=token_check ), \

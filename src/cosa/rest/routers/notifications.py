@@ -249,6 +249,26 @@ def _answered_by( authenticated_user_id, account_email, x_api_key ):
     }
 
 
+def _is_addressee( caller_user_id, recipient_id ):
+    """
+    Say whether the authenticated caller is the user the notification was addressed to.
+
+    Requires:
+        - caller_user_id is what `require_api_key_or_jwt` returned (any value is tolerated)
+        - recipient_id is the notification row's recipient (UUID or its string)
+
+    Ensures:
+        - True only when both parse as UUIDs and are equal
+        - False for None, an empty value, or anything that is not a UUID
+        - never raises
+
+    """
+    try:
+        return uuid.UUID( str( caller_user_id ) ) == uuid.UUID( str( recipient_id ) )
+    except ( ValueError, AttributeError, TypeError ):
+        return False
+
+
 def _stored_answered_by( stored_response_value ):
     """
     The server-stamped who-answered on a stored answer, or None.
@@ -714,6 +734,9 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
     Requires:
         - notification_id is a UUID string
         - response_value is a non-empty str or dict
+        - answered_by is the server-built dict from `_answered_by`, or None. Its
+          "user_id" is the authenticated caller: the login's user, or the user that owns
+          the API key. None is treated as "no caller" and refused with 403
 
     Ensures:
         - validates notification exists, is unanswered, and is within the grace
@@ -727,6 +750,9 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
           case used to be a 500, a client error reported as a server error,
           and is the reason the parse now happens before the DB is opened.
         - HTTPException 404 if the notification does not exist
+        - HTTPException 403 if the caller is not the notification's addressee
+          (`recipient_id`); nothing is written. This runs after the 404 and before the
+          state checks, so a stranger learns nothing about the card's state
         - HTTPException 400 if already responded / grace period exceeded
         - HTTPException 500 if the response update fails. A genuine server failure
           must keep saying so, or "stop returning 500" is satisfied by never returning 500.
@@ -770,6 +796,18 @@ def _submit_response_sync( notification_id, response_value, answered_by=None ):
             raise HTTPException(
                 status_code = 404,
                 detail      = f"Notification {notification_id} not found"
+            )
+
+        # ADDRESSEE ONLY (row 5a1e018c, Rick's ruling 2026-10-09: "Fix: addressee only").
+        # The door used to ask for a credential and record who answered, but let ANY valid
+        # login answer ANY card, so a Yes landed on Rick's card from another signed-in
+        # login. The caller's user id must be the card's `recipient_id`. The compare is on
+        # parsed UUIDs, so case and hyphen spelling cannot split one user into two; a
+        # caller id that is not a UUID is not the addressee.
+        if not _is_addressee( answered_by[ "user_id" ] if answered_by else None, notification.recipient_id ):
+            raise HTTPException(
+                status_code = 403,
+                detail      = "Only the addressee of a notification may answer it"
             )
 
         # Check state - must be 'delivered' or within grace period
@@ -1756,6 +1794,7 @@ async def submit_notification_response(
     Raises:
         - HTTPException with 401 if the caller sent no credential or a bad one
         - HTTPException with 404 if notification not found
+        - HTTPException with 403 if the caller's user is not the notification's addressee
         - HTTPException with 400 if notification already responded/expired (outside grace period)
         - HTTPException with 500 for update failures
 
