@@ -618,10 +618,25 @@ def _create_notification_calls_that_pass_a_payload():
 
 
 def test_the_files_that_write_a_notification_payload_are_pinned():
-    """The ack watcher writes a payload on rows that ask nothing; the un-park door, on a card."""
+    """Three files write a payload: the ack watcher, the un-park door and the podcast door."""
     found, walked = _create_notification_calls_that_pass_a_payload()
     assert walked > 200, "the sweep found too few files to mean anything"
-    assert found == { "rest/commons_ack_watcher.py", "rest/routers/tasks.py" }, found
+    assert found == { "rest/commons_ack_watcher.py", "rest/routers/podcast_proxy.py", "rest/routers/tasks.py" }, found
+
+
+def test_a_podcast_card_the_server_wrote_is_refused_as_an_un_park_card():
+    """
+    A podcast card is not an un-park card.
+
+    The podcast door also writes a payload on a question. The equality in unpark_card_refusal keeps them apart.
+    A podcast payload is a different dict, so a yes on it never un-parks a row.
+    """
+    from cosa.rest import podcast_proxy as pp
+    facts = { "scope": "demo", "rel": "io/tmp/a.md", "server_path": "/x/a.md", "name": "a.md", "size": 5, "sha256": "a" * 64 }
+    podcast = _card( payload=pp.card_payload( facts, "Maya (b9537836)", "b9537836" ) )
+    assert _refusal( _card() ) is None
+    assert "not made by the server for this row" in _refusal( podcast )
+    assert pp.CARD_KIND != gate.UNPARK_ASK_KIND
 
 
 def test_the_payload_guard_would_notice_a_call_that_passes_one( tmp_path ):

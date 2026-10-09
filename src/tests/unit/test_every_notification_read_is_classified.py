@@ -92,6 +92,7 @@ CLASSIFICATION = {
     "get_dm_inbox"                      : ( STRUCTURALLY_IMMUNE, "direction == ai_to_ai; an ack is saved ai_to_human (the create_notification default)" ),
     "get_answers_owed_for_persona"      : ( STRUCTURALLY_IMMUNE, "response_requested AND responded_at IS NOT NULL; an ack requests no response" ),
     "find_live_unpark_card"             : ( STRUCTURALLY_IMMUNE, "payload kind == unpark_ask, a column only the un-park mint writes on a question; AND response_requested, which an ack never sets. An ack carries neither" ),
+    "find_live_podcast_card"            : ( STRUCTURALLY_IMMUNE, "not shown to the user as messages, correspondents or a count: the ask door reads it once to name a card still waiting for the same file, and the 409 carries only the card id. Its own filters exclude acks too: payload kind == podcast_proxy_start, a column only the podcast proxy's ask door writes on a question; AND response_requested, which an ack never sets" ),
     "get_pending_for_recipient"         : ( STRUCTURALLY_IMMUNE, "response-pending states an ack never enters" ),
     "get_expired_notifications"         : ( STRUCTURALLY_IMMUNE, "expires_at IS NOT NULL; an ack carries no expiry" ),
     "mark_expired"                      : ( STRUCTURALLY_IMMUNE, "acts on the expired set, which an ack never joins" ),
@@ -163,11 +164,11 @@ class TestTheClassificationCoversEveryRead:
     def test_the_denominator_is_what_we_think_it_is( self ):
         """
         🔴 A GUARD THAT CANNOT STATE ITS DENOMINATOR IS TELLING YOU ABOUT ITS CORPUS.
-        There are 23 reads now; there were 22 before find_live_unpark_card was added.
+        There are 24 reads now; there were 23 before find_live_podcast_card was added.
         This is a tripwire, not a constant to keep green by editing: if it moves, a read
         was added or removed and the map below must say so.
         """
-        assert len( _query_bearing_methods() ) == 23, (
+        assert len( _query_bearing_methods() ) == 24, (
             f"the number of query-bearing reads changed to {len( _query_bearing_methods() )}. "
             f"Classify the new one in CLASSIFICATION and update this count deliberately." )
 
