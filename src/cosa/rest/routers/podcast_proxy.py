@@ -97,7 +97,7 @@ def ask_for_a_podcast(
     persona    = get_voice_persona( session_id )
     seat       = find_session_by_id( session_id, check_pid=False ) or { }
     asker      = proxy.asker_label( session_id, persona.get( "name" ) if persona is not None else None )
-    ask_payload = proxy.card_payload( facts, asker, session_id )
+    ask_payload = proxy.card_payload( facts, asker, proxy.binding_id( session_id, seat ) )
     question, abstract = proxy.card_text( ask_payload )
     age        = proxy.max_age_seconds()
     now        = datetime.now( timezone.utc )
@@ -217,7 +217,7 @@ def start_a_podcast(
 
     with get_db() as session:
         card    = NotificationRepository( session ).get_by_id( payload.card_id )
-        refusal = proxy.start_refusal( card, session_id, now, proxy.max_age_seconds() )
+        refusal = proxy.start_refusal( card, proxy.binding_id( session_id, find_session_by_id( session_id, check_pid=False ) ), now, proxy.max_age_seconds() )
         stored       = dict( card.payload ) if refusal is None else { }
         recipient_id = str( card.recipient_id ) if refusal is None else ""
     if refusal is not None: raise _refuse( refusal.status, refusal.code, refusal.message )

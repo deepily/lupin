@@ -86,10 +86,12 @@ def world( monkeypatch, tmp_path ):
     monkeypatch.setattr( door, "NotificationRepository", cards )
     monkeypatch.setattr( door, "get_db", fake_db )
     monkeypatch.setattr( door, "datetime", type( "Clock", ( ), { "now": staticmethod( lambda tz=None: NOW ) } ) )
+    bridge = { }
+    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: bridge.get( sid ) )
     monkeypatch.setattr( door, "copy_directory", lambda: str( tmp_path / "copies" ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_id", lambda user_id: { "id": user_id, "email": RICK } )
-    world = { "root": root, "cards": cards, "flow": flow, "sessions": sessions, "copies": tmp_path / "copies", "registry": { "demo": cfg } }
+    world = { "root": root, "cards": cards, "flow": flow, "sessions": sessions, "copies": tmp_path / "copies", "bridge": bridge, "registry": { "demo": cfg } }
     world[ "path" ] = root / "io" / "tmp" / "summary.md"
     world[ "path" ].write_text( "# A summary\n\nSome words, enough to hear.\n" )
     return world
@@ -194,6 +196,39 @@ def test_a_different_session_than_the_asker_cannot_start_it( world ):
     answer = _start( world, card.id, actor="sam 0badc0de" )
     assert answer.status_code == 403 and _code( answer ) == "wrong_session" and "Maya" in answer.json()[ "detail" ][ "message" ]
     assert world[ "flow" ].calls == [ ]
+
+
+STABLE_ID  = "b9537836-25ae-4da8-8b49-a7eb248912ad"
+RESPUN_ID  = "16bb30b6"
+
+
+def _seat( world, stable, *ids ):
+    """The bridge record a seat keeps: one stable id, and the id of each of its sessions."""
+    for known in ids: world[ "bridge" ][ known ] = { "stable_session_id": stable }
+
+
+def test_a_respun_seat_with_the_same_stable_id_resumes_and_starts_its_card( world ):
+    _seat( world, STABLE_ID, SESSION_ID, RESPUN_ID )
+    card   = _card( world )
+    answer = _start( world, card.id, actor=f"maya {RESPUN_ID}" )
+    assert answer.status_code == 200, answer.text
+    assert len( world[ "flow" ].calls ) == 1 and len( _spent( world ) ) == 1
+
+
+def test_a_different_stable_id_is_wrong_session_even_with_a_known_bridge( world ):
+    _seat( world, STABLE_ID, SESSION_ID )
+    _seat( world, "0badc0de-1111-4222-8333-444444444444", "0badc0de" )
+    card   = _card( world )
+    answer = _start( world, card.id, actor="sam 0badc0de" )
+    assert answer.status_code == 403 and _code( answer ) == "wrong_session"
+    assert world[ "flow" ].calls == [ ] and _spent( world ) == [ ]
+
+
+def test_binding_id_is_the_stable_prefix_when_the_bridge_has_one_and_the_id_otherwise():
+    assert pp.binding_id( RESPUN_ID, { "stable_session_id": STABLE_ID } ) == SESSION_ID
+    assert pp.binding_id( SESSION_ID, { "stable_session_id": STABLE_ID } ) == SESSION_ID
+    assert pp.binding_id( RESPUN_ID, { "session_id": "x" } ) == RESPUN_ID
+    assert pp.binding_id( RESPUN_ID, None ) == RESPUN_ID
 
 
 def test_an_actor_without_a_session_id_is_a_400( world ):

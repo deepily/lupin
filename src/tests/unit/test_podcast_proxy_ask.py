@@ -152,6 +152,13 @@ def test_the_seats_own_words_never_reach_the_card( world ):
     assert card.payload[ "asked_by" ] == f"Maya ({SESSION_ID})"
 
 
+def test_a_card_asked_after_a_respin_binds_to_the_stable_id( world, monkeypatch ):
+    monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: { "stable_session_id": f"{SESSION_ID}-25ae-4da8-8b49-a7eb248912ad" } )
+    _file( world )
+    _ask( world, actor="maya 16bb30b6" )
+    assert world[ "cards" ].created[ 0 ].payload[ "asked_by_session" ] == SESSION_ID
+
+
 def test_a_session_the_bridge_does_not_know_is_named_as_unrecognized( world ):
     _file( world )
     _ask( world, actor="ghost 0badc0de" )

@@ -200,6 +200,27 @@ def human_size( size ):
     return f"{size / ( 1024 * 1024 ):.1f} MiB"
 
 
+def binding_id( session_id, seat ):
+    """
+    The id a card binds to: the seat's stable id, which no /clear changes.
+
+    This check is a courtesy, not a lock. The actor string is written by the caller, so the server cannot
+    prove which seat sent it. The lock is Rick's yes bound to the file, plus the spent-card row.
+
+    Requires:
+        - session_id is the id parsed from the caller's actor string
+        - seat is the session bridge record that id resolves to, or None when no bridge knows it
+
+    Ensures:
+        - returns the first 8 characters of the seat's stable_session_id when the bridge record carries one
+        - otherwise returns session_id unchanged, so ask and start still agree for an unknown seat
+        - the current and the stable id of one seat give the same result, so a re-spun seat finds its card
+    """
+    stable = seat.get( "stable_session_id" ) if seat else None
+    if stable: return stable[ :8 ]
+    return session_id
+
+
 def asker_label( session_id, persona_name ):
     """
     Who the card says is asking, built from the server's own facts.
@@ -223,7 +244,7 @@ def card_payload( facts, asker, session_id ):
 
     Requires:
         - facts is the dict check_source returned; asker is the label asker_label made
-        - session_id is the asking session's id, parsed from its actor string
+        - session_id is the asking seat's binding id from `binding_id`
 
     Ensures:
         - returns { kind, command, scope_path, server_path, name, size, sha256, asked_by, asked_by_session }
@@ -286,13 +307,13 @@ def start_refusal( card, actor_session, now, max_age ):
 
     Requires:
         - card is the Notification row read by the id the caller cited, or None when no row has it
-        - actor_session is the caller's session id; now is aware; max_age is the INI age in seconds
+        - actor_session is the caller's binding id from `binding_id`; now is aware; max_age is the INI age in seconds
 
     Ensures:
         - returns None only when every one of these holds: the card exists and carries the payload
           this feature's ask writes, no more and no less; it asked a question; it was answered; the answer is a yes a person gave,
           not the timed-out default; the server saw it arrive on the operator's own login; the caller is the
-          session that asked; the card is no older than max_age
+          seat that asked, by stable id (a courtesy check, not a lock); the card is no older than max_age
         - returns a StartRefusal otherwise, whose code names the first failed condition
         - the card's message and abstract are never read: they are text, and the payload is what the server wrote
     """
