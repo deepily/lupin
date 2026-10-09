@@ -123,13 +123,15 @@ def incomplete_causes( result, ceiling_hit, ledger_stopped ):
     Ensures:
         - returns [] for a complete search
         - otherwise the causes in the order ceiling, ledger, CALL_FAILED, MALFORMED_ANSWER, then the sweep's own stop name
+        - a ceiling refusal is named whatever else went wrong, including a pack whose failed attempt the ceiling then refused to retry
+        - a ledger stop is named when entries were left unasked or failed, so a spend the ledger could not record after the last answer is not a cause
         - entries left unasked with no named reason are named attempts
     """
     if result[ "status" ] != "ok": return [ f"ERROR:{result[ 'error' ]}" ]
     stats, causes = result[ "stats" ], []
     left = stats[ "not_checked" ] > 0
-    if left and ceiling_hit: causes.append( "ceiling" )
-    if left and ledger_stopped: causes.append( "ledger" )
+    if ceiling_hit: causes.append( "ceiling" )
+    if ledger_stopped and ( left or stats[ "failed" ] > 0 ): causes.append( "ledger" )
     if stats[ "failed" ] > 0: causes.append( "CALL_FAILED" )
     if result[ "malformed" ]: causes.append( "MALFORMED_ANSWER" )
     if left and stats[ "stopped_by" ]: causes.append( stats[ "stopped_by" ] )
