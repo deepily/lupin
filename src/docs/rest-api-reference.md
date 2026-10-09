@@ -18,7 +18,7 @@
 ## 🪦 Retired queue doors — gone (410), remove by end of 2026
 
 Rick ruled that there is one entry point, and it is v2. Eighteen routes used to put work on the queue; sixteen are retired.
-Each retired route stays registered and answers **410 Gone** with a body naming its replacement.
+Each retired route stays registered on purpose and answers **410 Gone** with a body naming its replacement.
 A deleted route is invisible, and nothing would stop someone re-adding it because the product needs it.
 These stubs are removed by the end of 2026.
 
@@ -55,7 +55,7 @@ A 410 naming a route that answers "I do not understand" teaches a caller less th
 
 `/api/podcast-generator/submit` is the one job-queueing door that retires into `ask` rather than `submit`.
 Its description flow asked the user which document they meant, and which languages and audience they wanted.
-It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold.
+It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold by design.
 
 **No queue door is left live**. `/api/test-suite/submit` retired last.
 Rick ruled "retire after v2 gap". The gap was `queue_position`, now `AskResponse.queue_position`.
@@ -134,7 +134,7 @@ It was checked against `RETIRED_DOORS`, which does not list it.
 Neither can be edited from this repo. Their cutover is owed work in each repo.
 The 410 body names the replacement, so the fix is discoverable from the failure. That is the whole mitigation.
 
-**`/api/v2/ask` is not a drop-in for `/api/push`**.
+Warning: **`/api/v2/ask` is not a drop-in for `/api/push`**.
 `push` queued the job and returned `{status: "queued", job_id, …}` for the WebSocket to follow up on.
 `ask` answers synchronously and returns an `AskResponse`.
 It also validates with a Pydantic model, so a malformed body comes back **422, not 400**.
@@ -200,11 +200,11 @@ The token is never logged, traced or echoed.
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | GET | `/` | Public | Health check with version + `code_identity` |
-| GET | `/health` | Public | Simplified health check (2 fields — backs a 30s docker healthcheck) |
+| GET | `/health` | Public | Simplified health check (deliberately 2 fields — backs a 30s docker healthcheck) |
 | GET | `/api/code-identity` | Public | Which code the running process holds — captured at module import, never re-read |
 | GET | `/api/init` | Admin | Hot-reload config; `?config_block_id=` also swaps the running DB connection. Admin-only — it was `Public` before, which is what made it a P1 |
 | POST | `/api/prediction-engine/reset` | Auth | Reset the PredictionEngine singleton; `?drop_table=true` clears the decision rows. If the clear fails the singleton is still reset but the answer is `status: error` with `table_dropped: false`. Was an **unauthenticated GET whose `drop_table` defaulted to true** — hardened to POST + credential + default false |
-| GET | `/api/get-session-id` | Public | Generate new session ID. Not read-only: it grows `TwoWordIdGenerator.generated_ids`, a process-lifetime set that is never pruned |
+| GET | `/api/get-session-id` | Public | Generate new session ID. Warning: Not read-only: it grows `TwoWordIdGenerator.generated_ids`, a process-lifetime set that is never pruned |
 | GET | `/api/auth-test` | JWT | Verify token validity |
 | GET | `/api/config/client` | JWT | Get client configuration values |
 | GET | `/api/config/similarity-confirmation` | JWT | Get similarity confirmation setting |
@@ -233,14 +233,14 @@ The token is never logged, traced or echoed.
 
 > **Deep-dive**: See [`notification-api.md`](notification-api.md)
 
-**Every row's `Auth` below was re-derived from the router, not copied forward**.
+Warning: **Every row's `Auth` below was re-derived from the router, not copied forward**.
 Fifteen rows read `Public` and none of them was.
 Twelve are owner-gated by `require_path_identity_owner`, and three take any valid credential.
 Eight routes were missing from the table altogether.
 Walking `router.routes` and following each route's dependency tree shows **24 of 24 notification routes gated and 0 open**.
 That measurement reads the definition, which is the weaker instrument: a path measurement can disagree with it.
 
-**A wrong reassurance costs more than a wrong instruction**.
+Warning: **A wrong reassurance costs more than a wrong instruction**.
 A reader who follows a bad instruction finds out.
 A reader told these are `Public` believes the hole is already known and does not look.
 The pass that produced this table was sent to fix twelve rows. Three more were wrong and eight were absent.
@@ -383,8 +383,9 @@ See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
 | POST | `/api/claude-code/submit` | none | ❌ Retired → 410 Gone, use `/api/v2/submit` (remove by end of 2026) |
 | POST | `/api/claude-code/queue/submit` | none | ❌ Retired → 410 Gone, use `/api/v2/submit` (remove by end of 2026) |
 
-A tombstone carries no auth dependency: an unauthenticated caller must learn the
-same thing an authenticated one does, and a 401 teaches nobody anything.
+A tombstone carries no auth dependency on purpose.
+An unauthenticated caller must learn the same thing an authenticated one does.
+A 401 teaches nobody anything.
 
 ```json
 POST /api/v2/submit
@@ -528,13 +529,13 @@ It cannot cover a `user_email` that arrives in the query string.
 And `batch-id` had been left open because of one uncredentialed server-to-server caller in `swe_team/orchestrator.py`.
 That caller now sends its API key, so the route could be gated.
 
-**`acknowledge` carries no owner check, and that is a residue rather than a completed fix**.
+Warning: **`acknowledge` carries no owner check, and that is a residue rather than a completed fix**.
 It takes no identity parameter anywhere.
 `_proxy_batch_state` is one process-global counter, not a per-user record, so nothing in the request can be owned.
 Any credentialed caller can still retire another user's displayed batch.
 Making the batch per-user is a design change.
 
-**The `ratified_by` and `deleted_by` columns were writing a claim, not a fact**.
+Warning: **the `ratified_by` and `deleted_by` columns were writing a claim, not a fact**.
 The ownership check alone does not repair that.
 The guard accepts the caller's bare user id and compares email without regard to case.
 So one person could write three different strings into the same column, and into the trust-state key.
@@ -754,7 +755,7 @@ Both gates matter: a test that exercises one proves nothing about the other.
 
 The stream carries everything the seat read — file contents, tool output, possibly secrets from a `.env` or a log. A hidden UI entry point is a courtesy, not a gate. Revisit before mobile goes off-LAN.
 
-**The positive admin arm is proved at the override tier, not against the live auth stack**.
+Warning: **The positive admin arm is proved at the override tier, not against the live auth stack**.
 The only admin accounts are `admin@lupin.deepily.ai` and Rick's own, and **the fleet holds neither password**.
 So no test in this repo has ever watched an admin *succeed*, only a non-admin fail.
 Rick ruled that v1 ships on the `dependency_overrides[ require_admin ]` positive arm, with a dev-only test admin account as a separate follow-up.

@@ -599,7 +599,7 @@ building custom tooling.
 
 ### Authentication
 
-**This section said the opposite until it was corrected, and the sentence it used to carry is why the hole lasted**.
+Warning: **This section said the opposite until it was corrected, and the sentence it used to carry is why the hole lasted**.
 It read: *"All endpoints except `/api/proxy/batch-id` and `/api/proxy/acknowledge` require an authenticated session."*
 That was false for five endpoints.
 Anyone checking whether this API was safe would have read it and stopped looking.
@@ -631,7 +631,7 @@ Three things had to happen, and two of them are not "add a decorator".
 
 **`ratify` and `decision` needed a different guard**.
 Their `user_email` arrives in the **query** string.
-`require_path_identity_owner` reads `request.path_params` and raises 500 for a route that names no user in its path.
+`require_path_identity_owner` reads `request.path_params` and deliberately raises 500 for a route that names no user in its path.
 `require_query_identity_owner` is its sibling in the same module.
 It has the same 401 via `require_api_key_or_jwt` and the same 403 for a caller who is not the user named, reading the query instead.
 A bare uncredentialed call to either used to answer **422** for the missing `user_email`, which reads like a refusal and is not one.
@@ -647,12 +647,12 @@ That identity also keys the trust-state counter, where two spellings of one user
 **`batch-id` needed its caller fixed first**.
 The route was left open because of `swe_team/orchestrator.py`'s proxy-summary fetch, which sent no credential.
 It now sends its API key.
-The header helper returns an empty dict rather than raising when no key loads, because its caller must never take a SWE run down.
+Warning: The header helper returns an empty dict rather than raising when no key loads, because its caller must never take a SWE run down.
 A misconfigured box therefore degrades to a 401 that the surrounding `try/except` swallows into a warning.
 The symptom would be a proxy notification that silently stops updating in place.
 The warning names the endpoint, which is the only thing that makes that findable.
 
-**`acknowledge` has a credential and no owner check, and that is a residue, not a finish**.
+Warning: **`acknowledge` has a credential and no owner check, and that is a residue, not a finish**.
 An owner check was ruled onto it alongside ratify and delete.
 `_proxy_batch_state` is a single process-global counter, not a per-user record.
 There is no per-user batch for an owner check to be about.
@@ -660,7 +660,7 @@ There is no per-user batch for an owner check to be about.
 Making the batch per-user is a design change, not an authorization fix, and it is not done here.
 It is carried forward as an open item in the Known Limitations section, with the measurement and what a test watches.
 
-An earlier version of this paragraph said the route "takes no identity parameter in path, query or body".
+Warning: an earlier version of this paragraph said the route "takes no identity parameter in path, query or body".
 That was too strong, and it pointed at the wrong remedy.
 The handler signature takes none, and both callers POST body-less.
 But `require_api_key_or_jwt` **returns the caller's user id** on both of its branches.
@@ -712,7 +712,7 @@ There are zero proxy batch ids and zero ratified rows, so nobody has been hit by
 Multi-account use is not rare, though.
 **68% of active hours have more than one distinct account authenticating**.
 The defect becomes real the first time proxy batches are used at all.
-Those two counts are inherited from John's report and are not re-derived here.
+Warning: Those two counts are inherited from John's report and are not re-derived here.
 The code reading above is mine.
 Re-measure before treating either as current.
 

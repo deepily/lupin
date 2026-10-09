@@ -930,7 +930,7 @@ no user id in the path. So a caller can only ever read acks addressed to itself.
 Other codes: `400` when the credential is not a UUID, `500` on a query fault. A broadcast
 nobody has acked is `200` with `ack_count: 0` — an answer, not an absence.
 
-**This read ignores delivery state, and it must**. The undelivered drain
+Warning: **This read ignores delivery state, and it must**. The undelivered drain
 (`GET /api/notifications/undelivered`) answers *what did I miss while offline* and
 therefore skips anything already delivered to a socket. An ack that lands while a browser
 is open is marked delivered instantly. So a tally rebuilt from the undelivered inbox comes
@@ -944,12 +944,12 @@ Removing the undelivered drain's own state filter would break the drain.
 the new `payload` column. And marks it `delivered` immediately so it never joins the AFK
 inbox as a bodiless "missed notification".
 
-**A saved ack is excluded from the sender rosters and the conversation reads**.
+Warning: **A saved ack is excluded from the sender rosters and the conversation reads**.
 That is six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`: the two rosters
 (`get_sender_last_activities`, `get_sender_last_activities_visible`) and the four
 conversation/history reads (`get_sender_conversation`,
 `get_sender_conversations_by_date`, `get_sender_date_summaries`,
-`get_active_conversation`). Not `count_by_sender` or `get_by_recipient`. Which also return acks but have no caller outside tests. Those queries group by `sender_id` and
+`get_active_conversation`). Deliberately not `count_by_sender` or `get_by_recipient`, which also return acks but have no caller outside tests. Those queries group by `sender_id` and
 filter on nothing else, so any row saved into `notifications` becomes a *sender*. Without the exclusion a seat appears in `/api/notifications/senders-visible` — and
 therefore in the multiplexer's strip and the operator focus bar. Which hydrate from it —
 purely for having acked a broadcast. Before the conversation reads were covered too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that had merely acked.
@@ -960,7 +960,7 @@ and the active-conversation pick were all silently wrong. The exclusion holds wh
 and drag its `last_activity` forward. A broadcast ack is a tally element, and
 `/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
 
-**An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
+Warning: **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
 `unknown` is a measurement rather than a gap**. The commons store is shared across
 projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic. And a commons entry carries no project and no sender id, only `sender_session_id` plus
 persona fields. Naming a project here would file a peer project's ack under this one. And it would look correct in every tally because the persona and the broadcast would
@@ -1408,8 +1408,8 @@ class Notification( Base ):
 **Relationship**: `recipient: Mapped["User"]` via `back_populates="notifications"`.
 
 **Migrations**:
-- `275fb8d9c75c` - Original table creation
-- `62ec6f256d27` - Added `job_id` column
+- `275fb8d9c75c` - Original table creation (2025-12-30)
+- `62ec6f256d27` - Added `job_id` column (2026-01-23)
 - `9184990becdf` - Added `payload` column + the partial broadcast-ack index
 
 ---
@@ -1639,9 +1639,9 @@ suspects are innocent and chasing them costs an evening:**
 |---|---|---|
 | **Server** | 42/42 asks declaring a timeout above 120s expired at their declared value, ±0.1s | **Innocent** |
 | **Client** (`cosa_voice_mcp` blocking verbs) | live probe: answered at 151.4s and **returned at 151.4s with the real answer** | **Innocent** |
-| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | **The defect** |
+| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | Warning: **the defect** |
 
-so **The verb is fine and the answer is not lost. The announcement is early**.
+Warning: **the verb is fine and the answer is not lost. The announcement is early**.
 The hook that emits it (`src/lupin_cli/claude_code/hooks/post_tool_use.py`)
 holds no timer and no deadline of its own — it fires when the harness invokes
 it. So the ~120s decision is the harness's, one layer above this repo, and
@@ -1654,13 +1654,13 @@ re-attaches to the original notification's stream via
 `_ask_reattach_generator( existing_nid, timeout_seconds )`. `src/cosa/rest/routers/notifications.py:1247-1254`, generator defined at `:206`
 — and delivers the answer whenever the person gives it.
 
-**There is no `/reattach` route, so do not go looking for one**.
+Warning: **there is no `/reattach` route, so do not go looking for one**.
 Verified against the live app's OpenAPI: `reattach` appears in **zero** paths,
 with `/api/notify/response` present as the positive control proving the lookup
 reaches. Re-attachment is reachable **only** through the notify POST's
-idempotency branch. That is, not an omission.
+idempotency branch. That is by design, not an omission.
 
-**This is A workaround A caller has to know to make, not A fix**. The
+Warning: **this is a workaround a caller has to know to make, not a fix**. The
 beacon still lies about when the call finished; re-POSTing is how you recover
 the answer in spite of it. The tracking row stays open for that reason.
 Closing it would read as "the defect is fixed", and it is not.
@@ -1810,7 +1810,7 @@ The notification UI groups notifications into conversations using the sender ID:
   Date Grouping. And Sender-Dates endpoints above are **unaffected** — a reaped
   sender's notifications remain fully readable in history/audit. The eviction is a roster-query exclusion, **not** an `is_hidden` soft-delete.
 `is_hidden=True` would also hide the rows from every history view.
-That is the user's clear-conversation action, and it is not used here.
+That is the user's clear-conversation action, and it is deliberately not used here.
 - Roster is a *liveness* view (a reaped session is gone). History is the *durable
   record* (the reaped session's messages stay). Re-spawn-safe: a new session has a new
   `sender_id` (8-hex session suffix), so it is never masked by a prior session's marker.
