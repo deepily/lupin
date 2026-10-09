@@ -7048,6 +7048,228 @@
                 "deprecated": true
             }
         },
+        "/api/podcast-proxy/ask": {
+            "post": {
+                "tags": [
+                    "podcast-proxy"
+                ],
+                "summary": "Ask Rick to approve a podcast of a document",
+                "description": "A seat names a document as <scope>/<path>. The server judges the file with the doc viewer's whole read check, then makes the yes/no card itself, from the file's measured name, size and SHA-256, and pushes it to the operator. After the operator answers yes, the seat calls start with the card id. One waiting card per file and content. Auth: X-API-Key or Bearer JWT.",
+                "operationId": "ask_for_a_podcast_api_podcast_proxy_ask_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AskIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/podcast-proxy/start": {
+            "post": {
+                "tags": [
+                    "podcast-proxy"
+                ],
+                "summary": "Start the podcast Rick said yes to",
+                "description": "The seat that asked cites the card id. The server re-reads the stored card (a question, answered yes by a person on the operator's own login, written by the server, asked by this session, not older than the INI age), re-reads the file and refuses if its bytes changed, spends the card once, copies the judged bytes, and builds the podcast job for the operator through the v2 submit path. Auth: X-API-Key or Bearer JWT.",
+                "operationId": "start_a_podcast_api_podcast_proxy_start_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/StartIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/podcast-proxy/card/{card_id}": {
+            "get": {
+                "tags": [
+                    "podcast-proxy"
+                ],
+                "summary": "Where a podcast card stands",
+                "description": "A client that holds only a card id reads the file it was made for, whether Rick has answered, and whether it already started a job. The client compares scope_path with the path it expects. Auth: X-API-Key or Bearer JWT.",
+                "operationId": "podcast_card_status_api_podcast_proxy_card__card_id__get",
+                "parameters": [
+                    {
+                        "name": "card_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid",
+                            "title": "Card Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/presentation-generator/submit": {
             "post": {
                 "tags": [
@@ -13229,6 +13451,30 @@
                 "title": "ApprovalSettingsRequest",
                 "description": "One or more approval settings to write; an omitted field is left unchanged.\n\nThat makes this a patch rather than a replace. Every field is optional.\n\nThe fields are `StrictBool`, not `bool`, and that is the whole safety of the door.\nPydantic's lenient bool coerces the string \"false\", and `bool( \"false\" )` is True. A\nlenient model would let a caller switch a gate on by sending the word \"off\".\n\n`extra=\"forbid\"` is a choice, not a default. Pydantic ignores unknown fields unless told\notherwise. A typo'd key such as `enforcment_active` would then return 200 having changed\nnothing, and the operator would conclude the switch is broken. The rest of this router\nignores extras. That was rejected here, because a setting ignored in silence is a\nfailure mode this file documents at length."
             },
+            "AskIn": {
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "minLength": 1,
+                        "title": "Path"
+                    },
+                    "actor": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1,
+                        "title": "Actor"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "path",
+                    "actor"
+                ],
+                "title": "AskIn",
+                "description": "Body for POST /api/podcast-proxy/ask.\n\n`path` is the document in the doc viewer's form, `<scope>/<path within scope>`. `actor` is the\ncaller's persona and session id; only the id is used, and the card names the seat from the bridge."
+            },
             "AskRequest": {
                 "properties": {
                     "question": {
@@ -15497,6 +15743,29 @@
                 ],
                 "title": "SpeakerphoneBody",
                 "description": "POST body for setting speakerphone state.\n\nRequires:\n    - on is a bool (True to enable speakerphone, False to disable)"
+            },
+            "StartIn": {
+                "properties": {
+                    "card_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "title": "Card Id"
+                    },
+                    "actor": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "minLength": 1,
+                        "title": "Actor"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "card_id",
+                    "actor"
+                ],
+                "title": "StartIn",
+                "description": "Body for POST /api/podcast-proxy/start.\n\n`card_id` is the id the ask door returned. `actor` is the caller's persona and session id; only the id\nis used, and it must be the session that asked."
             },
             "SubmitRequest": {
                 "properties": {

@@ -2678,6 +2678,84 @@ GONE (410). Use /api/v2/ask. REMOVE BY 2026-12-31.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 410 | Successful Response | ... |
+## POST `/api/podcast-proxy/ask`
+
+> **Ask Rick to approve a podcast of a document**
+
+A seat names a document as <scope>/<path>. The server judges the file with the doc viewer's whole read check, then makes the yes/no card itself, from the file's measured name, size and SHA-256, and pushes it to the operator. After the operator answers yes, the seat calls start with the card id. One waiting card per file and content. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[AskIn](#askin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/podcast-proxy/start`
+
+> **Start the podcast Rick said yes to**
+
+The seat that asked cites the card id. The server re-reads the stored card (a question, answered yes by a person on the operator's own login, written by the server, asked by this session, not older than the INI age), re-reads the file and refuses if its bytes changed, spends the card once, copies the judged bytes, and builds the podcast job for the operator through the v2 submit path. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[StartIn](#startin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/podcast-proxy/card/{card_id}`
+
+> **Where a podcast card stands**
+
+A client that holds only a card id reads the file it was made for, whether Rick has answered, and whether it already started a job. The client compares scope_path with the path it expects. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| card_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/presentation-generator/submit`
 
 > **GONE — use /api/v2/submit**
@@ -4893,6 +4971,21 @@ failure mode this file documents at length.
 | sword_of_damocles_active |  | True makes an admit request name a deletion ticket the requester owns (row ab8c5728). |
 
 
+## AskIn
+
+
+Body for POST /api/podcast-proxy/ask.
+
+`path` is the document in the doc viewer's form, `<scope>/<path within scope>`. `actor` is the
+caller's persona and session id; only the id is used, and the card names the seat from the bridge.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| path | string |  |
+| actor | string |  |
+
+
 ## AskRequest
 
 
@@ -5816,6 +5909,21 @@ Requires:
 | on | boolean |  |
 
 
+## StartIn
+
+
+Body for POST /api/podcast-proxy/start.
+
+`card_id` is the id the ask door returned. `actor` is the caller's persona and session id; only the id
+is used, and it must be the session that asked.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| card_id | string |  |
+| actor | string |  |
+
+
 ## SubmitRequest
 
 
@@ -6268,4 +6376,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.08 10:30:05 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.08 23:35:57 by `src/scripts/generate-api-docs.sh`_
