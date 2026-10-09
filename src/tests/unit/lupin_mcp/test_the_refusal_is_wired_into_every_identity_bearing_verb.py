@@ -52,23 +52,23 @@ EXEMPT = {
     "ask_yes_no"            : "asks the user; the sender id rides the notification (not read further)",
     "converse"              : "speaks to the user; the sender id rides the notification (not read further)",
     "notify"                : "announces to the user; the sender id rides the notification (not read further)",
-    "set_session_topic"     : "sets this session's topic through the notification path (not read further)",
+    "set_session_topic"     : "RULING OWED: writes session_topic into the resolved session's bridge file, then notifies",
     "check_exists"          : "reuse-wiki lookup, per its docstring (not read further)",
     "fetch_similar"         : "reuse-wiki lookup, per its docstring (not read further)",
     "read_capability"       : "reuse-wiki page read, per its docstring (not read further)",
     "replay"                : "reuse-wiki receipt re-check, per its docstring (not read further)",
     "commons_read"          : "read-only (docstring tag READ)",
     "commons_who"           : "read-only (docstring tag READ)",
-    "dm_get"                : "read-only (docstring tag READ)",
-    "dm_list"               : "read-only (docstring tag READ)",
+    "dm_get"                : "read-only (docstring tag READ); whether the server marks anything delivered on read was not checked",
+    "dm_list"               : "RULING OWED: reads the resolved session's inbox, so a borrowed identity reads a colleague's; server-side marking on read not checked",
     "list_spawned_sessions" : "read-only (docstring tag READ)",
     "task_get"              : "read-only (docstring tag READ)",
     "task_promotion_status" : "read-only (docstring tag READ)",
     "task_query"            : "read-only (docstring tag READ)",
     "get_session_info"      : "returns this session's own identity and writes nothing",
-    "enable_speakerphone"   : "user-initiated session setting (docstring: USER-ONLY INITIATION)",
-    "disable_speakerphone"  : "user-initiated session setting (docstring: USER-ONLY INITIATION)",
-    "request_persona"       : "user-initiated session setting (docstring: USER-INITIATED ONLY)",
+    "enable_speakerphone"   : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
+    "disable_speakerphone"  : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
+    "request_persona"       : "RULING OWED: acts on the resolved session's state; the docstring limits who may call, not what a borrowed identity does",
     "spawn_sessions"        : "RULING OWED: host-side spawn of sessions by this manager; not read further",
     "commons_post"          : "RULING OWED: posts under the seat's session id and persona, no refusal call",
     "commons_ask_async"     : "RULING OWED: posts under the seat's name; not read further",
@@ -167,7 +167,7 @@ def test_wired_means_the_refusal_is_the_first_statement_and_names_the_tool( key 
     first, second = body[ 0 ], body[ 1 ]
     assert isinstance( first, ast.Assign ) and ast.unparse( first.value ) == f"_refuse_borrowed_identity('{public_name( key )}')", \
         f"{key}: first statement is {ast.unparse( first )!r}"
-    assert isinstance( second, ast.If ) and "return refusal" in ast.unparse( second ), f"{key}: no early return after the refusal"
+    assert ast.unparse( second ) == "if refusal is not None:\n    return refusal", f"{key}: second statement is {ast.unparse( second )!r}"
 
 
 @pytest.fixture
