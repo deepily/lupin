@@ -1286,3 +1286,281 @@ def test_the_real_chain_refuses_a_commit_when_a_tracked_rule_file_is_edited_and_
     _stage( repo, { "src/pkg/swept.py": SWEPT_CAPS } )
     res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 1 and "rule file src/cosa/repo/doc_lint/swept_scope.py is not the same staged and in the working tree" in res.stderr
+
+
+# ---- the TypeScript and JavaScript counted scope ---------------------------------------------
+
+try:
+    from cosa.repo.doc_lint import ts_counts
+except ImportError:                    # before the module exists the new tests fail by name and the old ones still run
+    ts_counts = None
+
+TS_TABLE = "src/conf/doc-lint-ts-counts.json"
+TS_NAME  = "TypeScript and JavaScript"
+
+
+def _ts_block( text ):
+    return f"/** {text} */\nexport const x = 1;\n"
+
+
+TS_CLEAN = _ts_block( "Return the thing." )
+TS_ONE   = _ts_block( "This is NOT fine." )
+TS_TWO   = _ts_block( "This is NOT fine and NEVER good." )
+
+
+def _fake_extract( root, texts ):
+    """Stand in for the Node extractor: a one-line JSDoc block becomes one record."""
+    fake_extract.seen.append( dict( texts ) )
+    out = {}
+    for path, text in texts.items():
+        records = [ { "kind": "file", "file": path, "ts_version": "5.9.3", "parse_errors": [] } ]
+        for i, line in enumerate( text.split( "\n" ) ):
+            if "/**" in line and "*/" in line:
+                records.append( { "kind": "jsdoc", "file": path, "text": line.split( "/**", 1 )[ 1 ].split( "*/", 1 )[ 0 ].strip(), "start_line": i + 1, "end_line": i + 1,
+                                  "symbol_key": None, "directive": False, "tags": [], "ts_version": "5.9.3", "commented_code": False } )
+        out[ path ] = records
+    return out
+
+
+def fake_extract( root, texts ):
+    return _fake_extract( root, texts )
+
+
+fake_extract.seen = []
+
+
+@pytest.fixture
+def ts_stamped( stamped, monkeypatch ):
+    fake_extract.seen.clear()
+    for rel in ts_counts.STAMP_FILES:
+        full = stamped / rel
+        if not full.exists():
+            full.parent.mkdir( parents=True, exist_ok=True )
+            full.write_text( f"stamp file {rel}\n", encoding="utf-8" )
+    monkeypatch.setattr( ts_counts, "extract", fake_extract )
+    _no_external( monkeypatch )
+    return stamped
+
+
+def _ts_table( repo, files, stamp=None ):
+    text = counts.table_text( files, stamp if stamp is not None else ts_counts.rules_stamp( str( repo ) ) )
+    ( repo / TS_TABLE ).parent.mkdir( parents=True, exist_ok=True )
+    ( repo / TS_TABLE ).write_text( text, encoding="utf-8" )
+    _git( repo, "add", "-f", TS_TABLE )
+
+
+def _ts_base( repo, files, table, stamp=None ):
+    _stage( repo, files )
+    _ts_table( repo, table, stamp )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+
+
+def test_a_staged_ts_file_with_no_table_is_reported_not_checked_and_refused_nothing( ts_stamped ):
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert f"WARNING: there is no {TS_NAME} count table at HEAD or staged, so the {TS_NAME} counted scope was NOT checked" in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table absent" in text
+
+
+def test_a_commit_with_no_ts_file_runs_no_extractor_and_still_prints_the_ts_denominator( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    fake_extract.seen.clear()
+    _stage( ts_stamped, { "src/pkg/a.py": CLEAN, "notes.md": "x\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and fake_extract.seen == [] and "no TypeScript" not in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table ok" in text
+
+
+def test_a_ts_file_that_rises_above_its_entry_is_refused_with_the_count_and_the_findings( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3
+    assert "REFUSED src/a.ts: 2 findings, the count table allows 1 (+1); reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>" in text
+    assert "[doc-lint]   src/a.ts:1: caps: ALL-CAPS word NOT" in text and "[doc-lint]   src/a.ts:1: caps: ALL-CAPS word NEVER" in text
+    assert f"{TS_NAME} counted scope: 1 files checked, 0 at or below their count, 1 over, 0 waivers honoured, table ok" in text and "1 refusals, commit REFUSED" in text
+
+
+def test_a_ts_file_at_or_below_its_entry_is_allowed( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_TWO }, { "src/a.ts": 2 } )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO + "export const y = 2;\n" } )                  # flat
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and f"{TS_NAME} counted scope: 1 files checked, 1 at or below their count, 0 over" in text
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )                                         # fell, the table not lowered
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_new_ts_file_starts_at_zero_and_a_javascript_file_is_counted_too( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/new.js": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/new.js: 1 findings, the count table allows 0 (+1)" in text and "rename" not in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _stage( ts_stamped, { "src/new.mjs": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+
+
+def test_a_renamed_ts_file_keeps_its_entry_and_a_rise_in_it_is_refused( ts_stamped ):
+    body = "".join( f"export const value_{i} = {i};\n" for i in range( 40 ) )
+    _ts_base( ts_stamped, { "src/old.ts": TS_TWO + body }, { "src/old.ts": 2 } )
+    _git( ts_stamped, "mv", "src/old.ts", "src/new.ts" )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "1 at or below their count" in text
+    _stage( ts_stamped, { "src/new.ts": _ts_block( "This is NOT fine and NEVER good and NOT again." ) + body } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/new.ts: 3 findings, the count table allows 2 (+1)" in text
+
+
+def test_a_waiver_lowers_a_ts_files_count_and_a_waiver_without_a_reason_does_not( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/a.ts": "/** This is NOT fine. */ // doc-lint: waive caps -- quoted from the standard\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and f"{TS_NAME} counted scope: 1 files checked, 1 at or below their count, 0 over, 1 waivers honoured" in text
+    _stage( ts_stamped, { "src/a.ts": "/** This is NOT fine. */ // doc-lint: waive caps\n" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 1 findings, the count table allows 0" in text
+
+
+def test_the_extractor_is_given_only_the_staged_files_and_the_text_in_the_index_not_the_disk( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE, "src/b.ts": TS_ONE }, { "src/a.ts": 1, "src/b.ts": 1 } )
+    fake_extract.seen.clear()
+    _stage( ts_stamped, { "src/a.ts": TS_ONE + "export const staged = 1;\n" } )
+    ( ts_stamped / "src/a.ts" ).write_text( TS_TWO, encoding="utf-8" )                    # the disk copy is worse than the staged one
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+    assert fake_extract.seen == [ { "src/a.ts": TS_ONE + "export const staged = 1;\n" } ]
+
+
+def test_a_ts_file_that_is_not_utf8_counts_as_one_finding( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage_bytes( ts_stamped, "src/a.ts", b"/** caf\xe9 */\n" )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 1 findings, the count table allows 0 (+1)" in text and "not-utf-8" in text
+
+
+def test_a_staged_ts_table_that_raises_an_entry_or_adds_one_is_refused( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 } )
+    _ts_table( ts_stamped, { "src/a.ts": 2 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: src/a.ts raised from 1 to 2; the table may only fall" in text
+    _ts_table( ts_stamped, { "src/a.ts": 1, "src/b.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: src/b.ts raised from 0 to 1; the table may only fall" in text
+
+
+def test_a_staged_ts_table_that_lowers_or_deletes_an_entry_is_the_allowance_for_the_commit( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_TWO, "src/b.ts": TS_ONE }, { "src/a.ts": 2, "src/b.ts": 1 } )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE, "src/b.ts": TS_CLEAN } )
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "2 at or below their count" in text
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )                                           # the file now rises against the staged entry
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/a.ts: 2 findings, the count table allows 1 (+1)" in text
+
+
+def test_a_regenerated_ts_table_under_a_new_stamp_may_raise_only_when_it_equals_the_census( ts_stamped ):
+    _ts_base( ts_stamped, { "src/a.ts": TS_ONE }, { "src/a.ts": 1 }, stamp="oldstamp" )
+    _stage( ts_stamped, { "src/a.ts": TS_TWO } )
+    _ts_table( ts_stamped, { "src/a.ts": 2 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+    _ts_table( ts_stamped, { "src/a.ts": 5 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: a regenerated table must equal a census of the staged tree under the current rules" in text
+    assert "[doc-lint]   src/a.ts: table 5, census 2" in text and "table stale" in text
+
+
+def test_a_ts_table_cut_under_other_rules_refuses_a_commit_that_stages_a_ts_file_and_names_the_command( ts_stamped ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {}, stamp="oldstamp" )
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED: the {TS_NAME} count table was cut under other rules (stamp oldstamp, now " in text
+    assert 'regenerate it with: LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.ts_counts --repo-root "$PWD" --write and stage the table with the rule change' in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _stage( ts_stamped, { "notes.md": "x\n" } )                                            # no TS file staged
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+
+
+def test_a_malformed_staged_ts_table_is_refused_and_a_malformed_committed_one_only_warns( ts_stamped ):
+    _stage( ts_stamped, { "src/keep.ts": TS_CLEAN, TS_TABLE: "garbage" } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"REFUSED {TS_TABLE}: the staged table is malformed: table is not JSON" in text
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and f"WARNING: the {TS_NAME} count table at HEAD is malformed" in text
+
+
+def test_the_python_and_ts_tables_are_independent( ts_stamped ):
+    _base( ts_stamped, { "src/lupin_mcp/a.py": ONE }, { "src/lupin_mcp/a.py": 1 } )          # a Python table, no TS table
+    _stage( ts_stamped, { "src/lupin_mcp/a.py": TWO } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and "REFUSED src/lupin_mcp/a.py: 2 findings, the count table allows 1 (+1)" in text and f"no {TS_NAME} count table" not in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )                                             # a TS table, the Python one untouched at HEAD
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "table regenerated" in text
+
+
+def test_a_rule_file_that_differs_between_the_index_and_the_disk_refuses_a_commit_that_stages_a_ts_file( ts_stamped ):
+    rule = "src/cosa/repo/doc_lint/tsdoc_lint.py"
+    _git( ts_stamped, "add", "-f", rule )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "rules" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )                    # an unstaged edit to the comment linter
+    _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"rule file {rule} is not the same staged and in the working tree" in text and "table diverged" in text
+    _git( ts_stamped, "reset", "-q", "--hard" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )
+    _stage( ts_stamped, { "notes.md": "x\n" } )                                            # nothing judged is staged
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text
+
+
+def test_a_staged_ts_table_alone_is_judged_so_the_divergence_check_applies_to_it( ts_stamped ):
+    rule = "src/scripts/ts_doc_extract.mjs"
+    _git( ts_stamped, "add", "-f", rule )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "rules" )
+    ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )
+    _ts_table( ts_stamped, {} )
+    rc, text = _gate( ts_stamped )
+    assert rc == 3 and f"rule file {rule} is not the same staged and in the working tree" in text
+
+
+def test_a_crash_in_the_ts_counted_check_still_allows_the_commit_with_the_loud_line( ts_stamped, monkeypatch ):
+    _ts_base( ts_stamped, { "src/keep.ts": TS_CLEAN }, {} )
+    _stage( ts_stamped, { "src/a.ts": TS_ONE } )
+    def boom( root, texts ): raise RuntimeError( "extractor failed: node is gone" )
+    monkeypatch.setattr( ts_counts, "extract", boom )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "[doc-lint] GATE CRASHED, commit allowed: RuntimeError: extractor failed: node is gone" in text
+
+
+def test_staged_ts_counted_reads_paths_renames_and_the_table( ts_stamped ):
+    shared = "".join( f"export const value_{i} = {i};\n" for i in range( 40 ) )
+    _stage( ts_stamped, { "src/old name.ts": TS_CLEAN + shared, "src/skip.py": "x = 1\n" } )
+    _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "base" )
+    _git( ts_stamped, "mv", "src/old name.ts", "src/new name.ts" )
+    _stage( ts_stamped, { "src/b.js": TS_CLEAN, "node_modules/c.js": TS_CLEAN, TS_TABLE: "{}", "notes.md": "x\n" } )
+    paths, renamed, table_staged = gate.staged_ts_counted( str( ts_stamped ) )
+    assert paths == [ "src/b.js", "src/new name.ts" ] and renamed == { "src/new name.ts": "src/old name.ts" } and table_staged is True
+    with pytest.raises( RuntimeError, match="git diff --cached failed" ):
+        gate.staged_ts_counted( str( ts_stamped / "nope" ) )
+
+
+def test_staged_counted_still_lists_python_only_when_ts_files_are_staged( ts_stamped ):
+    _stage( ts_stamped, { "src/tests/t.py": CLEAN, "src/a.ts": TS_CLEAN, TS_TABLE: "{}" } )
+    assert gate.staged_counted( str( ts_stamped ) ) == ( [ "src/tests/t.py" ], {}, False )
+
+
+def test_head_ts_table_text_is_none_until_a_table_is_committed( ts_stamped ):
+    assert gate.head_table_text( str( ts_stamped ), TS_TABLE ) is None
+    _ts_base( ts_stamped, { "src/a.ts": TS_CLEAN }, { "src/a.ts": 1 } )
+    assert counts.parse_table( gate.head_table_text( str( ts_stamped ), TS_TABLE ) ).files == { "src/a.ts": 1 }
+    assert gate.head_table_text( str( ts_stamped ) ) is None                                # the Python table has its own default

@@ -410,6 +410,14 @@ def _done( stdout="", returncode=0, stderr="" ):
     return types.SimpleNamespace( stdout=stdout, returncode=returncode, stderr=stderr )
 
 
+def test_run_extractor_reads_the_files_from_another_root_but_runs_the_script_of_the_repo( monkeypatch, tmp_path ):
+    other = tmp_path / "scratch"
+    calls = _fake_run( monkeypatch, _done( json.dumps( _file_record() | { "file": "a.ts" } ) ) )
+    found = tsdoc_lint.run_extractor( tmp_path, [ "a.ts" ], source_root=other )
+    assert list( found ) == [ "a.ts" ]
+    assert calls == [ [ "node", os.path.join( str( tmp_path ), "src/scripts/ts_doc_extract.mjs" ), "--repo-root", str( other ), "a.ts" ] ]
+
+
 def test_run_extractor_groups_records_by_file_and_skips_blank_lines( monkeypatch, tmp_path ):
     lines = "\n".join( [ json.dumps( _file_record() | { "file": "a.ts" } ), "", json.dumps( _comment( "x", file="a.ts" ) ), json.dumps( _comment( "y", file="other.ts" ) ) ] )
     calls = _fake_run( monkeypatch, _done( lines ) )
