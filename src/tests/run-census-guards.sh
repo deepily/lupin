@@ -32,5 +32,8 @@ if [ -z "$FILES" ]; then
 fi
 echo "run-census-guards: $( echo "$FILES" | wc -l ) files"
 
-# shellcheck disable=SC2086
-"$PYTEST" $FILES -q -p no:cacheprovider --no-cov
+# The wrapper reports a collection error as the suite never running, and keeps the contention guard.
+source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
+# shellcheck disable=SC2086  # the file names are tracked paths without spaces
+run_pytest_with_diagnosis "$PYTEST" $FILES -q -p no:cacheprovider --no-cov
+exit $?
