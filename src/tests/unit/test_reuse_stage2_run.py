@@ -245,3 +245,26 @@ def test_an_old_answer_that_is_missing_or_wrong_gives_a_row_that_says_which( tmp
     rows = e2r.run_searches( scratch.env(), "s2-run", items[ :1 ], twins, 10 ** 8 )[ "searches" ][ 0 ][ "rows" ]
     assert rows[ 0 ][ "unasked" ] is True and rows[ 0 ][ "p_overlap" ] is None
     assert rows[ 1 ][ "malformed" ] is not None and rows[ 1 ][ "p_overlap" ] is None and rows[ 2 ][ "p_overlap" ] is not None
+
+
+def test_the_rows_of_a_stage_two_search_rank_best_first_and_a_candidate_at_exactly_half_is_on_the_shortlist( tmp_path, monkeypatch ):
+    def graded( ctx, need, entries ):
+        ids   = [ e[ "id" ] for e in entries ]
+        marks = dict( zip( ids, [ 0.2, 0.5, 0.9, 0.4, 0.7, 0.1 ] ) )
+        return { "answered": { i: { "provides": marks[ i ], "coverage": 0.5, "score": 1.0 } for i in ids }, "unasked": [], "malformed": [],
+                 "stats": { "failed": 0, "not_checked": 0, "stopped_by": None, "requests": 1, "attempt_counts": { "n429": 0, "n529": 0 } } }
+    monkeypatch.setattr( s2, "NEW_PAIR_ASK", graded )
+    scratch = Env( tmp_path, asks={ "new": s2.ask_new_pairs } )
+    items, twins = plan_of( scratch, tmp_path )
+    read = e2r.run_searches( scratch.env(), "s2-run", items[ :1 ], twins, 10 ** 8 )[ "searches" ][ 0 ]
+    ids  = [ r[ "candidate" ] for r in read[ "rows" ] ]
+    assert read[ "read" ] is not None
+    result = s2.ask_new_pairs( None, items[ 0 ] )
+    assert [ r[ "id" ] for r in result[ "nearest" ] ] == [ ids[ 2 ], ids[ 4 ], ids[ 1 ], ids[ 3 ], ids[ 0 ], ids[ 5 ] ]
+    assert [ r[ "id" ] for r in result[ "shortlist" ] ] == [ ids[ 2 ], ids[ 4 ], ids[ 1 ] ]                           # 0.5 itself is in
+
+
+def test_the_unwired_new_question_is_refused_by_the_name_check_before_any_ask_runs():
+    with pytest.raises( s1.DriverRefused, match="not wired" ): s2._asks( [ "new" ] )
+    with pytest.raises( s1.DriverRefused, match="not one of" ): s2._asks( [ "other" ] )
+    assert list( s2._asks( [ "old" ] ) ) == [ "old" ]

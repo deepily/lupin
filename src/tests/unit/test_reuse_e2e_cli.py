@@ -54,9 +54,10 @@ def setup( tmp_path, capsys ):
     return s
 
 
-def test_ledger_init_is_for_a_stand_in_run_only( tmp_path ):
+def test_ledger_init_is_for_a_stand_in_run_only( tmp_path, capsys ):
     s = Setup( tmp_path )
-    assert run.cli( [ "--root", str( s.root ), "--live", "ledger-init" ] ) == 2
+    assert run.cli( [ "--root", str( s.root ), "--live", "--data", str( s.data ), "--ledger", str( s.ledger ), "ledger-init" ] ) == 2
+    assert "ledger-init is for a stand-in run" in capsys.readouterr().err and not s.ledger.exists()
 
 
 def test_a_stand_in_run_needs_its_own_data_folder_and_ledger_and_will_not_use_the_real_ones( tmp_path ):
@@ -126,3 +127,10 @@ def test_a_live_environment_takes_the_real_paths_and_no_stand_in_transport( setu
 def test_a_run_with_no_root_and_no_environment_root_is_refused( monkeypatch, capsys ):
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
     assert run.cli( [ "status" ] ) == 2 and "--root" in capsys.readouterr().err
+
+
+def test_a_refused_new_question_is_refused_before_any_run_is_opened_or_request_is_sent( setup, capsys ):
+    before = rl.AccountLedger( setup.ledger ).snapshot()
+    assert run.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--questions", "old,new" ] ) ) == 2
+    assert not ( setup.data / "e2e-results" ).exists() and rl.AccountLedger( setup.ledger ).snapshot() == before
+    with pytest.raises( s1.DriverRefused, match="not wired" ): run._asks( [ "new" ] )

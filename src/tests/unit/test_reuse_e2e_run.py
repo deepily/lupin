@@ -44,14 +44,16 @@ class Env:
         self.path   = tmp_path / tag / "ledger.jsonl"
         rl.AccountLedger.create( self.path, limit, "test", "scratch" )
         self.posts  = []
+        self.texts  = []
         self.asks   = asks or { "old": ask_old, "new": ask_new }
         self.pack   = pack_size
 
     def factory( self, budget ):
-        inner, posts = rr.StandIn( budget ), self.posts
+        inner, posts, texts = rr.StandIn( budget ), self.posts, self.texts
         class Counting:
             def post_with_meta( self, body ):
                 posts.append( len( body[ "questions" ] ) )
+                texts.extend( q[ "instructions" ] for q in body[ "questions" ].values() )
                 return inner.post_with_meta( body )
         return Counting()
 
@@ -305,3 +307,104 @@ def test_a_real_sweep_with_one_malformed_stand_in_answer_is_incomplete_by_malfor
     scratch.factory = corrupting
     rec = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
     assert rec[ "searches" ][ 0 ][ "causes" ] == [ "MALFORMED_ANSWER" ] and rec[ "searches" ][ 0 ][ "status" ] == "incomplete"
+
+
+def write_page_wiki( root ):
+    """Ensures: writes a wiki with one capability page that covers the generated module."""
+    wiki = root / "src" / "docs" / "wiki"
+    ( wiki / "capabilities" ).mkdir( parents=True, exist_ok=True )
+    ( wiki / "INDEX.md" ).write_text( "- [[wide-page]] — a page about the wide module. `cosa.wide`\n", encoding="utf-8" )
+    ( wiki / "capabilities" / "wide-page.md" ).write_text( f"---\ncapability: wide-page\npins:\n  - {IDS[ 0 ]}@aaaaaaaaaa\n---\n# wide-page\n", encoding="utf-8" )
+
+
+def test_the_old_question_goes_through_the_free_text_sweep_so_no_page_is_asked_and_the_member_is_never_shown( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    write_page_wiki( scratch.root )
+    rec     = run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 8 )
+    member  = rt.entry_text( next( e for e in rt.prepare( rt.ReuseContext( scratch.root, scratch.data ) )[ 1 ] if e[ "id" ] == IDS[ 0 ] ) )
+    assert scratch.texts and not any( "wide-page" in t or "a page about the wide module" in t for t in scratch.texts )          # the page route is off
+    assert not any( member in t for t in scratch.texts )                                                                    # the member is not its own candidate
+    assert rec[ "searches" ][ 0 ][ "status" ] == "complete"
+
+
+def test_a_ledger_stop_in_the_middle_of_a_run_ends_it_and_the_later_searches_are_not_run( tmp_path ):
+    state = { "n": 0 }
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    def lowering( ctx, item ):
+        state[ "n" ] += 1
+        if state[ "n" ] == 3: rl.AccountLedger( scratch.path ).set_limit( 1, "test", "lower the limit under the run" )
+        return ask_old( ctx, item )
+    scratch.asks = { "old": lowering }
+    rec    = run.run_searches( scratch.env(), "e2e-run", items_of( 5 ), twins_of( 5 ), 10 ** 8 )
+    states = [ s[ "status" ] for s in rec[ "searches" ] ]
+    assert states[ :2 ] == [ "complete", "complete" ] and states[ 2 ] == "incomplete" and states[ 3: ] == [ "not_run", "not_run" ]
+    assert rec[ "searches" ][ 2 ][ "causes" ] == [ "ledger" ] and rec[ "stopped" ] == { "reason": "ledger", "after": 3 } and rec[ "state" ] == "stopped"
+
+
+def scripted( bad ):
+    """Ensures: an ask incomplete on the numbered calls, counted across questions."""
+    state = { "n": 0 }
+    def ask( ctx, item ):
+        state[ "n" ] += 1
+        return failing( failed=1 if state[ "n" ] in bad else 0 )( ctx, item )
+    return ask
+
+
+def test_the_sixth_incomplete_search_at_the_twentieth_stops_the_run_and_at_the_twenty_first_does_not( tmp_path ):
+    at_twenty = Env( tmp_path, tag="a", asks={ "old": scripted( { 1, 2, 3, 4, 5, 20 } ) } )
+    rec = run.run_searches( at_twenty.env(), "e2e-run", items_of( 30 ), twins_of( 30 ), 10 ** 6 )
+    assert rec[ "stopped" ] == { "reason": "reliability", "after": 20 } and rec[ "totals" ][ "not_run" ] == 10
+    at_twenty_one = Env( tmp_path, tag="b", asks={ "old": scripted( { 1, 2, 3, 4, 5, 21 } ) } )
+    rec = run.run_searches( at_twenty_one.env(), "e2e-run", items_of( 30 ), twins_of( 30 ), 10 ** 6 )
+    assert rec[ "stopped" ] is None and rec[ "totals" ][ "incomplete" ] == 6 and rec[ "totals" ][ "not_run" ] == 0
+
+
+def test_the_full_run_counts_the_canary_searches_in_the_window_at_the_door_the_command_line_uses( tmp_path ):
+    both    = scripted( { 11, 12, 13, 14, 15, 21 } )                                       # the canary is searches 1 to 10; the sixth incomplete is search 21 of the whole
+    scratch = Env( tmp_path, asks={ "old": both, "new": both } )
+    run.run_canary( scratch.env(), items_of( 30 ), twins_of( 30 ), 10 ** 8 )
+    run.approve_canary( scratch.env(), "cheech", "read it" )
+    rec = run.run_full( scratch.env(), items_of( 30 ), twins_of( 30 ), 5 * 10 ** 8 )
+    assert rec[ "stopped" ] is None and rec[ "totals" ][ "incomplete" ] == 6 and rec[ "totals" ][ "not_run" ] == 0                # alone, search 11 of this part would have stopped it
+
+
+def test_unasked_counts_the_entries_that_failed_and_the_entries_never_reached( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": failing( failed=1, left=2 ) } )
+    assert run.run_searches( scratch.env(), "e2e-run", items_of( 1 ), twins_of( 1 ), 10 ** 6 )[ "searches" ][ 0 ][ "unasked" ] == 3
+
+
+def test_the_result_file_is_rewritten_after_each_member_not_only_at_the_end( tmp_path ):
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    seen    = {}
+    def peeking( ctx, item ):
+        path = scratch.data / "e2e-results" / "e2e-run.json"
+        if item[ "member" ] == IDS[ 2 ]: seen[ "members" ] = [ s[ "member" ] for s in json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ] ]
+        return ask_old( ctx, item )
+    scratch.asks = { "old": peeking }
+    run.run_searches( scratch.env(), "e2e-run", items_of( 4 ), twins_of( 4 ), 10 ** 8 )
+    assert seen[ "members" ] == [ IDS[ 0 ], IDS[ 1 ] ]
+
+
+def test_a_ceiling_refusal_after_a_failed_attempt_is_named_the_ceiling_as_well_as_the_failed_calls():
+    result = { "status": "ok", "malformed": [], "stats": { "failed": 3, "not_checked": 0, "stopped_by": None } }
+    assert e2e.incomplete_causes( result, True, False ) == [ "ceiling", "CALL_FAILED" ]
+    assert e2e.incomplete_causes( result, False, True ) == [ "ledger", "CALL_FAILED" ]
+    assert e2e.incomplete_causes( result, False, False ) == [ "CALL_FAILED" ]
+
+
+def test_a_ceiling_refusal_after_a_failed_attempt_stops_the_run_at_that_search( tmp_path ):
+    state = { "n": 0 }
+    scratch = Env( tmp_path, asks={ "old": failing( failed=2 ) } )
+    def refused( ctx, item ):
+        state[ "n" ] += 1
+        if state[ "n" ] == 2: ctx.transport.budget_for_test.ceiling_refusals += 1
+        return failing( failed=2 if state[ "n" ] == 2 else 0 )( ctx, item )
+    original = scratch.factory
+    def with_budget( budget ):
+        transport = original( budget )
+        transport.budget_for_test = budget
+        return transport
+    scratch.factory, scratch.asks = with_budget, { "old": refused }
+    rec = run.run_searches( scratch.env(), "e2e-run", items_of( 5 ), twins_of( 5 ), 10 ** 6 )
+    assert rec[ "searches" ][ 1 ][ "causes" ] == [ "ceiling", "CALL_FAILED" ] and rec[ "stopped" ] == { "reason": "ceiling", "after": 2 }
+    assert [ s[ "status" ] for s in rec[ "searches" ][ 2: ] ] == [ "not_run" ] * 3

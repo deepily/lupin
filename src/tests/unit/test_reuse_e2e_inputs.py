@@ -150,3 +150,27 @@ def test_a_file_with_the_right_hash_that_is_not_json_is_refused( tmp_path ):
     path = tmp_path / "sample.json"
     path.write_text( "not json", encoding="utf-8" )
     with pytest.raises( e2e.FrozenInputRefused, match="not JSON" ): e2e.load_sample( path, sha_of( "not json" ) )
+
+
+def search( member, question, status="complete", hit=False, tokens=0 ):
+    return { "member": member, "question": question, "status": status, "causes": [] if status == "complete" else [ "CALL_FAILED" ], "tokens": tokens, "requests": 1, "unasked": 0,
+             "n429": 0, "n529": 0, "read": { "verdict": "NEW", "on_shortlist": hit, "ranked_first": hit, "top_ten": hit } }
+
+
+def test_an_incomplete_search_with_the_twin_on_its_answered_shortlist_still_counts_as_a_miss():
+    rows = [ search( "a", "old", "incomplete", hit=True ), search( "b", "old", hit=True ) ]
+    fig  = e2e.figures( rows, [ "old" ] )[ "old" ]
+    assert fig[ "on_shortlist" ][ "k" ] == 1 and fig[ "on_shortlist" ][ "n" ] == 2 and fig[ "on_shortlist_complete" ][ "k" ] == 1 and fig[ "on_shortlist_complete" ][ "n" ] == 1
+    assert e2e.paired( rows + [ search( "a", "new" ), search( "b", "new" ) ], "old", "new" )[ "on_shortlist" ][ "only_old" ] == 1       # a is a miss for old, so b alone is old-only
+
+
+def test_the_cost_of_a_search_is_the_tokens_over_the_searches_run_at_the_pinned_price():
+    rows = [ search( "a", "old", tokens=1_000_000 ), search( "b", "old", tokens=1_000_000 ) ]
+    assert e2e.figures( rows, [ "old" ] )[ "old" ][ "usd_per_search" ] == pytest.approx( 0.042 )
+    assert e2e.figures( [], [ "old" ] )[ "old" ][ "usd_per_search" ] is None
+
+
+def test_the_paired_comparison_leaves_out_a_member_whose_search_was_not_run():
+    rows = [ search( "a", "old", hit=True ), search( "a", "new", "not_run" ), search( "b", "old", hit=True ), search( "b", "new", hit=False ) ]
+    pair = e2e.paired( rows, "old", "new" )[ "on_shortlist" ]
+    assert pair == { "only_old": 1, "only_new": 0, "both": 0, "neither": 0, "p": 1.0 }                                  # only b is counted
