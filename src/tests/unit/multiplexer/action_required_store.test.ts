@@ -862,11 +862,13 @@ test("bcf15f08: the store's surface is UNCHANGED — a new member must be classi
   // write the StorageService: persist, recordStep, restore, storage.
   // A-2 #2d (2026-09-18) added, both classified NOT an answer path — neither POSTs, they only read
   // the TTS queue: ttsHoldsHead, ttsSlot.
+  // Row 4ca5776c (2026-10-09) added, both classified NOT an answer path — neither POSTs, they only
+  // add a waiting card to the store: hydrateAwaiting, ingest.
   const EXPECTED = [
     "activateHead", "api", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
     "clearTimeoutFn", "clockOffset",
     "constructor", "disposeForTesting", "emit", "emitCountdown", "emitWithDetails", "entries",
-    "expireEntry", "freezeAll", "getById", "list", "nowFn", "onConnectionState",
+    "expireEntry", "freezeAll", "getById", "hydrateAwaiting", "ingest", "list", "nowFn", "onConnectionState",
     "onExpired", "onQueueUpdate", "onResponded", "onSysTimeUpdate", "persist", "recordStep",
     "removeEntry", "respondAndAwait", "restore", "retire", "setIntervalFn", "setTimeoutFn",
     "startInterval", "stopInterval", "storage", "subscribe", "thawAll", "tick", "togglePause",

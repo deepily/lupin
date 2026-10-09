@@ -1154,6 +1154,10 @@ class NotificationsUI {
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
 
+            // Draw the response cards filed while this page was closed (row 4ca5776c). Not awaited:
+            // the page is usable while the request is out, and a live push that arrives first is kept.
+            this.hydrateAwaitingResponseCards();
+
             // Restore TTS queue from localStorage (refresh survival)
             this.restoreTTSQueueState();
 
@@ -23140,6 +23144,42 @@ class NotificationsUI {
             this.error( 'Failed to restore action-required state:', error );
             // Clear corrupted data
             localStorage.removeItem( this.ACTION_REQUIRED_KEY );
+        }
+    }
+
+    /**
+     * Draw the response cards that were filed before this page opened.
+     *
+     * A card reaches this page by a live push, or from this browser's own saved state. A card filed
+     * while the page was closed has neither, so the server is asked for the ones still waiting.
+     *
+     * Requires:
+     *     - the user is authenticated (authedFetch)
+     *
+     * Ensures:
+     *     - every waiting card the page does not already hold goes through addActionRequiredNotification, oldest first
+     *     - a card already held (restored from storage, or pushed while the request was out) is not drawn twice
+     *     - returns how many cards were drawn
+     *     - a refused or failed request draws nothing, logs the cause, and returns 0
+     */
+    async hydrateAwaitingResponseCards() {
+        try {
+            const response = await this.authedFetch( '/api/notifications/awaiting-response' );
+            if ( !response.ok ) {
+                this.error( 'Failed to load waiting response cards:', response.status, response.statusText );
+                return 0;
+            }
+            const data  = await response.json();
+            let   drawn = 0;
+            for ( const notification of data.notifications ) {
+                if ( this.actionRequiredNotifications.has( notification.id ) ) continue;
+                this.addActionRequiredNotification( notification );
+                drawn++;
+            }
+            return drawn;
+        } catch ( error ) {
+            this.error( 'Error loading waiting response cards:', error );
+            return 0;
         }
     }
 

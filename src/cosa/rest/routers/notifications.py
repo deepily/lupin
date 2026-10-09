@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, Annotated, Literal
 import zoneinfo
 import asyncio
 import json
+import math
 import uuid
 import re
 
@@ -2067,6 +2068,97 @@ async def get_undelivered_notifications(
     except Exception as e:
         print( f"[NOTIFY] Error getting undelivered for {authenticated_user_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to get undelivered notifications: {str( e )}" )
+
+
+def _project_awaiting_response( n, now ) -> Optional[dict]:
+    """
+    Project a waiting response card to a live push's shape, or None when it has run out.
+
+    Requires:
+        - n is a Notification row with response_requested true
+        - now is a timezone-aware datetime
+
+    Ensures:
+        - returns None for a row whose expires_at is not after now
+        - timeout_seconds is the whole seconds left to the row's expiry, rounded up, so a page restarts its countdown where the server's clock stands
+        - a row with no expires_at keeps its own timeout_seconds
+        - suppress_ding is true, since a card the user was never told about must not ring on page load
+    """
+    if n.expires_at is not None:
+        left = ( n.expires_at - now ).total_seconds()
+        if left <= 0: return None
+        timeout_seconds = math.ceil( left )
+    else:
+        timeout_seconds = n.timeout_seconds
+    return {
+        "id"                 : str( n.id ),
+        "sender_id"          : n.sender_id,
+        "sender_persona"     : n.sender_persona,
+        "sender_icon"        : n.sender_icon,
+        "title"              : n.title,
+        "message"            : n.message,
+        "abstract"           : n.abstract,
+        "type"               : n.type,
+        "priority"           : n.priority,
+        "job_id"             : n.job_id,
+        "payload"            : n.payload,
+        "state"              : n.state,
+        "response_requested" : True,
+        "response_type"      : n.response_type,
+        "response_default"   : n.response_default,
+        "response_options"   : n.response_options,
+        "timeout_seconds"    : timeout_seconds,
+        "suppress_ding"      : True,
+        "created_at"         : n.created_at.isoformat() if n.created_at else None,
+    }
+
+
+@router.get(
+    "/notifications/awaiting-response",
+    summary     = "Get the response cards still waiting for an answer",
+    description = "The authenticated user's response-required notifications that are neither answered nor expired, oldest first, in the shape a live push carries. A page that opens after a card was filed draws its Yes/No from this."
+)
+async def get_awaiting_response_notifications(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]
+):
+    """
+    Pull the authenticated user's response cards that still wait for an answer.
+
+    Requires:
+        - a valid API key or Bearer JWT (authenticated_user_id is the recipient's system UUID)
+
+    Ensures:
+        - returns rows the repository calls pending, minus soft-hidden rows and rows past their expiry
+        - shape: { status, awaiting_count, notifications, timestamp }
+        - a pure read: nothing is marked delivered or answered
+
+    Raises:
+        - HTTPException 400 if authenticated_user_id is not a valid UUID
+        - HTTPException 500 on query failure
+    """
+    try:
+        recipient_uuid = uuid.UUID( authenticated_user_id )
+    except ( ValueError, AttributeError, TypeError ):
+        raise HTTPException( status_code=400, detail="authenticated user id is not a valid UUID" )
+
+    try:
+        def _fetch_awaiting_sync():
+            with get_db() as session:
+                repo = NotificationRepository( session )
+                now  = datetime.now( timezone.utc )
+                rows = [ _project_awaiting_response( n, now ) for n in repo.get_pending_for_recipient( recipient_uuid ) if not n.is_hidden ]
+                return [ row for row in rows if row is not None ]
+
+        notifications = await asyncio.to_thread( _fetch_awaiting_sync )
+        return {
+            "status"         : "success",
+            "awaiting_count" : len( notifications ),
+            "notifications"  : notifications,
+            "timestamp"      : get_local_timestamp()
+        }
+    except Exception as e:
+        print( f"[NOTIFY] Error getting awaiting-response for {authenticated_user_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to get awaiting-response notifications: {str( e )}" )
 
 
 def _project_owed_answer( n, requesting_session_hash8=None ):

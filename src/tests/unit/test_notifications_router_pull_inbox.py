@@ -182,6 +182,133 @@ class TestTheUndeliveredInbox:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# GET /api/notifications/awaiting-response
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import datetime as _dt
+
+
+class _Waiting:
+    """A waiting response card. Every field carries a different value."""
+    id                 = a_uuid( "waiting-row" )
+    sender_id          = "SENDER-ID-VALUE"
+    sender_persona     = "PERSONA-VALUE"
+    sender_icon        = "ICON-VALUE"
+    title              = "TITLE-VALUE"
+    message            = "MESSAGE-VALUE"
+    abstract           = "ABSTRACT-VALUE"
+    type               = "TYPE-VALUE"
+    priority           = "PRIORITY-VALUE"
+    job_id             = "JOB-ID-VALUE"
+    payload            = { "PAYLOAD-KEY": "PAYLOAD-VALUE" }
+    state              = "delivered"
+    response_type      = "RESPONSE-TYPE-VALUE"
+    response_default   = "DEFAULT-VALUE"
+    response_options   = { "OPTIONS-KEY": "OPTIONS-VALUE" }
+    timeout_seconds    = 77
+    is_hidden          = False
+    created_at         = _Stamp( "CREATED-AT-VALUE" )
+
+    def __init__( self, expires_in=None, **overrides ):
+        self.expires_at = None if expires_in is None else _dt.datetime.now( _dt.timezone.utc ) + _dt.timedelta( seconds=expires_in )
+        for key, value in overrides.items(): setattr( self, key, value )
+
+
+class TestTheAwaitingResponseInbox:
+
+    def test_it_returns_the_card_in_the_shape_of_a_live_push( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=300 ) ] )
+        r = harness.client.get( "/api/notifications/awaiting-response" )
+        assert_no_accidental_500( r )
+        body = r.json()
+        assert body[ "status" ]         == "success"
+        assert body[ "awaiting_count" ] == 1
+        assert body[ "timestamp" ]      == FROZEN_TIMESTAMP
+        card = body[ "notifications" ][ 0 ]
+        assert card == {
+            "id"                 : a_uuid( "waiting-row" ),
+            "sender_id"          : "SENDER-ID-VALUE",
+            "sender_persona"     : "PERSONA-VALUE",
+            "sender_icon"        : "ICON-VALUE",
+            "title"              : "TITLE-VALUE",
+            "message"            : "MESSAGE-VALUE",
+            "abstract"           : "ABSTRACT-VALUE",
+            "type"               : "TYPE-VALUE",
+            "priority"           : "PRIORITY-VALUE",
+            "job_id"             : "JOB-ID-VALUE",
+            "payload"            : { "PAYLOAD-KEY": "PAYLOAD-VALUE" },
+            "state"              : "delivered",
+            "response_requested" : True,
+            "response_type"      : "RESPONSE-TYPE-VALUE",
+            "response_default"   : "DEFAULT-VALUE",
+            "response_options"   : { "OPTIONS-KEY": "OPTIONS-VALUE" },
+            "timeout_seconds"    : card[ "timeout_seconds" ],
+            "suppress_ding"      : True,
+            "created_at"         : "CREATED-AT-VALUE",
+        }
+
+    def test_the_timeout_is_the_time_left_to_the_expiry_and_not_the_original_timeout( self, harness ):
+        """A page restarts at the time left to the expiry, not at the row's own timeout."""
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=300 ) ] )
+        left = harness.client.get( "/api/notifications/awaiting-response" ).json()[ "notifications" ][ 0 ][ "timeout_seconds" ]
+        assert 298 <= left <= 300
+
+    def test_a_part_second_rounds_up_so_a_card_is_never_drawn_with_zero_left( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=0.4 ) ] )
+        body = harness.client.get( "/api/notifications/awaiting-response" ).json()
+        assert body[ "notifications" ][ 0 ][ "timeout_seconds" ] == 1
+
+    def test_a_card_past_its_expiry_is_left_out_and_not_counted( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=-5 ), _Waiting( expires_in=60 ) ] )
+        body = harness.client.get( "/api/notifications/awaiting-response" ).json()
+        assert body[ "awaiting_count" ]      == 1
+        assert len( body[ "notifications" ] ) == 1
+
+    def test_a_hidden_card_is_left_out( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=60, is_hidden=True ), _Waiting( expires_in=60 ) ] )
+        assert harness.client.get( "/api/notifications/awaiting-response" ).json()[ "awaiting_count" ] == 1
+
+    def test_a_card_with_no_expiry_keeps_its_own_timeout( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting() ] )
+        card = harness.client.get( "/api/notifications/awaiting-response" ).json()[ "notifications" ][ 0 ]
+        assert card[ "timeout_seconds" ] == 77
+
+    def test_an_empty_inbox_is_a_success_with_zero_and_not_a_404( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [] )
+        r = harness.client.get( "/api/notifications/awaiting-response" )
+        assert r.status_code == 200
+        assert r.json()[ "awaiting_count" ] == 0
+        assert r.json()[ "notifications" ]  == []
+
+    def test_the_query_is_keyed_by_the_AUTHENTICATED_user_not_a_parameter( self, harness ):
+        harness.as_user( a_uuid( "the-authenticated-caller" ) )
+        harness.repo.returns( "get_pending_for_recipient", [] )
+        harness.client.get( "/api/notifications/awaiting-response" )
+        assert harness.repo.call_to( "get_pending_for_recipient" ).first == uuid.UUID( a_uuid( "the-authenticated-caller" ) )
+
+    def test_it_is_a_pure_read( self, harness ):
+        harness.repo.returns( "get_pending_for_recipient", [ _Waiting( expires_in=60 ) ] )
+        harness.client.get( "/api/notifications/awaiting-response" )
+        harness.repo.assert_only_called( "get_pending_for_recipient" )
+
+    def test_a_credential_that_is_not_a_uuid_is_a_400_before_the_database_is_touched( self, harness ):
+        harness.as_user( "not-a-uuid" )
+        r = harness.client.get( "/api/notifications/awaiting-response" )
+        assert r.status_code == 400
+        assert harness.repo.calls == []
+        assert harness.sessions   == []
+
+    def test_a_repo_fault_is_a_500_and_not_an_empty_list( self, harness ):
+        harness.repo.raises( "get_pending_for_recipient", RuntimeError( "connection reset" ) )
+        assert harness.client.get( "/api/notifications/awaiting-response" ).status_code == 500
+
+    def test_the_static_route_is_not_swallowed_by_the_user_id_route( self, harness ):
+        """The route answers as itself and is not read as a user id."""
+        harness.repo.returns( "get_pending_for_recipient", [] )
+        assert "awaiting_count" in harness.client.get( "/api/notifications/awaiting-response" ).json()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GET /api/notifications/answers-owed
 # ═══════════════════════════════════════════════════════════════════════════════
 

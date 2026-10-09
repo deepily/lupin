@@ -233,7 +233,7 @@ interface QueueUpdatePayload {
   notification?: ServerNotificationFields;
 }
 
-interface ServerNotificationFields {
+export interface ServerNotificationFields {
   id_hash             ?: string;
   id                  ?: string;
   message             ?: string;
@@ -271,6 +271,17 @@ export interface ActionRequiredStore {
   /** Arrival order. The first item is the active card; the rest wait in the queue (360de81b). */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
+  /**
+   * Take in the cards that were filed before this page opened (row 4ca5776c).
+   *
+   * Requires:
+   *   - cards is the `notifications` list of GET /api/notifications/awaiting-response
+   * Ensures:
+   *   - each card the store does not already hold is added, in list order, exactly as a live push adds it
+   *   - a card already held is left alone, so a push that arrived first is kept
+   *   - returns how many cards were added
+   */
+  hydrateAwaiting(cards: ReadonlyArray<ServerNotificationFields>): number;
   /**
    * Non-optimistic respond — Phase 6b per Pass 2 A1. Transitions through
    * "submitting" → "responded" | "failed". Throws on unknown idHash or
@@ -505,6 +516,29 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private onQueueUpdate(e: LupinEvent<QueueUpdatePayload>): void {
     const n = e.payload.notification;
     if (!n) return;
+    this.ingest(n);
+  }
+
+  /**
+   * Take in the cards that were filed before this page opened (row 4ca5776c).
+   *
+   * A card reaches the store by a live push, so one filed while the page was closed was never drawn.
+   * The server's list of waiting cards goes through the same path a push takes.
+   *
+   * Requires:
+   *   - cards is the `notifications` list of GET /api/notifications/awaiting-response
+   * Ensures:
+   *   - each card the store does not already hold is added, in list order, exactly as a live push adds it
+   *   - a card already held is left alone, so a push that arrived first is kept
+   *   - returns how many cards were added
+   */
+  hydrateAwaiting(cards: ReadonlyArray<ServerNotificationFields>): number {
+    const before = this.entries.size;
+    for (const card of cards) this.ingest(card);
+    return this.entries.size - before;
+  }
+
+  private ingest(n: ServerNotificationFields): void {
     if (n.response_requested !== true) return;
     const idHash = n.id_hash ?? n.id;
     if (!idHash) return;

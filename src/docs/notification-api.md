@@ -991,6 +991,21 @@ ack NOT SAVED` line regardless of the debug flag.
 **Live probe** (write-only, run at the operator's discretion — it interrupts every live
 seat): `src/scripts/probe_broadcast_ack_two_sided.py`.
 
+### 4.2 GET /api/notifications/awaiting-response
+
+The response cards still waiting for the caller's answer, oldest first, in the shape a live push carries.
+Both pages call it at load, so a card filed while the page was closed is drawn as a Yes/No card.
+
+Shape: `{ status, awaiting_count, notifications, timestamp }`. Each notification carries `id`, `sender_id`,
+`sender_persona`, `sender_icon`, `title`, `message`, `abstract`, `type`, `priority`, `job_id`, `payload`,
+`state`, `response_requested` (always true), `response_type`, `response_default`, `response_options`,
+`timeout_seconds`, `suppress_ding` (always true) and `created_at`.
+
+- `timeout_seconds` is the whole seconds left to the row's expiry, rounded up, so a page restarts its countdown where the server's clock stands. A row with no expiry keeps its own timeout.
+- A row past its expiry, or soft-hidden, is left out. A row the user has answered is not waiting, so it is left out too.
+- A pure read: nothing is marked delivered or answered. `400` when the credential is not a UUID, `500` on a query fault.
+- It reads `NotificationRepository.get_pending_for_recipient`, not the undelivered inbox: a card pushed to an open page is already `delivered` and is still waiting.
+
 ---
 
 ## 5. Data Models & Enums

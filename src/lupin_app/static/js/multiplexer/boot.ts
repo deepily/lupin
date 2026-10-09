@@ -37,6 +37,7 @@ import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrato
 import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
 import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
 import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
+import { createAwaitingResponseHydration } from "./stores/awaitingResponseHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
@@ -760,6 +761,9 @@ function bootMultiplexer(): void {
     getExcludeOwnJobs : () => authManager.isCurrentUserAdmin() && stores.notifications.filterMode() === "others",
   });
   void coldHistoryHydration.run();
+  // Row 4ca5776c — a response card filed while this page was closed is not in the history above as a
+  // card. Ask the server for the ones still waiting and let the store add them as a push would.
+  void createAwaitingResponseHydration({ api: apiClient, stores: { actionRequired: stores.actionRequired } }).run();
   // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
   // ONCE at boot; after a long silent window the host prune reaps stale sessions
   // and the strip only lazily refills (~15-20min) as sessions re-announce a

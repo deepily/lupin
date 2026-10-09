@@ -241,6 +241,7 @@ result, not only where it posts. (`AskResponse.queue_position` — added 2026-09
 | GET | `/api/notifications/answers-owed` | Credential | Questions this caller still owes an answer to |
 | POST | `/api/notifications/answers-owed/ack` | Credential | Acknowledge an owed-answer item |
 | GET | `/api/notifications/undelivered` | Credential | Notifications not yet delivered to this caller |
+| GET | `/api/notifications/awaiting-response` | Credential | Response cards still waiting for an answer, as a live push carries them; both pages draw these at load |
 | POST | `/api/notifications/undelivered/dismiss` | Credential | Dismiss an undelivered notification |
 | GET | `/api/notifications/broadcast-acks/{broadcast_id}` | Credential | Acks collected for one broadcast |
 
