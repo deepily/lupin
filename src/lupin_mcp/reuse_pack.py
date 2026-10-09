@@ -370,7 +370,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
              "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
-             "malformed": [ m for r in rows if r[ "status" ] == "answered" for m in _malformed_of( r ) ], "oversize": oversize,
+             "malformed": [ m for r in rows for m in _malformed_of( r ) ], "oversize": oversize,
              "cache_write_failed": unwritten, "refused_422": breaker.refusals,
              "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }
 

@@ -131,3 +131,10 @@ def test_a_pair_receipt_replays_on_a_context_with_another_pack_size( env ):
     other     = packed_ctx( env, fake.PairFake( entries_of( env ) ), size=7 )
     out       = rt.replay_impl( rec[ "id" ], other )
     assert out[ "status" ] == "ok" and out[ "frozen" ][ "verdict" ] == rec[ "verdict" ] and out[ "differences" ] == { "frozen": [], "head": [] }
+
+
+def test_replaying_a_pair_receipt_on_a_context_without_the_packed_path_is_a_named_error_not_a_crash( env ):
+    _, _, rec = pair_run( env )
+    plain     = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=None )
+    out       = rt.replay_impl( rec[ "id" ], plain )
+    assert out[ "status" ] == "error" and out[ "error" ] == "PAIR_NEEDS_PACKED"

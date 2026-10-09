@@ -1051,12 +1051,14 @@ def _route_pair( ctx, need, entries, flags, frozen=False, model=None, policy=Non
     Ensures:
         - returns the same shape as _route, with route "full" and no plan
         - the verdict is decide_provides over the answers; an entry that failed, was malformed or was too large to send is a gap
+        - d["malformed"] also names every entry the sweep found malformed, with its first reason, though its cause stays CALL_FAILED
     """
     from lupin_mcp import reuse_pack                                           # imported here: it imports this module
     policy = vd.POLICY_PROVIDES if policy is None else policy
     sw     = reuse_pack.packed_sweeper( ctx.pack_size, kind="pair" )( ctx, need, entries, frozen=frozen, model=model, gaps=gaps )
     asked  = [ { "id": a[ "id" ], "provides": a[ "provides" ], "coverage": a[ "probabilities" ] } for a in sw[ "answers" ] ]
     d      = vd.decide_provides( asked, [ e[ "id" ] for e in entries ], sw[ "failed" ], flags, policy )
+    d[ "malformed" ] = d[ "malformed" ] + [ { "id": m[ "id" ], "reason": m[ "reasons" ][ 0 ] } for m in sw[ "malformed" ] ]      # the cause stays CALL_FAILED: these ids are failed
     return { "route": "full", "sw": sw, "d": d, "deciding": entries, "stages": [ _stage( "all", sw, len( entries ) ) ], "plan": None, "sweeps": [ sw ] }
 
 
