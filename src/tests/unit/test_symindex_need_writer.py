@@ -166,6 +166,20 @@ def test_write_need_gives_up_after_max_attempts( src_root ):
     assert record[ "job_id" ] is None
 
 
+def test_write_need_retries_after_a_failed_call( src_root ):
+    calls = []
+
+    async def flaky( prompt, system_prompt ):
+        calls.append( prompt )
+        if len( calls ) == 1: raise RuntimeError( "error_max_turns" )
+        return _reply( GOOD )
+
+    record = asyncio.run( nw.write_need( _input( src_root ), flaky ) )
+    assert record[ "ok" ] is True and len( record[ "attempts" ] ) == 2
+    assert record[ "attempts" ][ 0 ][ "failures" ] == [ "call_error" ] and record[ "attempts" ][ 0 ][ "session_id" ] is None
+    assert "call_error" not in calls[ 1 ]
+
+
 def test_write_need_totals_cost_and_tokens( src_root ):
     record = asyncio.run( nw.write_need( _input( src_root ), FakeQuery( [ "bad.", GOOD ] ) ) )
     assert record[ "cost_usd" ] == 1.0 and record[ "input_tokens" ] == 200 and record[ "output_tokens" ] == 40
@@ -227,7 +241,7 @@ def test_sdk_reply_runs_with_tools_off_and_reads_the_result( monkeypatch ):
     reply = asyncio.run( nw.sdk_reply( "p", "s" ) )
     assert reply == nw.Reply( text="A function that does it.", session_id="sess-9", cost_usd=0.25, input_tokens=7, output_tokens=3 )
     assert seen[ 0 ].tools == [] and seen[ 0 ].permission_mode == "default" and seen[ 0 ].system_prompt == "s"
-    assert seen[ 0 ].max_turns == 1
+    assert seen[ 0 ].max_turns == 3
 
 
 def test_sdk_reply_raises_on_an_error_result( monkeypatch ):
