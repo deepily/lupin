@@ -1369,3 +1369,28 @@ pfv_compose_service() {
     [ -n "$found" ] || return 1
     printf '%s\n' "$found"
 }
+
+# ── pfv_test_login_env_status ────────────────────────────────────────────────
+# Does the VM's env file supply the test role's password?
+#
+# The VM has no secrets directory. The test role's password reaches the container as
+# LUPIN_TEST_DB_PASSWORD, from the Secret Manager secret lupin-db-test-password, through the
+# env file. An empty or absent value is plain mode: tests that create databases then run as
+# DB_USER. This cannot say whether the secret exists in Secret Manager: the VM has no gcloud
+# call here, so the env file is the only witness.
+#
+# Requires:  $1 = path to the env file
+# Ensures:
+#   - prints SUPPLIED and returns 0 when the file holds a non-empty LUPIN_TEST_DB_PASSWORD
+#   - prints PLAIN and returns 1 when the key is absent or empty
+#   - prints UNREADABLE and returns 3 when the file cannot be read
+#   - never prints the value
+pfv_test_login_env_status() {
+    local rc=0
+    pfv_env_file_supplies "$1" LUPIN_TEST_DB_PASSWORD || rc=$?
+    case "$rc" in
+        0) printf 'SUPPLIED'; return 0 ;;
+        1|2) printf 'PLAIN'; return 1 ;;
+        *) printf 'UNREADABLE'; return 3 ;;
+    esac
+}
