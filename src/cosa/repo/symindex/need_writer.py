@@ -29,6 +29,7 @@ MIN_WORDS        = 8
 MAX_WORDS        = 40
 MAX_ATTEMPTS     = 3
 OPENERS          = { "function": "A function that ", "method": "A method that ", "class": "A class that " }
+BARE_WORD        = re.compile( r"[a-z]+" )
 PLACEHOLDER      = re.compile( r"\b(NAME|CLASS|MODULE|ARG\d+|ATTR\d+)\b" )
 SENTENCE_BREAK   = re.compile( r"[.?!]\s+\S" )
 SYSTEM_PROMPT    = (
@@ -140,7 +141,7 @@ def check_form( sentence, need ):
     return sorted( kinds )
 
 
-def build_prompt( need, failures=None, own_words=None, last_words=None ):
+def build_prompt( need, failures=None, own_words=None, last_words=None, avoid_words=None ):
     """
     Build the user prompt for one member.
 
@@ -148,12 +149,17 @@ def build_prompt( need, failures=None, own_words=None, last_words=None ):
         - holds the stripped text and the form rules
         - when failures is given, ends with a note naming only the kinds of failure
         - own_words, when given, are named in that note; each must be one of the member's own names
+        - avoid_words, when given, are each named as a word not to use; they come from the checker's
+          resend list and nothing else from that list reaches the writer
         - last_words, when given with a word_count failure, states the length of the last sentence and
           tells a long one to aim ten words under the limit, a short one to say a little more
 
     Raises:
         - ValueError when an own word is not one of the member's own names
+        - ValueError when an avoid word is not a bare lower-case word
     """
+    for word in avoid_words or []:
+        if not BARE_WORD.fullmatch( word ): raise ValueError( f"avoid word {word!r} is not a bare lower-case word" )
     foreign = [ word for word in ( own_words or [] ) if word not in need.forbidden ]
     if foreign: raise ValueError( f"{foreign[ 0 ]} is not one of the member's own names" )
     prompt = (
@@ -176,10 +182,11 @@ def build_prompt( need, failures=None, own_words=None, last_words=None ):
     if failures and "own_identifier" in failures:
         for word in own_words or []: prompt += f' In your last sentence the word "{word}" is a name in the original code; do not use it.'
         prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it. Words that often double as names in code include limit, error, state, job, mode, store, seed, minutes, code, agent, result, budget; say those ideas in other words."
+    for word in avoid_words or []: prompt += f' Do not use the word "{word}".'
     return prompt
 
 
-async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None ):
+async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None, avoid_words=None ):
     """
     Ask for one sentence and retry on a form failure.
 
@@ -197,7 +204,7 @@ async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None )
     record    = { "member_id": need.member_id, "kind": need.kind, "ok": False, "need": None, "job_id": None, "rewrites": 0 }
     for _ in range( max_attempts ):
         try:
-            reply = await reply_fn( build_prompt( need, failures, own_words, last_words ), SYSTEM_PROMPT )
+            reply = await reply_fn( build_prompt( need, failures, own_words, last_words, avoid_words ), SYSTEM_PROMPT )
         except RuntimeError as error:
             attempts.append( { "reply": str( error ), "failures": [ "call_error" ], "session_id": None, "cost_usd": 0.0,
                                "input_tokens": 0, "output_tokens": 0 } )
@@ -221,7 +228,7 @@ async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None )
     return record
 
 
-async def run_members( member_ids, src_root, out_dir, reply_fn, redo=None, max_attempts=MAX_ATTEMPTS ):
+async def run_members( member_ids, src_root, out_dir, reply_fn, redo=None, max_attempts=MAX_ATTEMPTS, avoid=None ):
     """
     Write a need for each member in order, one json file each, resuming over saved files.
 
@@ -238,7 +245,8 @@ async def run_members( member_ids, src_root, out_dir, reply_fn, redo=None, max_a
         - ValueError on a duplicate member id
     """
     if len( set( member_ids ) ) != len( member_ids ): raise ValueError( "duplicate member id in the run list" )
-    redo = redo or {}
+    redo  = redo or {}
+    avoid = avoid or {}
     os.makedirs( out_dir, exist_ok=True )
     records = []
     for index, member_id in enumerate( member_ids, start=1 ):
@@ -249,11 +257,30 @@ async def run_members( member_ids, src_root, out_dir, reply_fn, redo=None, max_a
         if saved is not None and member_id not in redo:
             records.append( saved )
             continue
-        record = await write_need( ni.build_input( member_id, src_root ), reply_fn, max_attempts, redo.get( member_id ) )
+        record = await write_need( ni.build_input( member_id, src_root ), reply_fn, max_attempts, redo.get( member_id ), avoid.get( member_id ) )
         if saved is not None: record[ "rewrites" ] = saved[ "rewrites" ] + 1
         with open( path, "w", encoding="utf-8" ) as handle: json.dump( record, handle, indent=2 )
         records.append( record )
     return records
+
+
+def redo_from_resend_list( rows ):
+    """
+    Turn the checker's resend list into redo kinds and avoid words per member.
+
+    Requires:
+        - rows is the list read from a resend-list.json: member, failed, and optionally avoid_words
+
+    Ensures:
+        - returns ( redo, avoid ): redo maps a member to its check names, identifier renamed
+          own_identifier; avoid maps a member to its avoid_words only when it failed identifier
+        - nothing else from a row reaches the writer
+    """
+    redo, avoid = {}, {}
+    for row in rows:
+        redo[ row[ "member" ] ] = [ "own_identifier" if check == "identifier" else check for check in row[ "failed" ] ]
+        if "identifier" in row[ "failed" ] and row.get( "avoid_words" ): avoid[ row[ "member" ] ] = list( row[ "avoid_words" ] )
+    return redo, avoid
 
 
 def needs_document( run_dir, member_ids, sample_sha256 ):
@@ -313,6 +340,7 @@ def main( argv=None, reply_fn=None ):
     parser.add_argument( "--model", default=DEFAULT_MODEL )
     parser.add_argument( "--max-attempts", type=int, default=MAX_ATTEMPTS )
     parser.add_argument( "--assemble", default=None, help="write the needs document here and make no model call" )
+    parser.add_argument( "--resend-list", default=None, help="the checker's resend-list.json; those members are rewritten" )
     parser.add_argument( "--redo-file", default=None, help="json list of {member, check}; those members are rewritten" )
     args = parser.parse_args( argv )
 
@@ -323,13 +351,15 @@ def main( argv=None, reply_fn=None ):
         with open( args.assemble, "w", encoding="utf-8" ) as handle:
             json.dump( needs_document( args.out, members, sample_sha ), handle, indent=2 )
         return 0
-    redo     = {}
+    redo, avoid = {}, {}
+    if args.resend_list:
+        with open( args.resend_list, encoding="utf-8" ) as handle: redo, avoid = redo_from_resend_list( json.load( handle ) )
     if args.redo_file:
         with open( args.redo_file, encoding="utf-8" ) as handle: rows = json.load( handle )
         for row in rows: redo.setdefault( row[ "member" ], [] ).append( row[ "check" ] )
     if reply_fn is None:
         async def reply_fn( prompt, system_prompt ): return await sdk_reply( prompt, system_prompt, args.model )
-    records = asyncio.run( run_members( members, src_root, args.out, reply_fn, redo, args.max_attempts ) )
+    records = asyncio.run( run_members( members, src_root, args.out, reply_fn, redo, args.max_attempts, avoid ) )
     failed  = [ r[ "member_id" ] for r in records if not r[ "ok" ] ]
     print( f"members={len( records )} ok={len( records ) - len( failed )} failed={len( failed )}" )
     return 1 if failed else 0
