@@ -63,7 +63,7 @@ def test_resolve_member_splits_module_from_qualname( src_root ):
 
 def test_resolve_member_unknown_id_raises( src_root ):
     with pytest.raises( ValueError, match="no module file" ):
-        ni.resolve_member( "pkg_alpha.nothing.here.fn", src_root )
+        ni.resolve_member( "zzz_absent.nothing.fn", src_root )
 
 
 def test_resolve_member_package_init( tmp_path ):
@@ -79,6 +79,11 @@ def test_kind_of_each_member( src_root ):
     assert ni.build_input( FUNC_ID, src_root ).kind  == "function"
     assert ni.build_input( METH_ID, src_root ).kind  == "method"
     assert ni.build_input( CLASS_ID, src_root ).kind == "class"
+
+
+def test_unresolved_prefix_falls_back_to_package_and_fails_on_name( src_root ):
+    with pytest.raises( ValueError, match="not found" ):
+        ni.build_input( "pkg_alpha.nothing.here.fn", src_root )
 
 
 def test_missing_qualname_raises( src_root ):
@@ -105,7 +110,7 @@ def test_class_input_strips_class_method_and_params( src_root ):
     text = ni.build_input( CLASS_ID, src_root ).text
     for leaked in ( "ResultBlockReader", "read_block", "source_path", "limit", "mod_gamma", "sub_beta", "pkg_alpha" ):
         assert leaked not in text, leaked
-    assert "CLASS" in text and "open(" in text
+    assert "CLASS" in text and "open(" in text and "__init__" in text
 
 
 def test_method_input_strips_enclosing_class( src_root ):
@@ -113,6 +118,11 @@ def test_method_input_strips_enclosing_class( src_root ):
     assert "ResultBlockReader" not in text
     assert "read_block" not in text
     assert "source_path" not in text
+
+
+def test_self_attribute_names_become_attr_placeholders( src_root ):
+    text = ni.build_input( METH_ID, src_root ).text
+    assert "self.ATTR1" in text
 
 
 def test_self_and_cls_are_not_replaced( src_root ):
