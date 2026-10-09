@@ -324,20 +324,161 @@
         {
             "phase": 4,
             "name": "Package sweep, 77 packages on a daily train",
-            "steps": [],
-            "expand_trigger": "Phase 3 is signed off"
+            "steps": [
+                {
+                    "key": "ph4-s1",
+                    "name": "Sweep the Python packages in six trains",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every swept package passes the docstring linter",
+                    "done_receipt": "six trains merged on main; the report at 72fb54a2e counts 859 files, 7,959 docstrings, 0 findings"
+                },
+                {
+                    "key": "ph4-s2",
+                    "name": "Before and after report",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Report states files, docstrings and findings before and after",
+                    "done_receipt": "2026.10.07-docstring-sweep-before-and-after-report.md at 72fb54a2e"
+                }
+            ]
         },
         {
             "phase": 5,
             "name": "Reference docs to capability pages",
-            "steps": [],
-            "expand_trigger": "the sweep finishes"
+            "steps": [
+                {
+                    "key": "ph5-s1",
+                    "name": "Lint census of the in-scope pages",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every in-scope page listed with its finding count, population from git ls-files",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph5-s2",
+                    "name": "Fix the reference pages in place",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every reference page passes the markdown linter on all rules but length",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph5-s1"
+                    ]
+                },
+                {
+                    "key": "ph5-s3",
+                    "name": "Split the 13 long pages, old path kept as index",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every part is under 1,500 words, every claim is in one part, no citer of an old path changes",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph5-s2"
+                    ]
+                },
+                {
+                    "key": "ph5-s4",
+                    "name": "CLAUDE.md template and rewrite",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "CLAUDE.md meets its template and the tests that read it by machine stay green",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph5-s2"
+                    ]
+                },
+                {
+                    "key": "ph5-s5",
+                    "name": "Claim harness on whole pages",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Old and new page carry the same claims for every rewritten page",
+                    "owner_role": "tester",
+                    "depends_on": [
+                        "ph5-s3",
+                        "ph5-s4"
+                    ]
+                },
+                {
+                    "key": "ph5-s6",
+                    "name": "Exit gate: linter, claim harness and unit tier",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Every in-scope page passes md_lint and the claim harness, and the unit tier is green on the changed tree",
+                    "depends_on": [
+                        "ph5-s5"
+                    ]
+                }
+            ]
         },
         {
             "phase": 6,
             "name": "R&D extract-then-archive",
-            "steps": [],
-            "expand_trigger": "Phase 5 finishes"
+            "steps": [
+                {
+                    "key": "ph6-s1",
+                    "name": "Citation search over all tracked files, as code",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "A script finds every tracked file citing a given R&D doc, with no extension list, and has tests",
+                    "owner_role": "implementer"
+                },
+                {
+                    "key": "ph6-s2",
+                    "name": "Classify every R&D doc into the ledger",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "src/docs/rnd-ledger.tsv covers every doc in src/rnd and src/cosa/rnd at its sha",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph6-s1"
+                    ]
+                },
+                {
+                    "key": "ph6-s3",
+                    "name": "Approve the in-force list in one batch",
+                    "item_class": "decision",
+                    "priority": "P2",
+                    "acceptance": "Rick approves the list of docs still in force",
+                    "depends_on": [
+                        "ph6-s2"
+                    ]
+                },
+                {
+                    "key": "ph6-s4",
+                    "name": "Decision records and repointed Design lines",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Each in-force decision has a record and every Design line that cited the old doc points at it",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph6-s3"
+                    ]
+                },
+                {
+                    "key": "ph6-s5",
+                    "name": "Read rule in CLAUDE.md and the ledger coverage test",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "A unit test asserts the read rule and that the ledger covers every doc present at its sha, population from git ls-files",
+                    "owner_role": "implementer",
+                    "depends_on": [
+                        "ph6-s2"
+                    ]
+                },
+                {
+                    "key": "ph6-s6",
+                    "name": "Exit gate: every doc classified and the in-force items approved",
+                    "item_class": "task",
+                    "priority": "P2",
+                    "acceptance": "Ledger complete, approval recorded, coverage test green",
+                    "depends_on": [
+                        "ph6-s4",
+                        "ph6-s5"
+                    ]
+                }
+            ]
         },
         {
             "phase": 7,
