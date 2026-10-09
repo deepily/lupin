@@ -4681,6 +4681,23 @@ def task_ask_unpark(
     )
 
 
+def _podcast_actor() -> str:
+    """
+    Build the actor the podcast doors bind a card to: the persona and the stable session id.
+
+    Ensures:
+        - returns "<persona> <first 8 hex of the stable session id>"
+        - the stable id survives a clear, so a re-spun seat can resume its own card
+        - falls back to the current session's 8 hex when the bridge has no stable id
+        - never raises
+    """
+    try:
+        stable = _get_cc_metadata().get( "stable_session_id" ) or ""
+    except Exception:
+        stable = ""
+    return f"{_commons_persona_fields()[ 'persona_name' ]} {stable[ :8 ] if stable else SESSION_ID}"
+
+
 @mcp.tool
 @_offloaded_tool
 def podcast_for_rick(
@@ -4710,7 +4727,7 @@ def podcast_for_rick(
         card_already_waiting, card_already_spent, ask_answer_malformed, card_unreadable.
         A queue_failed error carries a retry hint: the card is still valid.
 
-    The actor is not a parameter: it is stamped from the session bridge.
+    The actor is not a parameter: it is stamped from the session bridge, bound to the stable session id.
 
     Example:
         podcast_for_rick(path="/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/2026.10.08-summary.md")
@@ -4721,7 +4738,7 @@ def podcast_for_rick(
     return podcast_for_rick_impl(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
-        actor        = _task_store_identity(),
+        actor        = _podcast_actor(),
         host_path    = path,
         card_id      = card_id,
     )

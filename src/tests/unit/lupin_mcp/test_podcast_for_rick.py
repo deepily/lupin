@@ -303,6 +303,7 @@ def stamped( monkeypatch ):
     monkeypatch.setattr( cv, "_get_server_url", lambda: "http://stub:7999" )
     monkeypatch.setattr( cv, "_mcp_outbound_api_key", lambda: "ck_live_stub" )
     monkeypatch.setattr( cv, "SESSION_ID_SOURCE", sb.SOURCE_PPID )
+    monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "stable_session_id": "" } )
 
 
 def test_the_tool_stamps_the_actor_and_passes_the_path_through( stamped, monkeypatch ):
@@ -310,6 +311,26 @@ def test_the_tool_stamps_the_actor_and_passes_the_path_through( stamped, monkeyp
     monkeypatch.setattr( cv, "podcast_for_rick_impl", lambda **kwargs: captured.update( kwargs ) or sentinel )
     assert cv.podcast_for_rick.fn.sync( path="/abs/x.md", card_id="c1" ) is sentinel
     assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "actor": "tiffany 641d31ee", "host_path": "/abs/x.md", "card_id": "c1" }
+
+
+def test_the_actor_binds_to_the_stable_session_id_not_the_current_one( stamped, monkeypatch ):
+    monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "stable_session_id": "641d31ee-8b4c-4349-b241-9560e294a2ce", "session_id": "ffffffff-0000" } )
+    monkeypatch.setattr( cv, "SESSION_ID", "ffffffff" )   # the id after a clear
+    captured = { }
+    monkeypatch.setattr( cv, "podcast_for_rick_impl", lambda **kwargs: captured.update( kwargs ) or { } )
+    cv.podcast_for_rick.fn.sync( path="/abs/x.md" )
+    assert captured[ "actor" ] == "tiffany 641d31ee"
+
+
+def test_without_a_stable_id_the_actor_falls_back_to_the_current_session( stamped, monkeypatch ):
+    monkeypatch.setattr( cv, "_get_cc_metadata", lambda: { "stable_session_id": "" } )
+    assert cv._podcast_actor() == "tiffany 641d31ee"
+
+
+def test_a_bridge_failure_falls_back_to_the_current_session( stamped, monkeypatch ):
+    def broken(): raise RuntimeError( "no bridge" )
+    monkeypatch.setattr( cv, "_get_cc_metadata", broken )
+    assert cv._podcast_actor() == "tiffany 641d31ee"
 
 
 def test_actor_is_not_a_tool_parameter():
