@@ -41,7 +41,9 @@ from . import harness_runner, model_transport, reader_rig
 
 DOC_NODES    = ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef )
 ATTEMPTS     = 3
-RAW_LIMIT    = 2000
+RAW_HEAD     = 600     # the start of a reply names what the grader was weighing
+RAW_TAIL     = 1400    # the end holds its last words and the score object, so the tail is the larger share
+RAW_LIMIT    = RAW_HEAD + RAW_TAIL
 SCORE_MENTION = re.compile( r'\{[^{}]*"score"[^{}]*\}' )
 SCORE_STRICT  = re.compile( r'\{\s*"score"\s*:\s*([01])\s*\}' )
 FENCE_OPEN    = re.compile( r"^```(?:json)?" )
@@ -288,6 +290,22 @@ def take_score_object( raw ):
     return '{"score": ' + taken.group( 1 ) + "}"
 
 
+def cut_raw( raw ):
+    """
+    Return a raw reply cut to head and tail, with the cut marked.
+
+    Requires:
+        - raw is the text of one model reply
+
+    Ensures:
+        - a reply of RAW_LIMIT characters or fewer is returned unchanged
+        - a longer one is returned as its first RAW_HEAD characters, a line "[... N characters cut ...]" with N the
+          number of characters left out, and its last RAW_TAIL characters
+    """
+    if len( raw ) <= RAW_LIMIT: return raw
+    return raw[ :RAW_HEAD ] + f"\n[... {len( raw ) - RAW_LIMIT} characters cut ...]\n" + raw[ -RAW_TAIL: ]
+
+
 class CallTracker:
     """
     Wrap a query function: remember the last step and raw reply, and maybe salvage a score.
@@ -322,7 +340,7 @@ class CallTracker:
         if taken is None:
             for message in messages: yield message
             return
-        self.salvaged = { "score": json.loads( taken )[ "score" ], "raw": self.raw[ :RAW_LIMIT ] }
+        self.salvaged = { "score": json.loads( taken )[ "score" ], "raw": cut_raw( self.raw ) }
         first = True
         for message in messages:
             if not isinstance( message, AssistantMessage ): yield message
@@ -343,7 +361,7 @@ async def score_question( text, question, config, run, ledger, query_fn, salvage
         - returns ( 1 or 0, None, salvaged ) on the first attempt that gets a parseable reply to both steps;
           salvaged is { score, raw } when that attempt's grader reply was cut down to its score object, else None
         - returns ( None, { step, error, raws }, None ) when every attempt failed: the step and error of the last
-          attempt, and raws holding the raw reply of every attempt, each cut to RAW_LIMIT characters
+          attempt, and raws holding the raw reply of every attempt, each cut by cut_raw to its head and tail
         - a ModelUnavailableError ends the attempts at once, and is reported as the last attempt
         - a retry is a real call, charged to the cap; a reader answer cached after it parsed is not asked again
         - a score read from the ledger, not from a call made now, reports no salvage
@@ -358,7 +376,7 @@ async def score_question( text, question, config, run, ledger, query_fn, salvage
             return int( await reader_rig.score_text( text, [ question ], config, run, ledger=ledger, query_fn=tracker ) ), None, tracker.salvaged
         except ( reader_rig.ReaderParseError, model_transport.ModelCallError ) as e:
             error = f"{type( e ).__name__}: {e}"
-            raws.append( tracker.raw[ :RAW_LIMIT ] )
+            raws.append( cut_raw( tracker.raw ) )
             if isinstance( e, model_transport.ModelUnavailableError ): break
     return None, { "step": tracker.step, "error": error, "raws": raws }, None
 
@@ -412,7 +430,7 @@ async def score_file( path, old_text, new_text, group, config, ledger, query_fn,
         - returns { old_scores, new_scores, old_total, new_total, compared, dropped, old_answered, new_answered,
           unscored_records, salvaged_records, old_mean, new_mean, passes, verdict }, totals being whole numbers of answers graded 1
         - each unscored record holds file, text (old or new, never sent to a model), run, id, step, error and raws
-        - each salvaged record holds file, text, run, id, the score taken and the raw reply cut to RAW_LIMIT; only
+        - each salvaged record holds file, text, run, id, the score taken and the raw reply cut by cut_raw to its head and tail; only
           pairs that were compared get one, since only they are in the totals
         - old_mean and new_mean are None when nothing was compared
         - passes is None when any pair was dropped, else new_total >= old_total
