@@ -27,6 +27,9 @@ DEFAULT_NEEDS    = DATA_ROOT + "/reuse-e2e-2026.10/needs.json"
 DEFAULT_MANIFEST = DATA_ROOT + "/reuse-recall-baseline-2026.10.06/manifest.json"
 DEFAULT_SAMPLE   = "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io/tmp/2026.10.07-john-jev-e2e-sample-by-component-58-42-seed-20261007.json"
 
+DEFAULT_SAMPLE_SHA   = "5b6d84fc2dd8dc458b36255e129001f55e3fbe4d252c14c6d65a4994779a91fd"      # plan 12.1, ruling R1
+DEFAULT_MANIFEST_SHA = "bfbfceab399cf753093f0c9ee0bec73a0de00738a0696126a669e129de466941"      # plan 12.1
+
 SAMPLE_SIZE      = 100
 MIN_WORDS        = 8
 MAX_WORDS        = 40
@@ -231,7 +234,9 @@ def main( argv=None ):
 
     Ensures:
         - returns 0 when exactly --size needs were checked and all pass, 1 when any fails or the count differs
-        - returns 2, writing nothing, when an input is missing or not readable JSON
+        - returns 2, writing nothing, when an input is missing, unreadable or malformed
+        - returns 2, writing nothing, when the sample or manifest sha256 is not the one named
+        - returns 2, writing nothing, when a member or a twin of one is not in the index
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     ap.add_argument( "--needs",    default=DEFAULT_NEEDS )
@@ -240,18 +245,24 @@ def main( argv=None ):
     ap.add_argument( "--index",    required=True, help="symbols.jsonl of the index the run used" )
     ap.add_argument( "--out-dir",  required=True )
     ap.add_argument( "--size",     type=int, default=SAMPLE_SIZE )
+    ap.add_argument( "--sample-sha256",   default=DEFAULT_SAMPLE_SHA )
+    ap.add_argument( "--manifest-sha256", default=DEFAULT_MANIFEST_SHA )
     a = ap.parse_args( argv )
     try:
         raw      = json.loads( pathlib.Path( a.needs ).read_text( encoding="utf-8" ) )
         groups   = twin_groups( json.loads( pathlib.Path( a.manifest ).read_text( encoding="utf-8" ) ) )
         index    = load_index( a.index )
         sample   = load_sample_ids( a.sample )
-        sha      = file_sha256( a.needs )
-    except ( OSError, ValueError ) as e:
+        shas     = { "needs_sha256": file_sha256( a.needs ), "sample_sha256": file_sha256( a.sample ), "manifest_sha256": file_sha256( a.manifest ) }
+        for name, want in ( ( "sample_sha256", a.sample_sha256 ), ( "manifest_sha256", a.manifest_sha256 ) ):
+            if shas[ name ] != want: raise ValueError( f"{name} is {shas[ name ]}, not the {want} named" )
+        bad = sorted( k for k, v in raw.items() if not ( isinstance( v, dict ) and isinstance( v.get( "need" ), str ) ) )
+        if bad: raise ValueError( f"needs rows without a text under 'need': {', '.join( bad )}" )
+        results = check_all( { k: v[ "need" ] for k, v in raw.items() }, sample, index, groups )
+    except ( OSError, ValueError, KeyError, AttributeError ) as e:
         print( f"need check: cannot read an input: {e}" )
         return 2
-    results = check_all( { k: v[ "need" ] for k, v in raw.items() }, sample, index, groups )
-    results[ "needs_sha256" ] = sha
+    results.update( shas )
     results[ "sample_size_expected" ] = a.size
     out = pathlib.Path( a.out_dir )
     out.mkdir( parents=True, exist_ok=True )
