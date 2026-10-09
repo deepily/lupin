@@ -859,8 +859,9 @@ def _refuse_borrowed_identity( verb: str, source: Optional[ str ] = None ) -> Op
     into a fail-to-resolve, and a false "your session is broken" is what cost Rick an
     afternoon. So the tier still answers, and THIS is what stops the answer being acted on.
 
-    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. `notify`
-    and the `commons_read` family are untouched: a notification from the wrong pane is noise,
+    ⚠️ SCOPE IS DELIBERATELY NARROW — WRITES THAT CARRY AN IDENTITY, NOTHING ELSE. That covers a
+    task row, a DM, a commons post, and the topic `set_session_topic` writes into the resolved
+    session's bridge file. `notify` and the `commons_read` family are untouched: a notification from the wrong pane is noise,
     while a task row or a DM from the wrong seat is a durable misattribution. Refusing the
     alert path would also silence the very warning that says the identity is borrowed.
 
@@ -2475,6 +2476,9 @@ def set_session_topic( topic: str ) -> dict:
     Returns:
         dict with status and the topic that was set
     """
+    refusal = _refuse_borrowed_identity( "set_session_topic" )
+    if refusal is not None: return refusal
+
     import json
 
     meta        = _get_cc_metadata()
@@ -3458,6 +3462,9 @@ def commons_post(
         commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
         commons_post(topic="dm-tiberius", body="yes, that fix landed in commit f4e0370", metadata={"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"})
     """
+    refusal = _refuse_borrowed_identity( "commons_post" )
+    if refusal is not None: return refusal
+
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
     return _get_commons_store().post(
@@ -4048,6 +4055,9 @@ def dm_respond(
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
         The two id fields are the ones `dm_send` returns: `recipient_session` is the FULL session id (feed it back as `recipient_session_id`), `recipient_session_hash8` the persisted 8-character form that `dm_list` reports. They are deliberately not equal (`dm_list`'s `session_id` filter accepts either).
     """
+    refusal = _refuse_borrowed_identity( "dm_respond" )
+    if refusal is not None: return refusal
+
     persona = _commons_persona_fields()
     return _dm_respond_impl(
         recipient            = recipient,
