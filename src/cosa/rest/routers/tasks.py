@@ -3107,6 +3107,7 @@ def query_tasks(
     item_class          : Optional[str] = None,
     correlation_key     : Optional[str] = None,
     id_prefix           : Optional[str] = None,
+    blocked_by_persona  : Optional[str] = None,
     count_only          : bool = False,
     terse               : bool = False,
     include_terminal    : bool = False,
@@ -3202,6 +3203,7 @@ def query_tasks(
     # canonicalizes to None and keeps matching every row.
     owner_persona       = _canon_persona( owner_persona )
     accountable_manager = _canon_persona( accountable_manager )
+    blocked_by_persona  = _canon_persona( blocked_by_persona )
     # Alias parity (bug de653086): canonicalize the project filter through the
     # SAME alias table the WRITE seam now uses, so a query by the raw repo name
     # ("planning-is-prompting") still matches rows stored canonically ("plan") —
@@ -3224,6 +3226,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
@@ -3258,6 +3261,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
@@ -3279,6 +3283,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
@@ -3302,6 +3307,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 limit               = limit,
                 offset              = offset,
                 include_terminal    = include_terminal,
@@ -3318,7 +3324,7 @@ def query_tasks(
                     f"unscoped task_query would return {e.count} non-terminal rows "
                     f"(> {e.threshold}). Narrow it with a filter (owner_persona / "
                     f"status / item_class / project / gate_class / accountable_manager "
-                    f"/ correlation_key / id_prefix), or pass unscoped_audit=true for a deliberate "
+                    f"/ correlation_key / id_prefix / blocked_by_persona), or pass unscoped_audit=true for a deliberate "
                     f"full-store audit."
                 ),
             )
@@ -3356,6 +3362,7 @@ def query_tasks(
             item_class          = item_class,
             correlation_key     = correlation_key,
             id_prefix           = id_prefix,
+            blocked_by_persona  = blocked_by_persona,
             include_terminal    = include_terminal,
             owed_only           = owed_only,
             hide_parked         = hide_parked,
@@ -3414,6 +3421,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 # The update window is one of "your filters" too: without it the notice
                 # would count held rows outside the window the page and `total` describe.
                 updated_since       = updated_since,
@@ -3463,6 +3471,7 @@ def query_tasks(
                 item_class          = item_class,
                 correlation_key     = correlation_key,
                 id_prefix           = id_prefix,
+                blocked_by_persona  = blocked_by_persona,
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,

@@ -51,7 +51,8 @@ def _compiled( **kwargs ):
     query = TaskRepository._apply_scalar_filters(
         Session().query( TaskItem ), None, None, None, None, None, None, None, None, None, **kwargs
     )
-    return str( query.statement.compile( dialect = postgresql.dialect(), compile_kwargs = { "literal_binds": True } ) )
+    compiled = query.statement.compile( dialect = postgresql.dialect() )
+    return str( compiled ), list( compiled.params.values() )
 
 
 def _calls_missing_the_argument( source, scope, matches ):
@@ -75,13 +76,13 @@ def _is_repo_call( node ):
 # ── 1. the clause ─────────────────────────────────────────────────────────────
 
 def test_the_clause_is_a_jsonb_containment_of_the_exact_persona_ref():
-    sql = _compiled( blocked_by_persona = "tiffany" )
+    sql, params = _compiled( blocked_by_persona = "tiffany" )
     assert "blocked_by @>" in sql
-    assert '"kind": "persona"' in sql and '"id": "tiffany"' in sql
+    assert [ { "kind": "persona", "id": "tiffany" } ] in params
 
 
 def test_NEGATIVE_CONTROL_without_the_filter_no_containment_is_added():
-    assert "@>" not in _compiled()
+    assert "@>" not in _compiled()[ 0 ]
 
 
 # ── 2. every caller passes it ─────────────────────────────────────────────────
@@ -149,13 +150,13 @@ def _client():
     return TestClient( app )
 
 
-def test_the_page_route_forwards_the_canonical_persona_to_every_repo_call( repo ):
+def test_the_page_route_forwards_the_canonical_persona_to_its_four_repo_calls( repo ):
     r = _client().get( "/api/tasks", params = { FILTER: "Tiffany", "project": "lupin" } )
     assert r.status_code == 200, r.text
-    seen = { c[ 0 ]: c.kwargs[ FILTER ] for c in repo.method_calls if c[ 0 ] in REPO_METHODS }
-    assert set( seen ) == set( REPO_METHODS )
-    assert set( seen.values() ) == { "tiffany" }
-    assert all( c.kwargs[ FILTER ] == "tiffany" for c in repo.method_calls if c[ 0 ] in REPO_METHODS )
+    calls = [ c for c in repo.method_calls if c[ 0 ] in REPO_METHODS ]
+    assert { c[ 0 ] for c in calls } == { "query_tasks", "count_tasks", "count_tasks_by_project" }
+    assert len( calls ) == 4, "the page, the total, the held-rows count and the by-project count"
+    assert all( c.kwargs[ FILTER ] == "tiffany" for c in calls )
 
 
 def test_the_count_route_forwards_it_to_all_three_counts( repo ):

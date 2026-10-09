@@ -1158,8 +1158,10 @@ class TestUnscopedGuardRules:
         assert set( rules.SCOPING_FILTERS ) == {
             "owner_persona", "status", "item_class", "project",
             "gate_class", "accountable_manager", "correlation_key",
-            "id_prefix",
+            "id_prefix", "blocked_by_persona",
         }
+        # blocked_by_persona (row 879fe139) was admitted in the plan review: it names one persona, so it
+        # narrows like owner_persona does, and "what waits on me" would otherwise be rejected as bare.
         assert "urgency" not in rules.SCOPING_FILTERS
 
     def test_unscoped_query_error_carries_count_and_threshold( self ):

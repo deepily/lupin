@@ -264,6 +264,8 @@ SCOPING_FILTERS = (
     # count as a bare unscoped pull and get rejected by the guard, which is the
     # opposite of what the guard is for (row f45b37a9 remedy 2 / 4288dd53).
     "id_prefix",
+    # "What waits on me" names one persona, so it narrows as sharply as owner_persona does.
+    "blocked_by_persona",
 )
 
 

@@ -878,6 +878,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        blocked_by_persona  : Optional[str] = None,
         limit               : int = 100,
         offset              : int = 0,
         include_terminal    : bool = False,
@@ -929,6 +930,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             "item_class"          : item_class,
             "correlation_key"     : correlation_key,
             "id_prefix"           : id_prefix,
+            "blocked_by_persona"  : blocked_by_persona,
         }
 
         # The guard: a bare unscoped pull over-threshold, with no deliberate-audit
@@ -960,7 +962,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until
+            updated_since=updated_since, updated_until=updated_until,
+            blocked_by_persona=blocked_by_persona
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -969,7 +972,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
     @staticmethod
     def _apply_scalar_filters( query, owner_persona, status, gate_class, urgency,
                                accountable_manager, project, item_class, correlation_key,
-                               id_prefix, updated_since=None, updated_until=None ):
+                               id_prefix, updated_since=None, updated_until=None,
+                               blocked_by_persona=None ):
         """
         Apply the exact-match filters in one place, shared by every count and page query.
 
@@ -979,6 +983,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         Requires:
             - query is a TaskItem query; every filter is None or an exact value
+            - blocked_by_persona, when present, is the canonical persona name a row's blocked_by names
             - id_prefix, when present, is compact lowercase hex (hyphens stripped) exactly as
               `classify_task_ref` returns it; this method does not re-validate caller text,
               because a `LIKE` built from arbitrary input turns an id lookup into a search surface
@@ -1002,6 +1007,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if id_prefix is not None:
             hyphened = hyphenate_compact_prefix( id_prefix )
             query    = query.filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )
+        # Rows that wait on a persona but belong to someone else. `blocked_by` is non-empty only while a row is
+        # blocked, so no status clause is needed. JSONB containment matches the exact id, never a prefix.
+        if blocked_by_persona is not None:
+            query = query.filter( TaskItem.blocked_by.contains( [ { "kind": "persona", "id": blocked_by_persona } ] ) )
         # Activity window (row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07).
         #
         # KEYED ON `updated_ts`, NOT `created_ts`, AND THE CHOICE IS THE WHOLE
@@ -1136,6 +1145,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        blocked_by_persona  : Optional[str] = None,
         updated_since       : Optional[datetime] = None,
         updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
@@ -1165,7 +1175,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until
+            updated_since=updated_since, updated_until=updated_until,
+            blocked_by_persona=blocked_by_persona
         )
         # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
         # the identical admitted set, or the sum-parity gate is comparing two
@@ -1185,6 +1196,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        blocked_by_persona  : Optional[str] = None,
         updated_since       : Optional[datetime] = None,
         updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
@@ -1212,7 +1224,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until
+            updated_since=updated_since, updated_until=updated_until,
+            blocked_by_persona=blocked_by_persona
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1228,6 +1241,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        blocked_by_persona  : Optional[str] = None,
         updated_since       : Optional[datetime] = None,
         updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
@@ -1255,7 +1269,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, None, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until
+            updated_since=updated_since, updated_until=updated_until,
+            blocked_by_persona=blocked_by_persona
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1272,6 +1287,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        blocked_by_persona  : Optional[str] = None,
         updated_since       : Optional[datetime] = None,
         updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
@@ -1303,7 +1319,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
             accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until
+            updated_since=updated_since, updated_until=updated_until,
+            blocked_by_persona=blocked_by_persona
         )
         # The SAME helper query_tasks uses — this is the COUNT(*)/page parity seam
         # the Stop-hook oracle reads. Rachel's gate asserts

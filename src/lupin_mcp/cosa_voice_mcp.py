@@ -4373,6 +4373,7 @@ def task_query(
     project             : Optional[ str ] = None,
     item_class          : Optional[ str ] = None,
     correlation_key     : Optional[ str ] = None,
+    blocked_by_persona  : Optional[ str ] = None,
     limit               : Optional[ int ] = None,
     offset              : Optional[ int ] = None,
     terse               : bool            = False,
@@ -4385,7 +4386,7 @@ def task_query(
 
     Pass terse=True for any "see my list" / board glance (the at-a-glance projection, without `body`); terse=False only when you need a row's body or audit context.
 
-    Scope every read: a BARE `task_query()` is REJECTED once the store holds more than the threshold of non-terminal rows. Add a filter (owner_persona / status / item_class / project / gate_class / accountable_manager / correlation_key) or pass `unscoped_audit=True` for a deliberate full-store audit.
+    Scope every read: a BARE `task_query()` is REJECTED once the store holds more than the threshold of non-terminal rows. Add a filter (owner_persona / status / item_class / project / gate_class / accountable_manager / correlation_key) or pass `unscoped_audit=True` for a deliberate full-store audit. `blocked_by_persona` also scopes a read.
 
     Hidden by default: terminal rows (`include_terminal=True` adds done/dropped), held rows (`status="not_approved"` shows them; an un-status'd query puts a HOLDING AREA notice in `warnings[]` when any match) and park-active rows (`include_parked=True` or `status="parked"`). The `in_progress` and `queued` passes cannot see held rows: add a `not_approved` pass before concluding nothing is owed.
 
@@ -4405,6 +4406,7 @@ def task_query(
         project: Filter by owning project
         item_class: task | decision | review_request | bug | gate
         correlation_key: Exact-match filter on the hook-upsert correlation key
+        blocked_by_persona: Rows blocked on this persona, whoever owns them ("what waits on me")
         limit: Max rows (server default 100, cap 500)
         offset: Pagination offset
         terse: True for the at-a-glance projection; False (default) for the full wire shape including body
@@ -4415,6 +4417,7 @@ def task_query(
     Examples:
         task_query(owner_persona="sam", status="in_progress", terse=True)    # my owed work, the everyday scoped query
         task_query(gate_class="operator")    # operator queue, full rows
+        task_query(blocked_by_persona="tiffany", terse=True)    # what waits on me, whoever owns it: read it before a clear
         task_query(unscoped_audit=True, include_terminal=True, terse=True)    # deliberate full-store audit
         task_query(status="parked", terse=True)    # what is parked, and why
     """
@@ -4429,6 +4432,7 @@ def task_query(
         project             = project,
         item_class          = item_class,
         correlation_key     = correlation_key,
+        blocked_by_persona  = blocked_by_persona,
         limit               = limit,
         offset              = offset,
         terse               = terse,

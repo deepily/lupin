@@ -750,6 +750,7 @@ def task_query_impl(
     item_class          = None,
     correlation_key     = None,
     id_prefix           = None,
+    blocked_by_persona  = None,
     limit               = None,
     offset              = None,
     terse               = False,
@@ -771,6 +772,10 @@ def task_query_impl(
           call is "everything, newest first" — the manager board glance
         - `correlation_key` exact-match filter passes through (spec amendment
           2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
+        - `blocked_by_persona` returns the rows whose `blocked_by` holds a persona ref with that
+          exact name, whoever owns them: "what waits on me", so a handover lists owed work and the
+          rows other seats hold for you. A row minted before the write seam canonicalized
+          `blocked_by` ids may hold a non-canonical name and will not match.
         - `id_prefix` filters BY IDENTITY and accepts the 8-hex form every brief,
           DM and cross-reference in this fleet is written in — or a full UUID,
           which is normalized server-side (row f45b37a9 remedy 2, closing
@@ -853,6 +858,7 @@ def task_query_impl(
         "item_class"          : item_class,
         "correlation_key"     : correlation_key,
         "id_prefix"           : id_prefix,
+        "blocked_by_persona"  : blocked_by_persona,
         "limit"               : limit,
         "offset"              : offset,
     }
