@@ -110,3 +110,24 @@ def test_replay_of_a_pair_receipt_whose_cache_is_gone_names_the_missing_entry( e
     for p in ( env[ 1 ] / "jev-cache" ).rglob( "*.json" ): p.unlink()
     out = rt.replay_impl( rec[ "id" ], ctx )
     assert out[ "status" ] == "error" and out[ "error" ] == "CACHE_MISSING"
+
+
+def test_the_receipts_malformed_list_names_every_entry_of_a_pack_in_which_all_are_malformed( env ):
+    ids = { e[ "id" ] for e in entries_of( env ) }
+    _, _, rec = pair_run( env, wrong={ "provides": ids } )
+    assert sorted( m[ "id" ] for m in rec[ "malformed" ] ) == sorted( ids ) and all( m[ "reason" ] for m in rec[ "malformed" ] )
+    assert rec[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rec[ "cause" ] == "CALL_FAILED" and "MALFORMED_ANSWER" not in rec[ "causes" ]
+
+
+def test_the_receipts_malformed_list_names_an_entry_that_was_malformed_alone_after_a_422_split( env ):
+    bad = "cosa.mathx.add"
+    _, _, rec = pair_run( env, refuse_over=2, wrong={ "coverage": { bad } } )
+    assert [ m[ "id" ] for m in rec[ "malformed" ] ] == [ bad ] and rec[ "stats" ][ "failed" ] == 1 and rec[ "cause" ] == "CALL_FAILED"
+    assert any( r[ "status" ] == "refused" for r in rec[ "requests" ] ) and any( r[ "size" ] == 1 and r[ "status" ] == "answered" for r in rec[ "requests" ] )
+
+
+def test_a_pair_receipt_replays_on_a_context_with_another_pack_size( env ):
+    _, _, rec = pair_run( env )
+    other     = packed_ctx( env, fake.PairFake( entries_of( env ) ), size=7 )
+    out       = rt.replay_impl( rec[ "id" ], other )
+    assert out[ "status" ] == "ok" and out[ "frozen" ][ "verdict" ] == rec[ "verdict" ] and out[ "differences" ] == { "frozen": [], "head": [] }

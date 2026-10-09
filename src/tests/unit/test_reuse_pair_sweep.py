@@ -133,3 +133,27 @@ def test_a_cached_pair_entry_with_no_answers_at_all_is_corrupt( ctx_for ):
     rt.JevCache( ctx.data ).put( rp.pair_key( NEED, rt.entry_text( ENTRIES[ 0 ] ) ), { "unrelated": 1 } )
     with pytest.raises( rt.ReuseError ) as e: sweep( ctx, ENTRIES[ :1 ] )
     assert e.value.name == "CACHE_CORRUPT"
+
+
+def test_the_pair_key_changes_when_the_pair_template_changes( monkeypatch ):
+    text   = rt.entry_text( ENTRIES[ 0 ] )
+    before = rp.pair_key( NEED, text )
+    monkeypatch.setattr( rpr, "template_hash", lambda: "another-template" )
+    assert rp.pair_key( NEED, text ) != before
+
+
+def test_a_cached_pair_entry_with_an_extra_field_is_corrupt( ctx_for ):
+    ctx   = ctx_for( fake.PairFake( ENTRIES ) )
+    sweep( ctx, ENTRIES[ :1 ] )
+    key   = rp.pair_key( NEED, rt.entry_text( ENTRIES[ 0 ] ) )
+    entry = rt.JevCache( ctx.data ).get( key )
+    other = rp.pair_key( NEED + " again", rt.entry_text( ENTRIES[ 0 ] ) )
+    rt.JevCache( ctx.data ).put( other, { **entry, "answers": { "fit": { **entry[ "answers" ][ "fit" ], "extra": 1 } } } )
+    with pytest.raises( rt.ReuseError ) as e: rp.sweep_packed( ctx, NEED + " again", ENTRIES[ :1 ], 3, kind="pair" )
+    assert e.value.name == "CACHE_CORRUPT"
+
+
+def test_a_pack_in_which_every_entry_is_malformed_still_lists_them_in_the_sweep( ctx_for ):
+    ids = { e[ "id" ] for e in ENTRIES[ :3 ] }
+    out = sweep( ctx_for( fake.PairFake( ENTRIES, wrong={ "coverage": ids } ) ), ENTRIES[ :3 ], size=3 )
+    assert out[ "rows" ][ 0 ][ "status" ] == "failed" and sorted( m[ "id" ] for m in out[ "malformed" ] ) == sorted( ids ) and out[ "answers" ] == []
