@@ -1200,14 +1200,29 @@ def page_route_need_impl( need, exclude_id, ctx ):
     return _need_impl( need, exclude_id, ctx, "choice", False )
 
 
-def _need_impl( need, exclude_id, ctx, question, sweep_only ):
+def unstored_need_impl( need, exclude_id, ctx ):
+    """
+    Sweep every entry for a free-text need and store no receipt.
+
+    Requires:
+        - need is a non-empty description of the capability
+        - exclude_id is None, or a symbol id of a healthy index (the member whose twin is sought)
+    Ensures:
+        - returns the same shape as sweep_need_impl, from a receipt that is built and not written
+        - a second ask of the same need is therefore not handed the first ask's receipt, which a stored receipt would be
+        - the page route is off, as in sweep_need_impl
+    """
+    return _need_impl( need, exclude_id, ctx, "choice", True, False )
+
+
+def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True ):
     """Ensures: returns one need's public result with exclude_id left out."""
     if not isinstance( need, str ) or not need.strip(): return { "status": "error", "error": "EMPTY_NEED" }
     try:
         prepared = prepare( ctx )
         if exclude_id is not None and not any( e[ "id" ] == exclude_id for e in prepared[ 1 ] ) and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
             return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": exclude_id }
-        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question ) )
+        return _public( run_question( ctx, "check_exists", need.strip(), need.strip(), exclude_id=exclude_id, prepared=prepared, sweep_only=sweep_only, question=question, write=write ) )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail }
 
