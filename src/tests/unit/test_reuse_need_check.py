@@ -260,6 +260,18 @@ def test_the_results_record_the_sha_of_all_three_inputs( tmp_path ):
         assert full[ key ] == nc.file_sha256( tmp_path / name )
 
 
+def test_the_results_name_the_index_generation_and_its_sha( tmp_path ):
+    gen = tmp_path / "gen-abc123def0"
+    gen.mkdir()
+    args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
+    ( gen / "symbols.jsonl" ).write_text( ( tmp_path / "symbols.jsonl" ).read_text() )
+    args[ args.index( "--index" ) + 1 ] = str( gen / "symbols.jsonl" )
+    assert nc.main( args ) == 0
+    full = json.loads( ( tmp_path / "out" / "check-results.json" ).read_text() )
+    assert full[ "index_generation" ] == "gen-abc123def0"
+    assert full[ "index_sha256" ] == nc.file_sha256( gen / "symbols.jsonl" )
+
+
 @pytest.mark.parametrize( "flag", [ "--sample-sha256", "--manifest-sha256" ] )
 def test_a_sample_or_manifest_that_is_not_the_pinned_file_exits_two_and_writes_nothing( tmp_path, flag, capsys ):
     args = write_inputs( tmp_path, { A: GOOD, D: GOOD } )
