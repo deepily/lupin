@@ -211,3 +211,43 @@ def test_the_real_owner_lookup_reads_the_file_system( tmp_path ):
     plain = tmp_path / "plain"
     plain.write_text( "x" )
     assert REAL_OWNER_OF( str( plain ) ) == ( os.getuid(), os.getgid() )
+
+
+@pytest.mark.parametrize( "mode", [ 0o620, 0o602, 0o666 ] )
+def test_a_source_writable_by_group_or_others_is_refused( world, mode ):
+    world.source.chmod( mode )
+    assert world.run()[ 0 ] == 16
+
+
+def test_a_pipe_in_place_of_the_source_is_refused_and_does_not_hang( world ):
+    import signal
+    world.source.unlink()
+    os.mkfifo( world.source )
+    class Hung( BaseException ): """Not an OSError, so the script's own handler cannot swallow it."""
+    def hang( *args ): raise Hung( "opening the pipe blocked" )
+    signal.signal( signal.SIGALRM, hang )
+    signal.alarm( 5 )
+    try: code = world.run()[ 0 ]
+    finally: signal.alarm( 0 )
+    assert code == 16
+
+
+def test_the_temp_file_is_created_exclusively( world, monkeypatch ):
+    """A leftover temp file that the unlink step missed must stop the write, not be overwritten."""
+    ( world.secrets / "db_test_password.new" ).write_text( "planted\n" )
+    real = ids.os.path.lexists
+    monkeypatch.setattr( ids.os.path, "lexists", lambda p: False if p.endswith( ".new" ) else real( p ) )
+    with pytest.raises( FileExistsError ): world.run()
+    assert ( world.secrets / "db_test_password.new" ).read_text() == "planted\n"
+
+
+def test_a_link_in_place_of_the_test_file_is_replaced_and_its_target_is_left_alone( world, tmp_path ):
+    target = tmp_path / "same-content"
+    target.write_text( "test-pw\n" )
+    target.chmod( 0o644 )
+    os.symlink( target, world.secrets / "db_test_password" )
+    code, out = world.run()
+    assert code == 0 and "db_test_password: repaired" in out
+    assert not ( world.secrets / "db_test_password" ).is_symlink()
+    assert oct( target.stat().st_mode & 0o777 ) == "0o644", "the link's target was changed"
+    assert str( target ) not in [ c[ 0 ] for c in world.chown.calls ]

@@ -96,7 +96,7 @@ def read_source( env, lookup_fn=pwd.getpwuid ):
     if uid == 0: raise Refusal( 15, "run this through sudo from an operator account, not from root's own shell" )
     path = os.path.join( home, SOURCE_NAME )
     try:
-        fd = os.open( path, os.O_RDONLY | os.O_NOFOLLOW )
+        fd = os.open( path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK )
     except OSError as error:
         raise Refusal( 16, f"{path} cannot be opened safely: {error.__class__.__name__}" )
     info = os.fstat( fd )
