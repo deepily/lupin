@@ -103,11 +103,12 @@ def test_a_waiting_card_is_drawn_on_load_and_a_tap_posts_the_answer( logged_in_p
     card = page.locator( f"#action-required-{card_id}" )
     card.wait_for( state="visible", timeout=15000 )
 
-    # The page draws what the builder wrote: the question carries the file's name and measured size.
-    assert question in card.inner_text(), "the card must show the builder's question, which names the file and its size"
-    # Each of these comes from the measured file, not from card_text, so a builder that drops one reddens here.
-    assert payload[ "name" ] in card.inner_text()
-    assert human_size( payload[ "size" ] ) in card.inner_text()
+    # The question element alone, since the abstract below it also names the file and its size.
+    # The name and size come from the measured file, not card_text, so a builder that drops one reddens here.
+    drawn = card.locator( ".action-required-message" ).inner_text()
+    assert question in drawn, "the card must show the builder's question"
+    assert payload[ "name" ] in drawn
+    assert human_size( payload[ "size" ] ) in drawn
     assert card.locator( ".response-button.yes" ).count() == 1
     assert card.locator( ".response-button.no" ).count() == 1
     assert card.locator( ".response-button.neither" ).count() == 1
