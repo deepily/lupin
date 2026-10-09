@@ -455,12 +455,13 @@ def test_the_status_of_something_that_is_not_a_podcast_card_is_a_404( world, mak
     assert answer.status_code == 404 and _code( answer ) == "no_card"
 
 
-def test_the_assembled_application_serves_both_new_doors_with_their_verbs():
+def test_the_assembled_application_serves_every_podcast_door_with_its_verb():
     from lupin_app.main import app
     verbs = { }
     for route in app.routes:
         if getattr( route, "path", "" ).startswith( "/api/podcast-proxy/" ): verbs.setdefault( route.path, set() ).update( route.methods )
-    assert verbs == { "/api/podcast-proxy/ask": { "POST" }, "/api/podcast-proxy/start": { "POST" }, "/api/podcast-proxy/card/{card_id}": { "GET" } }
+    assert verbs == { "/api/podcast-proxy/ask": { "POST" }, "/api/podcast-proxy/start": { "POST" }, "/api/podcast-proxy/card/{card_id}": { "GET" },
+                      "/api/podcast-proxy/from-viewer": { "POST" }, "/api/podcast-proxy/from-viewer/check": { "GET" } }
 
 
 def test_a_stale_copy_of_the_same_card_is_replaced_and_a_planted_link_is_not_followed( world, tmp_path ):

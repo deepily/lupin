@@ -40,6 +40,26 @@ class PodcastProxySpentRepository( BaseRepository[ PodcastProxySpentCard ] ):
         except IntegrityError:
             return False
 
+    def claim_after_window( self, card_id: uuid.UUID, started_by: str, scope_path: str, sha256: str, cutoff ) -> bool:
+        """
+        Claim an id whose earlier claim, if any, is older than `cutoff`.
+
+        One conditional DELETE removes only a row spent before `cutoff`, then the claim runs.
+        Two callers that saw the same old row cannot both win, because the primary key decides.
+        A fresh row is never removed by the loser's delete.
+
+        Requires:
+            - cutoff is an aware datetime; a row spent before it no longer blocks a new claim
+
+        Ensures:
+            - returns True and leaves one fresh row when no row existed or the existing one was spent before cutoff
+            - returns False and changes nothing when a row spent at or after cutoff exists
+        """
+        self.session.query( PodcastProxySpentCard ).filter(
+            PodcastProxySpentCard.card_id == card_id, PodcastProxySpentCard.spent_at < cutoff
+        ).delete( synchronize_session=False )
+        return self.claim( card_id, started_by, scope_path, sha256 )
+
     def record_job( self, card_id: uuid.UUID, job_id: Optional[ str ] ) -> None:
         """Set the job id on the card's row. A no-op when the row is gone."""
         row = self.session.get( PodcastProxySpentCard, card_id )

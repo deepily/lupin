@@ -138,3 +138,35 @@ def test_a_released_claim_is_won_again_and_a_claim_without_a_job_has_no_job_id( 
         session.commit()
     assert _claim( engine, card_id, "third" ) is True
     assert [ row[ 0 ] for row in _rows( engine, card_id ) ] == [ "third" ]
+
+
+def _claim_after( engine, card_id, started_by, cutoff ):
+    with Session( engine ) as session:
+        won = PodcastProxySpentRepository( session ).claim_after_window( card_id, started_by, "demo/io/tmp/summary.md", "a" * 64, cutoff )
+        session.commit()
+        return won
+
+
+@needs_docker
+def test_of_many_simultaneous_clicks_on_an_expired_row_exactly_one_wins_and_its_fresh_row_stays( engine ):
+    from datetime import datetime, timedelta, timezone
+    card_id = uuid.uuid4()
+    with engine.begin() as connection:
+        connection.execute( text(
+            "INSERT INTO podcast_proxy_spent_cards ( card_id, spent_at, started_by, scope_path, sha256, job_id ) "
+            "VALUES ( :id, now() - interval '1 hour', 'old', 'demo/io/tmp/summary.md', :sha, 'pg-old' )" ), { "id": card_id, "sha": "a" * 64 } )
+    # The old row is an hour old and the window is fifteen minutes, so every racer sees an expired row.
+    # A row a winner writes now is newer than the cutoff, so no loser's delete may remove it.
+    cutoff  = datetime.now( timezone.utc ) - timedelta( seconds=900 )
+    gate    = threading.Barrier( RACERS )
+    results = [ ]
+    def click( index ):
+        gate.wait()
+        results.append( ( index, _claim_after( engine, card_id, f"racer-{index}", cutoff ) ) )
+    threads = [ threading.Thread( target=click, args=( index, ) ) for index in range( RACERS ) ]
+    for thread in threads: thread.start()
+    for thread in threads: thread.join( timeout=60 )
+    winners = [ index for index, won in results if won ]
+    assert len( results ) == RACERS and len( winners ) == 1, results
+    rows = _rows( engine, card_id )
+    assert [ row[ 0 ] for row in rows ] == [ f"racer-{winners[ 0 ]}" ], rows

@@ -47,6 +47,11 @@ MAX_BYTES = 8 * 1024 * 1024
 CARD_KIND = "podcast_proxy_start"
 COMMAND   = "agent router go to podcast generator"
 
+# The viewer door has no card: a signed-in person's click is the yes. Its claim is keyed on who clicked,
+# which file and which bytes, so a double click is one job and an edited file is a new one.
+VIEWER_NAMESPACE  = uuid.UUID( "6f0d8a52-3a4b-4c1e-9d7e-2b1c5a9e4f10" )
+VIEWER_STARTED_BY = "viewer:"
+
 # How long a yes stays good, and how long the card waits for an answer. The INI key overrides it.
 MAX_AGE_KEY     = "podcast proxy card max age seconds"
 MAX_AGE_DEFAULT = 900
@@ -175,6 +180,20 @@ def check_source( scope_path, registry=None, keep_content=False ):
               "size": len( data ), "sha256": hashlib.sha256( data ).hexdigest() }
     if keep_content: facts[ "content" ] = data
     return facts
+
+
+def viewer_claim_id( user_id, scope_path, sha256 ):
+    """
+    The spent-record id for one person's podcast of one file's bytes from the doc viewer.
+
+    Requires:
+        - user_id is the signed-in person's id; scope_path is `<scope>/<rel>` as the check returned it
+        - sha256 is the hex digest of the judged bytes
+
+    Ensures:
+        - returns the same uuid for the same three values, and a different one when any differs
+    """
+    return uuid.uuid5( VIEWER_NAMESPACE, f"{user_id}:{scope_path}:{sha256}" )
 
 
 def max_age_seconds( config_mgr=None ):

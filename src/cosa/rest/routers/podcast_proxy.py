@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from cosa.rest import podcast_proxy as proxy
@@ -178,6 +178,52 @@ def copy_directory():
     return os.path.join( cu.get_project_root(), "io", "podcast-proxy" )
 
 
+def _run_claimed_job( flow, facts, claim_id, copy_id, recipient_id, user_email ):
+    """
+    Queue the podcast job for a claim this caller already won, and record it.
+
+    Requires:
+        - the spent row for claim_id is held by this caller and committed
+        - facts is the dict check_source returned with keep_content=True
+        - copy_id names this attempt's copy folder; the seat door passes its card id, the viewer door a fresh id per click
+
+    Ensures:
+        - with INI `podcast proxy dry run` on: nothing is copied or queued and the spent row takes a "dry-run-" job id
+        - otherwise writes the copy under copy_id, submits the job for recipient_id, records the job id on claim_id
+          and returns { job_id, status, name, queue_position }
+        - when the queue refuses: removes only this attempt's copy, releases the claim, and answers 502 queue_failed
+    """
+    if proxy.dry_run_enabled():
+        fake_job = f"dry-run-{str( claim_id )[ :8 ]}"
+        with get_db() as session:
+            PodcastProxySpentRepository( session ).record_job( claim_id, fake_job )
+        return { "job_id": fake_job, "status": proxy.DRY_RUN_STATUS, "name": facts[ "name" ], "queue_position": None }
+
+    try:
+        path   = proxy.write_copy( copy_directory(), copy_id, facts[ "name" ], facts[ "content" ] )
+        result = flow.submit(
+            command      = proxy.COMMAND,
+            args         = { "research": path },
+            user_id      = recipient_id,
+            user_email   = user_email,
+            session_id   = f"podcast-proxy-{str( copy_id )[ :8 ]}",
+            websocket_id = f"podcast-proxy-{str( copy_id )[ :8 ]}",
+            speak        = False,
+        )
+        if result.get( "status" ) != "waiting" or not result.get( "job_id" ):
+            raise RuntimeError( f"the queue answered status {result.get( 'status' )!r}: {result.get( 'error' ) or result.get( 'route_reason' )}" )
+    except Exception as failure:
+        proxy.remove_copy( copy_directory(), copy_id )
+        with get_db() as session:
+            PodcastProxySpentRepository( session ).release( claim_id )
+        print( f"[podcast-proxy] queue failed for card {claim_id}: {failure!r}" )
+        raise _refuse( 502, "queue_failed", "The job could not be queued. The yes is still good; start the same card again." )
+
+    with get_db() as session:
+        PodcastProxySpentRepository( session ).record_job( claim_id, result[ "job_id" ] )
+    return { "job_id": result[ "job_id" ], "status": result[ "status" ], "name": facts[ "name" ], "queue_position": result.get( "queue_position" ) }
+
+
 @router.post(
     "/start",
     summary     = "Start the podcast Rick said yes to",
@@ -249,37 +295,8 @@ def start_a_podcast(
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
 
-    if proxy.dry_run_enabled():
-        fake_job = f"dry-run-{str( payload.card_id )[ :8 ]}"
-        with get_db() as session:
-            PodcastProxySpentRepository( session ).record_job( payload.card_id, fake_job )
-        return { "card_id": str( payload.card_id ), "job_id": fake_job, "status": proxy.DRY_RUN_STATUS,
-                 "name": facts[ "name" ], "queue_position": None }
-
-    try:
-        path   = proxy.write_copy( copy_directory(), payload.card_id, facts[ "name" ], facts[ "content" ] )
-        result = flow.submit(
-            command      = proxy.COMMAND,
-            args         = { "research": path },
-            user_id      = recipient_id,
-            user_email   = operator[ "email" ],
-            session_id   = f"podcast-proxy-{str( payload.card_id )[ :8 ]}",
-            websocket_id = f"podcast-proxy-{str( payload.card_id )[ :8 ]}",
-            speak        = False,
-        )
-        if result.get( "status" ) != "waiting" or not result.get( "job_id" ):
-            raise RuntimeError( f"the queue answered status {result.get( 'status' )!r}: {result.get( 'error' ) or result.get( 'route_reason' )}" )
-    except Exception as failure:
-        proxy.remove_copy( copy_directory(), payload.card_id )
-        with get_db() as session:
-            PodcastProxySpentRepository( session ).release( payload.card_id )
-        print( f"[podcast-proxy] queue failed for card {payload.card_id}: {failure!r}" )
-        raise _refuse( 502, "queue_failed", "The job could not be queued. The yes is still good; start the same card again." )
-
-    with get_db() as session:
-        PodcastProxySpentRepository( session ).record_job( payload.card_id, result[ "job_id" ] )
-    return { "card_id": str( payload.card_id ), "job_id": result[ "job_id" ], "status": result[ "status" ],
-             "name": facts[ "name" ], "queue_position": result.get( "queue_position" ) }
+    outcome = _run_claimed_job( flow, facts, claim_id=payload.card_id, copy_id=payload.card_id, recipient_id=recipient_id, user_email=operator[ "email" ] )
+    return { "card_id": str( payload.card_id ), **outcome }
 
 
 @router.get(
@@ -316,3 +333,100 @@ def podcast_card_status(
     return { "card_id": str( card_id ), "scope_path": stored[ "scope_path" ], "name": stored[ "name" ], "size": stored[ "size" ],
              "sha256": stored[ "sha256" ], "asked_by_session": stored[ "asked_by_session" ], "state": state,
              "expires_at": expires, "spent": spent is not None, "job_id": job_id }
+
+
+class ViewerIn( BaseModel ):
+    """Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`."""
+    model_config = ConfigDict( extra="forbid" )
+
+    path : str = Field( ..., min_length=1, max_length=1024 )
+
+
+def _signed_in_person( account_email ):
+    """Return the caller's login email, or refuse with 403 not_a_person."""
+    if account_email is None:
+        raise _refuse( 403, "not_a_person", "A podcast from the doc viewer is started by a signed-in person, not by an API key." )
+    return account_email
+
+
+@router.get(
+    "/from-viewer/check",
+    summary     = "Can the doc viewer offer a podcast for this file?",
+    description = "Runs the same judgement the start does (viewer read check, size, credential, extension) without keeping "
+                  "the content. Auth: Bearer JWT of a signed-in person."
+)
+def check_a_viewer_file(
+    path: Annotated[ str, Query( min_length=1, max_length=1024 ) ],
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+):
+    """
+    Say whether a podcast can be made of this file.
+
+    The page shows its button only for a file that can.
+
+    Requires:
+        - the caller is a signed-in person (403 not_a_person otherwise)
+
+    Ensures:
+        - returns { ok: True, name, size } for a file the door would accept
+        - 400 with the door's code (bad_path, not_found, viewer_refused, wrong_kind, too_large, credential, unreadable) otherwise
+        - nothing is queued, claimed or written
+    """
+    _signed_in_person( account_email )
+    try:
+        facts = proxy.check_source( path )
+    except proxy.DoorRefusal as refusal:
+        raise _refuse( 400, refusal.code, refusal.message )
+    return { "ok": True, "name": facts[ "name" ], "size": facts[ "size" ] }
+
+
+@router.post(
+    "/from-viewer",
+    summary     = "Start a podcast of a document the signed-in person is viewing",
+    description = "The click, confirmed in the page, is the yes. The server judges the file as the start door does, claims "
+                  "one job per person, file and bytes inside the card max age, and queues the job for the caller. "
+                  "Auth: Bearer JWT of a signed-in person."
+)
+def start_a_podcast_from_viewer(
+    payload: ViewerIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    flow = Depends( get_ask_flow ),
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+):
+    """
+    Judge the file, claim the click, queue the job.
+
+    Requires:
+        - the caller is a signed-in person (403 not_a_person otherwise)
+
+    Ensures:
+        - every refusal has the body { detail: { code, message } }
+        - 400 with the door's code when the check refuses the file
+        - 409 spent, with job_id beside the code, when this person already started this file's bytes inside the max age
+        - 409 claimed_no_job when that earlier click claimed and recorded no job yet
+        - the claim is on a derived id, so another person, an edited file, or a click after the max age is its own job
+        - the copy folder is named for this click alone, so a failed second attempt cannot remove the first job's copy
+        - otherwise returns { job_id, status, name, queue_position, size } for a job built for the caller
+    """
+    email = _signed_in_person( account_email )
+    try:
+        facts = proxy.check_source( payload.path, keep_content=True )
+    except proxy.DoorRefusal as refusal:
+        raise _refuse( 400, refusal.code, refusal.message )
+
+    scope_path = f"{facts[ 'scope' ]}/{facts[ 'rel' ]}"
+    claim_id   = proxy.viewer_claim_id( authenticated_user_id, scope_path, facts[ "sha256" ] )
+    cutoff     = datetime.now( timezone.utc ) - timedelta( seconds=proxy.max_age_seconds() )
+    with get_db() as session:
+        spent_rows = PodcastProxySpentRepository( session )
+        won        = spent_rows.claim_after_window( claim_id, f"{proxy.VIEWER_STARTED_BY}{authenticated_user_id}", scope_path, facts[ "sha256" ], cutoff )
+        earlier    = None if won else spent_rows.get( claim_id )
+        earlier_job = earlier.job_id if earlier is not None else None
+    if not won and earlier_job is None:
+        raise _refuse( 409, "claimed_no_job", "A start of this file is under way, or one did not finish. Wait a moment, then look again." )
+    if not won:
+        raise HTTPException( status_code=409, detail={ **proxy.refusal_detail( "spent", "A podcast of this file was already started, and one click starts one job." ), "job_id": earlier_job } )
+
+    outcome = _run_claimed_job( flow, facts, claim_id=claim_id, copy_id=uuid.uuid4(), recipient_id=authenticated_user_id, user_email=email )
+    return { **outcome, "size": facts[ "size" ] }

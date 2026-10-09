@@ -152,3 +152,65 @@ def test_two_starts_at_the_same_moment_let_exactly_one_through( engine ):
     assert sorted( won for _, won in results ) == [ False, True ], results
     with sessions() as session:
         assert session.query( PodcastProxySpentCard ).count() == 1
+
+
+def _old_row( engine, card=CARD, hours=1 ):
+    """A row that was spent `hours` ago, written straight into the table."""
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO podcast_proxy_spent_cards ( card_id, spent_at, started_by, scope_path, sha256, job_id ) "
+            f"VALUES ( '{card.hex}', datetime( 'now', '-{hours} hours' ), 'old', 'lupin/io/tmp/a.md', '{'ab' * 32}', 'pg-old' )" )
+
+
+def _after( session, cutoff, by="new", card=CARD ):
+    return PodcastProxySpentRepository( session ).claim_after_window( card, by, "lupin/io/tmp/a.md", "ab" * 32, cutoff )
+
+
+def test_claim_after_window_wins_when_no_row_exists( engine ):
+    from datetime import datetime, timedelta, timezone
+    with Session( engine ) as session:
+        assert _after( session, datetime.now( timezone.utc ) - timedelta( seconds=900 ) ) is True
+        session.commit()
+        assert session.get( PodcastProxySpentCard, CARD ).started_by == "new"
+
+
+def test_claim_after_window_replaces_a_row_spent_before_the_cutoff( engine ):
+    from datetime import datetime, timedelta, timezone
+    _old_row( engine )
+    with Session( engine ) as session:
+        assert _after( session, datetime.now( timezone.utc ) - timedelta( seconds=900 ) ) is True
+        session.commit()
+        row = session.get( PodcastProxySpentCard, CARD )
+        assert row.started_by == "new" and row.job_id is None
+
+
+def test_claim_after_window_leaves_a_row_spent_inside_the_window( engine ):
+    from datetime import datetime, timedelta, timezone
+    with Session( engine ) as session:
+        assert _claim( session, by="first" ) is True
+        session.commit()
+    with Session( engine ) as session:
+        assert _after( session, datetime.now( timezone.utc ) - timedelta( seconds=900 ) ) is False
+        session.commit()
+        assert session.get( PodcastProxySpentCard, CARD ).started_by == "first"
+
+
+def test_two_clicks_on_one_expired_row_let_exactly_one_through_and_keep_the_fresh_row( engine ):
+    from datetime import datetime, timedelta, timezone
+    _old_row( engine )
+    cutoff                     = datetime.now( timezone.utc ) - timedelta( seconds=900 )
+    sessions, barrier, results = sessionmaker( engine ), threading.Barrier( 2 ), [ ]
+    def click( who ):
+        with sessions() as session:
+            barrier.wait()
+            won = _after( session, cutoff, by=who )
+            session.commit()
+            results.append( ( who, won ) )
+    threads = [ threading.Thread( target=click, args=( f"click {n}", ) ) for n in range( 2 ) ]
+    for thread in threads: thread.start()
+    for thread in threads: thread.join( 30 )
+    assert sorted( won for _, won in results ) == [ False, True ], results
+    winner = [ who for who, won in results if won ][ 0 ]
+    with sessions() as session:
+        rows = session.query( PodcastProxySpentCard ).all()
+        assert len( rows ) == 1 and rows[ 0 ].started_by == winner
