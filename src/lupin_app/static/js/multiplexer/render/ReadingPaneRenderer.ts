@@ -35,6 +35,7 @@ import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
 import { buildConsolePageHref } from "../console/consolePageUrl";
+import { bindPodcastLinks } from "./podcastLinks";
 
 // Store surface this renderer drives (subset of ReadingPaneStore).
 export interface ReadingPaneStoreLike {
@@ -155,6 +156,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private onBustClick      !: () => void;
   private onSplitterDown   !: ( ev: MouseEvent ) => void;
   private onDocClick       !: ( ev: MouseEvent ) => void;
+  // Play Here and Download on a finished podcast card (row 4bf48f78); the unbinder for unmount.
+  private unbindPodcast    : ( () => void ) | null = null;
   // Drag-session listeners (attached/detached per drag).
   private onDragMove       : ( ( ev: MouseEvent ) => void ) | null = null;
   private onDragUp         : ( () => void ) | null = null;
@@ -213,6 +216,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn.addEventListener("click", this.onBustClick);
     this.splitter.addEventListener("mousedown", this.onSplitterDown);
     document.addEventListener("click", this.onDocClick);
+    this.unbindPodcast = bindPodcastLinks();
 
     this.updateToggleTooltip();
 
@@ -246,6 +250,8 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn.removeEventListener("click", this.onBustClick);
     this.splitter.removeEventListener("mousedown", this.onSplitterDown);
     document.removeEventListener("click", this.onDocClick);
+    this.unbindPodcast?.();
+    this.unbindPodcast = null;
     this.detachDragListeners();
 
     // Surrender any lifted AR widget back home so unmount leaves the DOM clean.
