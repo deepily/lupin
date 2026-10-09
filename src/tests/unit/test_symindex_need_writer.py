@@ -129,7 +129,9 @@ def test_prompt_warns_off_plain_input_words_without_naming_this_members_names( s
 
 
 def test_retry_hint_for_own_identifier_says_a_plain_word_may_be_a_name( src_root ):
-    assert "plain everyday word" in nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ] )
+    hinted = nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ] )
+    assert "plain everyday word" in hinted
+    assert "limit, error, state, job" in hinted
     assert "plain everyday word" not in nw.build_prompt( _input( src_root ), failures=[ "opener" ] )
 
 
