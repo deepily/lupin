@@ -40,6 +40,7 @@ def test_pair_ask_returns_each_answer_with_provides_coverage_and_score( env ):
     assert sorted( out[ "answered" ] ) == sorted( e[ "id" ] for e in entries ) and out[ "unasked" ] == [] and out[ "malformed" ] == []
     one = out[ "answered" ][ "cosa.feeds.parse_feed" ]
     assert set( one ) == { "provides", "coverage", "score" } and one[ "provides" ] > out[ "answered" ][ "cosa.mathx.add" ][ "provides" ]
+    assert one[ "score" ] > out[ "answered" ][ "cosa.mathx.add" ][ "score" ] > 0 and one[ "coverage" ] > out[ "answered" ][ "cosa.mathx.add" ][ "coverage" ]
     assert set( out[ "stats" ] ) == { "failed", "not_checked", "stopped_by", "requests", "attempt_counts" } and out[ "stats" ][ "requests" ] == 1
 
 
