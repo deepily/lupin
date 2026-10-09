@@ -16,7 +16,8 @@
 #   LUPIN_DB_GRANTS_REPAIR  on enables --repair-when-enabled; anything else leaves it check-only
 #   DB_GRANTS_PSQL    the psql command, default: docker exec -i lupin-postgres psql -U lupin_dev -d lupin_db_dev
 #   DB_GRANTS_PYTHON  the interpreter, default: the tree's .venv, then python3
-#   DB_GRANTS_SECRETS_DIR  when set, the first check also checks the secret files in that directory
+#   DB_GRANTS_SECRETS_DIR  the secret files' directory, checked too; default /etc/lupin/secrets (the one place
+#                     that names it; the bounce and the preflight both call this helper); set empty to skip
 #
 # Standalone so a test can drive it with a stub psql and no database.
 
@@ -27,7 +28,7 @@ for arg in "$@"; do
     case "$arg" in
         --repair) REPAIR=1 ;;
         --repair-when-enabled) [ "${LUPIN_DB_GRANTS_REPAIR:-off}" = "on" ] && REPAIR=1 ;;
-        -h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "check-db-grants.sh: unknown argument $arg" >&2; exit 2 ;;
     esac
 done
@@ -42,14 +43,15 @@ fi
 
 roles() { LUPIN_ROOT="$ROOT" PYTHONPATH="${ROOT}/src" "$PYTHON" -m cosa.utils.db_roles --psql "$PSQL" "$@"; }
 
+SECRETS_DIR="${DB_GRANTS_SECRETS_DIR-/etc/lupin/secrets}"
 SECRETS_ARGS=()
-if [ -n "${DB_GRANTS_SECRETS_DIR:-}" ]; then SECRETS_ARGS=( --secrets-dir "$DB_GRANTS_SECRETS_DIR" ); fi
+if [ -n "$SECRETS_DIR" ]; then SECRETS_ARGS=( --secrets-dir "$SECRETS_DIR" ); fi
 
 check_out="$( roles --check ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} 2>&1 )"; rc=$?
 echo "$check_out"
 if [ "$rc" -eq 0 ]; then exit 0; fi
 if [ "$rc" -eq 5 ]; then
-    echo "check-db-grants: the grants are clean, but the secret files in ${DB_GRANTS_SECRETS_DIR} were NOT checked (this login cannot search the directory)" >&2
+    echo "check-db-grants: the grants are clean, but the secret files in ${SECRETS_DIR} were NOT checked (this login cannot search the directory)" >&2
     exit 4
 fi
 if [ "$rc" -ne 1 ]; then
@@ -63,7 +65,7 @@ if ! roles --grants-only --apply; then
     echo "check-db-grants: the repair itself failed" >&2
     exit 1
 fi
-recheck_out="$( roles --check 2>&1 )"; rc=$?
+recheck_out="$( roles --check ${SECRETS_ARGS[@]+"${SECRETS_ARGS[@]}"} 2>&1 )"; rc=$?
 echo "$recheck_out"
 if [ "$rc" -eq 0 ]; then echo "check-db-grants: repaired"; exit 0; fi
 echo "check-db-grants: STILL RED after the repair (exit ${rc}); the roles need the full provisioning" >&2

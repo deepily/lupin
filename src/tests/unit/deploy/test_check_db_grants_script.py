@@ -48,7 +48,7 @@ def stub( tmp_path ):
     state = tmp_path / "state"
     def make( start, **env ):
         state.write_text( start )
-        base = dict( os.environ, DB_GRANTS_PSQL=str( psql ), DB_GRANTS_PYTHON=sys.executable, STUB_STATE=str( state ) )
+        base = dict( os.environ, DB_GRANTS_PSQL=str( psql ), DB_GRANTS_PYTHON=sys.executable, DB_GRANTS_SECRETS_DIR="", STUB_STATE=str( state ) )
         base.update( env )
         return base
     make.calls = lambda: ( tmp_path / "state.log" ).read_text().split() if ( tmp_path / "state.log" ).exists() else []
@@ -119,10 +119,36 @@ def test_a_check_that_could_not_look_at_the_secret_files_exits_four_and_says_not
     assert stub.calls() == [ ], "a repair was attempted on a check that never looked"
 
 
-def test_without_a_secrets_directory_the_helper_passes_no_secrets_flag( stub, tmp_path ):
-    fake = _five_python( tmp_path )
-    _helper( stub( "clean", DB_GRANTS_PYTHON=str( fake ) ) )
+def test_an_empty_secrets_directory_setting_skips_the_secret_files( stub, tmp_path ):
+    _helper( stub( "clean", DB_GRANTS_PYTHON=str( _five_python( tmp_path ) ) ) )
     assert "--secrets-dir" not in ( tmp_path / "args.log" ).read_text()
+
+
+def _unset_default( stub, tmp_path ):
+    """The environment of a caller that never mentions the secrets directory."""
+    env = stub( "clean", DB_GRANTS_PYTHON=str( _five_python( tmp_path ) ) )
+    del env[ "DB_GRANTS_SECRETS_DIR" ]
+    return env
+
+
+def test_the_helper_checks_etc_lupin_secrets_when_nobody_names_a_directory( stub, tmp_path ):
+    done = _helper( _unset_default( stub, tmp_path ) )
+    assert done.returncode == 4 and "/etc/lupin/secrets" in done.stderr
+    assert "--secrets-dir /etc/lupin/secrets" in ( tmp_path / "args.log" ).read_text()
+
+
+def test_a_bounce_with_no_directory_named_says_the_secret_files_were_not_checked( stub, tmp_path ):
+    done = _bounce( _unset_default( stub, tmp_path ) )
+    assert done.returncode == 0 and "NOT checked" in done.stderr
+
+
+def test_the_repair_checks_the_secret_files_again_and_does_not_hide_a_gap( stub, tmp_path ):
+    fake = tmp_path / "gap-python"
+    fake.write_text( "#!/bin/sh\necho \"$@\" >> " + str( tmp_path ) + "/args.log\ncase \"$*\" in *grants-only*) exit 0;; esac\necho 'secret file is absent'\nexit 1\n" )
+    fake.chmod( 0o755 )
+    done = _helper( stub( "clean", DB_GRANTS_PYTHON=str( fake ), DB_GRANTS_SECRETS_DIR="/etc/lupin/secrets" ), "--repair" )
+    assert done.returncode == 1 and "STILL RED" in done.stderr
+    assert ( tmp_path / "args.log" ).read_text().count( "--secrets-dir /etc/lupin/secrets" ) == 2, "the recheck dropped the directory"
 
 
 def test_an_unknown_argument_exits_two_and_help_exits_zero( stub ):
@@ -242,6 +268,14 @@ def test_a_clean_answer_is_quiet_unless_verbose_and_a_red_answer_always_shows_th
     assert "helper says hello" not in _probe( tmp_path, 0 )[ 0 ].stdout
     assert "       helper says hello" in _probe( tmp_path, 0, HARNESS_VERBOSE="true" )[ 0 ].stdout
     assert "       helper says hello" in _probe( tmp_path, 3 )[ 0 ].stdout
+
+
+def test_the_probe_through_the_real_helper_checks_the_default_directory_and_warns_not_checked( stub, tmp_path ):
+    env = _unset_default( stub, tmp_path )
+    env.update( PROBE=PROBE, DB_GRANTS_HELPER=HELPER )
+    done = subprocess.run( [ "bash", "-c", HARNESS ], env=env, capture_output=True, text=True, timeout=30 )
+    assert "WARN: database grants are clean, but the secret files were NOT checked" in done.stdout, done.stdout
+    assert "--secrets-dir /etc/lupin/secrets" in ( tmp_path / "args.log" ).read_text()
 
 
 def test_the_skip_switch_warns_and_never_runs_the_helper( tmp_path ):
