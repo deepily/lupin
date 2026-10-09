@@ -857,3 +857,41 @@ def test_a_cap_stopped_pair_shows_none_on_both_sides( repo ):
     models = Spender( str( repo[ "tmp" ] / "ledger.jsonl.calls" ) )
     run( repo, [ QA ], models, **{ "--runs": "1", "--grader-cap": "12", "--out": out } )
     assert json.load( open( out ) )[ "files" ][ "src/mod_a.py" ][ "by_question" ] == { "qa": { "old": [ None ], "new": [ None ], "old_total": 0, "new_total": 0 } }
+
+
+# ---- grades served from the ledger ---------------------------------------------------------------
+
+def test_a_fresh_ledger_serves_no_grade_and_prints_no_strict_warning( repo, capsys ):
+    out = str( repo[ "tmp" ] / "fresh-served.json" )
+    run( repo, [ QA ], extra=[ "--strict-grader" ], **{ "--runs": "1", "--out": out } )
+    report = json.load( open( out ) )
+    assert report[ "grades_from_ledger" ] == 0 and report[ "files" ][ "src/mod_a.py" ][ "grades_from_ledger" ] == 0
+    assert "strict figure" not in capsys.readouterr().out
+
+
+def test_a_strict_rerun_on_a_ledger_of_salvaged_grades_counts_them_and_says_the_figure_is_not_valid( repo, capsys ):
+    run( repo, [ QA ], FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] ), **{ "--runs": "1" } )
+    capsys.readouterr()
+    out = str( repo[ "tmp" ] / "strict-served.json" )
+    code, models = run( repo, [ QA ], extra=[ "--strict-grader" ], **{ "--runs": "1", "--out": out } )
+    report = json.load( open( out ) )
+    assert code == 0 and models.calls == [] and report[ "strict_grader" ] is True and report[ "overall" ][ "salvaged" ] == 0
+    assert report[ "grades_from_ledger" ] == 2 and report[ "files" ][ "src/mod_a.py" ][ "grades_from_ledger" ] == 2
+    assert "strict figure not valid unless the ledger was strict throughout: 2 grades from the ledger" in capsys.readouterr().out
+
+
+def test_a_default_rerun_counts_the_served_grades_without_the_strict_warning( repo, capsys ):
+    run( repo, [ QA ], FakeModels( grader_script=[ REASON + '{"score": 1}', REASON + '{"score": 0}' ] ), **{ "--runs": "1" } )
+    capsys.readouterr()
+    out = str( repo[ "tmp" ] / "default-served.json" )
+    run( repo, [ QA ], **{ "--runs": "1", "--out": out } )
+    assert json.load( open( out ) )[ "grades_from_ledger" ] == 2
+    assert "strict figure" not in capsys.readouterr().out
+
+
+def test_a_grade_made_after_a_cached_one_is_not_counted_as_served( repo ):
+    # run 1 on a ledger that holds run 0 only: the first run's grades are served, the second run's are made now
+    run( repo, [ QA ], **{ "--runs": "1" } )
+    out = str( repo[ "tmp" ] / "mixed-served.json" )
+    run( repo, [ QA ], FakeModels( reader_script=[ None, None, '{"answer": "a fresh answer"}', '{"answer": "another fresh answer"}' ] ), **{ "--runs": "2", "--out": out } )
+    assert json.load( open( out ) )[ "grades_from_ledger" ] == 2
