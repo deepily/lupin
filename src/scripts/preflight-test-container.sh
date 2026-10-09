@@ -221,6 +221,12 @@ fi
 source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-db-grants-probe.sh"
 probe_db_grants
 
+# ── 8. Test login secret ─────────────────────────────────────────────────
+# The test container mounts the second database secret; see lib/preflight-test-secret-probe.sh.
+# shellcheck source=lib/preflight-test-secret-probe.sh
+source "$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" && pwd )/lib/preflight-test-secret-probe.sh"
+probe_test_login_secret
+
 # ── Summary ──────────────────────────────────────────────────────────────
 echo
 if [ "$failures" -eq 0 ]; then
