@@ -16,6 +16,7 @@ PODCAST_ASK_PATH      = "/api/podcast-proxy/ask"
 PODCAST_START_PATH    = "/api/podcast-proxy/start"
 CARD_RESPONSE_PATH    = "/api/notifications/response/{card_id}"
 CARD_FACTS_PATH       = "/api/podcast-proxy/card/{card_id}"
+DRY_RUN_STATUS        = "dry run"   # the start door's own word when its dry-run switch is on; the tool must not call that started
 POLL_INTERVAL_SECONDS = 3.0
 POLL_FAILURE_LIMIT    = 5
 WORKTREE_ADVICE       = "write it to the main checkout's io/tmp"
@@ -146,6 +147,7 @@ def podcast_for_rick_impl(
 
     Ensures:
         - returns { status: "started", card_id, ... } only after a person's yes and a successful start
+        - returns { status: "dry run", card_id, job_id } when the server's dry-run switch is on: the yes was spent and nothing was queued
         - returns { status: "declined", card_id } for a no or a neither, and never calls start
         - returns { status: "default_used", card_id } for a timed-out default, and never calls start
         - returns { status: "expired", card_id } when the card's expiry passes unanswered
@@ -221,6 +223,7 @@ def _start( card_id, api_base_url, api_key, actor, request_fn ):
 
     Ensures:
         - returns { status: "started", card_id, ...the door's answer } on success
+        - returns { status: "dry run", card_id, job_id } when the door answered "dry run": nothing was queued
         - a refusal carries reason = the server's detail.code, the card id and stage "start"
         - code spent is named card_already_spent; no second job exists because the server spends a card once
         - code queue_failed adds retry, saying the card is still valid and to call again with its card_id
@@ -229,7 +232,8 @@ def _start( card_id, api_base_url, api_key, actor, request_fn ):
     started = request_fn( "POST", PODCAST_START_PATH, api_base_url, api_key,
                           json_body={ "card_id": card_id, "actor": actor } )
     if started.get( "status" ) != "error":
-        return { **started, "status": "started", "card_id": card_id }
+        status = DRY_RUN_STATUS if started.get( "status" ) == DRY_RUN_STATUS else "started"
+        return { **started, "status": status, "card_id": card_id }
     code    = _code_of( started )
     refused = { **started, "card_id": card_id, "stage": "start" }
     if code is not None: refused[ "reason" ] = "card_already_spent" if code == "spent" else code

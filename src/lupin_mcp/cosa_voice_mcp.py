@@ -4718,6 +4718,7 @@ def podcast_for_rick(
 
     Returns:
         { status: "started", card_id, job_id, ... } after a yes and a successful start;
+        { status: "dry run", card_id, job_id } when the server's dry-run switch is on: the yes is spent and nothing was queued;
         { status: "declined", card_id } for a no or neither;
         { status: "default_used", card_id } when the card timed out on its default;
         { status: "expired", card_id } when nobody answered in time;

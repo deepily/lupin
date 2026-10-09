@@ -360,3 +360,10 @@ def test_a_start_that_meets_a_claim_with_no_job_carries_the_servers_code_and_the
     out = call( world, Clock( answer_and_claim ) )
     assert out[ "reason" ] == "claimed_no_job" and out[ "stage" ] == "start" and "Do not start it again" in out[ "retry" ]
     assert world[ "flow" ].calls == []
+
+
+def test_with_the_servers_dry_run_switch_on_the_tool_says_dry_run_and_not_started( world, monkeypatch ):
+    monkeypatch.setattr( pp, "dry_run_enabled", lambda config_mgr=None: True )
+    out = call( world, Clock( lambda n: rick_answers( world ) if n == 2 else None ) )
+    assert out[ "status" ] == "dry run" and out[ "job_id" ] == f"dry-run-{out[ 'card_id' ][ :8 ]}"
+    assert world[ "flow" ].calls == []
