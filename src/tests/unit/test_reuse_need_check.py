@@ -7,6 +7,7 @@ two tests that read them skip with a stated reason when the files are absent.
 """
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -213,14 +214,75 @@ def test_a_twins_id_part_or_file_stem_is_never_named():
 
 def test_a_run_failure_carries_no_words_and_the_entry_has_exactly_three_keys():
     got = resend_for( "A function that will parse a feed from a web address and return articles." )
-    assert got == [ { "member": A, "failed": [ "member_text_run" ], "avoid_words": [] } ]
+    assert got == [ { "member": A, "failed": [ "text_run" ], "avoid_words": [] } ]
     assert set( got[ 0 ] ) == { "member", "failed", "avoid_words" }
 
 
 def test_a_run_and_a_word_together_name_the_word_and_not_the_run():
     got = resend_for( "A function that will parse a feed from a web address and return the limit." )
-    assert got == [ { "member": A, "failed": [ "identifier", "member_text_run" ], "avoid_words": [ "limit" ] } ]
+    assert got == [ { "member": A, "failed": [ "identifier", "text_run" ], "avoid_words": [ "limit" ] } ]
     assert "parse a feed" not in json.dumps( got )
+
+
+def test_words_are_read_from_identifier_rows_only_even_if_a_run_row_carried_some():
+    rows = [ { "member": A, "ok": False, "failures": [ { "check": "twin_text_run", "detail": "x", "words": [ B ] },
+                                                      { "check": "member_text_run", "detail": "y", "words": [ "leak" ] } ] } ]
+    assert nc.resend_list( { "rows": rows } ) == [ { "member": A, "failed": [ "text_run" ], "avoid_words": [] } ]
+
+
+def test_a_twin_run_alone_gives_exactly_three_keys_and_no_words():
+    got = resend_for( "A function that will pull each record out of the store, one at a time." )
+    assert got == [ { "member": A, "failed": [ "text_run" ], "avoid_words": [] } ]
+
+
+def test_a_twin_run_with_an_identifier_word_names_the_word_and_no_twin():
+    got = resend_for( "A function that will pull each record out of the store, one at a time, up to the limit." )
+    assert got == [ { "member": A, "failed": [ "identifier", "text_run" ], "avoid_words": [ "limit" ] } ]
+    assert B not in json.dumps( got )
+
+
+def test_a_member_word_that_is_also_a_twins_id_part_is_still_named():
+    got = resend_for( "A function that returns the cosa it was given and counts the records it holds." )
+    assert got == [ { "member": A, "failed": [ "identifier" ], "avoid_words": [ "cosa" ] } ]        # cosa starts all four ids
+
+
+def test_a_mixed_case_argument_name_is_matched_in_lower_case():
+    rec = { "id": "p.f", "sig": "( self, camelArg )", "doc": "", "file": "p/x.py" }
+    assert "camelarg" in nc.identifier_tokens( rec ) and "camelArg" not in nc.identifier_tokens( rec )
+    f = nc.check_need( "p.f", "A function that returns the camelArg values it holds for every caller today.", { "p.f": rec }, {} )
+    assert [ x[ "check" ] for x in f ] == [ "identifier" ] and f[ 0 ][ "words" ] == [ "camelarg" ]
+
+
+def test_both_run_checks_appear_under_one_neutral_name_and_the_results_keep_the_real_ones():
+    need = "A function that will pull each record out of the store, one at a time."
+    res  = nc.check_all( { A: need }, [ A ], INDEX, nc.twin_groups( MANIFEST ) )
+    assert [ f[ "check" ] for f in res[ "rows" ][ 0 ][ "failures" ] ] == [ "twin_text_run" ]
+    assert nc.resend_list( res )[ 0 ][ "failed" ] == [ "text_run" ]
+    assert "twin" not in json.dumps( nc.resend_list( res ) )
+
+
+def test_the_member_run_and_the_twin_run_together_give_text_run_once():
+    need = "A function that will pull each record out of the store and parse a feed from the web."
+    got  = resend_for( need )
+    assert got == [ { "member": A, "failed": [ "text_run" ], "avoid_words": [] } ]
+
+
+@pytest.mark.parametrize( "need", [
+    "A function that returns the limit it was given and counts the records it holds.",
+    "A function that returns the chunks it was given and counts the records it holds.",
+    "A function that returns my_limit_value values and counts them for each of the records.",
+    "A function that returns the cosa it was given and the camel_Chunks of records it holds.",
+] )
+def test_every_avoid_word_is_in_the_need_as_written( need ):
+    got = resend_for( need )
+    assert got and got[ 0 ][ "avoid_words" ], "the loop must find a word to check"
+    for w in got[ 0 ][ "avoid_words" ]:
+        assert w in re.findall( r"[a-z0-9_]+", need.lower() ), w                    # a whole word of the need, not a piece of one
+
+
+def test_a_word_reached_only_through_an_underscore_is_given_as_the_whole_word_written():
+    assert resend_for( "A function that returns my_limit_value values and counts them for each of the records." ) == \
+        [ { "member": A, "failed": [ "identifier" ], "avoid_words": [ "my_limit_value" ] } ]
 
 
 # ---- files and exit codes ----
