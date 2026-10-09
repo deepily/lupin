@@ -292,6 +292,9 @@ def test_the_waiting_card_query_filters_on_kind_path_hash_state_and_expiry():
     text = " ".join( str( f.compile( dialect=postgresql.dialect() ) ) for f in filters )
     for part in ( "payload ->> ", "response_requested", "state IN", "expires_at >" ):
         assert part in text, part
+    literal = " ".join( str( f.compile( dialect=postgresql.dialect(), compile_kwargs={ "literal_binds": True } ) ) for f in filters )
+    assert "notifications.response_requested IS true" in literal, literal
+    assert "notifications.state IN ('created', 'delivered')" in literal, literal
     bound = " ".join( str( f.compile( dialect=postgresql.dialect() ).params ) for f in filters )
     assert "podcast_proxy_start" in bound and "demo/a.md" in bound and "abc" in bound
 
