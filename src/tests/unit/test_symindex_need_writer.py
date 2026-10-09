@@ -208,6 +208,49 @@ def test_retry_prompt_names_kind_of_failure_only( src_root ):
     assert "raw_text" not in prompt.split( "rejected" )[ 1 ]
 
 
+# --- naming the member's own offending word -------------------------------
+
+def test_own_words_found_lists_only_the_members_own_names( src_root ):
+    need = _input( src_root )
+    sentence = "A function that reads raw_text with strict care and returns an extraneous mapping."
+    assert nw.own_words_found( sentence, need ) == [ "raw_text", "strict" ]
+    assert set( nw.own_words_found( sentence, need ) ) <= set( need.forbidden )
+
+
+def test_own_words_found_skips_the_opening_phrase( tmp_path ):
+    pkg = tmp_path / "pk"
+    pkg.mkdir()
+    ( pkg / "__init__.py" ).write_text( "" )
+    ( pkg / "m.py" ).write_text( "def run( function ):\n    return function()\n" )
+    need = ni.build_input( "pk.m.run", str( tmp_path ) )
+    assert nw.own_words_found( "A function that calls it.", need ) == []
+
+
+def test_prompt_names_the_offending_own_word_and_nothing_else( src_root ):
+    need   = _input( src_root )
+    prompt = nw.build_prompt( need, failures=[ "own_identifier" ], own_words=[ "raw_text" ] )
+    assert 'the word "raw_text"' in prompt
+    assert '"strict"' not in prompt and "extraneous" not in prompt
+
+
+def test_prompt_refuses_a_word_that_is_not_in_the_members_own_names( src_root ):
+    with pytest.raises( ValueError, match="not one of the member's own names" ):
+        nw.build_prompt( _input( src_root ), failures=[ "own_identifier" ], own_words=[ "somebody_elses_name" ] )
+
+
+def test_write_need_names_the_own_word_on_retry_but_not_a_foreign_word( src_root ):
+    fake = FakeQuery( [ "A function that reads raw_text and returns a quux mapping of the parsed record into a dictionary object.", GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake ) )
+    assert 'the word "raw_text"' in fake.prompts[ 1 ]
+    assert "quux" not in fake.prompts[ 1 ]
+
+
+def test_a_redo_prompt_carries_no_word_until_the_writer_has_used_one( src_root ):
+    fake = FakeQuery( [ GOOD ] )
+    asyncio.run( nw.write_need( _input( src_root ), fake, failures=[ "own_identifier" ] ) )
+    assert "the word" not in fake.prompts[ 0 ]
+
+
 # --- write_need -------------------------------------------------------------
 
 def test_write_need_accepts_first_good_reply( src_root ):
