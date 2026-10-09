@@ -15,9 +15,9 @@ Run command:
 import asyncio
 import json
 import os
-import urllib.request
 
 import pytest
+from tests.helpers import app_login
 
 try:
     import websockets
@@ -39,22 +39,7 @@ def _login_jwt():
     password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_{EMAIL,PASSWORD} env vars not set" )
-    body = json.dumps( { "email" : email, "password" : password } ).encode()
-    req  = urllib.request.Request(
-        f"{BASE_URL}/auth/login",
-        data    = body,
-        headers = { "Content-Type" : "application/json" },
-        method  = "POST"
-    )
-    try:
-        with urllib.request.urlopen( req, timeout=10 ) as resp:
-            data = json.loads( resp.read() )
-    except Exception as e:
-        pytest.skip( f"auth/login failed against {BASE_URL}: {e}" )
-    token = data.get( "tokens", {} ).get( "access_token" )
-    if not token:
-        pytest.skip( f"unexpected /auth/login response shape: {list( data.keys() )}" )
-    return token
+    return app_login.login( BASE_URL, email, password )[ "tokens" ][ "access_token" ]
 
 
 # ---------------------------------------------------------------------------

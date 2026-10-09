@@ -52,7 +52,7 @@ import os
 import threading
 
 import pytest
-import requests
+from tests.helpers import app_login
 
 from tests.e2e_ui.parity_oracle import (
     ACCORDION_HARNESS_URL_PATH,
@@ -85,14 +85,7 @@ def tokens():
     password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD not set" )
-    try:
-        resp = requests.post( f"{BASE_URL}/auth/login",
-                              json={ "email": email, "password": password }, timeout=10 )
-    except requests.RequestException as exc:
-        pytest.skip( f"{BASE_URL} unreachable: {exc}" )
-    if resp.status_code != 200:
-        pytest.skip( f"login failed: {resp.status_code}" )
-    return resp.json()[ "tokens" ]
+    return app_login.login( BASE_URL, email, password )[ "tokens" ]
 
 
 @pytest.fixture( scope="module" )

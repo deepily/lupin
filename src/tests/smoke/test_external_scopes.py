@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 
 import pytest
+from tests.helpers import app_login
 
 
 BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
@@ -40,16 +41,7 @@ BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 
 def _login( email: str, password: str ) -> str:
     """POST /auth/login → access token (per reference_auth_testing_contract)."""
-    body = json.dumps( { "email": email, "password": password } ).encode()
-    req  = urllib.request.Request(
-        f"{BASE_URL}/auth/login",
-        data    = body,
-        headers = { "Content-Type": "application/json" },
-        method  = "POST",
-    )
-    with urllib.request.urlopen( req, timeout=10 ) as resp:
-        payload = json.loads( resp.read() )
-    return payload[ "tokens" ][ "access_token" ]
+    return app_login.login( BASE_URL, email, password )[ "tokens" ][ "access_token" ]
 
 
 def _fetch( path: str, token: str = None, query: dict = None ):
@@ -90,10 +82,7 @@ def access_token():
     if not email or not password:
         pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/PASSWORD not set" )
 
-    try:
-        return _login( email, password )
-    except Exception as e:
-        pytest.skip( f"login failed: {e}" )
+    return _login( email, password )
 
 
 @pytest.fixture( scope="module" )

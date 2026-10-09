@@ -23,6 +23,7 @@ import time
 
 import pytest
 import requests
+from tests.helpers import app_login
 
 from tests.integration.v2_queued import assert_handed_off
 
@@ -153,15 +154,7 @@ def auth_headers():
     if not email or not password:
         pytest.skip( "Test credentials not set (LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*)" )
 
-    resp = requests.post(
-        f"{BASE_URL}/auth/login",
-        json={ "email": email, "password": password },
-        timeout=30
-    )
-    if resp.status_code != 200:
-        pytest.skip( f"Login failed: {resp.status_code}" )
-
-    token = resp.json()[ "tokens" ][ "access_token" ]
+    token = app_login.login( BASE_URL, email, password, timeout=30 )[ "tokens" ][ "access_token" ]
     return { "Authorization": f"Bearer {token}" }
 
 
