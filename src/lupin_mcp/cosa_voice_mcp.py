@@ -2713,6 +2713,9 @@ def enable_speakerphone() -> dict:
     Returns:
         dict with status, session_id, speakerphone_on=True on success; when the HTTP path is reachable, also includes "displaced_sessions" and "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
     """
+    refusal = _refuse_borrowed_identity( "enable_speakerphone" )
+    if refusal is not None: return refusal
+
     return _flip_speakerphone( True )
 
 
@@ -2731,6 +2734,9 @@ def disable_speakerphone() -> dict:
     Returns:
         dict with status, session_id, speakerphone_on=False on success
     """
+    refusal = _refuse_borrowed_identity( "disable_speakerphone" )
+    if refusal is not None: return refusal
+
     return _flip_speakerphone( False )
 
 
@@ -2912,6 +2918,9 @@ def request_persona( name: Optional[ str ] = None ) -> dict:
         request_persona("Rachel")      # deliberate voice swap
         request_persona()              # user asked for a persona, any free one
     """
+    refusal = _refuse_borrowed_identity( "request_persona" )
+    if refusal is not None: return refusal
+
     return _request_persona( name )
 
 
@@ -2988,6 +2997,9 @@ def spawn_sessions(
     Returns:
         dict: { spawned:[{session_name, requested_role, status, model}], manager_persona, collection_topic, model } or {status:"error"}
     """
+    refusal = _refuse_borrowed_identity( "spawn_sessions" )
+    if refusal is not None: return refusal
+
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
     sid, persona = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
@@ -3572,6 +3584,9 @@ def commons_ask_sync(
         result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)    # poll peers for the latest build hash, wait up to 60s
         for entry in result["replies"]: print(entry["body"])
     """
+    refusal = _refuse_borrowed_identity( "commons_ask_sync" )
+    if refusal is not None: return refusal
+
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
     persona = _commons_persona_fields()
@@ -3611,6 +3626,9 @@ def commons_ask_async(
         result = commons_ask_async(topic="builds", body="latest hash?")    # poll-mode: ask the topic at large
         # later: commons_read(topic="builds", since=result["posted_ts"]) and filter on in_reply_to
     """
+    refusal = _refuse_borrowed_identity( "commons_ask_async" )
+    if refusal is not None: return refusal
+
     return _commons_ask_async_dispatch(
         topic       = topic,
         body        = body,
@@ -4130,6 +4148,9 @@ def dm_list(
         Bad `since`: {"status":"error","reason":"bad_request","detail":...}.
         Transport/auth failure: {"status":"error","reason":...,"detail":...}.
     """
+    refusal = _refuse_borrowed_identity( "dm_list" )
+    if refusal is not None: return refusal
+
     return _dm_list_impl(
         thread_id    = thread_id,
         since        = since,
