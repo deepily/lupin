@@ -74,6 +74,9 @@ def _repo_with_a_worktree( root, with_script=True ):
         dest = os.path.join( script_dir, "link-worktree-artifacts.sh" )
         shutil.copy2( os.path.join( _SCRIPT_DIR, "link-worktree-artifacts.sh" ), dest )
         os.chmod( dest, 0o755 )
+        # The script sources this library from the folder beside it.
+        os.makedirs( os.path.join( script_dir, "lib" ) )
+        shutil.copy2( os.path.join( _SCRIPT_DIR, "lib", "worktree-link-lib.sh" ), os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
     else:
         with open( os.path.join( script_dir, ".keep" ), "w" ) as f: f.write( "" )
 

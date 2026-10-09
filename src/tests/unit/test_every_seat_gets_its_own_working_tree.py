@@ -69,6 +69,10 @@ def fake_projects_dir():
         for script in ( "provision-seat-worktree.sh", "link-worktree-venv.sh" ):
             shutil.copy( _repo_under_test() / "src" / "scripts" / script,
                          main / "src" / "scripts" / script )
+        # The scripts source this library from the folder beside them.
+        ( main / "src" / "scripts" / "lib" ).mkdir()
+        shutil.copy( _repo_under_test() / "src" / "scripts" / "lib" / "worktree-link-lib.sh",
+                     main / "src" / "scripts" / "lib" / "worktree-link-lib.sh" )
         _git( "init", "-q", cwd=main )
         _git( "config", "user.email", "t@example.com", cwd=main )
         _git( "config", "user.name", "t", cwd=main )

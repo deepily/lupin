@@ -168,6 +168,9 @@ def _init_main_checkout( path, with_script=True, spec=None ):
             dest = os.path.join( script_dir, name )
             shutil.copy2( os.path.join( _SCRIPT_DIR, name ), dest )
             os.chmod( dest, 0o755 )
+        # The scripts source this library from the folder beside them.
+        os.makedirs( os.path.join( script_dir, "lib" ), exist_ok=True )
+        shutil.copy2( os.path.join( _SCRIPT_DIR, "lib", "worktree-link-lib.sh" ), os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
     else:
         # `src/scripts` must still be a tracked directory, or the worktree would not have
         # it and the cloud-run.env case would be testing directory creation instead of
