@@ -15,7 +15,7 @@ It does the three steps that used to be typed by hand, and carries nothing betwe
 Everything that can be checked is checked before the first change. A refusal prints what stopped it
 and which of the three steps were not done. A rerun on a finished host reports "unchanged" for each.
 
-What stays manual is listed in src/docs/db-secrets-install.md. It covers the app password file, the
+What stays manual is listed in src/docs/db-login-files-install.md. It covers the app password file, the
 operator's password file, the lupin_test role, Cloud SQL, terraform and the VM push.
 
 It uses the standard library only. It finds the payload beside itself, not through LUPIN_ROOT, because

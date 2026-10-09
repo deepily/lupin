@@ -445,3 +445,18 @@ def test_main_defaults_come_from_the_process( monkeypatch, capsys ):
     monkeypatch.setattr( sys, "argv", [ "x", "--nonsense" ] )
     assert ids.main() == 2
     assert "usage" in capsys.readouterr().out
+
+
+# ── the doc it points to must be servable ────────────────────────────────────
+
+DOC = "src/docs/db-login-files-install.md"
+
+
+def test_the_doc_exists_is_served_and_is_the_one_every_pointer_names():
+    """The doc viewer refuses a name with `secret` as a word, so the doc cannot carry one."""
+    from cosa.rest.routers._scope_registry import _is_secrets_path
+    assert os.path.isfile( os.path.join( cu.get_project_root(), DOC ) )
+    assert _is_secrets_path( DOC ) is False
+    assert _is_secrets_path( "src/docs/db-secrets-install.md" ) is True   # the control: the old name is refused
+    for pointer in ( "src/scripts/install_db_secrets.py", "src/scripts/provision-db-roles.sh", "src/docs/README.md" ):
+        with open( os.path.join( cu.get_project_root(), pointer ) ) as handle: assert DOC.split( "/" )[ -1 ] in handle.read(), pointer

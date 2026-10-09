@@ -22,7 +22,7 @@
 #   The read-only check, exit 1 on a gap (it prints each gap and the repair command above):
 #   src/scripts/provision-db-roles.sh --psql "<same as above>" --check
 #
-# The test login's secret file on a new host: sudo src/scripts/install_db_secrets.py (src/docs/db-secrets-install.md).
+# The test login's secret file on a new host: sudo src/scripts/install_db_secrets.py (src/docs/db-login-files-install.md).
 #
 # ⚠️ NOT RUN AGAINST THE LIVE DATABASE YET. The app's password file is root-owned (a sudo step),
 # and --reassign is a cutover step that needs the app containers recreated first. See
