@@ -2779,6 +2779,57 @@ A client that holds only a card id reads the file it was made for, whether Rick 
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/podcast-proxy/from-viewer/check`
+
+> **Can the doc viewer offer a podcast for this file?**
+
+Runs the same judgement the start does (viewer read check, size, credential, extension) without keeping the content. Auth: Bearer JWT of a signed-in person.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| path | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/podcast-proxy/from-viewer`
+
+> **Start a podcast of a document the signed-in person is viewing**
+
+The click, confirmed in the page, is the yes. The server judges the file as the start door does, claims one job per person, file and bytes inside the card max age, and queues the job for the caller. Auth: Bearer JWT of a signed-in person.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[ViewerIn](#viewerin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/presentation-generator/submit`
 
 > **GONE — use /api/v2/submit**
@@ -6294,6 +6345,17 @@ Request to verify email address with token.
 | token | string | Email verification token from email |
 
 
+## ViewerIn
+
+
+Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| path | string |  |
+
+
 ## VoicePersonaSampleRequest
 
 
@@ -6399,4 +6461,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.09 13:18:18 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.09 19:37:44 by `src/scripts/generate-api-docs.sh`_

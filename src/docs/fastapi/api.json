@@ -7334,6 +7334,155 @@
                 }
             }
         },
+        "/api/podcast-proxy/from-viewer/check": {
+            "get": {
+                "tags": [
+                    "podcast-proxy"
+                ],
+                "summary": "Can the doc viewer offer a podcast for this file?",
+                "description": "Runs the same judgement the start does (viewer read check, size, credential, extension) without keeping the content. Auth: Bearer JWT of a signed-in person.",
+                "operationId": "check_a_viewer_file_api_podcast_proxy_from_viewer_check_get",
+                "parameters": [
+                    {
+                        "name": "path",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024,
+                            "title": "Path"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/podcast-proxy/from-viewer": {
+            "post": {
+                "tags": [
+                    "podcast-proxy"
+                ],
+                "summary": "Start a podcast of a document the signed-in person is viewing",
+                "description": "The click, confirmed in the page, is the yes. The server judges the file as the start door does, claims one job per person, file and bytes inside the card max age, and queues the job for the caller. Auth: Bearer JWT of a signed-in person.",
+                "operationId": "start_a_podcast_from_viewer_api_podcast_proxy_from_viewer_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ViewerIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/presentation-generator/submit": {
             "post": {
                 "tags": [
@@ -16737,6 +16886,23 @@
                 ],
                 "title": "VerifyEmailRequest",
                 "description": "Request to verify email address with token."
+            },
+            "ViewerIn": {
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "minLength": 1,
+                        "title": "Path"
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "path"
+                ],
+                "title": "ViewerIn",
+                "description": "Body for POST /api/podcast-proxy/from-viewer: the document as `<scope>/<path>`."
             },
             "VoicePersonaSampleRequest": {
                 "properties": {
