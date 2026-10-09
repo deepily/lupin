@@ -8,6 +8,10 @@ fail_on_a_refusal. A new site that skips on its own cannot slip in.
 
 The lane-B probe returns False in its handler and skips elsewhere. Its own test file guards it.
 
+A broad handler (Exception, SQLAlchemyError, a bare except) that skips is a second way past the helper.
+The second census below lists every such file and compares it with a short named list. A new entry has
+to be added there with its reason, so a fourth skip on a database connect is a visible decision.
+
 The population is every tracked .py file under the two test roots, counted before the check.
 """
 
@@ -43,6 +47,39 @@ def _skipping_handlers( source ):
             kinds = [ n.id if isinstance( n, ast.Name ) else getattr( n, "attr", "" ) for n in ast.walk( handler.type ) ] if handler.type is not None else [ ]
             if "OperationalError" in kinds and "skip" in _calls( handler.body ): found.append( ( node, handler ) )
     return found
+
+
+BROAD = ( "Exception", "BaseException", "SQLAlchemyError", "DBAPIError", "InterfaceError" )
+
+# Files whose broad handler skips, and why that is allowed. The first three skip on a database connect
+# and are left alone on purpose: they probe a rolled-back temp table, and a refused login there is not
+# the failure class this guard exists for. The other five skip on an HTTP login to the app, not Postgres.
+BROAD_SKIP_ALLOWED = {
+    "src/tests/unit/test_metadata_schema_drift.py"                       : "database connect; drift is unmeasured, not claimed green",
+    "src/tests/unit/test_task_promotion_ticket_answer_by_migration.py"   : "database connect; a rolled-back temp table probe with a loud skip",
+    "src/tests/unit/test_task_request_columns_migration.py"              : "database connect; a rolled-back temp table probe with a loud skip",
+    "src/tests/smoke/test_external_scopes.py"                            : "HTTP login to the app, not a database",
+    "src/tests/websocket_smoke/core/test_close_codes.py"                 : "HTTP login to the app, not a database",
+    "src/tests/ws_channel_browser/test_ws_circuit_banner.py"             : "HTTP login to the app, not a database",
+    "src/tests/ws_channel_browser/test_ws_close_codes.py"                : "HTTP login to the app, not a database",
+    "src/tests/ws_channel_browser/test_ws_lifecycle.py"                  : "HTTP login to the app, not a database",
+}
+
+
+def _broad_skip_files( population, read ):
+    """Return the files with a broad or bare handler that calls pytest.skip."""
+    found = [ ]
+    for path in population:
+        source = read( path )
+        if "skip" not in source: continue
+        for node in ast.walk( ast.parse( source ) ):
+            if not isinstance( node, ast.Try ): continue
+            for handler in node.handlers:
+                kinds = [ n.id if isinstance( n, ast.Name ) else getattr( n, "attr", "" ) for n in ast.walk( handler.type ) ] if handler.type is not None else [ "<bare>" ]
+                if ( set( kinds ) & set( BROAD ) or "<bare>" in kinds ) and "skip" in _calls( handler.body ):
+                    found.append( path )
+                    break
+    return sorted( set( found ) )
 
 
 def _read( path ):
@@ -98,3 +135,29 @@ def test_a_handler_that_fails_the_refusal_itself_counts_as_routed():
 def test_an_unrelated_handler_is_not_counted():
     source = "import pytest\ndef f():\n    try:\n        connect()\n    except ValueError:\n        pytest.skip( 'x' )\n    except OperationalError:\n        raise\n"
     assert census( [ "d.py" ], lambda path: source ) == ( [ ], [ ] )
+
+
+def test_a_tuple_handler_that_skips_is_still_seen():
+    source = ( "import pytest\nfrom sqlalchemy.exc import OperationalError\ndef f():\n    try:\n        connect()\n"
+               "    except ( OperationalError, ValueError ):\n        pytest.skip( 'down' )\n" )
+    assert census( [ "e.py" ], lambda path: source ) == ( [ "e.py" ], [ "e.py" ] )
+
+
+def test_the_broad_skip_files_are_exactly_the_named_list():
+    found = _broad_skip_files( _population(), _read )
+    assert found, "the census found no broad skipping file, so nothing was compared"
+    assert found == sorted( BROAD_SKIP_ALLOWED ), (
+        f"a broad skip appeared or went away. New: {sorted( set( found ) - set( BROAD_SKIP_ALLOWED ) )}. "
+        f"Gone: {sorted( set( BROAD_SKIP_ALLOWED ) - set( found ) )}. Add or remove its entry, with the reason." )
+
+
+def test_every_named_broad_skip_carries_a_reason():
+    assert all( reason.strip() for reason in BROAD_SKIP_ALLOWED.values() )
+
+
+def test_the_broad_census_names_a_fourth_skip_and_a_bare_one():
+    broad = "import pytest\ndef f():\n    try:\n        connect()\n    except Exception:\n        pytest.skip( 'x' )\n"
+    bare  = broad.replace( "except Exception:", "except:" )
+    quiet = broad.replace( "pytest.skip( 'x' )", "raise" )
+    sources = { "a.py": broad, "b.py": bare, "c.py": quiet }
+    assert _broad_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "b.py" ]
