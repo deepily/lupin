@@ -85,6 +85,7 @@ def test_a_wrong_file_is_repaired_and_reported( tmp_path, owners, damage ):
     if damage == "link":
         other = tmp_path / "elsewhere"
         other.write_text( TEST + "\n" )
+        os.chmod( other, 0o440 )                 # the target looks right in every way but being a link
         victim.unlink()
         victim.symlink_to( other )
     report = _write( target, owners )
