@@ -16,6 +16,51 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-08 afternoon to evening (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `d9cc796f`, `c572d723`, `c586cc46`, `c13c3d43`; crew Maya 🌻 · Pocholo 📣 · Tiffany · Clayton 😎)
+
+Rick's words below were checked against the fleet's hook logs (`io/claude_code_hooks/logs`) by Pocholo: the result of each ask tool, each inbound prompt, and the row writes. That is a disk record of what the seat received, not the notification table. A quote is tagged ASK (card answer), PROMPT (typed or voice message) or ROW (written into a row). Times are the hook log's, EDT.
+
+**Rick ruled, 2026-10-08 from 16:55** (cards unless marked):
+
+- **Which of the five asks to do today** (ASK 16:55, multi-select): "Container login", "Grants apply", "Build the host gate", "DB cutover today", "Hooks crontab line". Not on the answer: the VM settings look and deploy (row `ea27d263`) and row `c41c090a`.
+- **Cutover time** (ASK 16:57): "About 5:05 today (Recommended)". Row `80513825`.
+- **Cutover step 2** (ASK 17:04): "File is there, root and group 1002" (he ran `sudo ls -ln /etc/lupin/secrets`).
+- **VM settings look and deploy, row `ea27d263`** (PROMPT 17:11): "Look now and deploy today I just updated my GCP credentials". The look was done at 17:13; the deploy ran at 17:46 after he added the permission rule himself.
+- **Mobile row `c41c090a`: one shared library file** (ASK 17:16): "One shared library file (Recommended)". Later (ASK 17:30; no row has it): the mobile seat comes "After the lupin half lands (Recommended)".
+- **Cutover step 5** (PROMPT 17:22, typed, not a card): "It finished with no error" (he ran the `--reassign --apply` provision).
+- **Cutover step 9, postgres loopback bind** (ASK 17:25): "Yes, now (Recommended)".
+- **Env step, four host keys in `.env`** (ASK 17:30 "It's still right now while I'm at the keyboard", no row; then ASK 17:33 "Mr. Radio adds them (Recommended)", row `80513825`). Tried and undone twice (see history).
+- **VM deploy automation** (ASK 17:30 "Why do I have to run the deploy? Shouldn't this be automatable?", no row; ASK 17:33 "Yes, fix and deploy (Recommended)"; ASK 17:37 "Mr. Radio adds a permission rule (Recommended)"; the last two on row `ea27d263`). The rule was refused to Mr. Radio as self-modification; Rick added it himself.
+- **Template database for the tests that create databases** (PROMPT 18:09, two prompts; row `80513825` amended 18:16): "Template database plus test login (Recommended)".
+- **Red integration gate after the cutover** (PROMPT 20:09, after two cards timed out at about 18:17 and 18:36; no row): "Mr. Radio fixes forward, gate red tonight (Recommended)". No rollback, no expected-red marks.
+- **The test container's login, and the sudo step** (PROMPT 20:09, no row): "Yeah I'm willing to run the pseudo step as long as this particular part of the process gets replicated and automated and all of the installed instances of Lupine AF" (his words as the transcription gave them). Maya built the automation (section 7); the gaps it does not automate are listed in her addendum and Pocholo's verdict.
+- **Sudoers line for one command** (PROMPT 20:55, no row): "Yes, and Rick adds a sudoers line for that one command". Mr. Radio's constraint: a root-owned copy outside the repo, fixed arguments, the script refuses a copy with the wrong owner or mode; no seat runs sudo. Built as `5e2a90ca7` and `4f4bc6ef5`; commands for Rick in `io/tmp/2026.10.08-rick-commands-install-db-secrets.md`. He has not run them.
+- **Delete the orphaned tests**: in git (the subject of `e928e4915`) and as a PROMPT at 20:02 in another seat's session (`97709c57`), per Pocholo.
+- **Voice-to-podcast, row `4bf48f78`** (voice, about 20:08; row text): asked for a voice-driven document-to-podcast. The row was promoted to P0 at 20:09:45 and approved at 20:10:04 (store events; not found outside Mr. Radio's record).
+- **Row `71a11ed7`** (about 20:11): Rick filed the approve error himself (the row's creator is `rick (rick)`, P1; the time is not checked).
+- **Podcast mechanism** (card, about 20:22; row `4bf48f78`, first amendment, which gives Mr. Radio's summary and one quote): he keeps the button, wants a spoken way too, names the Q&A interface as a door, and "Pick would be in getting you Mr Radio to be able to submit that request as my proxy".
+- **Podcast: do not build yet** (PROMPT 20:24; ROW `4bf48f78`): "I don't want you to build anything just yet".
+- **Podcast: four steps in order** (card, about 20:35; row amendment): "I like the idea of your recommendation for building all 4 steps in order". The order is 0 two door checks, 1 seat proxy, 2 viewer button, 3 "the last card". The proxy sends the absolute path, so the job need not accept doc-viewer links (the amendment's gloss, not his words).
+- **Podcast: write a plan, have María check it** (about 20:37; row amendment): "I want you to write this up as a plan And I want someone else to sanity check it So I'm going to spin up Maria ... before you hand it off to your swe team. And I'll even give you a couple more seats" (the ellipsis is the amendment's).
+- **Podcast: lean proxy first** (PROMPT 20:44; ROW `4bf48f78`): "Let's start with the lean proxy first but I want to see the plan".
+- **Podcast: both clients** (PROMPT 20:53; no row; plan section 9.8 quotes it): "I want to make sure that that's available both for the legacy notification and the multiplexer clients both".
+- **Podcast: order of work** (card "Both pages"; PROMPT 21:06; ROW `4bf48f78` amended 21:10; the long note matches verbatim): he ticked "Card files beside the seat's cards (Recommended)", "Play Here on the multiplexer", "Download proven or fixed on the multiplexer", and wrote: "Hey I like all of your recommendations and even the spoken yes on both pages but let's deprioritize the multiplexer and let's deprioritize spoken yes on both pages Otherwise let's do all notification card first And you can do the implementation for notification first get it to me and then Move on to the multiplexer in that order". The order as Mr. Radio read it (his reading, not Rick's words): the legacy page complete and delivered, then the multiplexer, then a spoken yes.
+- **Podcast: the long ping** (PROMPT 21:14, no row): "send me a nice long ping whenever the legacy notification client has doc to voice doc to podcast by voice". Mr. Radio told him a yes/no card lands in the asking seat's history and he taps yes. A voice message at about 21:23 asked for an ETA (a paraphrase; no transcript is quoted here).
+- **Away** (PROMPT 21:23:04, voice; the transcript's words): "Okay so I'm going to be AFK for the next couple of hours So do you best without me and save your questions for when I come back okay?" No cards until he is back.
+- **Earlier, not today's**: row `8385316c` is parked at his word of 2026-10-05.
+
+**Mr. Radio's calls today** (made without Rick, each open to his reversal; Mr. Radio's, not Rick's):
+
+- Fix forward, no rollback, no expected-red marks while Rick was away (18:46 note).
+- Sections of Maya's plan held back until Rick answered the second-secret question (18:46 note); built after his 20:10 answer.
+- The no-keys mode of the template helper is plain `CREATE DATABASE`; with keys it clones the template and fails, never skips, when the template is missing; template removal has its own flag `db_roles --drop-template` (19:15 note, "agreed by me").
+- The podcast card binds to the asking seat's stable session id.
+- No automated yes on :7999 for the podcast proxy: the test login is not on the approver list (measured 21:33), and only Rick's account is an approver. The earlier word to Rick that a test Yes would be answered by the run is wrong on the Yes.
+- The host login red (the CONNECT privilege failure) is fixed in the tests (`c057143124`), not by a grant.
+- The podcast tip lands alone (22:57:06, `458797519`); the second train follows.
+
+**Open**: Rick's first yes on a podcast card; the finding that `/api/notify/response` accepted a yes on Rick's card from another signed-in login (Pocholo's answer, `io/tmp/2026.10.08-pocholo-live-run-check-and-who-can-answer.md`: only promotion, un-park and the podcast check who answered; the answer door does not compare caller to recipient; whether to change that is open); the fleet tool holds a seat up to 15 minutes while it polls; the second train; the multiplexer Play Here and Download, then a spoken yes (Rick's order of 21:07); the sudo step for the test container's login (his hands); rows `5a1e018c` and `420e96ee`, filed at 23:05.
+
 ## 📚 DECISIONS LOG 2026-10-07 night to 10-08 (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `7f9ad619`, `5de42f73`, `a0105e01`; crew Maya · Pocholo)
 
 **Rick ruled** (cards answered by keypress unless marked voice):
