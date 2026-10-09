@@ -896,3 +896,11 @@ def test_a_grade_made_after_a_cached_one_is_not_counted_as_served( repo ):
     out = str( repo[ "tmp" ] / "mixed-served.json" )
     run( repo, [ QA ], FakeModels( reader_script=[ None, None, '{"answer": "a fresh answer"}', '{"answer": "another fresh answer"}' ] ), **{ "--runs": "2", "--out": out } )
     assert json.load( open( out ) )[ "grades_from_ledger" ] == 2
+
+
+def test_the_served_ledger_passes_a_timing_through_to_the_inner_ledger( repo ):
+    inner   = harness_runner.Ledger( str( repo[ "tmp" ] / "timing-ledger.jsonl" ) )
+    wrapped = rr.ServedLedger( inner )
+    wrapped.put( "grade|k", 1, { "grader": { "seconds": 2.5, "calls": 1 } } )
+    assert inner.get( "grade|k" ) == 1 and inner.timing( "grade|k" ) == { "grader": { "seconds": 2.5, "calls": 1 } }
+    assert wrapped.get( "grade|k" ) == 1 and wrapped.reused == set()          # written after the wrap: held by no one before it
