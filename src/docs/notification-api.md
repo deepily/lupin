@@ -1,16 +1,14 @@
 # Lupin Notification API Reference
 
-> **One-stop reference** for the Lupin notification system — from architecture to testing.
->
-> **Last Updated**: 2026-04-24
-> **Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/2025.10.15-sse-notifications/`.
->
-> **v0.1.7 CJ Flow async note**: when `cj flow max concurrent agentic jobs > 1`,
-> multiple agentic jobs may emit notifications concurrently from different pool
-> worker threads. `notification_id` + `job_id` routing remains the canonical way
-> to correlate responses; no ordering guarantee exists ACROSS different jobs.
-> Within a single job, the pop-before-transition invariant in
-> `RunningFifoQueue._on_agentic_complete` preserves TTS → emit → queue transition.
+**One-stop reference** for the Lupin notification system — from architecture to testing.
+
+**Source of Truth**: This document supersedes all R&D planning docs in `src/rnd/2025.10.15-sse-notifications/`.
+
+**v0.1.7 CJ Flow async note**: when `cj flow max concurrent agentic jobs > 1`, several agentic jobs may emit notifications at once.
+They emit from different pool worker threads. `notification_id` + `job_id` routing remains the canonical way
+to correlate responses. No ordering guarantee exists across different jobs.
+Within a single job, the pop-before-transition invariant in
+`RunningFifoQueue._on_agentic_complete` preserves TTS → emit → queue transition.
 
 ---
 
@@ -22,13 +20,13 @@
 3. [Authentication](#3-authentication)
 4. [REST API Endpoints](#4-rest-api-endpoints)
 5. [Pydantic Models & Enums](#5-pydantic-models--enums) *(second half)*
-6. [In-Memory Queue ( NotificationFifoQueue )](#6-in-memory-queue--notificationfifoqueue-) *(second half)*
+6. [In-Memory Queue (NotificationFifoQueue)](#6-in-memory-queue--notificationfifoqueue-) *(second half)*
 7. [PostgreSQL Persistence](#7-postgresql-persistence) *(second half)*
 8. [SSE Blocking Flow](#8-sse-blocking-flow) *(second half)*
 9. [WebSocket Events](#9-websocket-events) *(second half)*
 10. [CLI Clients](#10-cli-clients) *(second half)*
 11. [cosa-voice MCP Integration](#11-cosa-voice-mcp-integration) *(second half)*
-12. [Notification Proxy ( Auto-Responder )](#12-notification-proxy--auto-responder-) *(second half)*
+12. [Notification Proxy (Auto-Responder)](#12-notification-proxy--auto-responder-) *(second half)*
 13. [Testing & Debugging](#13-testing--debugging) *(second half)*
 
 ---
@@ -48,7 +46,7 @@ users. It supports two fundamental modes:
    input.
 
 The system is designed for a **voice-first UX**: notifications are spoken aloud via
-TTS, and user responses can be captured through voice-to-text or traditional text
+TTS. And user responses can be captured through voice-to-text or traditional text
 input.
 
 ---
@@ -57,82 +55,77 @@ input.
 
 Every notification flows through up to three layers, each serving a distinct purpose:
 
-#### Layer 1: FIFO Queue + WebSocket ( real-time )
+#### Layer 1: FIFO Queue + WebSocket (real-time)
 
 An in-memory `NotificationFifoQueue` accepts incoming notifications and immediately
 pushes them to connected browser clients via WebSocket events
-( `notification_queue_update` ). Priority handling ensures that `urgent` and `high`
-items are inserted at the front of the queue, while `medium` and `low` items are
-appended to the back.
+(`notification_queue_update`). Priority handling inserts `urgent` and `high` items at the front of the queue.
+`medium` and `low` items are appended to the back.
 
 **Source**: `src/cosa/rest/notification_fifo_queue.py`
 
-#### Layer 2: PostgreSQL ( persistent history )
+#### Layer 2: PostgreSQL (persistent history)
 
 All notifications are persisted via the `Notification` SQLAlchemy ORM model and the
 `NotificationRepository` class. This layer enables:
 
 - Conversation grouping by sender
 - Date-based accordion display
-- Sender analytics ( last activity, notification counts )
+- Sender analytics (last activity, notification counts)
 - Soft-delete / archive via `is_hidden` flag
 
-**Source**: `src/cosa/rest/postgres_models.py` ( lines 482-628 ),
+**Source**: `src/cosa/rest/postgres_models.py` (lines 482-628),
 `src/cosa/rest/db/repositories/notification_repository.py`
 
-> **`persist=false` — delivery-only re-attempts skip THIS layer only** ( bug
-> `e1bbe011` ). The fire-and-forget branch persists a forensic row by default
-> (`persist=true`). A caller that is re-attempting delivery of an *already-persisted*
-> notification passes `persist=false` to skip the DB insert while leaving Layer 1
-> (FIFO + WebSocket) delivery fully intact — so a repeated retry never mints a
-> duplicate forensic row. The sole production user is the fleet arbiter's
-> re-announce-on-return loop ( see § `persist` param below ).
+**`persist=false` — delivery-only re-attempts skip this layer only** . The fire-and-forget branch persists a forensic row by default
+(`persist=true`). A caller that is re-attempting delivery of an *already-persisted*
+notification passes `persist=false` to skip the DB insert.
+Layer 1 (FIFO + WebSocket) delivery stays fully intact. So a repeated retry never mints a
+duplicate forensic row. The sole production user is the fleet arbiter's
+re-announce-on-return loop (see § `persist` param below).
 
-#### Layer 3: SSE ( synchronous blocking )
+#### Layer 3: SSE (synchronous blocking)
 
 For response-required notifications, the `POST /api/notify` endpoint returns a
 `StreamingResponse` with Server-Sent Events. The SSE stream stays open until one
 of three things happens:
 
-1. The user responds ( via the browser UI or voice input )
-2. The timeout expires ( `timeout_seconds` parameter )
-3. The user is detected as offline ( immediate default return )
+1. The user responds (via the browser UI or voice input)
+2. The timeout expires (`timeout_seconds` parameter)
+3. The user is detected as offline (immediate default return)
 
 **Source**: Router endpoint `POST /api/notify` with `response_requested=true`
 
-#### Side Channel: FCM Wake Push ( mobile silent relay, S6 )
+#### Side Channel: FCM Wake Push (mobile silent relay)
 
-When a user-targeted notification is enqueued at Layer 1 and the user has NO live
-WebSocket session marked `client_type: "mobile"` ( a live web/desktop session does
-NOT suppress this ), the queue's enqueue chokepoint asks `FcmWakeService` to send a
-content-free, data-only, high-priority FCM push
-`{ "type": "ws_wake", "reason": "undelivered" | "reconnect-hint", "ts": <iso8601> }`
-to the user's registered devices ( `POST /api/fcm/register-token` ). The push carries
-NO message content — the woken mobile handler fetches the notification over the
+A user-targeted notification is enqueued at Layer 1, and the user has no live WebSocket session marked `client_type: "mobile"`.
+A live web or desktop session does not suppress the wake.
+In that case the queue's enqueue chokepoint asks `FcmWakeService` to send a content-free, data-only, high-priority FCM push.
+The payload is `{ "type": "ws_wake", "reason": "undelivered" | "reconnect-hint", "ts": <iso8601> }`.
+It goes to the user's registered devices (`POST /api/fcm/register-token`). The push carries
+no message content — the woken mobile handler fetches the notification over the
 authenticated API. Debounced to at most one wake per user per
-`fcm wake debounce seconds` ( default 60 ). Boots DISABLED with a clear log line
+`fcm wake debounce seconds` (default 60). Boots disabled with a clear log line
 until Firebase credentials are provisioned — never blocks the notification path.
 
-**A notification enqueued INSIDE a live debounce window is deferred, never dropped**
-( row `ed76b897` ). It used to be dropped: the debounce arm returned `debounced` and
-ended there, and because its log line was gated on `debug` AND `verbose` it produced
-no output either — measured live 2026-09-28, a notify 37 s after a completed wake, the
-device socket down, logged nothing at all and sat unplayed until something else woke
-the device. Now the FIRST notify inside a window arms ONE trailing wake for the moment
-the window closes; every later notify in that window collapses onto it. The trailing
-wake re-runs the whole policy at fire time, so a device that reconnected during the
+**A notification enqueued inside a live debounce window is deferred, never dropped**
+(). It used to be dropped: the debounce arm returned `debounced` and
+ended there. And because its log line was gated on `debug` and `verbose` it produced
+no output either. Measured live: a notify 37 s after a completed wake, with the device socket down, logged nothing at all.
+It sat unplayed until something else woke the device. Now the first notify inside a window arms one trailing wake for the moment
+the window closes. Every later notify in that window collapses onto it. The trailing
+wake re-runs the whole policy at fire time. So a device that reconnected during the
 window is not woken — a deferral is a request, not a promise. `/api/notify/next`
-serves the OLDEST unplayed item, so the backlog drains in order.
+serves the oldest unplayed item. So the backlog drains in order.
 
-**The trailing wake has no override — it honours the window like any other caller.**
-A timer thread is not a clock. Descheduled it fires LATE, and by then an ordinary
-notify may have taken the expired slot and opened a new window; a forced send would
+**The trailing wake has no override — it honours the window like any other caller**.
+A timer thread is not a clock. Descheduled it fires late, and by then an ordinary
+notify may have taken the expired slot and opened a new window. A forced send would
 put two wakes inside it, defeating the one rate limit the service exists for. Woken
-EARLY it would send before the window it was waiting on had closed. Both cases
-disappear because the trailing wake simply re-enters `maybe_send_wake`: late or
-early it finds the window open and re-defers for what is genuinely left, and each
-re-defer's delay strictly decreases, so it converges rather than loops. **At most one
-wake per user per window holds even against a late timer.**
+Early it would send before the window it was waiting on had closed. Both cases disappear because the trailing wake simply re-enters `maybe_send_wake`.
+Late or early, it finds the window open and re-defers for what is left.
+Each re-defer's delay strictly decreases. So it converges rather than loops. **At most one
+wake per user per window holds even against a late timer**.
 
 `maybe_send_wake()` returns the arm it took:
 
@@ -140,18 +133,16 @@ wake per user per window holds even against a late timer.**
 |---|---|
 | `disabled` | master switch off, or Firebase credentials never resolved |
 | `mobile_ws_live` | the user has a live mobile queue-WS — no wake needed |
-| `deferred` | inside a window; **this call** armed the trailing wake ( logged UNGATED ) |
+| `deferred` | inside a window; **this call** armed the trailing wake (logged UNGATED) |
 | `debounced` | inside a window; a trailing wake was **already** pending, so this collapsed onto it |
 | `no_tokens` | no registered FCM tokens for the user |
 | `submitted` | handed to the send executor |
 
-The `deferred` line and the trailing wake's outcome line are both printed **ungated** —
-the debug flag being off is exactly the condition under which the original silence went
-unread for a day.
+The `deferred` line and the trailing wake's outcome line are both printed **ungated**. The original silence went unread for a day because the debug flag was off.
 
-**Source**: `src/cosa/rest/fcm_wake_service.py` ( policy + sender ),
-`src/cosa/rest/notification_fifo_queue.py` ( `_maybe_send_fcm_wake` hook ),
-`src/cosa/rest/routers/fcm.py` ( token registration ),
+**Source**: `src/cosa/rest/fcm_wake_service.py` (policy + sender),
+`src/cosa/rest/notification_fifo_queue.py` (`_maybe_send_fcm_wake` hook),
+`src/cosa/rest/routers/fcm.py` (token registration),
 spec `src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md`
 
 ---
@@ -174,14 +165,14 @@ Or, for session-aware senders:
 
 **Known agent types**:
 
-| Agent Type             | Description                                |
+| Agent Type | Description |
 |------------------------|--------------------------------------------|
-| `claude.code`          | Claude Code CLI sessions ( via cosa-voice ) |
-| `deep.research`        | Deep Research agentic jobs                 |
-| `podcast.generator`    | Podcast Generator agentic jobs             |
-| `claude.code.job`      | Claude Agent SDK bounded/interactive jobs  |
-| `notification.proxy`   | Auto-responder proxy                       |
-| `arg.expeditor`        | Runtime argument expeditor agent           |
+| `claude.code`          | Claude Code CLI sessions (via cosa-voice) |
+| `deep.research`        | Deep Research agentic jobs |
+| `podcast.generator`    | Podcast Generator agentic jobs |
+| `claude.code.job`      | Claude Agent SDK bounded/interactive jobs |
+| `notification.proxy`   | Auto-responder proxy |
+| `arg.expeditor`        | Runtime argument expeditor agent |
 
 **Examples**:
 
@@ -194,7 +185,7 @@ podcast.generator@lupin.deepily.ai
 
 #### Recipient Routing
 
-Notifications target a user by **email address** ( the `target_user` parameter ).
+Notifications target a user by **email address** (the `target_user` parameter).
 The server resolves the email to an internal UUID via `get_user_by_email()`, then
 uses that UUID for database storage and WebSocket delivery.
 
@@ -207,7 +198,7 @@ into date-based accordion sections for easy navigation.
 #### Job Card Routing
 
 The optional `job_id` field routes notifications to specific agentic job cards in
-the UI. This allows long-running background jobs ( deep research, podcast generation )
+the UI. This allows long-running background jobs (deep research, podcast generation)
 to have their own notification streams displayed within the job's progress panel.
 
 **Job ID formats**:
@@ -267,7 +258,7 @@ graph TB
     PG_DB --> REPO
 ```
 
-![System Architecture]( images/notification-system-architecture.png )
+![System Architecture](images/notification-system-architecture.png)
 
 ---
 
@@ -275,24 +266,24 @@ graph TB
 
 The following table maps each component to its implementation file:
 
-| Component              | File                                                            | Approx. Lines | Purpose                                          |
+| Component | File | Approx. Lines | Purpose |
 |------------------------|-----------------------------------------------------------------|---------------|--------------------------------------------------|
-| REST API endpoints     | `src/cosa/rest/routers/notifications.py`                        | 1,948         | All 17 notification endpoints                    |
-| In-memory queue        | `src/cosa/rest/notification_fifo_queue.py`                      | 588           | FIFO queue with WebSocket emission               |
-| PostgreSQL model       | `src/cosa/rest/postgres_models.py`                              | 482-628       | `Notification` ORM model, 20+ columns            |
-| Repository             | `src/cosa/rest/db/repositories/notification_repository.py`      | 892           | CRUD, conversation queries, sender analytics     |
-| Pydantic models        | `src/cosa/cli/notification_models.py`                           | 1,062         | Request/response models, SSE events, enums       |
-| API key auth           | `src/cosa/rest/middleware/api_key_auth.py`                      | ~200          | Dual auth middleware ( API key or JWT )           |
-| Sync CLI client        | `src/cosa/cli/notify_user_sync.py`                              | ~400          | SSE blocking client with retry                   |
-| Async CLI client       | `src/cosa/cli/notify_user_async.py`                             | ~300          | Fire-and-forget with adaptive retry              |
-| Generic CLI client     | `src/cosa/cli/notify_user.py`                                   | ~300          | Legacy/fallback notification sender              |
-| Type enums             | `src/cosa/cli/notification_types.py`                            | 102           | NotificationType, NotificationPriority enums     |
-| Voice I/O layer        | `src/cosa/agents/utils/voice_io.py`                             | ~820          | Voice-first with CLI fallback                    |
-| Deep Research interface| `src/cosa/agents/deep_research/cosa_interface.py`               | ~490          | Async notification wrappers for DR agent         |
-| Claude Code interface  | `src/cosa/agents/claude_code/cosa_interface.py`                 | ~220          | Async notification wrappers for CC agent         |
-| Proxy listener         | `src/cosa/agents/notification_proxy/listener.py`                | 359           | WebSocket listener for auto-response             |
-| Proxy responder        | `src/cosa/agents/notification_proxy/responder.py`               | 465           | Strategy chain for auto-answering                |
-| Proxy config           | `src/cosa/agents/notification_proxy/config.py`                  | 286           | Profiles, credentials, constants                 |
+| REST API endpoints | `src/cosa/rest/routers/notifications.py`                        | 1,948 | All 17 notification endpoints |
+| In-memory queue | `src/cosa/rest/notification_fifo_queue.py`                      | 588 | FIFO queue with WebSocket emission |
+| PostgreSQL model | `src/cosa/rest/postgres_models.py`                              | 482-628 | `Notification` ORM model, 20+ columns |
+| Repository | `src/cosa/rest/db/repositories/notification_repository.py`      | 892 | CRUD, conversation queries, sender analytics |
+| Pydantic models | `src/cosa/cli/notification_models.py`                           | 1,062 | Request/response models, SSE events, enums |
+| API key auth | `src/cosa/rest/middleware/api_key_auth.py`                      | ~200 | Dual auth middleware (API key or JWT) |
+| Sync CLI client | `src/cosa/cli/notify_user_sync.py`                              | ~400 | SSE blocking client with retry |
+| Async CLI client | `src/cosa/cli/notify_user_async.py`                             | ~300 | Fire-and-forget with adaptive retry |
+| Generic CLI client | `src/cosa/cli/notify_user.py`                                   | ~300 | Legacy/fallback notification sender |
+| Type enums | `src/cosa/cli/notification_types.py`                            | 102 | NotificationType, NotificationPriority enums |
+| Voice I/O layer | `src/cosa/agents/utils/voice_io.py`                             | ~820 | Voice-first with CLI fallback |
+| Deep Research interface| `src/cosa/agents/deep_research/cosa_interface.py`               | ~490 | Async notification wrappers for DR agent |
+| Claude Code interface | `src/cosa/agents/claude_code/cosa_interface.py`                 | ~220 | Async notification wrappers for CC agent |
+| Proxy listener | `src/cosa/agents/notification_proxy/listener.py`                | 359 | WebSocket listener for auto-response |
+| Proxy responder | `src/cosa/agents/notification_proxy/responder.py`               | 465 | Strategy chain for auto-answering |
+| Proxy config | `src/cosa/agents/notification_proxy/config.py`                  | 286 | Profiles, credentials, constants |
 
 ---
 
@@ -350,7 +341,7 @@ The following table maps each component to its implementation file:
 Understanding the evolution of the notification system helps explain why certain
 patterns exist in the codebase today.
 
-### Phase 1 — Bash Scripts ( June-October 2025 )
+### Phase 1 — Bash Scripts (June-October 2025)
 
 Claude Code originally sent notifications by executing bash scripts from the
 terminal. This was the first working prototype of agent-to-human communication.
@@ -360,7 +351,7 @@ terminal. This was the first working prototype of agent-to-human communication.
 - **Global commands** installed at `~/.local/bin/`:
   - `notify-claude-async` — Fire-and-forget notifications
   - `notify-claude-sync` — Response-required notifications with SSE blocking
-  - `notify-claude` — Unified wrapper
+  - `notify-claude`. Unified wrapper
 - **Project-level wrapper**: `src/scripts/notify.sh`
 - **Architecture**: Three-layer PoC: Bash wrapper → Python SSE client → FastAPI server
 
@@ -373,7 +364,7 @@ terminal. This was the first working prototype of agent-to-human communication.
 
 **Archived at**: `src/rnd/2025.10.15-sse-notifications/src/`
 
-### Phase 2 — Python CLI Consolidation ( November-December 2025 )
+### Phase 2 — Python CLI Consolidation (November-December 2025)
 
 The fragile bash scripts were replaced with Pydantic-validated Python CLI modules.
 This phase introduced type safety, retry logic, and proper error handling.
@@ -385,22 +376,22 @@ This phase introduced type safety, retry logic, and proper error handling.
 
 **Phase 2.4**: `notify_user_async.py`
 - Fire-and-forget with adaptive retry
-- Naming refactored: `notify-claude` → `notify-claude-async` ( explicit naming )
+- Naming refactored: `notify-claude` → `notify-claude-async` (explicit naming)
 - Pydantic validation applied consistently to async path
 
 **Phase 2.5**: Multi-environment configuration
 - Config loading via `cosa.utils.config_loader`: env vars > config file > defaults
-- API key moved from query parameter to `X-API-Key` header ( security improvement )
+- API key moved from query parameter to `X-API-Key` header (security improvement)
 
-**Sender-Aware System** ( Phase 2 of sender-aware design, December 2025 ):
+**Sender-Aware System** (Phase 2 of sender-aware design, December 2025):
 - `sender_id` field added to all models
 - PostgreSQL migration for notification persistence
 - Conversation grouping by sender in the frontend
 
-### Phase 3 — cosa-voice MCP Migration ( January 2026-present )
+### Phase 3 — cosa-voice MCP Migration (January 2026-present)
 
 The Python CLI was superseded by native MCP tool calls via the cosa-voice server
-( v0.3.0 ). This brought significant improvements:
+(v0.3.0). This brought significant improvements:
 
 - **Audio TTS**: Notifications are spoken aloud, not just displayed
 - **Voice-to-text input**: Users can respond by speaking
@@ -409,16 +400,16 @@ The Python CLI was superseded by native MCP tool calls via the cosa-voice server
 
 **Deprecated command mapping**:
 
-| Deprecated Command       | MCP Replacement            |
+| Deprecated Command | MCP Replacement |
 |--------------------------|----------------------------|
 | `notify-claude-async`    | `notify()`                 |
 | `notify-claude-sync`     | `ask_yes_no()` / `converse()` |
-| Menu options via CLI     | `ask_multiple_choice()`    |
-| `notify-claude` ( unified ) | Removed entirely        |
+| Menu options via CLI | `ask_multiple_choice()`    |
+| `notify-claude` (unified) | Removed entirely |
 
-**Python CLI modules remain available**: They are used internally by
-`cosa_interface` wrappers in agentic jobs ( deep research, podcast generator )
-that run as background processes without MCP access.
+**Python CLI modules remain available**.
+The `cosa_interface` wrappers use them internally, in agentic jobs such as deep research and the podcast generator.
+Those jobs run as background processes without MCP access.
 
 ### Evolution Timeline
 
@@ -439,22 +430,22 @@ timeline
         February 2026 : Voice I/O integration complete
 ```
 
-![Historical Evolution]( images/notification-historical-evolution.png )
+![Historical Evolution](images/notification-historical-evolution.png)
 
 ### Why This Matters
 
-The Python CLI layer ( `notify_user_sync.py`, `notify_user_async.py` ) is the
+The Python CLI layer (`notify_user_sync.py`, `notify_user_async.py`) is the
 foundation that agentic jobs still call internally. Understanding its credential
 gathering, retry logic, and SSE stream parsing is essential for debugging
 notification failures from background jobs.
 
 Key debugging implications:
 
-- **Background jobs** ( deep research, podcast generator ) use the Python CLI
+- **Background jobs** (deep research, podcast generator) use the Python CLI
   path because they run as subprocesses without MCP access
 - **Claude Code sessions** use the MCP path via cosa-voice for richer UX
 - **Config loading** follows a strict precedence: env vars > config file > defaults
-- **API key authentication** is always via the `X-API-Key` header ( never query params )
+- **API key authentication** is always via the `X-API-Key` header (never query params)
 
 ---
 
@@ -479,7 +470,7 @@ curl -X POST "http://localhost:7999/api/notify" \
   -d "target_user=user@example.com"
 ```
 
-**Python ( CLI )**:
+**Python (CLI)**:
 
 ```python
 from lupin_cli.notifications.notification_models import (
@@ -499,7 +490,7 @@ response = notify_user_async( request )
 print( f"Status: {response.status}, Connections: {response.connection_count}" )
 ```
 
-**MCP ( cosa-voice )**:
+**MCP (cosa-voice)**:
 
 ```python
 notify( "Build completed successfully", notification_type="task", priority="medium" )
@@ -511,7 +502,7 @@ notify( "Build completed successfully", notification_type="task", priority="medi
 
 Ask the user a binary question and wait for their answer.
 
-**curl** ( opens SSE stream ):
+**curl** (opens SSE stream):
 
 ```bash
 curl -N -X POST "http://localhost:7999/api/notify" \
@@ -537,7 +528,7 @@ Or on timeout:
 data: {"status": "expired", "response": "no", "default_used": true}
 ```
 
-**Python ( CLI )**:
+**Python (CLI)**:
 
 ```python
 from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
@@ -560,7 +551,7 @@ else:
     print( f"Error: {response.error_message}" )
 ```
 
-**MCP ( cosa-voice )**:
+**MCP (cosa-voice)**:
 
 ```python
 response = ask_yes_no( "Deploy to production?", default="no", priority="high" )
@@ -590,7 +581,7 @@ curl -N -X POST "http://localhost:7999/api/notify" \
   --data-urlencode 'response_options={"questions":[{"question":"How should we handle the migration?","header":"Migration","multiSelect":false,"options":[{"label":"Incremental","description":"Migrate tables one at a time"},{"label":"Big bang","description":"Migrate everything at once"},{"label":"Cancel","description":"Skip migration for now"}]}]}'
 ```
 
-**Python ( CLI )**:
+**Python (CLI)**:
 
 ```python
 from lupin_cli.notifications.notification_models import NotificationRequest, ResponseType
@@ -618,7 +609,7 @@ response = notify_user_sync( request )
 print( f"User chose: {response.response_value}" )
 ```
 
-**MCP ( cosa-voice )**:
+**MCP (cosa-voice)**:
 
 ```python
 response = ask_multiple_choice(
@@ -644,7 +635,7 @@ response = ask_multiple_choice(
 
 Ask multiple free-form questions on a single screen.
 
-**MCP ( cosa-voice )**:
+**MCP (cosa-voice)**:
 
 ```python
 response = ask_open_ended_batch(
@@ -683,7 +674,7 @@ curl "http://localhost:7999/api/notifications/conversation/claude.code@lupin.dee
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
-With optional time window ( last 48 hours ):
+With optional time window (last 48 hours):
 
 ```bash
 curl "http://localhost:7999/api/notifications/conversation/claude.code@lupin.deepily.ai/user@example.com?hours=48" \
@@ -691,7 +682,7 @@ curl "http://localhost:7999/api/notifications/conversation/claude.code@lupin.dee
 ```
 
 The response is a JSON array of notification objects sorted chronologically
-( oldest first ), suitable for chat-style display.
+(oldest first), suitable for chat-style display.
 
 ---
 
@@ -706,7 +697,7 @@ curl -X DELETE "http://localhost:7999/api/notifications/bulk/user@example.com?ho
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
-**Delete ALL notifications ( no time filter )**:
+**Delete all notifications (no time filter)**:
 
 ```bash
 curl -X DELETE "http://localhost:7999/api/notifications/bulk/user@example.com" \
@@ -733,7 +724,7 @@ Response:
 The notification API supports two authentication methods. **Either one is
 sufficient** — you do not need to provide both.
 
-#### Method 1: API Key ( `X-API-Key` header )
+#### Method 1: API Key (`X-API-Key` header)
 
 API key authentication is the primary method for service-to-service communication.
 This is what CLI clients, MCP tools, and agentic jobs use.
@@ -748,7 +739,7 @@ ck_live_{64+ alphanumeric/underscore/hyphen characters}
 
 **How validation works**:
 
-1. Format check: regex match against the key format ( fast rejection of malformed keys )
+1. Format check: regex match against the key format (fast rejection of malformed keys)
 2. Database lookup: query all active keys from the `api_keys` table
 3. Timing-safe comparison: `bcrypt.checkpw()` against each stored hash
 4. On success: `last_used_at` timestamp updated, user UUID returned
@@ -756,7 +747,7 @@ ck_live_{64+ alphanumeric/underscore/hyphen characters}
 
 **Source**: `src/cosa/rest/middleware/api_key_auth.py`
 
-#### Method 2: JWT Bearer Token ( `Authorization` header )
+#### Method 2: JWT Bearer Token (`Authorization` header)
 
 JWT authentication is used primarily by the browser UI. Tokens are obtained
 through the standard login flow.
@@ -783,8 +774,8 @@ curl -s -X POST http://localhost:7999/api/auth/login \
 
 When both headers are present, the server tries them in this order:
 
-1. **API Key** ( `X-API-Key` ) — checked first
-2. **JWT** ( `Authorization: Bearer` ) — checked second
+1. **API Key** (`X-API-Key`) — checked first
+2. **JWT** (`Authorization: Bearer`) — checked second
 3. If neither succeeds: HTTP 401
 
 **Source**: `require_api_key_or_jwt()` in `src/cosa/rest/middleware/api_key_auth.py`
@@ -806,9 +797,9 @@ To create a new API key:
 
 ---
 
-### Configuration Precedence ( CLI Clients )
+### Configuration Precedence (CLI Clients)
 
-When using the Python CLI clients ( `notify_user_sync.py`, `notify_user_async.py` ),
+When using the Python CLI clients (`notify_user_sync.py`, `notify_user_async.py`),
 credentials are resolved in this order:
 
 ```
@@ -817,13 +808,13 @@ Environment Variables  >  Config File  >  Hardcoded Defaults
 
 #### Environment Variables
 
-| Variable                      | Purpose                          | Default                    |
+| Variable | Purpose | Default |
 |-------------------------------|----------------------------------|----------------------------|
-| `LUPIN_API_URL`               | Server base URL                  | `http://localhost:7999`    |
-| `LUPIN_APP_SERVER_URL`        | Server base URL ( legacy alias ) | `http://localhost:7999`    |
-| `LUPIN_API_KEY_FILE`          | Path to file containing API key  | From config                |
-| `LUPIN_DEV_EMAIL`             | Default target user email        | From config                |
-| `LUPIN_ENV`                   | Environment name for config      | `local`                    |
+| `LUPIN_API_URL`               | Server base URL | `http://localhost:7999`    |
+| `LUPIN_APP_SERVER_URL`        | Server base URL (legacy alias) | `http://localhost:7999`    |
+| `LUPIN_API_KEY_FILE`          | Path to file containing API key | From config |
+| `LUPIN_DEV_EMAIL`             | Default target user email | From config |
+| `LUPIN_ENV`                   | Environment name for config | `local`                    |
 
 #### Config File
 
@@ -867,12 +858,12 @@ curl -X POST "http://localhost:7999/api/notify" \
 
 ### Error Responses
 
-| Status Code | Condition                                | Error Detail                                                                 |
+| Status Code | Condition | Error Detail |
 |-------------|------------------------------------------|------------------------------------------------------------------------------|
-| 401         | No auth header provided                  | `Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>`             |
-| 401         | API key format invalid                   | `Invalid API key format. Expected format: ck_live_{64+ characters}`          |
-| 401         | API key not found or inactive            | `Invalid or inactive API key. Verify your key is correct and active.`        |
-| 401         | JWT validation failed                    | `Invalid JWT: <error details>`                                               |
+| 401 | No auth header provided | `Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>`             |
+| 401 | API key format invalid | `Invalid API key format. Expected format: ck_live_{64+ characters}`          |
+| 401 | API key not found or inactive | `Invalid or inactive API key. Verify your key is correct and active.`        |
+| 401 | JWT validation failed | `Invalid JWT: <error details>`                                               |
 
 All 401 responses include the `WWW-Authenticate` header:
 
@@ -885,27 +876,26 @@ WWW-Authenticate: API-Key, Bearer
 ## 4. REST API Endpoints
 
 For the complete endpoint reference with request/response schemas, see:
-- **Interactive docs**: `/docs` (Swagger UI) or `/redoc` (ReDoc) — always current
+- **Interactive docs**: `/docs` (Swagger UI) or `/redoc` (ReDoc). Always current
 - **Quick reference table**: [rest-api-reference.md](rest-api-reference.md)
 
-The notification endpoints are in the `notifications` tag group — **24 routed endpoints** (counted from `notifications.router.routes` on 2026-09-23; it moves, so re-derive rather than quoting this) covering:
+The notification endpoints are in the `notifications` tag group — **24 routed endpoints** (counted from `notifications.router.routes`; it moves, so re-derive rather than quoting this) covering:
 - `POST /api/notify` — Core dispatch (fire-and-forget or SSE blocking)
-- `POST /api/notify/response` — User response submission
+- `POST /api/notify/response`. User response submission
 - `GET/DELETE /api/notifications/*` — CRUD operations
 - `GET /api/notifications/conversation/*` — Conversation threading
-- `GET /api/notifications/senders*` — Sender activity queries
+- `GET /api/notifications/senders*`. Sender activity queries
 - `GET /api/notifications/broadcast-acks/{broadcast_id}` — one broadcast's saved ack tally
 - `POST /api/notifications/generate-gist` — LLM session naming
 
 ### 4.1 GET /api/notifications/broadcast-acks/{broadcast_id}
 
-Rebuild one broadcast's ack tally from the SAVED notification rows — which seats acked,
-with what status, and when. Added 2026-09-23 with store row `4f320c27` (parent bug
-`1c7da903`), implementing Rick's ruling that acks are saved alongside the notifications
+Rebuild one broadcast's ack tally from the saved notification rows — which seats acked,
+with what status, and when. Added with store (parent), implementing Rick's ruling that acks are saved alongside the notifications
 rather than existing only as an in-memory push.
 
 **Auth**: API key or Bearer JWT. The recipient is the authenticated account and there is
-no user id in the path, so a caller can only ever read acks addressed to itself.
+no user id in the path. So a caller can only ever read acks addressed to itself.
 
 | parameter | in | default | meaning |
 |---|---|---|---|
@@ -940,53 +930,47 @@ no user id in the path, so a caller can only ever read acks addressed to itself.
 Other codes: `400` when the credential is not a UUID, `500` on a query fault. A broadcast
 nobody has acked is `200` with `ack_count: 0` — an answer, not an absence.
 
-🔴 **THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT.** The undelivered drain
+**This read ignores delivery state, and it must**. The undelivered drain
 (`GET /api/notifications/undelivered`) answers *what did I miss while offline* and
 therefore skips anything already delivered to a socket. An ack that lands while a browser
-is open is marked delivered instantly, so a tally rebuilt from the undelivered inbox comes
-back EMPTY for exactly the acks the user already half-saw. This endpoint asks a different
-question — *which seats have acked this broadcast* — and its answer does not depend on
-whether a socket happened to be open. Do not add a state filter here, and do not remove
-the undelivered drain's own one.
+is open is marked delivered instantly. So a tally rebuilt from the undelivered inbox comes
+back empty for the very acks the user already half-saw. This endpoint asks a different
+question — *which seats have acked this broadcast*. Its answer does not depend on whether a socket happened to be open.
+Adding a state filter here would break that.
+Removing the undelivered drain's own state filter would break the drain.
 
 **Where the rows come from**: `CommonsAckWatcher._persist_ack_row` saves each ack as a
 `commons_broadcast_ack` notification addressed to the broadcaster, with the identity in
-the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
+the new `payload` column. And marks it `delivered` immediately so it never joins the AFK
 inbox as a bodiless "missed notification".
 
-⚠️ **A saved ack is EXCLUDED from the sender rosters AND the conversation reads** —
-six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`: the two rosters
+**A saved ack is excluded from the sender rosters and the conversation reads**.
+That is six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`: the two rosters
 (`get_sender_last_activities`, `get_sender_last_activities_visible`) and the four
 conversation/history reads (`get_sender_conversation`,
 `get_sender_conversations_by_date`, `get_sender_date_summaries`,
-`get_active_conversation`). Deliberately NOT `count_by_sender` or `get_by_recipient`,
-which also return acks but have no caller outside tests. Those queries group by `sender_id` and
-filter on nothing else, so any row saved into `notifications` becomes a *sender*;
-without the exclusion a seat appears in `/api/notifications/senders-visible` — and
-therefore in the multiplexer's strip and the operator focus bar, which hydrate from it —
-purely for having acked a broadcast — and, before the conversation reads were covered
-too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that
-had merely acked, while the history hydration gained date buckets that existed for no
-other reason. None of it was visible: the multiplexer's `normalizeHistoryRow` drops an
-empty-message row at render, so the rows never appeared while the counts, the buckets
+`get_active_conversation`). Not `count_by_sender` or `get_by_recipient`. Which also return acks but have no caller outside tests. Those queries group by `sender_id` and
+filter on nothing else, so any row saved into `notifications` becomes a *sender*. Without the exclusion a seat appears in `/api/notifications/senders-visible` — and
+therefore in the multiplexer's strip and the operator focus bar. Which hydrate from it —
+purely for having acked a broadcast. Before the conversation reads were covered too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that had merely acked.
+The history hydration also gained date buckets that existed for no other reason. None of it was visible: the multiplexer's `normalizeHistoryRow` drops an
+empty-message row at render. So the rows never appeared while the counts, the buckets
 and the active-conversation pick were all silently wrong. The exclusion holds whatever
 `sender_id` an ack carries: even a perfectly attributed ack would inflate that seat's `notification_count`
 and drag its `last_activity` forward. A broadcast ack is a tally element, and
 `/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
 
-⚠️ **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
-`unknown` is a measurement rather than a gap.** The commons store is shared across
-projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic —
-and a commons entry carries no project and no sender id, only `sender_session_id` plus
-persona fields. Naming a project here would file a peer project's ack under this one,
-and it would look correct in every tally because the persona and the broadcast would
-still be right. The seat's 8-char session prefix IS carried, because the entry supplies
+**An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
+`unknown` is a measurement rather than a gap**. The commons store is shared across
+projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic. And a commons entry carries no project and no sender id, only `sender_session_id` plus
+persona fields. Naming a project here would file a peer project's ack under this one. And it would look correct in every tally because the persona and the broadcast would
+still be right. The seat's 8-char session prefix is carried, because the entry supplies
 it and `_voice_persona_for_sender_id` matches on exactly those characters. The persist runs on the watcher's own daemon
-thread and cannot block or fail the live push; a failure prints a `[CommonsAckWatcher] ❌
-ack NOT SAVED` line regardless of the debug flag.
+thread and cannot block or fail the live push. A failure prints a `[CommonsAckWatcher] ❌
+ack not saved` line regardless of the debug flag.
 
-**Not a new aggregate.** There is no ack table and no ack cache — this reads the same
-`notifications` rows the watcher writes, and it works only because those acks are saved.
+**Not a new aggregate**. There is no ack table and no ack cache — this reads the same
+`notifications` rows the watcher writes. And it works only because those acks are saved.
 
 **Live probe** (write-only, run at the operator's discretion — it interrupts every live
 seat): `src/scripts/probe_broadcast_ack_two_sided.py`.
@@ -996,13 +980,20 @@ seat): `src/scripts/probe_broadcast_ack_two_sided.py`.
 The response cards still waiting for the caller's answer, oldest first, in the shape a live push carries.
 Both pages call it at load, so a card filed while the page was closed is drawn as a Yes/No card.
 
-Shape: `{ status, awaiting_count, notifications, timestamp }`. Each notification carries `id`, `sender_id`,
-`sender_persona`, `sender_icon`, `title`, `message`, `abstract`, `type`, `priority`, `job_id`, `payload`,
-`state`, `response_requested` (always true), `response_type`, `response_default`, `response_options`,
-`timeout_seconds`, `suppress_ding` (always true), `created_at` and `voice_persona` (the sender's persona from the session bridge, or null, under the key a live push uses).
+Shape: `{ status, awaiting_count, notifications, timestamp }`.
+Each notification carries these fields:
+
+- `id`, `sender_id`, `sender_persona`, `sender_icon`
+- `title`, `message`, `abstract`, `type`, `priority`
+- `job_id`, `payload`, `state`
+- `response_requested` (always true), `response_type`, `response_default`, `response_options`, `timeout_seconds`
+- `suppress_ding` (always true), `created_at`
+- `voice_persona`
+
+`voice_persona` is the sender's persona from the session bridge, or null, under the key a live push uses.
 
 - `timeout_seconds` is the whole seconds left to the row's expiry, rounded up, so a page restarts its countdown where the server's clock stands. A row with no expiry keeps its own timeout.
-- A row past its expiry, or soft-hidden, is left out. A row the user has answered is not waiting, so it is left out too.
+- A row past its expiry, or soft-hidden, is left out. A row the user has answered is not waiting. So it is left out too.
 - A pure read: nothing is marked delivered or answered. `400` when the credential is not a UUID, `500` on a query fault.
 - It reads `NotificationRepository.get_pending_for_recipient`, not the undelivered inbox: a card pushed to an open page is already `delivered` and is still waiting.
 
@@ -1028,12 +1019,12 @@ class NotificationType( str, Enum ):
     CUSTOM   = "custom"
 ```
 
-| Value      | Description                                      |
+| Value | Description |
 |------------|--------------------------------------------------|
-| `task`     | Discrete work item completion or status change    |
-| `progress` | Ongoing process update (build, test, analysis)    |
-| `alert`    | Warning or error requiring attention              |
-| `custom`   | Freeform notification type                        |
+| `task`     | Discrete work item completion or status change |
+| `progress` | Ongoing process update (build, test, analysis) |
+| `alert`    | Warning or error requiring attention |
+| `custom`   | Freeform notification type |
 
 #### NotificationPriority
 
@@ -1045,12 +1036,12 @@ class NotificationPriority( str, Enum ):
     URGENT = "urgent"
 ```
 
-| Value    | Audio Behavior              | Queue Insertion |
+| Value | Audio Behavior | Queue Insertion |
 |----------|-----------------------------|-----------------|
-| `low`    | Silent (no sound)           | Back of queue   |
-| `medium` | Gentle ping                 | Back of queue   |
-| `high`   | Prominent ping + TTS        | Front of queue  |
-| `urgent` | Alert tone + TTS            | Front of queue  |
+| `low`    | Silent (no sound) | Back of queue |
+| `medium` | Gentle ping | Back of queue |
+| `high`   | Prominent ping + TTS | Front of queue |
+| `urgent` | Alert tone + TTS | Front of queue |
 
 #### ResponseType
 
@@ -1062,12 +1053,12 @@ class ResponseType( str, Enum ):
     OPEN_ENDED_BATCH = "open_ended_batch"
 ```
 
-| Value              | UI Rendering                      | Response Format                     |
+| Value | UI Rendering | Response Format |
 |--------------------|-----------------------------------|-------------------------------------|
 | `yes_no`           | Yes/No/Neither buttons + optional comment | `"yes"`, `"no"`, `"neither"`, or with `[comment: ...]` |
-| `open_ended`       | Text input + mic button           | Free-form string                    |
-| `multiple_choice`  | Radio/checkbox options            | Selected label(s)                   |
-| `open_ended_batch` | Multiple text inputs on one screen | Dict keyed by header               |
+| `open_ended`       | Text input + mic button | Free-form string |
+| `multiple_choice`  | Radio/checkbox options | Selected label(s) |
+| `open_ended_batch` | Multiple text inputs on one screen | Dict keyed by header |
 
 ---
 
@@ -1083,29 +1074,29 @@ class NotificationRequest( BaseModel ):
 
 **Fields**:
 
-| Field               | Type                          | Default                              | Constraints / Validators              |
+| Field | Type | Default | Constraints / Validators |
 |---------------------|-------------------------------|--------------------------------------|---------------------------------------|
-| `message`           | `str`                         | *required*                           | min_length=1, max_length=5000, `message_not_whitespace` validator |
-| `response_type`     | `ResponseType`                | *required*                           | Enum validation                       |
-| `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
-| `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
+| `message`           | `str`                         | *required* | min_length=1, max_length=5000, `message_not_whitespace` validator |
+| `response_type`     | `ResponseType`                | *required* | Enum validation |
+| `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation |
+| `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation |
 | `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
-| `timeout_seconds`   | `int`                         | `120`                                | ge=1, le=600                          |
-| `response_default`  | `Optional[str]`               | `None`                               | `validate_yes_no_default` validator   |
-| `title`             | `Optional[str]`               | `None`                               | min_length=1, max_length=100          |
-| `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
+| `timeout_seconds`   | `int`                         | `120`                                | ge=1, le=600 |
+| `response_default`  | `Optional[str]`               | `None`                               | `validate_yes_no_default` validator |
+| `title`             | `Optional[str]`               | `None`                               | min_length=1, max_length=100 |
+| `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5) |
 | `response_options`  | `Optional[dict]`              | `None`                               | `validate_multiple_choice_options` validator |
-| `abstract`          | `Optional[str]`               | `None`                               | max_length=5000                       |
-| `session_name`      | `Optional[str]`               | `None`                               | max_length=50                         |
-| `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
-| `suppress_ding`     | `bool`                        | `False`                              | Boolean flag                          |
+| `abstract`          | `Optional[str]`               | `None`                               | max_length=5000 |
+| `session_name`      | `Optional[str]`               | `None`                               | max_length=50 |
+| `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5) |
+| `suppress_ding`     | `bool`                        | `False`                              | Boolean flag |
 
 **Validators**:
 
-| Validator                          | Target Field       | Rule                                                          |
+| Validator | Target Field | Rule |
 |------------------------------------|--------------------|---------------------------------------------------------------|
-| `message_not_whitespace`           | `message`          | Strips whitespace; raises `ValueError` if empty after strip   |
-| `validate_yes_no_default`          | `response_default` | For `yes_no` type, must be `"yes"` or `"no"` (or `None`)     |
+| `message_not_whitespace`           | `message`          | Strips whitespace; raises `ValueError` if empty after strip |
+| `validate_yes_no_default`          | `response_default` | For `yes_no` type, must be `"yes"` or `"no"` (or `None`) |
 | `validate_multiple_choice_options` | `response_options` | For `multiple_choice`: must have `questions` array, each with `question`, `options` (2-20 items), each option with `label`. For `open_ended_batch`: must have `questions` array, each with `question`. |
 
 **Method**: `to_api_params() -> dict`
@@ -1124,18 +1115,18 @@ class AsyncNotificationRequest( BaseModel ):
 
 **Fields**:
 
-| Field               | Type                          | Default                              | Constraints                           |
+| Field | Type | Default | Constraints |
 |---------------------|-------------------------------|--------------------------------------|---------------------------------------|
-| `message`           | `str`                         | *required*                           | min_length=1, max_length=5000, `message_not_whitespace` validator |
-| `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation                       |
-| `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation                       |
+| `message`           | `str`                         | *required* | min_length=1, max_length=5000, `message_not_whitespace` validator |
+| `notification_type` | `NotificationType`            | `NotificationType.CUSTOM`            | Enum validation |
+| `priority`          | `NotificationPriority`        | `NotificationPriority.MEDIUM`        | Enum validation |
 | `target_user`       | `Optional[str]`               | `None`                               | Resolved from config/env at dispatch time |
-| `timeout`           | `int`                         | `5`                                  | ge=1, le=30 (HTTP request timeout)    |
-| `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
-| `abstract`          | `Optional[str]`               | `None`                               | max_length=5000                       |
-| `session_name`      | `Optional[str]`               | `None`                               | max_length=50                         |
-| `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5)       |
-| `suppress_ding`     | `bool`                        | `False`                              | Boolean flag                          |
+| `timeout`           | `int`                         | `5`                                  | ge=1, le=30 (HTTP request timeout) |
+| `sender_id`         | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5) |
+| `abstract`          | `Optional[str]`               | `None`                               | max_length=5000 |
+| `session_name`      | `Optional[str]`               | `None`                               | max_length=50 |
+| `job_id`            | `Optional[str]`               | `None`                               | Regex pattern (see Section 5.5) |
+| `suppress_ding`     | `bool`                        | `False`                              | Boolean flag |
 | `queue_name`        | `Optional[str]`               | `None`                               | Pattern: `^(run|todo|done|dead)$`     |
 | `progress_group_id` | `Optional[str]`               | `None`                               | Pattern: `^pg-[a-f0-9]{8}$`          |
 
@@ -1147,29 +1138,29 @@ Same conversion logic as `NotificationRequest.to_api_params()`, minus
 
 ---
 
-### 5.2a Server-Side Query Param: `persist` ( fire-and-forget only )
+### 5.2a Server-Side Query Param: `persist` (fire-and-forget only)
 
-`persist` is a **server-side query parameter on `POST /api/notify`** — it is NOT a
-field on the client convenience models above, because its only production user
+`persist` is a **server-side query parameter on `POST /api/notify`** — it is not a
+field on the client convenience models above. Because its only production user
 (the fleet arbiter) builds the notify URL directly rather than through those models.
 
-| Param     | Type   | Default | Applies to        | Semantics                                                              |
+| Param | Type | Default | Applies to | Semantics |
 |-----------|--------|---------|-------------------|-----------------------------------------------------------------------|
-| `persist` | `bool` | `True`  | fire-and-forget   | `True` → persist a forensic Layer-2 (PostgreSQL) row (prior behavior, byte-identical for all existing callers). `False` → skip ONLY the DB insert; Layer-1 (FIFO + WebSocket) delivery + the `queued` / `user_not_available` outcome are unchanged. |
+| `persist` | `bool` | `True`  | fire-and-forget | `True` → persist a forensic Layer-2 (PostgreSQL) row (prior behavior, byte-identical for all existing callers). `False` → skip only the DB insert. Layer-1 (FIFO + WebSocket) delivery + the `queued` / `user_not_available` outcome are unchanged. |
 
 - **Not a config/INI knob** — `persist` is request-scoped (per-call query param). There
   is no `lupin-app.ini` key for it; each caller decides per request. Response-required
   mode ignores it and always persists.
 - **Who sends `persist=false` and why** — the fleet arbiter's re-announce-on-return
-  loop ( `_check_pending_outreach`, `arbiter_job.py` ). When Rick is offline, a pending
+  loop (`_check_pending_outreach`, `arbiter_job.py`). When Rick is offline, a pending
   Rick-bound advisory is re-pushed every `reannounce_interval_seconds` (300s) until a
-  DELIVERED outcome or the 24h TTL. Each retry is a *delivery* re-attempt of an
-  advisory whose forensic row was already written by the FIRST escalation
+  delivered outcome or the 24h TTL. Each retry is a *delivery* re-attempt of an
+  advisory whose forensic row was already written by the first escalation
   (`persist=true`). Without `persist=false`, every 300s retry minted a fresh forensic
-  row — the bug `e1bbe011` flood (3000+ duplicate rows on Rick's return). With
+  row — the flood (3000+ duplicate rows on Rick's return). With
   `persist=false`, retries collapse to **exactly one forensic row per advisory**.
 - **Wiring** — `arbiter_live_notify.build_notify_request` / `make_notify_transport`
-  thread the flag; `app._build_arbiter_outreach_hops` builds TWO transports: the
+  thread the flag. `app._build_arbiter_outreach_hops` builds two transports: the
   first-send `live_notify_fn` (persist=True → the one forensic row) and the
   re-announce `live_retry_fn` (persist=False → no new rows).
 
@@ -1185,17 +1176,17 @@ Returned by `notify_user_sync` after the SSE stream completes.
 class NotificationResponse( BaseModel ):
 ```
 
-| Field            | Type            | Default | Description                                     |
+| Field | Type | Default | Description |
 |------------------|-----------------|---------|-------------------------------------------------|
-| `response_value` | `Optional[str]` | `None`  | User's response value or `None` on error         |
-| `exit_code`      | `int`           | *required* | `0` = success, `1` = error, `2` = timeout    |
+| `response_value` | `Optional[str]` | `None`  | User's response value or `None` on error |
+| `exit_code`      | `int`           | *required* | `0` = success, `1` = error, `2` = timeout |
 | `status`         | `Optional[str]` | `None`  | Event status: `responded`, `expired`, `offline`, `error` |
-| `default_used`   | `bool`          | `False` | Whether the default value was used               |
-| `is_timeout`     | `bool`          | `False` | Whether the notification timed out               |
+| `default_used`   | `bool`          | `False` | Whether the default value was used |
+| `is_timeout`     | `bool`          | `False` | Whether the notification timed out |
 
 **Properties**:
 
-| Property    | Returns | Logic                |
+| Property | Returns | Logic |
 |-------------|---------|----------------------|
 | `success`   | `bool`  | `exit_code == 0`     |
 | `is_error`  | `bool`  | `exit_code == 1`     |
@@ -1208,18 +1199,18 @@ Returned by `notify_user_async` after the HTTP POST completes.
 class AsyncNotificationResponse( BaseModel ):
 ```
 
-| Field              | Type            | Default | Description                                      |
+| Field | Type | Default | Description |
 |--------------------|-----------------|---------|--------------------------------------------------|
-| `success`          | `bool`          | *required* | Whether notification was sent successfully    |
+| `success`          | `bool`          | *required* | Whether notification was sent successfully |
 | `status`           | `str`           | *required* | `queued`, `user_not_available`, `error`, `connection_error`, `timeout` |
-| `message`          | `Optional[str]` | `None`  | Status message or error description              |
-| `target_user`      | `str`           | *required* | Target user email address                     |
-| `target_system_id` | `Optional[str]` | `None`  | System UUID if user found                        |
-| `connection_count` | `int`           | `0`     | Number of active WebSocket connections (ge=0)    |
+| `message`          | `Optional[str]` | `None`  | Status message or error description |
+| `target_user`      | `str`           | *required* | Target user email address |
+| `target_system_id` | `Optional[str]` | `None`  | System UUID if user found |
+| `connection_count` | `int`           | `0`     | Number of active WebSocket connections (ge=0) |
 
 **Properties**:
 
-| Property    | Returns | Logic                                                  |
+| Property | Returns | Logic |
 |-------------|---------|--------------------------------------------------------|
 | `is_queued` | `bool`  | `status == "queued"`                                   |
 | `is_error`  | `bool`  | `status in ("error", "connection_error", "timeout")`   |
@@ -1342,13 +1333,13 @@ parse_sender_id( "claude.code@lupin.deepily.ai#a1b2c3d4" )
 
 Breakdown:
 
-| Segment                            | Matches                                        |
+| Segment | Matches |
 |------------------------------------|------------------------------------------------|
 | `[a-z]+(\.[a-z]+)+`               | Agent type: 2+ dot-separated lowercase words (e.g., `claude.code`, `claude.code.job`) |
 | `@[a-z]+\.deepily\.ai`            | Domain: `@{project}.deepily.ai`                |
-| `#[a-f0-9]{8}`                    | Hex session suffix (e.g., `#a1b2c3d4`)         |
+| `#[a-f0-9]{8}`                    | Hex session suffix (8 hex characters) |
 | `#[a-z]+(-[a-z]+)*`               | Hyphenated topic suffix (e.g., `#cats-vs-dogs`) |
-| `#[a-z]+-[a-f0-9]{8}`             | Job ID suffix (e.g., `#dr-a0ebba60`)           |
+| `#[a-z]+-[a-f0-9]{8}`             | Job ID suffix (e.g., `#dr-a0ebba60`) |
 
 #### Job ID Pattern (Pydantic `pattern` validator)
 
@@ -1356,11 +1347,11 @@ Breakdown:
 ^([a-z]+-[a-f0-9]{8}|[a-f0-9]{64}(::[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})?)$
 ```
 
-| Format           | Example                                                                              |
+| Format | Example |
 |------------------|--------------------------------------------------------------------------------------|
-| Short            | `dr-a1b2c3d4` (lowercase prefix + hyphen + 8 hex chars)                              |
-| SHA256           | `61d021320bed364e82d50af9128ddf8e1a63d8680d76ec06b1b03e27d8dee435` (64 hex chars)    |
-| Compound         | `{sha256}::{uuid}` (64 hex chars + `::` + UUID with hyphens)                        |
+| Short | `dr-a1b2c3d4` (lowercase prefix + hyphen + 8 hex chars) |
+| SHA256 | `61d021320bed364e82d50af9128ddf8e1a63d8680d76ec06b1b03e27d8dee435` (64 hex chars) |
+| Compound | `{sha256}::{uuid}` (64 hex chars + `::` + UUID with hyphens) |
 
 ---
 
@@ -1375,51 +1366,51 @@ class Notification( Base ):
 
 **Columns**:
 
-| Column              | SQLAlchemy Type                | Nullable | Default / Server Default      | Description                          |
+| Column | SQLAlchemy Type | Nullable | Default / Server Default | Description |
 |---------------------|-------------------------------|----------|-------------------------------|--------------------------------------|
-| `id`                | `UUID( as_uuid=True )`        | No (PK)  | `uuid.uuid4` / `gen_random_uuid()` | Primary key                    |
-| `sender_id`         | `String( 255 )`               | No       | --                            | Sender identifier (indexed)          |
-| `recipient_id`      | `UUID( as_uuid=True )`        | No       | --                            | FK -> `users.id` CASCADE (indexed)   |
-| `job_id`            | `String( 256 )`               | Yes      | --                            | Agentic job ID for routing (indexed) |
-| `title`             | `String( 255 )`               | Yes      | --                            | Notification title                   |
-| `message`           | `Text`                        | No       | --                            | Notification message body            |
-| `abstract`          | `Text`                        | Yes      | --                            | Supplementary context (markdown, URLs) |
-| `type`              | `String( 50 )`                | No       | --                            | Notification type (indexed)          |
-| `priority`          | `String( 50 )`                | No       | --                            | Priority level                       |
-| `created_at`        | `DateTime( timezone=True )`   | No       | `func.now()` / `NOW()`       | Creation timestamp                   |
-| `delivered_at`      | `DateTime( timezone=True )`   | Yes      | --                            | WebSocket delivery timestamp         |
-| `responded_at`      | `DateTime( timezone=True )`   | Yes      | --                            | User response timestamp              |
-| `expires_at`        | `DateTime( timezone=True )`   | Yes      | --                            | Expiration deadline                  |
-| `response_requested`| `Boolean`                     | No       | `False` / `'false'`          | Whether response is required         |
-| `response_type`     | `String( 50 )`                | Yes      | --                            | Response type (yes_no, open_ended, etc.) |
-| `response_value`    | `JSONB`                       | Yes      | --                            | User's response data                 |
-| `response_default`  | `String( 255 )`               | Yes      | --                            | Default response for timeout/offline |
-| `response_options`  | `JSONB`                       | Yes      | --                            | Multiple-choice option definitions   |
-| `timeout_seconds`   | `BigInteger`                  | Yes      | --                            | Response timeout in seconds          |
-| `state`             | `String( 50 )`                | No       | `"created"` / `'created'`   | State machine value (indexed)        |
-| `is_hidden`         | `Boolean`                     | No       | `False` / `'false'`         | Soft-delete flag (indexed)           |
-| `payload`           | `JSONB`                       | Yes      | --                            | Structured side-channel — the same dict the in-memory push sends as `payload=`. Its first consumer is the broadcast ack, whose whole identity (which broadcast, which seat) lives here and nowhere else. NULL on every row written before `9184990becdf`. |
+| `id`                | `UUID( as_uuid=True )`        | No (PK) | `uuid.uuid4` / `gen_random_uuid()` | Primary key |
+| `sender_id`         | `String( 255 )`               | No | -- | Sender identifier (indexed) |
+| `recipient_id`      | `UUID( as_uuid=True )`        | No | -- | FK -> `users.id` cascade (indexed) |
+| `job_id`            | `String( 256 )`               | Yes | -- | Agentic job ID for routing (indexed) |
+| `title`             | `String( 255 )`               | Yes | -- | Notification title |
+| `message`           | `Text`                        | No | -- | Notification message body |
+| `abstract`          | `Text`                        | Yes | -- | Supplementary context (markdown, URLs) |
+| `type`              | `String( 50 )`                | No | -- | Notification type (indexed) |
+| `priority`          | `String( 50 )`                | No | -- | Priority level |
+| `created_at`        | `DateTime( timezone=True )`   | No | `func.now()` / `NOW()`       | Creation timestamp |
+| `delivered_at`      | `DateTime( timezone=True )`   | Yes | -- | WebSocket delivery timestamp |
+| `responded_at`      | `DateTime( timezone=True )`   | Yes | -- | User response timestamp |
+| `expires_at`        | `DateTime( timezone=True )`   | Yes | -- | Expiration deadline |
+| `response_requested`| `Boolean`                     | No | `False` / `'false'`          | Whether response is required |
+| `response_type`     | `String( 50 )`                | Yes | -- | Response type (yes_no, open_ended, etc.) |
+| `response_value`    | `JSONB`                       | Yes | -- | User's response data |
+| `response_default`  | `String( 255 )`               | Yes | -- | Default response for timeout/offline |
+| `response_options`  | `JSONB`                       | Yes | -- | Multiple-choice option definitions |
+| `timeout_seconds`   | `BigInteger`                  | Yes | -- | Response timeout in seconds |
+| `state`             | `String( 50 )`                | No | `"created"` / `'created'`   | State machine value (indexed) |
+| `is_hidden`         | `Boolean`                     | No | `False` / `'false'`         | Soft-delete flag (indexed) |
+| `payload`           | `JSONB`                       | Yes | -- | Structured side-channel — the same dict the in-memory push sends as `payload=`. Its first consumer is the broadcast ack, whose whole identity (which broadcast, which seat) lives here and nowhere else. NULL on every row written before `9184990becdf`. |
 
 **Indexes**:
 
-| Index Name                              | Column(s)                       | Type       |
+| Index Name | Column(s) | Type |
 |-----------------------------------------|---------------------------------|------------|
-| `idx_notifications_sender_id`           | `sender_id`                     | B-tree     |
-| `idx_notifications_recipient_id`        | `recipient_id`                  | B-tree     |
-| `idx_notifications_state`               | `state`                         | B-tree     |
-| `idx_notifications_created_at`          | `created_at`                    | B-tree     |
-| `idx_notifications_sender_recipient`    | `sender_id`, `recipient_id`     | Composite  |
-| `ix_notifications_type`                 | `type`                          | B-tree     |
-| `ix_notifications_is_hidden`            | `is_hidden`                     | B-tree     |
-| `ix_notifications_job_id`              | `job_id`                        | B-tree     |
+| `idx_notifications_sender_id`           | `sender_id`                     | B-tree |
+| `idx_notifications_recipient_id`        | `recipient_id`                  | B-tree |
+| `idx_notifications_state`               | `state`                         | B-tree |
+| `idx_notifications_created_at`          | `created_at`                    | B-tree |
+| `idx_notifications_sender_recipient`    | `sender_id`, `recipient_id`     | Composite |
+| `ix_notifications_type`                 | `type`                          | B-tree |
+| `ix_notifications_is_hidden`            | `is_hidden`                     | B-tree |
+| `ix_notifications_job_id`              | `job_id`                        | B-tree |
 | `idx_notifications_ack_broadcast`       | `recipient_id`, `(payload->>'broadcast_id')` | Partial, `WHERE type = 'commons_broadcast_ack'` |
 
 **Relationship**: `recipient: Mapped["User"]` via `back_populates="notifications"`.
 
 **Migrations**:
-- `275fb8d9c75c` - Original table creation (2025-12-30)
-- `62ec6f256d27` - Added `job_id` column (2026-01-23)
-- `9184990becdf` - Added `payload` column + the partial broadcast-ack index (2026-09-23, row `4f320c27`)
+- `275fb8d9c75c` - Original table creation
+- `62ec6f256d27` - Added `job_id` column
+- `9184990becdf` - Added `payload` column + the partial broadcast-ack index
 
 ---
 
@@ -1437,35 +1428,35 @@ class NotificationItem:
 
 **Constructor Parameters & Instance Attributes**:
 
-| Attribute            | Type            | Default                              | Description                                    |
+| Attribute | Type | Default | Description |
 |----------------------|-----------------|--------------------------------------|------------------------------------------------|
 | `id`                 | `str`           | `str( uuid.uuid4() )`               | Database ID (or auto-generated for backward compat) |
-| `id_hash`            | `str`           | same as `id`                         | Backward compatibility alias                   |
-| `message`            | `str`           | *required*                           | Notification message text                      |
-| `title`              | `Optional[str]` | `None`                               | Notification title                             |
-| `type`               | `str`           | `"task"`                             | Notification type                              |
-| `priority`           | `str`           | `"medium"`                           | Priority level                                 |
-| `source`             | `str`           | `"claude_code"`                      | Source system identifier                       |
-| `user_id`            | `Optional[str]` | `None`                               | Target user system UUID                        |
-| `timestamp`          | `str`           | Timezone-aware ISO 8601              | Creation timestamp from configured timezone    |
-| `played`             | `bool`          | `False`                              | Whether notification has been played (TTS)     |
-| `play_count`         | `int`           | `0`                                  | Number of times played                         |
-| `last_played`        | `Optional[str]` | `None`                               | Timestamp of last playback                     |
-| `response_requested` | `bool`          | `False`                              | Whether user response is required              |
-| `response_type`      | `Optional[str]` | `None`                               | Response type (yes_no, open_ended, etc.)       |
-| `response_default`   | `Optional[str]` | `None`                               | Default response value                         |
-| `response_options`   | `Optional[dict]`| `None`                               | Multiple-choice option definitions             |
-| `timeout_seconds`    | `Optional[int]` | `None`                               | Response timeout in seconds                    |
-| `sender_id`          | `str`           | `"claude.code@unknown.deepily.ai"`   | Sender identifier (fallback if not provided)   |
-| `abstract`           | `Optional[str]` | `None`                               | Supplementary context (markdown, URLs)         |
+| `id_hash`            | `str`           | same as `id`                         | Backward compatibility alias |
+| `message`            | `str`           | *required* | Notification message text |
+| `title`              | `Optional[str]` | `None`                               | Notification title |
+| `type`               | `str`           | `"task"`                             | Notification type |
+| `priority`           | `str`           | `"medium"`                           | Priority level |
+| `source`             | `str`           | `"claude_code"`                      | Source system identifier |
+| `user_id`            | `Optional[str]` | `None`                               | Target user system UUID |
+| `timestamp`          | `str`           | Timezone-aware ISO 8601 | Creation timestamp from configured timezone |
+| `played`             | `bool`          | `False`                              | Whether notification has been played (TTS) |
+| `play_count`         | `int`           | `0`                                  | Number of times played |
+| `last_played`        | `Optional[str]` | `None`                               | Timestamp of last playback |
+| `response_requested` | `bool`          | `False`                              | Whether user response is required |
+| `response_type`      | `Optional[str]` | `None`                               | Response type (yes_no, open_ended, etc.) |
+| `response_default`   | `Optional[str]` | `None`                               | Default response value |
+| `response_options`   | `Optional[dict]`| `None`                               | Multiple-choice option definitions |
+| `timeout_seconds`    | `Optional[int]` | `None`                               | Response timeout in seconds |
+| `sender_id`          | `str`           | `"claude.code@unknown.deepily.ai"`   | Sender identifier (fallback if not provided) |
+| `abstract`           | `Optional[str]` | `None`                               | Supplementary context (markdown, URLs) |
 | `suppress_ding`      | `bool`          | `False`                              | Skip notification sound for conversational TTS |
-| `job_id`             | `Optional[str]` | `None`                               | Agentic job ID for routing to job cards        |
+| `job_id`             | `Optional[str]` | `None`                               | Agentic job ID for routing to job cards |
 | `queue_name`         | `Optional[str]` | `None`                               | Queue where job is running (run/todo/done/dead) |
 | `progress_group_id`  | `Optional[str]` | `None`                               | Progress group ID for in-place DOM updates |
 
 **Methods**:
 
-| Method                  | Returns         | Description                                             |
+| Method | Returns | Description |
 |-------------------------|-----------------|---------------------------------------------------------|
 | `_get_local_timestamp()`| `str`           | Timezone-aware ISO 8601 timestamp from `ConfigurationManager` |
 | `_get_time_display()`   | `str`           | Formatted time with TZ abbreviation (e.g., `"14:30 EST"`) |
@@ -1496,7 +1487,7 @@ stateDiagram-v2
     offline --> [*]
 ```
 
-![Notification Lifecycle]( images/notification-lifecycle.png )
+![Notification Lifecycle](images/notification-lifecycle.png)
 
 ### 6.2 Happy Path (Response-Required)
 
@@ -1555,7 +1546,7 @@ When `timeout_seconds` elapses without a user response:
 2. Server calls `repo.mark_expired( notification_id )` which:
    - Sets `state='expired'`
    - If `response_default` was configured, stores `{"value": response_default, "source": "timeout_default"}` as `response_value`
-3. Server broadcasts `notification_expired` WebSocket event to all user connections with:
+3. The server broadcasts a `notification_expired` WebSocket event to all user connections, with this payload.
    ```json
    {
        "notification_id" : "uuid-string",
@@ -1575,36 +1566,36 @@ stored normally.
 
 ### 6.4 Offline Path
 
-When the target user has no active WebSocket connections at notification time:
+When the target user has no active WebSocket connections at notification time, two cases apply.
 
-- **With `response_default` set**: Server immediately returns a JSON response (not SSE) with:
-  ```json
-  {
-      "status"          : "offline",
-      "default_used"    : "the-default-value",
-      "notification_id" : "uuid-string",
-      "message"         : "User is offline, returned default value immediately"
-  }
-  ```
-  The notification is persisted to PostgreSQL with `state='expired'`.
+- With `response_default` set, the server immediately returns a JSON response, not SSE, shaped like this.
+```json
+{
+    "status"          : "offline",
+    "default_used"    : "the-default-value",
+    "notification_id" : "uuid-string",
+    "message"         : "User is offline, returned default value immediately"
+}
+```
+The notification is persisted to PostgreSQL with `state='expired'`.
 
-- **Without `response_default`**: Server raises `HTTPException( status_code=503 )` with detail
+- Without `response_default`, the server raises `HTTPException( status_code=503 )` with detail
   `"User is offline and no default response provided"`.
 
 ### 6.5 Priority Queue Behavior
 
 The in-memory FIFO queue uses priority-based insertion ordering:
 
-| Priority           | Insertion Position                                    |
+| Priority | Insertion Position |
 |--------------------|-------------------------------------------------------|
-| `urgent` / `high`  | **Front** of queue (after other urgent/high items)    |
-| `medium` / `low`   | **Back** of queue                                     |
+| `urgent` / `high`  | **Front** of queue (after other urgent/high items) |
+| `medium` / `low`   | **Back** of queue |
 
 This ensures urgent notifications are displayed and played via TTS before lower-priority
 items, even if they arrived later.
 
-Implementation detail: When inserting an `urgent` or `high` priority item, the queue
-scans from the front to find the first non-urgent/non-high item and inserts before it.
+Implementation detail: an `urgent` or `high` item is inserted by scanning from the front.
+The queue finds the first non-urgent, non-high item and inserts before it.
 This preserves FIFO ordering among same-priority-class items.
 
 ### 6.6 Soft Delete vs Hard Delete
@@ -1614,13 +1605,13 @@ The notification system supports two deletion modes:
 **Soft Delete** (preferred):
 - Sets `is_hidden = True` on the notification row
 - Notification is excluded from all user-facing queries (sender lists, conversations)
-- Preserved in the database for analytics, audit trails, and debugging
+- Preserved in the database for analytics, audit trails. And debugging
 - Used by: `DELETE /api/notifications/conversation/{sender_id}/{user_email}`,
   `DELETE /api/notifications/date/{sender_id}/{user_email}/{date_string}`
 
 **Hard Delete**:
 - Actually removes the row from the PostgreSQL `notifications` table
-- Irreversible; used only for true data purge scenarios
+- Irreversible. Used only for true data purge scenarios
 - Used by: `DELETE /api/notifications/{notification_id}` with `hard_delete=true`
 
 **Design rationale**: Soft delete preserves the notification history for conversation
@@ -1629,52 +1620,50 @@ their notification inbox.
 
 ---
 
-### 6.7 A blocking ask announced COMPLETE at ~120s, then FAILED at 660s — and how to get your answer back
+### 6.7 A blocking ask announced `COMPLETE` at ~120s, then `FAILED` at 660s — and how to get your answer back
 
-**If you are reading this at 2am because a `converse` / `ask_yes_no` /
-`ask_multiple_choice` with a long timeout was announced finished while the
-person had not answered yet, this section is the whole story.** Row
-`97ff4426`.
+**If you are reading this at 2am, this section is the whole story**.
+You are here because a `converse`, `ask_yes_no` or `ask_multiple_choice` with a long timeout was announced finished.
+The person had not answered yet.
 
-**The symptom.** You declare `timeout_seconds=600`. At roughly 120 seconds the
-PostToolUse beacon announces the call COMPLETE. Some minutes later a second
-report says it FAILED, at around 660s — after the call had already returned and
+**The symptom**. You declare `timeout_seconds=600`. At roughly 120 seconds the
+PostToolUse beacon announces the call `COMPLETE`. Some minutes later a second
+report says it `FAILED`, at around 660s. After the call had already returned and
 after its side effect had landed. Nothing about that sequence describes what
 the server or the client actually did.
 
-**The three layers, each measured separately (2026-09-06), because the obvious
+**The three layers, each measured separately, because the obvious
 suspects are innocent and chasing them costs an evening:**
 
 | Layer | What was measured | Verdict |
 |---|---|---|
-| **Server** | 42/42 asks declaring a timeout above 120s expired at their declared value, ±0.1s | **INNOCENT** |
-| **Client** (`cosa_voice_mcp` blocking verbs) | live probe: answered at 151.4s and **returned at 151.4s with the real answer** | **INNOCENT** |
-| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | 🔴 **THE DEFECT** |
+| **Server** | 42/42 asks declaring a timeout above 120s expired at their declared value, ±0.1s | **Innocent** |
+| **Client** (`cosa_voice_mcp` blocking verbs) | live probe: answered at 151.4s and **returned at 151.4s with the real answer** | **Innocent** |
+| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | **The defect** |
 
-⇒ **The verb is fine and the answer is not lost. The ANNOUNCEMENT is early.**
+so **The verb is fine and the answer is not lost. The announcement is early**.
 The hook that emits it (`src/lupin_cli/claude_code/hooks/post_tool_use.py`)
 holds no timer and no deadline of its own — it fires when the harness invokes
-it, so the ~120s decision is the harness's, one layer above this repo, and
-**WHY it does that is unmeasured and is not a Lupin question.**
+it. So the ~120s decision is the harness's, one layer above this repo, and
+**Why it does that is unmeasured and is not a Lupin question**.
 
-**THE WORKAROUND — re-POST the same ask and you re-attach to it.** Every
+**The workaround — re-POST the same ask and you re-attach to it**. Every
 blocking verb stamps an `idempotency_key` (`cosa_voice_mcp._with_idempotency_key`).
 A second POST carrying the same key does **not** mint a second card: it
 re-attaches to the original notification's stream via
-`_ask_reattach_generator( existing_nid, timeout_seconds )` —
-`src/cosa/rest/routers/notifications.py:1247-1254`, generator defined at `:206`
+`_ask_reattach_generator( existing_nid, timeout_seconds )`. `src/cosa/rest/routers/notifications.py:1247-1254`, generator defined at `:206`
 — and delivers the answer whenever the person gives it.
 
-⚠️ **There is no `/reattach` route and you must not go looking for one.**
+**There is no `/reattach` route, so do not go looking for one**.
 Verified against the live app's OpenAPI: `reattach` appears in **zero** paths,
 with `/api/notify/response` present as the positive control proving the lookup
 reaches. Re-attachment is reachable **only** through the notify POST's
-idempotency branch. That is by design, not an omission.
+idempotency branch. That is, not an omission.
 
-🔴 **THIS IS A WORKAROUND A CALLER HAS TO KNOW TO MAKE, NOT A FIX.** The
+**This is A workaround A caller has to know to make, not A fix**. The
 beacon still lies about when the call finished; re-POSTing is how you recover
-the answer in spite of it. Row `97ff4426` stays OPEN for that reason — closing
-it would read as "the defect is fixed", and it is not.
+the answer in spite of it. The tracking row stays open for that reason.
+Closing it would read as "the defect is fixed", and it is not.
 
 ---
 
@@ -1699,7 +1688,7 @@ Example: `claude.code@lupin.deepily.ai`
 {agent_type}@{project}.deepily.ai#{session_id}
 ```
 
-Example: `claude.code@lupin.deepily.ai#a1b2c3d4`
+Example: `claude.code@lupin.deepily.ai#<hash8>`
 
 **Job-aware format** (agentic job routing):
 
@@ -1711,14 +1700,14 @@ Example: `deep.research@lupin.deepily.ai#dr-a0ebba60`
 
 ### 7.2 Known Agent Types
 
-| Agent Type            | Description                                    | Typical Usage                        |
+| Agent Type | Description | Typical Usage |
 |-----------------------|------------------------------------------------|--------------------------------------|
-| `claude.code`         | Claude Code CLI sessions                       | Interactive development sessions     |
-| `claude.code.job`     | Claude Code bounded/interactive jobs           | Fire-and-forget agentic tasks        |
-| `deep.research`       | Deep Research agent                            | Long-running research jobs           |
-| `podcast.generator`   | Podcast Generator agent                        | Audio content generation jobs        |
-| `notification.proxy`  | Notification proxy / relay                     | Internal routing and forwarding      |
-| `arg.expeditor`       | Runtime Argument Expeditor agent               | Parameter resolution and routing     |
+| `claude.code`         | Claude Code CLI sessions | Interactive development sessions |
+| `claude.code.job`     | Claude Code bounded/interactive jobs | Fire-and-forget agentic tasks |
+| `deep.research`       | Deep Research agent | Long-running research jobs |
+| `podcast.generator`   | Podcast Generator agent | Audio content generation jobs |
+| `notification.proxy`  | Notification proxy / relay | Internal routing and forwarding |
+| `arg.expeditor`       | Runtime Argument Expeditor agent | Parameter resolution and routing |
 
 ### 7.3 Sender ID Validation
 
@@ -1731,13 +1720,13 @@ and `AsyncNotificationRequest`:
 
 **Validation rules**:
 
-| Component    | Rules                                                           |
+| Component | Rules |
 |--------------|-----------------------------------------------------------------|
-| Agent type   | Lowercase alpha only, 2+ dot-separated segments (e.g., `claude.code`, `deep.research`) |
-| `@` separator | Required literal character                                     |
-| Project      | Lowercase alpha only, single word                               |
-| Domain       | Must be `.deepily.ai`                                           |
-| `#` suffix   | Optional; one of: 8-char hex, hyphenated lowercase words, or prefix-hex job ID |
+| Agent type | Lowercase alpha only, 2+ dot-separated segments (e.g., `claude.code`, `deep.research`) |
+| `@` separator | Required literal character |
+| Project | Lowercase alpha only, single word |
+| Domain | Must be `.deepily.ai`                                           |
+| `#` suffix | Optional; one of: 8-char hex, hyphenated lowercase words, or prefix-hex job ID |
 
 **Examples of valid sender IDs**:
 
@@ -1777,11 +1766,11 @@ extract_sender_from_message( "[COSA] Tests passed" )
 The cosa-voice MCP server also performs project auto-detection from the working
 directory path:
 
-| Directory Pattern                 | Detected Project |
+| Directory Pattern | Detected Project |
 |-----------------------------------|------------------|
 | `*/planning-is-prompting/*`       | `plan`           |
 | `*/genie-in-the-box/*` or `*/lupin/*` | `lupin`     |
-| Other                             | Directory name   |
+| Other | Directory name |
 
 This auto-detection ensures that notifications are correctly grouped even when the
 caller does not explicitly set a sender ID.
@@ -1810,20 +1799,19 @@ The notification UI groups notifications into conversations using the sender ID:
 - Used by the frontend to implement efficient pagination
 - Loads only the dates the user scrolls to
 
-**Reaped-Sender Roster Eviction** (`GET /api/notifications/senders-visible/{email}` — the focus-bar roster; bug `ee59d5ed`):
+**Reaped-Sender Roster Eviction** (`GET /api/notifications/senders-visible/{email}` — the focus-bar roster;):
 - The visible-senders roster **durably excludes** any `sender_id` that has a persisted
   `type="session_reaped"` marker row for the recipient. When a session is reaped —
   by a normal `dismiss_sessions` **or** by the heartbeat-arbiter orphan-bridge sweep —
-  a `session_reaped` notification is persisted, and from then on that sender is absent
+  a `session_reaped` notification is persisted. And from then on that sender is absent
   from the roster, **including across a page refresh** (`get_visible_senders` →
   `NotificationRepository.get_sender_last_activities_visible`).
 - This is **roster-only** and **history-preserving**: the Conversation View,
-  Date Grouping, and Sender-Dates endpoints above are **unaffected** — a reaped
-  sender's notifications remain fully readable in history/audit. The eviction is a
-  roster-query exclusion, **not** an `is_hidden` soft-delete (`is_hidden=True` would
-  also hide the rows from every history view — that is the user's clear-conversation
-  action, deliberately NOT used here).
-- Roster is a *liveness* view (a reaped session is gone); history is the *durable
+  Date Grouping. And Sender-Dates endpoints above are **unaffected** — a reaped
+  sender's notifications remain fully readable in history/audit. The eviction is a roster-query exclusion, **not** an `is_hidden` soft-delete.
+`is_hidden=True` would also hide the rows from every history view.
+That is the user's clear-conversation action, and it is not used here.
+- Roster is a *liveness* view (a reaped session is gone). History is the *durable
   record* (the reaped session's messages stay). Re-spawn-safe: a new session has a new
   `sender_id` (8-hex session suffix), so it is never masked by a prior session's marker.
 
@@ -1834,8 +1822,8 @@ separate notification streams:
 
 **How it works**:
 
-1. Each Claude Code session gets a unique session ID (8-char hex, e.g., `a1b2c3d4`)
-2. The session ID is appended to the sender ID: `claude.code@lupin.deepily.ai#a1b2c3d4`
+1. Each Claude Code session gets a unique session ID (8 hex characters)
+2. The session ID is appended to the sender ID: `claude.code@lupin.deepily.ai#<hash8>`
 3. Notifications from different sessions appear as separate conversations in the UI
 4. The user can identify which session sent each notification
 
@@ -1892,12 +1880,12 @@ graph TD
     ASYNC --> HTTP
 ```
 
-![Client Tier Stack]( images/notification-client-tiers.png )
+![Client Tier Stack](images/notification-client-tiers.png)
 
 Each tier wraps the tier below it with progressively more convenience:
 - **Tier 1** (MCP Tools) -- Used by Claude Code sessions via the cosa-voice MCP server
-- **Tier 2** (cosa_interface) -- Used by async agent orchestrators (Deep Research, Claude Code jobs)
-- **Tier 3** (CLI Clients) -- Python library + CLI for direct notification sending
+- **Tier 2** (cosa_interface). Used by async agent orchestrators (Deep Research, Claude Code jobs)
+- **Tier 3** (CLI Clients). Python library + CLI for direct notification sending
 - **Tier 4** (Direct HTTP) -- Raw REST API calls via curl or any HTTP client
 
 ---
@@ -2218,13 +2206,13 @@ python3 -m lupin_cli.notifications.notify_user_async "Build completed" \
     --priority high
 ```
 
-#### Bash Wrapper Scripts ( Global CLI Commands )
+#### Bash Wrapper Scripts (Global CLI Commands)
 
 The Python CLI tools above are wrapped by bash scripts installed at `~/.local/bin/`
 for convenient command-line access from any directory. The canonical copies live in
 `src/scripts/` for version control and easy reinstallation.
 
-**Installation** ( from project root ):
+**Installation** (from project root):
 
 ```bash
 cp src/scripts/notify-claude-async ~/.local/bin/
@@ -2234,20 +2222,20 @@ chmod +x ~/.local/bin/notify-claude-async ~/.local/bin/notify-claude-sync
 
 **How they work**:
 
-1. Resolve `LUPIN_ROOT` ( from env var, `DEEPILY_PROJECTS_DIR` fallback, or hardcoded path )
+1. Resolve `LUPIN_ROOT` (from env var, `DEEPILY_PROJECTS_DIR` fallback, or hardcoded path)
 2. Validate the directory exists
-3. Use the CoSA venv Python ( `$LUPIN_ROOT/src/cosa/.venv/bin/python3` ) which has `requests` + `pydantic`
+3. Use the CoSA venv Python (`$LUPIN_ROOT/src/cosa/.venv/bin/python3`) which has `requests` + `pydantic`
 4. Set `PYTHONPATH` to include `$LUPIN_ROOT/src`
-5. `exec` the Python CLI module with all args passed through ( `"$@"` )
+5. `exec` the Python CLI module with all args passed through (`"$@"`)
 
-**Fire-and-forget** ( async ):
+**Fire-and-forget** (async):
 
 ```bash
 notify-claude-async "Build completed" --type task --priority medium
 notify-claude-async "Deploying..." --type progress --priority low --debug
 ```
 
-**Response-required** ( sync, SSE blocking ):
+**Response-required** (sync, SSE blocking):
 
 ```bash
 notify-claude-sync "Approve deployment?" --response-type yes_no --response-default no
@@ -2415,7 +2403,7 @@ data: {"status": "responded", "response": "yes", "default_used": false}\n\n
 
 **Lifecycle**: The SSE stream emits exactly **one event** and then closes. The
 server creates an `asyncio.Event()` in the `pending_responses` dict, waits on it
-with `asyncio.wait_for()` using the configured timeout, and yields the appropriate
+with `asyncio.wait_for()` using the configured timeout. And yields the appropriate
 event based on the outcome.
 
 **Headers**:
@@ -2452,9 +2440,8 @@ Users submit responses via `POST /api/notify/response`.
 2. **PostgreSQL update** -- The notification record is updated via
    `NotificationRepository.update_response()`. The notification must be in
    `delivered` state, or in `expired` state within the grace period.
-3. **SSE signal** -- If the notification's SSE stream is still waiting in
-   `pending_responses`, the response data is written and the `asyncio.Event` is
-   set, waking the stream which then yields a `responded` event.
+3. **SSE signal** -- If the notification's SSE stream is still waiting in `pending_responses`, the response data is written and the `asyncio.Event` is set.
+   That wakes the stream, which then yields a `responded` event.
 4. **WebSocket broadcast** -- A `notification_responded` event is emitted to the
    target user's WebSocket sessions.
 
@@ -2481,10 +2468,8 @@ where users may step away and return after the timeout.
 ### 10.1 Overview
 
 The `voice_io` module (`src/cosa/agents/utils/voice_io.py`) provides a
-voice-first interaction layer for COSA agents. It uses the cosa_interface
-pattern (Tier 2) as its primary channel and automatically falls back to CLI
-text (`print` / `input`) when the voice service is unavailable or when
-`--cli-mode` is explicitly set.
+voice-first interaction layer for COSA agents. It uses the cosa_interface pattern (Tier 2) as its primary channel.
+It falls back to CLI text (`print` / `input`) automatically when the voice service is unavailable or `--cli-mode` is explicitly set.
 
 ```
 Priority Order:
@@ -2624,9 +2609,9 @@ Every voice I/O function follows a three-step error handling pattern:
 logged via `logger.warning()` and the CLI fallback is used transparently.
 
 **Exception**: `select_themes()` and `select_topics()` **do** re-raise as
-`RuntimeError` after notifying the user of the failure. This is intentional --
-the caller needs to distinguish between "user cancelled" (returns empty list) and
-"voice service error" (raises `RuntimeError`) so it can retry or switch modes.
+`RuntimeError` after notifying the user of the failure. This is intentional.
+The caller needs to distinguish "user cancelled" (returns an empty list) from "voice service error" (raises `RuntimeError`).
+With that distinction it can retry or switch modes.
 
 ---
 
@@ -2636,7 +2621,7 @@ the caller needs to distinguish between "user cancelled" (returns empty list) an
 
 The Notification Proxy Agent is a standalone WebSocket client that automatically
 answers Runtime Argument Expediter prompts. It connects to the Lupin server,
-listens for `notification_queue_update` events, and routes response-required
+listens for `notification_queue_update` events. And routes response-required
 notifications through a **3-tier strategy chain** -- local LLM fuzzy matching
 first, keyword rules second, cloud LLM fallback third.
 
@@ -2692,7 +2677,7 @@ sequenceDiagram
     R->>API: Submit response
 ```
 
-![Proxy Strategy Chain]( images/notification-proxy-strategy.png )
+![Proxy Strategy Chain](images/notification-proxy-strategy.png)
 
 The strategy chain short-circuits: the first tier that returns a non-`None`
 answer wins. If all three tiers return `None`, the notification is skipped
@@ -2702,9 +2687,9 @@ and counted under `self.stats[ "skipped" ]`.
 
 ### 11.3 Strategy Tiers
 
-**Tier 1 -- LLM Script Matcher** ( `LlmScriptMatcherStrategy` )
+**Tier 1 -- LLM Script Matcher** (`LlmScriptMatcherStrategy`)
 
-- **Model**: Phi-4 14B via local vLLM ( spec key: `kaitchup/phi_4_14b` )
+- **Model**: Phi-4 14B via local vLLM (spec key: `kaitchup/phi_4_14b`)
 - **Mechanism**: Loads a Q&A script JSON at construction. When a notification
   arrives, sends the question + all script entries to Phi-4 and asks it to
   fuzzy-match the best entry. Handles `YES_NO`, `OPEN_ENDED`,
@@ -2715,13 +2700,12 @@ and counted under `self.stats[ "skipped" ]`.
   - Answer verification: `/src/conf/prompts/notification-proxy-answer-verifier.txt`
 - **Availability**: Falls through gracefully if vLLM server is down.
 
-**Tier 2 -- Expediter Rules** ( `ExpediterRuleStrategy` )
+**Tier 2 -- Expediter Rules** (`ExpediterRuleStrategy`)
 
 - **Model**: None (pure keyword matching)
-- **Mechanism**: Maps keywords found in notification messages to argument names
-  using a ranked keyword list ( `KEYWORD_TO_ARG` ), then looks up the answer
-  in the active test profile. First match wins.
-- **Keyword map** ( order matters ):
+- **Mechanism**: Maps keywords found in notification messages to argument names, using a ranked keyword list (`KEYWORD_TO_ARG`).
+It then looks up the answer in the active test profile. First match wins.
+- **Keyword map** (order matters):
 
 ```python
 KEYWORD_TO_ARG = [
@@ -2736,9 +2720,9 @@ KEYWORD_TO_ARG = [
 
 - **Speed**: Fastest tier -- no LLM calls, no network.
 
-**Tier 3 -- LLM Fallback** ( `LLMFallbackStrategy` )
+**Tier 3 -- LLM Fallback** (`LLMFallbackStrategy`)
 
-- **Model**: Anthropic Claude Sonnet ( `claude-sonnet-4-5-20250929` )
+- **Model**: Anthropic Claude Sonnet (`claude-sonnet-4-5-20250929`)
 - **Mechanism**: Sends the raw notification message to Claude Sonnet with
   `max_tokens = 500` and returns the generated answer.
 - **API key**: Resolved via `ANTHROPIC_API_KEY_FIREWALLED` env var or
@@ -2769,13 +2753,13 @@ python -m cosa.agents.notification_proxy --dry-run --verbose
 |------|---------|-------------|
 | `--host` | `localhost` | Server hostname |
 | `--port` | `7999` | Server port |
-| `--email` | *(env var)* | Login email ( overrides env vars ) |
-| `--password` | *(env var)* | Login password ( overrides env vars ) |
+| `--email` | *(env var)* | Login email (overrides env vars) |
+| `--password` | *(env var)* | Login password (overrides env vars) |
 | `--session-id` | `auto proxy` | WebSocket session identifier |
 | `--profile` | `deep_research` | Test profile for auto-answers |
 | `--strategy` | `llm_script` | Strategy mode: `llm_script`, `rules`, or `auto` |
 | `--debug` | `False` | Enable debug output |
-| `--verbose` | `False` | Enable verbose output ( implies debug ) |
+| `--verbose` | `False` | Enable verbose output (implies debug) |
 | `--dry-run` | `False` | Display notifications without computing responses |
 
 **Strategy modes**:
@@ -2784,7 +2768,7 @@ python -m cosa.agents.notification_proxy --dry-run --verbose
 |------|--------|--------|--------|
 | `llm_script` | Phi-4 script matcher | *(skipped)* | Claude Sonnet |
 | `rules` | *(skipped)* | Keyword rules | Claude Sonnet |
-| `auto` | Phi-4 script matcher | Keyword rules ( fallback if vLLM unavailable ) | Claude Sonnet |
+| `auto` | Phi-4 script matcher | Keyword rules (fallback if vLLM unavailable) | Claude Sonnet |
 
 ---
 
@@ -2842,7 +2826,7 @@ fuzzy-match incoming notifications to entries.
 | `crud.json` | `crud` |
 | `_template.json` | Starter template for new scripts |
 
-**Entry format** ( from `_template.json` ):
+**Entry format** (from `_template.json`):
 
 ```json
 {
@@ -2870,11 +2854,11 @@ fuzzy-match incoming notifications to entries.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `question_pattern` | Yes | Expected question text ( fuzzy matched by Phi-4 ) |
+| `question_pattern` | Yes | Expected question text (fuzzy matched by Phi-4) |
 | `answer` | Yes | The answer to return when matched |
 | `arg_name` | Yes | The CLI argument name this maps to |
 | `response_types` | Yes | Array of valid response types for this entry |
-| `agents` | No | Scope entry to specific agent names ( for multi-agent scripts ) |
+| `agents` | No | Scope entry to specific agent names (for multi-agent scripts) |
 
 ---
 
@@ -2884,13 +2868,13 @@ The proxy resolves login credentials with a **2-tier priority** chain:
 
 | Priority | Email Source | Password Source |
 |----------|-------------|-----------------|
-| 1 ( highest ) | `--email` CLI flag | `--password` CLI flag |
+| 1 (highest) | `--email` CLI flag | `--password` CLI flag |
 | 2 | `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` env var | `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` env var |
 
 If neither source provides a value, `get_credentials()` raises a `ValueError`
 with setup instructions.
 
-**Anthropic API key** ( for Tier 3 LLM Fallback ):
+**Anthropic API key** (for Tier 3 LLM Fallback):
 
 | Priority | Source |
 |----------|--------|
@@ -2908,8 +2892,8 @@ server.
 
 1. **REST login** -- `POST /auth/login` with email + password to obtain a JWT
 2. **WebSocket connect** -- `ws://{host}:{port}/ws/queue/{session_id}`
-3. **Auth message** -- Send `auth_request` with Bearer token and subscribed events
-4. **Auth response** -- Wait for `auth_success` ( includes `user_id` )
+3. **Auth message**. Send `auth_request` with Bearer token and subscribed events
+4. **Auth response**. Wait for `auth_success` (includes `user_id`)
 5. **Receive loop** -- Dispatch events to `on_event` callback
 
 **Subscribed events**:
@@ -2981,11 +2965,11 @@ These keys live in `src/conf/lupin-app.ini` under `[Lupin: Baseline]`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enable response required notifications` | `false` | Enable response-required notifications ( Phase 2 ). When `false`, only fire-and-forget is supported. |
+| `enable response required notifications` | `false` | Enable response-required notifications (Phase 2). When `false`, only fire-and-forget is supported. |
 | `enable sse blocking` | `false` | Enable SSE blocking mode for synchronous notifications. When `false`, all notifications are async. |
 | `notification timeout default seconds` | `120` | Default timeout in seconds for response-required notifications. |
 | `notification grace period seconds` | `300` | Grace period after timeout expires during which the server still accepts a response. |
-| `notification offline immediate default` | `true` | When `true`, immediately returns default answer if user is offline ( no active WebSocket ). |
+| `notification offline immediate default` | `true` | When `true`, immediately returns default answer if user is offline (no active WebSocket). |
 
 ---
 
@@ -2995,7 +2979,7 @@ These keys live in `src/conf/lupin-app.ini` under `[Lupin: Baseline]`:
 |-----|---------|-------------|
 | `llm spec key for notification proxy matcher` | `kaitchup/phi_4_14b` | LLM model identifier for Phi-4 script matcher. |
 | `prompt template for notification proxy script matcher` | `/src/conf/prompts/notification-proxy-script-matcher.txt` | Prompt template for single-question and multiple-choice matching. |
-| `prompt template for notification proxy batch matcher` | `/src/conf/prompts/notification-proxy-batch-matcher.txt` | Prompt template for batch ( `open_ended_batch` ) matching. |
+| `prompt template for notification proxy batch matcher` | `/src/conf/prompts/notification-proxy-batch-matcher.txt` | Prompt template for batch (`open_ended_batch`) matching. |
 | `prompt template for notification proxy answer verifier` | `/src/conf/prompts/notification-proxy-answer-verifier.txt` | Prompt template for semantic answer verification. |
 | `notification proxy scripts directory` | `/src/conf/notification-proxy-scripts` | Directory containing Q&A script JSON files. |
 
@@ -3009,7 +2993,7 @@ All config keys have matching explainer entries in `src/conf/lupin-app-splainer.
 |-------|-----------|-------------|
 | `notification_queue_update` | Server -> Client | New or updated notification in the queue |
 | `notification_play_sound` | Server -> Client | Command to play a notification sound file |
-| `job_state_transition` | Server -> Client | Job moved between queues ( todo -> running -> done/dead ) |
+| `job_state_transition` | Server -> Client | Job moved between queues (todo -> running -> done/dead) |
 | `sys_ping` | Server -> Client | Keep-alive ping from server |
 | `sys_pong` | Client -> Server | Keep-alive response from client |
 | `auth_request` | Client -> Server | Authentication with Bearer token |
@@ -3025,7 +3009,7 @@ All config keys have matching explainer entries in `src/conf/lupin-app-splainer.
 | `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` | Login email for notification proxy and smoke tests |
 | `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD` | Login password for notification proxy and smoke tests |
 | `ANTHROPIC_API_KEY_FIREWALLED` | Anthropic API key for Tier 3 LLM Fallback |
-| `LUPIN_ROOT` | Project root directory ( used by `cu.get_project_root()` ) |
+| `LUPIN_ROOT` | Project root directory (used by `cu.get_project_root()`) |
 | `LUPIN_CONFIG_MGR_CLI_ARGS` | CLI args JSON for `ConfigurationManager` |
 
 ---
@@ -3042,9 +3026,9 @@ The `ConfigurationManager` uses a single INI file with section-based inheritance
 
 Runtime overrides follow this priority chain:
 
-1. **Environment variables** ( highest priority )
-2. **CLI arguments** ( via `LUPIN_CONFIG_MGR_CLI_ARGS` )
-3. **INI file values** ( lowest priority )
+1. **Environment variables** (highest priority)
+2. **CLI arguments** (via `LUPIN_CONFIG_MGR_CLI_ARGS`)
+3. **INI file values** (lowest priority)
 
 ---
 
@@ -3079,7 +3063,7 @@ section inheritance transparently.
 |------|----------|------:|------:|---------|
 | `test_notification_proxy.py` | `src/tests/unit/` | 1554 | 120 | Proxy strategies, responder routing, config, XML models |
 | `test_notification_models.py` | `src/tests/unit/` | 736 | 41 | Pydantic notification request/response validation |
-| `test_notifications_api.py` | `src/tests/unit/` | 567 | 11 | REST API endpoint unit tests ( fire-and-forget, response-required, submit ) |
+| `test_notifications_api.py` | `src/tests/unit/` | 567 | 11 | REST API endpoint unit tests (fire-and-forget, response-required, submit) |
 | `test_notifications_sse_smoke.py` | `src/tests/smoke/` | 356 | 5 | SSE notification flow live smoke test |
 | `test_notification_proxy_script_matching.py` | `src/tests/smoke/` | 851 | 1 | LLM script matcher end-to-end smoke test |
 | `test_expeditor_mock_job_smoke.py` | `src/tests/smoke/` | 703 | 1 | Expeditor mock job live pipeline smoke test |
@@ -3092,7 +3076,7 @@ section inheritance transparently.
 
 ### 13.2 Running Tests by Tier
 
-**Unit tests** ( fast, no server required ):
+**Unit tests** (fast, no server required):
 
 ```bash
 # All notification unit tests
@@ -3104,7 +3088,7 @@ pytest src/tests/unit/test_notifications_api.py -v
 pytest src/tests/unit/test_notification*.py -v
 ```
 
-**Smoke tests** ( require running Lupin server on port 7999 ):
+**Smoke tests** (require running Lupin server on port 7999):
 
 ```bash
 # SSE notification flow
@@ -3117,7 +3101,7 @@ pytest src/tests/smoke/test_notification_proxy_script_matching.py -v -s
 pytest src/tests/smoke/test_expeditor_mock_job_smoke.py -v -s
 ```
 
-**Integration tests** ( require running Lupin server ):
+**Integration tests** (require running Lupin server):
 
 ```bash
 # Notification API integration
@@ -3151,7 +3135,7 @@ should raise `ValueError` with setup instructions.
 
 ### 13.4 What Each Test Suite Covers
 
-**`test_notification_proxy.py`** ( 120 tests ):
+**`test_notification_proxy.py`** (120 tests):
 - `TestConfig` -- Profile loading, defaults, strategy choices
 - `TestGetCredentials` -- 2-tier credential resolution
 - `TestExpediterRulesConstruction` -- Rule strategy initialization
@@ -3162,34 +3146,34 @@ should raise `ValueError` with setup instructions.
 - `TestNotificationResponder` -- Strategy routing, stats tracking
 - `TestKeywordMapping` -- Keyword-to-argument mapping correctness
 - `TestProfileCoverage` -- All profiles have required keys
-- `TestKeywordOrderingRegression` -- Order-sensitive matching regression tests
+- `TestKeywordOrderingRegression`. Order-sensitive matching regression tests
 - `TestScriptMatcherResponseModel` -- Pydantic XML response parsing
 - `TestVerificationResponseModel` -- Verification response parsing
 - `TestLlmScriptMatcherConstruction` -- Script loader, vLLM availability
 - `TestLlmScriptMatcherCanHandle` -- Sender filtering for script matcher
-- `TestLlmScriptMatcherRespond` -- Phi-4 fuzzy matching end-to-end
+- `TestLlmScriptMatcherRespond`. Phi-4 fuzzy matching end-to-end
 - `TestLlmAnswerVerifier` -- Semantic answer verification
 - `TestQAScriptFormat` -- Script JSON structure validation
-- `TestSenderIdFiltering` -- Cross-strategy sender filtering
+- `TestSenderIdFiltering`. Cross-strategy sender filtering
 - `TestConfigAdditions` -- Config constant additions
 - `TestResponderStrategyMode` -- `llm_script` / `rules` / `auto` mode routing
 
-**`test_notification_models.py`** ( 41 tests ):
+**`test_notification_models.py`** (41 tests):
 - `TestNotificationRequestValidation` -- Request model field validation
 - `TestSSEEventModels` -- SSE event serialization
-- `TestNotificationResponse` -- Response model construction
+- `TestNotificationResponse`. Response model construction
 - `TestAsyncNotificationRequestValidation` -- Async request validation
 - `TestAsyncNotificationResponse` -- Async response model
 
-**`test_notifications_api.py`** ( 11 tests ):
+**`test_notifications_api.py`** (11 tests):
 - `TestNotifyFireAndForget` -- Fire-and-forget endpoint
 - `TestNotifyResponseRequired` -- Response-required endpoint
 - `TestSubmitNotificationResponse` -- Response submission endpoint
 
-**`test_notifications_integration.py`** ( 8 tests ):
+**`test_notifications_integration.py`** (8 tests):
 - End-to-end notification lifecycle against a live server
 
-**`test_notification_auth.py`** ( 11 tests ):
+**`test_notification_auth.py`** (11 tests):
 - Authentication flows for notification endpoints
 
 ---
@@ -3247,14 +3231,14 @@ pytest src/tests/smoke/test_notifications_sse_smoke.py -v -s
 pytest src/tests/smoke/test_expeditor_mock_job_smoke.py -v -s
 ```
 
-**Do not merge with failing tests.** If a test is legitimately flaky, document
+**Do not merge with failing tests**. If a test is legitimately flaky, document
 the flakiness and create a separate fix.
 
 ---
 
 ### 13.7 Writing New Notification Tests
 
-**Unit test template** ( add to `src/tests/unit/test_notification_proxy.py` ):
+**Unit test template** (add to `src/tests/unit/test_notification_proxy.py`):
 
 ```python
 class TestYourNewFeature:
@@ -3284,7 +3268,7 @@ class TestYourNewFeature:
         # ...
 ```
 
-**Smoke test template** ( add to `src/tests/smoke/` ):
+**Smoke test template** (add to `src/tests/smoke/`):
 
 ```python
 #!/usr/bin/env python3
@@ -3339,7 +3323,7 @@ if __name__ == "__main__":
 
 **Key conventions**:
 - Unit tests use `pytest` fixtures and mocks -- no server required
-- Smoke tests use real HTTP calls -- server must be running
+- Smoke tests use real HTTP calls. Server must be running
 - Both use spaces inside parentheses: `len( items )`, `range( 10 )`
 - Align colons in dicts: `"key"  : "value"`
 - Use Design by Contract docstrings for test helper functions

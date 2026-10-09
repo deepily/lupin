@@ -1,12 +1,10 @@
 # Decision Proxy — Admin Guide
 
-> **Audience**: Lupin administrators who review and ratify proxy decisions
->
-> **Pages covered**: `/app/admin/proxy-dashboard` and `/app/admin/proxy-ratify`
->
-> **Last Updated**: 2026-10-08
->
-> **See Also**: [End-to-End Trust Proxy Overview](../rnd/2026.02.23-trust-proxy-preference-learning/2026.02.27-end-to-end-trust-proxy-overview.md) — full conceptual walkthrough from cold start to autonomous predictions
+**Audience**: Lupin administrators who review and ratify proxy decisions
+
+**Pages covered**: `/app/admin/proxy-dashboard` and `/app/admin/proxy-ratify`
+
+**See Also**: End-to-End Trust Proxy Overview (`src/rnd/2026.02.23-trust-proxy-preference-learning/`, not in this tree) — full conceptual walkthrough from cold start to autonomous predictions
 
 ---
 
@@ -27,10 +25,9 @@
 
 ### The Problem
 
-SWE Team jobs (and other agentic workflows) generate dozens of decisions that historically
-required real-time human approval: task decomposition sign-offs, dangerous command gating,
-architecture choices, dependency updates, test strategy confirmations. Each decision triggers
-a voice notification and blocks the job until you respond.
+SWE Team jobs and other agentic workflows generate dozens of decisions that historically required real-time human approval.
+Examples are task decomposition sign-offs, dangerous command gating, architecture choices, dependency updates and test strategy confirmations.
+Each decision triggers a voice notification and blocks the job until you respond.
 
 **The old model** — real-time, interrupt-driven:
 
@@ -43,8 +40,8 @@ Ten decisions means ten manual interruptions. You're babysitting the agent.
 
 ### The New Model
 
-The decision proxy intercepts these decisions, classifies them by category and risk, and
-either acts autonomously (at earned trust levels) or queues them for batch review later.
+The decision proxy intercepts these decisions and classifies them by category and risk.
+It either acts autonomously, at earned trust levels, or queues them for batch review later.
 
 **The new model** — async, batch-driven:
 
@@ -61,7 +58,7 @@ Job starts → Proxy handles decisions autonomously → You review over morning 
 | User attention | Required for every decision | Review in batches |
 | Job blocking | Blocks on each decision | Runs continuously |
 | Off-hours work | Impossible without babysitting | Fully autonomous |
-| Trust model | Binary (allow/deny) | Graduated (L1-L5) |
+| Trust model | Binary (allow/deny) | Graduated (Levels 1 to 5) |
 | Learning | None | Proxy improves from your feedback |
 
 ---
@@ -71,15 +68,15 @@ Job starts → Proxy handles decisions autonomously → You review over morning 
 ### Trust Level Progression
 
 Trust is tracked **per-user, per-domain, per-category**. The SWE domain has 6 categories
-(see below), and each starts at L1 and progresses independently.
+(see below), and each starts at Level 1 and progresses independently.
 
 | Level | Name | Behavior | Ratification Required? |
 |-------|------|----------|------------------------|
-| **L1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. | No (not_required) |
-| **L2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
-| **L3** | Trusted | Acts on decisions with high confidence (>80%). Lower confidence decisions are queued. | Depends on confidence |
-| **L4** | Autonomous | Acts on most decisions. Only queues low-confidence or destructive-category decisions. | Rarely |
-| **L5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
+| **Level 1** | Shadow | Observe only — logs what the proxy *would* decide but takes no action. The original notification still reaches you. | No (not_required) |
+| **Level 2** | Provisional | Suggests a decision and queues it for ratification. Does not act autonomously. | Yes (pending) |
+| **Level 3** | Trusted | Acts on decisions with high confidence (>80%). Lower confidence decisions are queued. | Depends on confidence |
+| **Level 4** | Autonomous | Acts on most decisions. Only queues low-confidence or destructive-category decisions. | Rarely |
+| **Level 5** | Full Trust | Acts on all decisions in this category. Ratification available but not required. | No (not_required) |
 
 ### The 6 SWE Categories
 
@@ -98,22 +95,21 @@ The proxy operates in one of four modes, set globally from the Trust Dashboard:
 
 | Mode | Description |
 |------|-------------|
-| **DISABLED** | Proxy is off. All decisions go directly to user as before. |
-| **SHADOW** | Proxy observes and logs decisions but never acts. Good for initial evaluation. |
-| **SUGGEST** | Proxy suggests decisions and queues them for ratification. Does not act autonomously. |
-| **ACTIVE** | Proxy acts based on trust levels. This is the production mode. |
+| **`DISABLED`** | Proxy is off. All decisions go directly to user as before. |
+| **`SHADOW`** | Proxy observes and logs decisions but never acts. Good for initial evaluation. |
+| **`SUGGEST`** | Proxy suggests decisions and queues them for ratification. Does not act autonomously. |
+| **`ACTIVE`** | Proxy acts based on trust levels. This is the production mode. |
 
 ### Circuit Breaker
 
 Each category has an independent circuit breaker that protects against automation failures.
-If too many decisions in a category are rejected during ratification, the circuit breaker
-**trips** and automatically demotes that category back to a lower trust level until the
-admin manually resets it.
+If too many decisions in a category are rejected during ratification, the circuit breaker **trips**.
+It then demotes that category to a lower trust level until the admin manually resets it.
 
 | State | Indicator | Meaning |
 |-------|-----------|---------|
 | **OK** (Closed) | Green dot | Operating normally |
-| **TRIPPED** (Open) | Red dot | Too many rejections — proxy stopped acting in this category |
+| **`TRIPPED`** (Open) | Red dot | Too many rejections — proxy stopped acting in this category |
 | **COOLDOWN** | Yellow dot | Recovery period after a trip |
 
 ### Active Hours and Deferral
@@ -141,7 +137,7 @@ decision keeps the answer the proxy would have given. The statistics count these
 | `decision proxy timezone` | IANA timezone the hours are read in | `America/Chicago` |
 | `decision proxy human user id` | The server user id of **you**, the person the proxy defers to | empty |
 
-**It is off until you name yourself.** With `decision proxy human user id` empty, the
+**It is off until you name yourself**. With `decision proxy human user id` empty, the
 proxy has no one to defer to. It answers exactly as before. To turn it on, set the key to
 your user id (the `user_id` your browser session shows in `GET /api/websocket-sessions`).
 Then restart the decision proxy process, because the keys are read at start.
@@ -154,7 +150,7 @@ connected: <cause>`. This is the ruling "Proxy answers". It is one constant,
 would make the proxy defer on doubt. The sessions answer is reused for 10 seconds, so a
 connection that opens or closes can take that long to be seen.
 
-**The SWE team gate has its own switch.** The SWE team orchestrator asks the same strategy
+**The SWE team gate has its own switch**. The SWE team orchestrator asks the same strategy
 in-process. At an `act` decision it approves without asking anyone, whatever the hour.
 The key `swe engineering proxy ask before act` changes that. It ships `false`, which keeps
 today's behaviour. Set it `true` and an `act` decision no longer approves by itself.
@@ -201,11 +197,11 @@ sequenceDiagram
     Note over Proxy: Trust states update from your feedback
 ```
 
-### Step-by-Step
+### Walkthrough
 
-1. **Evening**: Launch a SWE Team job from the Lupin UI. Set trust mode to ACTIVE (or SUGGEST for first runs).
+1. **Evening**: Launch a SWE Team job from the Lupin UI. Set trust mode to `ACTIVE` (or `SUGGEST` for first runs).
 2. **Overnight**: The proxy handles decisions based on current trust levels. High-confidence decisions in trusted categories are executed. Others are queued.
-3. **Morning**: Open the **Trust Dashboard** to see an overview of what happened overnight — how many decisions per category, success rates, any circuit breaker trips.
+3. **Morning**: Open the **Trust Dashboard** to see an overview of what happened overnight. How many decisions per category, success rates, any circuit breaker trips.
 4. **Review**: Switch to **Pending Ratification** to approve or reject queued decisions. Each approval/rejection updates the trust state for that category.
 5. **Repeat**: Over days, trust levels naturally climb as you approve decisions. The proxy handles more autonomously, and your morning review gets shorter.
 
@@ -259,14 +255,15 @@ The blue bar at the top of the page controls and displays the proxy's operating 
 
 | Element | Description |
 |---------|-------------|
-| **Trust Mode dropdown** | Select DISABLED, SHADOW, SUGGEST, or ACTIVE. Changes take effect immediately if a SWE Team job is running (hot-reload), or are queued for the next job. |
+| **Trust Mode dropdown** | Select `DISABLED`, `SHADOW`, `SUGGEST`, or `ACTIVE`. Changes take effect immediately if a SWE Team job is running (hot-reload), or are queued for the next job. |
 | **Status dot** | Shows the target of your mode change. **Green** = running job updated immediately. **Yellow** = queued for next job. **Gray** = no running job (idle). |
 | **Domain** | Currently always `swe`. Future domains may be added. |
 | **User** | Your email address (auto-detected from auth). Trust states are per-user. |
 
-**Changing the mode**: Select a new mode from the dropdown. The page will display a success
-message indicating whether the change was applied to a running job ("active job updated") or
-queued for the next job ("applies to next job").
+**Changing the mode**: Select a new mode from the dropdown.
+The page shows a success message.
+It says "active job updated" if the change reached a running job.
+It says "applies to next job" if the change was queued.
 
 ### Trust Cards (6 Categories)
 
@@ -277,12 +274,12 @@ Below the mode bar is a 3-column grid of trust cards, one per SWE category.
 | Card Element | Location | What It Shows |
 |-------------|----------|---------------|
 | **Category icon + name** | Top | Which SWE category (e.g., "Testing") |
-| **Level badge** (e.g., `L2`) | Center, large text | Current trust level for this category. Color matches the level (see [Badge Reference](#6-badge-and-color-reference)). |
+| **Level badge** (e.g., `Level 2`) | Center, large text | Current trust level for this category. Color matches the level (see [Badge Reference](#6-badge-and-color-reference)). |
 | **Level label** | Below badge | Human-readable name (e.g., "Provisional") |
 | **Success rate bar** | Middle | Horizontal bar showing approval rate. Green (>80%), yellow (50-80%), red (<50%). Shows "No data" if the category has never been used. |
 | **Total** | Bottom-left stat | Total decisions made in this category |
 | **Rejected** | Bottom-center stat | How many decisions were rejected during ratification |
-| **Circuit breaker** | Bottom-right | Status indicator with colored dot: green (OK), red (TRIPPED), yellow (COOLDOWN) |
+| **Circuit breaker** | Bottom-right | Status indicator with colored dot: green (OK), red (`TRIPPED`), yellow (COOLDOWN) |
 
 **What "No data" means**: The category has never had a decision processed through it. This
 is normal for fresh installations or categories that haven't been triggered yet.
@@ -297,7 +294,7 @@ Below the trust cards is a table showing the most recent decisions across all ca
 | **Time** | Relative timestamp (e.g., "2h ago", "5m ago", "3d ago") |
 | **Question** | The decision question text, truncated to 60 characters. Hover for full text. |
 | **Action** | What the proxy did: `shadow`, `suggest`, `act`, or `defer` (see [Badge Reference](#6-badge-and-color-reference)) |
-| **Trust** | Trust level badge at the time of the decision (L1-L5) |
+| **Trust** | Trust level badge at the time of the decision (Levels 1 to 5) |
 | **Confidence** | How confident the proxy was in its classification. Green (>80%), orange (50-80%), red (<50%) |
 | **State** | Ratification state: `pending` (orange), `approved` (green), `rejected` (red), `N/R` (gray — not required) |
 
@@ -361,12 +358,12 @@ Four cards at the top give you an instant pulse check:
 
 ### Filter Bar
 
-Three dropdown filters that apply with **AND logic** (all filters must match):
+Three dropdown filters that apply with **And logic** (all filters must match):
 
 | Filter | Options | Effect |
 |--------|---------|--------|
 | **Category** | All Categories, Deployment, Testing, Dependencies, Architecture, Destructive, General | Show only decisions in the selected category |
-| **Trust Level** | All Trust Levels, L1 — Shadow, L2 — Provisional, L3 — Trusted, L4 — Autonomous, L5 — Full Trust | Show only decisions at the selected trust level |
+| **Trust Level** | All Trust Levels, Level 1 — Shadow, Level 2 — Provisional, Level 3. Trusted, Level 4 — Autonomous, Level 5 — Full Trust | Show only decisions at the selected trust level |
 | **Action** | All Actions, Shadow, Suggest, Act, Defer | Show only decisions with the selected action type |
 
 **Clear Filters**: Resets all three dropdowns to "All" and shows the full list.
@@ -384,7 +381,7 @@ The main table shows all pending decisions matching your current filters.
 | **Category** | Category badge (e.g., `TESTING`, `DEPS`). Gray pill-shaped badge. |
 | **Question** | Decision question text, truncated to 80 characters. Hover for full text. **Click anywhere on the row** (except checkbox or action buttons) to open the detail modal. |
 | **Action** | What the proxy decided to do. Color-coded badge (see [Badge Reference](#6-badge-and-color-reference)). |
-| **Trust** | Trust level at the time of the decision. Color-coded badge (L1-L5). |
+| **Trust** | Trust level at the time of the decision. Color-coded badge (Levels 1 to 5). |
 | **Confidence** | Proxy classification confidence. Color-coded text: green (>80%), orange (50-80%), red (<50%). Shows "—" if null. |
 | **Age** | How long ago the decision was created (e.g., "2h ago", "5m ago"). |
 | **Actions** | Two inline buttons: **checkmark** (quick approve) and **X** (quick reject). |
@@ -405,7 +402,7 @@ When one or more checkboxes are selected, a bulk actions bar appears above the t
 
 - **Selected count**: Shows "N selected" (e.g., "3 selected")
 - **Approve Selected**: Approves all selected decisions at once. Success message shows count.
-- **Reject Selected**: Opens a confirmation modal ("Are you sure you want to reject N selected decisions?"). You must click **Confirm Reject** to proceed, or **Cancel** to abort.
+- **Reject Selected**: Opens a confirmation modal ("Are you sure you want to reject N selected decisions?"). Click **Confirm Reject** to proceed, or **Cancel** to abort.
 - **Delete Selected**: Opens a confirmation modal warning that deletion is permanent and cannot be undone. Only pending decisions can be deleted. Does not affect trust state counters.
 
 **Select all**: The checkbox in the table header selects/deselects all rows on the **current page only** (not all pages).
@@ -419,7 +416,7 @@ Click any row in the decisions table to open the detail modal with complete info
 | **Category** | Decision category badge |
 | **Domain** | Domain identifier (typically "swe") |
 | **Action** | Proxy action badge (shadow/suggest/act/defer) |
-| **Trust Level** | Trust level badge (L1-L5) |
+| **Trust Level** | Trust level badge (Levels 1 to 5) |
 | **Confidence** | Classification confidence percentage, color-coded |
 | **Sender** | The agent or session that originated the decision (sender_id) |
 | **Created** | Full timestamp of when the decision was created |
@@ -472,11 +469,11 @@ the message: **"No pending decisions. All caught up!"**
 
 | Level | Background | Text Color | Card Border | Large Text Color |
 |-------|-----------|------------|-------------|------------------|
-| **L1** | Gray (`#e2e8f0`) | Dark gray (`#4a5568`) | Gray (`#a0aec0`) | Gray (`#a0aec0`) |
-| **L2** | Light blue (`#bee3f8`) | Blue (`#2b6cb0`) | Blue (`#4299e1`) | Blue (`#4299e1`) |
-| **L3** | Light green (`#c6f6d5`) | Green (`#276749`) | Green (`#48bb78`) | Green (`#48bb78`) |
-| **L4** | Light purple (`#e9d8fd`) | Purple (`#553c9a`) | Purple (`#9f7aea`) | Purple (`#9f7aea`) |
-| **L5** | Light yellow (`#fefcbf`) | Dark yellow (`#975a16`) | Yellow (`#ecc94b`) | Yellow (`#ecc94b`) |
+| **Level 1** | Gray (`#e2e8f0`) | Dark gray (`#4a5568`) | Gray (`#a0aec0`) | Gray (`#a0aec0`) |
+| **Level 2** | Light blue (`#bee3f8`) | Blue (`#2b6cb0`) | Blue (`#4299e1`) | Blue (`#4299e1`) |
+| **Level 3** | Light green (`#c6f6d5`) | Green (`#276749`) | Green (`#48bb78`) | Green (`#48bb78`) |
+| **Level 4** | Light purple (`#e9d8fd`) | Purple (`#553c9a`) | Purple (`#9f7aea`) | Purple (`#9f7aea`) |
+| **Level 5** | Light yellow (`#fefcbf`) | Dark yellow (`#975a16`) | Yellow (`#ecc94b`) | Yellow (`#ecc94b`) |
 
 ### Ratification State Badges
 
@@ -485,7 +482,7 @@ the message: **"No pending decisions. All caught up!"**
 | **pending** | Light orange (`#feebc8`) | Orange (`#c05621`) | Awaiting admin review |
 | **approved** | Light green (`#c6f6d5`) | Green (`#276749`) | Admin approved the decision |
 | **rejected** | Light red (`#fed7d7`) | Red (`#c53030`) | Admin rejected the decision |
-| **N/R** (not_required) | Gray (`#e2e8f0`) | Dark gray (`#4a5568`) | No ratification needed (L1 shadow or L5 full trust) |
+| **N/R** (not_required) | Gray (`#e2e8f0`) | Dark gray (`#4a5568`) | No ratification needed (Level 1 shadow or Level 5 full trust) |
 
 ### Confidence Colors
 
@@ -508,7 +505,7 @@ the message: **"No pending decisions. All caught up!"**
 | Status | Dot Color | Text Color | Meaning |
 |--------|----------|------------|---------|
 | **OK** (closed) | Green (`#48bb78`) | Green (`#276749`) | Normal operation |
-| **TRIPPED** (open) | Red (`#f56565`) | Red (`#c53030`) | Auto-demoted — too many rejections |
+| **`TRIPPED`** (open) | Red (`#f56565`) | Red (`#c53030`) | Auto-demoted — too many rejections |
 | **COOLDOWN** | Yellow (`#ecc94b`) | Dark yellow (`#975a16`) | Recovery period after trip |
 
 ### Mode Status Dot (Dashboard)
@@ -563,9 +560,9 @@ levels or gets demoted.
 If a category accumulates too many rejections in a short window, the circuit breaker
 **trips**:
 
-1. **TRIPPED**: Proxy stops acting autonomously for that category. All decisions are queued.
+1. **`TRIPPED`**: Proxy stops acting autonomously for that category. All decisions are queued.
 2. **COOLDOWN**: After a cooldown period, the circuit breaker enters recovery.
-3. **CLOSED (OK)**: Normal operation resumes, but trust level may have been reduced.
+3. **Closed (OK)**: Normal operation resumes, but trust level may have been reduced.
 
 This prevents runaway automation — if the proxy makes bad decisions, it automatically
 stops and waits for human guidance.
@@ -574,12 +571,12 @@ stops and waits for human guidance.
 
 | Day | Actions | Trust State (Testing Category) |
 |-----|---------|-------------------------------|
-| **Day 1** | Start in SHADOW mode. Proxy logs 8 shadow decisions overnight. | L1 Shadow, 0 total, no success rate |
-| **Day 2** | Switch to SUGGEST mode. Proxy queues 6 suggestions. You approve all 6. | L1 → L2 Provisional, 6 total, 100% rate |
-| **Day 3** | Switch to ACTIVE mode. Proxy acts on 4 high-confidence decisions, queues 2 lower-confidence. You approve all 2 queued. | L2, 8 total, 100% rate |
-| **Day 4** | Proxy acts on 5, queues 1. You approve it. | L2 → L3 Trusted, 9 total, 100% rate |
-| **Day 5** | Proxy acts autonomously on 7 testing decisions. 1 queued, you reject it (wrong test strategy). | L3, 10 total, 90% rate. Circuit breaker: OK |
-| **Day 7** | Continued high approval rate. | L3 stable, ready for L4 promotion |
+| **Day 1** | Start in `SHADOW` mode. Proxy logs 8 shadow decisions overnight. | Level 1 Shadow, 0 total, no success rate |
+| **Day 2** | Switch to `SUGGEST` mode. Proxy queues 6 suggestions. You approve all 6. | Level 1 → Level 2 Provisional, 6 total, 100% rate |
+| **Day 3** | Switch to `ACTIVE` mode. Proxy acts on 4 high-confidence decisions, queues 2 lower-confidence. You approve all 2 queued. | Level 2, 8 total, 100% rate |
+| **Day 4** | Proxy acts on 5, queues 1. You approve it. | Level 2 → Level 3 Trusted, 9 total, 100% rate |
+| **Day 5** | Proxy acts autonomously on 7 testing decisions. 1 queued, you reject it (wrong test strategy). | Level 3, 10 total, 90% rate. Circuit breaker: OK |
+| **Day 7** | Continued high approval rate. | Level 3 stable, ready for Level 4 promotion |
 
 ---
 
@@ -602,75 +599,76 @@ building custom tooling.
 
 ### Authentication
 
-🔴 **This section said the opposite until 2026-09-25, and the sentence it used to carry is why
-the hole lasted.** It read: *"All endpoints except `/api/proxy/batch-id` and
-`/api/proxy/acknowledge` require an authenticated session."* That was false for five endpoints.
-Anyone checking whether this API was safe would have read it and stopped looking — which is the
-failure mode a wrong reassurance has and a wrong instruction does not.
+**This section said the opposite until it was corrected, and the sentence it used to carry is why the hole lasted**.
+It read: *"All endpoints except `/api/proxy/batch-id` and `/api/proxy/acknowledge` require an authenticated session."*
+That was false for five endpoints.
+Anyone checking whether this API was safe would have read it and stopped looking.
+That is the failure mode of a wrong reassurance, which a wrong instruction does not have.
 
-**Measured at the PATH** on 2026-09-25 (row `2d6f2221`), driving the real router through a
-TestClient with **no credential at all** — not read off the decorators:
+**Measured at the path**, driving the real router through a TestClient with **no credential at all**, not read off the decorators:
 
 | endpoint | before | now |
 |---|---|---|
 | `GET /api/proxy/pending/{user_email}` | **200, reached the handler** | **401** without a credential, **403** if the path names another user |
 | `GET /api/proxy/trust/{user_email}` | **200, reached the handler** | same gate |
-| `GET /api/proxy/batch-id` | 200 | **401** — gated 2026-09-26 (row `44d8e89c`) |
-| `POST /api/proxy/acknowledge` | 200 | **401** — gated 2026-09-26 |
-| `GET /api/proxy/decisions/{domain}/{category}` | 200 | **401** — gated 2026-09-26 |
+| `GET /api/proxy/batch-id` | 200 | **401** — gated |
+| `POST /api/proxy/acknowledge` | 200 | **401** — gated |
+| `GET /api/proxy/decisions/{domain}/{category}` | 200 | **401** — gated |
 | `POST /api/proxy/ratify/{decision_id}` | **reached the database** | **401** without a credential, **403** if `?user_email=` names another user |
 | `DELETE /api/proxy/decision/{decision_id}` | **reached the database** | same gate |
 | `GET` / `PUT /api/proxy/mode` | 401 | unchanged — gated |
 
-The two user-keyed routes are **owner-only, with no admin bypass** (Mr. Radio's ruling on row
-`d90baf3d`): the email in the path must be the caller's own, matched ignoring case. The admin pages
-already satisfy this — both `proxy-dashboard.js` and `proxy-ratify.js` set `userEmail` from
-`getCurrentUser()`, so they only ever ask for the signed-in user's own data, and `apiCall()` sends
-the credential by default.
+The two user-keyed routes are **owner-only, with no admin bypass**, per Mr. Radio's ruling.
+The email in the path must be the caller's own, matched ignoring case.
+The admin pages already satisfy this.
+Both `proxy-dashboard.js` and `proxy-ratify.js` set `userEmail` from `getCurrentUser()`, so they only ask for the signed-in user's own data.
+`apiCall()` sends the credential by default.
 
-#### The remaining five, closed 2026-09-26 (row `44d8e89c`)
+#### The remaining five, closed
 
-Re-measured the same way — the real router, no credential — **all nine endpoints now answer 401**.
-Three things had to happen, and two of them are not "add a decorator":
+Re-measured the same way, with the real router and no credential, **all nine endpoints now answer 401**.
+Three things had to happen, and two of them are not "add a decorator".
 
-**`ratify` and `decision` needed a different guard.** Their `user_email` arrives in the **query**
-string, and `require_path_identity_owner` reads `request.path_params` and deliberately raises 500
-for a route that names no user in its path. `require_query_identity_owner` is its sibling in the
-same module: same 401 via `require_api_key_or_jwt`, same 403 for a caller who is not the user
-named, reading the query instead. A bare uncredentialed call to either used to answer **422** for
-the missing `user_email` — which reads like a refusal and is not one. A route-level `Depends`
-raising 401 preempts that 422, measured with a TestClient rather than assumed.
+**`ratify` and `decision` needed a different guard**.
+Their `user_email` arrives in the **query** string.
+`require_path_identity_owner` reads `request.path_params` and raises 500 for a route that names no user in its path.
+`require_query_identity_owner` is its sibling in the same module.
+It has the same 401 via `require_api_key_or_jwt` and the same 403 for a caller who is not the user named, reading the query instead.
+A bare uncredentialed call to either used to answer **422** for the missing `user_email`, which reads like a refusal and is not one.
+A route-level `Depends` raising 401 preempts that 422. That was measured with a TestClient, not assumed.
 
-**Their audit columns were recording a claim, not a fact.** `ratified_by` and `deleted_by` were
-written from the query string. The ownership check alone does not repair that: the check accepts
-the caller's bare user id and compares email without regard to case, so one person can present
-three strings that all pass. Both handlers now take the identity from the credential — which also
-keys the trust-state counter, where two spellings of one user would have split a counter and given
-a quietly wrong answer rather than a cosmetic one.
+**Their audit columns were recording a claim, not a fact**.
+`ratified_by` and `deleted_by` were written from the query string.
+The ownership check alone does not repair that.
+The check accepts the caller's bare user id and compares email without regard to case, so one person can present three strings that all pass.
+Both handlers now take the identity from the credential.
+That identity also keys the trust-state counter, where two spellings of one user would have split the counter and given a quietly wrong answer.
 
-**`batch-id` needed its caller fixed first.** That route was left open in row `2d6f2221` *because*
-of `swe_team/orchestrator.py`'s proxy-summary fetch, which sent no credential. It now sends its API
-key. ⚠️ The header helper returns an empty dict rather than raising when no key loads, because its
-caller must never take a SWE run down — so a misconfigured box degrades to a 401 the surrounding
-`try/except` swallows into a warning. The symptom would be a proxy notification that silently stops
-updating in place. The warning names the endpoint, which is the only thing that makes that findable.
+**`batch-id` needed its caller fixed first**.
+The route was left open because of `swe_team/orchestrator.py`'s proxy-summary fetch, which sent no credential.
+It now sends its API key.
+The header helper returns an empty dict rather than raising when no key loads, because its caller must never take a SWE run down.
+A misconfigured box therefore degrades to a 401 that the surrounding `try/except` swallows into a warning.
+The symptom would be a proxy notification that silently stops updating in place.
+The warning names the endpoint, which is the only thing that makes that findable.
 
-🔴 **`acknowledge` has a credential and no owner check, and that is a residue, not a finish.** Row
-`44d8e89c` ruled an owner check onto it alongside ratify and delete. `_proxy_batch_state` is a single
-process-global counter rather than a per-user record, so there is no per-user batch for an owner
-check to be about. **Any credentialed caller can still retire another user's displayed batch.**
+**`acknowledge` has a credential and no owner check, and that is a residue, not a finish**.
+An owner check was ruled onto it alongside ratify and delete.
+`_proxy_batch_state` is a single process-global counter, not a per-user record.
+There is no per-user batch for an owner check to be about.
+**Any credentialed caller can still retire another user's displayed batch**.
 Making the batch per-user is a design change, not an authorization fix, and it is not done here.
-Carried forward as an open item in § 9 Known Limitations, with the measurement and with what is and
-is not watched by a test.
+It is carried forward as an open item in the Known Limitations section, with the measurement and what a test watches.
 
-> ⚠️ **This paragraph used to add "it takes no identity parameter in path, query or body", and that
-> was too strong in a way that pointed at the wrong remedy.** The handler signature takes none, and
-> both callers do POST body-less — but `require_api_key_or_jwt` **returns the caller's user id** on
-> both of its branches (`return user_id` for an API key, `return user_info[ "uid" ]` for a JWT), so
-> an identity IS resolved on every successful request. It is discarded because the route wires the
-> dependency as a bare `dependencies=[ Depends( … ) ]` entry, whose return value FastAPI throws
-> away. Identity is one wiring change away; the global counter is the actual obstacle. Corrected
-> 2026-09-27 after reading the dependency rather than the route. See § 9.1.
+An earlier version of this paragraph said the route "takes no identity parameter in path, query or body".
+That was too strong, and it pointed at the wrong remedy.
+The handler signature takes none, and both callers POST body-less.
+But `require_api_key_or_jwt` **returns the caller's user id** on both of its branches.
+That is `return user_id` for an API key and `return user_info[ "uid" ]` for a JWT.
+So an identity is resolved on every successful request.
+It is discarded because the route wires the dependency as a bare `dependencies=[ Depends( … ) ]` entry, and FastAPI throws that return value away.
+Identity is one wiring change away. The global counter is the actual obstacle.
+The correction came from reading the dependency rather than the route.
 
 The admin pages handle authentication automatically via the shared `auth.js` module.
 
@@ -678,15 +676,17 @@ The admin pages handle authentication automatically via the shared `auth.js` mod
 
 ## 9. Known Limitations
 
-Open items, each with what was measured and the date. A limitation listed here is **not** fixed —
-this section exists because the one below it spent two days documented only inside the tail of
-§ 8's "the remaining five, **closed**" subsection, where a reader checking for open problems had no
-reason to look. A finding filed under a heading that says *closed* reads as closed.
+Open items, each with what was measured.
+A limitation listed here is **not** fixed.
+This section exists because the item below once sat only in the tail of a subsection titled "remaining five, **closed**".
+That subsection is in the API endpoint section, and it held the item for two days.
+A reader checking for open problems had no reason to look there.
+A finding filed under a heading that says *closed* reads as closed.
 
 ### 9.1 Any credentialed caller can retire another user's proxy notification batch
 
-**Status**: open · **Route**: `POST /api/proxy/acknowledge` · **Measured 2026-09-27**, by reading
-`src/cosa/rest/routers/decision_proxy.py` and `src/cosa/rest/middleware/api_key_auth.py`.
+**Status**: open. **Route**: `POST /api/proxy/acknowledge`.
+**Measured** by reading `src/cosa/rest/routers/decision_proxy.py` and `src/cosa/rest/middleware/api_key_auth.py`.
 
 The batch a user sees in their notifications is identified by one **process-global** counter:
 
@@ -697,48 +697,53 @@ _proxy_batch_state = {
 }
 ```
 
-`acknowledge_batch()` increments `generation` on that one dict. It is not keyed by user, so every
-signed-in user shares a single batch id, and the first caller to acknowledge retires it **for
-everybody**. The route is credentialed (`require_api_key_or_jwt`, so an uncredentialed call answers
-401) and performs no owner check, which row `44d8e89c` recorded as a deliberate residue rather than
-an oversight.
+`acknowledge_batch()` increments `generation` on that one dict.
+It is not keyed by user, so every signed-in user shares a single batch id.
+The first caller to acknowledge retires it **for everybody**.
+The route is credentialed (`require_api_key_or_jwt`, so an uncredentialed call answers 401) and performs no owner check.
+That absence is recorded as a residue rather than an oversight.
 
-**What this would look like to a user**: their proxy notification stops updating in place and a new
-batch begins, at a moment they did not choose, because somebody else clicked acknowledge.
+**What this would look like to a user**: their proxy notification stops updating in place and a new batch begins.
+It happens at a moment they did not choose, because somebody else clicked acknowledge.
 
-🟡 **LATENT TODAY — the conditional above is doing real work.** Measured by John on 2026-09-27
-~17:00 EDT and recorded on row `b6526c47`: **no user has ever had a live proxy batch**, because the
-batch has never been live for anyone — zero proxy batch ids, zero ratified rows. So nobody has been
-hit by this. Multi-account use is not the rare case, though: **68% of active hours have more than one
-distinct account authenticating**, so the defect becomes real the first time proxy batches are used
-at all. ⚠️ *Those two counts are inherited from John's report and are not re-derived here; the code
-reading above is mine.* Re-measure before treating either as current.
+🟡 **Latent today**. The conditional above matters.
+John measured, and recorded on the row, that **no user has ever had a live proxy batch**.
+There are zero proxy batch ids and zero ratified rows, so nobody has been hit by this.
+Multi-account use is not rare, though.
+**68% of active hours have more than one distinct account authenticating**.
+The defect becomes real the first time proxy batches are used at all.
+Those two counts are inherited from John's report and are not re-derived here.
+The code reading above is mine.
+Re-measure before treating either as current.
 
-**The open decision is Rick's**, per the row: fix now (per-user batch state keyed on the credential's
-canonical email, plus the owner check, with both callers changed), or leave it documented until proxy
-batches are switched on. Mr. Radio's recommendation on the row is to document now and fix before
-batches go live — which is what this entry is.
+**The open decision is Rick's**.
+Per the row, the choice is between two moves:
 
-**Two claims about this that are easy to get wrong** — both checked at the source rather than
-inferred from the route decorator:
+- Fix now: per-user batch state keyed on the credential's canonical email, plus the owner check, with both callers changed.
+- Leave it documented until proxy batches are switched on.
+
+Mr. Radio's recommendation on the row is to document now and fix before batches go live, which is what this entry is.
+
+**Two claims about this are easy to get wrong**.
+Both were checked at the source rather than inferred from the route decorator:
 
 | claim | verdict |
 |---|---|
-| "The request carries no identity, so an owner check is impossible." | **False.** `require_api_key_or_jwt` returns the caller's user id on both branches — `return user_id` for an `X-API-Key`, `return user_info[ "uid" ]` for a `Bearer` JWT. An identity is resolved on every successful request. |
-| "The handler receives that identity." | **False.** The route wires the dependency as `dependencies=[ Depends( require_api_key_or_jwt ) ]`, and FastAPI discards a bare `dependencies=` entry's return value. `async def acknowledge_proxy_batch()` takes no parameters, so nothing reaches it. |
+| "The request carries no identity. So an owner check is impossible." | **False**. `require_api_key_or_jwt` returns the caller's user id on both branches. `return user_id` for an `X-API-Key`, `return user_info[ "uid" ]` for a `Bearer` JWT. An identity is resolved on every successful request. |
+| "The handler receives that identity." | **False**. The route wires the dependency as `dependencies=[ Depends( require_api_key_or_jwt ) ]`, and FastAPI discards a bare `dependencies=` entry's return value. `async def acknowledge_proxy_batch()` takes no parameters, so nothing reaches it. |
 
-⇒ **The blocker is the shared counter, not missing identity.** Wiring the identity into the handler
-is a one-line change (`user_id: str = Depends( require_api_key_or_jwt )`); it would buy nothing on
-its own, because there is still only one batch for the check to be about. The fix is to key the batch
-per user, which is a design change.
+So the blocker is the shared counter, not missing identity.
+Wiring the identity into the handler is a one-line change: `user_id: str = Depends( require_api_key_or_jwt )`.
+It would buy nothing on its own, because there is still only one batch for the check to be about.
+The fix is to key the batch per user, which is a design change.
 
-**Why it has not simply been gated**: inventing a required `user_email` parameter would 400 both
-existing callers — `notifications.js` (`fetch( '/api/proxy/acknowledge', { method: 'POST', headers:
-self.getAuthHeaders() } )`, no body) and `ApiClient.acknowledgeProxy()` (no arguments) — and would
-gate a counter that is shared regardless.
+**Why it has not simply been gated**.
+Inventing a required `user_email` parameter would 400 both existing callers.
+Those callers are `notifications.js` (`fetch('/api/proxy/acknowledge', { method: 'POST', headers: self.getAuthHeaders() })`, no body) and `ApiClient.acknowledgeProxy()` (no arguments).
+It would also gate a counter that is shared regardless.
 
-**What the tests do and do not watch.** The route is not untested — say which, because "untested"
-and "tested for something else" call for different work:
+**What the tests do and do not watch**.
+The route is not untested, so say which: "untested" and "tested for something else" call for different work.
 
 | watched | by |
 |---|---|
@@ -747,10 +752,11 @@ and "tested for something else" call for different work:
 | a credentialed POST answers 200, not merely "not 401" | `test_a_credential_only_route_admits_any_valid_caller`, same file |
 | **the cross-user consequence — that one user's acknowledge retires another's batch** | **nothing** |
 
-The third test's docstring states the design choice in place: *"These carry no owner check on
-purpose … there is no owner in any of them to be."* So the current behaviour is pinned as intended
-and the sharing itself is unwatched — if the batch is later made per-user, no existing test fails to
-mark the change, and if a refactor widens the sharing, none notices.
+The third test's docstring states the design choice in place.
+It says these routes carry no owner check because there is no owner in any of them to be.
+So the current behaviour is pinned as intended, and the sharing itself is unwatched.
+If the batch is later made per-user, no existing test fails to mark the change.
+If a refactor widens the sharing, none notices.
 
 ---
 
@@ -758,5 +764,5 @@ mark the change, and if a refactor widens the sharing, none notices.
 
 - **Notification API Reference**: `src/docs/notification-api.md` — comprehensive notification system docs
 - **WebSocket Events**: `src/docs/websocket-events.md` — event catalog including `proxy_decision_new`
-- **Decision Proxy Architecture**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/` — design context and 4-layer architecture
+- **Decision Proxy Architecture**: `src/rnd/2026.02.14-swe-team-phase-4-decision-proxy-architecture/`. Design context and 4-layer architecture
 - **Automated Interactive Testing**: `src/docs/automated-interactive-testing.md` — proxy auto-answer testing guide
