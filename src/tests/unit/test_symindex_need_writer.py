@@ -257,7 +257,7 @@ def test_retry_after_word_count_says_how_many_words_the_last_sentence_had( src_r
     long = "A function that " + " ".join( ["word"] * 45 ) + "."
     fake = FakeQuery( [ long, GOOD ] )
     asyncio.run( nw.write_need( _input( src_root ), fake ) )
-    assert "had 49 words" in fake.prompts[ 1 ] and "8 to 40" in fake.prompts[ 1 ]
+    assert "had 48 words" in fake.prompts[ 1 ] and "8 to 40" in fake.prompts[ 1 ]
 
 
 def test_retry_for_another_kind_carries_no_word_count( src_root ):

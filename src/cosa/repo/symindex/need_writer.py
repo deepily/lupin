@@ -140,7 +140,7 @@ def check_form( sentence, need ):
     return sorted( kinds )
 
 
-def build_prompt( need, failures=None, own_words=None ):
+def build_prompt( need, failures=None, own_words=None, last_words=None ):
     """
     Build the user prompt for one member.
 
@@ -148,6 +148,7 @@ def build_prompt( need, failures=None, own_words=None ):
         - holds the stripped text and the form rules
         - when failures is given, ends with a note naming only the kinds of failure
         - own_words, when given, are named in that note; each must be one of the member's own names
+        - last_words, when given with a word_count failure, states the length of the last sentence
 
     Raises:
         - ValueError when an own word is not one of the member's own names
@@ -167,6 +168,8 @@ def build_prompt( need, failures=None, own_words=None ):
         f"{need.text}\n"
     )
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
+    if failures and "word_count" in failures and last_words is not None:
+        prompt += f" Your last sentence had {last_words} words; it must have {MIN_WORDS} to {MAX_WORDS}."
     if failures and "own_identifier" in failures:
         for word in own_words or []: prompt += f' In your last sentence the word "{word}" is a name in the original code; do not use it.'
         prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it. Words that often double as names in code include limit, error, state, job, mode, store, seed, minutes, code, agent, result, budget; say those ideas in other words."
@@ -187,18 +190,20 @@ async def write_need( need, reply_fn, max_attempts=MAX_ATTEMPTS, failures=None )
     """
     attempts  = []
     own_words = None
+    last_words = None
     record    = { "member_id": need.member_id, "kind": need.kind, "ok": False, "need": None, "job_id": None, "rewrites": 0 }
     for _ in range( max_attempts ):
         try:
-            reply = await reply_fn( build_prompt( need, failures, own_words ), SYSTEM_PROMPT )
+            reply = await reply_fn( build_prompt( need, failures, own_words, last_words ), SYSTEM_PROMPT )
         except RuntimeError as error:
             attempts.append( { "reply": str( error ), "failures": [ "call_error" ], "session_id": None, "cost_usd": 0.0,
                                "input_tokens": 0, "output_tokens": 0 } )
-            failures, own_words = None, None
+            failures, own_words, last_words = None, None, None
             continue
         sentence  = extract_sentence( reply.text )
         failures  = check_form( sentence, need )
         own_words = own_words_found( sentence, need )
+        last_words = len( sentence.split() )
         attempts.append( { "reply": reply.text, "failures": failures, "session_id": reply.session_id, "cost_usd": reply.cost_usd,
                            "input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens } )
         if not failures:
