@@ -6,7 +6,7 @@
 | **Doctrine home** | `lupin/src/docs/agents/implementer-watch-protocol.md` *(here)* |
 | **PIP-promotion target** | `planning-is-prompting/workflow/implementer-watch-protocol.md` *(on trigger — see below)* |
 | **Layer** | Layer-2 per-recipient doctrine for the generic Heartbeat Poker (`HeartbeatPokerJob`) |
-| **Authored by** | Task I3, per the D2 spec `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* |
+| **Authored by** | The implementation task for this protocol, per the watcher-protocol spec `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* |
 | **Design doc** | `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md`)* |
 
 ## PIP-promotion triggers
@@ -25,12 +25,12 @@ authorization** (never-auto-commit policy).
 
 ## 1. Role
 
-A **Watcher** is a peer Claude Code session, external to an *implementer* session,
-whose job is to keep that implementer **powering through** a multi-task implementation
+A **Watcher** is a peer Claude Code session, external to an *implementer* session.
+Its job is to keep that implementer **powering through** a multi-task implementation
 run without going dormant at task boundaries.
 
-The motivating failure (design doc section 1): an implementer that pauses ~12 times overnight,
-going idle at each boundary instead of self-chaining to the next task. The Watcher,
+The motivating failure (design doc section 1) is an implementer that pauses ~12 times overnight.
+It goes idle at each boundary instead of self-chaining to the next task. The Watcher,
 poked on a cadence by a `HeartbeatPokerJob`, probes the implementer and nudges it back
 into motion. Converting turn-boundary idle gaps into continuous progress.
 
@@ -43,7 +43,7 @@ recipient session dispatches on it. This protocol is that dispatch doctrine.
 ## 2. Activation
 
 This protocol is loaded into the Watcher session at **cold-cast**. Before the first
-poke lands (design doc section 3 cold-cast sequence; the launch runbook is D3 section 7). A poke that
+poke lands (design doc section 3 cold-cast sequence; the launch runbook is its own spec, section 7). A poke that
 reaches a session not yet doctrine-loaded is wasted.
 
 Each `HeartbeatPokerJob` tick delivers a `poke_body`:
@@ -59,10 +59,10 @@ in section 3.
 
 ## 3. Per-tick behavior
 
-On each heartbeat poke the Watcher executes the following. Every step `EXECUTOR: AI`
-(the Watcher is a CC session; the one `EXECUTOR: HUMAN` step in the broader system,
-spawning a recipient session, is a launch prerequisite owned by D3, not a per-tick
-behavior):
+On each heartbeat poke the Watcher executes the following. Every step is `EXECUTOR: AI`,
+because the Watcher is a CC session. The one `EXECUTOR: HUMAN` step in the broader system
+is spawning a recipient session. That is a launch prerequisite owned by the launch
+runbook, not a per-tick behavior:
 
 ```mermaid
 flowchart TD
@@ -88,8 +88,8 @@ flowchart TD
 
 ## 4. Dormancy detection
 
-Reuse the existing liveness surface — **no new state primitive** (design doc Q1
-prior-art). The Watcher reads `commons_who().last_post_ts` for the implementer's session.
+Reuse the existing liveness surface — **no new state primitive** (the design doc's
+prior-art question). The Watcher reads `commons_who().last_post_ts` for the implementer's session.
 
 "Dormant" = `last_post_ts` has not advanced across a threshold the Watcher applies.
 **Recommended threshold: ≥2 missed cadence intervals** before nudging. A single missed
@@ -98,14 +98,14 @@ false nudge is noise.
 
 ---
 
-## 5. Phase-boundary-marker contract (finding F-Rio-E3)
+## 5. Phase-boundary-marker contract (Rio's finding on boundary markers)
 
-The Watcher can derive *phase boundaries* — needed for section 3 step 3 — **only if the
+The Watcher can derive *phase boundaries* — needed for the third item of section 3 — **only if the
 implementer emits phase-boundary markers**. This is a hard, two-sided contract:
 
 - **Implementer side** `EXECUTOR: AI` *(prerequisite)* — at every task/phase boundary
-  the implementer must emit a phase-boundary marker: a structured `commons_post` to its
-  coordination topic carrying machine-parseable metadata, e.g.:
+  the implementer must emit a phase-boundary marker. The marker is a structured
+  `commons_post` to its coordination topic, carrying machine-parseable metadata, e.g.:
 
   ```json
   { "kind": "progress", "phase_boundary": true, "task_done": "<id>", "task_next": "<id>" }
@@ -123,7 +123,7 @@ silently.
 
 ## 6. "Checkpoint" — definition (never-auto-commit)
 
-When section 3 step 3 says the Watcher *requests a checkpoint*, **"checkpoint" does `NOT` mean a
+When the third item of section 3 says the Watcher *requests a checkpoint*, **"checkpoint" does `NOT` mean a
 git commit**. An autonomous git commit violates the never-auto-commit policy — commits
 require explicit user authorization.
 
@@ -159,12 +159,12 @@ behavior until the poker run ends on a clean termination signal or the hard cap.
 |---|---|
 | `plan-review-cascaded-common.md` §Observer-mode Probe Protocol | Sibling Layer-2 doctrine; structural template |
 | `src/rnd/v0.1.7/2026.05.20-...-design.md` section 2 use case 3, section 5 γ | Watcher role + doctrine-home ratification |
-| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* | The D2 spec this protocol body was authored from |
+| `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md`)* | The watcher-protocol spec this protocol body was authored from |
 | `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md`)* | The Layer-1 poker this doctrine pairs with |
 | `/plan-session-checkpoint` skill | Work-organization shape for the checkpoint (section 6) — not a commit mandate |
 
 ---
 
-*Layer-2 doctrine — authored (task I3). The Layer-1 poker code lives in
+*Layer-2 doctrine — authored by the implementation task. The Layer-1 poker code lives in
 `src/cosa/agents/heartbeat_poker_job.py` and never migrates; only this doctrine is
 PIP-promotable.*

@@ -39,7 +39,7 @@ flowchart TD
     STORE[("UNIFIED TASK-STORE\n:7999 /api/tasks\nPostgres-backed")]
     MW --> STORE
     STORE -->|"task_query COUNT at stop-time"| R1["READER 1\nHeartbeat self-poke\n(Stop hook)"]
-    STORE -->|"same owed query"| R2["READER 2\nArbiter:8001\n(out-of-band fleet watcher)"]
+    STORE -->|"same owed query"| R2["READER 2\nArbiter :8001\n(out-of-band fleet watcher)"]
     STORE -->|"GET /api/tasks (full rows)"| R3["READER 3\nHuman UI card\n(multiplexer / cosa-voice)"]
 ```
 

@@ -14,7 +14,7 @@ Derive the list through the reader the server itself uses. And compare **set equ
 
 ```python
 from cosa.config.configuration_manager import ConfigurationManager
-names = ConfigurationManager().get( "websocket available events", return_type="list-string")
+names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
 Verified: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in the first build phase** of the console-tee feature, and are **not in it yet**.
@@ -256,7 +256,7 @@ Gated by two INI keys (both default True):
   "persona_icon": "🌸",
   "persona_color": "#F06292",
   "body": "...",
-  "metadata": {... }
+  "metadata": { ... }
 }
 ```
 
@@ -328,13 +328,13 @@ Slices 1 to 3. An **invalidation**, not a delta: it says "the task store committ
 **Payload** (the commit's **last** event, plus a count):
 ```json
 {
-  "type": "task_store_changed",
-  "event_id": 48213,
-  "item_id": "4288dd53-6779-460a-88bd-a7365fb734b2",
-  "transition": "queued->in_progress",
-  "to_status": "in_progress",
-  "ts": "2026-10-03T21:40:00+00:00",
-  "count": 1
+  "type"       : "task_store_changed",
+  "event_id"   : 48213,
+  "item_id"    : "4288dd53-6779-460a-88bd-a7365fb734b2",
+  "transition" : "queued->in_progress",
+  "to_status"  : "in_progress",
+  "ts"         : "2026-10-03T21:40:00+00:00",
+  "count"      : 1
 }
 ```
 `to_status` is `null` for a label without `->` (`patched`, `amended`, `chased`).
@@ -372,10 +372,10 @@ Start receiving append frames for one seat. Sent on the already-authenticated `/
 
 ```json
 {
-  "type": "cc_transcript_watch",
+  "type"        : "cc_transcript_watch",
   "cc_session_id": "449359bc-c735-4970-8fc0-e83b635c8548",
-  "from_offset": 0,
-  "file_epoch": null
+  "from_offset" : 0,
+  "file_epoch"  : null
 }
 ```
 
@@ -391,7 +391,7 @@ Start receiving append frames for one seat. Sent on the already-authenticated `/
 
 Stops the frames. The tailer stops after the **last** watcher leaves, plus a grace period.
 
-> **Unwatch is the polite path, not the reliable one**. A closed tab or a dropped socket never sends it. So `WebSocketManager.disconnect()` sweeps the watcher registry as well. That sweep is hand-maintained — it already deletes from `active_connections`, `session_timestamps`, `session_subscriptions`, `session_is_admin`, `session_client_types` and the user association one statement at a time. So the watcher map is a **sixth entry that has to be added there explicitly**. Miss it and the tailer polls forever while `emit_to_session` early-returns into a session already gone: a silent burn with no error anywhere.
+> Warning: **Unwatch is the polite path, not the reliable one**. A closed tab or a dropped socket never sends it. So `WebSocketManager.disconnect()` sweeps the watcher registry as well. That sweep is hand-maintained — it already deletes from `active_connections`, `session_timestamps`, `session_subscriptions`, `session_is_admin`, `session_client_types` and the user association one statement at a time. So the watcher map is a **sixth entry that has to be added there explicitly**. Miss it and the tailer polls forever while `emit_to_session` early-returns into a session already gone: a silent burn with no error anywhere.
 
 ### `cc_transcript_append` (Server → Client)
 
@@ -399,20 +399,20 @@ Coalesced roughly every 300 ms per seat, delivered by `emit_to_session` to watch
 
 ```json
 {
-  "type": "cc_transcript_append",
+  "type"        : "cc_transcript_append",
   "cc_session_id": "449359bc-...",
-  "file_epoch": "449359bc-c735-4970-8fc0-e83b635c8548",
-  "offset": 20480,
-  "next_offset": 24576,
-  "blocks": [
+  "file_epoch"  : "449359bc-c735-4970-8fc0-e83b635c8548",
+  "offset"      : 20480,
+  "next_offset" : 24576,
+  "blocks"      : [
     { "ts": "2026-09-27T18:04:03Z", "role": "assistant", "kind": "text",
       "text": "Reading the spec now.", "truncated": false },
     { "ts": "2026-09-27T18:04:05Z", "role": "assistant", "kind": "tool_call",
-      "text": "Bash( sha256sum …)", "truncated": false, "name": "Bash" },
+      "text": "Bash( sha256sum … )", "truncated": false, "name": "Bash" },
     { "ts": "2026-09-27T18:04:06Z", "role": "user", "kind": "tool_result",
       "text": "41661313b706…", "truncated": true }
   ],
-  "ts": "2026-09-27T18:04:06Z"
+  "ts"          : "2026-09-27T18:04:06Z"
 }
 ```
 
@@ -453,10 +453,10 @@ A markdown renderer turns a raw file dump into markup, so `#` becomes a heading 
 
 ```json
 {
-  "type": "cc_transcript_state",
+  "type"        : "cc_transcript_state",
   "cc_session_id": "449359bc-...",
-  "file_epoch": "…",
-  "state": "live"
+  "file_epoch"  : "…",
+  "state"       : "live"
 }
 ```
 
@@ -652,7 +652,7 @@ The following events were removed in July 2025 and replaced by `job_state_transi
 | `queue_done_update` | `job_state_transition` (with `to_state: "completed"`) |
 | `queue_dead_update` | `job_state_transition` (with `to_state: "failed"`) |
 
-**This table used to say `to_queue: "todo"` / `"run"` / `"done"` / `"dead"`. And that
+Warning: **This table used to say `to_queue: "todo"` / `"run"` / `"done"` / `"dead"`. And that
 field does not exist**. `emit_job_state_transition()` (`src/cosa/rest/queue_util.py:65-71`)
 emits exactly `job_id`, `from_state`, `to_state`, `timestamp`, and an optional `metadata` —
 never `to_queue`. Measured live on `:7999`: a submitted job produces `pending`->`queued`,
@@ -682,7 +682,7 @@ with no slot — every web client — sees none of this and its frames are uncha
 | `resume_complete` | server → client | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <server's current seq> }`, sent once after `auth_success` and after any replayed frames. Marks where the backlog ends. `seq` is the **server's** current seq for the slot, not an echo of `last_seq`. The client sets `last_seq = seq` on receipt. Live frames that arrive during the replay are held and sent right after this frame, so the client never sees a live frame overtake the backlog. **It can be sent twice**: the buffer is bounded. So frames emitted while the replay is on the wire can be evicted before they are sent. A hole found during the replay turns `gap` true on the one frame. A hole found only after the first `resume_complete` went out with `gap: false` is followed by a **second** `resume_complete { gap: true }`, sent before the frames past the hole. A client treats any `gap: true` as "refetch in full", and the second is idempotent with the first |
 | `ack` | client → server | `{ "type": "ack", "seq": N }` — the client confirms it has processed through `N`, and the server drops those frames |
 
-**`gap: true` is the server saying it cannot prove continuity**, and the client must
+Warning: **`gap: true` is the server saying it cannot prove continuity**, and the client must
 do a full refetch rather than assume it is current. It is set when frames were evicted by the retention cap.
 It is also set when the server holds nothing at all for a client claiming a non-zero `last_seq`.
 A server restart looks like that from the client's side. A
@@ -715,7 +715,7 @@ Constants live in `src/cosa/rest/routers/websocket.py`.
 | 4001 | `CLOSE_CODE_AUTH_INVALID_TOKEN`       | Invalid / expired / malformed token. Bad `auth_request` envelope | Auth flow on `/ws/queue/{session}` rejects the supplied token (any of: malformed JSON, missing `token` field, empty token, signature failure, `TokenExpiredException`) | `notifications.js` attempts a single `refreshAccessToken()` call first. On refresh-success, `manualRetry()` runs on both channels (no banner shown). On refresh-failure, the auth-permanent banner is shown ("Authentication failed — please log in again."). |
 | 4002 | `CLOSE_CODE_AUTH_SESSION_CONFLICT`    | Single-session-per-user policy displaced this connection | A second connection arrives for a user already connected, `AND` `websocket enforce single session per user = True`. The old session receives 4002. | Banner: "Another session has taken over. Refresh to reclaim." Channel does `NOT` auto-retry. |
 | 4003 | `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED` | RBAC reject on one or more `subscribed_events` | Reserved — no current branch emits 4003. The audio path filters denied events silently today. Reserved for future RBAC enforcement. | Banner: "Permission denied for one or more notification streams." Channel does `NOT` auto-retry. |
-| 4004 | `CLOSE_CODE_SUPERSEDED` | **Superseded**, reason `"superseded"` | A newer `/ws/queue` connection claimed this socket's `( user_id, device_id)` slot. The old socket is closed `AND` fully deregistered. A half-dead socket left registered would make the device read as connected and silently suppress its FCM wake. Emitted only for mobile sessions, the only ones holding a slot; a mobile client that sent no `device_id` holds none and is never superseded. | Permanent: the client must `NOT` reconnect this socket. **A `NEW` code**. 4001 is auth failure, which the browser answers with a meaningless token refresh. 4003 is reserved server-side but live on the client — `QueueTransport.ts` lists it in `PERMANENT_CLOSE_CODES` and `notifications.js` renders it "Permission denied…". A reserved server code can still be a spoken-for client one. Browsers do not yet list 4004, so it falls to their default close handling; they cannot receive it today because they hold no slot. |
+| 4004 | `CLOSE_CODE_SUPERSEDED` | **Superseded**, reason `"superseded"` | A newer `/ws/queue` connection claimed this socket's `( user_id, device_id)` slot. The old socket is closed `AND` fully deregistered. A half-dead socket left registered would make the device read as connected and silently suppress its FCM wake. Emitted only for mobile sessions, the only ones holding a slot; a mobile client that sent no `device_id` holds none and is never superseded. | Permanent: the client must `NOT` reconnect this socket. Warning: **A `NEW` code**. 4001 is auth failure, which the browser answers with a meaningless token refresh. 4003 is reserved server-side but live on the client — `QueueTransport.ts` lists it in `PERMANENT_CLOSE_CODES` and `notifications.js` renders it "Permission denied…". A reserved server code can still be a spoken-for client one. Browsers do not yet list 4004, so it falls to their default close handling; they cannot receive it today because they hold no slot. |
 
 For comparison, the standard close codes the server still uses unchanged:
 
