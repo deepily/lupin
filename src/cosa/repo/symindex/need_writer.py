@@ -131,7 +131,7 @@ def build_prompt( need, failures=None ):
     )
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
     if failures and "own_identifier" in failures:
-        prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it."
+        prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it. Words that often double as names in code include limit, error, state, job, mode, store, seed, minutes, code, agent, result, budget; say those ideas in other words."
     return prompt
 
 
