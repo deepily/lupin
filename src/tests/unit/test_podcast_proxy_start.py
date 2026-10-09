@@ -90,6 +90,7 @@ def world( monkeypatch, tmp_path ):
     monkeypatch.setattr( door, "find_session_by_id", lambda sid, check_pid=True: bridge.get( sid ) )
     monkeypatch.setattr( door, "copy_directory", lambda: str( tmp_path / "copies" ) )
     monkeypatch.setattr( pp, "max_age_seconds", lambda config_mgr=None: 900 )
+    monkeypatch.setattr( pp, "dry_run_enabled", lambda config_mgr=None: False )
     monkeypatch.setattr( "cosa.rest.user_service.get_user_by_id", lambda user_id: { "id": user_id, "email": RICK } )
     world = { "root": root, "cards": cards, "flow": flow, "sessions": sessions, "copies": tmp_path / "copies", "bridge": bridge, "registry": { "demo": cfg } }
     world[ "path" ] = root / "io" / "tmp" / "summary.md"
@@ -139,6 +140,35 @@ def test_a_yes_on_a_server_made_card_starts_one_job_for_the_operator( world ):
     call = world[ "flow" ].calls[ 0 ]
     assert call[ "command" ] == "agent router go to podcast generator" and call[ "user_id" ] == str( OPERATOR_ID ) and call[ "user_email" ] == RICK
     assert call[ "speak" ] is False and set( call[ "args" ] ) == { "research" }
+
+
+def test_with_the_dry_run_switch_off_a_yes_queues_a_real_job( world ):
+    card   = _card( world )
+    answer = _start( world, card.id )
+    assert answer.status_code == 200 and answer.json()[ "status" ] == "waiting" and len( world[ "flow" ].calls ) == 1
+    assert _spent( world )[ 0 ].job_id == "pg-1a2b3c4d" and world[ "copies" ].exists()
+
+
+def test_with_the_dry_run_switch_on_the_checks_and_the_claim_run_and_no_job_is_queued( world, monkeypatch ):
+    monkeypatch.setattr( pp, "dry_run_enabled", lambda config_mgr=None: True )
+    card   = _card( world )
+    answer = _start( world, card.id )
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == { "card_id": str( card.id ), "job_id": f"dry-run-{str( card.id )[ :8 ]}", "status": "dry run",
+                              "name": "summary.md", "queue_position": None }
+    assert world[ "flow" ].calls == [ ] and not world[ "copies" ].exists()
+    rows = _spent( world )
+    assert len( rows ) == 1 and rows[ 0 ].card_id == card.id and rows[ 0 ].job_id == f"dry-run-{str( card.id )[ :8 ]}"
+    assert rows[ 0 ].sha256 == hashlib.sha256( world[ "path" ].read_bytes() ).hexdigest()
+    again = _start( world, card.id )
+    assert again.status_code == 409 and _code( again ) == "spent"
+
+
+def test_a_dry_run_still_refuses_what_a_real_start_refuses( world, monkeypatch ):
+    monkeypatch.setattr( pp, "dry_run_enabled", lambda config_mgr=None: True )
+    card = _card( world, response_value={ "value": "no", "source": "ui", "answered_by": dict( OPERATOR ) } )
+    answer = _start( world, card.id )
+    assert answer.status_code == 403 and _code( answer ) == "not_yes" and _spent( world ) == [ ]
 
 
 def test_the_job_reads_a_copy_the_server_made_and_not_the_seats_file( world ):

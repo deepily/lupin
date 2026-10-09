@@ -210,6 +210,8 @@ def start_a_podcast(
         - the spent record is committed before the job is queued; when queuing fails it is released and the answer
           is 502 queue_failed with a fixed sentence, the cause going to the server log. A crash between the claim and
           the release leaves the claim, which the next start answers as claimed_no_job
+        - with INI `podcast proxy dry run` on, the checks and the claim run as usual, the spent row takes a job id
+          that starts with "dry-run-", nothing is copied or queued, and the answer's status is "dry run"
         - otherwise returns { card_id, job_id, status, name, queue_position } for a job built for the card's
           recipient from a copy of the judged bytes
     """
@@ -246,6 +248,13 @@ def start_a_podcast(
         raise _refuse( 409, "claimed_no_job", "A start of that card is under way, or one did not finish. Read the card status again before asking Rick." )
     if not won:
         raise _refuse( 409, "spent", "That card has already started a podcast, and a yes covers one, so it is refused." )
+
+    if proxy.dry_run_enabled():
+        fake_job = f"dry-run-{str( payload.card_id )[ :8 ]}"
+        with get_db() as session:
+            PodcastProxySpentRepository( session ).record_job( payload.card_id, fake_job )
+        return { "card_id": str( payload.card_id ), "job_id": fake_job, "status": proxy.DRY_RUN_STATUS,
+                 "name": facts[ "name" ], "queue_position": None }
 
     try:
         path   = proxy.write_copy( copy_directory(), payload.card_id, facts[ "name" ], facts[ "content" ] )

@@ -50,6 +50,8 @@ COMMAND   = "agent router go to podcast generator"
 # How long a yes stays good, and how long the card waits for an answer. The INI key overrides it.
 MAX_AGE_KEY     = "podcast proxy card max age seconds"
 MAX_AGE_DEFAULT = 900
+DRY_RUN_KEY     = "podcast proxy dry run"
+DRY_RUN_STATUS  = "dry run"
 
 
 class DoorRefusal( Exception ):
@@ -191,6 +193,23 @@ def max_age_seconds( config_mgr=None ):
     seconds = config_mgr.get( MAX_AGE_KEY, default=MAX_AGE_DEFAULT, return_type="int" )
     if seconds <= 0: raise ValueError( f"'{MAX_AGE_KEY}' must be positive, got {seconds}" )
     return seconds
+
+
+def dry_run_enabled( config_mgr=None ):
+    """
+    Whether the start door stops before it queues a job, from the INI key.
+
+    Requires:
+        - config_mgr, when given, answers get( key, default=, return_type= ); None builds the server's own
+
+    Ensures:
+        - returns True only when the key is set to true; a missing key gives False
+        - a dry run does every check and writes the spent-card row, and queues nothing
+    """
+    if config_mgr is None:
+        from cosa.config.configuration_manager import ConfigurationManager
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    return config_mgr.get( DRY_RUN_KEY, default=False, return_type="boolean" )
 
 
 def human_size( size ):

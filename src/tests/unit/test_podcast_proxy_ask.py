@@ -265,6 +265,17 @@ def test_the_server_reads_its_own_ini_when_no_config_is_given():
     assert pp.max_age_seconds() == 900
 
 
+def test_the_dry_run_switch_reads_its_ini_key_with_a_false_default_and_the_shipped_ini_has_it_off():
+    seen = [ ]
+    class Config:
+        def get( self, key, default=None, return_type=None ):
+            seen.append( ( key, default, return_type ) )
+            return True
+    assert pp.dry_run_enabled( Config() ) is True
+    assert seen == [ ( "podcast proxy dry run", False, "boolean" ) ]
+    assert pp.dry_run_enabled() is False
+
+
 @pytest.mark.parametrize( "size,text", [ ( 0, "0 bytes" ), ( 1023, "1023 bytes" ), ( 1024, "1.0 KiB" ),
                                           ( 1048575, "1024.0 KiB" ), ( 1048576, "1.0 MiB" ) ] )
 def test_the_size_reads_in_the_unit_a_person_uses( size, text ):
