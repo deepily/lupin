@@ -223,7 +223,7 @@ def _init_mobile_main_checkout( path, with_script, spec ):
 
     Requires:
         - path is an existing directory
-        - spec["script_dir"] holds link-worktree-venv.sh, link-worktree-artifacts.sh and lib/worktree-link-lib.sh
+        - spec["script_dir"] holds link-worktree-venv.sh and link-worktree-artifacts.sh, and lib/worktree-link-lib.sh when the repo has one
 
     Ensures:
         - one commit on main with origin/main pointing at it
@@ -245,10 +245,13 @@ def _init_mobile_main_checkout( path, with_script, spec ):
             dest = os.path.join( script_dir, name )
             shutil.copy2( os.path.join( spec[ "script_dir" ], name ), dest )
             os.chmod( dest, 0o755 )
-        # Both scripts source lib/worktree-link-lib.sh beside themselves (lupin-mobile row c41c090a),
-        # so a copy of the scripts without it dies at the first `source` and links nothing.
-        os.makedirs( os.path.join( script_dir, "lib" ), exist_ok=True )
-        shutil.copy2( os.path.join( spec[ "script_dir" ], "lib", "worktree-link-lib.sh" ), os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
+        # Where lupin-mobile has the library its scripts source it from beside themselves (mobile row c41c090a),
+        # so a copy of those scripts without it dies at the first `source` and links nothing.
+        # An older lupin-mobile has neither the library nor the `source` line, and has nothing to copy.
+        lib_source = os.path.join( spec[ "script_dir" ], "lib", "worktree-link-lib.sh" )
+        if os.path.exists( lib_source ):
+            os.makedirs( os.path.join( script_dir, "lib" ), exist_ok=True )
+            shutil.copy2( lib_source, os.path.join( script_dir, "lib", "worktree-link-lib.sh" ) )
     else:
         with open( os.path.join( script_dir, ".keep" ), "w" ) as f: f.write( "" )
     with open( os.path.join( path, "README.md" ), "w" ) as f: f.write( "# test\n" )
