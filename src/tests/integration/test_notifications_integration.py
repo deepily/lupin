@@ -51,6 +51,12 @@ pytestmark = pytest.mark.integration
 # ones; only the storage and the socket are doubles.
 
 
+# The one user in this harness: the card is addressed to this id and the credential dependency
+# answers as this id. The door answers 403 to anyone else (row 5a1e018c), so the two must agree.
+ITEST_USER_ID  = "0f3c9a52-7b1e-4c6d-8a21-5d9e4b7f6a10"
+ITEST_STRANGER = "9d2b7e41-3c58-4f06-b1a9-6e8d0c4a2f73"
+
+
 class _FakeNotification:
     """Stand-in for the Notification ORM row the repository returns."""
     def __init__( self, state="delivered", expires_at=None, job_id=None,
@@ -61,7 +67,7 @@ class _FakeNotification:
         self.job_id         = job_id
         self.sender_id      = sender_id
         self.sender_persona = sender_persona
-        self.recipient_id   = recipient_id or _uuid.uuid4()
+        self.recipient_id   = recipient_id or _uuid.UUID( ITEST_USER_ID )
 
 
 class _FakeNotificationRepository:
@@ -107,9 +113,9 @@ class _FakeAsyncEvent:
 
 
 # What the door stores for a UI answer, exactly. `answered_by` is the SERVER's account of the caller
-# (row e20e249a): the harness overrides `require_api_key_or_jwt` to return "itest-user", and posts
+# (row e20e249a): the harness overrides `require_api_key_or_jwt` to return ITEST_USER_ID (the card's addressee), and posts
 # with neither an X-API-Key nor a Bearer token, so the method is "jwt" and there is no account email.
-ITEST_ANSWERED_BY = { "user_id": "itest-user", "account_email": None, "method": "jwt" }
+ITEST_ANSWERED_BY = { "user_id": ITEST_USER_ID, "account_email": None, "method": "jwt" }
 
 
 def stored_ui_answer( value ):
@@ -119,7 +125,8 @@ def stored_ui_answer( value ):
 
 class _NotificationHarness:
     """Everything a test needs to drive POST /api/notify/response."""
-    def __init__( self, client, ws_manager, notification ):
+    def __init__( self, client, ws_manager, notification, app=None ):
+        self.app          = app
         self.client       = client
         self.ws_manager   = ws_manager
         self.notification = notification
@@ -222,7 +229,7 @@ def notification_harness( request ):
     app.dependency_overrides[ get_websocket_manager ] = lambda: ws_manager
     # The door asks for a credential since row e20e249a. These tests are about what
     # happens AFTER the door, so the caller is named here; the refusal has its own tests.
-    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "itest-user"
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_USER_ID
 
     saved_pending = dict( notifications_module.pending_responses )
     notifications_module.pending_responses.clear()
@@ -232,7 +239,7 @@ def notification_harness( request ):
          patch.dict( "sys.modules", { "lupin_app.main": fake_main } ), \
          patch.object( notifications_module, "get_formatted_time_display", lambda: "3:00 PM" ), \
          patch.object( notifications_module, "get_formatted_date_display", lambda: "Monday" ):
-        yield _NotificationHarness( TestClient( app ), ws_manager, notification )
+        yield _NotificationHarness( TestClient( app ), ws_manager, notification, app )
 
     notifications_module.pending_responses.clear()
     notifications_module.pending_responses.update( saved_pending )
@@ -593,6 +600,32 @@ class TestMultiDeviceSync:
         assert "already responded" in second.json()[ "detail" ].lower()
         assert notification_harness.persisted == stored_ui_answer( "yes" ), \
             "the losing tab must not overwrite the answer that was accepted first"
+
+    def test_a_different_login_cannot_answer_the_card( self, notification_harness ):
+        """
+        Test that a login other than the addressee is refused and the card stays unanswered.
+
+        Ensures:
+            - the stranger gets 403 naming the rule
+            - nothing is persisted, no waiter is woken and nothing is broadcast
+            - the addressee can still answer the same card afterwards
+        """
+        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+
+        notification_harness.app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_STRANGER
+        refused = notification_harness.respond( "yes" )
+
+        assert refused.status_code == 403, f"expected 403, got {refused.status_code}"
+        assert "addressee" in refused.json()[ "detail" ].lower()
+        assert notification_harness.persisted is None
+        assert notification_harness.broadcasts( "notification_responded" ) == []
+        assert notification_harness.notification.state == "delivered"
+
+        notification_harness.app.dependency_overrides[ require_api_key_or_jwt ] = lambda: ITEST_USER_ID
+        accepted = notification_harness.respond( "yes" )
+
+        assert accepted.status_code == 200, f"expected 200, got {accepted.status_code}"
+        assert notification_harness.persisted == stored_ui_answer( "yes" )
 
     def test_unknown_notification_is_404_not_500( self, notification_harness ):
         """
