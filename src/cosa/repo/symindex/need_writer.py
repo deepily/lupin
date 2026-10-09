@@ -124,10 +124,14 @@ def build_prompt( need, failures=None ):
         "invent names.\n\n"
         f"Write one sentence that begins \"{OPENERS[ need.kind ]}\" and says what it does and what it returns, "
         f"in plain words, {MIN_WORDS} to {MAX_WORDS} words. Describe the job, not the steps, "
-        "and do not copy phrases from its docstring.\n\n"
+        "and do not copy phrases from its docstring. The plainest words for its inputs, such as "
+        "text, data, value, item, name, path, result, may be names in the original code, so use a more "
+        "specific everyday word for them.\n\n"
         f"{need.text}\n"
     )
     if failures: prompt += f"\nYour previous sentence was rejected. Failure kinds: {', '.join( failures )}. Write a different sentence."
+    if failures and "own_identifier" in failures:
+        prompt += " A plain everyday word you used is also a name in the original code; choose a different word for it."
     return prompt
 
 
