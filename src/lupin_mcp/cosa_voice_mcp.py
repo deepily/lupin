@@ -4684,27 +4684,31 @@ def task_ask_unpark(
 @mcp.tool
 @_offloaded_tool
 def podcast_for_rick(
-    path : str,
+    path    : str = "",
+    card_id : str = "",
 ) -> dict:
     """
     Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
 
-    One call does the exchange. The server checks the file and makes the card, which shows Rick the file's
-    name and size. This tool polls the card until he answers or it expires, then starts the job.
-    It blocks until then, up to about 10 minutes. Only a yes that a person gave starts anything.
+    The server makes the card. This tool polls it until Rick answers or it expires, then starts the job.
+    It blocks up to about 10 minutes, and only a person's yes starts anything. To resume after an error
+    such as queue_failed, pass the card_id: the ask is skipped, and the path refuses a card for another file.
 
     Args:
         path: Absolute path to a file in the main checkout of a registered repo. A file inside a
-            git worktree is refused, because the server cannot see it: write it to the main checkout's io/tmp.
+            git worktree is refused: the server cannot see it, so write it to the main checkout's io/tmp.
+        card_id: A card from an earlier call, to resume instead of asking again.
 
     Returns:
-        { status: "started", card_id, ... } after a yes and a successful start;
+        { status: "started", card_id, job_id, ... } after a yes and a successful start;
         { status: "declined", card_id } for a no or neither;
         { status: "default_used", card_id } when the card timed out on its default;
         { status: "expired", card_id } when nobody answered in time;
-        or { status: "error", reason, detail, stage? } with reasons path_not_absolute, file_not_found,
-        outside_any_repo, inside_a_worktree, card_already_waiting, ask_answer_malformed, card_unreadable,
-        card_already_spent, or the server's own refusal verbatim.
+        or { status: "error", reason, detail, stage? }. The reason is the server's own code
+        (too_old, hash_mismatch, queue_failed and so on) or one of path_not_absolute, file_not_found,
+        outside_any_repo, inside_a_worktree, path_or_card_required, card_for_a_different_file,
+        card_already_waiting, card_already_spent, ask_answer_malformed, card_unreadable.
+        A queue_failed error carries a retry hint: the card is still valid.
 
     The actor is not a parameter: it is stamped from the session bridge.
 
@@ -4719,6 +4723,7 @@ def podcast_for_rick(
         api_key      = _mcp_outbound_api_key(),
         actor        = _task_store_identity(),
         host_path    = path,
+        card_id      = card_id,
     )
 
 

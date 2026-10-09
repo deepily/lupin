@@ -15,6 +15,7 @@ from lupin_mcp.task_store_tools import task_store_request
 PODCAST_ASK_PATH      = "/api/podcast-proxy/ask"
 PODCAST_START_PATH    = "/api/podcast-proxy/start"
 CARD_RESPONSE_PATH    = "/api/notifications/response/{card_id}"
+CARD_FACTS_PATH       = "/api/podcast-proxy/card/{card_id}"
 POLL_INTERVAL_SECONDS = 3.0
 POLL_FAILURE_LIMIT    = 5
 WORKTREE_ADVICE       = "write it to the main checkout's io/tmp"
@@ -109,11 +110,24 @@ def _verdict( answer ):
     return "yes" if str( value.get( "value", "" ) ).strip().lower() == "yes" else "no"
 
 
+def _code_of( refused ):
+    """
+    Read the machine-readable code from a refusal the server sent.
+
+    Ensures:
+        - returns detail.code when the refusal body is { detail: { code, message } }
+        - returns None for any other shape, so a caller never parses prose
+    """
+    detail = refused.get( "detail" )
+    return detail.get( "code" ) if isinstance( detail, dict ) else None
+
+
 def podcast_for_rick_impl(
     api_base_url,
     api_key,
     actor,
-    host_path,
+    host_path  = "",
+    card_id    = "",
     request_fn = task_store_request,
     sleep_fn   = time.sleep,
     now_fn     = lambda: datetime.now( timezone.utc ),
@@ -122,9 +136,12 @@ def podcast_for_rick_impl(
     """
     Ask Rick about a podcast of one file, wait for his answer, and start it on a yes.
 
+    With a card_id the ask is skipped and the exchange resumes: read the card, poll it, start once.
+
     Requires:
         - actor is the bridge-stamped identity, set by the caller and never a tool parameter
-        - host_path is the seat's absolute path to a file in a main checkout
+        - host_path is the seat's absolute path to a file in a main checkout, or empty when resuming
+        - card_id is a card this seat was given earlier, or empty to ask afresh
 
     Ensures:
         - returns { status: "started", card_id, ... } only after a person's yes and a successful start
@@ -132,26 +149,44 @@ def podcast_for_rick_impl(
         - returns { status: "default_used", card_id } for a timed-out default, and never calls start
         - returns { status: "expired", card_id } when the card's expiry passes unanswered
         - returns { status: "error", reason, detail } for a path refusal, a refused ask, a refused start, or an unreadable card
+        - reason is the server's detail.code when it sent one; prose is never parsed
         - a card already waiting for the same file surfaces as reason "card_already_waiting"
-        - a spent card surfaces as reason "card_already_spent"
+        - a refused start for queue_failed adds a retry hint: the card is still valid
+        - a card_id that belongs to a different file than host_path is refused before any poll or start
+        - a card the server reports as spent is refused with its job id, and start is not called
         - start is called at most once and is never retried
         - never raises
     """
-    translated = translate_host_path( host_path, run_fn )
-    if translated[ "status" ] != "ok": return translated
+    translated = None
+    if host_path:
+        translated = translate_host_path( host_path, run_fn )
+        if translated[ "status" ] != "ok": return translated
 
-    asked = request_fn( "POST", PODCAST_ASK_PATH, api_base_url, api_key,
-                        json_body={ "path": translated[ "path" ], "actor": actor } )
-    if asked.get( "status" ) == "error":
-        # A 409 here means a card for this very file already waits on Rick; asking again would be noise.
-        refused = { **asked, "stage": "ask" }
-        if asked.get( "http_status" ) == 409: refused[ "reason" ] = "card_already_waiting"
-        return refused
+    if card_id:
+        facts = request_fn( "GET", CARD_FACTS_PATH.format( card_id=card_id ), api_base_url, api_key )
+        if facts.get( "status" ) == "error": return { **facts, "reason": _code_of( facts ) or facts.get( "reason" ), "card_id": card_id, "stage": "card" }
+        if translated is not None and facts.get( "scope_path" ) != translated[ "path" ]:
+            return _refusal( "card_for_a_different_file", f"Card {card_id} was made for {facts.get( 'scope_path' )}, not {translated[ 'path' ]}; nothing was started.", card_id=card_id )
+        if facts.get( "spent" ) is True:
+            return _refusal( "card_already_spent", f"Card {card_id} already started job {facts.get( 'job_id' )}; no second job was queued.", card_id=card_id, job_id=facts.get( "job_id" ), stage="card" )
+        asked = facts
+    elif translated is not None:
+        asked = request_fn( "POST", PODCAST_ASK_PATH, api_base_url, api_key,
+                            json_body={ "path": translated[ "path" ], "actor": actor } )
+        if asked.get( "status" ) == "error":
+            # A 409 here means a card for this very file already waits on Rick; asking again would be noise.
+            refused = { **asked, "stage": "ask" }
+            code    = _code_of( asked )
+            if code is not None: refused[ "reason" ] = code
+            if asked.get( "http_status" ) == 409: refused[ "reason" ] = "card_already_waiting"
+            return refused
+        card_id = asked.get( "card_id" )
+    else:
+        return _refusal( "path_or_card_required", "Give an absolute path to ask afresh, or a card_id to resume." )
 
-    card_id = asked.get( "card_id" )
     expires = _parse_instant( asked.get( "expires_at" ) )
     if not card_id or expires is None:
-        return _refusal( "ask_answer_malformed", "The ask door answered without a card_id and an expires_at.", stage="ask", answer=asked )
+        return _refusal( "ask_answer_malformed", "The server answered without a card_id and an expires_at.", stage="ask", answer=asked )
 
     failures = 0
     while now_fn() < expires:
@@ -177,13 +212,16 @@ def _start( card_id, api_base_url, api_key, actor, request_fn ):
 
     Ensures:
         - returns { status: "started", card_id, ...the door's answer } on success
-        - maps a 409 to reason "card_already_spent"
-        - passes any other refusal through with the card id and stage "start"
+        - a refusal carries reason = the server's detail.code, the card id and stage "start"
+        - code spent is named card_already_spent; no second job exists because the server spends a card once
+        - code queue_failed adds retry, saying the card is still valid and to call again with its card_id
     """
     started = request_fn( "POST", PODCAST_START_PATH, api_base_url, api_key,
                           json_body={ "card_id": card_id, "actor": actor } )
     if started.get( "status" ) != "error":
         return { **started, "status": "started", "card_id": card_id }
-    if started.get( "http_status" ) == 409:
-        return { **started, "reason": "card_already_spent", "card_id": card_id, "stage": "start" }
-    return { **started, "card_id": card_id, "stage": "start" }
+    code    = _code_of( started )
+    refused = { **started, "card_id": card_id, "stage": "start" }
+    if code is not None: refused[ "reason" ] = "card_already_spent" if code == "spent" else code
+    if code == "queue_failed": refused[ "retry" ] = f"The card is still valid: call podcast_for_rick again with card_id={card_id}."
+    return refused

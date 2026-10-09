@@ -79,14 +79,15 @@ def test_a_file_inside_a_linked_worktree_is_refused_with_the_advice( repos ):
 class Server:
     """Scripted answers by (method, path); the clock moves only when the tool sleeps."""
 
-    def __init__( self, ask, polls, start=None ):
-        self.ask, self.polls, self.start = ask, list( polls ), start
+    def __init__( self, ask, polls, start=None, facts=None ):
+        self.ask, self.polls, self.start, self.facts = ask, list( polls ), start, facts
         self.calls, self.now = [], START
 
     def request( self, method, path, base, key, json_body=None, **_ ):
         self.calls.append( ( method, path, json_body ) )
         if path == pfr.PODCAST_ASK_PATH:   return self.ask
         if path == pfr.PODCAST_START_PATH: return self.start
+        if path == pfr.CARD_FACTS_PATH.format( card_id="c1" ): return self.facts
         assert path == pfr.CARD_RESPONSE_PATH.format( card_id="c1" ), path
         return self.polls.pop( 0 ) if len( self.polls ) > 1 else self.polls[ 0 ]
 
@@ -94,6 +95,8 @@ class Server:
     def clock( self ):          return self.now
 
     def starts( self ): return [ c for c in self.calls if c[ 1 ] == pfr.PODCAST_START_PATH ]
+    def asks( self ):   return [ c for c in self.calls if c[ 1 ] == pfr.PODCAST_ASK_PATH ]
+    def polled( self ): return [ c for c in self.calls if c[ 1 ].startswith( "/api/notifications/response/" ) ]
 
 
 def ASK( minutes=10, **over ):
@@ -108,9 +111,19 @@ PENDING = { "state": "pending", "response_value": None, "responded_at": None }
 ERROR   = { "status": "error", "reason": "server_unreachable", "detail": "down" }
 
 
-def run( server, repos ):
-    return pfr.podcast_for_rick_impl( "http://s", "key", "tiffany 641d31ee", str( repos[ "main" ] / "io" / "tmp" / "x.md" ),
+def run( server, repos, path=True, card_id="" ):
+    host = str( repos[ "main" ] / "io" / "tmp" / "x.md" ) if path else ""
+    return pfr.podcast_for_rick_impl( "http://s", "key", "tiffany 641d31ee", host, card_id,
                                       request_fn=server.request, sleep_fn=server.sleep, now_fn=server.clock )
+
+
+def FACTS( **over ):
+    return { "card_id": "c1", "scope_path": "lupin/io/tmp/x.md", "state": "yes", "spent": False, "job_id": None,
+             "expires_at": ( START + timedelta( minutes=10 ) ).isoformat(), **over }
+
+
+def refusal( http_status, code, message="m" ):
+    return { "status": "error", "http_status": http_status, "detail": { "code": code, "message": message } }
 
 
 def test_a_yes_starts_the_job_exactly_once_with_the_card_id( repos ):
@@ -193,16 +206,80 @@ def test_a_refused_path_never_reaches_the_server( repos ):
 
 
 def test_a_spent_card_is_named_and_start_is_not_retried( repos ):
-    server = Server( ASK(), [ ANSWER( "yes" ) ], start={ "status": "error", "http_status": 409, "detail": "spent" } )
+    server = Server( ASK(), [ ANSWER( "yes" ) ], start=refusal( 409, "spent" ) )
     out = run( server, repos )
     assert out[ "reason" ] == "card_already_spent" and out[ "card_id" ] == "c1" and out[ "stage" ] == "start"
     assert len( server.starts() ) == 1
 
 
 def test_any_other_refusal_of_start_passes_through_with_the_card( repos ):
-    server = Server( ASK(), [ ANSWER( "yes" ) ], start={ "status": "error", "http_status": 400, "detail": "file changed" } )
+    server = Server( ASK(), [ ANSWER( "yes" ) ], start=refusal( 409, "hash_mismatch" ) )
     out = run( server, repos )
-    assert out == { "status": "error", "http_status": 400, "detail": "file changed", "card_id": "c1", "stage": "start" }
+    assert out == { **refusal( 409, "hash_mismatch" ), "reason": "hash_mismatch", "card_id": "c1", "stage": "start" }
+
+
+def test_a_refusal_with_no_code_is_passed_through_without_a_reason( repos ):
+    plain = { "status": "error", "http_status": 500, "detail": "boom" }
+    out = run( Server( ASK(), [ ANSWER( "yes" ) ], start=plain ), repos )
+    assert out == { **plain, "card_id": "c1", "stage": "start" } and "reason" not in out
+
+
+def test_a_queue_failure_names_the_code_and_says_the_card_is_still_valid( repos ):
+    out = run( Server( ASK(), [ ANSWER( "yes" ) ], start=refusal( 502, "queue_failed" ) ), repos )
+    assert out[ "reason" ] == "queue_failed" and "card_id=c1" in out[ "retry" ]
+
+
+def test_a_refused_ask_with_a_code_reports_the_code_as_the_reason( repos ):
+    out = run( Server( refusal( 400, "file_refused" ), [] ), repos )
+    assert out[ "reason" ] == "file_refused" and out[ "stage" ] == "ask"
+
+
+# ── resume with a card_id ───────────────────────────────────────────────────
+
+def test_resume_after_a_queue_failure_starts_once_without_asking_again( repos ):
+    server = Server( None, [ ANSWER( "yes" ) ], start={ "card_id": "c1", "job_id": "j9", "status": "waiting" }, facts=FACTS() )
+    out = run( server, repos, path=False, card_id="c1" )
+    assert out[ "status" ] == "started" and out[ "job_id" ] == "j9"
+    assert server.asks() == [] and len( server.starts() ) == 1
+
+
+def test_resume_on_a_spent_card_names_the_job_and_starts_nothing( repos ):
+    server = Server( None, [ ANSWER( "yes" ) ], start=refusal( 409, "spent" ), facts=FACTS( spent=True, job_id="j1" ) )
+    out = run( server, repos, path=False, card_id="c1" )
+    assert out[ "reason" ] == "card_already_spent" and out[ "job_id" ] == "j1" and "j1" in out[ "detail" ]
+    assert server.asks() == [] and server.polled() == [] and server.starts() == []
+
+
+def test_a_card_for_a_different_file_than_the_path_is_refused_before_any_poll( repos ):
+    server = Server( None, [ ANSWER( "yes" ) ], start={ "job_id": "j" }, facts=FACTS( scope_path="lupin/io/tmp/other.md" ) )
+    out = run( server, repos, card_id="c1" )
+    assert out[ "reason" ] == "card_for_a_different_file" and "other.md" in out[ "detail" ]
+    assert server.asks() == [] and server.polled() == [] and server.starts() == []
+
+
+def test_a_card_for_the_same_file_as_the_path_resumes( repos ):
+    server = Server( None, [ ANSWER( "yes" ) ], start={ "job_id": "j" }, facts=FACTS() )
+    assert run( server, repos, card_id="c1" )[ "status" ] == "started"
+
+
+def test_neither_a_path_nor_a_card_is_refused( repos ):
+    server = Server( ASK(), [] )
+    assert run( server, repos, path=False )[ "reason" ] == "path_or_card_required" and server.calls == []
+
+
+def test_an_unreadable_card_stops_the_resume_with_its_code_and_stage( repos ):
+    out = run( Server( None, [], facts=refusal( 404, "no_card" ) ), repos, path=False, card_id="c1" )
+    assert out[ "reason" ] == "no_card" and out[ "stage" ] == "card" and out[ "card_id" ] == "c1"
+
+
+def test_an_unreachable_server_on_resume_keeps_its_own_reason( repos ):
+    out = run( Server( None, [], facts=ERROR ), repos, path=False, card_id="c1" )
+    assert out[ "reason" ] == "server_unreachable" and out[ "stage" ] == "card"
+
+
+def test_card_facts_with_no_expiry_are_malformed( repos ):
+    out = run( Server( None, [], facts=FACTS( expires_at=None ) ), repos, path=False, card_id="c1" )
+    assert out[ "reason" ] == "ask_answer_malformed"
 
 
 # ── the registered tool ─────────────────────────────────────────────────────
@@ -225,12 +302,12 @@ def stamped( monkeypatch ):
 def test_the_tool_stamps_the_actor_and_passes_the_path_through( stamped, monkeypatch ):
     captured, sentinel = { }, { "status": "started" }
     monkeypatch.setattr( cv, "podcast_for_rick_impl", lambda **kwargs: captured.update( kwargs ) or sentinel )
-    assert cv.podcast_for_rick.fn.sync( path="/abs/x.md" ) is sentinel
-    assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "actor": "tiffany 641d31ee", "host_path": "/abs/x.md" }
+    assert cv.podcast_for_rick.fn.sync( path="/abs/x.md", card_id="c1" ) is sentinel
+    assert captured == { "api_base_url": "http://stub:7999", "api_key": "ck_live_stub", "actor": "tiffany 641d31ee", "host_path": "/abs/x.md", "card_id": "c1" }
 
 
 def test_actor_is_not_a_tool_parameter():
-    assert list( inspect.signature( cv.podcast_for_rick.fn ).parameters ) == [ "path" ]
+    assert list( inspect.signature( cv.podcast_for_rick.fn ).parameters ) == [ "path", "card_id" ]
 
 
 def test_a_borrowed_identity_is_refused_before_the_impl( stamped, monkeypatch ):
