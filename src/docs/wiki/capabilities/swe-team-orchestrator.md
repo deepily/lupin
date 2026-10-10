@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
   - cosa.agents.swe_team.job.SweTeamJob@82140429b7
   - cosa.agents.swe_team.job.SweTeamJob.do_all@98c373ef75
-  - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator@7eb9e4b72b
+  - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator@6e88646c78
   - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator.run@5b89c1bd41
   - cosa.agents.swe_team.safety_limits.SafetyGuard@e7424558e3
   - cosa.agents.swe_team.agent_definitions.get_active_roles@6ad024b691
@@ -16,7 +16,7 @@ pins:
 `SweTeamJob` (`JOB_TYPE` `swe_team`) runs one task through `SweTeamOrchestrator`. A Lead splits the task, a Coder does each piece, and a Tester checks it. Its safety guard, hooks and test runner are imported by [[fix-expediter-bfe]] and [[fix-expediter-tfe]].
 
 ## The run
-- `run` returns the final summary, or `None` on failure. A `SafetyLimitError` or any other exception sets the state to failed and sends an urgent notification.
+- `run` returns the final summary, or `None` on failure. A `SafetyLimitError` or any other exception sets the state to failed and sends an urgent notification. A result message with `is_error` raises through `raise_error_result` in each of the three SDK loops; it is no longer forwarded as output.
 - With `dry_run` set, `run` uses `MockAgentSDKSession` and makes no SDK calls. Live mode needs `claude-agent-sdk`; without it the summary says so.
 - The Lead splits the task into `TaskSpec` items. If the split cannot be parsed, one task built from the whole description is used.
 - Before any work, the run asks "Proceed?" (120 seconds, default yes) through `_gated_confirmation`, so an active proxy may answer. A no, from either, ends the run with "Task cancelled by user after decomposition."
@@ -32,7 +32,7 @@ pins:
 
 ## The decision proxy
 - Unless `trust_mode` is `disabled`, an `EngineeringStrategy` proxy is built on the [[decision-proxy]] trust tracker and circuit breaker. `_gated_confirmation` asks it first, then acts on its trust mode; in `shadow` the user is still asked.
-- In an active mode, an `act` verdict approves or rejects without asking, with a low-priority notice. A `suggest` verdict adds its suggestion to the question's abstract.
+- In an active mode, an `act` verdict approves or rejects without asking, with a low-priority notice. With `swe engineering proxy ask before act` true (shipped false), the user is asked instead. A `suggest` verdict adds its suggestion to the question's abstract.
 - After a user answer, agreement with the proxy is recorded in the trust tracker.
 
 ## Progress and states
