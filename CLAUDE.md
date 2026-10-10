@@ -10,25 +10,27 @@
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (port 7999)
 - Regenerate API docs: `src/scripts/generate-api-docs.sh` (server on port 7999; `--offline` for saved JSON)
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
-- New agentic service with voice I/O: `/lupin-new-claude-agent-sdk-voice-workflow`; canonical doc `src/workflow/agentic-voice-workflow.md`
+- New agentic service with voice I/O: `/lupin-new-claude-agent-sdk-voice-workflow`; canonical doc `src/workflow/agentic-voice-workflow.md`; reference agents `src/cosa/agents/deep_research/`, `podcast_generator/`
 - Baseline and remediation: `/smoke-test-baseline`, `/smoke-test-remediation`; each command file holds its arguments
 
 ### CJ Flow
 - Every queued job implements the `QueueableJob` protocol (`src/cosa/rest/queue_protocol.py`); pipeline todo → running → done/dead.
 - `AgenticJobBase` jobs run in the agentic pool; `AgentBase` and `SolutionSnapshot` run inline on the consumer thread. Re-read the INI key `cj flow max concurrent agentic jobs` before relying on a pool size.
-- `FifoQueue` is shared by pool workers and the consumer thread: `running_fifo_queue.py` removes a job with `self.delete_by_id_hash(job.id_hash)`, never `self.pop()`.
+- `FifoQueue` is shared by pool workers and the consumer thread: `running_fifo_queue.py` removes a job with `self.delete_by_id_hash(job.id_hash)`, never `self.pop()`, because the head of the queue is not deterministic under pool-callback concurrency.
 - ⚠️ `GET /api/queue/pool-status` describes the pool, not the venue. Do not derive idleness from it; use `cosa.rest.venue_idle` / `GET /api/busy` (§ Testing venues).
 
 ### Cost model
 - Prefer bounded Claude Code (`ClaudeCodeJob`, `task_type=BOUNDED`, covered by the Max plan) over the direct Anthropic SDK (`ANTHROPIC_API_KEY_FIREWALLED`, billed per token) for LLM-driven agents that fit its tool surface.
 - Never use the bare `ANTHROPIC_API_KEY`; it is reserved for the Claude Code CLI.
+- The SDK's `cost_usd` telemetry on a bounded job is a notional figure: the Anthropic console balance does not move for it.
+- Deferred and not ratified for migration: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
 - A migration is a cost-shift, not zero-cost. Say "covered by existing fixed cost", never "free".
 - Do not migrate: calls above about 10 QPS, a latency budget under about 2 s, non-Anthropic models, token-by-token streaming.
 - Detail: `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`.
 
 ### Scheduled jobs
-The host is usually powered off from about 11 PM to 10 AM EDT, and a job scheduled then runs at the next boot. Re-derive the hours with `journalctl --list-boots --no-pager`, not `last -x reboot`.
-To run a job later, submit through `/api/v2/submit` with the command `agent router go to claude code` and a top-level `scheduled_at` (ISO-8601 with offset). `scheduled_at` is not part of the command's argument contract.
+The host is usually powered off from about 11 PM to 10 AM EDT, and a job scheduled then runs at the next boot. Re-derive the hours with `journalctl --list-boots --no-pager`, not `last -x reboot`, whose `wtmp` rotates.
+To run a job later, submit through `/api/v2/submit` with the command `agent router go to claude code` and a top-level `scheduled_at` (ISO-8601 with offset). `scheduled_at` is top-level because it tells the queue *when* to run; it is not part of the command's argument contract. A job that lands while the host is off drains late, and `job_persistence.py` logs a `[CJ-CATCHUP-LATE]` line.
 
 ### Code style
 - **Imports**: Group by stdlib, third-party, local
@@ -96,7 +98,7 @@ Eligible **iff all three**:
 - Runtime ≤ 2 minutes end-to-end.
 - No monopoly requirement.
 
-Suites that qualify (unit tests, inline `quick_smoke_test()` blocks, `py_compile` and import checks, the WebSocket smoke runner, and the named read-only smoke files) are listed with their reasoning in `src/docs/doctrine/testing-venues.md`.
+Suites that qualify (unit tests, inline `quick_smoke_test()` blocks, `py_compile` and import checks, the WebSocket smoke runner, and the named read-only smoke files) are listed, with the reasoning for each, in `src/docs/doctrine/testing-venues.md` § "The `:7999` suite list".
 
 #### :8000 (test) — monopolize mode, scheduled only
 
@@ -159,17 +161,17 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per § Testing venues; `:8000 (scheduled)` = submit via `POST /api/v2/submit` (command `agent router go to test suite`), self-authorized on a verified-idle server and placed behind any already-scheduled or running job. Counts, timings and per-suite notes are in `src/docs/doctrine/testing-venues.md`.
 
-| Suite | Venue | Command |
-|---|---|---|
-| Unit | :7999 | `pytest src/tests/unit/` |
-| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` |
-| Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` |
-| Smoke (inline) | :7999 | `python -m cosa.rest.<module>` |
-| WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` |
-| Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` (**final merge gate**) |
-| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v`; one half: `--half a` / `--half b` |
-| Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` |
-| Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` |
+| Suite | Venue | Command | Rules that matter |
+|---|---|---|---|
+| Unit | :7999 | `pytest src/tests/unit/` | |
+| TypeScript | :8000 (scheduled) | `./src/tests/run-typescript-tests.sh` | runs under c8 at 100% inside the memory-capped `jstest.slice` cgroup, so `test_types: ["all"]` is safe; an `RC=124` is a hang on leaked transports, not memory |
+| Docker smoke | :7999 (host only) | `./src/tests/run-docker-smoke-gate.sh` | any skip, error or missing file is a failure; not offered inside a container |
+| Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks, non-destructive; `src/tests/smoke/` files are heterogeneous, route each by the § Testing venues rubric |
+| WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | connection, auth, events |
+| Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | **final merge gate**; always `--bg` |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v`; one half: `--half a` / `--half b` | the merge gate runs two halves, `e2e_a` then `e2e_b`; a new test file must be in `src/tests/e2e_ui/partition/` (`test_e2e_halves_partition.py` fails on a file in neither half or both); `-k visual` for visual only, `--update-snapshots` to rebaseline (snapshots are version-controlled) |
+| Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | mutates state |
+| Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | real LLM spend; `--include-opus` / `--all` variants |
 
 **Before you ask for review**: run `src/tests/run-census-guards.sh` beside the tests of the files you changed. A census guard counts something across the whole tree, so new code can turn it red while none of its files changed. The set is chosen by file name (`test_every_*`, `*census*`, `*_pin*`, `*pins*`, `*pinned*`), so name a new census guard to match.
 
@@ -277,21 +279,40 @@ Stated as rules. The measurements behind them are in `src/docs/doctrine/`; you d
 - Take a green baseline first and record the failing set. The kill signal is the failing set: a named test
   that was passing now fails. Exit codes 4 and 5 mean pytest could not run the node, and on a branch with a
   deliberate red, `rc == 1` scores every mutant as killed.
+- Compare the assertion that fired, not just the test id. An assertion placed behind a currently-failing
+  one is carried, not exercised — put a new guard in its own test.
 - Assert the mutation applied: the anchor matched exactly once, the on-disk sha changed. End with a restore
   control you actually read.
 - Isolate every arm. Rebuilding the sandbox per arm is strongest; `src/scripts/purge-pycache.sh` is the
   practical choice in a working tree. A raw `find … __pycache__ -delete` re-opens the defect.
+- A surviving mutant has four explanations — a weak test, a broken harness, an equivalent mutant, or a
+  fixture that cannot discriminate. Only the first earns a new test, and the fourth is invisible to
+  re-reading the test body.
+- Put a ceiling on a kill count as well as a floor. A break aimed at one line should redden the tests that
+  reach it; near-total kill is a syntax error until proven otherwise. Compare the run count to baseline,
+  not just the failures.
+- "I repaired a fixture" is not "I proved the repair discriminates". Two arms off one mutated sha: the old
+  fixture survives, the new one is killed by the named test. Neither arm alone counts.
+- A clean pass samples the mutation space; it does not survey it. Exchange shas with another harness to
+  catch a disagreement, never to manufacture a confirmation.
 - Never mutate in a peer's live worktree, or in the shared main tree. Check the sha out into a detached
   worktree of your own — a `cp` restore from your own backup carries the same race as `git checkout`.
-- The other five rules for reading a mutation run are in `src/docs/doctrine/coverage-and-mutation.md`.
 
 #### Bytecode
+
 The tree uses checked-hash invalidation. Without it CPython validates a `.pyc` on the source's
 whole-second mtime plus size, so a same-size edit inside one second runs the previous arm's bytecode.
 
 - `src/scripts/purge-pycache.sh` purges **and** reconverts, and refuses before deleting if it cannot
   reconvert. It takes only `--dry-run`. It resolves its tree from its own location, so run the copy that
   lives in the tree you mean; `LUPIN_ROOT` is inert for it, but `PYTHON` is not.
+- `src/scripts/migrate-pyc-to-checked-hash.sh --verify` is the read-only report, and it scans
+  `$LUPIN_ROOT/src` — not where you are standing. Read its `scanned roots:` line, not its checkmark. Pin
+  both `LUPIN_ROOT` and `PYTHON`, since `PYTHON` derives from the root and many worktrees have no `.venv`.
+- Its exits: 0 clean, 1 timestamp pycs present (the real finding), 2 it never ran. Only stderr separates
+  2's causes.
+- A `0` from a tree that has never been used is vacuous, not clean. Use a new worktree once,
+  purge-and-reconvert, then verify.
 - `-f` is the whole migration — without it `compileall` converts nothing and reports success.
 - `PYTHONDONTWRITEBYTECODE` suppresses writing, never trusting. Editing a test file inside a test still
   needs `tests.helpers.pyc_freshness`.
@@ -301,13 +322,20 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
 - Every worktree goes under `.claude/worktrees/`, never `../`. A spawned seat's tree lands there on its own
   (`seat-<name>`, locked while the seat lives); a hand-made one is
   `git worktree add .claude/worktrees/<persona>-<task>`. That folder is gitignored and swept by the arbiter
-  janitor once a tree is idle. Anything next to the repo is swept by nobody. The janitor details are in `src/docs/doctrine/worktree-tiers.md`.
+  janitor once a tree is idle. Anything next to the repo is swept by nobody. The janitor moves a tree's ignored files that are not build artifacts, the tree's own run
+  output (`tmp/`, `io/test-suite/`, `io/swe-team/`, `io/claude_code_hooks/`, `src/docs/index/`, `.claude-session.md`) or mirrored
+  mementos into `io/worktree-evacuated/<day>-<tree>-<stamp>/` in the main tree and then removes the tree;
+  an unmerged branch moves to `refs/archive/<day>/<name>` (restore with
+  `git update-ref refs/heads/<name> <sha>`). Both are deleted 14 days later, so keep data in git or
+  somewhere durable. A reap by any other door (a manager's dismiss, a seat's own teardown) still refuses
+  such a tree and leaves it for the janitor.
 - Pin all three, every time. `LUPIN_ROOT` is inherited from your shell and silently keeps naming the main
   repo:
 
   ```bash
   cd <worktree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
   ```
+
 - `LUPIN_ROOT` decides which tree paths resolve against; `PYTHONPATH` decides which tree modules are
   imported from. Pin one and not the other and your modules come from two checkouts — a tree that exists
   nowhere on disk, pointing toward a false green.
@@ -321,6 +349,7 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   | `.venv` | 33 |
   | terraform provider cache | 1 |
   | `LUPIN_ROOT` unpinned | 1 |
+
 - Provisioning runs in the Python spawn path only, so a hand-typed `git worktree add` gets nothing — run
   `src/scripts/link-worktree-artifacts.sh` and `src/scripts/link-worktree-venv.sh` yourself there. The
   first does not link `.venv`; the second does.
@@ -333,6 +362,13 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   exactly the defects its unmerged work repairs.
 - While a tier is running, that worktree is read-only — whatever your reason for touching it. A mutation
   arm feels like measuring, not editing, and the run cannot tell the difference.
+- The tier stamp's `run-span=unmoved` compares two HEAD shas; `tracked-dirty` is one sample at the end with
+  untracked rows stripped. Neither certifies that the run measured the tree you think it did. Name a run by
+  what it measured, not by the sha you asked for.
+  `bundle-span=` covers what both are blind to: it hashes the CONTENT of every
+  served `.js` and `manifest.json` under `src/lupin_app/static/dist/` (gitignored; `.map` files are not served) at start and end, names the root hashed
+  (`bundle=<hash>@seat` or `@main`), leaves out each manifest's `built` time stamp (two builds of one source differ in it alone), and a rebuild that changes what a page loads inside the run reads `bundle-span=<a>..<b> ⚠️ BUNDLE
+  REBUILT MID-RUN` beside `run-span`. `@seat` and `@main` are different directories; `:8000` serves main's.
 
 #### Reading a result
 
@@ -420,6 +456,7 @@ One row per topic; every path below exists (checked by `src/tests/unit/test_clau
 | WebSocket auth and transport in the web client | `src/docs/wiki/capabilities/web-client-transport-and-auth.md` | the client cannot authenticate |
 | Notification API | `src/docs/notification-api.md` | emitting or routing a notification |
 | Decision proxy administration | `src/docs/proxy-admin-guide.md` | trust dashboard, ratification |
+| Interactive proxy testing (auto-answer) | `src/docs/automated-interactive-testing.md` | running the interactive proxy suite |
 | Voice and MCP onboarding | `src/docs/cosa-voice-onboarding.md` | a seat has no voice or MCP tools |
 | Agentic voice workflow | `src/workflow/agentic-voice-workflow.md` | building a new voice-I/O job |
 | Session spawn, reap and re-spin | `src/docs/wiki/capabilities/mcp-session-spawn-and-reap.md` | spawning, dismissing or re-spinning a seat |

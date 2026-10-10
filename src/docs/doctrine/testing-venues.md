@@ -101,3 +101,49 @@ this is"* must never resolve to *"go ahead"*.
 **synthetic input only; never observed live.** Its four siblings were observed on real processes. A
 reader deciding whether to trust the UNKNOWN branch should know it is proven as logic and unproven
 in the field.
+
+---
+
+## The `:7999` suite list, moved out of CLAUDE.md on 2026-10-10
+
+Row `cba9386c`. This is the list the root `CLAUDE.md` carried at `92a662e4d` under `### :7999 (dev) — AI-discretionary`, verbatim. A file on this list needs no monopoly; the three criteria that qualify a file are in `CLAUDE.md` § Testing venues.
+
+Suites that qualify:
+- `pytest src/tests/unit/`
+- Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
+- `src/tests/smoke/test_calculator_live_pipeline.py`
+- `src/tests/smoke/test_container_preflight.py`
+- `src/tests/smoke/test_memory_cap_binds.py` — it runs `systemd-run` and gets a process SIGKILLed,
+  which reads like a :8000 suite and is not one. The scope is transient (`--scope --collect`, dies
+  with the command), so nothing persists; it takes about 0.5s; and the only process it kills is the
+  allocator it started, inside a cgroup it owns. It needs no monopoly.
+- `src/tests/smoke/test_credential_mount_shape.py` — it runs throwaway alpine containers on scratch files and
+  reads the compute containers with `docker exec id -u`, so nothing persists and it needs no monopoly.
+  `docker_smoke` runs it on the host with the two files below.
+- `src/tests/smoke/test_db_roles_rollback_real_postgres.py` — it starts a Docker container, which
+  reads like a :8000 suite and is not one. The container is a throwaway Postgres reached only by
+  `docker exec`, with a name guard, memory and processor caps, and removal with its volumes at the end, so
+  nothing persists and the real database is refused before any command runs. The file's five
+  docker tests skip without docker (19 passed, 5 skipped with docker hidden); with docker the whole
+  file, 24 tests, took 28.4s in one run (2026-10-08, at 9e9cfbce7). It needs no
+  monopoly. Re-time it rather than trusting that figure.
+- `src/tests/smoke/test_db_grants_real_postgres.py` — it reuses the rollback file's throwaway container,
+  so the same reasoning holds: `docker exec` only, a name guard, removal at the end, nothing persists. Its
+  17 docker tests all skip without docker and took 59.3s with it in one run (2026-10-08, at 9e9cfbce7). Re-time it rather than
+  trusting that figure. It needs no monopoly.
+- `src/tests/smoke/test_template_database_vector_real_postgres.py` and
+  `src/tests/smoke/test_db_template_provisioning_real_postgres.py` — the template database
+  `lupin_template_vector` (the vector extension, made once by `db_roles`, so the test role clones it with no
+  superuser). Both reuse the rollback file's throwaway container, so the same reasoning holds. It is reached by
+  `docker exec` only, behind a name guard, and removed at the end. Nothing persists and no monopoly is needed. With docker they took 11.1s (3 tests)
+  and 28.0s (7 tests) in one run (2026-10-08, at 53ba759b9); with docker hidden every test skips (0.4s each).
+  Re-time them rather than trusting those figures. They are not in `docker_smoke`'s list of three, so a
+  skip there is not yet a failure.
+- `src/tests/smoke/test_podcast_proxy_spent_cards_real_postgres.py` — the spent-card claim race on a real
+  Postgres. It reuses the rollback file's throwaway container and its name and label guards, and connects
+  with psycopg2 over the container's bridge address (no port is published). The address is refused when empty or
+  when it is the real database's host, and the login password is random and never written to disk. The container
+  is removed with its volumes at the end, so nothing persists and no monopoly is needed. With docker the four
+  tests took about 8s in one run (2026-10-08, at b9d89658f); with docker hidden three skip and one passes (0.2s).
+  Re-time it rather than trusting those figures. It is not in `docker_smoke`'s list, so a skip there is not yet a failure.
+- `src/tests/websocket_smoke/` (run via `src/scripts/run-websocket-smoke-tests.sh`)
