@@ -43,11 +43,13 @@ ARCHIVE_PREFIXES = ( "history/", "todo-history/", "src/cosa/history/", "src/cosa
 
 HOLDING_RND_CLASSES = frozenset( { "in force", "new" } )
 
+INDEX_PATHS = ( "src/rnd/README.md", "src/cosa/rnd/README.md" )
+
 RULING_NOTE = (
     "Which citers hold a doc out of history is a manager's ruling of 2026-10-09 on the plan's word "
     "'live'. A code, test, CLAUDE.md, src/docs, TODO.md or .claude citer holds. An R&D citer holds "
-    "only while its own class is in force or new. History archives, session manifests and index "
-    "READMEs never hold. Rick may change it."
+    "only while its own class is in force or new. History archives, session manifests and the "
+    "two root index READMEs never hold; an initiative-folder README holds like any R&D citer. Rick may change it."
 )
 
 _KEYS    = ( "live_path_citers", "live_name_citers", "live_stem_citers",
@@ -196,15 +198,15 @@ def citer_kind( path ):
 
     Ensures:
         - returns "archive" for history/, todo-history/, src/cosa/history/, a history.md and a .claude-session.md
-        - returns "index" for a README.md under an R&D root
-        - returns "rnd" for any other file under an R&D root
+        - returns "index" for the two root indexes src/rnd/README.md and src/cosa/rnd/README.md
+        - returns "rnd" for any other file under an R&D root, an initiative-folder README included
         - returns "live" for everything else: code, tests, CLAUDE.md, src/docs, TODO.md and .claude files
 
     Raises:
         - nothing
     """
     if path.startswith( ARCHIVE_PREFIXES ) or path == "history.md" or path.endswith( ".claude-session.md" ): return "archive"
-    if is_rnd( path ): return "index" if os.path.basename( path ) == "README.md" else "rnd"
+    if is_rnd( path ): return "index" if path in INDEX_PATHS else "rnd"
     return "live"
 
 
