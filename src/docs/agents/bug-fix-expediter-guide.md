@@ -4,6 +4,8 @@
 
 **Scope**: `src/cosa/agents/bug_fix_expediter/`, `src/cosa/rest/dead_queue_watchdog.py`, BFE INI keys.
 
+**Last Updated**: 2026-04-10.
+
 **See Also**:
 
 - [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — `PlanWriter`, `GitStrategist`, `FixExecutor`
@@ -201,7 +203,7 @@ replaces the Phase 5 placeholder with the branch/commit/PR metadata.
 
 **Goal**: resubmit the original failed job to prove the fix worked end-to-end.
 
-**Status**: code-complete with 58 unit tests passing. Live E2E
+**Status as of 2026-04-10**: code-complete with 58 unit tests passing. Live E2E
 verification is in progress in a separate console.
 
 **How it works**:
@@ -480,7 +482,7 @@ Possible causes:
    for `RateLimitEvent` warnings in the log.
 3. **Budget exhausted**: `bug fix expediter budget usd` was hit mid-run. Check the
    cost tracker summary in the plan doc footer.
-4. **Root cause obscure**: some bugs need human investigation.
+4. **Root cause genuinely obscure**: some bugs need human investigation.
    Lowering `bug fix expediter min diagnosis confidence` (e.g., 0.5) lets BFE
    proceed with lower-confidence diagnoses, but the fix success rate drops.
 

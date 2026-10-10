@@ -4,6 +4,8 @@
 
 **Scope**: `src/cosa/agents/test_fix_expediter/`, `src/cosa/rest/test_suite_completion_watchdog.py`, TFE INI keys.
 
+**Last Updated**: 2026-04-10.
+
 **See Also**:
 
 - [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — shared `FixExecutor`, `GitStrategist`, `PlanWriter`
@@ -214,7 +216,7 @@ proposal prompt caps each fix at 5 file changes — larger scopes get rejected a
 
 **Plan document**: `PlanWriter.write_plan()` (from the shared package) writes one
 multi-section Markdown document listing every cluster + its proposals. Each
-cluster becomes a `## Cluster <cluster_id>: ...` section; a cluster id is the letter C plus its position, starting at 1. The document lives at
+cluster becomes a `## Cluster C1: ...` section. The number in the heading is the cluster's position, starting at 1. The document lives at
 `io/swe-team/plans/{user_email}/YYYY.MM.DD-{slug}-plan.md`.
 
 **Aggregated voice gate**: `ask_multiple_choice()` with `multiSelect=True`. The
@@ -253,7 +255,7 @@ specific tests pass now."
 **`continue_on_cluster_failure`**: when a cluster fix fails verification and
 exhausts `max_fix_attempts`, TFE decides whether to abort the rest of the batch or
 continue with remaining clusters. Default: `true` (continue). Rationale: cluster
-fixes are independent (Phase 0 clustering ensures distinct root
+fixes are independent by construction (Phase 0 clustering ensures distinct root
 causes), so a failed second cluster shouldn't block the first or third.
 
 **Dry-run mode**: when `dry_run=True` on the TFE job, Phase 3 synthesizes success
@@ -438,7 +440,7 @@ failures) leaves overrides unset → use INI defaults.
 
 ### Step 1: Master switch (INI default)
 
-Auto-fix is **enabled by default**:
+As of 2026-04-10, auto-fix is **enabled by default**:
 
 ```ini
 # src/conf/lupin-app.ini

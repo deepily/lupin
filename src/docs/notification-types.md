@@ -3,7 +3,7 @@
 Catalogue of the custom `type` values accepted by `POST /api/notify/*` and emitted
 through the `notification_queue_update` WebSocket envelope.
 
-**Verified against**: `valid_types` mirror at `src/cosa/rest/routers/notifications.py:359-363`.
+**Last verified**: 2026-05-12 — `valid_types` mirror at `src/cosa/rest/routers/notifications.py:359-363`.
 
 For the full notification system (architecture, queues, persistence, CLI clients),
 see [`notification-api.md`](notification-api.md). For the WebSocket event catalog,

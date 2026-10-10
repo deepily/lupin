@@ -4,6 +4,8 @@
 
 **Scope**: `src/cosa/agents/shared/` — `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` registry.
 
+**Last Updated**: 2026-04-10.
+
 **See Also**:
 
 - [Bug Fix Expediter Guide](bug-fix-expediter-guide.md)
@@ -39,7 +41,7 @@ between BFE and TFE are:
   `classname::name[param]` semantics.
 - **Output**: BFE retries the original dead job, TFE reruns the affected test suites.
 
-The reusable pieces were extracted into
+During the session of 2026-04-10 the reusable pieces were extracted into
 `src/cosa/agents/shared/` as a peer of the agent packages — **not** a subordinate
 of either. Agent packages import from `shared/`; `shared/` does not import from any
 specific agent package. This keeps BFE's proven dead-job code path untouched while
@@ -538,7 +540,7 @@ pytest src/tests/unit/test_tfe_*.py -v
 pytest src/tests/unit/ --tb=no -q
 ```
 
-All green: **3119 passed, 1 xfailed**.
+All green as of 2026-04-10: **3119 passed, 1 xfailed**.
 
 ---
 

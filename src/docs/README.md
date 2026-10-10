@@ -16,7 +16,7 @@
 | [notification-api.md](notification-api.md) | Notification system architecture, lifecycle, proxy | `routers/notifications.py` |
 | [notification-types.md](notification-types.md) | Catalogue of `type` values + custom state-update types (incl. `commons_broadcast_ack`) | `routers/notifications.py` `valid_types` |
 | [proxy-admin-guide.md](proxy-admin-guide.md) | Trust Dashboard and ratification guide | `routers/decision_proxy.py` |
-| [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | Warning: its former code anchor `src/lib/clients/` was deleted; the doc now describes the web frontend only |
+| [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | Warning: its former code anchor `src/lib/clients/` was deleted 2026-08-26; the doc now describes the web frontend only |
 | [cost-model-bounded-cc-vs-firewalled-sdk.md](cost-model-bounded-cc-vs-firewalled-sdk.md) | Runbook: move an LLM-driven agent from the direct Anthropic SDK to a bounded Claude Code job (prerequisites, steps, verify, rollback) | `CLAUDE.md` § Cost model |
 | [fleet-liveness-and-task-store-architecture.md](fleet-liveness-and-task-store-architecture.md) | **Top-to-bottom** fleet liveness + unified task-store: one store / three readers (Stop-hook self-poke · arbiter :8001 · UI card), the heartbeat seam + `owed_source_from_store` cutover flag + fail-safe, arbiter detectors (staleness/tap-ACK/whole-fleet-stall), manager/worker lifecycle, migration drain | `src/lupin_cli/claude_code/hooks/`, `src/cosa/agents/heartbeat_arbiter/`, `src/cosa/rest/routers/tasks.py` |
 | [docstring-standard.md](docstring-standard.md) | What the pre-commit doc gate refuses in swept Python, the waiver form, the printed denominator | `src/cosa/repo/doc_lint/gate.py`, `swept_scope.py` |
@@ -44,7 +44,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 | [vm-new-host-checklist.md](vm-new-host-checklist.md) | Host configuration git does not carry (heartbeat block, manager roster, flow-ratio override, container git trust): symptom, preflight check id and fix for each |
 | [database-migrations.md](database-migrations.md) | Database migration procedures |
 | [db-login-files-install.md](db-login-files-install.md) | One command that installs the test login's secret files on a new host (`sudo src/scripts/install_db_secrets.py`), its refusals, and what stays manual |
-| [post-games/README.md](post-games/README.md) | Post-game retrospectives, tracked, one folder per work-branch version (Rick's ruling) |
+| [post-games/README.md](post-games/README.md) | Post-game retrospectives, tracked, one folder per work-branch version (Rick's ruling 2026-10-03) |
 | [automated-interactive-testing.md](automated-interactive-testing.md) | Proxy auto-answer testing guide |
 
 ## Auth Subsystem
