@@ -127,21 +127,19 @@ def test_indexes_come_back_in_order_and_empty_for_no_claims():
 QUALIFIER_WORDS = ( "only", "never", "always", "until", "unless", "rather than", "at most", "at least", "no longer", "without" )
 
 
-def test_prompt_states_both_rules_and_keeps_the_reply_contract():
+def test_prompt_states_the_clause_rule_and_keeps_the_reply_contract_without_the_extra_claims_rule():
     prompt = ce.SYSTEM_PROMPT
     assert "A claim may not add a clause" in prompt
+    clause = prompt.split( "A claim may not add a clause" )[ 1 ].split( "Reply with one JSON object" )[ 0 ]
     for word in ( "so", "which", "because", "this is the reason" ):
-        assert word in prompt.split( "A claim may not add a clause" )[ 1 ].split( "If a sentence limits" )[ 0 ]
+        assert word in clause
     assert "whose content words are absent from its quote" in prompt
-    limit = prompt.split( "If a sentence limits its own claim" )[ 1 ].split( "Reply with one JSON object" )[ 0 ]
-    assert ": only, never, always, until, unless, rather than, at most, at least, no longer, without." in limit
-    for phrase in ( "state the limit as one extra claim", "at least three words, and never the whole sentence",
-                    "Make one extra claim per limiting word", "any adjective or any item of a list",
-                    "never give two claims the same quote" ):
-        assert phrase in limit
+    for gone in ( "If a sentence limits", "state the limit as one extra claim", "at least three words, and never the whole sentence",
+                  "Make one extra claim per limiting word", "any adjective or any item of a list", "never give two claims the same quote" ):
+        assert gone not in prompt
     assert "A qualifier is its own claim" not in prompt and "restricts a noun" not in prompt
     assert "Copy each quote character for character" in prompt
-    assert prompt.index( "If a sentence limits its own claim" ) < prompt.index( "Reply with one JSON object" )
+    assert prompt.index( "A claim may not add a clause" ) < prompt.index( "Reply with one JSON object" )
 
 
 def test_the_prompt_version_changed_with_the_prompt_and_still_names_the_extractor():
