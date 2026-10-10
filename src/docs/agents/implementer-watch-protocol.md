@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Status** | 🟢 Active doctrine — Lupin-first (γ ratification,) |
+| **Status** | 🟢 Active doctrine — Lupin-first (γ ratification, 2026-05-21) |
 | **Doctrine home** | `lupin/src/docs/agents/implementer-watch-protocol.md` *(here)* |
 | **PIP-promotion target** | `planning-is-prompting/workflow/implementer-watch-protocol.md` *(on trigger — see below)* |
 | **Layer** | Layer-2 per-recipient doctrine for the generic Heartbeat Poker (`HeartbeatPokerJob`) |
@@ -165,6 +165,6 @@ behavior until the poker run ends on a clean termination signal or the hard cap.
 
 ---
 
-*Layer-2 doctrine — authored by the implementation task. The Layer-1 poker code lives in
+*Layer-2 doctrine — authored 2026-05-22 by the implementation task. The Layer-1 poker code lives in
 `src/cosa/agents/heartbeat_poker_job.py` and never migrates; only this doctrine is
 PIP-promotable.*

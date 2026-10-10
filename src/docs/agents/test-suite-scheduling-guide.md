@@ -4,6 +4,8 @@
 
 **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/v2/submit` (test-suite command), remediation snapshot schema v1.0
 
+**Last Updated**: 2026-04-10
+
 **See Also**:
 - [Test Fix Expediter Guide](test-fix-expediter-guide.md) — TFE consumes the remediation snapshots TestSuiteJob produces
 - [Bug Fix Expediter Guide](bug-fix-expediter-guide.md). If a TestSuiteJob crashes rather than completes, BFE picks it up from the dead queue
@@ -62,9 +64,9 @@ TFE it can trigger automated remediation on failure.
 | `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
 | `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped) |
-| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run | 830 tests. The whole suite under one timeout; the merge pyramid runs the halves below instead |
-| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s | files in `src/tests/e2e_ui/partition/half-a.txt` |
-| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s | files in `src/tests/e2e_ui/partition/half-b.txt` |
+| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run (ts-cf9f5f85, 2026-09-12) | 830 tests. The whole suite under one timeout; the merge pyramid runs the halves below instead |
+| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-a.txt` |
+| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-b.txt` |
 | `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
@@ -80,12 +82,12 @@ runs the one file against `:8000` and exits with pytest's status.
 
 **Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is one comma-separated
 string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
-because the request model declares a `str`. The job
+because the request model declares a `str` (measured 2026-09-15). The job
 object itself holds a list after the router splits the string. The job aggregates results
 across all requested suites in a single Markdown report and a single remediation
 snapshot.
 
-**E2E halves**: `e2e_a` and `e2e_b` split the e2e suite into two halves
+**E2E halves (2026-09-14)**: `e2e_a` and `e2e_b` split the e2e suite into two halves
 by file, balanced on measured per-file time. Submit `"e2e_a,e2e_b"` to run the whole suite with
 a separate timeout, junit and log per half: a timeout then discards one half's results, not both.
 They run back to back in one job and cannot run side by side. `:8000` runs one monopolize job at a
@@ -133,7 +135,7 @@ flowchart LR
     Watchdog -->|no| Idle[Wait for next<br/>TestSuiteJob]
 ```
 
-### Between-suites DB isolation (invariant —)
+### Between-suites DB isolation (invariant)
 
 A single `TestSuiteJob` can run **multiple** suites. One case is `test_types=["all"]` →
 `smoke → websocket → integration → e2e`, after the unit tier that a container leaves to the host.
@@ -230,7 +232,7 @@ For programmatic/non-Claude-Code invocation, use the REST API directly (next sec
 
 ## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 
-> **`POST /api/test-suite/submit` was retired to 410**. A test suite is
+> **`POST /api/test-suite/submit` was retired to 410 on 2026-09-29**. A test suite is
 > submitted through the general v2 door, naming the command. Everything below is that door.
 
 **Endpoint**: `POST /api/v2/submit`
@@ -252,7 +254,7 @@ authenticated Lupin API.
 }
 ```
 
-`cosa.agents.test_suite.v2_client.submit_body( …)` builds this; `src/scripts/submit-test-suite.py` is the
+`cosa.agents.test_suite.v2_client.submit_body( … )` builds this; `src/scripts/submit-test-suite.py` is the
 command-line wrapper. The suite arguments go in `args`; `scheduled_at` and `websocket_id` are directives
 to the queue and stay top-level.
 
@@ -261,7 +263,7 @@ process only. The suite job keeps only names that start with `TFE_`, `BFE_` or `
 wrapper asks the job's own filter and refuses any other name before it logs in.
 
 **The live eval test has two sizes**. Inside the integration suite `test_v2_eval_live.py` runs a
-short proxy, 5 utterances per command (50 asks), ruled by Rick. The
+short proxy, 5 utterances per command (50 asks), ruled by Rick on 2026-10-05. The
 full sample is a separate scheduled run in the 10 am to 1 PM window:
 
 ```bash
@@ -271,7 +273,7 @@ src/scripts/submit-test-suite.py --test-types integration \
   --scheduled-at 2026-10-06T11:00:00-04:00
 ```
 
-At 20 per command the file makes 200 asks. On it was measured at about 7.4 seconds per
+At 20 per command the file makes 200 asks. On 2026-10-05 it was measured at about 7.4 seconds per
 ask and was stopped by the default 15-minute per-file cap. Which is why the run raises the cap.
 
 | Field | Where | Type | Default | Purpose |
@@ -478,7 +480,7 @@ nightly runs averaging 2 red days: $30 per month. Tune
 
 ## 9. Interaction with TFE
 
-`test fix expediter auto fix enabled = true`
+As of 2026-04-10, `test fix expediter auto fix enabled = true`
 is the default. Every TestSuiteJob that lands in the done queue is evaluated by
 `TestSuiteCompletionWatchdog`. If the job's remediation snapshot shows failures,
 the watchdog auto-dispatches a TFE job. The TFE job then walks its six-phase pipeline, from cluster to rerun validation, as
@@ -531,7 +533,7 @@ failures. These are distinct code paths with distinct watchdogs.
 
 ### The third case: a run that returned normally but executed zero tests
 
-Warning: **Changed**. There is a case that is neither of the
+Warning: **Changed 2026-08-25.** There is a case that is neither of the
 two above, and it used to be filed under the wrong one. If the suite subprocess
 crashes at *startup* — before any test runs — `_execute()` still returns normally. So `do_all` used to set `JobState.COMPLETED`. The job landed in the **done**
 queue reading `completed` while carrying `0 passed / 0 failed / 0 errors / 0 skipped`.
@@ -577,7 +579,7 @@ until the clock catches up.
 
 The shell script may be missing or the pytest invocation may fail before running
 any tests. Check `/tmp/{suite}-junit-*.xml` for partial output. Check the FastAPI
-log for `[TestSuiteJob] Running: bash...` lines showing the exact command.
+log for `[TestSuiteJob] Running: bash ...` lines showing the exact command.
 
 Common causes:
 - **Script path wrong**: `SUITE_SCRIPTS` dict in `job.py` points at a moved script

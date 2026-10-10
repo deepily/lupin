@@ -1,6 +1,6 @@
 # WebSocket Event System Documentation
 
-**Date**: · **Revised**: (CC transcript console events; stale event count removed)
+**Date**: 2026.03.20 · **Revised**: 2026.09.27 (CC transcript console events; stale event count removed)
 **Source of truth**: `lupin-app.ini` key `websocket available events`, `src/cosa/rest/routers/websocket.py`
 **Status**: Active
 
@@ -8,7 +8,7 @@
 
 The allow-list is the `websocket available events` key in `lupin-app.ini` (`src/conf/lupin-app.ini:1729`). And **that key is the only authority**. A name absent from it is dropped at subscribe time while auth still reports success (see `websocket_manager.py` `connect()`, and the in-place comment beside the validation). Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
 
-**Count, and why this sentence no longer states one**. This document used to open "The system defines **22 events**". Which was wrong when read: the INI key listed **25**. `websocket-configuration.md` carries a third figure, an 18-name copy of the list. Three documents, three counts, and nothing reconciling them — so the count is not restated here.
+**Count, and why this sentence no longer states one**. This document used to open "The system defines **22 events**". Which was wrong when read on 2026.09.27: the INI key listed **25**. `websocket-configuration.md` carries a third figure, an 18-name copy of the list. Three documents, three counts, and nothing reconciling them — so the count is deliberately not restated here.
 
 Derive the list through the reader the server itself uses. And compare **set equality** against a committed literal. A count is the weakest possible assertion, since it passes just as happily if a name is misspelled:
 
@@ -17,8 +17,8 @@ from cosa.config.configuration_manager import ConfigurationManager
 names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
-Verified: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in the first build phase** of the console-tee feature, and are **not in it yet**.
-The plan is `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. They must be appended with `", "` exactly: the reader is a bare `value.split( ", ")` with no per-token strip. So a comma without a space mangles the new name *and* the one before it, silently. See [`websocket-architecture.md`](websocket-architecture.md) § CC Transcript Console Channel.
+Verified 2026.09.27: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in the first build phase** of the console-tee feature, and are **not in it yet**.
+The plan is `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. They must be appended with `", "` exactly: the reader is a bare `value.split( ", " )` with no per-token strip. So a comma without a space mangles the new name *and* the one before it, silently. See [`websocket-architecture.md`](websocket-architecture.md) § CC Transcript Console Channel.
 
 ### Event Summary Table
 
@@ -237,7 +237,7 @@ Broadcast when a user submits a response to a response-required notification. Al
 
 ### `commons_activity`
 
-**`NEW`** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` (not in this tree).
+**NEW 2026-05-14** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
 
 Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "commons_activity"`. Fired by `CommonsActivityWatcher` (FastAPI-side daemon in `src/cosa/rest/commons_activity_watcher.py`) on each ~1s tick when new entries land in the commons store on any non-excluded topic. Recipient is resolved best-effort from `metadata.sender_user_id` first, then a bridge-owner lookup keyed by `sender_session_id`; falls back to broadcast-to-all-authenticated-WS in single-user dev.
 
@@ -268,8 +268,8 @@ Client handling: `notifications.js::_handleCommonsActivityWS()` prepends the new
 
 ### `speakerphone_changed`
 
-**Renamed** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor.
-See `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`. Broadcast on every speakerphone-mode toggle so all connected UI tabs sync. In solo mode, activating one session displaces any other active session; in chorus mode, multiple sessions can be simultaneously active.
+**Renamed 2026-05-13** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor.
+See [`../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/). Broadcast on every speakerphone-mode toggle so all connected UI tabs sync. In solo mode, activating one session displaces any other active session; in chorus mode, multiple sessions can be simultaneously active.
 
 Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "speakerphone_changed"`. Origin: `src/cosa/rest/routers/speakerphone.py`, which emits at two sites.
 Site (a) is the displaced-other-session push, sent when a different session previously held the slot in solo mode.
@@ -442,7 +442,7 @@ A window's edge is where they can differ: the live index may still remember a ca
 **A block's `kind` comes from the content block's type, never from the record's role**. In a census of 8,115 records across four recent lupin transcripts, **760 of the 1,026 `user` records carried tool results**. A role-based mapping would render three quarters of them as fake human turns.
 
 **`kind` decides the renderer, and prose and tool content do not share one**. `text` renders as markdown. `tool_call`, `tool_result` and `thinking` render as **plain text** (`<pre>` / `textContent` on the web), collapsed and truncated.
-`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is open-ended.
+`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is deliberately open-ended.
 So a switch over three literals with no fallback would render nothing, silently, in the one surface whose whole job is to show everything.
 The risk here is **mangling, not injection**.
 A markdown renderer turns a raw file dump into markup, so `#` becomes a heading and a diff renders wrong.
@@ -466,7 +466,7 @@ A markdown renderer turns a raw file dump into markup, so `#` becomes a heading 
 | `ended` | The **seat** exited — driven by the `SessionEnd` hook, with a staleness fallback for a seat that dies without firing it | stop expecting frames. The pane is final, not merely quiet |
 | `rotated` | The `file_epoch` changed: a `/clear` swapped the transcript path, or the file was truncated in place | drop the buffer and offset, re-fetch the backlog over REST |
 | `epoch_mismatch` | The watch named an epoch that is no longer current | same as `rotated` — clear and re-fetch. **No blocks accompany this frame** |
-| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Two reasons today: `not_found` — no such seat, or its transcript file is not here. `admin_only` — the caller's session does not hold the admin role (since; before that a non-admin watch got a generic `error` frame, which a refused `cc_transcript_unwatch` still gets). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry. The web pane's status line reads **"Session not found"** for `not_found` and "Watch refused" for any other or missing reason |
+| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Two reasons today: `not_found` — no such seat, or its transcript file is not here. `admin_only` — the caller's session does not hold the admin role (since 2026-10-03; before that a non-admin watch got a generic `error` frame, which a refused `cc_transcript_unwatch` still gets). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry. The web pane's status line reads **"Session not found"** for `not_found` and "Watch refused" for any other or missing reason |
 
 A **real idle seat** is not refused: its transcript exists, so it resolves and reads `live` even with nothing new to send.
 
@@ -656,14 +656,14 @@ Warning: **This table used to say `to_queue: "todo"` / `"run"` / `"done"` / `"de
 field does not exist**. `emit_job_state_transition()` (`src/cosa/rest/queue_util.py:65-71`)
 emits exactly `job_id`, `from_state`, `to_state`, `timestamp`, and an optional `metadata` —
 never `to_queue`. Measured live on `:7999`: a submitted job produces `pending`->`queued`,
-`queued`->`running`, `running`->`completed`. Two consumers had been reading the phantom field with a `.get( "to_queue", "?")` default.
-They printed `? -> ?` on every transition since the rename, and that has been corrected.
+`queued`->`running`, `running`->`completed`. Two consumers had been reading the phantom field with a `.get( "to_queue", "?" )` default.
+They printed `? -> ?` on every transition since the rename, and that was corrected 2026-08-24.
 
-The following event was renamed during the Speakerphone solo/chorus refactor (the solo/chorus refactor, `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
+The following event was renamed during the 2026-05-13 Speakerphone solo/chorus refactor (the solo/chorus refactor, `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
 
 | Deprecated Event | Replacement | Rename Date |
 |-----------------|-------------|-------------|
-| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) | |
+| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) | 2026-05-13 |
 
 The deprecated name is `NOT` in the `valid_types` whitelist; pushing it returns HTTP 400. The multiplexer `SenderStore` accepts both names client-side as a **forward-compat bridge** in case the event is ever re-renamed back. See `speakerphone_changed` entry above for details.
 
@@ -695,7 +695,7 @@ Eviction takes the oldest slot with no connected holder. A connected slot is nev
 the number of connected holders (one warning per crossing) and settles back at the next write.
 Without an `ack` the buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
 
-`resume_complete` is **not** in `websocket available events`: the endpoint
+`resume_complete` is deliberately **not** in `websocket available events`: the endpoint
 sends it directly, like `auth_success`, and it never passes through the subscription
 filter. Listing it would imply a path that does not exist.
 
@@ -715,7 +715,7 @@ Constants live in `src/cosa/rest/routers/websocket.py`.
 | 4001 | `CLOSE_CODE_AUTH_INVALID_TOKEN`       | Invalid / expired / malformed token. Bad `auth_request` envelope | Auth flow on `/ws/queue/{session}` rejects the supplied token (any of: malformed JSON, missing `token` field, empty token, signature failure, `TokenExpiredException`) | `notifications.js` attempts a single `refreshAccessToken()` call first. On refresh-success, `manualRetry()` runs on both channels (no banner shown). On refresh-failure, the auth-permanent banner is shown ("Authentication failed — please log in again."). |
 | 4002 | `CLOSE_CODE_AUTH_SESSION_CONFLICT`    | Single-session-per-user policy displaced this connection | A second connection arrives for a user already connected, `AND` `websocket enforce single session per user = True`. The old session receives 4002. | Banner: "Another session has taken over. Refresh to reclaim." Channel does `NOT` auto-retry. |
 | 4003 | `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED` | RBAC reject on one or more `subscribed_events` | Reserved — no current branch emits 4003. The audio path filters denied events silently today. Reserved for future RBAC enforcement. | Banner: "Permission denied for one or more notification streams." Channel does `NOT` auto-retry. |
-| 4004 | `CLOSE_CODE_SUPERSEDED` | **Superseded**, reason `"superseded"` | A newer `/ws/queue` connection claimed this socket's `( user_id, device_id)` slot. The old socket is closed `AND` fully deregistered. A half-dead socket left registered would make the device read as connected and silently suppress its FCM wake. Emitted only for mobile sessions, the only ones holding a slot; a mobile client that sent no `device_id` holds none and is never superseded. | Permanent: the client must `NOT` reconnect this socket. Warning: **A `NEW` code**. 4001 is auth failure, which the browser answers with a meaningless token refresh. 4003 is reserved server-side but live on the client — `QueueTransport.ts` lists it in `PERMANENT_CLOSE_CODES` and `notifications.js` renders it "Permission denied…". A reserved server code can still be a spoken-for client one. Browsers do not yet list 4004, so it falls to their default close handling; they cannot receive it today because they hold no slot. |
+| 4004 | `CLOSE_CODE_SUPERSEDED` | **Superseded**, reason `"superseded"` | A newer `/ws/queue` connection claimed this socket's `( user_id, device_id )` slot. The old socket is closed `AND` fully deregistered. A half-dead socket left registered would make the device read as connected and silently suppress its FCM wake. Emitted only for mobile sessions, the only ones holding a slot; a mobile client that sent no `device_id` holds none and is never superseded. | Permanent: the client must `NOT` reconnect this socket. Warning: **A new code on purpose.** 4001 is auth failure, which the browser answers with a meaningless token refresh. 4003 is reserved server-side but live on the client — `QueueTransport.ts` lists it in `PERMANENT_CLOSE_CODES` and `notifications.js` renders it "Permission denied…". A reserved server code can still be a spoken-for client one. Browsers do not yet list 4004, so it falls to their default close handling; they cannot receive it today because they hold no slot. |
 
 For comparison, the standard close codes the server still uses unchanged:
 

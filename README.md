@@ -6,19 +6,19 @@
 
 *Named after Arsène Lupin, the gentleman thief. The **AF** is **Agent Factory** -- and, yes, the other thing too.*
 
-**Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code so a person who can't type can still drive an agentic coding session as a first-class UX citizen. Not just ride along as a passenger. And that's cool AF**.
+> **Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code so a person who can't type can still drive an agentic coding session as a first-class UX citizen -- not just ride along as a passenger. And that's cool AF.**
+>
+> -- R. P. Ruiz, *[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
 
--- R. P. Ruiz, *[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
-
-**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back. With Bayesian trust learning, fine-tuned intent routing, and solution caching built in**.
+**A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.2.0** (dev) | License: [Apache 2.0](`LICENSE`)
+Current version: **v0.2.0** (dev) | License: [Apache 2.0](LICENSE)
 
 ---
 
-I can't type. That constraint is why this isn't a position paper -- since March 2025 I've put roughly a million lines of AI-generated code into production. And typed almost none of it.
+I can't type. That constraint is why this isn't a position paper -- since March 2025 I've put roughly a million lines of AI-generated code into production, and typed almost none of it.
 
 ---
 
@@ -33,9 +33,9 @@ I can't type. That constraint is why this isn't a position paper -- since March 
 ## Came here from the articles?
 
 - **The workflow corpus** -- 51 canonical workflow documents in [planning-is-prompting](https://github.com/deepily/planning-is-prompting/tree/main/workflow), the methodology repo this one runs on. In-repo: [agentic-voice-workflow.md](src/workflow/agentic-voice-workflow.md).
-- **The SWE team role definitions** -- [spin-up-swe-team/`SKILL`.md](.claude/skills/spin-up-swe-team/`SKILL`.md) is the activation. The per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
-- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's L1-L5, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me. And what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
-- **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure. The transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
+- **The SWE team role definitions** -- [spin-up-swe-team/SKILL.md](.claude/skills/spin-up-swe-team/SKILL.md) is the activation; the per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
+- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's L1-L5, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
+- **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure; the transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
 
 ---
 
@@ -111,7 +111,7 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ## What's new in v0.2.0 (dev)
 
-v0.2.0 (August 2026, in progress) drove the vague-request demo path end to end -- "make me a podcast about that thing I was researching". And gave podcast and presentation approval gates a **fail-open** timeout that discloses up front that silence continues. Its second half turned the instruments on themselves: every test tier now names the tree its green was earned on, the coverage frame widened from `cosa` alone to six packages entered by directory path (pulling ~40,581 previously invisible lines into the denominator). And a `--cov` run that cannot attribute its own number is refused outright.
+v0.2.0 (August 2026, in progress) drove the vague-request demo path end to end -- "make me a podcast about that thing I was researching" -- and gave podcast and presentation approval gates a **fail-open** timeout that discloses up front that silence continues. Its second half turned the instruments on themselves: every test tier now names the tree its green was earned on, the coverage frame widened from `cosa` alone to six packages entered by directory path (pulling ~40,581 previously invisible lines into the denominator), and a `--cov` run that cannot attribute its own number is refused outright.
 
 Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
 
@@ -119,7 +119,7 @@ Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION
 
 ## Agent ecosystem
 
-**23 specialized agent types** -- from sub-second sync responders to long-running autonomous research pipelines. All routed through fine-tuned small models and unified by a single voice-first queue system.
+**23 specialized agent types** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
 
 One counting note, because the articles use a different unit. The 23 below are agent **types** -- classes in the codebase, counted from the four tables. When the articles talk about *seventeen agents*, they mean fleet **personas**: the named seats a live Claude Code session sits in, each with its own voice. Types are what the system can do; personas are who is on shift. Neither number contradicts the other.
 
@@ -146,7 +146,7 @@ One counting note, because the articles use a different unit. The 23 below are a
 | ResearchToPodcastAgent | Chained research-to-podcast pipeline |
 | PresentationGeneratorAgent | Multi-phase pipeline: outline → elaborate → render → deliver (Phases 1-8) |
 | ResearchToPresentationAgent | Chained research-to-presentation pipeline |
-| ClaudeCodeAgent | Claude Agent SDK tasks (bounded or interactive mode) |
+| ClaudeCodeAgent | Claude Agent SDK tasks (BOUNDED or INTERACTIVE mode) |
 | SWETeamAgent | 4-phase dev team: Lead, Coder, Tester, Trust Proxy |
 
 ### Auto-recovery agents (self-healing via Claude Agent SDK + worktree isolation)
@@ -177,8 +177,8 @@ No other platform closes the voice loop this completely:
 - **Browser to agents**: Dual-channel WebSocket architecture (queue events + audio streaming) with ASR (Whisper) to TTS pipeline, end to end
 - **Agents to developer tools**: 6 Claude Code system hooks (`PreToolUse`, `PostToolUse`, `Notification`, `Stop`, `PermissionRequest`, `UserPromptSubmit`) bridge voice into every coding session
 - **Developer tools back to browser**: cosa-voice MCP server provides 5 voice tools (`notify`, `converse`, `ask_yes_no`, `ask_multiple_choice`, `ask_open_ended_batch`)
-- **Session continuity**. Stable session IDs survive context clears via write-once atomic lockfile. No identity drift
-- **Stop hook gisting**. Ultra-short TTS summaries of completed work via frontier model distillation
+- **Session continuity**: Stable session IDs survive context clears via write-once atomic lockfile -- no identity drift
+- **Stop hook gisting**: Ultra-short TTS summaries of completed work via frontier model distillation
 - **Voice injection**: tmux-based voice input into idle Claude Code sessions -- speak and it types
 
 ### Intent routing via fine-tuned small models -- not prompt engineering
@@ -186,15 +186,15 @@ No other platform closes the voice loop this completely:
 While most platforms route via system prompts or keyword matching, Lupin fine-tunes:
 
 - 39,871 training examples across 35 command intents
-- PEFT/LoRA on Mistral 8B with 8 bit AutoRound quantization. Local GPU inference, zero API calls for routing
+- PEFT/LoRA on Mistral 8B with 8 bit AutoRound quantization -- local GPU inference, zero API calls for routing
 - Sub-second classification with GSM8K-validated post-quantization math reasoning
-- Result: routing that is faster, cheaper. And more reliable than prompt-based alternatives
+- Result: routing that is faster, cheaper, and more reliable than prompt-based alternatives
 
 ### Solution snapshot memory -- agents that learn from their own work
 
 When an agent solves a problem, the solution is embedded and cached in the vector store. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
 
-**As of v0.1.9 the backend is PostgreSQL + pgvector** (cutover; ~202,000 vectors backfilled, dual-engine equivalence proven, exact scan chosen over HNSW). The LanceDB path remains behind a one-flag rollback. The speedup numbers below are the original file-based → LanceDB benchmark that motivated a real vector store in the first place:
+**As of v0.1.9 the backend is PostgreSQL + pgvector** (cutover 2026-07-07; ~202,000 vectors backfilled, dual-engine equivalence proven, exact scan chosen over HNSW). The LanceDB path remains behind a one-flag rollback. The speedup numbers below are the original file-based → LanceDB benchmark that motivated a real vector store in the first place:
 
 | Operation | File-Based | Vector store | Speedup |
 |-----------|------------|--------------|---------|
@@ -216,12 +216,12 @@ Local GPU embeddings (CodeRankEmbed + nomic-embed-text-v1.5) vs OpenAI API:
 The first decision proxy for AI agents with academic-grade statistical rigor:
 
 - **Universal Prediction Engine**: 7 prediction slices with 87 unit tests and 21 end-to-end tests
-- **Bayesian Beta-Bernoulli trust model**. Per-agent trust learning with conjugate prior updates
+- **Bayesian Beta-Bernoulli trust model**: Per-agent trust learning with conjugate prior updates
 - **Thompson Sampling**: Exploration-exploitation balance for when to auto-approve vs. escalate
-- **Conformal prediction**: Calibrated confidence intervals. Not guesses, statistical guarantees
+- **Conformal prediction**: Calibrated confidence intervals -- not guesses, statistical guarantees
 - **LanceDB-backed preference embeddings**: Semantic similarity with response_type filtering
 - **L1-L5 trust escalation**: Five trust levels from "always ask" to "full autonomy" with circuit breaker pattern
-- **Morning coffee batch review**. Non-urgent decisions queued for human review at your convenience
+- **Morning coffee batch review**: Non-urgent decisions queued for human review at your convenience
 - **Ratification API**: Post-hoc approval with trust feedback loop
 
 ### Battle-tested -- 29,000+ automated tests
@@ -239,13 +239,13 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 | **Total authored test cases** | **29,167** | 26,743 Python + 2,424 TypeScript |
 | Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
 
-Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, **re-derived** — the previous table was a snapshot. Rows are grouped by directory so anyone can reproduce the number. WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number. The extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote**.
+Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`, **re-derived 2026-08-28** — the previous table was a 2026-08-07 snapshot. Rows are grouped by directory so anyone can reproduce the number; WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number; the extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
 
-**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured across the unit and CoSA tiers, with the gate floor set at 98. The floor is the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime, whose paths execute under the test-server tiers that are not yet folded into this figure. So the number is honest about the half of the system it can see. And explicit that a whole-system figure does not yet exist.
+**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured 2026-08-26 across the unit and CoSA tiers, with the gate floor set at 98. The floor is deliberately the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime, whose paths execute under the test-server tiers that are not yet folded into this figure — so the number is honest about the half of the system it can see, and explicit that a whole-system figure does not yet exist.
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
-**The rule behind all of it: the human is the designer and the user. Never the tester**. "Please try it and tell me if it works" is a prohibited sentence. That is not a preference. For a user who cannot type, manual QA is not an inconvenient fallback -- it is a fallback that does not exist. So the pyramid had to go all the way up. The test suite is an accessibility affordance: it is what lets one person who cannot manually click through a UI still know the software works.
+**The rule behind all of it: the human is the designer and the user -- never the tester.** "Please try it and tell me if it works" is a prohibited sentence. That is not a preference. For a user who cannot type, manual QA is not an inconvenient fallback -- it is a fallback that does not exist. So the pyramid had to go all the way up. The test suite is an accessibility affordance: it is what lets one person who cannot manually click through a UI still know the software works.
 
 ---
 
@@ -264,14 +264,14 @@ src/scripts/run-fastapi-lupin.sh          # FastAPI on port 7999
 # Run tests
 pytest src/tests/unit/                     # 16,247 unit tests (see the table above)
 src/scripts/run-websocket-smoke-tests.sh   # 50 WebSocket tests
-src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container,:8000)
+src/tests/run-integration-tests.sh --bg -v # Integration gate (dual-container, :8000)
 src/scripts/run-e2e-ui-tests.sh --bg -v    # 663 Playwright tests incl. visual regression
 
 # Install cosa-voice MCP server (for Claude Code voice I/O)
 claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.py
 ```
 
-**Config**: `src/conf/lupin-app.ini` | **Docker**: `docker build -f docker/lupin/Dockerfile.` | **GSM8K**: `src/scripts/run-gsm8k.sh --help`
+**Config**: `src/conf/lupin-app.ini` | **Docker**: `docker build -f docker/lupin/Dockerfile .` | **GSM8K**: `src/scripts/run-gsm8k.sh --help`
 
 ---
 
@@ -285,20 +285,20 @@ claude mcp add cosa-voice -- python ${LUPIN_ROOT}/src/lupin_mcp/cosa_voice_mcp.p
 - [CJ Flow Packaging Guide](src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — how to add new QueueableJob types
 - [cosa-voice MCP Server](src/lupin_mcp/README.md) — MCP server setup and tool reference
 - [Agentic Voice Workflow](src/workflow/agentic-voice-workflow.md) — building new agents with voice I/O
-- [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds. The arbiter and how to bounce it
+- [Fleet Liveness & Task-Store Architecture](src/docs/fleet-liveness-and-task-store-architecture.md) — one store, three readers; heartbeat holds; the arbiter and how to bounce it
 - [The Worker-Poke Flag Is On and Cannot Fire](src/rnd/v0.2.0/2026.08.15-worker-poke-flag-cannot-fire.md) — why enabling worker pokes changed nothing: `stuck` means repeated cap-reached, and the staleness tier is manager-only
-- [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on. And why
-- [Cascade section 4 Findings](src/rnd/v0.2.0/2026.08.15-cascade-section4-findings.md) — Krishna's line-by-line trace of v1's argument interview against v2's `needs_input`
-- [v2 as the Brain in the Todo Queue](src/rnd/v0.2.0/2026.08.15-v2-as-the-brain-in-todo-queue.md). María's plan for v2 owning the todo queue. The document Clayton's three-round cascade reviewed
-- [v2 Ask Slowdown Investigation](src/rnd/v0.2.0/2026.08.17-v2-ask-slowdown-investigation.md) — the calls that looked like a degrading model server are the todo agent's normal ~65s cost. Why the run died at the 120s read wall. And what the re-run actually costs
-- [Review: the Secret Scanner as a Pre-Commit Control](src/rnd/v0.2.0/_archive/F/2026.08.17-review-of-the-secret-scanner-precommit-control.md) — the instrument is sound and the pasted-hash hole is already closed. What is left is that the standing scan reads a ref 645 commits behind the branch we commit to. And that the scanner and the doc-viewer detector no longer agree on what a secret is
+- [Cost Model: Bounded CC vs Firewalled SDK](src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md) — which LLM path an agent lands on, and why
+- [Cascade §4 Findings](src/rnd/v0.2.0/2026.08.15-cascade-section4-findings.md) — Krishna's line-by-line trace of v1's argument interview against v2's `needs_input`
+- [v2 as the Brain in the Todo Queue](src/rnd/v0.2.0/2026.08.15-v2-as-the-brain-in-todo-queue.md) — María's plan for v2 owning the todo queue; the document Clayton's three-round cascade reviewed
+- [v2 Ask Slowdown Investigation](src/rnd/v0.2.0/2026.08.17-v2-ask-slowdown-investigation.md) — the calls that looked like a degrading model server are the todo agent's normal ~65s cost; why the run died at the 120s read wall, and what the re-run actually costs
+- [Review: the Secret Scanner as a Pre-Commit Control](src/rnd/v0.2.0/_archive/F/2026.08.17-review-of-the-secret-scanner-precommit-control.md) — the instrument is sound and the pasted-hash hole is already closed; what is left is that the standing scan reads a ref 645 commits behind the branch we commit to, and that the scanner and the doc-viewer detector no longer agree on what a secret is (row 85959aaf)
 
 ### Agentic jobs, recovery & test scheduling
 
 Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure auto-fix), and the TestSuiteJob scheduler share a common foundation in `src/cosa/agents/shared/`. See the **[Agents subsystem documentation](src/docs/agents/README.md)** for the full subsystem:
 
 - [Bug Fix Expediter Guide](src/docs/agents/bug-fix-expediter-guide.md) — diagnose → propose → fix → git → retry pipeline
-- [Test Fix Expediter Guide](src/docs/agents/test-fix-expediter-guide.md). Cluster → diagnose → propose → fix → git → rerun pipeline
+- [Test Fix Expediter Guide](src/docs/agents/test-fix-expediter-guide.md) — cluster → diagnose → propose → fix → git → rerun pipeline
 - [Test-Suite Scheduling Guide](src/docs/agents/test-suite-scheduling-guide.md) — TestSuiteJob + `/schedule-tests` skill
 - [Shared Fix Primitives Reference](src/docs/agents/shared-fix-primitives-reference.md) — PlanWriter, GitStrategist, FixExecutor
 
@@ -312,13 +312,13 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
 
-**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — snapshot of LoC distribution with mermaid diagram, 60/40 Python split, docstring-ratio observations, and operational implications of the CoSA-never-commit rule.
+**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — 2026-04-12 snapshot of LoC distribution with mermaid diagram, 60/40 Python split, docstring-ratio observations, and operational implications of the CoSA-never-commit rule.
 
 ---
 
 ## Version history
 
-**v0.2.0** (August 2026, in progress) — The demo that had to survive a real room. A vague spoken request ("make me a podcast about that thing I was researching") driven end to end through the Runtime Argument Expeditor, with first-turn document disambiguation, a shared keyword pre-filter and hard cap on the fuzzy matcher. And the search-paths key emptied after `/src` was found flooding the matcher with 6,670 candidates. Human approval gates for podcast and presentation now **fail open** — 600-second wait, timeout resolves the default. And the prompt discloses that silence continues — proven live on `:8000` in both the human-answered and silent-timeout directions. A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real playback asserted under a genuine click gesture. Presentation gained author-set slide-count override, up-front chunking of large decks behind a pinned progress bubble. And a fix for a truncation detector that was failing open on an unknown `stop_reason`. Cross-session DM verbosity became its own experiment: a two-arm pilot, a quality judge. And a **literal freeze protocol** (extract → placehold → validate → restore) with 494 tests, byte-exact identity round-trip across all 2,951 real messages. And every guard falsified by revert. Root causes that were not where anyone looked: an empty podcast script from a curly brace in the model's closing remarks. A demo crash caused by that morning's own label fix; Spanish prosody **refuted** as marker loss when it was a measurement bug. 24 ungated disambiguation tests found and closed; 33 stray heartbeat holds swept. The second half of the branch turned the instruments on themselves: every test tier now reports the sha it **started** on as well as the one it ended on (a run straddling a mid-run commit says so rather than averaging two trees). The coverage frame widened from `cosa` alone to six packages by directory path, pulling **~40,581 previously invisible lines**. The heartbeat/Stop-hook, the MCP server, the arbiter — into a denominator that had been passing green without them. A `--cov` run with no isolated data file is now **refused outright** after a shared file let one tier report 96.59% with ~28,000 statements missing. A conftest loading twice was found to have made **every network-access marker in the repo inert** on a directory run. Cancelled jobs were found resurrecting across a restart, including a metered 105-minute evaluation; and V1 was excised in one deliberate pass. **29,167 tests, 98.46% coverage**.
+**v0.2.0** (August 2026, in progress) — The demo that had to survive a real room. A vague spoken request ("make me a podcast about that thing I was researching") driven end to end through the Runtime Argument Expeditor, with first-turn document disambiguation, a shared keyword pre-filter and hard cap on the fuzzy matcher, and the search-paths key emptied after `/src` was found flooding the matcher with 6,670 candidates. Human approval gates for podcast and presentation now **fail open** — 600-second wait, timeout resolves the default, and the prompt discloses that silence continues — proven live on `:8000` in both the human-answered and silent-timeout directions. A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real playback asserted under a genuine click gesture. Presentation gained author-set slide-count override, up-front chunking of large decks behind a pinned progress bubble, and a fix for a truncation detector that was failing open on an unknown `stop_reason`. Cross-session DM verbosity became its own experiment: a two-arm pilot, a quality judge, and a **literal freeze protocol** (extract → placehold → validate → restore) with 494 tests, byte-exact identity round-trip across all 2,951 real messages, and every guard falsified by revert. Root causes that were not where anyone looked: an empty podcast script from a curly brace in the model's closing remarks; a demo crash caused by that morning's own label fix; Spanish prosody **refuted** as marker loss when it was a measurement bug. 24 ungated disambiguation tests found and closed; 33 stray heartbeat holds swept. The second half of the branch turned the instruments on themselves: every test tier now reports the sha it **started** on as well as the one it ended on (a run straddling a mid-run commit says so rather than averaging two trees); the coverage frame widened from `cosa` alone to six packages by directory path, pulling **~40,581 previously invisible lines** — the heartbeat/Stop-hook, the MCP server, the arbiter — into a denominator that had been passing green without them; a `--cov` run with no isolated data file is now **refused outright** after a shared file let one tier report 96.59% with ~28,000 statements missing; a conftest loading twice was found to have made **every network-access marker in the repo inert** on a directory run; cancelled jobs were found resurrecting across a restart, including a metered 105-minute evaluation; and V1 was excised in one deliberate pass. **29,167 tests, 98.46% coverage.**
 
 *Earlier releases (v0.1.9 back to v0.1.3) have moved to [VERSION-HISTORY.md](VERSION-HISTORY.md).*
 
@@ -328,15 +328,15 @@ Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.
 
 ## Project status
 
-Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning. And Bayesian decision theory into a production-grade stack backed by 29,167 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle), full CI discipline. And a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
+Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engineer, it combines voice-first agent orchestration, PEFT fine-tuning, and Bayesian decision theory into a production-grade stack backed by 29,167 automated tests across seven tiers (Python unit, TypeScript unit, WebSocket, smoke, integration, Playwright E2E, parity oracle), full CI discipline, and a FastAPI + PostgreSQL + pgvector architecture. Through a series of ambitious refactorings made possible by Claude Code and the [Planning is Prompting](https://github.com/deepily/planning-is-prompting) methodology, Lupin has evolved from single-user PoC sketches into a multi-user platform running on GCP.
 
 ---
 
 ## The wall of technologies
 
 Fifteen months, two repositories, 1,577 research and design documents. This is not a
-capability boast. It's a map of the talks that aren't being given. **Every item on it is
-something that had to be learned, chosen, measured, or thrown away**.
+capability boast — it's a map of the talks that aren't being given. **Every item on it is
+something that had to be learned, chosen, measured, or thrown away.**
 
 Semantic Caching · Mimetic Drift · PEFT/LoRA fine-tuning · Synthetic Training Data
 Generation · Mistral 8B · Phi-4 · Human in the Loop · vLLM ·
@@ -379,7 +379,7 @@ receipts
 **The agentic job system** — CJ Flow queue · 23 specialized agent types · synchronous
 sub-second responders (math, calendar, CRUD, calculator, weather, receptionist) ·
 long-running async agents (deep research, podcast generation, presentation generation,
-chained research-to-artifact pipelines) · the Runtime Argument Expeditor. Which notices
+chained research-to-artifact pipelines) · the Runtime Argument Expeditor, which notices
 what you didn't tell it and asks by voice · scheduled jobs surviving server bounces
 
 **Trust and autonomy** — Bayesian Beta-Bernoulli trust model with conjugate prior updates ·
@@ -406,7 +406,7 @@ installation wizard · the KISS brevity mandate
 
 **The automate-everything test pyramid** — 29,167 authored test cases across seven tiers ·
 Python unit · TypeScript unit · integration · smoke · end-to-end UI · WebSocket · parity
-oracle · 100% line, branch. And function coverage gates · Playwright with 12-page visual
+oracle · 100% line, branch, and function coverage gates · Playwright with 12-page visual
 regression · interactive proxy testing driven by a Phi-4 fuzzy script matcher · hash-chained
 attestation ledger · neutral-directory execution to defeat false greens · revert-to-verify
 discipline (**an assertion isn't a guard until you delete what it guards and watch it go
@@ -420,4 +420,4 @@ GitHub Actions · Firebase push provisioning
 
 ## License
 
-[Apache 2.0](`LICENSE`)
+[Apache 2.0](LICENSE)

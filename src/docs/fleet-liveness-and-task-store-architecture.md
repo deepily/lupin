@@ -1,7 +1,7 @@
 # Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)
 
 **Status**: canonical architecture reference.
-It was established right after the store-canonical cutover went live.
+It was established 2026-06-17, right after the store-canonical cutover went live.
 
 **Scope**: how the Lupin fleet tracks owed work and keeps multi-session ("fleet") agents alive and driven to completion.
 It covers the **unified task-store**, the **heartbeat self-poke**, the **out-of-band arbiter** and the **human UI card**.
@@ -22,9 +22,8 @@ It does so without long idle stalls and without burning context re-reading a tas
 Every earlier liveness bug traced to **two sources of truth**.
 One was the native Claude Code harness task list, which is transcript-reconstructed and vocabulary-poor.
 The other was the unified store, kept in sync by a fragile mirror.
-The **store-canonical cutover** collapsed that to one source.
-The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`, which is **removed** from the tree (cascade review, build ACs, cutover log).
-Find the commit that deleted it with `git log --diff-filter=D -- src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`.
+The **store-canonical cutover (2026-06-17)** collapsed that to one source.
+The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`)* (cascade review, build ACs, cutover log).
 A separate plan document was intended and never authored.
 
 ---
@@ -45,7 +44,7 @@ flowchart TD
 
 - **The store is the single source of truth**.
   Owed work lives here and nowhere else: your tasks, work you assign, decisions, gates, bugs and review-requests.
-  The native harness task list is **no longer** the liveness source, because the cutover jettisoned it.
+  The native harness task list is **no longer** the liveness source, because the 2026-06-17 cutover jettisoned it.
 - The three readers cannot disagree about "who owes what", because they read the same store with the same query shape.
   The old two-sources-of-truth bug is eliminated structurally, not patched.
 
@@ -77,7 +76,7 @@ It has the same root, with internal spaces turned into a separator (`dm-mr_radio
 Noisy free-text human input resolves via `normalize_for_match`, which is the root minus spaces.
 
 **Never** hand-roll a `.lower()` or `re.sub` persona normalizer.
-Divergence here is the exact bug that produced the false-idle P0.
+Divergence here is the exact bug that produced the 2026-06-18 false-idle P0.
 The read queried `maría`, the store held `maria`, and zero rows matched.
 It also split the DM-topic (`dm-maría` vs `dm-maria`). Authority: `src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md`.
 
@@ -104,7 +103,7 @@ Nothing else changes.
   The card must exist, have asked a question, and be answered (not the timed-out default) with yes.
   It must be posted on the operator's own login (`answered_by`), with a payload naming this row and this move.
   It must be made after the row was parked, and never used.
-  Only then does `refusal_for_admission( unpark_card_ok=True)` let the move through.
+  Only then does `refusal_for_admission( unpark_card_ok=True )` let the move through.
 - **Record**: the server writes its own resolved card id onto the event, over whatever the caller typed.
   That event is the single-use record (`TaskRepository.approval_card_ids_used` counts `parked->queued` events only).
   The `approval_card` key is refused on every other move, and for every caller but a manager's valid un-park, with one text.
@@ -132,7 +131,7 @@ Inputs 2 and 3 are **local / store-independent** and must keep poking even durin
 **The cutover flag**: `heartbeat.owed_source_from_store` in `~/.claude/settings.json`. `False` = old transcript path; `True` = store-count path. Flipping it fleet-wide is the cutover (every session's Stop hook reads it). **Reversible**: flip back to `False` to revert.
 
 **Fail-safe**: when the store is unreachable, times out or answers malformed, `owed_items` contributes 0.
-The hook logs a distinct `heartbeat_store_unreachable` phase and does **not** spurious-poke. Bounce-windows (Rick restarts `:7999` constantly under `--reload`) = no-poke windows.
+The hook logs a distinct `heartbeat_store_unreachable` phase and does **not** spurious-poke. Bounce-windows (Rick restarts `:7999` constantly under `--reload`) = no-poke windows by design.
 
 **Muting the poke** (two switches, either one mutes): `heartbeat.poke_output_enabled = false` in `~/.claude/settings.json` is the hand switch. The fleet switch is a small file an admin flips from a notification client's toolbar (multiplexer or legacy) through `PUT /api/heartbeat/poke-mute`. The Stop hook reads it on every stop through `hooks/lib/heartbeat_poke_mute.py`, so a flip lands on each seat's next stop with no restart. The file sits in the flow-ratio settings folder, which both rest containers already mount. A missing or malformed file reads as not muted, and no timer touches it. While muted, a seat is shown `heartbeat.poke_disabled_message` when that is set. And otherwise a line naming who muted it and when. `heartbeat.enabled` must stay `true` for either message to appear.
 
@@ -184,8 +183,8 @@ So an idle-but-finished or legitimately Rick-gated manager gets false MANAGER-DO
 Mitigations in use: keep management loops under 40 minutes.
 Represent user-gated work as a `gate_class=ricks_court` item transitioned to `blocked_by:[{kind:user}]`.
 
-**The sibling-gate lesson** (Krishna 🦚: three fixes, one family).
-Every arbiter false-positive class fixed had the same signature: **a correctness gate wired into one consumer of a signal but not its siblings**.
+**The sibling-gate lesson** (2026-07-12, Krishna 🦚: three fixes, one family).
+Every arbiter false-positive class fixed on 2026-07-12 had the same signature: **a correctness gate wired into one consumer of a signal but not its siblings**.
 The three fixes were these:
 
 - The blocked-edge roster leg lacked the store-corroboration the ping leg had (`edge_is_store_backed`).
@@ -248,7 +247,7 @@ They boot a persona and read `task_prompt` as their brief.
 **Migration drain** — `src/lupin_cli/claude_code/hooks/lib/task_store_drain.py`: per **active session**, it replays the transcript's owed native items and `task_create`s any missing ones.
 It is idempotent via `correlation_key` and `query_by_correlation_key`, and dry-run by default (`--apply` writes). Includes a per-session **count-parity** check (store owed-count == transcript owed-count). Run before flipping the flag so no session goes dark at cutover.
 
-**Cutover sequence (executed, Rick-supervised)**:
+**Cutover sequence (executed 2026-06-17, Rick-supervised)**:
 1. `drain --apply` → parity 4/4.
 2. verify parity (would_create = 0).
 3. flip `heartbeat.owed_source_from_store=True` in `~/.claude/settings.json`; verify it reads `True`.
@@ -276,7 +275,7 @@ The collision fix (generation-aware correlation keys) makes it safe during the i
 | Arbiter launch | `src/scripts/run-lupin-arbiter-app.sh` + systemd `--user` `lupin-arbiter-app.service` |
 | Cutover flag | `~/.claude/settings.json` → `heartbeat.owed_source_from_store` |
 | Spawn/reap | cosa-voice `spawn_sessions` / `dismiss_sessions` |
-| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover with `git log --diff-filter=D` on that path)* (review + cutover log) |
+| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`)* (review + cutover log) |
 | Arbiter routing | `src/docs/agents/heartbeat-arbiter-routing-guide.md` |
 
 ---
