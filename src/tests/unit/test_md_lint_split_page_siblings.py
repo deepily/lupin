@@ -142,3 +142,17 @@ def test_a_numbered_heading_in_the_page_itself_does_not_resolve_a_lone_page( tmp
     root = str( tmp_path )
     _write( root, "lone.md", "# Lone\n\n## 2. Steps\n\nSee §2 here.\n" )
     assert _bare( root, "lone.md" ) == [ "section reference '§2' has no path" ]
+
+
+def test_a_folder_of_dated_archive_files_beside_an_index_is_not_a_split( tmp_path ):
+    root = str( tmp_path )
+    _write( root, "history.md", "# History\n\nContents.\n" )
+    _write( root, "history/2026-05-03-to-06-history.md", "# May\n\nSee Phase 1 here.\n" )
+    _write( root, "history/2026-04-22-to-24-history.md", "# April\n\n### Phase 1: Start\n" )
+    assert "bare reference 'Phase 1'" in _bare( root, "history/2026-05-03-to-06-history.md" )
+
+
+def test_only_numbered_parts_count_as_siblings( tmp_path ):
+    root = _split_tree( tmp_path )
+    _write( root, "foo/notes.md", "# Notes\n\n### Phase 7: Notes\n" )
+    assert "bare reference 'Phase 7'" in _bare( root, "foo/01-intro.md" )
