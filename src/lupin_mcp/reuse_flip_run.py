@@ -117,6 +117,22 @@ def report_lines( searches, items, repeats ):
     return lines
 
 
+def check_repeats( searches, repeats ):
+    """
+    Refuse a report whose repeats differ from the repeats the records were run with.
+
+    Requires:
+        - searches are the search records of the canary and the run
+    Ensures:
+        - returns None when no record is complete or the highest repeat on the records equals repeats
+    Raises:
+        - DriverRefused naming both numbers when they differ
+    """
+    seen = max( ( s[ "rows" ][ 0 ][ "repeat" ] for s in searches if s[ "status" ] == "complete" ), default=None )
+    if seen is not None and seen != repeats:
+        raise s1.DriverRefused( f"the records were run with {seen} repeats per need, but the report was given --repeats {repeats}" )
+
+
 def _check_options( args ):
     """
     Check the options of a command line before anything is read or sent.
@@ -185,6 +201,7 @@ def main( argv=None ):
         for name in ( f"{prefix}-canary", f"{prefix}-run" ):
             path = env.results_dir / f"{name}.json"
             if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
+        check_repeats( searches, args.repeats )
         print( "\n".join( report_lines( searches, items, args.repeats ) ) )
     return 0
 

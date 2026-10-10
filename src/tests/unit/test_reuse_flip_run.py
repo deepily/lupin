@@ -244,3 +244,19 @@ def test_the_report_leaves_out_a_need_with_fewer_complete_records_than_repeats( 
     runs  = [ r for r in steady( items ) if not ( r[ "member" ] == "n03" and r[ "question" ] in ( "r4", "r5" ) ) ]
     text  = "\n".join( frun.report_lines( runs, items, 5 ) )
     assert "left out as incomplete: n03" in text and "0 of 29 needs flipped" in text
+
+
+def test_a_report_with_other_repeats_than_the_records_carry_is_refused_not_listed_as_incomplete( setup, capsys ):
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000" ) ) == 0
+    capsys.readouterr()
+    for given in ( "3", "7" ):
+        assert frun.cli( setup.args( "report", extra=[ "--repeats", given ] ) ) == 2
+        err = capsys.readouterr().err
+        assert "5 repeats" in err and f"--repeats {given}" in err
+
+
+def test_the_repeat_check_reads_complete_records_only_and_accepts_a_run_with_none():
+    runs = [ search( "n01", 5, status="incomplete" ), search( "n01", 5, status="not_run" ), search( "n02", 3 ) ]
+    frun.check_repeats( runs, 3 )
+    frun.check_repeats( runs[ :2 ], 9 )
+    frun.check_repeats( [], 9 )
