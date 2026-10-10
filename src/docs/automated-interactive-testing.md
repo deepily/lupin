@@ -1,11 +1,11 @@
 # Automated Interactive Testing Guide
 
-> Comprehensive reference for Lupin's notification proxy testing system.
-> Covers architecture, strategy chain, test profiles, Q&A scripts, base classes,
-> scenario authoring, CLI reference, and troubleshooting.
->
-> **Last Updated**: 2026-02-14
-> **Status**: Current
+Comprehensive reference for Lupin's notification proxy testing system.
+Covers architecture, strategy chain, test profiles, Q&A scripts, base classes,
+scenario authoring, CLI reference, and troubleshooting.
+
+**Last Updated**: 2026-02-14
+**Status**: Current
 
 ---
 
@@ -33,8 +33,8 @@
 ### What Problem Automated Interactive Testing Solves
 
 Agentic jobs (deep research, podcast generation, CRUD operations) interact with
-users through **response-required notifications**: "What topic should I research?",
-"Are you sure you want to delete this?" These prompts block until a human responds.
+users through **response-required notifications**. Examples are "What topic should I research?"
+and "Are you sure you want to delete this?" These prompts block until a human responds.
 
 Manual testing of these flows is slow, non-repeatable, and requires a human operator
 per run. The **notification proxy** + **test framework** solve this by:
@@ -358,14 +358,17 @@ detected, all entries (universal + agent-scoped) are considered.
 | `open_ended_batch` | Multiple questions on one screen | "Topic? Budget? Audience?" (all at once) |
 | `multiple_choice` | Select from predefined options | "Who is the target audience? [academic/general/technical]" |
 
-#### ⚠️ The document choice card: its options do not exist until run time
+#### The document choice card: its options do not exist until run time
 
-Most `multiple_choice` questions have a fixed option set you can write an answer
-against. The expeditor's **document choice card** — "Which document should I use for
-the …?", shown when the file matcher finds 2-to-cap candidates — does not: its option
-labels are the basenames of whatever documents the user happens to have, discovered
-during the run. **An `answer` naming a file can therefore never match a label.** The
-script matcher is told to *"pick the option label that best aligns with the Q&A
+Warning: most `multiple_choice` questions have a fixed option set you can write an answer
+against. The expeditor's **document choice card** is different. It asks "Which document should I use for
+the …?" and is shown when the file matcher finds 2-to-cap candidates. Its options do not exist until
+run time. The option labels are the basenames of whatever documents the user happens to have, discovered
+during the run.
+
+**An `answer` naming a file can therefore never match a label.**
+
+The script matcher is told to *"pick the option label that best aligns with the Q&A
 script's answer"*, so the entry carries a **directive** instead:
 
 ```json
@@ -377,14 +380,16 @@ script's answer"*, so the entry carries a **directive** instead:
 }
 ```
 
-**A missing entry does not error — the run CANCELS at the card**, which is
+**A missing entry does not error — the run cancels at the card**, which is
 indistinguishable from a user declining. That is exactly what happened to a live
-presentation job on 2026-08-21 (`[Expeditor] User cancelled at arg 'source'`, row
-`9046ef58`); podcast had been able to show the same card since row `bd0ce120` with no
+presentation job on 2026-08-21 (`[Expeditor] User cancelled at arg 'source'`).
+Podcast had been able to show the same card with no
 entry either, and simply never landed on 2+ matches in an automated run.
 
-**The `question_pattern` is a KEY into the code.** It must stay byte-identical to what
-`RuntimeArgumentExpeditor._document_choice_question()` returns for that agent;
+**The `question_pattern` is a key into the code.**
+
+It must stay byte-identical to what
+`RuntimeArgumentExpeditor._document_choice_question()` returns for that agent.
 `src/tests/unit/test_proxy_scripts_answer_the_choice_card.py` derives the question from
 the code and fails if the file disagrees, so the two cannot drift apart in silence.
 Any new agent whose args use the `fuzzy_file_match` handler needs an entry here, and
@@ -589,8 +594,8 @@ Not all fields are required — they depend on the scenario group.
 }
 ```
 
-**Flow**: POST `/api/v2/submit` (`agent router go to mock job`, `voice_command` in `args`) → synchronous response with `submit_details.config` + args → arg
-validation → optional job completion polling
+**Flow**: POST `/api/v2/submit` (`agent router go to mock job`, `voice_command` in `args`). The response is synchronous, with `submit_details.config` + args.
+Then arg validation, then optional job completion polling.
 
 ### Idempotency Considerations
 
@@ -861,7 +866,7 @@ After each test run, the proxy prints statistics:
 3. **Authentication failure** — Proxy logged in with wrong credentials. Check
    `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` and `_PASSWORD`.
 4. **WebSocket not connected** — Check proxy startup output for "connected" message.
-5. **Different user context** — Notifications are user-scoped; the proxy must be logged
+5. **Different user context** — Notifications are user-scoped. The proxy must be logged
    in as the same user (or same email) that the test submits jobs under.
 
 ### Delete Cancelled Instead of Confirmed

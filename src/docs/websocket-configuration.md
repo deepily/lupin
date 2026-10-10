@@ -54,7 +54,9 @@ All WebSocket configuration lives in `src/conf/lupin-app.ini` under the `[Lupin:
 - **Default**: See [Event Catalog](websocket-events.md)
 - **Purpose**: Defines the valid set of event types clients can subscribe to. Subscription requests for events not in this list are rejected. Clients use `"*"` to subscribe to all events.
 
-**No copy of the value is kept here.** This block used to list 18 names under the heading "Current value"; the key held **25** when that was checked on 2026.09.27, and `websocket-events.md` separately claimed 22. A transcribed copy of a config value is a second source of truth that nothing keeps in step, and its being wrong is invisible — it reads exactly like the right answer.
+**No copy of the value is kept here.**
+
+This block used to list 18 names under the heading "Current value". The key held **25** when that was checked on 2026.09.27, and `websocket-events.md` separately claimed 22. A transcribed copy of a config value is a second source of truth that nothing keeps in step. Its being wrong is invisible: it reads exactly like the right answer.
 
 Read it through the reader the server itself uses:
 
@@ -63,9 +65,11 @@ from cosa.config.configuration_manager import ConfigurationManager
 names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
-Added 2026.10.03 (row 8796333b): `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
+Added 2026.10.03: `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
 
-⚠️ **That reader is a bare `value.split( ", " )` with no per-token strip**, so every entry must be separated by a comma **and a space**. A comma alone produces one mangled token — the new name never validates *and neither does the one before it* — and nothing raises, because the list is still non-empty.
+Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
+
+Every entry must be separated by a comma **and a space**. A comma alone produces one mangled token: the new name never validates *and neither does the one before it*. Nothing raises, because the list is still non-empty.
 
 The catalogue of names, with payloads and directions, is in [`websocket-events.md`](websocket-events.md).
 

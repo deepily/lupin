@@ -26,7 +26,7 @@
 Lupin's frontend is a **multi-page application** (MPA) served as static HTML files by FastAPI. Each page is a self-contained HTML document that loads shared CSS and JS files. There is no build step, no transpilation, and no framework.
 
 **Key principles**:
-- Every HTML file works independently — no SPA router
+- Every HTML file works independently — no single-page-application router
 - Auth state lives in `localStorage` (JWT tokens + user data)
 - Shared behavior extracted to `auth.js` (API calls, token management) and `lupin-nav.js` (navigation bar)
 - CSS uses a 4-layer cascade (base → domain → page → nav)
@@ -387,7 +387,7 @@ const NAV_ITEMS = [
 |--------|---------|-------------|
 | `false` | `false` | Always |
 | `true` | `false` | User is logged in |
-| `true` | `true` | User is logged in AND has admin role |
+| `true` | `true` | User is logged in and has admin role |
 
 ### Features
 
@@ -691,12 +691,12 @@ When no data is available:
 
 **Constants**:
 - `SWE_CATEGORIES` — 6 categories: deployment, testing, deps, architecture, destructive, general
-- `TRUST_LABELS` — L1 Shadow, L2 Provisional, L3 Trusted, L4 Autonomous, L5 Full Trust
+- `TRUST_LABELS` — Level 1 Shadow, Level 2 Provisional, Level 3 Trusted, Level 4 Autonomous, Level 5 Full Trust
 
 **Trust Card Structure**:
 Each of the 6 category cards shows:
 - Category icon + label
-- Trust level (L1-L5) with color-coded border
+- Trust level (levels 1 to 5) with color-coded border
 - Success rate progress bar
 - Total decisions count, rejected count, circuit breaker status
 

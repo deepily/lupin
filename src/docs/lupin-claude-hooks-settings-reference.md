@@ -9,24 +9,26 @@
 
 ---
 
-## ⚠️ PROVISO — this is NOT the final resting place
+## Proviso — this is not the final resting place
 
-**These keys configure *Lupin*, not Claude.** They tune how the Lupin platform *responds to* Claude Code
-event hooks (Stop, PostToolUse, UserPromptSubmit, …) — the heartbeat poke, the task-store mirror, idle
+Warning: **These keys configure *Lupin*, not Claude.**
+
+They tune how the Lupin platform *responds to* Claude Code
+event hooks (Stop, PostToolUse, UserPromptSubmit, …): the heartbeat poke, the task-store mirror, idle
 detection. They live in `~/.claude/settings.json` today only because that is the file Claude Code hands to
-the hook subprocess, and the hook scripts read their config from the same JSON for convenience.
+the hook subprocess. The hook scripts read their config from the same JSON for convenience.
 
 **This couples Lupin's runtime behavior to a third-party tool's config file.** Consequences worth naming:
 
-- The config sits **outside the Lupin repo** (`~/.claude/`), so it is **not version-controlled with the code
+- The config sits **outside the Lupin repo** (`~/.claude/`). So it is **not version-controlled with the code
   it drives** and cannot be committed, reviewed, or rolled back through Lupin's git history.
 - A Lupin-owned concern (fleet liveness, task store) is expressed in **Claude Code's namespace**, mixed in
   beside `theme`, `model`, `permissions`.
 - Every session/host must hand-maintain the same block; there is no single Lupin-owned source.
 
-**Planned refactor (not yet scheduled):** move these blocks to a Lupin-owned config surface — a repo-tracked
-file (e.g. under `src/conf/`) or the existing `lupin-app.ini`/`ConfigurationManager` — with `settings.json`
-retaining, at most, a thin pointer. Until then, **treat this document as the authoritative schema** and this
+**Planned refactor (not yet scheduled):** move these blocks to a Lupin-owned config surface.
+That surface is a repo-tracked file (e.g. under `src/conf/`) or the existing `lupin-app.ini`/`ConfigurationManager`.
+`settings.json` would retain, at most, a thin pointer. Until then, **treat this document as the authoritative schema** and this
 location as **provisional**.
 
 ---
@@ -46,15 +48,15 @@ bogus `poke_cap` or `verification_threshold_seconds`).
 |---|---|---|---|
 | `enabled` | bool | `False` | Master switch. Dormant until wired on. |
 | `poke_cap` | int > 0 | **`1`** | Max times the Stop-hook poke fires per session before it stops nagging. Was `3`; lowered to `1` (2026-07-23) — rapid repeated pokes were noise. Owned by `heartbeat_poke_cap.DEFAULT_POKE_CAP`. |
-| `count_inbound_questions_as_owed` | bool | `False` | Whether an unanswered inbound DM counts as OWED work. Off by default (arbiter self-inflation). |
-| `owed_source_from_store` | bool | `False` | Owed-items SOURCE: `False` = transcript replay (legacy); `True` = unified task-store count. The store-only cutover flag. Reversible. |
+| `count_inbound_questions_as_owed` | bool | `False` | Whether an unanswered inbound DM counts as owed work. Off by default (arbiter self-inflation). |
+| `owed_source_from_store` | bool | `False` | Owed-items source: `False` = transcript replay (legacy); `True` = unified task-store count. The store-only cutover flag. Reversible. |
 | `verification_threshold_seconds` | number > 0 | `600` | Manager worker-verification debounce; fires `needs_verification` while a manager's last look-in is older than this and workers are out. |
-| `poke_output_enabled` | bool | `True` | Runtime mute: `False` suppresses the obligations lookup + its poke output WITHOUT tearing down the block. |
-| `poke_disabled_message` | str \| null | `""` | Substitute text emitted when muted. `""`/null ⇒ full silence. The hook **prepends** `[heartbeat: pokes muted]` (the `MUTE_PROMPT_SENTINEL`) at inject time — **do NOT bake that tag into this value** or it doubles. |
+| `poke_output_enabled` | bool | `True` | Runtime mute: `False` suppresses the obligations lookup + its poke output without tearing down the block. |
+| `poke_disabled_message` | str \| null | `""` | Substitute text emitted when muted. `""`/null means full silence. The hook **prepends** `[heartbeat: pokes muted]` (the `MUTE_PROMPT_SENTINEL`) at inject time — **do not bake that tag into this value** or it doubles. |
 
 ### 2. `task_store` — task-store mirror / owed-count client
 
-Loaded by `lib/task_store_settings.py`. The store host is F2-ruled to `:7999`.
+Loaded by `lib/task_store_settings.py`. The store host is ruled to `:7999`.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -83,7 +85,7 @@ into Claude Code's event loop. Each entry runs `"$LUPIN_ROOT/.venv/bin/python3" 
 |---|---|
 | `SessionStart` | `register_session.py` |
 | `PostToolUse` | `post_tool_use.py` |
-| `PreToolUse` | `pre_tool_use.py` (+ PIP `memento_record_guard.py` on Write\|Edit) |
+| `PreToolUse` | `pre_tool_use.py` (+ `PIP` `memento_record_guard.py` on Write\|Edit) |
 | `Stop` | `stop.py` (reads the `heartbeat` block) |
 | `Notification` | `notification.py` |
 | `UserPromptSubmit` | `user_prompt_submit.py` |

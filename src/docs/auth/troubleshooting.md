@@ -538,7 +538,7 @@ smtp.quit()
 ```
 
 **3. Check Gmail Settings** (if using Gmail):
-- Enable "Less secure app access" OR
+- Enable "Less secure app access" or
 - Use App-Specific Password
 
 **4. Check Firewall**
@@ -560,7 +560,7 @@ telnet smtp.gmail.com 587
 
 ## FAQ
 
-### Q1: How do I reset a user's password (admin)?
+### Question 1: How do I reset a user's password (admin)?
 
 **A:** Generate password reset token and send to user manually:
 
@@ -578,7 +578,7 @@ success, message, token = generate_password_reset_token(user["id"])
 print(f"Reset URL: https://your-domain.com/reset-password?token={token}")
 ```
 
-### Q2: How do I make a user an admin?
+### Question 2: How do I make a user an admin?
 
 **A:**
 ```sql
@@ -588,7 +588,7 @@ SET roles = '["admin", "user"]'
 WHERE email = 'user@example.com';
 ```
 
-### Q3: Can I increase token expiration time?
+### Question 3: Can I increase token expiration time?
 
 **A:** Yes, configure in `lupin-app.ini`:
 ```ini
@@ -598,7 +598,7 @@ jwt refresh token expiration days = 30  # 30 days instead of 7
 
 **Note**: Longer expiration = higher security risk if token stolen
 
-### Q4: How do I bulk delete old audit logs?
+### Question 4: How do I bulk delete old audit logs?
 
 **A:**
 ```sql
@@ -610,7 +610,7 @@ WHERE created_at < datetime('now', '-90 days');
 VACUUM;
 ```
 
-### Q5: Token refresh fails immediately after login?
+### Question 5: Token refresh fails immediately after login?
 
 **A:** This usually means:
 1. Refresh token not stored properly
@@ -623,7 +623,7 @@ SELECT COUNT(*) FROM refresh_tokens WHERE user_id = 1;
 -- Should be > 0 after login
 ```
 
-### Q6: WebSocket disconnects after 30 seconds?
+### Question 6: WebSocket disconnects after 30 seconds?
 
 **A:** This is nginx proxy timeout. Update nginx config:
 ```nginx
@@ -637,7 +637,7 @@ location /ws/ {
 }
 ```
 
-### Q7: How do I revoke all tokens for a user?
+### Question 7: How do I revoke all tokens for a user?
 
 **A:**
 ```python
@@ -650,13 +650,13 @@ print(f"Revoked {count} tokens")
 # User must re-login
 ```
 
-### Q8: Can I use JWT tokens from other services?
+### Question 8: Can I use JWT tokens from other services?
 
 **A:** Only if they share the same JWT secret key. Not recommended for security.
 
 Better: Implement OAuth2/OIDC integration (future feature).
 
-### Q9: Rate limiting too strict for my users?
+### Question 9: Rate limiting too strict for my users?
 
 **A:** Adjust configuration:
 ```ini
@@ -665,7 +665,7 @@ auth max failed attempts = 10  # Default: 5
 auth lockout duration minutes = 5  # Default: 15
 ```
 
-### Q10: How do I export all user data (GDPR)?
+### Question 10: How do I export all user data (GDPR)?
 
 **A:**
 ```python

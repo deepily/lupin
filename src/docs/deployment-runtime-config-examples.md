@@ -10,7 +10,7 @@
 
 Lupin uses a **runtime configuration pattern** that enables a single Docker image to be deployed across multiple environments (development, testing, production) without rebuilding.
 
-**Key Principle**: Configuration is selected at **runtime via environment variables**, NOT hardcoded in the Docker image.
+**Key Principle**: Configuration is selected at **runtime via environment variables**, not hardcoded in the Docker image.
 
 ---
 
@@ -263,7 +263,7 @@ gcloud storage buckets add-iam-policy-binding gs://bucket/ \
   --role="roles/storage.objectViewer"
 ```
 
-**Alternative**: If you must use gsutil, run from outside project directory:
+**Alternative**: If gsutil is required, run from outside project directory:
 ```bash
 cd /tmp
 gsutil iam ch serviceAccount:$SERVICE_ACCOUNT:roles/storage.objectViewer gs://lupin-lancedb-test/
