@@ -55,3 +55,16 @@ def test_a_mark_in_a_label_whose_target_has_no_path_stays_bare_with_a_path_far_a
 @pytest.mark.parametrize( "text", [ LONG, SHORT ] )
 def test_the_bare_section_refs_helper_agrees_with_the_linter( text ):
     assert marker_counts.bare_section_refs( text ) == []
+
+
+def test_a_link_target_that_ends_in_a_slash_is_a_folder_and_not_a_path():
+    assert _bare( "[Guide §3](../websocket-events/)" ) == [ "section reference '§3' has no path" ]
+
+
+def test_a_link_target_with_a_dot_and_no_path_does_not_resolve_the_mark():
+    assert _bare( "[Guide §3](v1.2)" ) == [ "section reference '§3' has no path" ]
+
+
+def test_a_stray_closing_bracket_after_a_mark_outside_any_label_does_not_borrow_the_target():
+    text = "[a](#b) then §3 and " + "w " * 40 + "](../deep/page.md)"
+    assert _bare( text ) == [ "section reference '§3' has no path" ]
