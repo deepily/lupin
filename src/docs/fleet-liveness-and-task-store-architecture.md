@@ -46,7 +46,7 @@ flowchart TD
   Owed work lives here and nowhere else: your tasks, work you assign, decisions, gates, bugs and review-requests.
   The native harness task list is **no longer** the liveness source, because the 2026-06-17 cutover jettisoned it.
 - The three readers cannot disagree about "who owes what", because they read the same store with the same query shape.
-  The old two-sources-of-truth bug is eliminated structurally, not patched.
+  The old two-sources-of-truth bug is eliminated *by construction*, not patched.
 
 ### Data model (item shape)
 
@@ -172,7 +172,7 @@ They also include **bridge-mtime**, which any tool call refreshes, and live brid
 The owning-manager *cc* ("X is blocking worker Y") is deduped on a `(blocker, blocked_item, recipient)` cooldown.
 It reuses the advisory-cooldown machinery.
 A persistent block therefore cc's the manager at most once per window.
-A new block (different `blocked_item`) still announces once.
+A genuinely-new block (different `blocked_item`) still announces once.
 The arbiter is a **headless observer with no DM inbox**.
 The canonical channel for a chase-ack back to the arbiter is a **commons `system-events` post**, not a DM reply.
 No inbound inbox is added to the observe-only service.
