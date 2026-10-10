@@ -15,5 +15,12 @@ class DependencyMissing( Exception ):
     """
 
     def __init__( self, what, detail="" ):
+        """
+        Build the error naming the missing tool, with an optional reason.
+
+        Ensures:
+            - the message is "<what> is missing", followed by ": <detail>" when detail is given
+            - what is kept as an attribute
+        """
         super().__init__( f"{what} is missing" + ( f": {detail}" if detail else "" ) )
         self.what = what

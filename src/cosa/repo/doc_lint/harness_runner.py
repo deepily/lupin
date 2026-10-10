@@ -108,6 +108,20 @@ class Ledger:
     """
 
     def __init__( self, path, binding=None ):
+        """
+        Load the finished calls from the file at path, and settle the binary it is bound to.
+
+        Requires:
+            - path is writable, and may name a file that does not exist yet
+            - binding is None, or a string naming the Claude Code binary and version
+
+        Ensures:
+            - entries and timings hold every readable record; a line that is not valid JSON is skipped
+            - when binding is given and the file records none, the binding is appended
+
+        Raises:
+            - LedgerBindingError when the file already holds calls or a binding that differs from binding
+        """
         self.path     = path
         self.entries  = {}
         self.timings  = {}

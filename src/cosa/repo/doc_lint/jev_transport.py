@@ -33,6 +33,13 @@ class JevConfigError( Exception ):
     """Jev cannot be called as configured: no key, or the server refused the key or the request."""
 
     def __init__( self, message, status=None, attempt_log=None ):
+        """
+        Build the error from a message, the refusing HTTP status and the attempt log.
+
+        Ensures:
+            - status is None when no request was made
+            - attempt_log is an empty list when none is given
+        """
         super().__init__( message )
         self.status      = status        # the HTTP status of a refusal (401, 403 or 422), or None when no request was made
         self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
@@ -42,6 +49,13 @@ class JevCallError( Exception ):
     """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
 
     def __init__( self, message, status=None, attempt_log=None ):
+        """
+        Build the error from a message, the last HTTP status seen and the attempt log.
+
+        Ensures:
+            - status is None when no response came, as with a timeout or a reset
+            - attempt_log is an empty list when none is given
+        """
         super().__init__( message )
         self.status      = status        # the last HTTP status seen, or None when no response came (a timeout or a reset)
         self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
@@ -51,6 +65,12 @@ class JevBudgetSpent( Exception ):
     """The call budget is used up: no further HTTP attempt may be made."""
 
     def __init__( self, message, attempt_log=None ):
+        """
+        Build the error from a message and the attempts made before the budget ran out.
+
+        Ensures:
+            - attempt_log is an empty list when none is given
+        """
         super().__init__( message )
         self.attempt_log = [] if attempt_log is None else attempt_log      # the attempts made before the budget ran out, as send_with_meta logs them
 
@@ -75,6 +95,18 @@ class CallBudget:
     """
 
     def __init__( self, limit ):
+        """
+        Set the attempt ceiling and start with none used.
+
+        Requires:
+            - limit is a positive integer, and not a bool
+
+        Ensures:
+            - used is 0, and no thread is counting a tally
+
+        Raises:
+            - ValueError when limit is not a positive integer
+        """
         if type( limit ) is not int or limit < 1: raise ValueError( f"call budget must be a positive integer, got {limit!r}" )
         self.limit, self.used, self._lock, self._tally = limit, 0, threading.Lock(), _Tally()
 

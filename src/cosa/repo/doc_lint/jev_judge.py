@@ -128,6 +128,21 @@ class JevBackend:
     """
 
     def __init__( self, jev_model, t_lo, t_hi, escalation_model, post_fn=None, sleep_fn=None, environ=None, allow_design_text=False ):
+        """
+        Keep the model ids, thresholds and injected callables, and derive key_id.
+
+        Requires:
+            - jev_model and escalation_model are non-empty
+            - t_lo and t_hi satisfy 0 <= t_lo < t_hi <= 1
+
+        Ensures:
+            - key_id is "<jev_model>@<t_lo>-<t_hi>+<escalation_model>"
+        - prompt_version is the module-level PROMPT_VERSION
+            - post_fn, sleep_fn and environ are held as given and passed to each Jev call
+
+        Raises:
+            - ValueError when a model id is empty or the thresholds are refused
+        """
         if not jev_model or not escalation_model: raise ValueError( "jev and escalation model ids are required: the harness has no default" )
         check_thresholds( t_lo, t_hi )
         self.jev_model        = jev_model

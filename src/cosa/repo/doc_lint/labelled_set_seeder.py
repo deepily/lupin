@@ -783,6 +783,13 @@ class WriterStopped( Exception ):
     """A writer run that was stopped early; carries the reason and what the run had done."""
 
     def __init__( self, message, called, dropped ):
+        """
+        Build the error from a message, the model calls made and the task ids dropped so far.
+
+        Ensures:
+            - called counts every model call attempted, failed ones included
+            - dropped is the list as given, not a copy
+        """
         super().__init__( message )
         self.called, self.dropped = called, dropped
 

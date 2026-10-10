@@ -32,6 +32,17 @@ class IndexSpec:
     """
 
     def __init__( self, root, name, py_roots, js_roots, dart_roots, module_base, skip_parts ):
+        """
+        Store the root, the name and the three language root sets, as given.
+
+        Requires:
+            - py_roots, js_roots and dart_roots are iterables of directories
+            - skip_parts is an iterable of directory names to leave out
+
+        Ensures:
+            - root and module_base are pathlib.Path; the three root sets are tuples; skip_parts is a frozenset
+            - no directory is checked here; spec_for lists only the ones that exist
+        """
         self.root        = pathlib.Path( root )
         self.name        = name
         self.py_roots    = tuple( py_roots )

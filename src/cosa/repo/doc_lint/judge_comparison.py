@@ -44,6 +44,15 @@ class MissingRowProbe:
     """
 
     def __init__( self, real ):
+        """
+        Copy the real back end's key_id and prompt_version, and start with no missing pass.
+
+        Requires:
+            - real has key_id and prompt_version attributes
+
+        Ensures:
+            - missing is an empty list, to hold one claim count per pass with no ledger row
+        """
         self.key_id         = real.key_id
         self.prompt_version = real.prompt_version
         self.missing        = []

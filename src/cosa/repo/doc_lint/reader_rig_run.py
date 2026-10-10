@@ -325,6 +325,15 @@ class CallTracker:
     """
 
     def __init__( self, inner, salvage=True ):
+        """
+        Wrap the query function inner, with no step, no raw text and nothing salvaged yet.
+
+        Requires:
+            - inner is an async generator function with sdk_query's signature
+
+        Ensures:
+            - salvage is held as given and applies to grader replies only
+        """
         self.inner    = inner
         self.salvage  = salvage
         self.step     = None
@@ -415,6 +424,16 @@ class ServedLedger:
     """
 
     def __init__( self, inner ):
+        """
+        Wrap the ledger inner and note which grade keys it already holds.
+
+        Requires:
+            - inner is a harness_runner.Ledger
+
+        Ensures:
+            - prior holds the keys of inner's entries that start with "grade|" at this moment
+            - reused is empty
+        """
         self.inner  = inner
         self.prior  = { k for k in inner.entries if k.startswith( "grade|" ) }
         self.reused = set()
