@@ -17,6 +17,12 @@ of any name, which keeps the count one for one and nothing more.
 The credit lives beside the launch reservations in the sessions folder. Every seat runs as
 the same operating system user, so the credit is a record and not a lock. It is minted only
 for a persona that was actually reaped, which keeps a re-spin one for one.
+
+Known limits. The switch stops a manager that follows the tool's answer. It is not a barrier
+against one that sets out to defeat it. Code injected into the launcher counts as the caller's
+own parent. An environment variable that makes the shell run a script with a debug trap is one
+way in. That code can restore a credit in the middle of a launch. The same user can also edit
+the configuration file. This is documented and not fixed, by the manager's ruling (Cheech, October 10, 2026); the operator may overturn it.
 """
 import datetime
 import json
