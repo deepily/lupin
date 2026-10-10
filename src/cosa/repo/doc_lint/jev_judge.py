@@ -133,12 +133,13 @@ class JevBackend:
 
         Requires:
             - jev_model and escalation_model are non-empty
-            - t_lo and t_hi satisfy 0 <= t_lo < t_hi <= 1
+            - t_lo and t_hi are int or float, not bool or str, and satisfy 0 <= t_lo < t_hi <= 1
 
         Ensures:
             - key_id is "<jev_model>@<t_lo>-<t_hi>+<escalation_model>"
-        - prompt_version is the module-level PROMPT_VERSION
+            - prompt_version is the module-level PROMPT_VERSION
             - post_fn, sleep_fn and environ are held as given and passed to each Jev call
+            - allow_design_text is held as given; a design document is refused unless it is True
 
         Raises:
             - ValueError when a model id is empty or the thresholds are refused

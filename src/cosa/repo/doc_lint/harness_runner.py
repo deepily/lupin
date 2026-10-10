@@ -112,7 +112,8 @@ class Ledger:
         Load the finished calls from the file at path, and settle the binary it is bound to.
 
         Requires:
-            - path is writable, and may name a file that does not exist yet
+            - path may name a file that does not exist yet
+            - path is writable when binding is given and the file records none
             - binding is None, or a string naming the Claude Code binary and version
 
         Ensures:

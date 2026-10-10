@@ -33,7 +33,7 @@ class IndexSpec:
 
     def __init__( self, root, name, py_roots, js_roots, dart_roots, module_base, skip_parts ):
         """
-        Store the root, the name and the three language root sets, as given.
+        Store the index spec fields, converted to Path, tuples and a frozenset.
 
         Requires:
             - py_roots, js_roots and dart_roots are iterables of directories
