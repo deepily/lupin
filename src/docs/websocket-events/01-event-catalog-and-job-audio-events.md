@@ -2,7 +2,7 @@
 
 # WebSocket Event System Documentation
 
-**Date**: 2026.03.20 · **Revised**: 2026.09.27 (CC transcript console events; stale event count removed)
+**Revised**: CC transcript console events added; stale event count removed
 **Source of truth**: `lupin-app.ini` key `websocket available events`, `src/cosa/rest/routers/websocket.py`
 **Status**: Active
 
@@ -10,7 +10,7 @@
 
 The allow-list is the `websocket available events` key in `lupin-app.ini` (`src/conf/lupin-app.ini:1729`). And **that key is the only authority**. A name absent from it is dropped at subscribe time while auth still reports success (see `websocket_manager.py` `connect()`, and the in-place comment beside the validation). Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
 
-**Count, and why this sentence no longer states one**. This document used to open "The system defines **22 events**". Which was wrong when read on 2026.09.27: the INI key listed **25**. `websocket-configuration.md` carries a third figure, an 18-name copy of the list. Three documents, three counts, and nothing reconciling them — so the count is deliberately not restated here.
+**Count, and why this sentence no longer states one**. This document used to open "The system defines **22 events**". Which was wrong when last checked: the INI key listed **25**. `websocket-configuration.md` carries a third figure, an 18-name copy of the list. Three documents, three counts, and nothing reconciling them — so the count is not restated here, by rule.
 
 Derive the list through the reader the server itself uses. And compare **set equality** against a committed literal. A count is the weakest possible assertion, since it passes just as happily if a name is misspelled:
 
@@ -19,7 +19,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
-Verified 2026.09.27: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in the first build phase** of the console-tee feature, and are **not in it yet**.
+Verified at this page's last revision: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in the first build phase** of the console-tee feature, and are **not in it yet**.
 The plan is `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. They must be appended with `", "` exactly: the reader is a bare `value.split( ", " )` with no per-token strip. So a comma without a space mangles the new name *and* the one before it, silently. See [`websocket-architecture.md`](../websocket-architecture.md) § CC Transcript Console Channel.
 
 ### Event Summary Table

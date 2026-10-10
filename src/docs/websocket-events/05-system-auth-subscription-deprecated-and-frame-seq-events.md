@@ -174,13 +174,13 @@ field does not exist**. `emit_job_state_transition()` (`src/cosa/rest/queue_util
 emits exactly `job_id`, `from_state`, `to_state`, `timestamp`, and an optional `metadata` —
 never `to_queue`. Measured live on `:7999`: a submitted job produces `pending`->`queued`,
 `queued`->`running`, `running`->`completed`. Two consumers had been reading the phantom field with a `.get( "to_queue", "?" )` default.
-They printed `? -> ?` on every transition since the rename, and that was corrected 2026-08-24.
+They printed `? -> ?` on every transition since the rename, and that has since been corrected.
 
-The following event was renamed during the 2026-05-13 Speakerphone solo/chorus refactor (the solo/chorus refactor, `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
+The following event was renamed during the Speakerphone solo/chorus refactor (the solo/chorus refactor, `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
 
-| Deprecated Event | Replacement | Rename Date |
-|-----------------|-------------|-------------|
-| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) | 2026-05-13 |
+| Deprecated Event | Replacement |
+|-----------------|-------------|
+| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) |
 
 The deprecated name is `NOT` in the `valid_types` whitelist; pushing it returns HTTP 400. The multiplexer `SenderStore` accepts both names client-side as a **forward-compat bridge** in case the event is ever re-renamed back. See `speakerphone_changed` entry above for details.
 
@@ -212,6 +212,6 @@ Eviction takes the oldest slot with no connected holder. A connected slot is nev
 the number of connected holders (one warning per crossing) and settles back at the next write.
 Without an `ack` the buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
 
-`resume_complete` is deliberately **not** in `websocket available events`: the endpoint
+`resume_complete` is, by rule, **not** in `websocket available events`: the endpoint
 sends it directly, like `auth_success`, and it never passes through the subscription
 filter. Listing it would imply a path that does not exist.

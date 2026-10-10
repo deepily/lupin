@@ -63,7 +63,7 @@ Broadcast when a user submits a response to a response-required notification. Al
 
 ### `commons_activity`
 
-**NEW 2026-05-14** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
+**NEW** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
 
 Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "commons_activity"`. Fired by `CommonsActivityWatcher` (FastAPI-side daemon in `src/cosa/rest/commons_activity_watcher.py`) on each ~1s tick when new entries land in the commons store on any non-excluded topic. Recipient is resolved best-effort from `metadata.sender_user_id` first, then a bridge-owner lookup keyed by `sender_session_id`; falls back to broadcast-to-all-authenticated-WS in single-user dev.
 
@@ -94,7 +94,7 @@ Client handling: `notifications.js::_handleCommonsActivityWS()` prepends the new
 
 ### `speakerphone_changed`
 
-**Renamed 2026-05-13** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor.
+**Renamed** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor.
 See [`../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/). Broadcast on every speakerphone-mode toggle so all connected UI tabs sync. In solo mode, activating one session displaces any other active session; in chorus mode, multiple sessions can be simultaneously active.
 
 Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "speakerphone_changed"`. Origin: `src/cosa/rest/routers/speakerphone.py`, which emits at two sites.

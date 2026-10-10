@@ -49,7 +49,7 @@ A window's edge is where they can differ: the live index may still remember a ca
 **A block's `kind` comes from the content block's type, never from the record's role**. In a census of 8,115 records across four recent lupin transcripts, **760 of the 1,026 `user` records carried tool results**. A role-based mapping would render three quarters of them as fake human turns.
 
 **`kind` decides the renderer, and prose and tool content do not share one**. `text` renders as markdown. `tool_call`, `tool_result` and `thinking` render as **plain text** (`<pre>` / `textContent` on the web), collapsed and truncated.
-`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is deliberately open-ended.
+`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is open-ended by rule.
 So a switch over three literals with no fallback would render nothing, silently, in the one surface whose whole job is to show everything.
 The risk here is **mangling, not injection**.
 A markdown renderer turns a raw file dump into markup, so `#` becomes a heading and a diff renders wrong.
@@ -73,7 +73,7 @@ A markdown renderer turns a raw file dump into markup, so `#` becomes a heading 
 | `ended` | The **seat** exited — driven by the `SessionEnd` hook, with a staleness fallback for a seat that dies without firing it | stop expecting frames. The pane is final, not merely quiet |
 | `rotated` | The `file_epoch` changed: a `/clear` swapped the transcript path, or the file was truncated in place | drop the buffer and offset, re-fetch the backlog over REST |
 | `epoch_mismatch` | The watch named an epoch that is no longer current | same as `rotated` — clear and re-fetch. **No blocks accompany this frame** |
-| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Two reasons today: `not_found` — no such seat, or its transcript file is not here. `admin_only` — the caller's session does not hold the admin role (since 2026-10-03; before that a non-admin watch got a generic `error` frame, which a refused `cc_transcript_unwatch` still gets). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry. The web pane's status line reads **"Session not found"** for `not_found` and "Watch refused" for any other or missing reason |
+| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Two reasons today: `not_found` — no such seat, or its transcript file is not here. `admin_only` — the caller's session does not hold the admin role (newer behaviour; before that a non-admin watch got a generic `error` frame, which a refused `cc_transcript_unwatch` still gets). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry. The web pane's status line reads **"Session not found"** for `not_found` and "Watch refused" for any other or missing reason |
 
 A **real idle seat** is not refused: its transcript exists, so it resolves and reads `live` even with nothing new to send.
 
