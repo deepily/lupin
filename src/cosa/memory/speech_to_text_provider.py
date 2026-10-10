@@ -63,6 +63,16 @@ class SpeechToTextProvider:
         return cls._instance
 
     def __init__( self, debug: bool = False, verbose: bool = False ):
+        """
+        Read the configured provider on the first construction, and do nothing on later ones.
+
+        Requires:
+            - the INI key `speech to text provider` may be absent, and then reads as "local"
+
+        Ensures:
+            - a repeat call on the singleton returns at once and changes nothing
+            - _provider holds the INI value, stripped and lowercased
+        """
         if getattr( self, "_initialized", False ):
             return
         self._debug       = debug
