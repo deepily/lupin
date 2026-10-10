@@ -81,6 +81,17 @@ class MissingConfigKeyError( Exception ):
     """
 
     def __init__( self, key: str, block_id: str, config_path: Optional[str], blank: bool=False ) -> None:
+        """
+        Build the error and its message from the key, the block id and the config path.
+
+        Requires:
+            - key names the missing key and block_id the resolved config block
+            - config_path is the INI path that was read, or None when unknown
+
+        Ensures:
+            - key, block_id, config_path and blank are kept as attributes
+            - the message says "not found", or "resolved to an empty value" when blank is True
+        """
 
         self.key         = key
         self.block_id    = block_id
