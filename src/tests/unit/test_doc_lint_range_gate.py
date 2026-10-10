@@ -7,6 +7,7 @@ stand-in that reports what the worktree holds, so the tests read the staging and
 
 import io
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -266,12 +267,11 @@ def test_a_report_with_an_unchecked_commit_shows_it():
     assert text.splitlines()[ -1 ] == "range b..h: 2 commits, 1 passed, 0 refused, 1 unchecked"
 
 
-def _stale_holder( repo, name, pid=None ):
+def _stale_holder( repo, name, remove_tree=False ):
     holder = os.path.join( _folder( repo ), name )
     os.makedirs( holder )
     _git( repo[ "root" ], "worktree", "add", "-q", "--detach", os.path.join( holder, "tree" ), repo[ "two" ] )
-    if pid is not None:
-        with open( os.path.join( holder, "pid" ), "w", encoding="utf-8" ) as handle: handle.write( str( pid ) )
+    if remove_tree: shutil.rmtree( os.path.join( holder, "tree" ) )
     return holder
 
 
@@ -282,14 +282,40 @@ def _dead_pid():
 
 
 def test_a_stale_holder_from_a_killed_run_is_swept_when_the_next_run_starts( repo ):
-    no_pid = _stale_holder( repo, "range-gate-nopid" )
-    dead   = _stale_holder( repo, "range-gate-dead", pid=_dead_pid() )
-    live   = _stale_holder( repo, "range-gate-live", pid=os.getpid() )
-    other  = os.path.join( _folder( repo ), "someone-elses" )
+    unnamed = _stale_holder( repo, "range-gate-nopid" )
+    dead    = _stale_holder( repo, f"range-gate-{_dead_pid()}-abc" )
+    live    = _stale_holder( repo, f"range-gate-{os.getpid()}-abc" )
+    other   = os.path.join( _folder( repo ), "someone-elses" )
     os.makedirs( other )
-    code   = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=_runner_for( [ ( 0, "" ) ] ) )
+    code    = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=_runner_for( [ ( 0, "" ) ] ) )
     assert code == 0
-    assert not os.path.exists( no_pid ) and not os.path.exists( dead )
+    assert not os.path.exists( unnamed ) and not os.path.exists( dead )
     assert os.path.exists( live ) and os.path.exists( other )
     listing = _git( repo[ "root" ], "worktree", "list" )
-    assert "range-gate-nopid" not in listing and "range-gate-dead" not in listing and "range-gate-live" in listing
+    assert "range-gate-nopid" not in listing and "abc" in listing and f"range-gate-{os.getpid()}-abc" in listing
+
+
+def test_the_holder_of_a_running_check_carries_the_pid_of_its_run_from_the_moment_it_exists( repo ):
+    _folder( repo )
+    names = []
+    def runner( worktree ):
+        names.append( os.path.basename( os.path.dirname( worktree ) ) )
+        return 0, ""
+    range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=runner )
+    assert names[ 0 ].startswith( f"range-gate-{os.getpid()}-" )
+
+
+def test_the_sweep_prunes_the_registration_of_a_holder_whose_tree_is_already_gone( repo ):
+    gone = _stale_holder( repo, f"range-gate-{_dead_pid()}-gone", remove_tree=True )
+    assert "gone" in _git( repo[ "root" ], "worktree", "list" )
+    assert range_gate.sweep_stale( repo[ "root" ], os.path.dirname( gone ) ) == [ os.path.basename( gone ) ]
+    assert "range-gate" not in _git( repo[ "root" ], "worktree", "list" )
+
+
+def test_the_refusal_of_a_merge_range_names_the_merge_and_not_only_the_head( repo, tmp_path ):
+    merge = _merge_range( repo )
+    _write( repo[ "root" ], "later.py", "later = 1\n" )
+    head = _commit( repo[ "root" ], "after the merge" )
+    assert head != merge
+    with pytest.raises( range_gate.RangeRefused ) as raised: range_gate.check_range( repo[ "root" ], repo[ "base" ], head, _worktree( repo, tmp_path ), _runner_for( [] ) )
+    assert f"merge commit, {merge}" in str( raised.value )
