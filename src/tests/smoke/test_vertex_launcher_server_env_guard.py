@@ -1,7 +1,7 @@
 """
 OSQ-6 (EXISTING-server half) + §5c row 2 — the launcher refuses a TAINTED tmux server.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 Finding: Rio's C1 (store item b0e7142c) — "the guard runs in the WRONG PROCESS."
 
 THE EXPLOIT THIS FILE KILLS, verbatim from the finding: a tainted server env holding

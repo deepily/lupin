@@ -1,7 +1,7 @@
 """
 AC-D4 / AC-D4b / AC-D8 / AC-D9a — the §6a sound oracle.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md §6a
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md (decision 5)
 
 THE POINT OF THIS FILE, STATED PLAINLY: these four ACs would otherwise have been written
 against `google.cloud.monitoring_v3`, WHICH IS NOT INSTALLED — behind an `importorskip`,

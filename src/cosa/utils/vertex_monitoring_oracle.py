@@ -1,7 +1,7 @@
 """
 Cloud Monitoring `PublisherModel` oracle over REST, verifying what Vertex really served.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md §6a
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md (decision 5)
 It backs four acceptance checks: region and model, no leak into the default path, and derived spend.
 
 Why REST and not `google.cloud.monitoring_v3`

@@ -1,7 +1,7 @@
 """
 Vertex request-response logging verification harness.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 `setPublisherModelConfig` has been written and read back, so we know the config reads back.
 We do not know that data arrives. Those are different claims. This module exists to prove the

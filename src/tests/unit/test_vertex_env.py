@@ -1,7 +1,7 @@
 """
 AC-D1 / AC-D2 — Vertex toggle env composition and guards.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 AC-D2 is RED-FIRST BY CONSTRUCTION: every guard is proven to FAIL on the hostile
 input before the happy path is asserted. A guard with no red-first test is an

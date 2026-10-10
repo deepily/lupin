@@ -1,7 +1,7 @@
 """
 F-A11 — THE LAUNCHER MUST NOT BIRTH A TAINTED TMUX SERVER. Proven by EXECUTION, not by reading.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 WHY THIS FILE EXISTS, AND WHY IT RUNS THE REAL SHELL
 

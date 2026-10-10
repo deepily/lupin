@@ -1,7 +1,7 @@
 """
 Vertex / Model Garden per-session toggle: environment composition and guards.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 The guards are Python, not bash, because the Lupin coverage mandate is 100% of lines, branches and
 functions. Bash has no branch-coverage instrument. A shell guard tested only on its happy path would

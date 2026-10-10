@@ -1,7 +1,7 @@
 """
 The guard that guards the guard list.
 
-Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 
 WHY THIS FILE EXISTS — and it is an indictment of the file it protects.
 

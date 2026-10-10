@@ -13,7 +13,7 @@ The help names the command's declared arguments and stays in sync with the argum
 It cannot drift into a stub that merely exits 0. Each package's `__main__.py` is two lines
 that call `run_help_for_module( __package__ )`.
 
-Design: src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md
+Design: src/docs/decisions/2026.08.15-agent-registration-single-source.md
 """
 
 import argparse

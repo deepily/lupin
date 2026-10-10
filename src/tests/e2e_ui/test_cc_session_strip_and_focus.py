@@ -1,7 +1,7 @@
 """
 E2E UI tests for the CC session selector strip + exclusive focus mode.
 
-Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
 
 The tests in this file exercise the strip and focus-mode behaviors on the
 notifications page. Where possible they DRIVE the UI by simulating sender
