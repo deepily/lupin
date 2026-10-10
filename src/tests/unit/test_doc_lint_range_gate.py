@@ -193,3 +193,11 @@ def test_main_prints_without_a_file_when_none_is_named( repo ):
     stream = io.StringIO()
     code   = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=stream, runner=_runner_for( [ ( 0, "" ) ] ) )
     assert code == 0 and "1 passed" in stream.getvalue()
+
+
+def test_main_makes_its_worktree_folder_when_it_is_missing_and_works_from_a_linked_worktree( repo, tmp_path ):
+    linked = _worktree( repo, tmp_path )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", linked ], out=stream, runner=_runner_for( [ ( 0, "" ) ] ) )
+    assert code == 0 and "1 passed" in stream.getvalue()
+    assert os.listdir( os.path.join( repo[ "root" ], ".claude", "worktrees" ) ) == []

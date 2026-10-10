@@ -229,7 +229,7 @@ def main( argv=None, out=None, runner=run_gate ):
         - run inside the repository; --base and --head name commits; --out may name a file to write
 
     Ensures:
-        - makes a detached worktree in a temporary directory beside the repository's worktrees, and removes it on every path
+        - makes a detached worktree under the main checkout's .claude/worktrees, from a linked worktree too, and removes it on every path
         - prints the report and writes it to --out when given
         - returns 0 when every commit passes, 1 when any is refused and 2 when any could not be judged
 
@@ -243,7 +243,10 @@ def main( argv=None, out=None, runner=run_gate ):
     parser.add_argument( "--repo-root", default=os.getcwd() )
     args   = parser.parse_args( argv )
     out    = out or sys.stdout
-    holder = tempfile.mkdtemp( prefix="range-gate-", dir=os.path.join( args.repo_root, ".claude", "worktrees" ) )
+    common = git( args.repo_root, "rev-parse", "--path-format=absolute", "--git-common-dir" ).strip()
+    parent = os.path.join( os.path.dirname( common ), ".claude", "worktrees" )
+    os.makedirs( parent, exist_ok=True )
+    holder = tempfile.mkdtemp( prefix="range-gate-", dir=parent )
     work   = os.path.join( holder, "tree" )
     try:
         git( args.repo_root, "worktree", "add", "--detach", work, args.head )
