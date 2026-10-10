@@ -36,5 +36,5 @@ Five text-matching guards run on every Bash tool call and refuse or flag a risky
 - `branch_lock_guard`: one operator flag read only from the hook's environment. An inline form is ignored, and the deny text does not name the flag. A seat has no way past it.
 
 ## When not to use
-- These are accident-preventers, not a security boundary, so they give no protection against deliberate evasion.
+- These are accident-preventers, not a security boundary, so a deliberate attempt to evade them is outside what they promise to stop.
 - To land work, merge by the usual route; do not commit around a live merge. Worktree handling is in [[worktree-lifecycle]].

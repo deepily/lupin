@@ -37,4 +37,4 @@ How a job tells the user something or asks a question: by voice when a notificat
 - A new agent adds a `cosa_interface.py` that wraps an `AgentNotificationDispatcher( agent_type=... )` and a `voice_io.py` that calls `configure` and re-exports the core functions. Copy deep_research's pair.
 
 ## Don't
-- A gate answered with `options[0]` or a hard-coded fallback leaves no record of the choice; `unattended_default` or `response_default` puts it on the record. Importing `cosa.agents.test_fix_expediter` from inside a gate breaks it, because that package's `__init__` rebinds the interface to swe_team's, which has no `present_choices`.
+- A gate must not be answered with `options[0]` or a hard-coded fallback, because that leaves no record of the choice. Pass `unattended_default` or `response_default` so the choice is on the record. Importing `cosa.agents.test_fix_expediter` from inside a gate breaks it, because that package's `__init__` rebinds the interface to swe_team's, which has no `present_choices`.
