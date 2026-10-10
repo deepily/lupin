@@ -327,3 +327,16 @@ def test_the_sweep_prunes_a_registration_whose_whole_holder_folder_is_gone( repo
     assert "range-gate" in _git( repo[ "root" ], "worktree", "list" )
     assert range_gate.sweep_stale( repo[ "root" ], os.path.dirname( holder ) ) == []
     assert "range-gate" not in _git( repo[ "root" ], "worktree", "list" )
+
+
+def test_a_holder_name_without_a_decimal_pid_or_without_a_suffix_has_no_pid():
+    assert range_gate.holder_pid( "range-gate-x-y" ) is None
+    assert range_gate.holder_pid( "range-gate-123" ) is None
+    assert range_gate.holder_pid( "range-gate-123-abc" ) == 123
+
+
+def test_a_sweep_over_a_holder_named_with_a_non_numeric_pid_removes_it_and_does_not_raise( repo ):
+    odd = os.path.join( _folder( repo ), "range-gate-x-y" )
+    os.makedirs( odd )
+    assert range_gate.sweep_stale( repo[ "root" ], os.path.dirname( odd ) ) == [ "range-gate-x-y" ]
+    assert not os.path.exists( odd )
