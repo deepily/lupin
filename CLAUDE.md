@@ -95,28 +95,16 @@ Deferred and not ratified for migration: OpenAI call sites and the Runtime Argum
 - Non-Anthropic models required (OpenAI/Groq/Mistral/etc. — Max plan only covers Claude).
 - Token-by-token streaming UX (bounded CC returns on completion, no progressive streaming).
 
-### Off-peak scheduling rule (operational)
+### Scheduled jobs
 
-Max-plan usage has rolling-window limits, and the host is not up around the clock. Any non-interactive
-bounded job — batch generation, scheduled regression sweeps, podcast, presentation, research — must set
-`scheduled_at` inside a window the box is up for. User-clicked synchronous jobs are exempt.
+The host is not up around the clock: it is usually powered off from about 11 PM to 10 AM EDT, and a job
+scheduled then does not run until the next boot. Re-derive the hours rather than trusting this line; use
+`journalctl --list-boots --no-pager`, not `last -x reboot`, whose `wtmp` rotates.
 
-| window (EDT) | verdict |
-|---|---|
-| ~11 PM – 10 AM | ☠️ dead — the host is usually powered off. A job here does not run late, it does not run at all until boot |
-| 9 PM – 11 PM | ❌ peak — Rick's interactive window |
-| **10 AM – 1 PM** | ✅ **optimal — schedule batch work here** |
-| 1 PM – 9 PM | 🟡 acceptable |
-
-The boot window is a hard constraint, not a habit. The box also goes down mid-day sometimes, so "optimal" means *most likely up*, never *guaranteed up* — a long job must
-tolerate a restart.
-
-Re-derive the window rather than trusting the table; use `journalctl --list-boots --no-pager`, not
-`last -x reboot`, whose `wtmp` rotates and can report a single boot with nothing saying so.
-
-Submit through `/api/v2/submit`, naming the command `agent router go to claude code`. `scheduled_at` is
-top-level — it tells the queue *when* to run, and is not part of the command's argument contract. The old
-`/api/claude-code/submit` door and its alias answer **410 Gone**.
+To run a job later, submit through `/api/v2/submit`, naming the command `agent router go to claude code`.
+`scheduled_at` is top-level, because it tells the queue *when* to run and is not part of the command's
+argument contract. A job that lands while the host is off drains late and `job_persistence.py` emits a
+`[CJ-CATCHUP-LATE]` line naming `scheduled_at`, the actual time, and the hours late.
 
 ```json
 POST /api/v2/submit
@@ -126,9 +114,6 @@ POST /api/v2/submit
   "scheduled_at" : "2026-08-22T11:00:00-04:00"
 }
 ```
-
-A job that lands in the dead window drains late but not silently — `job_persistence.py` emits a
-`[CJ-CATCHUP-LATE]` line naming `scheduled_at`, the actual time, and the hours late.
 
 ## Code style
 - **Imports**: Group by stdlib, third-party, local

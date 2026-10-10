@@ -2992,7 +2992,7 @@ def spawn_sessions(
     """
     **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count` headless reviewer sessions for this manager.
 
-    Each child boots as a real interactive `claude` in a detached tmux session, gets its own voice persona (Extra-N when the named pool is exhausted) and reads `task_prompt` as its brief. Lineage is recorded so `dismiss_sessions` and `list_spawned_sessions` find the children. Tell children in `task_prompt` to post findings to the returned `collection_topic` (`dm-{your-persona}`). Each child spends Max-plan OAuth from the shared window: batch work is scheduled 10 AM to 1 PM EDT, see CLAUDE.md for the table; no other hours. `config_warning` in the result means the INI config manager could not be built (INI model pins and the spawn cap were NOT applied); it names the cause.
+    Each child boots as a real interactive `claude` in a detached tmux session, gets its own voice persona (Extra-N when the named pool is exhausted) and reads `task_prompt` as its brief. Lineage is recorded so `dismiss_sessions` and `list_spawned_sessions` find the children. Tell children in `task_prompt` to post findings to the returned `collection_topic` (`dm-{your-persona}`). Each child spends Max-plan OAuth from the shared window. `config_warning` in the result means the INI config manager could not be built (INI model pins and the spawn cap were NOT applied); it names the cause.
 
     Args:
         count: number of reviewers (1..INI `cc session spawn max reviewers`)
