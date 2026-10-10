@@ -19,3 +19,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [Each Claude Code session speaks with its own voice persona](2026.04.28-per-session-voice-personas.md) | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` |
 | [The idle-aware Stop hook, and what runs on an idle Stop](2026.04.29-idle-aware-stop-hook.md) | `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md` |
 | [TFE-to-CC, a parallel Claude Code engine for the first and third TFE phases](2026.04.19-tfe-to-cc-parallel-claude-code-engine.md) | `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md` |
+| [The heartbeat arbiter, a fleet-level observer of the hook's events](2026.06.04-heartbeat-arbiter-v2-design.md) | `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md` |
