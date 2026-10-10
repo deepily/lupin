@@ -5,7 +5,7 @@ pins:
   - lupin_mcp.cosa_voice_mcp.converse@e80eac9a7e
   - lupin_mcp.cosa_voice_mcp.ask_yes_no@9b3e0b6f3e
   - lupin_mcp.cosa_voice_mcp.ask_multiple_choice@7035439097
-  - lupin_mcp.cosa_voice_mcp.request_persona@9bed1bb61e
+  - lupin_mcp.cosa_voice_mcp.request_persona@e0e76c751e
 ---
 # cosa-voice MCP server
 
@@ -31,7 +31,7 @@ pins:
 - **`ask_yes_no` returns a string.** A real answer comes back clean. Any non-answer (timeout, offline, error, validation failure) returns `[default used] ` plus the default, so a prefixed value is not a decision.
 - **`converse` returns a string.** A substituted default carries the same prefix. A timeout returns `[timeout - using default] ...` or `[timeout - no response received]`, and other failures return `[error: <status>]`.
 - **`ask_multiple_choice` returns a dict.** A non-empty `questions` list is required, and a bad `default` returns `{"error": ...}` before anything is sent. A real answer carries `default_used: False` and `answered: True`; an offline default arrives through the same path stamped `default_used: True, answered: False`. A timeout with `default` returns `{"answers": default, "default_used": True, "answered": False}`; without one it returns `{"error": "timeout - no response received", "timeout": True}`.
-- **`request_persona`.** A blank name returns `status: "error"` without any HTTP call. HTTP 422 returns `not_in_pool`, 409 returns `occupied`, and there is no bridge-file fallback.
+- **`request_persona`.** A seat whose identity was guessed from the working directory returns `status: "error"` with `reason: "borrowed_identity"`, and a blank name returns `status: "error"`. Both return without any HTTP call. HTTP 422 returns `not_in_pool`, 409 returns `occupied`, and there is no bridge-file fallback.
 
 ## When not to use it
 - To send a message to a peer session use `dm_send` ([[mcp-commons-and-dm]]), not `notify`.
