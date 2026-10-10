@@ -1513,6 +1513,7 @@ def test_a_rule_file_that_differs_between_the_index_and_the_disk_refuses_a_commi
     _stage( ts_stamped, { "src/a.ts": TS_CLEAN } )
     rc, text = _gate( ts_stamped )
     assert rc == 3 and f"rule file {rule} is not the same staged and in the working tree" in text and "table diverged" in text
+    assert f"{TS_NAME} counted scope: 0 files checked, 0 at or below their count, 0 over, 0 waivers honoured, table diverged" in text
     _git( ts_stamped, "reset", "-q", "--hard" )
     ( ts_stamped / rule ).write_text( "weakened\n", encoding="utf-8" )
     _stage( ts_stamped, { "notes.md": "x\n" } )                                            # nothing judged is staged
