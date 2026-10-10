@@ -6,10 +6,10 @@ pins:
   - lupin_mcp.cosa_voice_mcp.fetch_similar@32876a143b
   - lupin_mcp.cosa_voice_mcp.read_capability@9cbb0f24b2
   - lupin_mcp.cosa_voice_mcp.replay@ccfe9d03f8
-  - lupin_mcp.reuse_tools.prepare@f9dcbbdae1
+  - lupin_mcp.reuse_tools.prepare@cb63b067e8
   - lupin_mcp.reuse_tools.sendable@6d563314ce
-  - lupin_mcp.reuse_tools.sweep@806fa5d2ff
-  - lupin_mcp.reuse_tools.LiveJevTransport.post@f51881fc6c
+  - lupin_mcp.reuse_tools.sweep@6b56c2af23
+  - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
   - cosa.repo.symindex.verdict.decide@1d8b27ba16
   - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware.on_call_tool@729af9d8d7
 ---
@@ -28,8 +28,8 @@ Four MCP tools ask whether a new definition already exists. They read the [[symb
 - `check_exists` first sends one POST per wiki page listed in `INDEX.md` that is pinned and names a package. It sweeps the symbols in up to 5 pages scoring 0.3 overlap or more, and a symbol at 0.5 decides. If none does, every symbol is swept; `fetch_similar` always sweeps all. The receipt records the route.
 - Each symbol POST holds the need and the symbol's id, signature and first docstring line. A repeated question is answered from the cache and sends nothing. Source bodies are never sent.
 - `sendable` blanks string defaults in signatures. It then drops any symbol whose id, signature or docstring line holds an email, URL, IP address, path or credential-shaped token. Dropped ids are not reported, so `NEW` means new among the sendable symbols.
-- The sweep runs 32 workers and tries each symbol up to three times. A 429 or 529 is retried inside a try, and each call times out at 60 seconds. One call spends at most 8,000 HTTP attempts, retries included, across all workers. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it, and a value outside 1 to 8,000 is refused with `BAD_BUDGET` in the error detail. Once it is spent, cached answers still serve, and entries never attempted are counted as `not_checked` in the receipt.
-- A 401, 403 or 422 stops later calls, but calls already in flight can finish. The key comes from the `JEV_API_TOASTER` environment variable. No INI key controls any of this.
+- The one-request sweep runs 32 workers and tries each symbol up to three times. A 429 or 529 is retried inside a try, and each call times out at 60 seconds. One call spends at most 9,000 HTTP attempts, retries included, across all workers. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it, and a value that is not a whole number from 1 to 9,000 is refused with `BAD_BUDGET` in the error detail. Once it is spent, cached answers still serve, and entries never attempted are counted as `not_checked` in the receipt.
+- A 401 or 403 stops later calls, but calls already in flight can finish. A 422 refuses only its own entry; five in a row with no answer between them stop the sweep. The key comes from `JEV_API_TOASTER`. `LUPIN_REUSE_JEV_PACK_SIZE`, with `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME`, sends entries in packs, and a ledger refusal answers `SPEND_LEDGER`. No INI key controls any of this.
 
 ## The verdict
 - Any flag beats the three outcomes below. `decide` then answers `UNCERTAIN_READ_SOURCE` with a cause: `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER` or `LOW_CONFIDENCE`.
