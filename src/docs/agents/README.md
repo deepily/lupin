@@ -34,12 +34,12 @@ respective R&D directories under `src/rnd/`.
 | "One of my deep research jobs died — can I auto-fix it?" | [Bug Fix Expediter Guide](bug-fix-expediter-guide.md) |
 | "I want to enable automated BFE on failed agentic jobs" | [Bug Fix Expediter Guide §6 How to Enable Auto-Fix](bug-fix-expediter-guide/02-ini-trust-enabling-and-observability.md#6-how-to-enable-auto-fix) |
 | "My test run has 22 failures — can TFE cluster and fix them?" | [Test Fix Expediter Guide](test-fix-expediter-guide.md) |
-| "How does TFE decide which tests to rerun?" | [Test Fix Expediter Guide §4, Rerun Validation phase](test-fix-expediter-guide.md#4-six-phase-pipeline) |
+| "How does TFE decide which tests to rerun?" | [Test Fix Expediter Guide §4, Rerun Validation phase](test-fix-expediter-guide/02-six-phase-pipeline.md#4-six-phase-pipeline) |
 | "I want to run the full test pyramid every night at 1am" | [Test-Suite Scheduling Guide §4 The `/schedule-tests` Skill](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md#4-the-schedule-tests-skill) |
 | "What's in the remediation snapshot JSON?" | [Test-Suite Scheduling Guide §6 Remediation Snapshot Schema](test-suite-scheduling-guide/03-rest-api-and-remediation-snapshot.md#6-remediation-snapshot-schema-v10) |
 | "How is the BFE/TFE shared `FixExecutor` structured?" | [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) |
 | "How do I add a new expediter agent of my own?" | [Shared Fix Primitives Reference §7 How to Add a New Expediter Agent](shared-fix-primitives-reference/02-prompt-registry-new-agent-and-tests.md#7-how-to-add-a-new-expediter-agent) |
-| "What's the difference between BFE and TFE?" | [TFE Guide §2 How TFE Differs from BFE](test-fix-expediter-guide.md#2-how-tfe-differs-from-bfe) |
+| "What's the difference between BFE and TFE?" | [TFE Guide §2 How TFE Differs from BFE](test-fix-expediter-guide/01-what-it-does-and-architecture.md#2-how-tfe-differs-from-bfe) |
 | "BFE/TFE isn't firing — what's wrong?" | Troubleshooting sections of the respective guides |
 
 ---
