@@ -11,7 +11,7 @@ import sys
 
 from .cli import run_linter
 from .links import design_path_findings, markdown_link_findings
-from .marker_counts import FENCED_BLOCK, FRONTMATTER, HTML_COMMENT, WORD_REGEX, count_markers, rates_per_thousand
+from .marker_counts import FRONTMATTER, HTML_COMMENT, WORD_REGEX, count_markers, rates_per_thousand
 from .text_rules import Finding, lint_text
 
 REFERENCE_MAX_WORDS = 1500
@@ -19,6 +19,7 @@ CAPABILITY_MAX_LINES = 40
 REFERENCE_SKIP      = ( "src/docs/fastapi/", "src/docs/wiki/", "src/docs/decisions/", "src/docs/doctrine/", "src/docs/auth/" )
 RUNBOOK_SECTIONS    = ( "prerequisites", "steps", "verify", "rollback" )
 HEADING_REGEX       = re.compile( r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE )
+INDENTED_FENCE      = re.compile( r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$", re.DOTALL | re.MULTILINE )
 
 
 def _blank( match ):
@@ -50,7 +51,7 @@ def blank_non_prose( source ):
     Raises:
         - nothing
     """
-    return HTML_COMMENT.sub( _blank, FENCED_BLOCK.sub( _blank, FRONTMATTER.sub( _blank, source, count=1 ) ) )
+    return HTML_COMMENT.sub( _blank, INDENTED_FENCE.sub( _blank, FRONTMATTER.sub( _blank, source, count=1 ) ) )
 
 
 def template_findings( path, source, prose ):
