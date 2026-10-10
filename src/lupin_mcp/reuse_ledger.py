@@ -190,7 +190,10 @@ class AccountLedger:
         return self._limit, total, self._runs
 
     def _append( self, f, row ):
-        f.write( json.dumps( { **row, "at": time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }, sort_keys=True ) + "\n" )
+        """Ensures: the row starts a new line, even after a hand-typed last row with no newline."""
+        f.buffer.seek( -1, os.SEEK_END )
+        lead = "" if f.buffer.read( 1 ) == b"\n" else "\n"
+        f.write( lead + json.dumps( { **row, "at": time.strftime( "%Y-%m-%dT%H:%M:%S%z" ) }, sort_keys=True ) + "\n" )
         f.flush()
 
     def snapshot( self ):
