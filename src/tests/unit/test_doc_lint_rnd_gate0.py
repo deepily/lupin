@@ -272,8 +272,10 @@ def _entry( **citers ):
     ( "src/cosa/history.md",                     "archive" ),
     ( ".claude-session.md",                      "archive" ),
     ( "src/cosa/.claude-session.md",             "archive" ),
-    ( "src/rnd/v0.1.7/x/README.md",              "index" ),
+    ( "src/rnd/README.md",                       "index" ),
     ( "src/cosa/rnd/README.md",                  "index" ),
+    ( "src/rnd/v0.1.7/x/README.md",              "rnd" ),
+    ( "src/cosa/rnd/sub/README.md",              "rnd" ),
     ( "src/rnd/v0.1.7/x/other.md",               "rnd" ),
     ( "src/cosa/rnd/note.md",                    "rnd" ),
 ] )
@@ -298,9 +300,16 @@ def test_a_history_archive_citer_alone_does_not_hold_a_doc():
 
 
 def test_an_index_readme_alone_does_not_hold_a_doc():
-    gate  = { A: _entry( rnd_name_citers=[ "src/rnd/v0.1.7/x/README.md" ] ) }
+    gate  = { A: _entry( rnd_name_citers=[ "src/rnd/README.md", "src/cosa/rnd/README.md" ] ) }
     final = rnd_gate0.resolve( gate, { A: "history" } )
     assert final[ A ][ "class" ] == "history"
+
+
+def test_an_initiative_folder_readme_holds_a_doc_like_any_other_rnd_citer():
+    gate  = { A: _entry( rnd_name_citers=[ "src/rnd/v0.1.7/x/README.md" ] ) }
+    final = rnd_gate0.resolve( gate, { A: "history" } )
+    assert final[ A ][ "class" ] == "new"
+    assert final[ A ][ "holding_citers" ] == [ "src/rnd/v0.1.7/x/README.md" ]
 
 
 @pytest.mark.parametrize( "citer_class", [ "in force", "new" ] )
@@ -352,7 +361,7 @@ def test_an_entry_keeps_the_proposed_class_beside_the_final_one():
 
 def test_the_description_counts_the_citers_that_hold_and_the_ones_that_do_not():
     gate  = { A: _entry( live_path_citers=[ "src/cosa/agents/foo.py", "history/a.md", "history/b.md" ],
-                         rnd_path_citers=[ "src/rnd/v0.1.7/x/README.md" ] ) }
+                         rnd_path_citers=[ "src/rnd/README.md" ] ) }
     entry = rnd_gate0.resolve( gate, { A: "history" } )[ A ]
     assert rnd_gate0.describe( entry ) == "holds 1 (live 1); passes 3 (archive 2, index 1)"
 
