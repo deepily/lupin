@@ -57,7 +57,7 @@ A 410 naming a route that answers "I do not understand" teaches a caller less th
 
 `/api/podcast-generator/submit` is the one job-queueing door that retires into `ask` rather than `submit`.
 Its description flow asked the user which document they meant, and which languages and audience they wanted.
-It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold, as its contract says.
+It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold, by choice.
 
 **No queue door is left live**. `/api/test-suite/submit` retired last.
 Rick ruled "retire after v2 gap". The gap was `queue_position`, now `AskResponse.queue_position`.

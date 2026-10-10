@@ -84,7 +84,7 @@ See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
 | POST | `/api/claude-code/submit` | none | ❌ Retired → 410 Gone, use `/api/v2/submit` (remove by end of 2026) |
 | POST | `/api/claude-code/queue/submit` | none | ❌ Retired → 410 Gone, use `/api/v2/submit` (remove by end of 2026) |
 
-A tombstone carries no auth dependency, as specified.
+A tombstone carries no auth dependency, by choice.
 An unauthenticated caller must learn the same thing an authenticated one does.
 A 401 teaches nobody anything.
 
