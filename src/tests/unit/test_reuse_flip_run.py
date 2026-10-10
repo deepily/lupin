@@ -205,3 +205,27 @@ def test_the_report_counts_a_changed_shortlist_and_notes_that_the_bound_is_above
     assert "1 of 30 needs flipped" in text and "flipped: n02" in text
     clean = "\n".join( frun.report_lines( steady( items ), items, 5 ) )
     assert "above 5%" in clean and "the pass rule is on the rate" in clean
+
+
+def test_an_ask_that_does_not_come_back_ok_is_passed_on_as_it_is_with_no_row( monkeypatch ):
+    failed = { "status": "failed", "error": "no" }
+    monkeypatch.setattr( rf, "ask_repeat", lambda ctx, need, member, run_index, **kw: failed )
+    asks = frun.repeat_asks( 2, "full" )
+    assert sorted( asks ) == [ "r1", "r2" ] and asks[ "r1" ]( None, { "need": "x", "exclude": None } ) is failed
+
+
+def test_a_report_where_no_need_has_all_its_repeats_names_the_ones_left_out( tmp_path ):
+    items = frun.load_flip_needs( *( lambda s: ( s.needs, s.sha ) )( Setup( tmp_path ) ) )
+    runs  = [ search( "n01", i, status="incomplete" ) for i in range( 1, 6 ) ]
+    assert frun.report_lines( runs, items, 5 ) == [ "no need has all its repeats complete yet", "left out as incomplete: n01" ]
+
+
+def test_a_clean_report_over_enough_needs_has_an_upper_bound_under_the_line_and_no_note( ):
+    items = [ { "member": f"n{i:03d}", "need": "x", "exclude": None, "kind": "duplicate" if i % 2 == 0 else "distinct" } for i in range( 200 ) ]
+    text  = "\n".join( frun.report_lines( steady( items ), items, 5 ) )
+    assert "0 of 200 needs flipped" in text and "state pass" in text and "above 5%" not in text
+
+
+def test_a_command_with_no_root_given_and_none_in_the_environment_is_refused( setup, monkeypatch ):
+    monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+    with pytest.raises( rr.RunnerRefused, match = "LUPIN_ROOT" ): frun.main( [ "--data", str( setup.data ), "--ledger", str( setup.ledger ), "report", "--needs", str( setup.needs ), "--needs-sha", setup.sha ] )
