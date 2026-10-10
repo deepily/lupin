@@ -2,7 +2,7 @@
 capability: decision-proxy
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - cosa.agents.decision_proxy.responder.DecisionResponder@3426a59d72
+  - cosa.agents.decision_proxy.responder.DecisionResponder@89292f8ed6
   - cosa.agents.decision_proxy.trust_tracker.TrustTracker@4b186feb3f
   - cosa.agents.decision_proxy.trust_tracker.CategoryTrust@827f2e8cf0
   - cosa.agents.decision_proxy.circuit_breaker.CircuitBreaker@ed1b3c7973
