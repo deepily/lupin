@@ -15,3 +15,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [A voice persona survives clear and compact](2026.05.02-voice-persona-clear-preservation.md) | `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` |
 | [The direct-message quality judge and the always-on style contract](2026.07.31-dm-verbosity-reduction-judge.md) | `src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-dm-verbosity-reduction-phase1-2-plan.md` |
 | [Router prompt list and training menu come from the registry](2026.08.16-router-prompt-and-corpus-from-registry.md) | `src/rnd/v0.2.0/2026.08.16-generate-router-prompt-and-corpus-from-registry.md` |
+| [AI to AI messages are notifications with the body inline](2026.06.15-notification-native-ai-to-ai-messaging.md) | `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md` |
