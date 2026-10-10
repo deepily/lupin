@@ -2,7 +2,7 @@
 capability: app-bootstrap-and-static
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - lupin_app.main.lifespan@497f7d03a2
+  - lupin_app.main.lifespan@e1b4d097a3
   - lupin_app.main.add_security_headers@d838bf9587
   - lupin_app.bootstrap_helpers.assert_lupin_root_valid@d54a4c870a
   - lupin_app.bootstrap_helpers.register_sigusr1_faulthandler@fafd1bc4ad
