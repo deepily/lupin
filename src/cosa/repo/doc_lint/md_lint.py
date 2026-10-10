@@ -24,7 +24,7 @@ BARE_LABEL_MESSAGE   = re.compile( r"^bare reference '(.*)'$" )
 BARE_SECTION_MESSAGE = re.compile( "^section reference '\u00a7(.*)' has no path$" )
 NUMBERED_PART      = re.compile( r"^\d{2}-.+\.md$" )
 NUMBERED_HEADING     = re.compile( r"^#{1,6}[ \t]+(\d+(?:\.\d+)*)\.?(?:[ \t]|$)", re.MULTILINE )
-INDENTED_FENCE      = re.compile( r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$", re.DOTALL | re.MULTILINE )
+FENCE_OPENER        = re.compile( r"^[ \t]*(`{3,}|~{3,})" )
 
 
 def _blank( match ):
@@ -43,6 +43,39 @@ def _blank( match ):
     return "\n" * match.group( 0 ).count( "\n" )
 
 
+def blank_fences( source ):
+    """
+    Blank every closed fenced code block, indented or not.
+
+    Requires:
+        - source is markdown text
+
+    Ensures:
+        - a fence closes on a line of its own character, at least as long as its opener, with only spaces after it
+        - a fence with no such closer is left as it is
+        - returns text with the same number of lines, each fenced line reduced to its newline
+
+    Raises:
+        - nothing
+    """
+    lines = source.split( "\n" )
+    index = 0
+    while index < len( lines ):
+        opener = FENCE_OPENER.match( lines[ index ] )
+        if opener is None:
+            index += 1
+            continue
+        mark   = opener.group( 1 )
+        closer = re.compile( r"^[ \t]*" + re.escape( mark[ 0 ] ) + "{" + str( len( mark ) ) + r",}[ \t]*$" )
+        end    = next( ( n for n in range( index + 1, len( lines ) ) if closer.match( lines[ n ] ) ), None )
+        if end is None:
+            index += 1
+            continue
+        lines[ index : end + 1 ] = [ "" ] * ( end + 1 - index )
+        index = end + 1
+    return "\n".join( lines )
+
+
 def blank_non_prose( source ):
     """
     Blank the front matter, fenced code and HTML comments of a page.
@@ -56,7 +89,7 @@ def blank_non_prose( source ):
     Raises:
         - nothing
     """
-    return HTML_COMMENT.sub( _blank, INDENTED_FENCE.sub( _blank, FRONTMATTER.sub( _blank, source, count=1 ) ) )
+    return HTML_COMMENT.sub( _blank, blank_fences( FRONTMATTER.sub( _blank, source, count=1 ) ) )
 
 
 def template_findings( path, source, prose ):

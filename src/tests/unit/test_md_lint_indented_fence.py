@@ -89,5 +89,6 @@ def test_a_triple_backtick_inside_a_sentence_does_not_open_a_fence():
     assert "caps" in found
 
 
-def test_text_after_a_closing_fence_is_part_of_the_closer_line():
-    assert md_lint.blank_non_prose( "  ```\nx\n  ``` words\nafter\n" ) == "\n\n\nafter\n"
+def test_text_after_a_closing_fence_means_the_line_is_not_a_closer():
+    page = "  ```\nx\n  ``` words\nafter\n"
+    assert md_lint.blank_non_prose( page ) == page
