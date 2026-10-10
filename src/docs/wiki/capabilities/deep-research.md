@@ -2,8 +2,8 @@
 capability: deep-research
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - cosa.agents.deep_research.job.DeepResearchJob@63c44ef6c1
-  - cosa.agents.deep_research.cli.run_research@e6898c5902
+  - cosa.agents.deep_research.job.DeepResearchJob@91f9c77f32
+  - cosa.agents.deep_research.cli.run_research@6d63dedaf3
   - cosa.agents.deep_research.cli.generate_abstract_for_cli@802bfc04b2
   - cosa.agents.deep_research.cli.save_report_with_frontmatter@3805e7087f
   - cosa.agents.deep_research.config.ResearchConfig@fcd3ee4805
@@ -27,8 +27,8 @@ pins:
 - `ResearchOrchestratorAgent` is not on this path. Its docstring says it is reserved and not wired into production. Outside its own file, only `cli.py` imports it (unused) and `__init__.py` exports it.
 - The job defaults to `no_confirm=True`: no clarification question and no plan yes/no. With `confirm_topics` (set for a document run) the user ticks topics. No answer in 600 seconds cancels with nothing spent, unless the INI key `deep research cancel when no topics ticked` is false.
 - Cancellation is polled after clarification, after planning, before each topic and before synthesis.
-- A `CostTracker` raises `BudgetExceededError` when a recorded call would pass `budget`. `run_research` catches it, notifies and returns `None`, so the job answers "Research was cancelled by the user" and ends `COMPLETED`. This is the filed bug "Deep research budget overrun is reported as cancelled by the user and the job ends `COMPLETED`". The abstract step also swallows every exception, so the job's own `BudgetExceededError` handler is not reached in practice.
-- `DeepResearchJob` does not pass `user_email` to `run_research`, so its cache folder has an empty user segment and is shared by all users. This is the filed bug "DeepResearchJob omits user_email in run_research, so its search cache folder is shared by all users". The chained agents pass theirs.
+- A `CostTracker` raises `BudgetExceededError` when a recorded call would pass `budget`. `run_research` does not catch it. The job's own handler sends one high-priority "Research stopped: Budget exceeded" notification and re-raises, so the job ends `FAILED` and the agentic pool dead-letters it. A budget stop is not read as a cancel. The abstract step swallows every exception, a budget error included, and falls back to the report's first paragraph.
+- `DeepResearchJob` passes `self.user_email` to `run_research`, so its cache folder has the user's own segment, as the chained agents' do.
 
 ## How to extend
 - Add a step inside `run_research` with a cancel check before it; keep JSON steps on `call_with_json_output`.
