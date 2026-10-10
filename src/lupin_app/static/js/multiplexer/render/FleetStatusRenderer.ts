@@ -82,6 +82,7 @@ interface SizeCapEls {
   crewField  : HTMLSpanElement;
   crewToggle : HTMLInputElement;
   crewState  : HTMLSpanElement;
+  crewWarning: HTMLSpanElement;
 }
 
 /**
@@ -159,8 +160,17 @@ function buildSizeCapControls(): SizeCapEls {
   crewLabel.append( crewToggle, crewState );
   crewField.append( crewLabel );
 
-  root.append( field, crewField, status );
-  return { root, slider, value, status, crewField, crewToggle, crewState };
+  // Shown only while the settings.json mute is set and the switch is off: the poke stays
+  // muted although the switch says it should not be.
+  const crewWarning = document.createElement( "span" );
+  crewWarning.className = "fleet-skeleton-crew-warning";
+  crewWarning.setAttribute( "data-testid", "multiplexer-skeleton-crew-warning" );
+  crewWarning.hidden = true;
+  crewWarning.textContent = "Warning: the stop poke is still muted by ~/.claude/settings.json "
+    + "while skeleton crew is off.";
+
+  root.append( field, crewField, crewWarning, status );
+  return { root, slider, value, status, crewField, crewToggle, crewState, crewWarning };
 }
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
@@ -403,15 +413,18 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
    * server's re-read, so a refused flip lands back on the enforced state.
    */
   private paintSkeletonCrew( els: SizeCapEls, payload: FleetSizeCap ): void {
-    const on = payload.skeleton_crew;
-    if ( typeof on !== "boolean" ) {
-      els.crewField.hidden = true;
+    const crew = payload.skeleton_crew;
+    if ( !crew || typeof crew.on !== "boolean" ) {
+      els.crewField.hidden   = true;
+      els.crewWarning.hidden = true;
       return;
     }
+    const on = crew.on;
     const saving  = this.stores.fleet.skeletonCrewSaving();
     const shown   = saving ?? on;
 
     els.crewField.hidden      = false;
+    els.crewWarning.hidden    = !( crew.settings_mute_while_off === true && !on );
     els.crewToggle.checked    = shown;
     els.crewToggle.disabled   = saving !== null;
     els.crewToggle.setAttribute( "aria-checked", String( shown ) );

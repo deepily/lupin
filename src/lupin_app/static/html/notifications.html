@@ -89,11 +89,14 @@
              not a section toggle. Hands off to POST /api/system/bounce, which the
              host-side watcher turns into the sanctioned warn → restart → all-clear. -->
         <button class="bounce-server-btn" id="bounce-dev-server-btn" data-testid="notifications-bounce-dev-server" type="button" title="Bounce the dev server (:7999) — warns the fleet, then restarts (~20s)">🔄</button>
+        <!-- Row 6f72dc83: HIDDEN, not removed. The skeleton crew switch in the Fleet Status
+             pane now mutes the poke too, so this separate control is out of sight; its
+             handlers and paint stay, and deleting `hidden` below brings it back. -->
         <!-- Heartbeat stop poke switch (row 3526fb95). Same action-button class as the
              bounce button: no data-section, so the section-visibility dispatcher ignores
              it. Starts disabled and unknown; refreshPokeMute paints the real state, and
              only an admin gets a working button. -->
-        <button class="bounce-server-btn" id="poke-mute-btn" data-testid="notifications-poke-mute" data-muted="unknown" type="button" disabled title="Heartbeat stop poke: loading…">❔</button>
+        <button class="bounce-server-btn" id="poke-mute-btn" data-testid="notifications-poke-mute" data-muted="unknown" type="button" hidden disabled title="Heartbeat stop poke: loading…">❔</button>
     </div>
 
     <div class="container">
@@ -761,6 +764,22 @@
                                min="1" step="1"
                                title="The fleet-wide session cap the spawn path enforces — EVERY session counts, managers included. Over cap refuses new spawns and reaps nobody. Drag and release to set it: the value is written to `cc session fleet size cap` in the configuration file and survives a restart. The slider's maximum is `cc session fleet size cap maximum`." />
                     </span>
+                    <!-- Skeleton crew switch (row 6f72dc83). Painted by the same call as the
+                         dial, from the same payload (`skeleton_crew`), so it stays hidden until
+                         the server sends a boolean. The state is said in text, not colour. -->
+                    <span class="fleet-skeleton-crew-field" id="skeleton-crew-field"
+                          data-testid="skeleton-crew-field" hidden>
+                        <label class="fleet-skeleton-crew-label">
+                            <input type="checkbox" role="switch" id="skeleton-crew-toggle"
+                                   data-testid="skeleton-crew-toggle"
+                                   aria-labelledby="skeleton-crew-state"
+                                   title="Skeleton crew. On: managers may not spawn seats or ask for them, and the heartbeat stop poke is muted. Off: managers may spawn inside the fleet cap. The state is written to `cc session skeleton crew enabled` in the configuration file and survives a restart." />
+                            <span id="skeleton-crew-state" data-testid="skeleton-crew-state"
+                                  class="fleet-skeleton-crew-state">Skeleton crew</span>
+                        </label>
+                    </span>
+                    <span class="fleet-skeleton-crew-warning" id="skeleton-crew-warning"
+                          data-testid="skeleton-crew-warning" hidden>Warning: the stop poke is still muted by ~/.claude/settings.json while skeleton crew is off.</span>
                     <span id="fleet-size-cap-status"
                           data-testid="fleet-size-cap-status"
                           class="fleet-size-cap-status"></span>

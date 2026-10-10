@@ -388,3 +388,17 @@
 .fleet-skeleton-crew-state {
     font-variant-numeric: tabular-nums;
 }
+
+/* Said in text with a warning sign, so it never rests on colour alone. */
+.fleet-skeleton-crew-warning {
+    padding: 1px 8px;
+    border: 1px solid #f5c6cb;
+    border-radius: 10px;
+    background: #fff3cd;
+    color: #664d03;
+    font-size: 11px;
+}
+
+.fleet-skeleton-crew-warning[hidden] {
+    display: none;
+}

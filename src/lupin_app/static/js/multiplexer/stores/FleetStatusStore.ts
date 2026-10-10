@@ -45,12 +45,20 @@ export interface FleetLiveCounts {
  * this is what the server SENT, not what it promised: the renderer paints only when
  * both numbers are finite, and hides the dial otherwise (legacy :9273-9276).
  */
+export interface FleetSkeletonCrew {
+  on                       : boolean;
+  since                    : string | null;
+  set_by                   : string | null;
+  /** True when the settings.json mute is set while off; null when unreadable. */
+  settings_mute_while_off  : boolean | null;
+}
+
 export interface FleetSizeCap {
   cap?     : number;
   ceiling? : number;
   live?    : FleetLiveCounts | null;
-  /** Skeleton crew on: no spawning, stop poke muted. Absent before the toggle shipped. */
-  skeleton_crew? : boolean;
+  /** The skeleton crew switch. Absent from a server that predates the toggle. */
+  skeleton_crew? : FleetSkeletonCrew;
 }
 
 export interface FleetStatusStore {

@@ -10026,10 +10026,122 @@ class NotificationsUI {
             ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
             : "";
 
+        this._paintSkeletonCrew( payload );
+
         // Bind here rather than at construction: the cluster is painted from a fetch, so
         // there is no earlier moment at which the element is known to exist. The binder
         // is idempotent, which is what makes calling it on every paint safe.
         this._wireFleetSizeCap();
+        this._wireSkeletonCrew();
+        return true;
+    }
+
+    _skeletonCrewEls() {
+        /** The skeleton crew switch cluster, or null when the page does not carry it. */
+        const toggle = document.getElementById( "skeleton-crew-toggle" );
+        if ( !toggle ) return null;
+        return {
+            field  : document.getElementById( "skeleton-crew-field" ),
+            warning: document.getElementById( "skeleton-crew-warning" ),
+            toggle,
+            state  : document.getElementById( "skeleton-crew-state" )
+        };
+    }
+
+    _paintSkeletonCrew( payload, saving ) {
+        /**
+         * Paint the skeleton crew switch from the same payload as the dial.
+         *
+         * Ensures:
+         *     - No-op when the page does not carry the switch
+         *     - The switch stays hidden unless payload.skeleton_crew.on is a real boolean:
+         *       a server that predates the toggle gets no switch that would do nothing
+         *     - The warning line shows only when the settings.json mute is set while the
+         *       switch is off (settings_mute_while_off === true); null means no warning
+         *     - The state is said in text, not by the checkbox alone
+         *     - `saving` (the requested state) shows the request and disables the switch
+         */
+        const els = this._skeletonCrewEls();
+        if ( !els ) return false;
+
+        const crew = payload ? payload.skeleton_crew : undefined;
+        if ( !crew || typeof crew.on !== "boolean" ) {
+            els.field.hidden   = true;
+            els.warning.hidden = true;
+            return false;
+        }
+        const on       = crew.on;
+        const inFlight = typeof saving === "boolean";
+        const shown    = inFlight ? saving : on;
+
+        els.field.hidden        = false;
+        els.warning.hidden      = !( crew.settings_mute_while_off === true && !on );
+        els.toggle.checked      = shown;
+        els.toggle.disabled     = inFlight;
+        els.toggle.setAttribute( "aria-checked", String( shown ) );
+        els.state.textContent   = inFlight
+            ? `Skeleton crew: turning ${saving ? "ON" : "OFF"}…`
+            : `Skeleton crew: ${on ? "ON" : "OFF"}`;
+        return true;
+    }
+
+    async setSkeletonCrew( on ) {
+        /**
+         * Write { on } and return what the server says it persisted.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a refusal via error() with the server's own `detail`
+         *     - Never throws
+         *
+         * The return is the server's re-read of the configuration file, not the value
+         * sent, so the caller repaints from what the spawn path actually enforces.
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/skeleton-crew", {
+                method  : "PUT",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { on } )
+            } );
+            if ( !response.ok ) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if ( body && body.detail ) detail = body.detail;
+                } catch ( ignored ) { /* a non-JSON error body keeps the status line */ }
+                this.error( `Skeleton crew not saved: ${detail}` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Skeleton crew save failed: ${error}` );
+            return null;
+        }
+    }
+
+    _wireSkeletonCrew() {
+        /**
+         * Bind the switch once; the paint runs on every fleet refresh.
+         *
+         * Ensures:
+         *     - No-op returning false when the page does not carry the switch
+         *     - `change` disables the switch, writes, then repaints from the server's
+         *       answer, or re-reads the file on a refusal so it snaps back
+         */
+        const els = this._skeletonCrewEls();
+        if ( !els ) return false;
+        if ( els.toggle.dataset.wired === "true" ) return false;
+
+        els.toggle.addEventListener( "change", async () => {
+            const requested = els.toggle.checked;
+            this._paintSkeletonCrew( { skeleton_crew: { on: !requested } }, requested );
+            const persisted = await this.setSkeletonCrew( requested );
+            if ( persisted ) this._paintFleetSizeCap( persisted );
+            else             await this.refreshFleetSizeCap();
+        } );
+
+        els.toggle.dataset.wired = "true";
         return true;
     }
 
