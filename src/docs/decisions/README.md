@@ -12,3 +12,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [Claude Code session selector strip and focus mode](2026.04.30-cc-session-selector-strip-and-focus-mode.md) | `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md` |
 | [One registry owns agent registration](2026.08.15-agent-registration-single-source.md) | `src/rnd/v0.2.0/2026.08.15-agent-registration-single-source.md` |
 | [A global pause for mobile wake pushes](2026.09.29-mobile-push-global-pause.md) | `src/rnd/v0.2.1/2026.09.29-mobile-push-kill-switch-design.md` |
+| [A voice persona survives clear and compact](2026.05.02-voice-persona-clear-preservation.md) | `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` |
