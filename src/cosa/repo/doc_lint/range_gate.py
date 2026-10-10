@@ -7,6 +7,7 @@ stages exactly what the commit changed, and runs the gate of that tree as the ho
 """
 
 import argparse
+import datetime
 import os
 import shutil
 import signal
@@ -147,6 +148,38 @@ def run_gate( worktree, python=None ):
     return res.returncode, ( res.stdout + res.stderr ).decode( "utf-8", "replace" )
 
 
+def now():
+    """
+    Give the local time with its offset, to the second.
+
+    Requires:
+        - nothing
+
+    Ensures:
+        - returns an ISO 8601 string such as 2026-10-10T01:02:03-04:00
+
+    Raises:
+        - nothing
+    """
+    return datetime.datetime.now().astimezone().isoformat( timespec="seconds" )
+
+
+def where( worktree ):
+    """
+    Name the worktree and the moment, for a line that could not be judged.
+
+    Requires:
+        - worktree is the path the check ran in
+
+    Ensures:
+        - returns two lines, worktree and at, in that order
+
+    Raises:
+        - nothing
+    """
+    return [ f"worktree {worktree}", f"at {now()}" ]
+
+
 def check_commit( root, worktree, sha, runner=run_gate ):
     """
     Judge one commit as the commit gate would have judged it.
@@ -159,6 +192,7 @@ def check_commit( root, worktree, sha, runner=run_gate ):
         - returns a Result whose verdict is passed, refused or unchecked
         - exit 3 from the gate is refused and carries the lines that name a refusal
         - exit 0 is passed; any other exit, and any git failure, is unchecked
+        - an unchecked result keeps every line of a git error and ends with the worktree path and the time
         - the worktree is left holding the staged commit, to be reset by the next call
 
     Raises:
@@ -173,11 +207,11 @@ def check_commit( root, worktree, sha, runner=run_gate ):
         stage( worktree, sha, found )
         code, output = runner( worktree )
     except RuntimeError as error:
-        return Result( sha, subject, "unchecked", None, [ str( error ) ] )
+        return Result( sha, subject, "unchecked", None, str( error ).splitlines() + where( worktree ) )
     if code == GATE_REFUSED:
         return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] )
     if code == 0: return Result( sha, subject, "passed", code, [] )
-    return Result( sha, subject, "unchecked", code, output.splitlines()[ -3: ] )
+    return Result( sha, subject, "unchecked", code, output.splitlines()[ -3: ] + where( worktree ) )
 
 
 def check_range( root, base, head, worktree, runner=run_gate ):
