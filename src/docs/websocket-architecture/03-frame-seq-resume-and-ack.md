@@ -59,7 +59,7 @@ When every slot past the ceiling is live, the map exceeds `max slots` by at most
 That logs one `[WS]` warning per crossing, not per frame.
 The next write after holders disconnect evicts back down.
 
-`resume_complete` is **not** in `websocket available events`, by rule. The endpoint
+`resume_complete` is **not** in `websocket available events`, by choice. The endpoint
 sends it directly like `auth_success` and it never passes through the subscription filter.
 Listing it would imply a path that does not exist.
 

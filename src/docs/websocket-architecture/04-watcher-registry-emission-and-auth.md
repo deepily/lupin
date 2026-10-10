@@ -114,7 +114,7 @@ The `/ws/queue/{session_id}` endpoint uses **in-band auth** (not HTTP headers), 
 | Single-session displaced | (no in-band message; displaced session sees 4002 close frame) | 4002 |
 | RBAC subscription denied | _(reserved — not currently emitted)_ | 4003 |
 | Device-slot superseded | (no in-band message; displaced socket sees a 4004 close frame, reason `superseded`) | 4004 |
-| Resume replay failed **after** auth succeeded | (no `auth_error` frame; reason `resume_failed`; the real exception is logged at error level with the session id) | **1011** — not 4001, by rule |
+| Resume replay failed **after** auth succeeded | (no `auth_error` frame; reason `resume_failed`; the real exception is logged at error level with the session id) | **1011** — not 4001, by choice |
 
 A 1011 is **not** an auth outcome.
 The replay of a device's backlog runs after `auth_success`, outside the auth `try`.
