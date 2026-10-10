@@ -40,11 +40,14 @@ NOW         = datetime.datetime( 2026, 10, 10, 17, 0, 0, tzinfo=datetime.timezon
 SPAWN_TEXT  = sc.refusal_text( "spawn" )
 LAUNCH_TEXT = sc.refusal_text( "launch" )
 
+_REAL_SESSION_IS_LIVE = rc._session_is_live
+
 
 @pytest.fixture
 def folder( tmp_path, monkeypatch ):
     target = tmp_path / "credits"
     monkeypatch.setenv( rc.CREDIT_DIR_ENV, str( target ) )
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: False )
     return target
 
 
@@ -626,3 +629,112 @@ def test_a_credit_file_that_holds_a_list_or_names_another_manager_is_not_a_credi
         encoding="utf-8" )
     assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
     assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+# ── a restore never hands a credit to a seat that is running ─────────────────
+
+def test_a_restore_refuses_when_the_session_is_live_and_the_claim_is_spent_for_good( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: name == "cc-new-1" ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert not ( folder / f"{rc.CLAIM_PREFIX}cc-new-1.json" ).exists()
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: False ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_a_restore_for_a_session_that_never_started_still_gives_the_credit_back( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: False ) is True
+
+
+def test_a_live_seat_cannot_buy_a_second_seat_through_release( folder, monkeypatch ):
+    now = datetime.datetime.now( datetime.timezone.utc )
+    rc.mint( "mgr-1", [ "tiffany" ], now=now )
+    err  = _Capture()
+    base = dict( admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+                 skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+                 environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    assert fca.main( [ "--session-name", "seatX", "--headless" ], **base ) == fca.EXIT_ADMITTED
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: name == "seatX" )
+    assert fca.main( [ "--session-name", "seatX", "--release" ], release_fn=lambda n, d: None, **base ) == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    assert fca.main( [ "--session-name", "seatZ", "--headless" ], **base ) == fca.EXIT_REFUSED
+
+
+def test_a_claim_that_cannot_be_removed_for_a_live_seat_is_still_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    def cannot( path ):
+        raise OSError( "busy" )
+    monkeypatch.setattr( rc.os, "unlink", cannot )
+    assert rc.restore( "cc-new-1", now=NOW, live_fn=lambda name: True ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+
+
+def test_the_default_restore_asks_the_live_check( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    asked = []
+    monkeypatch.setattr( rc, "_session_is_live", lambda name: asked.append( name ) or True )
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+    assert asked == [ "cc-new-1" ]
+
+
+def _tmux( monkeypatch, outcome ):
+    def run( argv, **kwargs ):
+        if isinstance( outcome, Exception ):
+            raise outcome
+        run.argv = argv
+        return SimpleNamespace( returncode=outcome )
+    monkeypatch.setattr( rc.subprocess, "run", run )
+    return run
+
+
+def test_a_live_bridge_makes_the_session_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: { "tmux": name } )
+    run = _tmux( monkeypatch, 1 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+    assert not hasattr( run, "argv" )
+
+
+def test_a_tmux_session_makes_the_session_live_and_is_matched_by_exact_name( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    run = _tmux( monkeypatch, 0 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+    assert run.argv == [ "tmux", "has-session", "-t", "=seatX" ]
+
+
+def test_no_bridge_and_no_tmux_session_is_not_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, 1 )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is False
+
+
+def test_a_box_without_tmux_and_without_a_bridge_is_not_live( monkeypatch ):
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, FileNotFoundError( "tmux" ) )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is False
+
+
+def test_a_live_check_that_fails_says_live( monkeypatch ):
+    def boom( name ):
+        raise RuntimeError( "bridge folder unreadable" )
+    monkeypatch.setattr( fca, "_live_bridge_lookup", boom )
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+
+
+# ── the sweep that spend runs ────────────────────────────────────────────────
+
+def test_old_claims_are_swept_when_a_credit_is_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-old-1" )
+    later = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS * 3 )
+    rc.mint( "mgr-2", [ "cheech" ], now=later )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-2.json"
+    stale.write_text( json.dumps( { "minted_ts": NOW.timestamp() } ), encoding="utf-8" )
+    assert stale.exists()
+    assert rc.spend( "mgr-2", "cheech", now=later, session_name="cc-new-2" ) is True
+    assert not stale.exists()
+    assert ( folder / f"{rc.CLAIM_PREFIX}cc-new-2.json" ).exists()

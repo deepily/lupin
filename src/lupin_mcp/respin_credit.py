@@ -23,9 +23,10 @@ import json
 import math
 import os
 import re
+import subprocess
 
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 CREDIT_TTL_SECONDS = 900
 CREDIT_DIR_ENV     = "LUPIN_RESPIN_CREDIT_DIR"
@@ -179,14 +180,43 @@ def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime 
     return True
 
 
-def restore( session_name: str, now: Optional[ datetime.datetime ] = None ) -> bool:
+def _session_is_live( session_name: str ) -> bool:
+    """
+    Whether a live bridge or a tmux session carries this name.
+
+    Ensures:
+        - returns True when a live bridge names the session
+        - returns True when `tmux has-session` finds it
+        - returns False when tmux is not installed and no bridge names it
+        - returns True when the check itself fails, so a credit is never handed back on a guess
+    """
+    try:
+        from lupin_mcp import fleet_cap_admission
+        if fleet_cap_admission._live_bridge_lookup( session_name ):
+            return True
+        found = subprocess.run( [ "tmux", "has-session", "-t", f"={session_name}" ],
+                                capture_output=True, timeout=5 )
+        return found.returncode == 0
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+
+def restore( session_name: str, now: Optional[ datetime.datetime ] = None,
+             live_fn: Optional[ Callable[ [ str ], bool ] ] = None ) -> bool:
     """
     Give a claimed credit back because the launch it was taken for did not start a session.
+
+    Requires:
+        - live_fn, when given, answers whether a session of that name is running
 
     Ensures:
         - returns True when the credit is spendable again, with its original clock
         - returns False when nothing was claimed under that name, when the credit has since
           expired, or when a newer credit for the same manager and persona already exists
+        - returns False and removes the claim when a live bridge or tmux session carries that
+          name, so one credit never buys a second seat
         - a second restore of the same claim returns False
         - never raises
     """
@@ -197,6 +227,12 @@ def restore( session_name: str, now: Optional[ datetime.datetime ] = None ) -> b
         with open( claim, "r", encoding="utf-8" ) as handle:
             record = json.load( handle )
     except ( OSError, ValueError ):
+        return False
+    if ( live_fn if live_fn is not None else _session_is_live )( session_name ):
+        try:
+            os.unlink( claim )
+        except OSError:
+            pass
         return False
     manager = record.get( "manager_session_id" ) if isinstance( record, dict ) else None
     slug    = record.get( "persona_slug" ) if isinstance( record, dict ) else None
