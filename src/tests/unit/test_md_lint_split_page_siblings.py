@@ -156,3 +156,24 @@ def test_only_numbered_parts_count_as_siblings( tmp_path ):
     root = _split_tree( tmp_path )
     _write( root, "foo/notes.md", "# Notes\n\n### Phase 7: Notes\n" )
     assert "bare reference 'Phase 7'" in _bare( root, "foo/01-intro.md" )
+
+
+def test_a_path_that_is_not_markdown_has_no_siblings( tmp_path ):
+    assert md_lint.sibling_paths( "foo/01-intro.txt", str( _split_tree( tmp_path ) ) ) == []
+
+
+def test_a_folder_with_an_index_and_no_numbered_part_is_not_a_split( tmp_path ):
+    root = str( tmp_path )
+    _write( root, "foo.md", PAGE_WITH_PARTS )
+    _write( root, "foo/notes.md", "# Notes\n" )
+    assert md_lint.sibling_paths( "foo.md", root ) == []
+
+
+def test_a_directory_named_like_a_part_is_not_a_sibling( tmp_path ):
+    root = _split_tree( tmp_path )
+    os.makedirs( os.path.join( root, "foo", "09-dir.md" ) )
+    assert md_lint.sibling_paths( "foo.md", root ) == [ "foo/01-intro.md", "foo/02-steps.md" ]
+
+
+def test_the_index_and_every_other_part_are_the_siblings_of_a_part( tmp_path ):
+    assert md_lint.sibling_paths( "foo/01-intro.md", _split_tree( tmp_path ) ) == [ "foo.md", "foo/02-steps.md" ]

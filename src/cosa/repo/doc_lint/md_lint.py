@@ -22,6 +22,7 @@ RUNBOOK_SECTIONS    = ( "prerequisites", "steps", "verify", "rollback" )
 HEADING_REGEX       = re.compile( r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE )
 BARE_LABEL_MESSAGE   = re.compile( r"^bare reference '(.*)'$" )
 BARE_SECTION_MESSAGE = re.compile( "^section reference '\u00a7(.*)' has no path$" )
+NUMBERED_PART      = re.compile( r"^\d{2}-.+\.md$" )
 NUMBERED_HEADING     = re.compile( r"^#{1,6}[ \t]+(\d+(?:\.\d+)*)\.?(?:[ \t]|$)", re.MULTILINE )
 INDENTED_FENCE      = re.compile( r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$", re.DOTALL | re.MULTILINE )
 
@@ -116,19 +117,22 @@ def sibling_paths( path, root ):
 
     Ensures:
         - a split page is an index at foo.md and the parts directly inside the folder foo beside it
+        - a part is named with two digits and a dash first, such as 01-intro.md, so a folder of dated archive files is not a split
         - returns the index and every part except path itself, sorted, as repo-relative paths
-        - returns an empty list when root is None, when the folder or the index is missing, or when path is neither
+        - returns an empty list when root is None, when the folder, the index or every part is missing, or when path is neither the index nor a part
         - a folder nested inside foo is not read
 
     Raises:
         - nothing
     """
     if root is None: return []
-    folder = path[ : -len( ".md" ) ] if path.endswith( ".md" ) else None
-    if folder is None or not os.path.isdir( os.path.join( root, folder ) ) or not os.path.isfile( os.path.join( root, folder + ".md" ) ):
-        folder = os.path.dirname( path )
-        if not folder or not os.path.isdir( os.path.join( root, folder ) ) or not os.path.isfile( os.path.join( root, folder + ".md" ) ): return []
-    group = [ folder + ".md" ] + [ os.path.join( folder, name ) for name in os.listdir( os.path.join( root, folder ) ) if name.endswith( ".md" ) and os.path.isfile( os.path.join( root, folder, name ) ) ]
+    if NUMBERED_PART.match( os.path.basename( path ) ): folder = os.path.dirname( path )
+    elif path.endswith( ".md" ): folder = path[ : -len( ".md" ) ]
+    else: return []
+    if not folder or not os.path.isdir( os.path.join( root, folder ) ) or not os.path.isfile( os.path.join( root, folder + ".md" ) ): return []
+    parts = [ os.path.join( folder, name ) for name in os.listdir( os.path.join( root, folder ) ) if NUMBERED_PART.match( name ) and os.path.isfile( os.path.join( root, folder, name ) ) ]
+    if not parts: return []
+    group = [ folder + ".md" ] + parts
     return sorted( member for member in group if member != path )
 
 
