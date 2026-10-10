@@ -18,6 +18,7 @@ Every test writes to tmp_path. The live sessions folder is never touched.
 import datetime
 import json
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -712,10 +713,20 @@ def test_no_bridge_and_no_tmux_session_is_not_live( monkeypatch ):
     assert _REAL_SESSION_IS_LIVE( "seatX" ) is False
 
 
-def test_a_box_without_tmux_and_without_a_bridge_is_not_live( monkeypatch ):
+def test_a_box_where_tmux_cannot_be_found_says_live( monkeypatch ):
     monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
     _tmux( monkeypatch, FileNotFoundError( "tmux" ) )
-    assert _REAL_SESSION_IS_LIVE( "seatX" ) is False
+    assert _REAL_SESSION_IS_LIVE( "seatX" ) is True
+
+
+def test_a_restore_refuses_when_tmux_cannot_be_found_and_no_bridge_exists_yet( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="seatX" )
+    monkeypatch.setattr( rc, "_session_is_live", _REAL_SESSION_IS_LIVE )
+    monkeypatch.setattr( fca, "_live_bridge_lookup", lambda name: None )
+    _tmux( monkeypatch, FileNotFoundError( "tmux" ) )
+    assert rc.restore( "seatX", now=NOW ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
 
 
 def test_a_live_check_that_fails_says_live( monkeypatch ):
@@ -738,3 +749,57 @@ def test_old_claims_are_swept_when_a_credit_is_spent( folder ):
     assert rc.spend( "mgr-2", "cheech", now=later, session_name="cc-new-2" ) is True
     assert not stale.exists()
     assert ( folder / f"{rc.CLAIM_PREFIX}cc-new-2.json" ).exists()
+
+
+# ── a release from another shell cannot beat the launch it would undo ───────
+
+def _claimed_by( pid, session="seatX" ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name=session, owner_pid=pid ) is True
+
+
+def test_the_claim_records_the_launcher_pid_and_its_start_time( folder ):
+    _claimed_by( os.getpid() )
+    record = json.loads( ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).read_text( encoding="utf-8" ) )
+    assert record[ "owner_pid" ] == os.getpid()
+    assert record[ "owner_start" ] == rc._process_start( os.getpid() )
+    assert record[ "manager_session_id" ] == "mgr-1"
+
+
+def test_a_release_from_another_process_while_the_launcher_runs_gives_nothing_back( folder ):
+    _claimed_by( os.getpid() )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is False
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).exists()
+
+
+def test_the_launcher_releasing_its_own_claim_gets_the_credit_back( folder ):
+    _claimed_by( os.getpid() )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+
+
+def test_a_release_after_the_launcher_has_gone_gives_the_credit_back( folder ):
+    gone = subprocess.Popen( [ sys.executable, "-c", "pass" ] )
+    gone.wait()
+    _claimed_by( gone.pid )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_a_recycled_pid_does_not_keep_a_claim_alive( folder, monkeypatch ):
+    _claimed_by( os.getpid() )
+    monkeypatch.setattr( rc, "_process_start", lambda pid: "a different start" )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_a_claim_with_no_owner_is_restored_as_before( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="seatX" )
+    assert rc.restore( "seatX", now=NOW, caller_pid=os.getpid() + 1 ) is True
+
+
+def test_the_launcher_hands_its_own_parent_pid_to_the_credit( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    assert fca._live_credit_spend( "mgr-1", "tiffany", "seatX" ) is True
+    record = json.loads( ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).read_text( encoding="utf-8" ) )
+    assert record[ "owner_pid" ] == os.getppid()
