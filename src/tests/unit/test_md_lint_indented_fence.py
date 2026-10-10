@@ -87,3 +87,7 @@ def test_a_triple_backtick_inside_a_sentence_does_not_open_a_fence():
     source = "Use ``` in a sentence.\n\nNot code: THIS IS LOUD.\n\n```\ncode\n```\n"
     found  = [ f.rule for f in md_lint.lint_source( "page.md", source ) ]
     assert "caps" in found
+
+
+def test_text_after_a_closing_fence_is_part_of_the_closer_line():
+    assert md_lint.blank_non_prose( "  ```\nx\n  ``` words\nafter\n" ) == "\n\n\nafter\n"
