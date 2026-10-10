@@ -3707,6 +3707,7 @@ The deterministic owed-work query (R4): exact-match filters, AND semantics, newe
 | item_class |  | False |  |
 | correlation_key |  | False |  |
 | id_prefix |  | False |  |
+| blocked_by_persona |  | False |  |
 | count_only | boolean | False |  |
 | terse | boolean | False |  |
 | include_terminal | boolean | False |  |
@@ -6461,4 +6462,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.09 19:37:44 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.09 20:13:40 by `src/scripts/generate-api-docs.sh`_

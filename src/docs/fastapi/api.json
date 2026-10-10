@@ -10045,6 +10045,22 @@
                         }
                     },
                     {
+                        "name": "blocked_by_persona",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Blocked By Persona"
+                        }
+                    },
+                    {
                         "name": "count_only",
                         "in": "query",
                         "required": false,
