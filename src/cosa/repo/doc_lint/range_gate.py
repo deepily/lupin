@@ -9,6 +9,7 @@ stages exactly what the commit changed, and runs the gate of that tree as the ho
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,23 @@ GATE_REFUSED   = 3
 EXIT_PASSED    = 0
 EXIT_REFUSED   = 1
 EXIT_UNCHECKED = 2
+
+
+
+class RangeRefused( Exception ):
+    """
+    A range the checker will not judge at all.
+
+    Requires:
+        - the message names the reason and, for a merge, the commit
+
+    Ensures:
+        - carries the reason as text, for the report and for the exit code 2
+
+    Raises:
+        - nothing
+    """
+
 
 Result = namedtuple( "Result", [ "sha", "subject", "verdict", "gate_rc", "lines" ] )
 
@@ -50,7 +68,7 @@ def list_commits( root, base, head ):
 
     Ensures:
         - returns full shas in the order a lander would apply them
-        - a merge commit is listed once, like any other
+        - a merge commit is listed like any other; check_range refuses a range that holds one
 
     Raises:
         - RuntimeError when git cannot list the range
@@ -174,9 +192,14 @@ def check_range( root, base, head, worktree, runner=run_gate ):
         - a commit that cannot be judged does not stop the commits after it
 
     Raises:
+        - RangeRefused when the range holds no commit, or holds a merge commit, which is named
         - RuntimeError when the range cannot be listed
     """
-    return [ check_commit( root, worktree, sha, runner ) for sha in list_commits( root, base, head ) ]
+    commits = list_commits( root, base, head )
+    if not commits: raise RangeRefused( f"range {base}..{head} holds 0 commits, nothing was checked" )
+    merges = git( root, "rev-list", "--merges", f"{base}..{head}" ).split()
+    if merges: raise RangeRefused( f"range {base}..{head} holds a merge commit, {merges[ 0 ]}: a lander applies a merge differently, so no commit was judged" )
+    return [ check_commit( root, worktree, sha, runner ) for sha in commits ]
 
 
 def exit_code( results ):
@@ -221,6 +244,53 @@ def report( base, head, results ):
     return "\n".join( lines ) + "\n"
 
 
+def sweep_stale( root, parent ):
+    """
+    Remove the holders that a killed run left under the worktrees folder.
+
+    Requires:
+        - root is a git working tree; parent is the folder that holds the range-gate-* holders
+
+    Ensures:
+        - a holder whose pid file names a live process is kept
+        - a holder with no readable pid file, or with the pid of a dead process, is removed with its worktree
+        - a folder whose name does not start with range-gate- is never touched
+        - returns the names of the holders it removed, sorted
+
+    Raises:
+        - nothing
+    """
+    removed = []
+    for name in sorted( os.listdir( parent ) ):
+        holder = os.path.join( parent, name )
+        if not name.startswith( "range-gate-" ) or not os.path.isdir( holder ): continue
+        try:
+            with open( os.path.join( holder, "pid" ), encoding="utf-8" ) as handle: alive = os.path.exists( f"/proc/{int( handle.read().strip() )}" )
+        except ( OSError, ValueError ): alive = False
+        if alive: continue
+        subprocess.run( [ "git", "-C", root, "worktree", "remove", "--force", os.path.join( holder, "tree" ) ], capture_output=True )
+        shutil.rmtree( holder, ignore_errors=True )
+        removed.append( name )
+    subprocess.run( [ "git", "-C", root, "worktree", "prune" ], capture_output=True )
+    return removed
+
+
+def _terminate( signum, frame ):
+    """
+    Turn a termination signal into a normal exit, so the cleanup in main runs.
+
+    Requires:
+        - installed as the SIGTERM handler for the length of main
+
+    Ensures:
+        - raises SystemExit with the conventional code, 128 plus the signal number
+
+    Raises:
+        - SystemExit always
+    """
+    raise SystemExit( 128 + signum )
+
+
 def main( argv=None, out=None, runner=run_gate ):
     """
     Check a range from the command line.
@@ -232,6 +302,9 @@ def main( argv=None, out=None, runner=run_gate ):
         - makes a detached worktree under the main checkout's .claude/worktrees, from a linked worktree too, and removes it on every path
         - prints the report and writes it to --out when given
         - returns 0 when every commit passes, 1 when any is refused and 2 when any could not be judged
+        - returns 2 and prints the reason when the range is empty or holds a merge commit
+        - a termination signal removes the worktree before the process ends
+        - a holder left by a run that was killed outright is swept when the next run starts
 
     Raises:
         - nothing
@@ -246,17 +319,24 @@ def main( argv=None, out=None, runner=run_gate ):
     common = git( args.repo_root, "rev-parse", "--path-format=absolute", "--git-common-dir" ).strip()
     parent = os.path.join( os.path.dirname( common ), ".claude", "worktrees" )
     os.makedirs( parent, exist_ok=True )
+    sweep_stale( args.repo_root, parent )
     holder = tempfile.mkdtemp( prefix="range-gate-", dir=parent )
+    with open( os.path.join( holder, "pid" ), "w", encoding="utf-8" ) as handle: handle.write( str( os.getpid() ) )
     work   = os.path.join( holder, "tree" )
+    previous = signal.signal( signal.SIGTERM, _terminate )
     try:
         git( args.repo_root, "worktree", "add", "--detach", work, args.head )
-        results = check_range( args.repo_root, args.base, args.head, work, runner )
+        try: results = check_range( args.repo_root, args.base, args.head, work, runner )
+        except RangeRefused as reason:
+            out.write( f"{reason}\n" )
+            return EXIT_UNCHECKED
         text    = report( args.base, args.head, results )
         out.write( text )
         if args.out is not None:
             with open( args.out, "w", encoding="utf-8" ) as handle: handle.write( text )
         return exit_code( results )
     finally:
+        signal.signal( signal.SIGTERM, previous )
         subprocess.run( [ "git", "-C", args.repo_root, "worktree", "remove", "--force", work ], capture_output=True )
         shutil.rmtree( holder, ignore_errors=True )
 
