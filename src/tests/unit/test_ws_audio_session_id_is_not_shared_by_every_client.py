@@ -153,6 +153,7 @@ ROOT = Path( cu.get_project_root() )
 
 NOTIFICATIONS_JS = ROOT / "src" / "lupin_app" / "static" / "js" / "notifications.js"
 ARCHITECTURE_MD  = ROOT / "src" / "docs" / "websocket-architecture.md"
+ARCHITECTURE_REL = "src/docs/websocket-architecture.md"
 TROUBLESHOOT_MD  = ROOT / "src" / "docs" / "websocket-troubleshooting.md"
 WS_MANAGER_PY    = ROOT / "src" / "cosa" / "rest" / "websocket_manager.py"
 
@@ -235,7 +236,11 @@ def test_no_doc_restates_the_falsified_universal_claim( path, banned, why ):
     Ensures:
         - the falsified sentence is absent
     """
-    assert banned not in _read( path ), f"{path.name} still claims: {banned!r} — {why}"
+    from tests.helpers.split_doc import read_split_page
+
+    # The architecture page is an index plus parts: read all of them, or the check is blind.
+    text = read_split_page( ROOT, ARCHITECTURE_REL ) if path == ARCHITECTURE_MD else _read( path )
+    assert banned not in text, f"{path.name} still claims: {banned!r} — {why}"
 
 
 def test_the_reuse_claim_is_kept_but_scoped_to_the_mobile_app():
