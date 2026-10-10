@@ -45,6 +45,8 @@ suite name and a run under it executes nothing and reports 0/0/0/0. Submit via:
 
 from __future__ import annotations
 
+from tests.helpers.card_wait_report import format_card_wait_report
+
 from .conftest import BASE_URL
 
 CARD_SENDER = "claude.code@lupin.deepily.ai#e2ecard"
@@ -120,6 +122,35 @@ def _interactive_selector( nid ):
         f'[data-testid="multiplexer-action-required"][data-id-hash="{ nid }"]'
         f'.action-required-widget-interactive'
     )
+
+
+def _card_wait_report( page, nid ):
+    """
+    Read the card, the focused element and the store ids off the page, and format them.
+
+    Requires:
+        - the page is open on /app/multiplexer with the boot test hook live
+    Ensures:
+        - returns the text of format_card_wait_report for that card
+        - never raises; a failed read is reported as a missing reading
+    """
+    try:
+        probe = page.evaluate(
+            """( nid ) => {
+                const card   = document.querySelector( `[data-testid="multiplexer-action-required"][data-id-hash="${ nid }"]` );
+                const active = document.activeElement;
+                const store  = window.__multiplexerTestHook.stores.actionRequired;
+                return {
+                    html   : card ? card.outerHTML : null,
+                    active : active ? { tag: active.tagName, class_name: active.className, testid: active.getAttribute( "data-testid" ) } : null,
+                    ids    : store.list().map( ( item ) => item.id_hash ),
+                };
+            }""",
+            nid,
+        )
+    except Exception:
+        probe = { "html": None, "active": None, "ids": None }
+    return format_card_wait_report( nid, probe[ "html" ], probe[ "active" ], probe[ "ids" ] )
 
 
 def _assert_still_answerable( card, why ):
@@ -239,11 +270,15 @@ class TestActionRequiredCardParity:
         card.locator( ".yes-no-comment-input" ).blur()
         assert page.locator( _interactive_selector( "e2ecard-esc" ) ).count() == 1
         page.keyboard.press( "Escape" )
-        page.wait_for_selector(
-            _interactive_selector( "e2ecard-esc" ),
-            state   = "detached",
-            timeout = 10000,
-        )
+        try:
+            page.wait_for_selector(
+                _interactive_selector( "e2ecard-esc" ),
+                state   = "detached",
+                timeout = 10000,
+            )
+        except Exception:
+            print( _card_wait_report( page, "e2ecard-esc" ) )
+            raise
 
     # ---- #2k, #2l : the other two response types -----------------------------
 
