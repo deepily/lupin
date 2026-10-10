@@ -20,6 +20,7 @@ through `clean_test_db`. The pytest process needs the database settings the conf
 
 import os
 import secrets
+import shutil
 import uuid
 
 import bcrypt
@@ -28,6 +29,7 @@ import requests
 
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import UserRepository, ApiKeyRepository
+from lupin_mcp import fleet_cap_ini_io, fleet_size_cap, skeleton_crew
 
 
 BASE_URL      = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
@@ -36,6 +38,36 @@ SWITCH_URL    = f"{BASE_URL}/api/arbiter/skeleton-crew"
 POKE_MUTE_URL = f"{BASE_URL}/api/heartbeat/poke-mute"
 
 SKELETON_KEYS = { "on", "since", "set_by", "settings_mute_while_off" }
+
+REAL_INI = os.path.join( os.environ.get( "LUPIN_ROOT", "/var/lupin" ), "src", "conf", "lupin-app.ini" )
+
+
+def _test_ini():
+    """
+    The test-only copy of the configuration file, seeded from the real one on first use.
+
+    Requires:
+        - LUPIN_SKELETON_CREW_INI names a file other than the real configuration file
+
+    Ensures:
+        - returns the path of a file that holds the switch key and the cap keys
+        - never writes the real configuration file
+
+    Raises:
+        - pytest.fail when the variable is unset or names the real file, because the server would
+          then write the file the whole fleet reads
+    """
+    path = os.environ.get( skeleton_crew.INI_OVERRIDE_ENV )
+    if not path:
+        pytest.fail( f"{skeleton_crew.INI_OVERRIDE_ENV} is not set, so a flip would write the real "
+                     f"configuration file and put the fleet on skeleton crew. Refusing to run." )
+    if os.path.realpath( path ) == os.path.realpath( REAL_INI ):
+        pytest.fail( f"{skeleton_crew.INI_OVERRIDE_ENV} names the real configuration file. Refusing to run." )
+    if not os.path.exists( path ):
+        shutil.copyfile( REAL_INI, path )
+        fleet_cap_ini_io.write_bool_to_disk( path, skeleton_crew.SKELETON_CREW_KEY, False,
+                                             insert_after=fleet_size_cap.FLEET_CEILING_KEY )
+    return path
 
 
 @pytest.fixture
@@ -103,7 +135,14 @@ def switch( test_api_key, create_test_admin ):
     """
     reader = _key_headers( test_api_key )
     admin  = _admin_headers( create_test_admin )
-    found  = _read_switch( reader )[ "on" ]
+    ini    = _test_ini()
+    for sentinel in ( True, False ):
+        fleet_cap_ini_io.write_bool_to_disk( ini, skeleton_crew.SKELETON_CREW_KEY, sentinel,
+                                             insert_after=fleet_size_cap.FLEET_CEILING_KEY )
+        seen = _read_switch( reader )[ "on" ]
+        assert seen is sentinel, ( f"the server does not read {ini}: it answered {seen} after the "
+                                   f"file was set to {sentinel}. Refusing to flip the real switch." )
+    found = _read_switch( reader )[ "on" ]
     try:
         yield { "reader": reader, "admin": admin, "found": found }
     finally:

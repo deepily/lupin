@@ -648,6 +648,18 @@ services:
       # LUPIN_FLOW_RATIO_DIR, and the suite subprocess inherits it, so the e2e test reads the
       # file the server writes. ⚠️ Applies at container CREATE: `up -d --force-recreate`.
       LUPIN_HEARTBEAT_POKE_MUTE_FILE: /var/lupin/flow-ratio/heartbeat-poke-mute.test.json
+      # The skeleton crew switch THIS server reads and writes: a test-only copy of the configuration
+      # file in the shared flow-ratio folder, never the real src/conf/lupin-app.ini. ./src is mounted
+      # into both servers, and :7999, the launcher and every seat's Stop hook read the real file, so
+      # an integration test that flipped it here would put the whole fleet on skeleton crew.
+      # skeleton_crew.ini_path() honours this key before the main checkout's file. The attribution
+      # record and the write lock follow LUPIN_CONFIG_LOCK_DIR, so they get a test-only folder too.
+      # ⚠️ That folder also holds the lock for this server's fleet cap writes to the real file, which
+      # means a cap write here is no longer serialised with one on :7999. That race was not measured.
+      # ⚠️ Applies at container CREATE: `up -d --force-recreate lupin-rest-test`. The copy is seeded
+      # by test_skeleton_crew_switch_integration.py on its first run.
+      LUPIN_SKELETON_CREW_INI: /var/lupin/flow-ratio/skeleton-crew.test.ini
+      LUPIN_CONFIG_LOCK_DIR: /var/lupin/flow-ratio/skeleton-crew-test-lock
       LUPIN_SERVER_PORT: "8000"
       DB_HOST: lupin-postgres
       # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not

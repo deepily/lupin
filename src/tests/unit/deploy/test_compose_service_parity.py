@@ -267,6 +267,17 @@ KNOWN_DIVERGENT_ENV = {
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
+    "LUPIN_SKELETON_CREW_INI": {
+        "dev-dev"   : "2026-10-10 — only :8000 gets a test-only copy of the configuration file for the "
+                      "skeleton crew switch; :7999 keeps the real src/conf/lupin-app.ini, which the "
+                      "launcher and every Stop hook read.",
+        "cloud-gpu" : "2026-10-10 — no test server on the VM.",
+    },
+    "LUPIN_CONFIG_LOCK_DIR": {
+        "dev-dev"   : "2026-10-10 — only :8000 moves the write lock and the switch's attribution record "
+                      "into a test-only folder, so a test flip never rewrites the real record.",
+        "cloud-gpu" : "2026-10-10 — no test server on the VM.",
+    },
     "LUPIN_HEARTBEAT_POKE_MUTE_FILE": {
         "dev-dev"   : "2026-10-02 — only :8000 gets a test-only poke switch file; :7999 keeps the "
                       "fleet's real heartbeat-poke-mute.json, which the Stop hook on the host reads.",
