@@ -15,6 +15,9 @@ line. A relative target a part leaves without the "../" is named as unmoved, sin
 A second form is allowed for an in-page link. In a part, "](#x)" may become "](<part-file>.md#x)" when
 heading x is in that part file. A "](#x)" left in a part whose heading x is now in another part would
 break, so it is named as dangling and fails. Each repointed link is listed per part.
+
+A repeated heading is numbered per part file, as GitHub does for a page of its own. The old "](#notes-1)"
+becomes "](<part-file>.md#notes)" when the second Notes is the first in that part.
 """
 
 import argparse
@@ -170,14 +173,15 @@ def structure_counts( text ):
 
 def heading_homes( part_texts ):
     """
-    Map each heading anchor to the part file that holds it.
+    Map each old anchor to the part file that holds its heading and the anchor there.
 
     Requires:
         - part_texts is { name: text } in reading order
 
     Ensures:
-        - returns { anchor: basename of the part file }, anchors as github_slug makes them
-        - a heading repeated across or within parts gets the suffixes -1, -2 in reading order, as GitHub does
+        - returns { old anchor: ( basename of the part file, anchor within that file ) }, anchors as github_slug makes them
+        - the old anchor numbers a repeated heading across all parts in reading order (notes, notes-1), as the old page did
+        - the anchor within the file numbers it per file, as GitHub does for a page of its own
         - headings inside code fences are skipped
 
     Raises:
@@ -185,7 +189,7 @@ def heading_homes( part_texts ):
     """
     homes, seen = {}, Counter()
     for name, text in part_texts.items():
-        inside = False
+        base, here, inside = os.path.basename( name ), Counter(), False
         for raw in text.split( "\n" ):
             if FENCE.match( raw ):
                 inside = not inside
@@ -193,9 +197,10 @@ def heading_homes( part_texts ):
             match = None if inside else HEADING.match( raw )
             if match is None: continue
             slug = github_slug( match.group( 1 ) )
-            n    = seen[ slug ]
+            n, m = seen[ slug ], here[ slug ]
             seen[ slug ] += 1
-            homes[ slug if n == 0 else f"{slug}-{n}" ] = os.path.basename( name )
+            here[ slug ] += 1
+            homes[ slug if n == 0 else f"{slug}-{n}" ] = ( base, slug if m == 0 else f"{slug}-{m}" )
     return homes
 
 
@@ -234,39 +239,46 @@ def repoint_back( line, homes ):
         - line is a str; homes is heading_homes of the parts
 
     Ensures:
-        - returns ( line, repointed ): each "](F.md#x)" outside a code span whose heading x is in part file F turned back to "](#x)"
-        - repointed is [ { old, new } ] with old "#x" and new "F.md#x", in order
-        - a target with a directory part, or whose anchor is in another file, is left alone
+        - returns ( line, repointed ): each "](F.md#y)" outside a code span, where part file F makes anchor y for the heading the old page called x, turned back to "](#x)"
+        - repointed is [ { old, new } ] with old "#x" and new "F.md#y", in order
+        - a target with a directory part, or whose anchor F does not make, is left alone
 
     Raises:
         - nothing
     """
     repointed = []
+    reverse   = { home: old for old, home in homes.items() }
     def one( match ):
         file, anchor = match.group( 1 ), match.group( 2 )
-        if homes.get( anchor ) != file: return match.group( 0 )
-        repointed.append( { "old": f"#{anchor}", "new": f"{file}#{anchor}" } )
-        return f"](#{anchor})"
+        old = reverse.get( ( file, anchor ) )
+        if old is None: return match.group( 0 )
+        repointed.append( { "old": f"#{old}", "new": f"{file}#{anchor}" } )
+        return f"](#{old})"
     pieces = CODE_SPAN.split( line )
     return "".join( p if i % 2 else FILE_ANCHOR.sub( one, p ) for i, p in enumerate( pieces ) ), repointed
 
 
 def dangling_in( line, part_base, homes ):
     """
-    List the in-page links of a line whose heading is now in another part.
+    List the in-page links of a line that would break in the part that holds the line.
 
     Requires:
         - line is a str outside a code fence; part_base is the basename of the part holding it; homes is heading_homes
 
     Ensures:
-        - returns [ ( anchor, home file ) ] for each "](#anchor)" outside code spans whose heading is in a part file other than part_base
+        - returns [ ( anchor, should_be ) ] for each "](#anchor)" outside code spans whose heading is in another part file, or whose anchor within its own part file differs
+        - should_be is "F.md#y", F the part file that holds the heading and y the anchor F makes for it
 
     Raises:
         - nothing
     """
     found = []
     for i, piece in enumerate( CODE_SPAN.split( line ) ):
-        if i % 2 == 0: found += [ ( a, homes[ a ] ) for a in INPAGE_LINK.findall( piece ) if a in homes and homes[ a ] != part_base ]
+        if i % 2: continue
+        for a in INPAGE_LINK.findall( piece ):
+            if a not in homes: continue
+            file, local = homes[ a ]
+            if file != part_base or local != a: found.append( ( a, f"{file}#{local}" ) )
     return found
 
 
@@ -341,7 +353,7 @@ def compare( old_text, index_text, part_texts, allow_index_lines=False, max_adde
         for number, raw, inside in rows_in:
             line, again = ( raw, [] ) if inside else repoint_back( raw, homes )
             if not inside:
-                dangling += [ { "part": name, "line_number": number, "anchor": a, "should_be": f"{h}#{a}" } for a, h in dangling_in( raw, base, homes ) ]
+                dangling += [ { "part": name, "line_number": number, "anchor": a, "should_be": s } for a, s in dangling_in( raw, base, homes ) ]
             if line in totals:
                 if left[ line ] > 0:
                     left[ line ] -= 1
