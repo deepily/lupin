@@ -35,6 +35,10 @@ def _isolated_hook_log( tmp_path, monkeypatch ):
 CALLER = 4000   # stand-in for the caller's claude pid in the stubbed tests
 
 
+class _Expired( BaseException ):
+    """Raised by an alarm; a BaseException, so the fail-open handler cannot swallow it."""
+
+
 class FakeProc:
     """A fake /proc view: absent pids read as gone or unreadable."""
 
@@ -1277,7 +1281,7 @@ def _bounded( command, seconds=10 ):
     """Run the guard over `command` and return how long it took, failing instead of hanging."""
     import signal as signal_module
     def expired( *args ):
-        raise AssertionError( f"the guard did not finish within {seconds} s" )
+        raise _Expired( f"the guard did not finish within {seconds} s" )
     previous = signal_module.signal( signal_module.SIGALRM, expired )
     signal_module.alarm( seconds )
     started = time.perf_counter()
@@ -1302,3 +1306,137 @@ def _bounded( command, seconds=10 ):
 ] )
 def test_a_long_run_of_wrappers_and_options_does_not_backtrack( command ):
     assert _bounded( command ) < 2.0
+
+
+# ---------------------------------------------------------------------------
+# The guard is linear in the length of the command
+# ---------------------------------------------------------------------------
+
+def _ordinary_heredoc( size ):
+    lines = max( size // 40, 1 )
+    return "cat > notes.txt <<'EOF'\n" + "\n".join( f"ordinary line {i} of plain text" for i in range( lines ) ) + "\nEOF\n"
+
+
+_LINEAR_SHAPES = {
+    "newline run"          : lambda size: "\n" * size,
+    "space run"            : lambda size: " " * size,
+    "tab run"              : lambda size: "\t" * size,
+    "mixed whitespace"     : lambda size: " \n\t" * ( size // 3 ),
+    "letter then newlines" : lambda size: "x" + "\n" * size,
+    "pkill then whitespace": lambda size: "pkill -f x" + " \n" * ( size // 2 ),
+    "ordinary heredoc"     : _ordinary_heredoc,
+    "pgrep one per line"   : lambda size: "pgrep x; " * ( size // 9 ),
+    "pgrep pipeline"       : lambda size: "pgrep x | " * ( size // 10 ),
+    "listings in quotes"   : lambda size: "echo 'a; pgrep x; " * ( size // 16 ),
+    "for loops"            : lambda size: "for p in $(pgrep x); do echo $p; " * ( size // 34 ),
+    "nested wrappers"      : lambda size: "sudo -n nice -n 5 env -i " * ( size // 24 ) + "ls",
+}
+
+
+def _best_of( command, repeats=3, seconds=20 ):
+    """The fastest of a few runs; an alarm fails a guard that will not finish instead of hanging."""
+    import signal as signal_module
+    def expired( *args ):
+        raise _Expired( f"the guard did not finish within {seconds} s on {len( command )} characters" )
+    previous = signal_module.signal( signal_module.SIGALRM, expired )
+    best     = None
+    try:
+        for _ in range( repeats ):
+            signal_module.alarm( seconds )
+            started = time.perf_counter()
+            kill_deny_reason(
+                "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: "bash",
+                pgrep_probe=lambda selector: [],
+            )
+            elapsed = time.perf_counter() - started
+            best    = elapsed if best is None else min( best, elapsed )
+    finally:
+        signal_module.alarm( 0 )
+        signal_module.signal( signal_module.SIGALRM, previous )
+    return best
+
+
+@pytest.mark.parametrize( "shape", sorted( _LINEAR_SHAPES ) )
+def test_the_guard_time_grows_in_proportion_to_the_command( shape ):
+    """
+    Doubling the command twice must cost about four times as much, not sixteen.
+
+    A quadratic guard reads 16 here; a linear one reads 4. The bound is 9, so a loaded box
+    does not make a linear guard fail, and a quadratic one never passes.
+    """
+    build = _LINEAR_SHAPES[ shape ]
+    base  = 8000
+    small = _best_of( build( base ) )
+    large = _best_of( build( base * 4 ), repeats=1 )
+    assert large / max( small, 0.002 ) < 9, f"{shape}: {small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x the input"
+
+
+def test_a_4000_line_ordinary_heredoc_costs_well_under_a_second():
+    command = _ordinary_heredoc( 4000 * 40 )
+    assert command.count( "\n" ) > 4000
+    assert _best_of( command ) < 1.0
+
+
+_SIX_REGEXES = (
+    "_KILL_LITERAL_RE", "_UNSCOPED_LISTING_RE", "_PATTERN_SWEEP_RE",
+    "_KILL_SUBST_RE", "_KILL_VERB_RE", "_INLINE_FLAG_RE",
+)
+_WHITESPACE_SHAPES = {
+    "newlines"        : lambda size: "\n" * size,
+    "letter+newlines" : lambda size: "x" + "\n" * size,
+    "mixed"           : lambda size: " \n\t" * ( size // 3 ),
+    "crlf"            : lambda size: "\r\n" * ( size // 2 ),
+    "spaces"          : lambda size: " " * size,
+}
+
+
+def _search_seconds( regex, text, seconds=20 ):
+    """One `regex.search( text )`, failing instead of hanging when it will not finish."""
+    import signal as signal_module
+    def expired( *args ):
+        raise _Expired( f"{regex.pattern[ :30 ]!r} did not finish within {seconds} s on {len( text )} characters" )
+    previous = signal_module.signal( signal_module.SIGALRM, expired )
+    try:
+        signal_module.alarm( seconds )
+        started = time.perf_counter()
+        regex.search( text )
+        return time.perf_counter() - started
+    finally:
+        signal_module.alarm( 0 )
+        signal_module.signal( signal_module.SIGALRM, previous )
+
+
+@pytest.mark.parametrize( "shape", sorted( _WHITESPACE_SHAPES ) )
+@pytest.mark.parametrize( "name", _SIX_REGEXES )
+def test_each_module_regex_is_linear_on_a_whitespace_run( name, shape ):
+    """The six regexes were each quadratic on a run of newlines: every one is pinned on its own."""
+    regex = getattr( kill_guard, name )
+    build = _WHITESPACE_SHAPES[ shape ]
+    small = min( _search_seconds( regex, build( 8000 ) ) for _ in range( 3 ) )
+    large = _search_seconds( regex, build( 32000 ) )
+    assert large / max( small, 0.002 ) < 9, f"{name} on {shape}: {small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x"
+
+
+# ---------------------------------------------------------------------------
+# A wrapper is judged by its basename too (`/usr/bin/sudo`, `\sudo`, `~/bin/pkill`)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "command", [
+    "/usr/bin/sudo pkill -f TOK",
+    r"\sudo pkill -f TOK",
+    "/usr/bin/sudo -n /usr/bin/env -i pkill -f TOK",
+    "~/bin/pkill -f TOK",
+    "/usr/bin/sudo ~/bin/pkill -f TOK",
+    "/usr/bin/nice -n 5 pkill -f TOK",
+    "'/usr/bin/sudo' pkill -f TOK",
+] )
+def test_a_wrapper_with_a_path_or_a_tilde_does_not_hide_a_sweep( command, worktree, elsewhere ):
+    proc   = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    reason = _guard( command, [ 700 ], proc, worktree )
+    assert reason is not None
+    assert "700" in reason
+
+
+def test_a_path_wrapper_does_not_turn_an_argument_into_a_command( worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( "/usr/bin/sudo -u root grep pkill TOK", [ 700 ], proc, worktree ) is None

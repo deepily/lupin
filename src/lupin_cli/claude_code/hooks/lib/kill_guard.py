@@ -45,6 +45,7 @@ import re
 import shlex
 import signal
 import subprocess
+from bisect import bisect_left, bisect_right
 from typing import List, Optional, Tuple
 
 
@@ -86,6 +87,10 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 # greedy value backtrack INTO the program name, so `FOO=barkill 123` would match a
 # `kill` that is part of a value — a false allow traded for a false deny. Pinning the
 # value to a real token end does neither.
+# Horizontal whitespace, or a backslash-newline continuation. A bare newline ends a command and is
+# a command start of its own, so no prefix may cross one: a run of newlines would be re-scanned
+# from each of them, and the guard went quadratic on it (measured: 8000 newlines took 15 s).
+_WS = r"(?:[ \t]|\\\n)"
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt)"
 # A wrapper may carry options, each with at most one value: `nice -n 5`, `sudo -u root`,
 # `env -i`, `ionice -c3`. A value is never a wrapper, a verb or an assignment, so every
@@ -95,18 +100,21 @@ _WRAPPER_VALUE    = (
     r"(?!(?:[\w./+-]*/)?(?:" + _WRAPPERS[ 3: -1 ] + r"|pkill|killall|kill)\b)"
     r"(?![A-Za-z_][A-Za-z0-9_]*=)[^\s;&|()`-][^\s;&|()`]*"
 )
-_WRAPPER_OPERANDS = r"(?:\s+-[^\s;&|()`]+(?:\s+" + _WRAPPER_VALUE + r")?)*"
+_WRAPPER_OPERANDS = r"(?:" + _WS + r"+-[^\s;&|()`]+(?:" + _WS + r"+" + _WRAPPER_VALUE + r")?)*"
 # `timeout` takes a duration (and options) before the command it wraps, so it is
 # not a bare word like the others: `timeout 5 pkill ...`, `timeout -s KILL 5 pkill ...`.
-_TIMEOUT_SPAN = r"timeout(?:\s+(?:-[sk]\s+\w+|-\S+))*\s+\d+(?:\.\d*)?[smhd]?(?=\s)"
-_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b{_WRAPPER_OPERANDS}))*"
+_TIMEOUT_SPAN = (
+    r"timeout(?:" + _WS + r"+(?:-[sk]" + _WS + r"+\w+|-\S+))*" + _WS + r"+\d+(?:\.\d*)?[smhd]?(?=\s)"
+)
+# A command word is judged by its basename: `/usr/bin/pkill`, `\pkill`, `"pkill"` all name pkill.
+_WORD_PRE  = r"""\\?["']?(?:[\w./+~-]*/)?"""
+_WORD_POST = r"""["']?(?![\w./-])"""
+
+_PREFIXES = rf"(?:{_WS}*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}))*"
 
 # Where a command can start: a line, a separator, a group, a keyword, a negation or a case arm.
 _CMD_START = r"(?:^|[;&|(`{)]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
 
-# A command word is judged by its basename: `/usr/bin/pkill`, `\pkill`, `"pkill"` all name pkill.
-_WORD_PRE  = r"""\\?["']?(?:[\w./+-]*/)?"""
-_WORD_POST = r"""["']?(?![\w./-])"""
 
 # A signal given as an option: `-9`, `-KILL`, `-SIGTERM`. The names come from the
 # platform's own table, so `-P`, `-U` and `-G` stay options that select processes.
@@ -139,9 +147,9 @@ _KILL_LITERAL_RE = re.compile(
     r"""
     """ + _CMD_START + r"""       # command position
     """ + _PREFIXES + r"""       # env assignments / transparent wrappers (row 084adbaf)
-    \s*
+    """ + _WS + r"""*
     """ + _WORD_PRE + r"""kill""" + _WORD_POST + r"""   # the verb (not pkill/killall — different shapes)
-    (?P<args>(?:\s+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
+    (?P<args>(?:""" + _WS + r"""+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
     """,
     re.VERBOSE,
 )
@@ -151,10 +159,11 @@ _KILL_LITERAL_RE = re.compile(
 _UNSCOPED_LISTING_RE = re.compile(
     r"""
     """ + _CMD_START + r"""
-    """ + _PREFIXES + r"""\s*
+    """ + _PREFIXES + r"""
+    """ + _WS + r"""*
     """ + _WORD_PRE + r"""
     (?:
-        ps\b(?=(?:\s+[^\s;&|)`\n]+)*\s+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
+        ps\b(?=(?:""" + _WS + r"""+[^\s;&|)`\n]+)*""" + _WS + r"""+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
       | pgrep\b
     )
     """,
@@ -165,7 +174,7 @@ _UNSCOPED_LISTING_RE = re.compile(
 # Only the shell's own pid scopes a listing to its children. A literal pid (`-P 1`, the
 # subreaper every orphan reparents to) scopes it to somebody else's.
 _OWN_PID = r"""["']?(?:\$\$|\$\{\$\}|\$PPID|\$\{PPID\}|\$BASHPID|\$\{BASHPID\}|\$!|\$\{!\})["']?"""
-_OWN_CHILDREN_RE = re.compile( rf"(?:-P|--parent|--ppid)\s*=?\s*{_OWN_PID}" )
+_OWN_CHILDREN_RE = re.compile( rf"(?:-P|--parent|--ppid)[ \t]*=?[ \t]*{_OWN_PID}" )
 
 # Quoted spans, removed before any structural test. `pgrep -f "node|esbuild"`
 # carries a pipe INSIDE an argument; reading that as a pipeline is how the guard
@@ -196,7 +205,7 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # through to the plain character class.
 _ARG_CHAR = r"""(?:\\.|"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
 _PATTERN_SWEEP_RE = re.compile(
-    rf"{_CMD_START}{_PREFIXES}\s*{_WORD_PRE}(?P<verb>pkill|killall){_WORD_POST}(?P<args>(?:\s+(?!#){_ARG_CHAR}+)*)"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}(?P<verb>pkill|killall){_WORD_POST}(?P<args>(?:{_WS}+(?!#){_ARG_CHAR}+)*)"
 )
 
 # One raw (still quoted) argument, and the two redirection shapes. A redirection is
@@ -210,14 +219,14 @@ _REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<{1,3})&?" )
 # Denying one and not the other draws an arbitrary line through identical
 # behaviour.
 _KILL_SUBST_RE = re.compile(
-    rf"{_CMD_START}{_PREFIXES}\s*{_WORD_PRE}kill(?:all)?{_WORD_POST}[^;&|\n]*?"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}kill(?:all)?{_WORD_POST}[^;&|\n]*?"
     r"(?:\$\(|`)(?P<subst>[^)`]*)"
 )
 
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
 # so it is optional in BOTH slots rather than only the first.
 _KILL_VERB_RE = re.compile(
-    rf"{_CMD_START}{_PREFIXES}\s*(?:xargs\s+(?:-[^\s]+\s+)*{_PREFIXES}\s*)?{_WORD_PRE}kill(?:all)?{_WORD_POST}"
+    rf"{_CMD_START}{_PREFIXES}{_WS}*(?:xargs{_WS}+(?:-[^\s]+{_WS}+)*{_PREFIXES}{_WS}*)?{_WORD_PRE}kill(?:all)?{_WORD_POST}"
 )
 
 
@@ -323,6 +332,7 @@ def _split_args( args: str ) -> List[ str ]:
         - a quoted span or a backslash-escaped character stays inside one word
         - redirections are dropped; unbalanced quotes fall back to a whitespace split
     """
+    args = args.replace( "\\\n", " " )
     try:
         shlex.split( args )
         words = []
@@ -660,8 +670,8 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
     rf"{_CMD_START}"
-    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b{_WRAPPER_OPERANDS}))*?"
-    rf"\s*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
+    rf"(?:{_WS}*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}))*?"
+    rf"{_WS}*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
 
 
@@ -755,6 +765,111 @@ def _claude_pids_targeted( command: str, comm_reader ) -> list:
     return hits
 
 
+_STOP_RE        = re.compile( r"[;\n)]" )
+_CLOSER_RE      = re.compile( r"\bdone\b|\}" )
+_CLOSE_CHARS_RE = re.compile( r"[)`]" )
+
+
+_TAIL_BUDGET_FACTOR = 16
+_TAIL_BUDGET_FLOOR  = 16384
+
+
+class _CommandIndex:
+    """
+    One pass over a command that answers every window question in logarithmic time.
+
+    Each listing once sliced and searched the rest of the command, which is quadratic in
+    the number of listings. Here every position is found once, then looked up by bisection.
+    """
+
+    def __init__( self, command: str ):
+        """
+        Index every position the window questions need, in one pass.
+
+        Requires:
+            - command is the shell command string
+
+        Ensures:
+            - quoted spans are blanked, so a `|` or `;` inside an argument is data
+            - every list below is sorted by position
+        """
+        self.command     = command
+        self.spans       = [ match.span() for match in _QUOTED_RE.finditer( command ) ]
+        self.span_starts = [ start for start, _ in self.spans ]
+        blanked          = _QUOTED_RE.sub( lambda match: " " * len( match.group( 0 ) ), command )
+        self.blanked     = blanked
+        self.stops       = [ match.start() for match in _STOP_RE.finditer( blanked ) ]
+        self.compounds   = [ match.start() for match in _COMPOUND_RE.finditer( blanked ) ]
+        closers          = list( _CLOSER_RE.finditer( blanked ) )
+        self.closer_starts = [ match.start() for match in closers ]
+        self.closer_ends   = [ match.end() for match in closers ]
+        self.pipes       = [ match.start() for match in _PIPE_RE.finditer( blanked ) ]
+        self.own         = [ match.start() for match in _OWN_CHILDREN_RE.finditer( blanked ) ]
+        self.verbs       = [ match.end() for match in _KILL_VERB_RE.finditer( blanked ) ]
+        fors             = list( _FOR_SUBST_RE.finditer( command ) )
+        self.for_ends    = [ match.end() for match in fors ]
+        self.for_vars    = [ match.group( "var" ) for match in fors ]
+        self.closes      = [ match.start() for match in _CLOSE_CHARS_RE.finditer( command ) ]
+
+    def inside_quote( self, position: int ) -> bool:
+        """True iff `position` falls strictly inside a quoted span, so a tail cannot start there."""
+        found = bisect_right( self.span_starts, position ) - 1
+        if found < 0:
+            return False
+        start, end = self.spans[ found ]
+        return start < position < end
+
+    def window_end( self, start: int ) -> int:
+        """
+        The offset where the pipeline that begins at `start` ends.
+
+        Ensures:
+            - the first `;`, newline or `)` ends it, unless a compound keyword opens first, in
+              which case it runs to the next `done` or `}` or to the end of the command
+        """
+        found = bisect_left( self.stops, start )
+        if found == len( self.stops ):
+            return len( self.blanked )
+        stop     = self.stops[ found ]
+        compound = bisect_left( self.compounds, start )
+        if compound == len( self.compounds ) or self.compounds[ compound ] >= stop:
+            return stop
+        closer = bisect_left( self.closer_starts, start )
+        return self.closer_ends[ closer ] if closer < len( self.closer_ends ) else len( self.blanked )
+
+    def loop_variable( self, listing_end: int ) -> Optional[ str ]:
+        """
+        The variable of the `for X in $(` loop that this listing's output feeds, or None.
+
+        Ensures:
+            - a loop counts when it opens at or before the listing and nothing closed it since
+            - of several, the earliest is returned
+        """
+        found      = bisect_left( self.closes, listing_end ) - 1
+        last_close = self.closes[ found ] if found >= 0 else -1
+        loop       = bisect_right( self.for_ends, last_close )
+        if loop < len( self.for_ends ) and self.for_ends[ loop ] <= listing_end:
+            return self.for_vars[ loop ]
+        return None
+
+    @staticmethod
+    def _within( positions: List[ int ], low: int, high: int ) -> bool:
+        """True iff some position p has low <= p < high."""
+        found = bisect_left( positions, low )
+        return found < len( positions ) and positions[ found ] < high
+
+    def window_scoped( self, low: int, high: int ) -> bool:
+        """True iff the window [low, high) names the shell's own children."""
+        return self._within( self.own, low, high )
+
+    def window_reaches_a_kill( self, low: int, high: int ) -> bool:
+        """True iff the window holds a pipe and a kill verb: the listing feeds a kill."""
+        if not self._within( self.pipes, low, high ):
+            return False
+        found = bisect_right( self.verbs, low )
+        return found < len( self.verbs ) and self.verbs[ found ] <= high
+
+
 def _pipeline_window( tail: str ) -> str:
     """
     The text a listing's output can still reach: its own pipeline, no further.
@@ -769,15 +884,8 @@ def _pipeline_window( tail: str ) -> str:
           compound keyword (`while`/`for`/`until`/`do`/`{`) opens before it, in
           which case it runs to `done`/`}` or to the end of the string
     """
-    blanked = _QUOTED_RE.sub( lambda m: " " * len( m.group( 0 ) ), tail )
-    stop    = re.search( r"[;\n)]", blanked )
-    if stop is None:
-        return blanked
-    head = blanked[ : stop.start() ]
-    if not _COMPOUND_RE.search( head ):
-        return head
-    closer = re.search( r"\bdone\b|\}", blanked )
-    return blanked[ : closer.end() ] if closer else blanked
+    index = _CommandIndex( tail )
+    return index.blanked[ : index.window_end( 0 ) ]
 
 
 def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
@@ -793,12 +901,7 @@ def _loop_variable_fed_by( command: str, listing_end: int ) -> Optional[ str ]:
           the listing and has not closed before it
         - returns None when no such loop introduces this listing
     """
-    for match in _FOR_SUBST_RE.finditer( command, 0, listing_end ):
-        between = command[ match.end() : listing_end ]
-        if ")" in between or "`" in between:
-            continue
-        return match.group( "var" )
-    return None
+    return _CommandIndex( command ).loop_variable( listing_end )
 
 
 def _sweeps_unscoped( command: str ) -> bool:
@@ -818,15 +921,34 @@ def _sweeps_unscoped( command: str ) -> bool:
         - False when every listing is scoped to the caller's own children
         - False for a listing whose output no kill consumes
     """
+    index   = _CommandIndex( command )
+    checked = {}
+    # A listing that sits inside a quoted span has its tail paired afresh, which costs a pass over
+    # that tail. The budget keeps the total linear: a command that spends all of it is refused,
+    # because the guard can no longer say what it does in bounded time.
+    budget  = _TAIL_BUDGET_FACTOR * len( command ) + _TAIL_BUDGET_FLOOR
     for listing in _UNSCOPED_LISTING_RE.finditer( command ):
-        tail   = command[ listing.end(): ]
-        window = _pipeline_window( tail )
-        if _OWN_CHILDREN_RE.search( window ):
+        end = listing.end()
+        if index.inside_quote( end ):
+            budget -= len( command ) - end
+            if budget < 0:
+                return True
+            view, low = _CommandIndex( command[ end: ] ), 0     # the tail pairs its quotes afresh
+        else:
+            view, low = index, end
+        high = view.window_end( low )
+        if view.window_scoped( low, high ):
             continue
-        if _PIPE_RE.search( window ) and _KILL_VERB_RE.search( window ):
+        if view.window_reaches_a_kill( low, high ):
             return True
-        variable = _loop_variable_fed_by( command, listing.end() )
-        if variable and re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command ):
+        variable = index.loop_variable( end )
+        if variable is None:
+            continue
+        if variable not in checked:
+            checked[ variable ] = bool(
+                re.search( r"kill\b[^;&|\n]*\$\{?" + re.escape( variable ) + r"\b", command )
+            )
+        if checked[ variable ]:
             return True
 
     # SHAPE D — the listing sits inside a substitution that IS the kill's argument.
