@@ -164,10 +164,7 @@ def authlane_ctx():
     db_module.engine, db_module.SessionLocal, db_module.ScopedSession = saved
     eng = _maintenance_engine( server_url )
     with eng.connect() as conn:
-        conn.execute( text(
-            "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity "
-            "WHERE datname = :db AND pid <> pg_backend_pid()"
-        ), { "db": _THROWAWAY_DB } )
+        conn.execute( text( td.terminate_sessions_sql( td.uses_template() ) ), { "n": _THROWAWAY_DB } )
         conn.execute( text( f'DROP DATABASE IF EXISTS "{_THROWAWAY_DB}"' ) )
     eng.dispose()
 

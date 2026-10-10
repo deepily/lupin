@@ -7,8 +7,8 @@ session on the database is enough, and the drop behind the statement then fails.
 when this guard was written; the helper fixed the statement once, so a copy keeps the old defect.
 
 This guard counts the tracked test files that name pg_terminate_backend outside the helper. A file may
-appear only in the allowlist below, with the count it holds today. The allowlist is a debt list: a file
-leaves it when it calls the helper, and the list ends empty.
+appear only in the allowlist below, with the count it holds. The allowlist is a debt list and it is empty,
+because every file now calls the helper.
 
 Venue: :7999 (unit tier). Reads tracked files only.
 """
@@ -26,21 +26,8 @@ EXEMPT_FILES = {
     "src/tests/unit/test_template_database_helper.py",
     "src/tests/unit/test_every_terminate_backend_in_a_test_is_the_helper.py",
 }
-# path : number of lines naming the needle. Remove an entry when the file calls the helper.
-ALLOWED = {
-    "src/tests/e2e/test_ask_answer_handback.py"                                          : 1,
-    "src/tests/integration/test_answers_owed_authlane_dv1.py"                            : 1,
-    "src/tests/integration/test_answers_owed_repo_realdb.py"                             : 1,
-    "src/tests/integration/test_unpark_card_reads_realdb.py"                             : 1,
-    "src/tests/smoke/test_acks_are_not_conversations.py"                                 : 1,
-    "src/tests/smoke/test_alembic_create_all_bootstrap_idempotency.py"                   : 1,
-    "src/tests/smoke/test_alembic_migration_drift_roundtrip.py"                          : 1,
-    "src/tests/smoke/test_broadcast_ack_persistence_e2e.py"                              : 1,
-    "src/tests/smoke/test_i3_kind_aware_chase_roundtrip.py"                              : 1,
-    "src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py"            : 1,
-    "src/tests/smoke/test_migration_answer_delivered_at_roundtrip.py"                    : 1,
-    "src/tests/smoke/test_migration_notif_response_requested_not_null_roundtrip.py"      : 1,
-}
+# path : number of lines naming the needle. Empty now; an entry is a debt and the list must stay empty.
+ALLOWED = { }
 
 
 def _tracked_test_files():

@@ -102,10 +102,7 @@ def throwaway_db_url( request ):
 
     eng = _maintenance_engine( server_url )
     with eng.connect() as conn:
-        conn.execute( text(
-            "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity "
-            "WHERE datname = :db AND pid <> pg_backend_pid()"
-        ), { "db": db_name } )
+        conn.execute( text( td.terminate_sessions_sql( td.uses_template() ) ), { "n": db_name } )
         conn.execute( text( f'DROP DATABASE IF EXISTS "{db_name}"' ) )
     eng.dispose()
 
