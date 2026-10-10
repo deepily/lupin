@@ -107,12 +107,36 @@ def test_exit_zero_passes_with_no_lines( repo, tmp_path ):
 def test_any_other_exit_is_unchecked_and_keeps_the_last_output_lines( repo, tmp_path ):
     out    = "a\nb\nc\nd\n"
     result = range_gate.check_commit( repo[ "root" ], _worktree( repo, tmp_path ), repo[ "one" ], _runner_for( [ ( 1, out ) ] ) )
-    assert ( result.verdict, result.gate_rc, result.lines ) == ( "unchecked", 1, [ "b", "c", "d" ] )
+    assert ( result.verdict, result.gate_rc, result.lines[ :3 ] ) == ( "unchecked", 1, [ "b", "c", "d" ] )
 
 
 def test_a_git_failure_is_unchecked_and_names_the_failure( repo, tmp_path ):
     result = range_gate.check_commit( repo[ "root" ], _worktree( repo, tmp_path ), repo[ "base" ], _runner_for( [] ) )
     assert result.verdict == "unchecked" and result.gate_rc is None and "failed" in result.lines[ 0 ]
+
+
+def test_an_unchecked_commit_names_its_worktree_and_the_time( repo, tmp_path, monkeypatch ):
+    monkeypatch.setattr( range_gate, "now", lambda: "2026-10-10T01:02:03-04:00" )
+    work   = _worktree( repo, tmp_path )
+    result = range_gate.check_commit( repo[ "root" ], work, repo[ "one" ], _runner_for( [ ( 1, "a\nb\n" ) ] ) )
+    assert result.verdict == "unchecked"
+    assert f"worktree {work}" in result.lines and "at 2026-10-10T01:02:03-04:00" in result.lines
+
+
+def test_a_git_failure_keeps_every_line_of_the_git_error( repo, tmp_path, monkeypatch ):
+    monkeypatch.setattr( range_gate, "now", lambda: "t" )
+    def failing( root, *args ): raise RuntimeError( "git checkout x failed: error: first\nhint: second\nhint: third" )
+    monkeypatch.setattr( range_gate, "git", failing )
+    work   = str( tmp_path / "w" )
+    result = range_gate.check_commit( "r", work, "abc", _runner_for( [] ) )
+    assert result.lines == [ "git checkout x failed: error: first", "hint: second", "hint: third", f"worktree {work}", "at t" ]
+
+
+def test_a_passed_or_refused_commit_carries_no_worktree_line( repo, tmp_path ):
+    work = _worktree( repo, tmp_path )
+    for code in ( 0, 3 ):
+        result = range_gate.check_commit( repo[ "root" ], work, repo[ "one" ], _runner_for( [ ( code, "REFUSED x\n" ) ] ) )
+        assert not any( line.startswith( "worktree " ) for line in result.lines )
 
 
 def test_the_worktree_is_reset_between_commits( repo, tmp_path ):
