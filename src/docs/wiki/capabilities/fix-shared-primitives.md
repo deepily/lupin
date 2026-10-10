@@ -6,8 +6,8 @@ pins:
   - cosa.agents.shared.fix_executor.FixExecutor.execute_fix@4a060ae1d4
   - cosa.agents.shared.fix_executor.register_fix_prompts@1eec1c5893
   - cosa.agents.shared.git_strategist.GitStrategist.resolve_trust_level@d0d72d8ff8
-  - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_single@c3b2518a8c
-  - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_multi@dde2110642
+  - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_single@736ee613a2
+  - cosa.agents.shared.git_strategist.GitStrategist.commit_and_pr_multi@2faed2d084
   - cosa.agents.shared.plan_writer.PlanWriter.write_plan@7642a07cc3
   - cosa.agents.shared.report_writer.ReportWriter.write@14bbc03bbd
 ---
@@ -29,8 +29,8 @@ Both [[fix-expediter-bfe]] and [[fix-expediter-tfe]] use these: a coder and test
 
 ## GitStrategist
 - `resolve_trust_level` returns 1 when the proxy is missing or anything goes wrong; otherwise it returns the level read from the proxy's trust tracker.
-- Below level 3, the commits stay on the current branch (`commit_only`). At 3 and above, `commit_and_pr_single` makes a fix branch, commits and pushes, then opens a pull request through `gh`. After any PR failure the result is `branch_only`.
-- `commit_and_pr_single` makes one commit. `commit_and_pr_multi` is what TFE uses: one commit per cluster, and a pull request only at level 3 and above. Its push step needs a `push_branch` that `GitOps` lacks, so no push runs today. Delete this clause when the bug "GitStrategist.commit_and_pr_multi says Pushed and opens a PR without pushing: no push_branch exists" closes.
+- Below level 3, the commits stay on the current branch (`commit_only`). At 3 and above, `commit_and_pr_single` makes a fix branch. Its `push_enabled` flag is false unless the caller passes it. With it false the fix is committed on the branch and nothing is pushed. No pull request opens, the original branch is restored and `error` names the INI key. With it true it commits and pushes, then opens a pull request through `gh`, and after any PR failure the result is `branch_only`.
+- `commit_and_pr_single` makes one commit. `commit_and_pr_multi` is what TFE uses: one commit per cluster, and a pull request only at level 3 and above after a successful push. It pushes with `GitOps.push_branch`, only when `push_enabled` is true. Otherwise it returns `commit_only` with `error` set, restores the original branch and opens no pull request.
 - Both return a dict with an `error` field instead of raising.
 
 ## Plan and report files
