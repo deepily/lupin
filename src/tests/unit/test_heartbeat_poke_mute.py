@@ -167,7 +167,8 @@ def _client( user ):
 
 def test_get_reports_the_switch_and_changes_nothing():
     client = _client( None )
-    assert client.get( "/api/heartbeat/poke-mute" ).json() == { "muted": False, "set_by": None, "set_at": None }
+    assert client.get( "/api/heartbeat/poke-mute" ).json() == { "muted": False, "set_by": None, "set_at": None,
+                                                                "source": "none" }
     assert not os.path.exists( pm.poke_mute_path() )
 
 
@@ -177,7 +178,8 @@ def test_admin_put_flips_it_and_the_hook_reader_agrees():
     on = client.put( "/api/heartbeat/poke-mute", json={ "muted": True }, headers={ "Authorization": "Bearer t" } )
     assert on.status_code == 200
     assert on.json()[ "muted" ] is True and on.json()[ "set_by" ] == "rick@example.com"
-    assert pm.read_poke_mute() == on.json()
+    assert on.json()[ "source" ] == "file"
+    assert pm.read_poke_mute() == { k: v for k, v in on.json().items() if k != "source" }
     assert client.get( "/api/heartbeat/poke-mute" ).json() == on.json()
 
     off = client.put( "/api/heartbeat/poke-mute", json={ "muted": False }, headers={ "Authorization": "Bearer t" } )
