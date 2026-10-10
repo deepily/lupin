@@ -2,8 +2,8 @@
 capability: doc-lint-gate
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - cosa.repo.doc_lint.gate.main@f005e4d493
-  - cosa.repo.doc_lint.gate.collect@ab8ee7e8f8
+  - cosa.repo.doc_lint.gate.main@f2f9f45c50
+  - cosa.repo.doc_lint.gate.collect@b57a2265c8
   - cosa.repo.doc_lint.gate.is_mechanical@b1c8b96ada
   - cosa.repo.doc_lint.cli.in_scope@2ace35ed53
   - cosa.repo.doc_lint.cli.run_linter@ea4dca0555
@@ -26,7 +26,7 @@ A pre-commit gate that lints docstrings, `#` comments and markdown on staged fil
 
 ## What makes it refuse
 - Warn mode exits 0, including after an internal crash, which prints a loud line. `--blocking` exits 1 when findings remain. Every refusal exits 3 and wins over `--blocking`.
-- Rule divergence: a tracked rule file that differs between index and working tree refuses a commit. This applies when the commit stages a Python file or the count table. Rule files are the `doc_lint` package, the word list, `pre-commit-chain.sh` and `ts_doc_extract.mjs`. The swept and counted checks are then skipped.
+- Rule divergence: a tracked rule file that differs between index and working tree refuses a commit. This applies when the commit stages a Python file, a TypeScript or JavaScript file in the counted scope, or either count table. Rule files are the `doc_lint` package, the word list, `pre-commit-chain.sh` and `ts_doc_extract.mjs`. The swept and counted checks are then skipped.
 - Swept scope: a staged swept file is refused when its docstring lint holds any finding on any line, touched or not. A waiver is a same-line marker, `doc-lint: waive <rule> -- <reason>`, that names the rule. Its reason needs a word of three or more letters, or it waives nothing.
 - A staged swept file that does not parse, or is not UTF-8, is refused and cannot be waived. The commit gate drops a leading byte-order mark first. Elsewhere a non-UTF-8 file is skipped with a warning, and in the counted scope it counts as one finding.
 - Counted scope: every other tracked `.py` file is counted. It is refused when its unwaived finding count exceeds its entry in `src/conf/doc-lint-counts.json`, which records one count per file. A new file starts at zero and a rename inherits its old entry.
