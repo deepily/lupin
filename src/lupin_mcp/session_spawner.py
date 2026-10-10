@@ -31,6 +31,7 @@ from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import fleet_size_cap
+from lupin_mcp import skeleton_crew
 from lupin_mcp import reap_memento
 from lupin_mcp import reap_branch
 from cosa.agents.shared import seat_teardown
@@ -647,6 +648,7 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
         - census_fn() -> an iterable of (bridge_path, session_id, persona) triples
 
     Ensures:
+        - returns the skeleton crew refusal first when the switch is on
         - returns None when the spawn fits under the cap
         - otherwise returns the refusal string, naming cap, total, split and headroom
         - NEVER raises and NEVER reaps — an unreadable fleet ALLOWS the spawn
@@ -664,6 +666,17 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
     inconsistency somebody missed.
     """
     try:
+        # The skeleton crew switch answers before the cap does: with it on, no spawn is
+        # allowed even when the fleet has room. It follows the same boundary as the cap
+        # below. The default source reads the file fresh, and an injected configuration
+        # is taken as the configuration.
+        if config_fn is None:
+            skeleton_refusal = skeleton_crew.skeleton_crew_refusal(
+                None, disk_fn=skeleton_crew.default_disk_skeleton_reader )
+        else:
+            skeleton_refusal = skeleton_crew.skeleton_crew_refusal( config_fn() )
+        if skeleton_refusal is not None:
+            return skeleton_refusal
         # 🔴 THE FRESH DISK READ APPLIES TO THE DEFAULT SOURCE ONLY, AND THAT BOUNDARY IS
         # THE WHOLE OF IT. When nobody injects a config the cap comes from the
         # process-lifetime ConfigurationManager singleton, which has no reload — so in

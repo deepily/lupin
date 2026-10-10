@@ -500,9 +500,66 @@ def _live_bridge_lookup( tmux_session_name: str ):
     return find_session_by_tmux( tmux_session_name )
 
 
+AGENT_MARKERS = ( "CLAUDECODE", "COSA_VOICE_SPAWNED_BY" )
+
+
+def _launched_by_an_agent( headless: bool, stdin_is_tty_fn: Callable, environ: Any ) -> bool:
+    """
+    Whether this launch looks like it came from an agent and not from a person's terminal.
+
+    Requires:
+        - stdin_is_tty_fn() -> bool
+        - environ supports .get
+
+    Ensures:
+        - True for a headless launch
+        - True when stdin is not a terminal, which is a manager's shell
+        - True when an agent marker is set to a non-empty value in the environment
+        - False only for a person at a terminal with no marker
+    """
+    if headless:
+        return True
+    if not stdin_is_tty_fn():
+        return True
+    return any( environ.get( marker ) for marker in AGENT_MARKERS )
+
+
+def _live_skeleton_refusal() -> Optional[ str ]:
+    """The skeleton crew refusal for a launch, read fresh from the configuration file."""
+    from lupin_mcp import skeleton_crew
+    return skeleton_crew.skeleton_crew_refusal(
+        None, disk_fn=skeleton_crew.default_disk_skeleton_reader, door="launch" )
+
+
+def _live_stdin_is_tty() -> bool:
+    """Whether this process's stdin is a terminal."""
+    return sys.stdin.isatty()
+
+
+def _skeleton_refusal( headless: bool, skeleton_fn: Callable, stdin_is_tty_fn: Callable,
+                       environ: Any, stderr: Any ) -> Optional[ str ]:
+    """
+    The skeleton crew refusal for this launch, or None when it may go on.
+
+    Ensures:
+        - returns None for a person at a terminal, whatever the switch says
+        - returns the refusal text for an agent launch when the switch is on
+        - a check that raises is allowed, and says so on stderr, like the cap guard
+        - never raises
+    """
+    try:
+        if not _launched_by_an_agent( headless, stdin_is_tty_fn, environ ):
+            return None
+        return skeleton_fn()
+    except Exception as error:
+        stderr.write( f"\n[SKELETON-CREW] check could not run, ALLOWING the launch: {error}\n\n" )
+        return None
+
+
 def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under_lock,
           release_fn: Callable = release, dir_fn: Callable = reservation_dir,
-          stderr = None ) -> int:
+          stderr = None, skeleton_fn: Optional[ Callable ] = None,
+          stdin_is_tty_fn: Optional[ Callable ] = None, environ: Any = None ) -> int:
     """
     The command line `start-cc-with-tmux.sh` runs before it creates a tmux session.
 
@@ -512,6 +569,7 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
     Ensures:
         - EXIT_ADMITTED (0) — the launch may proceed; a reservation holds its seat
         - EXIT_REFUSED (3) — over cap AND `--headless`; the refusal is on stderr
+        - EXIT_REFUSED (3) — skeleton crew is on and the launch is not a person at a terminal
         - EXIT_ADMITTED with a warning when over cap WITHOUT `--headless`
         - EXIT_ADMITTED on ANY internal failure, with the failure printed to stderr —
           fail-open, matching `default_fleet_gate`
@@ -532,6 +590,17 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
     parser.add_argument( "--headless", action="store_true" )
     parser.add_argument( "--release",  action="store_true" )
     args = parser.parse_args( argv )
+
+    if not args.release:
+        refusal = _skeleton_refusal(
+            args.headless,
+            skeleton_fn     if skeleton_fn     is not None else _live_skeleton_refusal,
+            stdin_is_tty_fn if stdin_is_tty_fn is not None else _live_stdin_is_tty,
+            environ         if environ         is not None else os.environ,
+            stderr )
+        if refusal is not None:
+            stderr.write( f"\n[SKELETON-CREW] REFUSING TO LAUNCH: {refusal}\n\n" )
+            return EXIT_REFUSED
 
     try:
         directory = dir_fn()
