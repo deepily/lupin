@@ -67,7 +67,7 @@ nightly runs averaging 2 red days: $30 per month. Tune
 
 ## 9. Interaction with TFE
 
-As of 2026-04-10, `test fix expediter auto fix enabled = true`
+As of this guide's last survey, `test fix expediter auto fix enabled = true`
 is the default. Every TestSuiteJob that lands in the done queue is evaluated by
 `TestSuiteCompletionWatchdog`. If the job's remediation snapshot shows failures,
 the watchdog auto-dispatches a TFE job. The TFE job then walks its six-phase pipeline, from cluster to rerun validation, as
@@ -120,7 +120,7 @@ failures. These are distinct code paths with distinct watchdogs.
 
 ### The third case: a run that returned normally but executed zero tests
 
-Warning: **Changed 2026-08-25.** There is a case that is neither of the
+Warning: **This behaviour changed.** There is a case that is neither of the
 two above, and it used to be filed under the wrong one. If the suite subprocess
 crashes at *startup* — before any test runs — `_execute()` still returns normally. So `do_all` used to set `JobState.COMPLETED`. The job landed in the **done**
 queue reading `completed` while carrying `0 passed / 0 failed / 0 errors / 0 skipped`.
@@ -138,7 +138,7 @@ executed has not passed.
 |---|---|---|
 | **Genuine red** (tests ran, some failed) | `COMPLETED` → done → **TFE** | The job did its work and is reporting a red. TFE reads the done queue and gates on `all_passed`; routing reds to dead would hide them from the thing that remediates them. |
 | **Partial run** (one tier ran, another did not) | `COMPLETED` → done | Also classifies as `NOT EXECUTED`. But its counts and `all_passed` already tell the truth. Routing partials to dead is a behaviour change outside this defect. |
-| **Dry run** (all-zero counts by construction) | `COMPLETED` → done | The dry-run path builds `suite_results` with zero counts too. `overall_status` is published by the *real* run path only. And that is what separates "a real run executed nothing" from "no real run happened". |
+| **Dry run** (all-zero counts, because that path sets every count to zero) | `COMPLETED` → done | The dry-run path builds `suite_results` with zero counts too. `overall_status` is published by the *real* run path only. And that is what separates "a real run executed nothing" from "no real run happened". |
 
 **Consequence worth knowing**: because these now reach the dead queue, **BFE** may
 engage on a startup crash where previously nothing did. That is the intended

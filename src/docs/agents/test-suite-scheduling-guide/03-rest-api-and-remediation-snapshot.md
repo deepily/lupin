@@ -2,7 +2,7 @@
 
 ## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 
-> **`POST /api/test-suite/submit` was retired to 410 on 2026-09-29**. A test suite is
+> **`POST /api/test-suite/submit` was retired to 410**. A test suite is
 > submitted through the general v2 door, naming the command. Everything below is that door.
 
 **Endpoint**: `POST /api/v2/submit`
@@ -33,7 +33,7 @@ process only. The suite job keeps only names that start with `TFE_`, `BFE_` or `
 wrapper asks the job's own filter and refuses any other name before it logs in.
 
 **The live eval test has two sizes**. Inside the integration suite `test_v2_eval_live.py` runs a
-short proxy, 5 utterances per command (50 asks), ruled by Rick on 2026-10-05. The
+short proxy, 5 utterances per command (50 asks), ruled by Rick. The
 full sample is a separate scheduled run in the 10 am to 1 PM window:
 
 ```bash
@@ -43,7 +43,7 @@ src/scripts/submit-test-suite.py --test-types integration \
   --scheduled-at 2026-10-06T11:00:00-04:00
 ```
 
-At 20 per command the file makes 200 asks. On 2026-10-05 it was measured at about 7.4 seconds per
+At 20 per command the file makes 200 asks. It was measured at about 7.4 seconds per
 ask and was stopped by the default 15-minute per-file cap. Which is why the run raises the cap.
 
 | Field | Where | Type | Default | Purpose |
