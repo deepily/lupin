@@ -20,6 +20,7 @@ MIN_NEEDS   = 30
 MIN_REPEATS = 5
 PASS_LIMIT  = 0.05
 ROUTES      = ( "full", "pages" )
+QUESTIONS   = ( "choice", "provides" )                 # the old question and the new one, by the name run_question takes
 
 
 def repeat_sweeper( size, workers, run_index, breaker=None ):
@@ -45,7 +46,28 @@ def repeat_sweeper( size, workers, run_index, breaker=None ):
     return sweeper
 
 
-def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route="full" ):
+def repeat_pair_sweeper( size, workers, run_index, breaker=None ):
+    """
+    Build a packed sweeper for the new question whose cache keys hold the repeat number.
+
+    Requires:
+        - size and workers are in range for sweep_packed; run_index is a whole number of 1 or more
+    Ensures:
+        - returns a function with sweep's signature that sweeps in the pair kind, keyed by need, candidate text and run_index
+        - a key of this sweeper never equals the production pair key, nor another repeat's
+    Raises:
+        - ValueError for a size, worker count or run_index out of range, before anything is sent
+    """
+    rp._check_sweep_args( size, workers, "stage1", run_index, "pair" )
+
+    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="stage1", run_index=run_index, template=template, model=model,
+                                frozen=frozen, gaps=gaps, breaker=breaker, kind="pair" )
+
+    return sweeper
+
+
+def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route="full", question="choice" ):
     """
     Ask one need once, as repeat number run_index, with the member left out.
 
@@ -53,19 +75,24 @@ def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route=
         - ctx is a packed context: it has a sweeper and a pack size
         - need is a non-empty description; member is None or a symbol id of the index
         - route is "full" (every entry is asked) or "pages" (the page route: pages, then their entries, then every entry)
+        - question is "choice" (the old question) or "provides" (the new one); the new question has no page route, so it takes route "full" only
     Ensures:
         - returns the public result of that route, as sweep_need_impl does
         - the page questions carry the repeat number as the entry questions do
         - no receipt is written, so repeat two cannot be handed repeat one's receipt
         - the caller's context is not changed
     Raises:
-        - ValueError for a context that is not packed, a route that is neither full nor pages, or a run_index out of range
+        - ValueError for a context that is not packed, a route that is neither full nor pages, a question that is neither choice nor provides,
+          the new question by the pages route, or a run_index out of range
     """
     if route not in ROUTES: raise ValueError( f"route must be one of {ROUTES}, got {route!r}" )
+    if question not in QUESTIONS: raise ValueError( f"question must be one of {QUESTIONS}, got {question!r}" )
+    if question == "provides" and route != "full": raise ValueError( f"the provides question has no page route, got route {route!r}" )
     if ctx.sweeper is None or ctx.pack_size is None: raise ValueError( "a repeat is asked on a packed context only" )
     repeat         = copy.copy( ctx )
     repeat.sweeper = repeat_sweeper( ctx.pack_size, workers, run_index )
-    return rt.unstored_need_impl( need, member, repeat, page_route=route == "pages" )
+    if question == "provides": repeat.pair_sweeper = repeat_pair_sweeper( ctx.pack_size, workers, run_index )
+    return rt.unstored_need_impl( need, member, repeat, page_route=route == "pages", question=question )
 
 
 def signature( result ):

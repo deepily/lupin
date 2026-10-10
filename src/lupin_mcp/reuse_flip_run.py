@@ -1,5 +1,5 @@
 """
-The flip-rate driver: the old question asked again and again, and how often it flips.
+The flip-rate driver: the old or the new question asked again and again, and its flips.
 
 Thirty needs or more are each asked several times, every repeat keyed apart and stored nowhere.
 A canary of five needs is read by a person before the rest is paid for.
@@ -19,9 +19,11 @@ from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
+from lupin_mcp import reuse_tools as rt
 
 NEEDS_FORMAT    = "reuse-flip-needs-1"
 KINDS           = ( "duplicate", "distinct" )
+QUESTION_NAMES  = { "old": "choice", "new": "provides" }   # the command line names the question; the tools name it by its policy
 PREFIX          = "fl"
 ESTIMATE_TOKENS = 319_000_000                         # 150 searches at 2,125,705 tokens each, rounded up, from the end-to-end run of 9 October
 
@@ -56,20 +58,21 @@ def load_flip_needs( path, expected_sha ):
     return items
 
 
-def repeat_asks( repeats, route ):
+def repeat_asks( repeats, route, question="choice" ):
     """
     Turn the repeats into asks, one question name each: r1, r2 and so on.
 
     Ensures:
         - ask rN asks the need as repeat N by the route, leaving the item's excluded symbol out
-        - the result carries rows: the repeat, the route, the verdict and the sorted shortlist ids, so the report needs no receipt
+        - question is "choice" (the old question) or "provides" (the new one, which has no page route)
+        - the result carries rows: the repeat, the route, the question, the verdict and the sorted shortlist ids, so the report needs no receipt
         - an error result is returned as it is
     """
     def make( index ):
         def ask( ctx, item ):
-            result = rf.ask_repeat( ctx, item[ "need" ], item[ "exclude" ], index, route=route )
+            result = rf.ask_repeat( ctx, item[ "need" ], item[ "exclude" ], index, route=route, question=question )
             if result[ "status" ] != "ok": return result
-            row = { "repeat": index, "route": route, "verdict": result[ "verdict" ], "shortlist": sorted( s[ "id" ] for s in result[ "shortlist" ] ) }
+            row = { "repeat": index, "route": route, "question": question, "verdict": result[ "verdict" ], "shortlist": sorted( s[ "id" ] for s in result[ "shortlist" ] ) }
             return { **result, "rows": [ row ] }
         return ask
 
@@ -91,7 +94,7 @@ def report_lines( searches, items, repeats ):
     if not searches: return [ "no searches have run yet" ]
     by_need = collections.defaultdict( list )
     for s in searches: by_need[ s[ "member" ] ].append( s )
-    counted, left_out, routes = {}, [], set()
+    counted, left_out, routes, questions = {}, [], set(), set()
     for item in items:
         runs = by_need[ item[ "member" ] ] if item[ "member" ] in by_need else []
         if not runs: continue
@@ -100,6 +103,7 @@ def report_lines( searches, items, repeats ):
             continue
         rows = sorted( ( s[ "rows" ][ 0 ] for s in runs ), key=lambda row: row[ "repeat" ] )
         routes.update( row[ "route" ] for row in rows )
+        questions.update( row[ "question" ] for row in rows )
         counted[ item[ "member" ] ] = [ { "status": "ok", "verdict": row[ "verdict" ], "shortlist": [ { "id": i } for i in row[ "shortlist" ] ] } for row in rows ]
     lines = []
     if left_out: lines.append( f"left out as incomplete: {', '.join( left_out )}" )
@@ -108,7 +112,8 @@ def report_lines( searches, items, repeats ):
     kind_of = { item[ "member" ]: item[ "kind" ] for item in items }
     kinds = ", ".join( f"{k} {sum( 1 for n in r[ 'flipped' ] if kind_of[ n ] == k )} of {sum( 1 for n in counted if kind_of[ n ] == k )}" for k in KINDS )
     route = routes.pop() if len( routes ) == 1 else "mixed"
-    lines = [ f"flip rate (old question, route {route}): {r[ 'flips' ]} of {r[ 'needs' ]} needs flipped, rate {r[ 'rate' ]:.1%}, "
+    asked = { v: k for k, v in QUESTION_NAMES.items() }[ questions.pop() ] if len( questions ) == 1 else "mixed"
+    lines = [ f"flip rate ({asked} question, route {route}): {r[ 'flips' ]} of {r[ 'needs' ]} needs flipped, rate {r[ 'rate' ]:.1%}, "
               f"95% interval {r[ 'interval' ][ 0 ]:.3f} to {r[ 'interval' ][ 1 ]:.3f}, state {r[ 'state' ]}",
               f"flipped: {', '.join( r[ 'flipped' ] ) if r[ 'flipped' ] else 'none'}",
               f"repeats per need: {r[ 'repeats_min' ]}; by kind: {kinds}" ] + lines
@@ -150,6 +155,25 @@ def _check_options( args ):
     return prefixes[ 0 ]
 
 
+def check_excludes( items, root, data ):
+    """
+    Refuse before any spend a need whose excluded symbol the sweep would not know.
+
+    Requires:
+        - items are the needs file's items; root is the tree the run asks about; data is the run's data directory
+    Ensures:
+        - returns None when every excluded id is an entry the sweep sends (sendable and in the index), or the tree is not one it can read
+        - nothing is sent and no ledger run is opened
+    Raises:
+        - DriverRefused naming each need and its excluded id that is not a sendable entry
+    """
+    flags, entries = rt.prepare( rt.ReuseContext( root, data ) )[ :2 ]
+    if flags & { "NOT_LUPIN_TREE", "INDEX_STALE" }: return None
+    known   = { e[ "id" ] for e in entries }
+    missing = [ f"{item[ 'member' ]} ({item[ 'exclude' ]})" for item in items if item[ "exclude" ] is not None and item[ "exclude" ] not in known ]
+    if missing: raise s1.DriverRefused( f"excluded symbol is not a sendable entry of this index, so the need would end UNKNOWN_ENTRY: {', '.join( missing )}" )
+
+
 def _parser():
     """Ensures: returns the command line parser."""
     ap = argparse.ArgumentParser( description=__doc__ )
@@ -162,6 +186,7 @@ def _parser():
     ap.add_argument( "--estimate-tokens", type=int, default=ESTIMATE_TOKENS )
     ap.add_argument( "--repeats", type=int, default=rf.MIN_REPEATS )
     ap.add_argument( "--route", choices=rf.ROUTES, default=rf.ROUTES[ 0 ] )
+    ap.add_argument( "--question", choices=tuple( QUESTION_NAMES ), default="old" )
     sub = ap.add_subparsers( dest="command", required=True )
     for name in ( "canary", "approve", "run", "report" ):
         p = sub.add_parser( name )
@@ -191,7 +216,9 @@ def main( argv=None ):
     rr.check_paths( root, args.data, args.ledger, args.live )                                    # a path refusal comes before the slow reads
     items = load_flip_needs( args.needs, args.needs_sha )
     spec  = { "prefix": prefix, "members": len( items ), "estimate": args.estimate_tokens, "canary_members": e2r.CANARY_MEMBERS }
-    env   = e2r._open_env( root, args.data, args.ledger, args.live, repeat_asks( args.repeats, args.route ), args.pack_size )
+    if args.question == "new" and args.route != "full": raise s1.DriverRefused( "the new question has no page route; give --route full" )
+    env   = e2r._open_env( root, args.data, args.ledger, args.live, repeat_asks( args.repeats, args.route, QUESTION_NAMES[ args.question ] ), args.pack_size )
+    if args.command in ( "canary", "run" ): check_excludes( items, env.root, env.data )
     if args.command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )
     elif args.command == "approve":
         e2r.approve_canary( env, args.by, args.why, spec=spec, revised_estimate=args.revised_estimate )

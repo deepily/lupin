@@ -14,9 +14,11 @@ import pytest
 from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_pack as rp
+from lupin_mcp import reuse_pair_fake as pair_fake
 from lupin_mcp import reuse_tools as rt
 from tests.unit.test_reuse_pack_route import PAGE_TEXTS, PackedFake, env, no_jev_key, packed_ctx, probs_of  # noqa: F401  (env and no_jev_key are fixtures)
 from tests.unit.test_reuse_page_first import CHOSEN, FEEDS_PAGE, HIT, write_wiki
+from tests.unit.test_reuse_pair_question import NEED as PAIR_NEED, entries_of
 from tests.unit.test_reuse_tools import FEEDS_TEXT, UNREL
 
 NEED = "read an RSS feed [flip]"
@@ -193,3 +195,48 @@ def test_the_report_names_a_flip_exactly_at_the_limit_as_a_pass():
     runs[ "need-1" ][ 0 ], runs[ "need-2" ][ 0 ] = result_of( "REUSE" ), result_of( "EXTEND" )
     r = rf.flip_rate( runs )
     assert r[ "rate" ] == 0.05 and r[ "state" ] == "pass"
+
+
+def pair_ctx( env ): return packed_ctx( env, pair_fake.PairFake( entries_of( env ) ) )
+
+
+def test_a_repeat_of_the_new_question_is_asked_again_and_the_same_repeat_is_not( env ):
+    ctx    = pair_ctx( env )
+    client = ctx.transport
+    first  = rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="provides" )
+    sent   = len( client.bodies )
+    rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 2, question="provides" )
+    assert first[ "status" ] == "ok" and len( client.bodies ) == 2 * sent and sent > 0            # repeat two is not handed repeat one's answers
+    rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="provides" )
+    assert len( client.bodies ) == 2 * sent                                                    # repeat one again is a cache hit
+    assert not ( env[ 1 ] / "receipts" ).exists()                                              # and nothing is stored
+
+
+def test_a_repeat_of_the_new_question_never_meets_the_production_answers( env ):
+    ctx = pair_ctx( env )
+    rt.sweep_need_impl( PAIR_NEED, "cosa.mathx.add", ctx, question="provides" )                # the ordinary ask caches by the plain key
+    sent = len( ctx.transport.bodies )
+    rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="provides" )
+    assert len( ctx.transport.bodies ) == 2 * sent
+
+
+def test_the_new_question_has_no_page_route_and_an_unknown_question_is_refused_before_anything_is_sent( env ):
+    ctx = pair_ctx( env )
+    with pytest.raises( ValueError, match="page route" ): rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, route="pages", question="provides" )
+    with pytest.raises( ValueError, match="question" ): rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="other" )
+    assert ctx.transport.bodies == [] and rf.QUESTIONS == ( "choice", "provides" )
+
+
+def test_the_repeat_pair_sweeper_refuses_a_repeat_number_below_one_before_anything_is_sent():
+    with pytest.raises( ValueError, match="run_index" ): rf.repeat_pair_sweeper( 3, 4, 0 )
+    with pytest.raises( ValueError, match="size" ): rf.repeat_pair_sweeper( 0, 4, 1 )
+
+
+def test_asking_a_repeat_of_the_new_question_leaves_the_callers_context_as_it_was( env ):
+    ctx = pair_ctx( env )
+    rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 2, question="provides" )
+    assert ctx.pair_sweeper is None
+
+
+def test_the_context_has_no_pair_sweeper_unless_it_is_given_one( env ):
+    assert rt.ReuseContext( env[ 0 ], env[ 1 ] ).pair_sweeper is None

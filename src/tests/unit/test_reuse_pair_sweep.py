@@ -110,9 +110,10 @@ def test_a_malformed_entry_is_failed_listed_and_counted_in_failed_attempts( ctx_
     assert out[ "failed_attempts" ] == [ { "request": out[ "rows" ][ 0 ][ "request_hash" ], "ids": [ bad ], "attempts": 1 } ]
 
 
-def test_the_pair_kind_has_no_measurement_key_mode_and_an_unknown_kind_is_refused( ctx_for ):
+def test_the_pair_kind_takes_the_measurement_key_mode_only_with_a_run_index_and_an_unknown_kind_is_refused( ctx_for ):
     ctx = ctx_for( fake.PairFake( ENTRIES ) )
-    with pytest.raises( ValueError, match = "key_mode" ): sweep( ctx, key_mode="stage1", run_index=1 )
+    with pytest.raises( ValueError, match = "run_index" ): sweep( ctx, key_mode="stage1" )
+    with pytest.raises( ValueError, match = "key_mode" ): sweep( ctx, key_mode="other" )
     with pytest.raises( ValueError, match = "kind" ): rp.sweep_packed( ctx, NEED, ENTRIES, 3, kind="other" )
     with pytest.raises( ValueError, match = "kind" ): rp.packed_sweeper( 3, kind="other" )
 
@@ -157,3 +158,20 @@ def test_a_pack_in_which_every_entry_is_malformed_still_lists_them_in_the_sweep(
     ids = { e[ "id" ] for e in ENTRIES[ :3 ] }
     out = sweep( ctx_for( fake.PairFake( ENTRIES, wrong={ "coverage": ids } ) ), ENTRIES[ :3 ], size=3 )
     assert out[ "rows" ][ 0 ][ "status" ] == "failed" and sorted( m[ "id" ] for m in out[ "malformed" ] ) == sorted( ids ) and out[ "answers" ] == []
+
+
+def test_the_pair_key_with_a_run_index_is_apart_from_the_plain_key_and_from_every_other_index():
+    text = rt.entry_text( ENTRIES[ 0 ] )
+    plain = rt.sha( rt.canonical( { "shape": rpr.SHAPE, "model": rt.JEV_MODEL, "template": rpr.template_hash(), "need": NEED, "candidate": text } ) )
+    assert rp.pair_key( NEED, text ) == plain and rp.pair_key( NEED, text, run_index=None ) == plain         # the production key is the key it always was
+    assert rp.pair_key( NEED, text, run_index=1 ) not in ( plain, rp.pair_key( NEED, text, run_index=2 ) )
+
+
+def test_a_measurement_sweep_of_the_pair_reads_only_its_own_repeat_and_never_the_production_answer( ctx_for ):
+    client = fake.PairFake( ENTRIES )
+    prod   = sweep( ctx_for( client ), ENTRIES[ :3 ] )
+    one    = sweep( ctx_for( client ), ENTRIES[ :3 ], key_mode="stage1", run_index=1 )
+    two    = sweep( ctx_for( client ), ENTRIES[ :3 ], key_mode="stage1", run_index=2 )
+    again  = sweep( ctx_for( client ), ENTRIES[ :3 ], key_mode="stage1", run_index=1 )
+    assert prod[ "calls" ] == 3 and one[ "calls" ] == 3 and one[ "cache_hits" ] == 0 and two[ "calls" ] == 3 and two[ "cache_hits" ] == 0
+    assert again[ "calls" ] == 0 and again[ "cache_hits" ] == 3 and again[ "answers" ] == one[ "answers" ]

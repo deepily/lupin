@@ -103,15 +103,19 @@ def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL )
     return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need, "candidate": text } ) )
 
 
-def pair_key( need, text, model=rt.JEV_MODEL ):
+def pair_key( need, text, model=rt.JEV_MODEL, run_index=None ):
     """
     Key one candidate's two-question answer wherever it was packed.
 
     Ensures:
         - the key holds the pair shape, model, the pair template's hash, need and candidate text, and no pack
         - it never equals the key of the three-way question for the same need and text
+        - with a run_index the key also holds it, so a measurement repeat never reads another repeat's answer or the production answer
+        - without a run_index the key is the one it always was
     """
-    return rt.sha( rt.canonical( { "shape": rpr.SHAPE, "model": model, "template": rpr.template_hash(), "need": need, "candidate": text } ) )
+    record = { "shape": rpr.SHAPE, "model": model, "template": rpr.template_hash(), "need": need, "candidate": text }
+    if run_index is not None: record[ "run_index" ] = run_index
+    return rt.sha( rt.canonical( record ) )
 
 
 def pack_key( body ):
@@ -249,7 +253,6 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
 def _check_sweep_args( size, workers, key_mode, run_index, kind="choice" ):
     """Raises: ValueError naming the argument that is out of range."""
     if kind not in KINDS: raise ValueError( f"kind must be one of {KINDS}, got {kind!r}" )
-    if kind == "pair" and key_mode != "candidate": raise ValueError( f"the pair kind has only the candidate key_mode, got {key_mode!r}" )
     if type( size ) is not int or size < 1: raise ValueError( f"size must be a positive integer, got {size!r}" )
     if type( workers ) is not int or not WORKERS_MIN <= workers <= WORKERS_MAX: raise ValueError( f"workers must be an integer from {WORKERS_MIN} to {WORKERS_MAX}, got {workers!r}" )
     if key_mode not in KEY_MODES: raise ValueError( f"key_mode must be one of {KEY_MODES}, got {key_mode!r}" )
@@ -288,7 +291,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
           the run index, so a measurement arm never reads another arm's answers or the production answers
         - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
         - budget, when not passed, is ctx.run_budget when a driver set one, else the live transport's own; a stand-in transport has none of its own
-        - kind "pair" asks the Noul and Score question, with the candidate key only; each pack is first cut under size_limit tokens
+        - kind "pair" asks the Noul and Score question; its key is the candidate key, or with key_mode "stage1" the candidate key plus
+          the run index (no pack size); each pack is first cut under size_limit tokens
         - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
         - a refused pack and all its halves are one refusal, keyed by the top-level pack's hash; BREAKER_422 refused
           packs in a row, with no answered request between them, stop the sweep and the rest is not reached
@@ -316,7 +320,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
 
     def key_of( rec ):
         text = rt.entry_text( rec )
-        if kind == "pair": return pair_key( need, text, model )
+        if kind == "pair": return pair_key( need, text, model, run_index if key_mode == "stage1" else None )
         return candidate_key( need, text, template, model ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model )
 
     state, misses = {}, []                                          # state maps an entry id to its answer, or to ( "failed" | "not_reached" )
