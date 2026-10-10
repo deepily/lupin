@@ -311,3 +311,19 @@ def test_a_run_whose_ceiling_exactly_fills_the_limit_is_admitted_and_one_token_m
     assert ledger.total() == ledger.limit_tokens() == 100_000
     with pytest.raises( rl.AccountLimitReached ):
         ledger.begin_run( "c", 1 )
+
+
+def test_every_row_is_on_disk_before_the_lock_is_let_go( ledger, monkeypatch ):
+    """Ensures: a second reader sees each row while the writer's handle is still open."""
+    seen, real = [], rl.AccountLedger._append
+
+    def spy( self, f, row ):
+        real( self, f, row )
+        seen.append( ( row[ "kind" ], ledger.path.read_bytes().splitlines()[ -1 ] ) )
+
+    monkeypatch.setattr( rl.AccountLedger, "_append", spy )
+    ledger.begin_run( "r", 100 )
+    ledger.spend( "r", 7 )
+    ledger.end_run( "r" )
+    assert [ k for k, _ in seen ] == [ "begin", "spend", "end" ]
+    assert [ json.loads( last )[ "kind" ] for _, last in seen ] == [ "begin", "spend", "end" ]
