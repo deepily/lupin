@@ -117,20 +117,21 @@ def report_lines( searches, items, repeats ):
     return lines
 
 
-def check_repeats( searches, repeats ):
+def check_repeats( runs, repeats ):
     """
-    Refuse a report whose repeats differ from the repeats the records were run with.
+    Refuse a report whose repeats differ from the repeats the runs were given.
 
     Requires:
-        - searches are the search records of the canary and the run
+        - runs are the loaded result files of the canary and the run, each with its list of questions
     Ensures:
-        - returns None when no record is complete or the highest repeat on the records equals repeats
+        - returns None when there is no run or every run was given exactly repeats questions
+        - a run stopped early still holds all its questions, so it is not read as having fewer repeats
     Raises:
-        - DriverRefused naming both numbers when they differ
+        - DriverRefused naming both numbers when a run was given another number of repeats
     """
-    seen = max( ( s[ "rows" ][ 0 ][ "repeat" ] for s in searches if s[ "status" ] == "complete" ), default=None )
-    if seen is not None and seen != repeats:
-        raise s1.DriverRefused( f"the records were run with {seen} repeats per need, but the report was given --repeats {repeats}" )
+    for run in runs:
+        if len( run[ "questions" ] ) != repeats:
+            raise s1.DriverRefused( f"the records were run with {len( run[ 'questions' ] )} repeats per need, but the report was given --repeats {repeats}" )
 
 
 def _check_options( args ):
@@ -197,11 +198,9 @@ def main( argv=None ):
         print( f"canary approved by {args.by}" )
     elif args.command == "run": print( e2r.run_line( e2r.run_full( env, items, {}, args.ceiling, spec=spec ) ) )
     else:
-        searches = []
-        for name in ( f"{prefix}-canary", f"{prefix}-run" ):
-            path = env.results_dir / f"{name}.json"
-            if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
-        check_repeats( searches, args.repeats )
+        runs = [ json.loads( path.read_text( encoding="utf-8" ) ) for path in ( env.results_dir / f"{prefix}-{part}.json" for part in ( "canary", "run" ) ) if path.exists() ]
+        check_repeats( runs, args.repeats )
+        searches = [ s for run in runs for s in run[ "searches" ] ]
         print( "\n".join( report_lines( searches, items, args.repeats ) ) )
     return 0
 

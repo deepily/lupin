@@ -255,14 +255,20 @@ def test_a_report_with_other_repeats_than_the_records_carry_is_refused_not_liste
         assert "5 repeats" in err and f"--repeats {given}" in err
 
 
-def test_the_repeat_check_reads_complete_records_only_and_accepts_a_run_with_none():
-    runs = [ search( "n01", 5, status="incomplete" ), search( "n01", 5, status="not_run" ), search( "n02", 3 ) ]
-    frun.check_repeats( runs, 3 )
-    frun.check_repeats( runs[ :2 ], 9 )
+def test_the_repeat_check_reads_the_questions_the_run_was_given_not_the_ones_that_finished():
+    stopped = { "questions": [ "r1", "r2", "r3", "r4", "r5" ], "searches": [ search( "n01", i ) for i in range( 1, 4 ) ] }       # stopped after r3
+    frun.check_repeats( [ stopped ], 5 )
+    with pytest.raises( s1.DriverRefused, match="5 repeats per need.*--repeats 3" ): frun.check_repeats( [ stopped ], 3 )
+    with pytest.raises( s1.DriverRefused, match="5 repeats per need.*--repeats 7" ): frun.check_repeats( [ stopped ], 7 )
     frun.check_repeats( [], 9 )
 
 
-def test_the_flip_canary_refuses_an_estimate_above_the_room_left_before_any_send( setup, capsys ):
-    room = rl.ACCOUNT_LIMIT_TOKENS
-    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--estimate-tokens", str( room + 1 ) ] ) ) == 2
-    assert "room left" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()
+def test_a_canary_stopped_early_is_reported_with_its_own_repeats_not_refused( setup, capsys ):
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000" ) ) == 0
+    path = setup.data / "e2e-results" / "fl-canary.json"
+    record = json.loads( path.read_text( encoding="utf-8" ) )
+    record[ "searches" ] = [ r for r in record[ "searches" ] if r[ "question" ] in ( "r1", "r2", "r3" ) ]
+    path.write_text( json.dumps( record ), encoding="utf-8" )
+    capsys.readouterr()
+    assert frun.cli( setup.args( "report" ) ) == 0
+    assert "left out as incomplete" in capsys.readouterr().out
