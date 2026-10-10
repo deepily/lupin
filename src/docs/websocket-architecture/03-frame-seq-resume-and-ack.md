@@ -50,7 +50,7 @@ session's frames are stamped and buffered but not sent (`resuming_sessions`). Th
 still counts the device as reached, since the frame will arrive. `disconnect()` discards the
 hold.
 
-**Bounded at both ends**, because the buffers deliberately outlive their sockets and per-slot capping alone would bound nothing.
+**Bounded at both ends**, because the buffers are kept after their sockets close, and per-slot capping alone would bound nothing.
 `websocket device frame buffer size` (default 200) caps frames per slot.
 `websocket device frame buffer max slots` (default 64) caps slots.
 Eviction takes the least-recently-emitted-to slot **that has no connected holder** first.
@@ -59,7 +59,7 @@ When every slot past the ceiling is live, the map exceeds `max slots` by at most
 That logs one `[WS]` warning per crossing, not per frame.
 The next write after holders disconnect evicts back down.
 
-`resume_complete` is **not** in `websocket available events`, deliberately: the endpoint
+`resume_complete` is **not** in `websocket available events`, by rule. The endpoint
 sends it directly like `auth_success` and it never passes through the subscription filter.
 Listing it would imply a path that does not exist.
 
@@ -74,7 +74,7 @@ Listing it would imply a path that does not exist.
 **Close code**. A displaced socket receives `CLOSE_CODE_SUPERSEDED` = **4004**, reason
 `"superseded"` (Tiffany's ruling). Permanent: the client must not reconnect it.
 
-Warning: **A new code on purpose — this shipped as 4001, was cut to 4003, and both were taken**.
+Warning: **A new code, not a reuse — this shipped as 4001, was cut to 4003, and both were taken**.
 4001 is auth failure, which the browser answers with a token refresh that means nothing for a
 supersede. 4003 is `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED`.
 It is reserved server-side and never emitted.
