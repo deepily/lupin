@@ -58,5 +58,5 @@ interface Window {
         "REQUEST_BADGES_PATH" | "BADGE_HOLDING_AREA" | "BADGE_TASK_AREA" | "VERDICT_APPROVED" |
         "VERDICT_DENIED" | "TRIAGE_DATE_LABEL" | "requestVerdictPath" | "requestAge" |
         "pendingRequestChip" | "requestVerdictBody" | "requestBadgeText" |
-        "requestEventsPath" | "requestFiledDetail" | "pendingRequestCount" | "groupRequestBadgeText" >;
+        "requestEventsPath" | "requestFiledDetail" | "pendingRequestCount" | "groupRequestBadgeText" | "groupRequestBadgeLabel" >;
 }

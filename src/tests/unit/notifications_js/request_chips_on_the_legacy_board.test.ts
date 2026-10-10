@@ -667,7 +667,9 @@ test( "each persona group shows its own pending-request count on the closed head
   ] } );
 
   assert.equal( groupBadge( "Krishna" )!.textContent, "2 requests" );
+  assert.equal( groupBadge( "Krishna" )!.getAttribute( "aria-label" ), "2 pending requests" );
   assert.equal( groupBadge( "Mr Radio" )!.textContent, "1 request" );
+  assert.equal( groupBadge( "Mr Radio" )!.getAttribute( "aria-label" ), "1 pending request" );
   assert.equal( groupBadge( "Sam" ), null, "no request means no badge, not a zero" );
   assert.equal( document.querySelectorAll( "#holding-area-container .holding-area-group:not(.collapsed)" ).length, 0 );
 } );
@@ -691,4 +693,14 @@ test( "without the shared module the group still paints, just with no badge", ()
   } finally {
     window.LUPIN_TASK_REQUEST = shared;
   }
+} );
+
+test( "a pending request on a row inside a plan sub-group is counted", () => {
+  const { ui } = newUI();
+  const planned = ( id: string, move: string | null ) => ( { ...filedBy( id, "krishna 420f5ec9", move ), correlation_key: "epic:docs-and-reuse" } );
+  ui.renderHoldingArea( { status: "ok", tasks: [ planned( "p1", "admit" ), planned( "p2", null ), filedBy( "l1", "krishna 420f5ec9", null ) ] } );
+
+  const plan = document.querySelector( '#holding-area-container .holding-area-group[data-filer="Krishna"] .holding-plan-group' );
+  assert.ok( plan, "the fixture made no plan sub-group" );
+  assert.equal( groupBadge( "Krishna" )!.textContent, "1 request", "a request inside a plan was not counted" );
 } );

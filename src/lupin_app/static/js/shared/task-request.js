@@ -214,6 +214,21 @@ export function groupRequestBadgeText( rows ) {
     return requestBadgeText( { group: pendingRequestCount( rows ) }, "group" );
 }
 
+/**
+ * A persona group's request badge, spoken: "1 pending request", "3 pending requests", or "".
+ *
+ * The visible text is "3 requests" next to the row count "5", and a screen reader reads the two
+ * numbers with nothing to join them. This is the badge's accessible name.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {string}
+ */
+export function groupRequestBadgeLabel( rows ) {
+    const n = pendingRequestCount( rows );
+    if ( n === 0 ) return "";
+    return n === 1 ? "1 pending request" : `${n} pending requests`;
+}
+
 // The classic-script bridge, mirroring task-lookup.js: notifications.js reads these at
 // CALL time. See window-globals.d.ts for the declaration that keeps this typechecking.
 if ( typeof window !== "undefined" ) {
@@ -221,6 +236,6 @@ if ( typeof window !== "undefined" ) {
         REQUEST_BADGES_PATH, BADGE_HOLDING_AREA, BADGE_TASK_AREA,
         VERDICT_APPROVED, VERDICT_DENIED, TRIAGE_DATE_LABEL,
         requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
-        requestEventsPath, requestFiledDetail, pendingRequestCount, groupRequestBadgeText,
+        requestEventsPath, requestFiledDetail, pendingRequestCount, groupRequestBadgeText, groupRequestBadgeLabel,
     };
 }

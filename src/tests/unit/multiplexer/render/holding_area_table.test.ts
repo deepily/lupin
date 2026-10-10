@@ -177,7 +177,7 @@ test( "the batch tooltips are byte-identical to the legacy client's, filer subst
 
 test( "the batch reason box's placeholder and accessible name match the legacy client's", () => {
   assert.equal( HOLDING_WONT_FIX_REASON_PLACEHOLDER, legacyAttr( /placeholder="([^"]*)"/ ) );
-  assert.equal( HOLDING_WONT_FIX_REASON_ARIA_LABEL,  legacyAttr( /aria-label="([^"]*)"/ ) );
+  assert.equal( HOLDING_WONT_FIX_REASON_ARIA_LABEL,  legacyAttr( /placeholder="[^"]*"\s+aria-label="([^"]*)"/ ) );
 } );
 
 test( "a rendered group carries both tooltips with THIS group's filer in them", () => {
@@ -329,6 +329,7 @@ test( "a persona with one pending request carries a '1 request' badge on its COL
   assert.ok( badge, "no request badge on the group header" );
   assert.equal( badge.textContent, "1 request" );
   assert.equal( badge.dataset.filer, "Mr Radio" );
+  assert.equal( badge.getAttribute( "aria-label" ), "1 pending request", "the badge needs an accessible name that joins it to what it counts" );
   assert.ok( badge.classList.contains( "task-request-badge" ), "it must reuse the pane badge's look" );
   assert.ok( el.classList.contains( "collapsed" ), "the badge must be there with the group closed" );
 } );
@@ -341,6 +342,7 @@ test( "a persona with several pending requests shows the count; the row total is
     requestRow( "t4", "Krishna", null, null ),
   ] ), null );
   assert.equal( el.querySelector( ".holding-area-group-request-badge" )!.textContent, "3 requests" );
+  assert.equal( el.querySelector( ".holding-area-group-request-badge" )!.getAttribute( "aria-label" ), "3 pending requests" );
   assert.equal( el.querySelector( ".holding-area-group-count" )!.textContent, "4" );
 } );
 

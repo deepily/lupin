@@ -506,3 +506,20 @@ test( "row fa5415af: the badge follows the poll — a verdict that clears the re
   assert.equal( badgeOf( container, "Krishna" ), null, "an answered request must not keep its badge" );
   assert.equal( badgeOf( container, "Sam" )!.textContent, "1 request" );
 } );
+
+test( "row fa5415af: a pending request on a row inside a plan sub-group is counted", () => {
+  const planned = ( id: string ): TaskItem =>
+    ( { ...heldTask( id, "Krishna 420f5ec9" ), correlation_key: "epic:docs-and-reuse" } ) as unknown as TaskItem;
+  const { container } = mountPane( { tasks: [
+    withRequest( planned( "p1" ), "pending", "admit" ),
+    planned( "p2" ),
+    heldTask( "loose1", "Krishna 420f5ec9" ),
+  ] } );
+
+  // Control: the pending row really is under a plan header, and the loose row is outside it.
+  const plan = groupOf( container, "Krishna" ).querySelector<HTMLElement>( ".holding-plan-group" );
+  assert.ok( plan, "the fixture made no plan sub-group" );
+  assert.equal( plan.querySelectorAll( "tr.task-row" ).length, 2 );
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "1 request", "a request inside a plan was not counted" );
+  assert.equal( badgeOf( container, "Krishna" )!.getAttribute( "aria-label" ), "1 pending request" );
+} );

@@ -15193,7 +15193,9 @@ class NotificationsUI {
         // when it has none, or when the shared module did not load.
         const sharedRequest = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
         const requestText   = sharedRequest ? sharedRequest.groupRequestBadgeText( tasks ) : "";
-        const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge" data-filer="${key}">${this.escapeHtml( requestText )}</span>`;
+        const requestLabel  = sharedRequest ? sharedRequest.groupRequestBadgeLabel( tasks ) : "";
+        const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge"`
+            + ` aria-label="${this.escapeHtml( requestLabel )}">${this.escapeHtml( requestText )}</span>`;
 
         return `
             <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">

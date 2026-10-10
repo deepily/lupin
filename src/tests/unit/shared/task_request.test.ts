@@ -22,7 +22,7 @@ import {
   BADGE_HOLDING_AREA, BADGE_TASK_AREA, REQUEST_BADGES_PATH, DEMOTE_NEEDS_TRIAGE_DATE_MESSAGE,
   requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
   REQUEST_FILED_TRANSITION, REQUEST_REASON_SEPARATOR, requestEventsPath, requestFiledDetail,
-  pendingRequestCount, groupRequestBadgeText,
+  pendingRequestCount, groupRequestBadgeText, groupRequestBadgeLabel,
 } from "../../../lupin_app/static/js/shared/task-request.js";
 import { TRIAGE_DATE_LABEL } from "../../../lupin_app/static/js/shared/task-request.js";
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
@@ -190,4 +190,11 @@ test( "a persona group's badge text is one request, N requests, or nothing — n
   assert.equal( groupRequestBadgeText( [ heldRow( "pending", "admit" ), heldRow( "pending", "demote" ), heldRow( "pending", "admit" ) ] ), "3 requests" );
   assert.equal( groupRequestBadgeText( [ heldRow( null, null ) ] ), "" );
   assert.equal( groupRequestBadgeText( [] ), "" );
+} );
+
+test( "a persona group's accessible name says 'pending requests', and is empty when there are none", () => {
+  assert.equal( groupRequestBadgeLabel( [ heldRow( "pending", "admit" ) ] ), "1 pending request" );
+  assert.equal( groupRequestBadgeLabel( [ heldRow( "pending", "admit" ), heldRow( "pending", "demote" ) ] ), "2 pending requests" );
+  assert.equal( groupRequestBadgeLabel( [ heldRow( "approved", "admit" ) ] ), "" );
+  assert.equal( groupRequestBadgeLabel( null ), "" );
 } );

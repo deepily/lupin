@@ -36,7 +36,7 @@ import { holdingPlanId, type HeldFilerGroup, type HeldPlan } from "../holdingAre
 import type { TaskItem } from "../taskListModel";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
-import { groupRequestBadgeText } from "../../../shared/task-request.js";
+import { groupRequestBadgeText, groupRequestBadgeLabel } from "../../../shared/task-request.js";
 
 /**
  * The batch-approve tooltip for one filer. Carbon copy of
@@ -126,9 +126,10 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
   const requestText = groupRequestBadgeText( group.tasks );
   if ( requestText !== "" ) {
     const badge = document.createElement( "span" );
-    badge.className   = "task-request-badge holding-area-group-request-badge";
+    badge.className     = "task-request-badge holding-area-group-request-badge";
     badge.dataset.filer = group.filer;
-    badge.textContent = requestText;
+    badge.setAttribute( "aria-label", groupRequestBadgeLabel( group.tasks ) );
+    badge.textContent   = requestText;
     header.appendChild( badge );
   }
 
