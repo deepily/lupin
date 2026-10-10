@@ -56,10 +56,7 @@ def ini_path() -> str:
     override = os.environ.get( INI_OVERRIDE_ENV )
     if override:
         return override
-    import cosa.utils.util as cu
-    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
-    main = _main_repo_path( cu.get_project_root() )
-    return os.path.join( str( main ), "src", "conf", "lupin-app.ini" )
+    return fleet_size_cap.main_checkout_ini_path()
 
 
 def _say( detail: str ) -> None:

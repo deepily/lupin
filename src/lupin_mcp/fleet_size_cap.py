@@ -61,6 +61,7 @@ pool to the overflow persona and then to UNBOUNDED `Extra-N` seats. 18 requested
 silently skipped by the loader, so `pool_size()` counts voice ids rather than names.
 """
 import functools
+import os
 from typing import Any, Callable, Dict, Iterable, Optional
 
 # The fleet-wide default. Deliberately the same figure as the per-manager spawn cap so
@@ -502,14 +503,33 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         "alone (Rick's ruling), so the fleet drains as sessions finish."
     )
     return " ".join( lines )
+def main_checkout_ini_path() -> str:
+    """
+    The configuration file of the main checkout, whatever tree the process is pinned to.
+
+    Ensures:
+        - returns `<main checkout>/src/conf/lupin-app.ini`, where a worktree resolves to the
+          checkout that owns it (git's common directory), so a seat's tracked copy is never read
+        - a directory that is no repository resolves to its own root, as before; the server
+          container mounts only `src`, so it falls back to `/var/lupin`
+        - resolves at call time and never raises
+        - is the one resolution the fleet cap and the skeleton crew switch share
+    """
+    import cosa.utils.util as cu
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
+    main = _main_repo_path( cu.get_project_root() )
+    return os.path.join( str( main ), "src", "conf", "lupin-app.ini" )
+
+
 def config_file_path() -> str:
     """
     The configuration FILE the fleet cap is read from and written to.
 
     Ensures:
-        - returns `<project root>/src/conf/lupin-app.ini`
+        - returns the main checkout's `src/conf/lupin-app.ini` (see main_checkout_ini_path)
         - resolves the root at CALL time, so it is correct in the container
           (LUPIN_ROOT=/var/lupin) and on the host (LUPIN_ROOT=<the checkout>)
+        - a process pinned to a worktree reads the live file, not that worktree's committed copy
 
     🔴 THE CONTAINER AND THE HOST RESOLVE TO THE SAME PHYSICAL FILE, and that is
     what makes a browser write reach the spawn path at all. Measured 2026-09-04:
@@ -526,8 +546,7 @@ def config_file_path() -> str:
     rather than quietly deleted, because it is the obvious conclusion and the next
     reader will reach it too.
     """
-    import cosa.utils.util as cu
-    return cu.get_project_root() + "/src/conf/lupin-app.ini"
+    return main_checkout_ini_path()
 
 
 def default_disk_cap_reader() -> Optional[ int ]:
