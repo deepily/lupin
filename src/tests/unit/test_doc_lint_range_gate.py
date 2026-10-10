@@ -7,6 +7,7 @@ stand-in that reports what the worktree holds, so the tests read the staging and
 
 import io
 import os
+import signal
 import subprocess
 import sys
 
@@ -201,3 +202,94 @@ def test_main_makes_its_worktree_folder_when_it_is_missing_and_works_from_a_link
     code   = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", linked ], out=stream, runner=_runner_for( [ ( 0, "" ) ] ) )
     assert code == 0 and "1 passed" in stream.getvalue()
     assert os.listdir( os.path.join( repo[ "root" ], ".claude", "worktrees" ) ) == []
+
+
+def _merge_range( repo ):
+    root = repo[ "root" ]
+    _git( root, "checkout", "-q", "-b", "side2", repo[ "base" ] )
+    _write( root, "side2.py", "side = 1\n" )
+    _commit( root, "side work 2" )
+    _git( root, "checkout", "-q", "main" )
+    _git( root, "merge", "-q", "--no-ff", "-m", "merge side2", "side2" )
+    return _git( root, "rev-parse", "HEAD" )
+
+
+def _folder( repo ):
+    path = os.path.join( repo[ "root" ], ".claude", "worktrees" )
+    os.makedirs( path, exist_ok=True )
+    return path
+
+
+def test_a_range_holding_a_merge_is_refused_whole_and_the_merge_is_named( repo, tmp_path ):
+    merge = _merge_range( repo )
+    with pytest.raises( range_gate.RangeRefused, match=merge ): range_gate.check_range( repo[ "root" ], repo[ "base" ], merge, _worktree( repo, tmp_path ), _runner_for( [] ) )
+
+
+def test_main_exits_two_for_a_merge_and_runs_no_check_and_leaves_no_folder( repo ):
+    merge  = _merge_range( repo )
+    folder = _folder( repo )
+    stream = io.StringIO()
+    runner = _runner_for( [] )
+    code   = range_gate.main( [ "--base", repo[ "base" ], "--head", merge, "--repo-root", repo[ "root" ] ], out=stream, runner=runner )
+    assert code == 2 and merge in stream.getvalue() and runner.seen == [] and os.listdir( folder ) == []
+
+
+def test_an_empty_range_exits_two_and_says_nothing_was_checked( repo ):
+    folder = _folder( repo )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", repo[ "one" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=stream, runner=_runner_for( [] ) )
+    assert code == 2 and "holds 0 commits, nothing was checked" in stream.getvalue() and os.listdir( folder ) == []
+
+
+def test_a_failure_after_the_worktree_exists_leaves_no_folder_and_no_registered_tree( repo ):
+    folder = _folder( repo )
+    def failing( worktree ): raise ValueError( "boom" )
+    with pytest.raises( ValueError, match="boom" ): range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "two" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=failing )
+    assert os.listdir( folder ) == [] and "range-gate" not in _git( repo[ "root" ], "worktree", "list" )
+
+
+def test_a_termination_signal_runs_the_cleanup_and_restores_the_handler( repo ):
+    folder = _folder( repo )
+    def guard( signum, frame ): raise AssertionError( "main installed no SIGTERM handler" )
+    original = signal.signal( signal.SIGTERM, guard )
+    try:
+        def killer( worktree ): os.kill( os.getpid(), signal.SIGTERM )
+        with pytest.raises( SystemExit ) as raised: range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "two" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=killer )
+        assert raised.value.code == 128 + signal.SIGTERM
+        assert os.listdir( folder ) == [] and signal.getsignal( signal.SIGTERM ) == guard
+    finally:
+        signal.signal( signal.SIGTERM, original )
+
+
+def test_a_report_with_an_unchecked_commit_shows_it():
+    text = range_gate.report( "b", "h", [ range_gate.Result( "c" * 40, "x", "unchecked", 1, [ "line" ] ), range_gate.Result( "d" * 40, "y", "passed", 0, [] ) ] )
+    assert text.splitlines()[ -1 ] == "range b..h: 2 commits, 1 passed, 0 refused, 1 unchecked"
+
+
+def _stale_holder( repo, name, pid=None ):
+    holder = os.path.join( _folder( repo ), name )
+    os.makedirs( holder )
+    _git( repo[ "root" ], "worktree", "add", "-q", "--detach", os.path.join( holder, "tree" ), repo[ "two" ] )
+    if pid is not None:
+        with open( os.path.join( holder, "pid" ), "w", encoding="utf-8" ) as handle: handle.write( str( pid ) )
+    return holder
+
+
+def _dead_pid():
+    child = subprocess.Popen( [ sys.executable, "-c", "pass" ] )
+    child.wait()
+    return child.pid
+
+
+def test_a_stale_holder_from_a_killed_run_is_swept_when_the_next_run_starts( repo ):
+    no_pid = _stale_holder( repo, "range-gate-nopid" )
+    dead   = _stale_holder( repo, "range-gate-dead", pid=_dead_pid() )
+    live   = _stale_holder( repo, "range-gate-live", pid=os.getpid() )
+    other  = os.path.join( _folder( repo ), "someone-elses" )
+    os.makedirs( other )
+    code   = range_gate.main( [ "--base", repo[ "base" ], "--head", repo[ "one" ], "--repo-root", repo[ "root" ] ], out=io.StringIO(), runner=_runner_for( [ ( 0, "" ) ] ) )
+    assert code == 0
+    assert not os.path.exists( no_pid ) and not os.path.exists( dead )
+    assert os.path.exists( live ) and os.path.exists( other )
+    listing = _git( repo[ "root" ], "worktree", "list" )
+    assert "range-gate-nopid" not in listing and "range-gate-dead" not in listing and "range-gate-live" in listing
