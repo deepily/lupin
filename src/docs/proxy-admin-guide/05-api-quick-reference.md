@@ -51,7 +51,7 @@ Three things had to happen, and two of them are not "add a decorator".
 
 **`ratify` and `decision` needed a different guard**.
 Their `user_email` arrives in the **query** string.
-`require_path_identity_owner` reads `request.path_params` and raises 500, as specified, for a route that names no user in its path.
+`require_path_identity_owner` reads `request.path_params` and, by choice, raises 500 for a route that names no user in its path.
 `require_query_identity_owner` is its sibling in the same module.
 It has the same 401 via `require_api_key_or_jwt` and the same 403 for a caller who is not the user named, reading the query instead.
 A bare uncredentialed call to either used to answer **422** for the missing `user_email`, which reads like a refusal and is not one.
