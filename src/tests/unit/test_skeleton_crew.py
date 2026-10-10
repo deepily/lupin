@@ -107,10 +107,11 @@ def test_the_default_reader_follows_the_env_override( tmp_path, monkeypatch ):
     assert sc.default_disk_skeleton_reader() is True
 
 
-def test_the_default_reader_uses_the_project_file_without_the_override( monkeypatch ):
+def test_the_default_reader_uses_the_main_checkouts_file_without_the_override( monkeypatch ):
     monkeypatch.delenv( sc.INI_OVERRIDE_ENV, raising=False )
-    from lupin_mcp import fleet_size_cap
-    assert sc.ini_path() == fleet_size_cap.config_file_path()
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
+    expected = _main_repo_path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) ) / "src" / "conf" / "lupin-app.ini"
+    assert sc.ini_path() == str( expected )
 
 
 # ── 2. the refusal text ──────────────────────────────────────────────────────
