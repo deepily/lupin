@@ -81,3 +81,9 @@ def test_a_fence_at_column_zero_is_blanked_as_before():
 def test_front_matter_and_html_comments_are_still_blanked():
     page = "---\ntitle: t\n---\n<!-- note\nmore -->\n  ```\nx\n  ```\nbody\n"
     assert md_lint.blank_non_prose( page ) == "\n\n\n\n\n\n\n\nbody\n"
+
+
+def test_a_triple_backtick_inside_a_sentence_does_not_open_a_fence():
+    source = "Use ``` in a sentence.\n\nNot code: THIS IS LOUD.\n\n```\ncode\n```\n"
+    found  = [ f.rule for f in md_lint.lint_source( "page.md", source ) ]
+    assert "caps" in found
