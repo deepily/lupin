@@ -16,7 +16,7 @@ from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 from tests.unit.test_reuse_pack_route import PAGE_TEXTS, PackedFake, env, no_jev_key, packed_ctx, probs_of  # noqa: F401  (env and no_jev_key are fixtures)
-from tests.unit.test_reuse_page_first import HIT, write_wiki
+from tests.unit.test_reuse_page_first import CHOSEN, FEEDS_PAGE, HIT, write_wiki
 from tests.unit.test_reuse_tools import FEEDS_TEXT, UNREL
 
 NEED = "read an RSS feed [flip]"
@@ -96,6 +96,33 @@ def test_a_repeat_runs_the_full_sweep_and_never_asks_a_page( env ):
     asked = [ q[ "instructions" ] for body in fake.bodies for q in body[ "questions" ].values() ]
     assert r[ "stats" ][ "route" ] == "full" and fake.unexpected == []
     assert asked and not any( page in text for page in PAGE_TEXTS for text in asked )          # page questions may not carry the repeat number, so none may be sent
+
+
+def page_asks( fake ): return [ q[ "instructions" ] for body in fake.bodies for q in body[ "questions" ].values() if any( page in q[ "instructions" ] for page in PAGE_TEXTS ) ]
+
+
+def test_a_repeat_by_the_page_route_asks_pages_first_keys_them_by_repeat_and_stores_nothing( env ):
+    write_wiki( env[ 0 ] )
+    fake = PackedFake( NEED, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } )
+    ctx  = packed_ctx( env, fake )
+    one  = rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1, route="pages" )
+    assert one[ "stats" ][ "route" ] == "pages" and one[ "verdict" ] == "REUSE" and len( page_asks( fake ) ) == 2
+    rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 2, route="pages" )
+    assert len( page_asks( fake ) ) == 4                                                       # the page questions carry the repeat number too
+    rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1, route="pages" )
+    assert len( page_asks( fake ) ) == 4 and not ( env[ 1 ] / "receipts" ).exists()           # repeat 1 again is a cache hit
+
+
+def test_a_repeat_by_the_page_route_falls_back_to_every_entry_when_no_page_is_chosen( env ):
+    write_wiki( env[ 0 ] )
+    r = rf.ask_repeat( packed_ctx( env, PackedFake( NEED ) ), NEED, "cosa.mathx.add", 1, route="pages" )
+    assert r[ "stats" ][ "route" ] == "pages_then_full"
+
+
+def test_a_route_other_than_full_or_pages_is_refused_before_anything_is_sent( env ):
+    fake = PackedFake( NEED )
+    with pytest.raises( ValueError, match="route" ): rf.ask_repeat( packed_ctx( env, fake ), NEED, "cosa.mathx.add", 1, route="both" )
+    assert fake.bodies == [] and rf.ROUTES == ( "full", "pages" )
 
 
 def test_asking_a_repeat_leaves_the_callers_context_as_it_was( env ):
