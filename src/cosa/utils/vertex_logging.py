@@ -558,6 +558,17 @@ class ProbeResult:
 
     def __init__( self, verdict, canary_seen_at=None, canary_tables=(), subject_tables=(),
                   readout_state=READOUT_NO_MATCH, polls=0, elapsed_s=0, residual_assumptions=() ):
+        """
+        Hold a verdict and the evidence a reader needs to distrust it.
+
+        Requires:
+            - verdict is one of the verdict values
+            - canary_tables, subject_tables and residual_assumptions are iterables
+
+        Ensures:
+            - the three iterables are kept as tuples
+            - every other argument is kept as given, and nothing is validated here
+        """
         self.verdict              = verdict
         self.canary_seen_at       = canary_seen_at
         self.canary_tables        = tuple( canary_tables )

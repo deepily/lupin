@@ -86,6 +86,16 @@ class MonitoringOracle:
     """
 
     def __init__( self, project_id, transport, clock, token_provider=None ):
+        """
+        Keep the project id and the injected transport and clock; no call is made here.
+
+        Requires:
+            - transport( url, params, token ) returns a dict
+            - clock() returns seconds as a float
+
+        Ensures:
+            - token_provider is a callable returning None when none is given
+        """
         self.project_id     = project_id
         self.transport      = transport
         self.clock          = clock
