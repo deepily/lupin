@@ -422,3 +422,101 @@ def test_driven_a_real_child_this_test_started_is_allowed_wherever_it_stands( wo
     finally:
         child.terminate()
         child.wait( timeout=10 )
+
+
+# ---------------------------------------------------------------------------
+# The selector the probe receives: redirections and quoted spans (review findings F1, F2)
+# ---------------------------------------------------------------------------
+
+def _selector_seen( command, worktree ):
+    """The selector list the guard hands pgrep for the first sweep in `command`."""
+    seen = []
+    kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, comm_reader=_comm(),
+        pgrep_probe=lambda selector: seen.append( list( selector ) ) or [],
+        cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
+    )
+    return seen[ 0 ] if seen else None
+
+
+@pytest.mark.parametrize( "command", [
+    "pkill -f TOK 2>/dev/null",
+    "pkill -f TOK 2>&1",
+    "pkill -f TOK > /dev/null",
+    "pkill -f TOK >/dev/null",
+    "pkill -f TOK >> /tmp/out.log",
+    "pkill -f TOK 2>/dev/null || true",
+    "pkill -f TOK > /dev/null 2>&1 || true",
+    "pkill -f TOK &> /tmp/out.log",
+    "pkill -f TOK < /dev/null",
+] )
+def test_a_redirection_is_not_part_of_the_pattern( command, worktree ):
+    assert _selector_seen( command, worktree ) == [ "-f", "TOK" ]
+
+
+@pytest.mark.parametrize( "command, expected", [
+    ( 'pkill -f "TOK|zzz"',                  [ "-f", "TOK|zzz" ] ),
+    ( "pkill -f 'zzz|TOK'",                  [ "-f", "zzz|TOK" ] ),
+    ( 'pkill -f "TOK;"',                     [ "-f", "TOK;" ] ),
+    ( 'pkill -f "a&b"',                      [ "-f", "a&b" ] ),
+    ( 'pkill -f "pytest|vitest" 2>/dev/null', [ "-f", "pytest|vitest" ] ),
+    ( 'pkill -f "has (parens) and `tick`"',  [ "-f", "has (parens) and `tick`" ] ),
+    ( 'pkill -f ">TOK"',                     [ "-f", ">TOK" ] ),
+    ( 'pkill -f "a b" -9',                   [ "-f", "a b" ] ),
+] )
+def test_a_quoted_pattern_is_kept_whole_whatever_it_holds( command, expected, worktree ):
+    assert _selector_seen( command, worktree ) == expected
+
+
+def test_a_quoted_pattern_does_not_swallow_the_next_command( worktree ):
+    command = 'pkill -f "TOK|zzz"; echo done'
+    assert _selector_seen( command, worktree ) == [ "-f", "TOK|zzz" ]
+
+
+def test_an_unbalanced_quote_still_falls_back_to_a_whitespace_split( worktree ):
+    assert _selector_seen( 'pkill -f "TOK zzz', worktree ) == [ "-f", '"TOK', "zzz" ]
+
+
+@pytest.mark.parametrize( "suffix", [
+    "2>/dev/null", "2>&1", "> /dev/null", "2>/dev/null || true", "> /dev/null 2>&1 || true",
+] )
+def test_driven_a_redirect_does_not_hide_a_foreign_process( suffix, worktree, elsewhere ):
+    token = "kgprobe-" + uuid.uuid4().hex
+    pid   = _spawn_orphan( elsewhere, token )
+    try:
+        reason = kill_deny_reason(
+            "Bash", { "command": f"pkill -f {token} {suffix}" }, enabled=True,
+            cwd=worktree, caller_pid=os.getpid(),
+        )
+        assert reason is not None
+        assert str( pid ) in reason
+    finally:
+        _stop( pid )
+
+
+@pytest.mark.parametrize( "shape", [ '"{token}|zzzz{token2}"', "'zzzz{token2}|{token}'", '"{token}|{token2};"' ] )
+def test_driven_a_quoted_pattern_holding_a_metacharacter_does_not_hide_a_foreign_process(
+    shape, worktree, elsewhere
+):
+    token  = "kgprobe-" + uuid.uuid4().hex
+    token2 = "kgprobe-" + uuid.uuid4().hex
+    pid    = _spawn_orphan( elsewhere, token )
+    try:
+        pattern = shape.format( token=token, token2=token2 )
+        reason  = kill_deny_reason(
+            "Bash", { "command": f"pkill -f {pattern}" }, enabled=True,
+            cwd=worktree, caller_pid=os.getpid(),
+        )
+        assert reason is not None
+        assert str( pid ) in reason
+    finally:
+        _stop( pid )
+
+
+def test_driven_the_control_with_a_redirect_and_a_quoted_alternation_matches_nothing( worktree ):
+    nothing = "kgprobe-" + uuid.uuid4().hex
+    other   = "kgprobe-" + uuid.uuid4().hex
+    command = f'pkill -f "{nothing}|{other}" 2>/dev/null || true'
+    assert kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, cwd=worktree, caller_pid=os.getpid(),
+    ) is None

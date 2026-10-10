@@ -150,9 +150,19 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # matching ITS OWN pid, and that is narrower than the hazard: a pattern matching
 # ANOTHER seat and not yours sails straight through it. Found by Krishna
 # 2026-08-24 while reviewing this guard, together with SHAPE D below.
+# An argument is a run of quoted spans and unquoted characters that end the command.
+# A quoted span may hold `|`, `;`, `&`, `)` or a backtick: those are data inside it.
+# A lone quote with no partner falls through to the plain character class.
+_ARG_CHAR = r"""(?:"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
 _PATTERN_SWEEP_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:pkill|killall)\b(?P<args>(?:\s+[^\s;&|)`\n]+)*)"
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:pkill|killall)\b(?P<args>(?:\s+{_ARG_CHAR}+)*)"
 )
+
+# One raw (still quoted) argument, and the two redirection shapes. A redirection is
+# the shell's, and pkill never sees it: `2>/dev/null`, `>/dev/null`, `2>&1`, `< in`.
+_RAW_ARG_RE        = re.compile( r"""(?:"[^"]*"|'[^']*'|[^\s"'])+""" )
+_REDIRECT_ATTACHED = re.compile( r"(?:\d*|&)(?:>>?|<)&?\S+" )
+_REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<)&?" )
 
 # SHAPE D — a substitution feeding a kill DIRECTLY: `kill $(pgrep …)` has the
 # exact semantics of `pgrep … | xargs kill`, which SHAPE B already denies.
@@ -208,6 +218,34 @@ def _strip_heredocs( command: str ) -> str:
     return "\n".join( kept )
 
 
+def _drop_redirections( raw_tokens: List[ str ] ) -> List[ str ]:
+    """
+    The raw arguments with shell redirections removed.
+
+    Requires:
+        - raw_tokens are whole arguments with their quotes still on
+
+    Ensures:
+        - an attached form (`2>/dev/null`, `>out`, `2>&1`, `<in`) is dropped
+        - a bare operator (`>`, `>>`, `2>`, `<`, `>&`) is dropped with the token after it
+        - a quoted argument is never a redirection, whatever it starts with
+        - every other argument is kept in order
+    """
+    kept = []
+    skip = False
+    for token in raw_tokens:
+        if skip:
+            skip = False
+            continue
+        if _REDIRECT_BARE.fullmatch( token ):
+            skip = True
+            continue
+        if _REDIRECT_ATTACHED.fullmatch( token ):
+            continue
+        kept.append( token )
+    return kept
+
+
 def _sweep_selector( args: str ) -> List[ str ]:
     """
     The `pgrep` selector equivalent to a `pkill`/`killall` argument list.
@@ -219,6 +257,8 @@ def _sweep_selector( args: str ) -> List[ str ]:
         - signal flags are dropped — `-9`, `-KILL`, `-TERM`, `-s TERM`,
           `--signal=9`, `--signal 9` — because pgrep rejects them
         - `--signal`'s and `-s`'s separate value is dropped with it
+        - shell redirections (`2>/dev/null`, `> out`, `2>&1`) are dropped: pkill
+          never receives them, and pgrep rejects a second pattern
         - every other token is kept in order, so the selector matches exactly
           what the sweep would have matched
         - the split is SHELL-AWARE, so a quoted pattern containing spaces stays
@@ -231,7 +271,10 @@ def _sweep_selector( args: str ) -> List[ str ]:
     # refuses more than one, the probe comes back empty, and the guard allows the
     # exact command that killed three seats. Caught by replaying real traffic.
     try:
-        tokens = shlex.split( args )
+        shlex.split( args )
+        tokens = []
+        for raw in _drop_redirections( _RAW_ARG_RE.findall( args ) ):
+            tokens.extend( shlex.split( raw ) )
     except ValueError:
         tokens = args.split()   # unbalanced quotes — fall back rather than refuse to look
     kept = []
