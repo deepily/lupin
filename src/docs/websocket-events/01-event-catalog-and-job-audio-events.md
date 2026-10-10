@@ -1,4 +1,4 @@
-> Part 1 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): catalog, job and audio events.
+> Part 1 of 6 of the [WebSocket Event System Documentation](../websocket-events.md): catalog, job and audio events.
 
 # WebSocket Event System Documentation
 

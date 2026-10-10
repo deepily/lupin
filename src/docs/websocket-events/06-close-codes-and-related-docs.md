@@ -1,4 +1,4 @@
-> Part 5 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): close code semantics and related documentation.
+> Part 6 of 6 of the [WebSocket Event System Documentation](../websocket-events.md): close code semantics and related documentation.
 
 ## Close Code Semantics
 
