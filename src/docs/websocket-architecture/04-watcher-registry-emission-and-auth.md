@@ -125,7 +125,7 @@ All 4001/4002/4003 codes are permanent from the client's perspective —
 the browser-side `ws-channel.js` state machine routes them straight to
 `OPEN_CIRCUIT` and does not auto-retry. NotificationsUI attempts a single
 token refresh on 4001 before showing the auth-permanent banner. See
-[WebSocket Events §Close Code Semantics](../websocket-events.md#close-code-semantics)
+[WebSocket Events §Close Code Semantics](../websocket-events/05-deprecated-frame-seq-and-close-codes.md#close-code-semantics)
 for the full reaction matrix and design source.
 
 ### Audio WebSocket Authentication
