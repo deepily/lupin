@@ -241,12 +241,65 @@ def test_a_repointed_link_inside_a_code_span_or_a_fence_is_not_excused():
     assert sc.compare( old, "# idx\n", moved )[ "pass" ] is False
 
 
-def test_a_second_heading_with_the_same_text_has_the_suffixed_anchor():
-    old    = "## Notes\n\nfirst\n\n## Notes\n\nsecond, see [first](#notes) and [again](#notes-1)\n"
-    parts  = { "a.md": "## Notes\n\nfirst\n", "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](#notes-1)\n" }
+NOTES_OLD = "## Notes\n\nfirst\n\n## Notes\n\nsecond, see [first](#notes) and [again](#notes-1)\n"
+NOTES_A   = "## Notes\n\nfirst\n"
+
+
+def test_a_repeated_heading_split_across_parts_is_numbered_per_part_file_as_github_does():
+    parts  = { "a.md": NOTES_A, "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](b.md#notes)\n" }
+    result = sc.compare( NOTES_OLD, "# idx\n", parts )
+    assert result[ "pass" ] is True and result[ "dangling" ] == []
+    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [
+        { "line_number": 3, "old": "#notes", "new": "a.md#notes" }, { "line_number": 3, "old": "#notes-1", "new": "b.md#notes" }
+    ]
+
+
+def test_a_suffixed_in_page_link_left_in_the_part_that_holds_its_heading_is_dangling_by_the_anchor_that_part_makes():
+    parts  = { "a.md": NOTES_A, "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](#notes-1)\n" }
+    result = sc.compare( NOTES_OLD, "# idx\n", parts )
+    assert result[ "pass" ] is False
+    assert result[ "dangling" ] == [ { "part": "b.md", "line_number": 3, "anchor": "notes-1", "should_be": "b.md#notes" } ]
+
+
+def test_the_suffixed_anchor_is_not_an_anchor_of_the_part_for_a_repoint():
+    parts  = { "a.md": NOTES_A, "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](b.md#notes-1)\n" }
+    result = sc.compare( NOTES_OLD, "# idx\n", parts )
+    assert result[ "pass" ] is False
+    assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "second, see [first](#notes) and [again](#notes-1)" ]
+
+
+def test_a_repeated_heading_inside_one_part_keeps_the_suffix_it_had_in_the_old_page():
+    old    = "## Notes\n\none\n\n## Notes\n\ntwo, see [again](#notes-1)\n\n## Tail\n"
+    parts  = { "a.md": "## Notes\n\none\n\n## Notes\n\ntwo, see [again](#notes-1)\n", "b.md": "## Tail\n" }
     result = sc.compare( old, "# idx\n", parts )
     assert result[ "pass" ] is True and result[ "dangling" ] == []
-    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [ { "line_number": 3, "old": "#notes", "new": "a.md#notes" } ]
+    assert result[ "parts" ][ "a.md" ][ "repointed" ] == []
+
+
+def test_a_link_to_a_heading_no_part_holds_is_not_a_repoint_and_fails_as_a_changed_line():
+    old    = "## One\n\n[go](#x)\n"
+    parts  = { "a.md": "## One\n\n[go](b.md#x)\n", "b.md": "## Two\n" }
+    result = sc.compare( old, "# idx\n", parts )
+    assert result[ "pass" ] is False
+    assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "[go](#x)" ]
+
+
+def test_a_repointed_link_inside_a_fence_is_not_excused():
+    old    = "## One\n\n```\n[y](#two)\n```\n\n## Two\n"
+    kept   = { "a.md": "## One\n\n```\n[y](#two)\n```\n", "b.md": "## Two\n" }
+    assert sc.compare( old, "# idx\n", kept )[ "pass" ] is True
+    moved  = { "a.md": kept[ "a.md" ].replace( "[y](#two)", "[y](b.md#two)" ), "b.md": "## Two\n" }
+    result = sc.compare( old, "# idx\n", moved )
+    assert result[ "pass" ] is False
+    assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "[y](#two)" ]
+
+
+def test_a_heading_shaped_line_inside_a_fence_is_not_a_home_for_a_repoint():
+    old    = "## One\n\n```\n# x\n```\n\n## Two\n\n[go](#x)\n"
+    parts  = { "a.md": "## One\n\n```\n# x\n```\n", "b.md": "## Two\n\n[go](a.md#x)\n" }
+    result = sc.compare( old, "# idx\n", parts )
+    assert result[ "pass" ] is False
+    assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "[go](#x)" ]
 
 
 def test_non_blank_lines_drop_trailing_white_space_and_blank_lines():
