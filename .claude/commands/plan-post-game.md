@@ -17,7 +17,7 @@
 1. **MUST use the following project-specific configuration**:
    - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
    - **Canonical workflow**: planning-is-prompting → workflow/post-game.md
-   - **Output location**: `src/docs/post-games/<version>/yyyy.mm.dd-<slug>-post-game.md` (full retro; `<version>` is the work branch's version) or one line in `history.md` (lightweight). A full retro carries `manager:` frontmatter and is registered in `src/docs/post-games/README.md`. Canonical: planning-is-prompting → workflow/post-game.md §5.6
+   - **Output location**: `src/docs/post-games/<version>/yyyy.mm.dd-<slug>-post-game.md` (full retro; `<version>` is the work branch's version, `v0.2.2` today) or one line in `history.md` (lightweight). A full retro carries `manager:` frontmatter and is registered in `src/docs/post-games/README.md`. The folder is tracked, so receipts (logs, failsets, screenshots) are cited, never checked in. Canonical: planning-is-prompting → `workflow/post-game.md` §5.6
    - Do NOT proceed without these parameters
 
 2. **MUST read the canonical workflow document**:
@@ -36,7 +36,7 @@
 
 5. **MUST produce movement, not just a doc** (§5):
    - Rulings → TODO.md Decisions Log (dated + attributed).
-   - Doctrine-grade lessons → graduate into a `workflow/` doc (record the pointer in that doc's version history / Status).
+   - Doctrine-grade lessons → graduate into a `workflow/` doc (record the pointer in that doc's Status or in its `docs/version-history/<name>.md`).
    - Open threads → a store item via `task_create` (never left in prose).
    - New failure modes → the failure-mode catalog.
 
