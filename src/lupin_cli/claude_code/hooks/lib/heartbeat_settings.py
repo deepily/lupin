@@ -173,8 +173,12 @@ def load_heartbeat_settings() -> dict:
     # main configuration file, read here at read time, so the poke has no copy of its own.
     # A key that is absent or unreadable never mutes.
     if poke_output_enabled:
-        from lupin_mcp import skeleton_crew
-        if skeleton_crew.is_on_quietly():
+        try:
+            from lupin_mcp import skeleton_crew
+            skeleton_on = skeleton_crew.is_on_quietly()
+        except Exception:
+            skeleton_on = False       # a hook that cannot ask leaves the poke on, never off
+        if skeleton_on:
             poke_output_enabled   = False
             poke_disabled_message = poke_disabled_message or SKELETON_CREW_POKE_MESSAGE
 

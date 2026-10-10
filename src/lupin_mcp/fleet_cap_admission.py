@@ -536,14 +536,21 @@ def _live_stdin_is_tty() -> bool:
     return sys.stdin.isatty()
 
 
-def _live_credit_spend( manager_session_id: str, slug: str ) -> bool:
-    """Spend the re-spin credit in the real credit folder."""
+def _live_credit_spend( manager_session_id: str, slug: str, session_name: str ) -> bool:
+    """Take the re-spin credit in the real credit folder, for this launch."""
     from lupin_mcp import respin_credit
-    return respin_credit.spend( manager_session_id, slug )
+    return respin_credit.spend( manager_session_id, slug, session_name=session_name )
+
+
+def _live_credit_restore( session_name: str ) -> bool:
+    """Give back the credit a launch took, when that launch did not start a session."""
+    from lupin_mcp import respin_credit
+    return respin_credit.restore( session_name )
 
 
 def _skeleton_refusal( headless: bool, skeleton_fn: Callable, stdin_is_tty_fn: Callable,
-                       environ: Any, stderr: Any, credit_spend_fn: Callable = _live_credit_spend ) -> Optional[ str ]:
+                       environ: Any, stderr: Any, credit_spend_fn: Callable = _live_credit_spend,
+                       session_name: str = "" ) -> Optional[ str ]:
     """
     The skeleton crew refusal for this launch, or None when it may go on.
 
@@ -570,7 +577,7 @@ def _skeleton_refusal( headless: bool, skeleton_fn: Callable, stdin_is_tty_fn: C
     if parsed is None:
         return refusal
     try:
-        spent = credit_spend_fn( parsed[ 0 ], parsed[ 1 ] )
+        spent = credit_spend_fn( parsed[ 0 ], parsed[ 1 ], session_name )
     except Exception:
         return refusal
     return None if spent else refusal
@@ -580,7 +587,8 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
           release_fn: Callable = release, dir_fn: Callable = reservation_dir,
           stderr = None, skeleton_fn: Optional[ Callable ] = None,
           stdin_is_tty_fn: Optional[ Callable ] = None, environ: Any = None,
-          credit_spend_fn: Optional[ Callable ] = None ) -> int:
+          credit_spend_fn: Optional[ Callable ] = None,
+          credit_restore_fn: Optional[ Callable ] = None ) -> int:
     """
     The command line `start-cc-with-tmux.sh` runs before it creates a tmux session.
 
@@ -619,7 +627,8 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
             stdin_is_tty_fn if stdin_is_tty_fn is not None else _live_stdin_is_tty,
             environ         if environ         is not None else os.environ,
             stderr,
-            credit_spend_fn if credit_spend_fn is not None else _live_credit_spend )
+            credit_spend_fn if credit_spend_fn is not None else _live_credit_spend,
+            args.session_name )
         if refusal is not None:
             stderr.write( f"\n[SKELETON-CREW] REFUSING TO LAUNCH: {refusal}\n\n" )
             return EXIT_REFUSED
@@ -628,6 +637,12 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
         directory = dir_fn()
         if args.release:
             release_fn( args.session_name, directory )
+            # A launch that took a re-spin credit and then never started a session gives
+            # it back, so the manager can try again. A failure here never breaks the release.
+            try:
+                ( credit_restore_fn if credit_restore_fn is not None else _live_credit_restore )( args.session_name )
+            except Exception:
+                pass
             return EXIT_ADMITTED
 
         verdict = admit_fn(

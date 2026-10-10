@@ -1948,12 +1948,21 @@ def dismiss_sessions(
             retained_slugs.append( persona_slug( name_persona ) )
     retained_unmatched = sorted( respin_slugs - set( retained_slugs ) )
 
-    # One credit per persona that was reaped and is coming straight back. It is what lets
+    # One credit per persona that was killed and is coming straight back. It is what lets
     # that one spawn through while skeleton crew is on. A folder that cannot be written
     # never breaks the reap. The credit is simply not there, and the spawn is refused.
+    # Only a seat this call actually killed earns one. A seat that was already gone would
+    # make the spawn it licenses a net new seat.
+    killed_slugs = set()
+    for entry in dismissed:
+        if entry[ "status" ] != "killed":
+            continue
+        killed_persona = _identity_persona_name( identities.get( entry[ "session_name" ] ) )
+        if killed_persona and persona_slug( killed_persona ) in respin_slugs:
+            killed_slugs.add( persona_slug( killed_persona ) )
     respin_credits_minted = []
     try:
-        respin_credits_minted = respin_credit.mint( manager_session_id, sorted( set( retained_slugs ) ) )
+        respin_credits_minted = respin_credit.mint( manager_session_id, sorted( killed_slugs ) )
     except Exception:
         pass
 

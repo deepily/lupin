@@ -554,3 +554,75 @@ def test_a_restore_that_fails_never_breaks_the_release( folder ):
 
 def test_the_credit_is_not_tied_to_the_session_name_the_launcher_is_given( folder ):
     assert "not tied to the session name" in " ".join( ( rc.__doc__ or "" ).split() )
+
+
+def test_a_claim_with_an_unreadable_minted_time_is_swept_by_the_files_own_age( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-1.json"
+    stale.write_text( "{not json", encoding="utf-8" )
+    old = NOW.timestamp() - rc.CREDIT_TTL_SECONDS * 3
+    os.utime( stale, ( old, old ) )
+    fresh = folder / f"{rc.CLAIM_PREFIX}cc-new-2.json"
+    fresh.write_text( json.dumps( { "minted_ts": "later" } ), encoding="utf-8" )
+    os.utime( fresh, ( NOW.timestamp(), NOW.timestamp() ) )
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_the_sweep_survives_a_missing_folder( folder ):
+    rc._sweep_claims( NOW )
+
+
+# ── the filesystem losing a race never raises ────────────────────────────────
+
+def test_a_spend_that_loses_the_unlink_race_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    def lost( path ):
+        raise FileNotFoundError( path )
+    monkeypatch.setattr( rc.os, "unlink", lost )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+
+
+def test_a_claim_that_loses_the_rename_race_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    def lost( src, dst ):
+        raise FileNotFoundError( src )
+    monkeypatch.setattr( rc.os, "rename", lost )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" ) is False
+
+
+def test_a_restore_that_loses_the_rename_is_false( folder, monkeypatch ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    def lost( src, dst ):
+        raise OSError( "gone" )
+    monkeypatch.setattr( rc.os, "rename", lost )
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+
+
+def test_a_sweep_that_cannot_remove_or_stat_a_claim_moves_on( folder, monkeypatch ):
+    folder.mkdir( parents=True, exist_ok=True )
+    stale = folder / f"{rc.CLAIM_PREFIX}cc-old-1.json"
+    stale.write_text( json.dumps( { "minted_ts": 1.0 } ), encoding="utf-8" )
+    def cannot( path ):
+        raise OSError( "busy" )
+    monkeypatch.setattr( rc.os, "unlink", cannot )
+    rc._sweep_claims( NOW )
+    assert stale.exists()
+    broken = folder / f"{rc.CLAIM_PREFIX}cc-old-2.json"
+    broken.write_text( "{not json", encoding="utf-8" )
+    monkeypatch.setattr( rc.os.path, "getmtime", cannot )
+    rc._sweep_claims( NOW )
+    assert broken.exists()
+
+
+def test_a_credit_file_that_holds_a_list_or_names_another_manager_is_not_a_credit( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    ( folder / "mgr-1.tiffany.json" ).write_text( "[1, 2]", encoding="utf-8" )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    ( folder / "mgr-1.tiffany.json" ).write_text(
+        json.dumps( { "manager_session_id": "mgr-2", "persona_slug": "tiffany", "minted_ts": NOW.timestamp() } ),
+        encoding="utf-8" )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False

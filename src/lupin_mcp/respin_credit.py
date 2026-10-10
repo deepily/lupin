@@ -11,12 +11,16 @@ written. The credit is keyed by the manager's session id and the persona, and it
 fifteen minutes. The launcher spends it. Spending is one atomic unlink, so two launches
 cannot share a credit, and a spent credit is gone.
 
+The credit is not tied to the session name the launcher is given. It licenses one launch
+of any name, which keeps the count one for one and nothing more.
+
 The credit lives beside the launch reservations in the sessions folder. Every seat runs as
 the same operating system user, so the credit is a record and not a lock. It is minted only
 for a persona that was actually reaped, which keeps a re-spin one for one.
 """
 import datetime
 import json
+import math
 import os
 import re
 
@@ -27,6 +31,7 @@ CREDIT_TTL_SECONDS = 900
 CREDIT_DIR_ENV     = "LUPIN_RESPIN_CREDIT_DIR"
 CREDIT_ENV         = "LUPIN_RESPIN_CREDIT"
 CREDIT_SUBDIR      = "respin-credits"
+CLAIM_PREFIX       = "claimed."
 
 _SAFE_NAME = re.compile( r"^[A-Za-z0-9_\-]+$" )
 
@@ -92,7 +97,26 @@ def mint( manager_session_id: str, slugs: List[ str ], now: Optional[ datetime.d
             os.fsync( handle.fileno() )
         os.replace( partial, path )
         written.append( slug )
+    _sweep_claims( now )
     return written
+
+
+def _valid_record( record: Any, manager_session_id: str, moment: float ) -> bool:
+    """
+    Whether a credit record is fresh and trustworthy.
+
+    Ensures:
+        - requires a minted time that is a finite number and not a bool
+        - requires 0 <= age <= CREDIT_TTL_SECONDS, so a time in the future never lives
+        - requires the record to name the same manager as its file
+    """
+    if not isinstance( record, dict ) or record.get( "manager_session_id" ) != manager_session_id:
+        return False
+    minted = record.get( "minted_ts" )
+    if isinstance( minted, bool ) or not isinstance( minted, ( int, float ) ) or not math.isfinite( minted ):
+        return False
+    age = moment - float( minted )
+    return 0 <= age <= CREDIT_TTL_SECONDS
 
 
 def find( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ] = None ) -> Optional[ dict ]:
@@ -100,8 +124,10 @@ def find( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ]
     The credit for this manager and persona when it is fresh, else None.
 
     Ensures:
-        - returns the record for an unspent credit younger than CREDIT_TTL_SECONDS
-        - returns None when absent, expired, garbled, or for another manager or persona
+        - returns the record for an unspent credit that is 0 to CREDIT_TTL_SECONDS old
+        - returns None when absent, expired, garbled, minted in the future or with a
+          minted time that is not a finite number
+        - returns None for another manager or persona
         - never raises
     """
     path = _path_for( manager_session_id, slug )
@@ -110,32 +136,111 @@ def find( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ]
     try:
         with open( path, "r", encoding="utf-8" ) as handle:
             record = json.load( handle )
-        age = _now( now ) - float( record[ "minted_ts" ] )
-    except ( OSError, ValueError, KeyError, TypeError ):
+    except ( OSError, ValueError ):
         return None
-    if age > CREDIT_TTL_SECONDS or record.get( "manager_session_id" ) != manager_session_id:
-        return None
-    return record
+    return record if _valid_record( record, manager_session_id, _now( now ) ) else None
 
 
-def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ] = None ) -> bool:
+def _claim_path( session_name: Optional[ str ] ) -> Optional[ str ]:
+    """The file a claimed credit waits in for this launch, or None for an unsafe name."""
+    if not ( isinstance( session_name, str ) and _SAFE_NAME.match( session_name ) ):
+        return None
+    return os.path.join( credit_dir(), f"{CLAIM_PREFIX}{session_name}.json" )
+
+
+def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ] = None,
+           session_name: Optional[ str ] = None ) -> bool:
     """
     Use up the credit, once.
+
+    Requires:
+        - session_name is the launch that takes the credit, or None
 
     Ensures:
         - returns True for exactly one caller when several race for one fresh credit
         - returns False when there is no fresh credit
-        - the credit is gone afterwards
+        - the credit is no longer spendable afterwards
+        - with a safe session_name the credit waits in a claim file, so `restore` can give
+          it back if that session never starts. Without one it is simply removed
         - never raises
     """
     if find( manager_session_id, slug, now=now ) is None:
         return False
-    path = _path_for( manager_session_id, slug )
+    path  = _path_for( manager_session_id, slug )
+    claim = _claim_path( session_name )
     try:
-        os.unlink( path )
+        if claim is None:
+            os.unlink( path )
+        else:
+            os.rename( path, claim )
+    except OSError:
+        return False
+    _sweep_claims( now )
+    return True
+
+
+def restore( session_name: str, now: Optional[ datetime.datetime ] = None ) -> bool:
+    """
+    Give a claimed credit back because the launch it was taken for did not start a session.
+
+    Ensures:
+        - returns True when the credit is spendable again, with its original clock
+        - returns False when nothing was claimed under that name, when the credit has since
+          expired, or when a newer credit for the same manager and persona already exists
+        - a second restore of the same claim returns False
+        - never raises
+    """
+    claim = _claim_path( session_name )
+    if claim is None:
+        return False
+    try:
+        with open( claim, "r", encoding="utf-8" ) as handle:
+            record = json.load( handle )
+    except ( OSError, ValueError ):
+        return False
+    manager = record.get( "manager_session_id" ) if isinstance( record, dict ) else None
+    slug    = record.get( "persona_slug" ) if isinstance( record, dict ) else None
+    target  = _path_for( manager, slug )
+    try:
+        if target is None or not _valid_record( record, manager, _now( now ) ) or os.path.exists( target ):
+            os.unlink( claim )
+            return False
+        os.rename( claim, target )
     except OSError:
         return False
     return True
+
+
+def _sweep_claims( now: Optional[ datetime.datetime ] ) -> None:
+    """
+    Remove claim files older than the credit's life.
+
+    Ensures:
+        - a claim for a session that did start is cleared once it could no longer be restored
+        - a claim whose minted time is unreadable is judged by the file's own time
+        - never raises
+    """
+    try:
+        names = os.listdir( credit_dir() )
+    except OSError:
+        return
+    moment = _now( now )
+    for name in names:
+        if not name.startswith( CLAIM_PREFIX ):
+            continue
+        path = os.path.join( credit_dir(), name )
+        try:
+            try:
+                with open( path, "r", encoding="utf-8" ) as handle:
+                    minted = json.load( handle ).get( "minted_ts" )
+            except ( OSError, ValueError, AttributeError ):
+                minted = None
+            if isinstance( minted, bool ) or not isinstance( minted, ( int, float ) ) or not math.isfinite( minted ):
+                minted = os.path.getmtime( path )
+            if moment - float( minted ) > CREDIT_TTL_SECONDS:
+                os.unlink( path )
+        except OSError:
+            continue
 
 
 def respin_slug( persona_preference: Any, seed_memento: Any, count: int ) -> Optional[ str ]:

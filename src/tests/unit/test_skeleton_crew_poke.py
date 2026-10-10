@@ -189,6 +189,8 @@ def test_the_old_flip_on_with_skeleton_crew_off_reports_the_file_as_source( swit
 def test_a_switch_module_that_cannot_be_imported_leaves_the_poke_on( settings_file, switch, monkeypatch ):
     settings_file( { "enabled": True } )
     switch( "true" )
+    import lupin_mcp
+    monkeypatch.delattr( lupin_mcp, "skeleton_crew", raising=False )
     monkeypatch.setitem( sys.modules, "lupin_mcp.skeleton_crew", None )
     loaded = hs.load_heartbeat_settings()
     assert loaded[ "poke_output_enabled" ] is True
