@@ -1,8 +1,9 @@
 // Row 6f72dc83 — the skeleton crew toggle in the multiplexer's Fleet Status pane.
 //
 // Design: src/rnd/v0.2.2/2026.10.10-skeleton-crew-toggle-design.md §5 (the clients) and §9 (build row 8).
-// Server contract: `skeleton_crew` (boolean) rides GET and PUT /api/arbiter/fleet-size-cap;
-// PUT /api/arbiter/skeleton-crew takes { "on": bool } and answers the same body, re-read from the file.
+// Wire contract (note section 5): the GET body gains `skeleton_crew` { on, since, set_by,
+// settings_mute_while_off }; PUT /api/arbiter/skeleton-crew takes { "on": bool }, admin only,
+// and answers the same body, re-read from the file.
 //
 // Store behaviour and renderer behaviour are both here, because the claim is the pair: a store
 // that saves correctly behind a switch that never disables is not the feature.
@@ -21,6 +22,7 @@ import {
   FLEET_SKELETON_CREW_ENDPOINT,
   type FleetApiClient,
   type FleetSizeCap,
+  type FleetSkeletonCrew,
 } from "../../../../lupin_app/static/js/multiplexer/stores/FleetStatusStore";
 import {
   createFleetStatusRenderer,
@@ -37,8 +39,11 @@ before(() => {
 
 const nowFn = (): number => 0;
 
-const CREW_OFF: FleetSizeCap = { cap: 6, ceiling: 18, live: { total: 5, managers: 2, workers: 3 }, skeleton_crew: false };
-const CREW_ON : FleetSizeCap = { ...CREW_OFF, skeleton_crew: true };
+const crew = ( on: boolean, mute: boolean | null = false ): FleetSkeletonCrew =>
+  ( { on, since: "2026-10-10T13:20:00-04:00", set_by: "rick", settings_mute_while_off: mute } );
+
+const CREW_OFF: FleetSizeCap = { cap: 6, ceiling: 18, live: { total: 5, managers: 2, workers: 3 }, skeleton_crew: crew( false ) };
+const CREW_ON : FleetSizeCap = { ...CREW_OFF, skeleton_crew: crew( true ) };
 const COMPOSITE: FleetComposite = { app_timezone: "America/New_York", fleet_arbiter: { sessions: [] } };
 
 function apiError( status: number, text: string ): Error & { status: number } {
@@ -58,7 +63,7 @@ function makeApi( overrides: Partial<Pick<ApiCtx, "getCap" | "putCrew">> = {} ):
   const ctx: ApiCtx = {
     calls   : [],
     getCap  : async () => CREW_OFF,
-    putCrew : async ( body ) => ( { ...CREW_OFF, skeleton_crew: ( body as { on: boolean } ).on } ),
+    putCrew : async ( body ) => ( { ...CREW_OFF, skeleton_crew: crew( ( body as { on: boolean } ).on ) } ),
     ...overrides,
     api     : null as unknown as FleetApiClient,
   };
@@ -98,7 +103,7 @@ test( "the state is read from the `skeleton_crew` field of the fleet-size-cap GE
   const { store } = makeStore( ctx );
   assert.equal( store.skeletonCrewSaving(), null, "nothing in flight before a write" );
   await store.refreshSizeCap();
-  assert.equal( store.sizeCap()!.skeleton_crew, true );
+  assert.equal( store.sizeCap()!.skeleton_crew!.on, true );
   assert.deepEqual( ctx.calls, [ `GET ${FLEET_SIZE_CAP_ENDPOINT}` ] );
 } );
 
@@ -114,10 +119,10 @@ test( "a flip PUTs { on }, reports saving while in flight, and keeps the SERVER'
   assert.deepEqual( events, [ { saving: true } ], "the pane repaints on the existing cap event" );
   assert.deepEqual( ctx.calls, [ `PUT ${FLEET_SKELETON_CREW_ENDPOINT} {"on":true}` ] );
 
-  release( { ...CREW_OFF, skeleton_crew: false } );
+  release( { ...CREW_OFF, skeleton_crew: crew( false ) } );
   await saving;
   assert.equal( store.skeletonCrewSaving(), null );
-  assert.equal( store.sizeCap()!.skeleton_crew, false, "the server's re-read, not the value sent" );
+  assert.equal( store.sizeCap()!.skeleton_crew!.on, false, "the server's re-read, not the value sent" );
   assert.deepEqual( events, [ { saving: true }, { saving: false } ] );
 } );
 
@@ -130,7 +135,7 @@ test( "a refused flip reports the server's detail, then re-reads the enforced st
   await store.setSkeletonCrew( true );
   assert.deepEqual( errors, [ "Skeleton crew not saved: admin role required" ] );
   assert.deepEqual( ctx.calls, [ `PUT ${FLEET_SKELETON_CREW_ENDPOINT} {"on":true}`, `GET ${FLEET_SIZE_CAP_ENDPOINT}` ] );
-  assert.equal( store.sizeCap()!.skeleton_crew, false, "snaps back to what the server holds" );
+  assert.equal( store.sizeCap()!.skeleton_crew!.on, false, "snaps back to what the server holds" );
   assert.equal( store.skeletonCrewSaving(), null );
 } );
 
@@ -179,6 +184,7 @@ function mountToggle() {
     field    : q( "multiplexer-skeleton-crew-field" ),
     toggle   : q( "multiplexer-skeleton-crew-toggle" ) as HTMLInputElement,
     state    : q( "multiplexer-skeleton-crew-state" ),
+    warning  : q( "multiplexer-skeleton-crew-warning" ),
   };
   const capChanged = ( saving: boolean ): void => {
     bus.emit<StoreFleetSizeCapChangedPayload>( { type: "store_fleet_size_cap_changed", payload: { saving }, source: "test", ts: 0 } );
@@ -194,13 +200,17 @@ test( "the switch is a real checkbox with role=switch, inside the cap controls b
   assert.equal( els.toggle.getAttribute( "aria-labelledby" ), els.state.id, "the visible text names the control" );
 } );
 
-test( "it stays hidden until the server sends a boolean `skeleton_crew`", () => {
+test( "it stays hidden until the server sends a `skeleton_crew` object with a boolean `on`", () => {
   const { els, fleet, capChanged } = mountToggle();
   assert.equal( els.field.hidden, true );
 
   fleet.cap = { cap: 6, ceiling: 18 };           // an older server: no field, no switch that does nothing
   capChanged( false );
   assert.equal( els.field.hidden, true );
+
+  fleet.cap = { ...CREW_OFF, skeleton_crew: { ...crew( false ), on: "yes" as unknown as boolean } };
+  capChanged( false );
+  assert.equal( els.field.hidden, true, "only a real boolean counts" );
 
   fleet.cap = CREW_OFF;
   capChanged( false );
@@ -225,6 +235,29 @@ test( "the state is said in TEXT and the checkbox agrees: OFF, then ON", () => {
   assert.equal( els.state.textContent, "Skeleton crew: ON" );
   assert.equal( els.toggle.checked, true );
   assert.equal( els.toggle.getAttribute( "aria-checked" ), "true" );
+} );
+
+test( "a warning line appears only when the settings mute is set while the toggle is off", () => {
+  const { els, fleet, capChanged } = mountToggle();
+  assert.equal( els.warning.hidden, true, "nothing before a payload" );
+
+  fleet.cap = { ...CREW_OFF, skeleton_crew: crew( false, true ) };
+  capChanged( false );
+  assert.equal( els.warning.hidden, false );
+  assert.match( els.warning.textContent!, /settings\.json/ );
+  assert.match( els.warning.textContent!, /skeleton crew is off/i );
+
+  fleet.cap = { ...CREW_OFF, skeleton_crew: crew( false, null ) };   // the server could not read the file
+  capChanged( false );
+  assert.equal( els.warning.hidden, true, "null means no warning" );
+
+  fleet.cap = { ...CREW_OFF, skeleton_crew: crew( false, false ) };
+  capChanged( false );
+  assert.equal( els.warning.hidden, true );
+
+  fleet.cap = { ...CREW_ON, skeleton_crew: crew( true, true ) };     // on already mutes the poke
+  capChanged( false );
+  assert.equal( els.warning.hidden, true, "the warning is for the OFF case only" );
 } );
 
 test( "change saves once with the requested state", () => {

@@ -1,8 +1,9 @@
 // Row 6f72dc83 — the skeleton crew toggle in the legacy Fleet Status pane.
 //
 // Design: src/rnd/v0.2.2/2026.10.10-skeleton-crew-toggle-design.md §5 (the clients) and §9 (build row 9).
-// Server contract: `skeleton_crew` (boolean) rides GET and PUT /api/arbiter/fleet-size-cap;
-// PUT /api/arbiter/skeleton-crew takes { "on": bool } and answers the same body, re-read from the file.
+// Wire contract (note section 5): the GET body gains `skeleton_crew` { on, since, set_by,
+// settings_mute_while_off }; PUT /api/arbiter/skeleton-crew takes { "on": bool }, admin only,
+// and answers the same body, re-read from the file.
 //
 // The switch lives inside #fleet-size-cap-controls, beside the dial, and is painted by the
 // same _paintFleetSizeCap call, so it is never shown without a payload and never shown for a
@@ -52,8 +53,10 @@ type CrewUI = Record<string, unknown> & {
 };
 
 const CAP = { cap: 6, ceiling: 18, live: { total: 5, managers: 2, workers: 3 } };
-const OFF = { ...CAP, skeleton_crew: false };
-const ON  = { ...CAP, skeleton_crew: true };
+const crew = ( on: boolean, mute: boolean | null = false ) =>
+  ( { on, since: "2026-10-10T13:20:00-04:00", set_by: "rick", settings_mute_while_off: mute } );
+const OFF = { ...CAP, skeleton_crew: crew( false ) };
+const ON  = { ...CAP, skeleton_crew: crew( true ) };
 
 let errors: string[];
 
@@ -121,7 +124,7 @@ test( "the state is said in TEXT and the checkbox agrees: OFF, then ON", () => {
   assert.equal( toggle().getAttribute( "aria-checked" ), "true" );
 } );
 
-test( "a payload without a boolean `skeleton_crew` hides the switch but not the dial", () => {
+test( "a payload without a `skeleton_crew` object hides the switch but not the dial", () => {
   const ui = newUI();
   build();
   ui._paintFleetSizeCap( OFF );
@@ -131,8 +134,33 @@ test( "a payload without a boolean `skeleton_crew` hides the switch but not the 
   assert.equal( field().hidden, true );
   assert.equal( cluster().hidden, false, "the dial is unaffected" );
 
-  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: "yes" } );
+  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: { ...crew( false ), on: "yes" } } );
   assert.equal( field().hidden, true, "only a real boolean counts" );
+} );
+
+const warning = (): HTMLElement => document.getElementById( "skeleton-crew-warning" ) as HTMLElement;
+
+test( "a warning line appears only when the settings mute is set while the toggle is off", () => {
+  const ui = newUI();
+  build();
+  assert.equal( warning().hidden, true, "nothing before a payload" );
+
+  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: crew( false, true ) } );
+  assert.equal( warning().hidden, false );
+  assert.match( warning().textContent!, /settings\.json/ );
+  assert.match( warning().textContent!, /skeleton crew is off/i );
+
+  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: crew( false, null ) } );
+  assert.equal( warning().hidden, true, "null means no warning" );
+
+  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: crew( false, false ) } );
+  assert.equal( warning().hidden, true );
+
+  ui._paintFleetSizeCap( { ...CAP, skeleton_crew: crew( true, true ) } );
+  assert.equal( warning().hidden, true, "the warning is for the OFF case only" );
+
+  ui._paintFleetSizeCap( CAP );
+  assert.equal( warning().hidden, true, "an older server sends no field, so no warning" );
 } );
 
 test( "an unusable payload hides the whole cluster, switch included", () => {
