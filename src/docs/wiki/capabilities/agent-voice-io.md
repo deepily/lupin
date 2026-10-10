@@ -8,7 +8,7 @@ pins:
   - cosa.agents.utils.voice_io.present_choices@b1c28fbb38
   - cosa.agents.utils.voice_io.read_gate_answer@c775d66871
   - cosa.agents.utils.voice_io.VoiceGateNoDefaultError@8a7e015aa2
-  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@4453d24bc5
+  - cosa.agents.utils.agent_notification_dispatcher.AgentNotificationDispatcher@5c85fcc6a7
   - cosa.agents.deep_research.cosa_interface.set_dispatch_context@fb2623d695
   - cosa.agents.deep_research.voice_io.reconfigure@8265f4719a
   - cosa.agents.utils.sender_id.build_sender_id@e3f42ed236
@@ -25,7 +25,7 @@ How a job tells the user something or asks a question: by voice when a notificat
 
 ## When nobody can answer
 - On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`. It raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers. On the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
-- One path bypasses that: `AgentNotificationDispatcher.ask_confirmation` swallows an unexpected error and returns `default == "yes"`. It is filed as the bug "ask_confirmation answers with `default` on an unexpected error, ignoring unattended_default". An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`). `ask_confirmation` returns it as the answer. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`.
+- `AgentNotificationDispatcher.ask_confirmation` raises when no answer arrives or the asking breaks. An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`), and `ask_confirmation` returns it as the answer. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`. Any other unexpected error is raised as `VoiceGateUnreachableError`. It is not a timeout, because the question may never have been asked.
 - `read_gate_answer` returns the answer under a header. A missing header raises `VoiceGateNoDefaultError` unless the caller passed an `unattended_default`, which is then returned; a default used is logged as a warning.
 
 ## Invariants
