@@ -20,7 +20,7 @@
 ## 🪦 Retired queue doors — gone (410), remove by end of 2026
 
 Rick ruled that there is one entry point, and it is v2. Eighteen routes used to put work on the queue; sixteen are retired.
-Each retired route stays registered on purpose and answers **410 Gone** with a body naming its replacement.
+Each retired route stays registered so it can answer **410 Gone** with a body naming its replacement.
 A deleted route is invisible, and nothing would stop someone re-adding it because the product needs it.
 These stubs are removed by the end of 2026.
 
@@ -57,7 +57,7 @@ A 410 naming a route that answers "I do not understand" teaches a caller less th
 
 `/api/podcast-generator/submit` is the one job-queueing door that retires into `ask` rather than `submit`.
 Its description flow asked the user which document they meant, and which languages and audience they wanted.
-It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold by design.
+It could also answer "cancelled". That is a conversation, which `ask` holds and `submit` refuses to hold, as its contract says.
 
 **No queue door is left live**. `/api/test-suite/submit` retired last.
 Rick ruled "retire after v2 gap". The gap was `queue_position`, now `AskResponse.queue_position`.
