@@ -1,16 +1,15 @@
 # Test Fix Expediter (TFE) Guide
 
-> **Audience**: Lupin operators running automated test suites and developers maintaining or extending TFE
->
-> **Scope**: `src/cosa/agents/test_fix_expediter/`, `src/cosa/rest/test_suite_completion_watchdog.py`, TFE INI keys
->
-> **Last Updated**: 2026-04-10
->
-> **See Also**:
-> - [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — shared `FixExecutor`, `GitStrategist`, `PlanWriter`
-> - [Bug Fix Expediter Guide](bug-fix-expediter-guide.md) — sister agent for dead-job recovery
-> - [Test-Suite Scheduling Guide](test-suite-scheduling-guide.md) — how TestSuiteJob produces the remediation snapshots TFE consumes
-> - R&D: [TFE plan index](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md)
+**Audience**: Lupin operators running automated test suites and developers maintaining or extending TFE.
+
+**Scope**: `src/cosa/agents/test_fix_expediter/`, `src/cosa/rest/test_suite_completion_watchdog.py`, TFE INI keys.
+
+**See Also**:
+
+- [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — shared `FixExecutor`, `GitStrategist`, `PlanWriter`
+- [Bug Fix Expediter Guide](bug-fix-expediter-guide.md) — sister agent for dead-job recovery
+- [Test-Suite Scheduling Guide](test-suite-scheduling-guide.md) — how TestSuiteJob produces the remediation snapshots TFE consumes
+- R&D: [TFE plan index](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md)
 
 ---
 
@@ -32,12 +31,12 @@
 
 The **Test Fix Expediter** is an agentic job that recovers from test failures. When
 a `TestSuiteJob` finishes with a non-empty failures list in its remediation snapshot,
-TFE clusters the failures by root cause, diagnoses each cluster, proposes fixes,
-applies them through a shared Coder+Tester loop, commits the results as one branch
-with N commits and one PR, and then schedules a validation rerun.
+TFE clusters the failures by root cause and diagnoses each cluster.
+It proposes fixes and applies them through a shared Coder+Tester loop.
+It commits the results as one branch with N commits and one PR, and then schedules a validation rerun.
 
-**When TFE fires**: A `TestSuiteJob` completes (successfully — the job itself didn't
-crash, but tests inside it failed) and lands in the done queue with
+**When TFE fires**: A `TestSuiteJob` completes successfully (the job itself didn't
+crash, but tests inside it failed). It lands in the done queue with
 `summary.all_passed == false` in its remediation snapshot artifact. The
 `TestSuiteCompletionWatchdog` evaluates the completed job against six eligibility
 gates and, if all pass, dispatches a `TestFixExpediterJob` to `jobs_todo_queue`.
@@ -53,13 +52,14 @@ gates and, if all pass, dispatches a `TestFixExpediterJob` to `jobs_todo_queue`.
 4. **Voice notifications** to the user with aggregated (not per-cluster) gates at
    Phase 1 and Phase 2.
 5. **An async validation rerun** — a new `TestSuiteJob` queued to re-run just the
-   affected suites, carrying a recursion-guard metadata flag so the watchdog
+   affected suites. It carries a recursion-guard metadata flag, so the watchdog
    refuses to re-trigger TFE on the rerun's completion.
 
-**What TFE does NOT do**: rerun forever (the recursion guard is strict), operate on
-test_suite jobs that crashed rather than completed (those land in the dead queue
-and fall to BFE), or modify tests outside the cluster it's fixing (the Tester
-agent's `pytest -k` filter is narrowed to the cluster's failing test names).
+**What TFE does not do**:
+
+- Rerun forever (the recursion guard is strict).
+- Operate on test_suite jobs that crashed rather than completed (those land in the dead queue and fall to BFE).
+- Modify tests outside the cluster it's fixing (the Tester agent's `pytest -k` filter is narrowed to the cluster's failing test names).
 
 ---
 
@@ -76,7 +76,7 @@ But they differ on every other axis:
 | **Watchdog** | `DeadQueueWatchdog` in `running_fifo_queue.py` error path | `TestSuiteCompletionWatchdog` in `running_fifo_queue.py` success path |
 | **Phase 0** | Packaging (build DeadJobContext) | Clustering (group N failures into K clusters) |
 | **Phase 1** | Diagnose the crash stack trace | Diagnose each cluster from `classname::name[param]` + traceback |
-| **Voice gates** | Per-fix (1 diagnosis + 1 proposal gate) | Aggregated (1 diagnosis + 1 multi-select proposal gate for ALL clusters) |
+| **Voice gates** | Per-fix (1 diagnosis + 1 proposal gate) | Aggregated (1 diagnosis + 1 multi-select proposal gate for all clusters) |
 | **Phase 5 git** | `commit_and_pr_single` (one fix → one commit/PR) | `commit_and_pr_multi` (N fixes → one branch, N commits, one PR) |
 | **Phase 6 validate** | Resubmit the original dead job | Queue a new TestSuiteJob targeting affected suites |
 | **Recursion guard** | `metadata["triggered_by_bfe"]` | `metadata["triggered_by_tfe"]` |
@@ -110,9 +110,9 @@ flowchart LR
 
 The **key architectural decision**: TFE fires on the **done queue success path**,
 not the dead queue. `TestSuiteJob` completes successfully from a queue perspective
-even when the tests it ran have failures — the test runner returns a result object
-with pass/fail counts; the job itself didn't crash. BFE's `DeadQueueWatchdog` is
-therefore the wrong hook. TFE has its own `TestSuiteCompletionWatchdog` that runs
+even when the tests it ran have failures. The test runner returns a result object
+with pass/fail counts, and the job itself didn't crash. BFE's `DeadQueueWatchdog` is
+therefore the wrong hook. TFE has its own `TestSuiteCompletionWatchdog`. It runs
 on the success-path push, checks `artifacts["remediation_snapshot"]` for
 `all_passed=false`, and dispatches TFE when a remediation snapshot is present
 and actionable.
@@ -130,7 +130,7 @@ clusters, each representing one root cause.
 does a pure-Python first pass. For each failure, it computes a key of
 `(normalized_classname, first_non_pytest_traceback_frame)`. Failures sharing a key
 get grouped together. Parametrized tests (`test_foo[param1]`, `test_foo[param2]`)
-collapse to one cluster because they share the classname AND the first non-pytest
+collapse to one cluster because they share the classname and the first non-pytest
 frame in the traceback.
 
 ```python
@@ -172,9 +172,9 @@ the shared root cause.
 System prompt lives in
 `src/cosa/agents/test_fix_expediter/prompts/diagnosis.py`.
 
-**Critical difference from BFE's diagnosis**: TFE's prompt teaches the agent how
-to parse `classname::name[param]` test IDs into source file paths and how to
-recognize four failure mode categories:
+**Critical difference from BFE's diagnosis**: TFE's prompt teaches the agent to
+parse `classname::name[param]` test IDs into source file paths. It also teaches
+it to recognize four failure mode categories:
 
 - **`code_bug`** — production code under test is wrong. Fix in `src/cosa/` or `src/lupin_app/`.
 - **`test_bug`** — test itself is wrong (stale assertion, bad mock). Fix in `src/tests/`.
@@ -187,10 +187,10 @@ iteration re-prompts with the prior attempt's confidence; the prompt explicitly
 tells the agent to discard bad hypotheses rather than incrementally patch them.
 
 **Processing order**: serial in MVP. Future optimization would parallelize via
-`asyncio.gather()` with a semaphore; deferred because per-cluster diagnoses are
+`asyncio.gather()` with a semaphore. It is deferred because per-cluster diagnoses are
 cheap enough (~30s each) that serial execution is fine for K ≤ 8.
 
-**Voice gate**: aggregated — one `ask_yes_no()` gate after ALL clusters have been
+**Voice gate**: aggregated — one `ask_yes_no()` gate after all clusters have been
 diagnosed. Summary markdown lists each cluster ID + error_category + confidence.
 User approves to proceed to Phase 2, or rejects to cancel the whole run.
 
@@ -212,9 +212,9 @@ approach: `code_patch`, `test_patch`, `config_change`, `retry`, or `manual`. The
 proposal prompt caps each fix at 5 file changes — larger scopes get rejected as
 "diagnosis too broad."
 
-**Plan document**: `PlanWriter.write_plan()` (from the shared package) writes ONE
+**Plan document**: `PlanWriter.write_plan()` (from the shared package) writes one
 multi-section Markdown document listing every cluster + its proposals. Each
-cluster becomes a `## Cluster C1: ...` section. The document lives at
+cluster becomes a `## Cluster <cluster_id>: ...` section; a cluster id is the letter C plus its position, starting at 1. The document lives at
 `io/swe-team/plans/{user_email}/YYYY.MM.DD-{slug}-plan.md`.
 
 **Aggregated voice gate**: `ask_multiple_choice()` with `multiSelect=True`. The
@@ -229,7 +229,7 @@ which cluster fixes to apply. Selecting nothing cancels Phase 3.
 ```
 
 **Alternative mode**: `test fix expediter voice gate mode = per_cluster` switches
-to K+1 sequential gates (one per proposal + one final confirm), which is high-touch
+to K+1 sequential gates (one per proposal + one final confirm). This is high-touch
 but preserves finer-grained control for high-risk fix batches.
 
 **INI tuning**:
@@ -253,8 +253,8 @@ specific tests pass now."
 **`continue_on_cluster_failure`**: when a cluster fix fails verification and
 exhausts `max_fix_attempts`, TFE decides whether to abort the rest of the batch or
 continue with remaining clusters. Default: `true` (continue). Rationale: cluster
-fixes are independent by construction (Phase 0 clustering ensures distinct root
-causes), so a failed C2 shouldn't block C1 or C3.
+fixes are independent (Phase 0 clustering ensures distinct root
+causes), so a failed second cluster shouldn't block the first or third.
 
 **Dry-run mode**: when `dry_run=True` on the TFE job, Phase 3 synthesizes success
 results from the proposals without invoking the Coder/Tester agents. Files are
@@ -296,13 +296,13 @@ runs, `suite_abbrev` is the suite name (`unit`, `e2e`, etc.); for multi-suite, i
 INI key supports four modes:
 
 - `inherit` (default) — read from the global SWE trust proxy, same as BFE
-- `fixed_l1` — force L1 (commit_only) regardless of earned trust
-- `fixed_l3` — force L3 (branch_and_pr) for testing
+- `fixed_l1` — force trust level 1 (commit_only) regardless of earned trust
+- `fixed_l3` — force trust level 3 (branch_and_pr) for testing
 - `shadow` — passive, compute but don't escalate
 
 **Partial-progress semantics**: if the Coder broke the build mid-batch, the
-strategist's `commit_and_pr_multi()` leaves the successful commits in place and
-surfaces the failure in the returned `error` field. TFE reports the partial state
+strategist's `commit_and_pr_multi()` leaves the successful commits in place.
+It surfaces the failure in the returned `error` field. TFE reports the partial state
 in its final status notification.
 
 ### Phase 6: Rerun Validation
@@ -310,9 +310,9 @@ in its final status notification.
 **Goal**: schedule a new `TestSuiteJob` targeting the affected suites to verify
 the fixes end-to-end.
 
-**Async, not waiting**: TFE does NOT block on the validation rerun. It queues a
-new `TestSuiteJob` via `create_agentic_job("agent router go to test suite", ...)`,
-sets `metadata["triggered_by_tfe"] = self.job_id` on the new job, pushes to
+**Async, not waiting**: TFE does not block on the validation rerun. It queues a
+new `TestSuiteJob` via `create_agentic_job("agent router go to test suite", ...)`.
+It sets `metadata["triggered_by_tfe"] = self.job_id` on the new job, pushes to
 `jobs_todo_queue`, and then completes itself. The user watches the rerun's
 progress in the Activity Log separately.
 
@@ -438,7 +438,7 @@ failures) leaves overrides unset → use INI defaults.
 
 ### Step 1: Master switch (INI default)
 
-As of Session 1cfcdf73 (2026-04-10), auto-fix is **enabled by default**:
+Auto-fix is **enabled by default**:
 
 ```ini
 # src/conf/lupin-app.ini
@@ -503,18 +503,18 @@ trail.
 
 ### Step 4: Graduate to active mode (optional)
 
-Once you trust TFE's behavior in shadow/L1 mode, graduate to `active` — real
+Once you trust TFE's behavior in shadow (trust level 1) mode, graduate to `active` — real
 branch creation + PR via `gh`:
 
 ```ini
 test fix expediter trust mode = inherit  # leave at inherit; SWE proxy manages the level
 ```
 
-The SWE Team Trust Proxy must be populated with L3+ earned trust via the
+The SWE Team Trust Proxy must be populated with level 3+ earned trust via the
 ratification workflow. See the
 [Decision Proxy Admin Guide](../proxy-admin-guide.md) for how to earn trust levels.
 
-Alternatively, for testing only: force L3 via
+Alternatively, for testing only: force level 3 via
 
 ```ini
 test fix expediter trust mode = fixed_l3
@@ -550,7 +550,7 @@ snapshot is only produced when `summary.all_passed == false`. Inspect
 `job.artifacts` after the run.
 
 **Check 3**: Is the recursion guard tripped? If you're manually resubmitting the
-same broken TestSuiteJob repeatedly, check the `metadata` field — leftover
+same broken TestSuiteJob repeatedly, check the `metadata` field. A leftover
 `triggered_by_tfe` from a prior run will make the watchdog skip dispatch.
 
 **Check 4**: Failure count over the cap? If the TestSuiteJob reports more than
@@ -587,9 +587,9 @@ confidence — you can approve anyway or cancel.
 
 **Fix 2**: Lower `min_diagnosis_confidence` to accept more marginal diagnoses.
 
-**Fix 3**: Provide more context via the prompt: the Phase 1 prompt builder in
+**Fix 3**: Provide more context via the prompt. The Phase 1 prompt builder in
 `src/cosa/agents/test_fix_expediter/prompts/diagnosis.py` already teaches the agent
-how to read test files and trace to production code, but obscure bugs may need
+how to read test files and trace to production code. Obscure bugs may still need
 manual investigation.
 
 ### Fix phase keeps failing verification
@@ -676,7 +676,7 @@ rejection (cancels Phase 3 / Phase 5 / Phase 6).
 
 Historical planning documents live under
 [`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/`](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md)
-— 14 design docs + 6 execution logs. Useful when debugging WHY TFE is designed
+— 14 design docs + 6 execution logs. Useful when debugging why TFE is designed
 the way it is.
 
 ### Test coverage
@@ -692,7 +692,7 @@ the way it is.
 | `test_tfe_diagnose.py` | 17 | Per-cluster iteration, parse errors, mock SDK |
 | `test_tfe_propose.py` | 21 | Multi-cluster proposals, voice gate modes |
 | `test_tfe_phase3_fix.py` | 13 | FixExecutor delegation, prompt registration |
-| `test_tfe_phase5_git.py` | 18 | `commit_and_pr_multi` L1/L3 paths |
+| `test_tfe_phase5_git.py` | 18 | `commit_and_pr_multi` level 1 and level 3 paths |
 | `test_tfe_phase6_rerun.py` | 14 | Async dispatch, recursion guard, scope modes |
 | `test_test_suite_completion_watchdog.py` | 30 | All 6 gates, dispatch, exception safety |
 | `test_tfe_job.py` | 9 | Instantiation, factory routing |

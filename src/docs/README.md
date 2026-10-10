@@ -16,7 +16,7 @@
 | [notification-api.md](notification-api.md) | Notification system architecture, lifecycle, proxy | `routers/notifications.py` |
 | [notification-types.md](notification-types.md) | Catalogue of `type` values + custom state-update types (incl. `commons_broadcast_ack`) | `routers/notifications.py` `valid_types` |
 | [proxy-admin-guide.md](proxy-admin-guide.md) | Trust Dashboard and ratification guide | `routers/decision_proxy.py` |
-| [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | ⚠️ its former code anchor `src/lib/clients/` was deleted 2026-08-26 (row `e2099400` §3b) — the doc now describes the web frontend only |
+| [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | Warning: its former code anchor `src/lib/clients/` was deleted; the doc now describes the web frontend only |
 | [cost-model-bounded-cc-vs-firewalled-sdk.md](cost-model-bounded-cc-vs-firewalled-sdk.md) | Runbook: move an LLM-driven agent from the direct Anthropic SDK to a bounded Claude Code job (prerequisites, steps, verify, rollback) | `CLAUDE.md` § Cost model |
 | [fleet-liveness-and-task-store-architecture.md](fleet-liveness-and-task-store-architecture.md) | **Top-to-bottom** fleet liveness + unified task-store: one store / three readers (Stop-hook self-poke · arbiter :8001 · UI card), the heartbeat seam + `owed_source_from_store` cutover flag + fail-safe, arbiter detectors (staleness/tap-ACK/whole-fleet-stall), manager/worker lifecycle, migration drain | `src/lupin_cli/claude_code/hooks/`, `src/cosa/agents/heartbeat_arbiter/`, `src/cosa/rest/routers/tasks.py` |
 | [docstring-standard.md](docstring-standard.md) | What the pre-commit doc gate refuses in swept Python, the waiver form, the printed denominator | `src/cosa/repo/doc_lint/gate.py`, `swept_scope.py` |
@@ -30,7 +30,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 |----------|-------|-----------------|
 | [agents/README.md](agents/README.md) | Subsystem index and "when to read which" decision table | — |
 | [agents/bug-fix-expediter-guide.md](agents/bug-fix-expediter-guide.md) | Dead-job auto-recovery agent (BFE) — 6 phases, INI keys, trust-to-git mapping | `src/cosa/agents/bug_fix_expediter/` |
-| [agents/test-fix-expediter-guide.md](agents/test-fix-expediter-guide.md) | Test-failure auto-recovery agent (TFE) — Phase 0 clustering, `TestSuiteCompletionWatchdog`, 16 INI keys | `src/cosa/agents/test_fix_expediter/` |
+| [agents/test-fix-expediter-guide.md](agents/test-fix-expediter-guide.md) | Test-failure auto-recovery agent (TFE) — clustering (phase zero), `TestSuiteCompletionWatchdog`, 16 INI keys | `src/cosa/agents/test_fix_expediter/` |
 | [agents/test-suite-scheduling-guide.md](agents/test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill — suite types, monopolize mode, remediation snapshot schema v1.0 | `src/cosa/agents/test_suite/` |
 | [agents/shared-fix-primitives-reference.md](agents/shared-fix-primitives-reference.md) | `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` — how to add a new expediter agent | `src/cosa/agents/shared/` |
 | [agents/heartbeat-arbiter-routing-guide.md](agents/heartbeat-arbiter-routing-guide.md) | Heartbeat-arbiter routing & recipients — the 13-case→6-tier model, active-manager resolver + phantom guard, two delivery mechanisms, and the health-loop (Loop A → Rick-only) | `src/cosa/agents/heartbeat_arbiter/`, `src/lupin_arbiter_app/` |
@@ -39,12 +39,12 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 
 | Document | Topic |
 |----------|-------|
-| [lupin-claude-hooks-settings-reference.md](lupin-claude-hooks-settings-reference.md) | **`~/.claude/settings.json` Lupin runtime knobs** (`heartbeat`, `task_store`, `idle_detection`) read by the hook scripts — schema, defaults, ⚠️ provisional-location proviso + planned refactor |
+| [lupin-claude-hooks-settings-reference.md](lupin-claude-hooks-settings-reference.md) | **`~/.claude/settings.json` Lupin runtime knobs** (`heartbeat`, `task_store`, `idle_detection`) read by the hook scripts — schema, defaults, Warning: provisional-location proviso + planned refactor |
 | [deployment-runtime-config-examples.md](deployment-runtime-config-examples.md) | Runtime config patterns and examples |
 | [vm-new-host-checklist.md](vm-new-host-checklist.md) | Host configuration git does not carry (heartbeat block, manager roster, flow-ratio override, container git trust): symptom, preflight check id and fix for each |
 | [database-migrations.md](database-migrations.md) | Database migration procedures |
 | [db-login-files-install.md](db-login-files-install.md) | One command that installs the test login's secret files on a new host (`sudo src/scripts/install_db_secrets.py`), its refusals, and what stays manual |
-| [post-games/README.md](post-games/README.md) | Post-game retrospectives, tracked, one folder per work-branch version (Rick's ruling 2026-10-03) |
+| [post-games/README.md](post-games/README.md) | Post-game retrospectives, tracked, one folder per work-branch version (Rick's ruling) |
 | [automated-interactive-testing.md](automated-interactive-testing.md) | Proxy auto-answer testing guide |
 
 ## Auth Subsystem
@@ -70,11 +70,11 @@ Deep-dive documentation for the JWT authentication system (relocated from `docs/
 | websocket-configuration.md | `lupin-app.ini` (7 keys) | 2026-03-20 |
 | websocket-troubleshooting.md | Current auth flow + events | 2026-03-20 |
 | rest-api-reference.md | All 19 routers + BFE/TFE/test-suite | 2026-04-10 |
-| rest-api-reference.md — retired-door rows ONLY | `routers/_retired_doors.py` `RETIRED_DOORS` (12 doors), guarded by `src/tests/unit/test_rest_api_reference_marks_retired_doors_gone.py` | 2026-09-28 |
+| rest-api-reference.md — retired-door rows only | `routers/_retired_doors.py` `RETIRED_DOORS` (12 doors), guarded by `src/tests/unit/test_rest_api_reference_marks_retired_doors_gone.py` | 2026-09-28 |
 | notification-api.md | `routers/notifications.py` (24 routed endpoints, counted from `router.routes`) | 2026-09-23 |
 | agents/README.md | BFE/TFE/TestSuite/shared subsystem index | 2026-04-10 |
-| agents/bug-fix-expediter-guide.md | `src/cosa/agents/bug_fix_expediter/` (Phase 6 complete, 58 tests) | 2026-04-10 |
+| agents/bug-fix-expediter-guide.md | `src/cosa/agents/bug_fix_expediter/` (final phase complete, 58 tests) | 2026-04-10 |
 | agents/test-fix-expediter-guide.md | `src/cosa/agents/test_fix_expediter/` (197 tests) | 2026-04-10 |
 | agents/test-suite-scheduling-guide.md | `src/cosa/agents/test_suite/job.py` + `/schedule-tests` skill | 2026-04-10 |
-| agents/shared-fix-primitives-reference.md | `src/cosa/agents/shared/` (3 modules, extracted Session 1cfcdf73) | 2026-04-10 |
+| agents/shared-fix-primitives-reference.md | `src/cosa/agents/shared/` (3 modules) | 2026-04-10 |
 | agents/heartbeat-arbiter-routing-guide.md | `arbiter_routing.py` / `arbiter_job.py` / `manager_resolver.py` / `lupin_arbiter_app/{fleet_arbiter_loop,app,arbiter_live_notify,health_watcher}.py` | 2026-06-09 |

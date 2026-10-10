@@ -1,17 +1,18 @@
 # Heartbeat-Arbiter Routing & Recipients Guide
 
-> **Whole-system context**: this guide covers the arbiter's *routing* (who it contacts). For the **top-to-bottom** picture of how the arbiter fits with the unified task-store, the Stop-hook self-poke, the UI card, and the manager/worker lifecycle, see [`../fleet-liveness-and-task-store-architecture.md`](../fleet-liveness-and-task-store-architecture.md).
->
-> **Audience**: Lupin operators reasoning about who the fleet arbiter contacts (and why), and developers maintaining or extending the arbiter's routing logic
->
-> **Scope**: `src/cosa/agents/heartbeat_arbiter/` (routing table, consumer job, manager resolver) + `src/lupin_arbiter_app/` (the :8001 service that wires the two loops to their delivery sinks)
->
-> **Last Updated**: 2026-06-09 — verified against `arbiter_routing.py`, `arbiter_job.py`, `manager_resolver.py`, `fleet_arbiter_loop.py`, `app.py`, `arbiter_live_notify.py`, `health_watcher.py`
->
-> **See Also**:
-> - R&D origin: [Arbiter routing & recipients summary](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md) — the one-page distillation this guide formalizes
-> - R&D design: [Arbiter consumption gap & operator loop](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md) **Part 6** — the ratified 12-case routing model (Rick's judgment calls, 2026-06-08)
-> - [Agentic Jobs & Recovery README](README.md) — sibling agent guides (BFE, TFE)
+**Whole-system context**: this guide covers the arbiter's *routing* (who it contacts). For the **top-to-bottom** picture, see [`../fleet-liveness-and-task-store-architecture.md`](../fleet-liveness-and-task-store-architecture.md). It shows how the arbiter fits with the unified task-store, the Stop-hook self-poke, the UI card, and the manager/worker lifecycle.
+
+**Audience**: Lupin operators reasoning about who the fleet arbiter contacts (and why), and developers maintaining or extending the arbiter's routing logic.
+
+**Scope**: `src/cosa/agents/heartbeat_arbiter/` (routing table, consumer job, manager resolver) + `src/lupin_arbiter_app/` (the :8001 service that wires the two loops to their delivery sinks).
+
+**Verified against**: `arbiter_routing.py`, `arbiter_job.py`, `manager_resolver.py`, `fleet_arbiter_loop.py`, `app.py`, `arbiter_live_notify.py`, `health_watcher.py`.
+
+**See Also**:
+
+- R&D origin: [Arbiter routing & recipients summary](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md) — the one-page distillation this guide formalizes
+- R&D design: [Arbiter consumption gap & operator loop](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md) **Part 6** — the ratified 12-case routing model (Rick's judgment calls)
+- [Agentic Jobs & Recovery README](README.md) — sibling agent guides (BFE, TFE)
 
 ---
 
@@ -23,7 +24,7 @@
 4. [How `_route` Executes a Tier (the Non-Actuation Redline)](#4-how-_route-executes-a-tier-the-non-actuation-redline)
 5. [Who Counts as an "Active Manager"? (Resolver + Phantom Guard)](#5-who-counts-as-an-active-manager-resolver--phantom-guard)
 6. [The Two Delivery Mechanisms](#6-the-two-delivery-mechanisms)
-7. [Does the Health-Check Loop Notify? — YES (Loop A → Rick-Only)](#7-does-the-health-check-loop-notify--yes-loop-a--rick-only)
+7. [Does the Health-Check Loop Notify? — Yes (Loop A → Rick-Only)](#7-does-the-health-check-loop-notify--yes-loop-a--rick-only)
 8. [End-to-End Flow Diagram](#8-end-to-end-flow-diagram)
 9. [Operational Notes](#9-operational-notes)
 10. [Code Map](#10-code-map)
@@ -37,7 +38,9 @@ Heartbeat Hook's event exhaust, the commons gateway, and Docker container health
 then **escalates** — it *senses and recommends*, it never *actuates*. This guide
 answers three operator questions exactly:
 
-1. **How does the arbiter determine WHO to contact?** — via a pure, auditable
+1. **How does the arbiter determine who to contact?**
+
+   It uses a pure, auditable
    table (`CASE_TIERS`) that maps every distinct arbiter output to exactly one of
    six recipient tiers.
 2. **How is contact accomplished across all scenarios & recipients?** — via two
@@ -45,12 +48,12 @@ answers three operator questions exactly:
    `commons.send_to` manager/blocker DM.
 3. **Does the health-check loop also issue notifications?** — **Yes.** It routes
    container/self-health alerts to **Rick only**, through the **same** escalation
-   sink (see [§7](#7-does-the-health-check-loop-notify--yes-loop-a--rick-only)).
+   sink (see [section 7](#7-does-the-health-check-loop-notify--yes-loop-a--rick-only)).
 
-> This guide covers the **routing & recipients** facet specifically. For the
-> broader arbiter design (event tailing, fleet-view construction, dependency
-> graph, idle roster, the v2.1 direct-state snapshot), see the R&D directory
-> linked above.
+This guide covers the **routing & recipients** facet specifically. For the
+broader arbiter design, see the R&D directory linked above. It covers event
+tailing, fleet-view construction, dependency graph, idle roster and the v2.1
+direct-state snapshot.
 
 ---
 
@@ -62,8 +65,8 @@ model.
 
 | Loop | Name | Layer | Source | Responsibility |
 |------|------|-------|--------|----------------|
-| **Loop A** | `health_watcher` | L2 | `lupin_arbiter_app/health_watcher.py` | Per-container Docker health + self-watch ("am I blind?") |
-| **Loop B** | `fleet_arbiter` | L3 | `cosa/agents/heartbeat_arbiter/arbiter_job.py` (`ArbiterConsumerJob`) | The fleet operator loop — tail events → fleet view → dependency graph → blocked/stuck/deadlock/decision detection |
+| **Loop A** | `health_watcher` | Layer 2 | `lupin_arbiter_app/health_watcher.py` | Per-container Docker health + self-watch ("am I blind?") |
+| **Loop B** | `fleet_arbiter` | Layer 3 | `cosa/agents/heartbeat_arbiter/arbiter_job.py` (`ArbiterConsumerJob`) | The fleet operator loop — tail events → fleet view → dependency graph → blocked/stuck/deadlock/decision detection |
 
 Both loops emit outputs that are **numbered cases**, and each case maps to exactly
 **one recipient tier** in the pure table `arbiter_routing.CASE_TIERS`. The two
@@ -82,9 +85,9 @@ The single shared idea: a case number is the contract; the tier is the answer to
 
 The contract lives as a **pure leaf** in `arbiter_routing.py` — no I/O, no seams —
 so the routing is auditable and 100%-testable in isolation. `CASE_TIERS` is the
-runtime dictionary; `tier_for(case)` is the lookup (it raises `KeyError` on an
-unknown case — a new output **must** be routed explicitly, never silently
-defaulted).
+runtime dictionary. `tier_for(case)` is the lookup. It raises `KeyError` on an
+unknown case: a new output **must** be routed explicitly, never silently
+defaulted.
 
 ### The six recipient tiers
 
@@ -103,24 +106,24 @@ defaulted).
 |---|------|------|------|-----|
 | 1 | container enter-unhealthy | A | `RICK_ONLY` | infra; managers don't act on containers |
 | 2 | container flapping | A | `RICK_ONLY` | ops alert |
-| 3 | health-watch BLIND | A | `RICK_ONLY` | "the arbiter's eyes are out" (e.g. docker daemon down) |
+| 3 | health-watch `BLIND` | A | `RICK_ONLY` | "the arbiter's eyes are out" (e.g. docker daemon down) |
 | 4 | blocker holding up a worker | B | `BLOCKER_AND_MANAGER` | direct nudge to the blocker + manager looped in |
 | 5 | deadlock cycle | B | `RICK_AND_MANAGERS` | a human/manager breaks it; resilient to owning-mgr-down |
 | 6 | fleet roster (per-tick) | B | `DROP` | roster is pull-state, served by `/state` — broadcast cut |
 | 7 | manager tap | B | `OWNING_MANAGER` | the core per-worker actionable nudge |
 | 8 | unresolved-manager (orphan) worker | B | `RICK_AND_MANAGERS` | any manager could adopt it |
-| 9 | manager-down + HOLD | B | `RICK_AND_MANAGERS` | leaderless crew; re-staff |
+| 9 | manager-down + `HOLD` | B | `RICK_AND_MANAGERS` | leaderless crew; re-staff |
 | 10 | decision-needed | B | `RICK_ONLY` (+ owning mgr cc if known) | decisions are the human's domain |
 | 11 | whole-fleet-stall | B | `RICK_AND_MANAGERS` | calibrated; rare + severe |
 | 12 | arbiter poll-error | B | `LOG_THEN_RICK` | demoted from a per-error ping; escalate only if persistent |
 | 13 | auto-poke reap-**recommendation** | B | `RICK_AND_MANAGERS` | post-Part-6 (2b-3) addition; **recommendation only** |
 
-**Cases #1–#12** are the ratified **Part-6** model (Rick's judgment calls,
-2026-06-08). **Case #13** (`CASE_AUTO_POKE_REAP_REC`) is a post-Part-6 (2b-3)
-addition routed through the same dispatcher: after a stuck **live** session
+**Cases #1–#12** are the ratified **Part-6** model (Rick's judgment calls).
+**Case #13** (`CASE_AUTO_POKE_REAP_REC`) is a post-Part-6 (2b-3)
+addition routed through the same dispatcher. After a stuck **live** session
 absorbs ≤N bounded non-destructive pokes with no recovery, the arbiter recommends
-a reap/replace to Rick + all active managers — but **never executes it** (the
-redline; see [§4](#4-how-_route-executes-a-tier-the-non-actuation-redline)).
+a reap/replace to Rick + all active managers. It **never executes it** (the
+redline; see [section 4](#4-how-_route-executes-a-tier-the-non-actuation-redline)).
 
 ### Two important precision points
 
@@ -129,7 +132,7 @@ redline; see [§4](#4-how-_route-executes-a-tier-the-non-actuation-redline)).
   the tier dispatch, and only when the post's `sender_session_id` resolves to a
   DM-able manager. No resolution → Rick-only, no-op cc.
 - **#12 (poll-error)** is **not** dispatched through `_route`. It is handled by
-  `_on_poll_error`'s streak logic: a transient one-off hiccup is logged; only
+  `_on_poll_error`'s streak logic. A transient one-off hiccup is logged. Only
   `≥ poll_error_escalate_threshold` consecutive failures escalate (once) to Rick
   via `notify_fn` ("arbiter effectively down"). A clean poll resets the streak.
 
@@ -177,8 +180,8 @@ job as `_active_managers(who_rows, bridge_sessions)`.
 A persona is an **active manager** iff it satisfies **both**:
 
 1. **MANAGER-ROLE** — its session owns a spawn-lineage manifest (it spawned ≥1
-   child; via `list_manager_session_ids`, which trusts a manifest filename only if
-   it round-trips the exact slugify transform that produced it).
+   child). This is checked via `list_manager_session_ids`, which trusts a manifest
+   filename only if it round-trips the exact slugify transform that produced it.
 2. **PROCESS-ALIVE (the phantom guard)** — its session is present in
    `bridge_sessions`, the PID + mtime-filtered live-bridge discovery
    (`find_active_voice_persona_sessions`).
@@ -205,12 +208,12 @@ with a dead bridge is excluded even if its commons row is still visible.
 `_active_managers` swallows any hiccup to `[]`), `RICK_AND_MANAGERS` cleanly
 degrades to **Rick-only**. No crash, no lost escalation.
 
-> The **owning manager** for per-worker cases (#7 tap, #4 blocker cc, #10 decision
-> cc) is resolved separately by `resolve_manager(worker_session_id)`, which walks
-> the spawn-lineage join (worker → bridge tmux_session → manifest → manager id →
-> persona) with a round-trip guard and a multi-match guard. It **prefers
-> UNRESOLVED over a wrong-manager DM**: any brittle/ambiguous hop returns
-> `unresolved`, and the caller escalates to Rick instead of guessing.
+The **owning manager** for per-worker cases (#7 tap, #4 blocker cc, #10 decision
+cc) is resolved separately by `resolve_manager(worker_session_id)`. It walks
+the spawn-lineage join (worker → bridge tmux_session → manifest → manager id →
+persona) with a round-trip guard and a multi-match guard. It **prefers
+`unresolved` over a wrong-manager DM**: any brittle/ambiguous hop returns
+`unresolved`, and the caller escalates to Rick instead of guessing.
 
 ---
 
@@ -227,12 +230,12 @@ two things on every Rick-bound escalation:
    swallowed + logged (`escalation_post_error`); the primary channel must not kill
    the loop.
 2. **Live push (best-effort):** if a `live_notify_fn` is wired, it fires the 2b-1
-   live hop — a `POST :7999/api/notify` so the alert actually reaches Rick instead
+   live hop, a `POST :7999/api/notify`. This lets the alert actually reach Rick instead
    of rotting on a topic nobody polls. A failure is swallowed + logged
    (`escalation_live_notify_error`).
 
 The live hop (`arbiter_live_notify.py`) is the **only** :7999-capable hop and is
-**escalation-path only** — the detection path stays :7999-free (R4 independence).
+**escalation-path only**. The detection path stays :7999-free, so a :7999 outage can never block detection.
 It carries:
 
 - a **content+window dedup guard** (`make_live_notify_fn`) so N identical
@@ -254,9 +257,9 @@ A directed commons DM via `gateway.send_to(recipient_persona, body)`. This
 **pushes/wakes** the recipient's tmux session (the recipient sees a
 `COMMONS PEER MESSAGE` system-reminder on its next turn). Used by:
 
-- **#7 manager tap** — the advisory crew summary ("I observe … / I recommend …";
-  the manager actuates, the arbiter never assigns), throttled tap-on-change +
-  min-interval;
+- **#7 manager tap** — the advisory crew summary ("I observe … / I recommend …").
+  The manager actuates and the arbiter never assigns. Taps are throttled:
+  tap-on-change + min-interval;
 - **#4 blocker** — DM the blocker naming the blocked worker + the ask, then cc its
   owning manager;
 - **#10 decision cc** — cc the owning manager when resolvable;
@@ -264,7 +267,7 @@ A directed commons DM via `gateway.send_to(recipient_persona, body)`. This
 
 ---
 
-## 7. Does the Health-Check Loop Notify? — YES (Loop A → Rick-Only)
+## 7. Does the Health-Check Loop Notify? — Yes (Loop A → Rick-Only)
 
 **Yes.** The health watcher (Loop A, `health_watcher.py`) issues notifications.
 Its escalation function is built by `_make_health_notify_fn` (`app.py`), and it
@@ -274,15 +277,17 @@ covers **three cases**:
 |---|--------------|---------|
 | 1 | **container enter-unhealthy** | a watched container transitions `(starting\|healthy) → unhealthy` (once per episode) |
 | 2 | **container flapping** | ≥ `flap_threshold` status transitions within `flap_window` (once per episode; `flap_exclude` containers — default `lupin-rest-dev` — are never flap-paged but still get enter-unhealthy alerts) |
-| 3 | **health-watch BLIND** | every container's `docker inspect` fails for K consecutive polls — the watcher noticing its own eyes are out |
+| 3 | **health-watch `BLIND`** | every container's `docker inspect` fails for K consecutive polls — the watcher noticing its own eyes are out |
 
-**Recipient: RICK ONLY — hard-wired, no manager fanout.** Containers are infra;
+**Recipient: Rick only — hard-wired, no manager fanout.** Containers are infra;
 managers don't act on them. This is enforced by the tier (`#1/#2/#3 → RICK_ONLY`)
 *and* by `_make_health_notify_fn` itself, which never resolves or fans out to
 managers.
 
-**Mechanism: the SAME shared escalation sink as Loop B.** `_make_health_notify_fn`
-wraps `make_escalation_notify_fn` — so a health escalation also lands on the
+**Mechanism: the same shared escalation sink as Loop B.**
+
+`_make_health_notify_fn`
+wraps `make_escalation_notify_fn`, so a health escalation also lands on the
 durable `fleet-escalations` topic + best-effort :7999 live push. It additionally
 emits a structured **`health_escalation`** log line before escalating. It never
 raises (the sink is degrade-safe).
@@ -293,7 +298,9 @@ def notify( message ):
     escalate( message )   # Part-6 #1/2/3 → Rick only (no managers)
 ```
 
-**So both loops converge on one Rick sink.** The difference: **Loop A is fixed to
+**So both loops converge on one Rick sink.**
+
+The difference: **Loop A is fixed to
 Rick-only** (infra/self-health), while **Loop B routes per-case across all six
 tiers**.
 
@@ -349,30 +356,35 @@ flowchart TD
 
 - **Service & supervision:** the arbiter runs in `lupin-arbiter-app` on **:8001**.
   `FleetArbiterLoop` relaunches a fresh `ArbiterConsumerJob` on each clean
-  12h-cap exit (single-instance by construction — sequential recycle). The health
+  12h-cap exit (single-instance: the recycle is sequential). The health
   watcher runs on its own background thread; `GET /health` never touches docker.
 - **Warm-up suppression:** each fresh job suppresses escalations while
   `(now − job_start) < start_period_seconds` (default 120s) — so cold boot,
   restart, and recycle never false-fire.
-- **Roster is pull-state:** there is no per-tick roster broadcast (#6 DROP). The
+- **Roster is pull-state:** there is no per-tick roster broadcast (#6 `DROP`). The
   fleet roster + per-session liveness are served by `GET /state` (the single-pane
   composite, read from the :8001-local store; the :7999 reverse-proxy pulls from
   here). A cold loop returns an explicit `"awaiting"` placeholder, never a bare
   null.
 - **Anti-storm guarantees:** manager taps fire only on crew-summary *change* +
-  min-interval; manager-down escalates once per un-acked tap; fleet-stall
-  escalates once per stall episode; auto-poke is capped per stall episode (≤N
-  pokes → one reap-recommendation → silence). The live-push dedup guard is
-  belt-and-suspenders on top of these.
+  min-interval. Manager-down escalates once per un-acked tap. Fleet-stall
+  escalates once per stall episode. Auto-poke is capped per stall episode (≤N
+  pokes → one reap-recommendation → silence). The live-push dedup guard is a
+  second layer on top of these.
 - **Config knobs** (all under `[Lupin: …]`, read in `assemble_app` /
-  `_build_live_notify_fn`): `arbiter poll seconds`, `arbiter alive/quiet threshold
-  seconds`, `arbiter tap min interval seconds`, `arbiter manager ack window
-  seconds`, `arbiter fleet stall window seconds`, `arbiter poll error escalate
-  threshold`, `arbiter auto poke enabled`, `arbiter poke stall threshold seconds`,
-  `arbiter poke max per episode`, `arbiter start period seconds`, `arbiter health
-  watch enabled` (+ the `arbiter health …` watch knobs), and the `arbiter live
-  notify …` keys (enabled / config env / url / target user / sender id / dedup
-  window / timeout).
+  `_build_live_notify_fn`):
+  - `arbiter poll seconds`
+  - `arbiter alive/quiet threshold seconds`
+  - `arbiter tap min interval seconds`
+  - `arbiter manager ack window seconds`
+  - `arbiter fleet stall window seconds`
+  - `arbiter poll error escalate threshold`
+  - `arbiter auto poke enabled`
+  - `arbiter poke stall threshold seconds`
+  - `arbiter poke max per episode`
+  - `arbiter start period seconds`
+  - `arbiter health watch enabled` (+ the `arbiter health …` watch knobs)
+  - the `arbiter live notify …` keys (enabled / config env / url / target user / sender id / dedup window / timeout)
 
 ---
 
@@ -390,7 +402,7 @@ flowchart TD
 
 **Design origin:** Part 6 of
 [`src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md`](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md)
-(judgment calls ratified by Rick 2026-06-08), distilled in
+(judgment calls ratified by Rick), distilled in
 [`2026.06.09-arbiter-routing-and-recipients-summary.md`](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md).
 </content>
 </invoke>

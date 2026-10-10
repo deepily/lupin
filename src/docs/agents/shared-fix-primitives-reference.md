@@ -1,15 +1,14 @@
 # Shared Fix Primitives Reference
 
-> **Audience**: Developers adding a new expediter agent OR debugging behavior shared between BFE and TFE
->
-> **Scope**: `src/cosa/agents/shared/` — `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` registry
->
-> **Last Updated**: 2026-04-10
->
-> **See Also**:
-> - [Bug Fix Expediter Guide](bug-fix-expediter-guide.md)
-> - [Test Fix Expediter Guide](test-fix-expediter-guide.md)
-> - R&D: [`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/02-fix-executor-extraction-plan.md`](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/02-fix-executor-extraction-plan.md)
+**Audience**: Developers adding a new expediter agent or debugging behavior shared between BFE and TFE.
+
+**Scope**: `src/cosa/agents/shared/` — `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` registry.
+
+**See Also**:
+
+- [Bug Fix Expediter Guide](bug-fix-expediter-guide.md)
+- [Test Fix Expediter Guide](test-fix-expediter-guide.md)
+- R&D: [`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/02-fix-executor-extraction-plan.md`](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/02-fix-executor-extraction-plan.md)
 
 ---
 
@@ -28,8 +27,8 @@
 
 ## 1. Why the Shared Package Exists
 
-The Bug Fix Expediter (BFE) and Test Fix Expediter (TFE) both apply code changes
-through a **Coder → Tester → Retry** loop using the Claude Agent SDK. Both write
+The Bug Fix Expediter (BFE) and Test Fix Expediter (TFE) both apply code changes.
+They do it through a **Coder → Tester → Retry** loop using the Claude Agent SDK. Both write
 structured Markdown plan documents. Both commit changes via a trust-level-aware
 git strategy. These concerns are **agent-agnostic** — the only parts that differ
 between BFE and TFE are:
@@ -40,14 +39,14 @@ between BFE and TFE are:
   `classname::name[param]` semantics.
 - **Output**: BFE retries the original dead job, TFE reruns the affected test suites.
 
-During Session 1cfcdf73 (2026-04-10) the reusable pieces were extracted into
-`src/cosa/agents/shared/` as a PEER of the agent packages — **not** a subordinate
+The reusable pieces were extracted into
+`src/cosa/agents/shared/` as a peer of the agent packages — **not** a subordinate
 of either. Agent packages import from `shared/`; `shared/` does not import from any
 specific agent package. This keeps BFE's proven dead-job code path untouched while
 giving TFE a fully-tested foundation.
 
 **Key invariant**: adding a third expediter agent (e.g., a future `IntegrationFixExpediter`)
-should require zero changes to `shared/` — only new prompt modules that self-register
+should require zero changes to `shared/`. It needs only new prompt modules that self-register
 into the `FIX_PROMPT_BUILDERS` registry.
 
 ---
@@ -93,6 +92,14 @@ writer = PlanWriter( user_email="alice@example.com", debug=False )
 - `debug`: enables `[PlanWriter]` diagnostic prints.
 
 ### Methods
+
+Phase numbers are those of the BFE and TFE pipelines:
+
+- Phase 2: Propose
+- Phase 3: Fix
+- Phase 4: collapsed into Phase 3.
+- Phase 5: Git
+- Phase 6: Resubmit (BFE) or Rerun (TFE)
 
 | Method | Purpose | When called |
 |--------|---------|-------------|
@@ -149,11 +156,11 @@ those attributes works — BFE passes a `DeadJobContext`, TFE passes a synthesiz
 
 ## 4. `GitStrategist` — Trust-Aware Git Operations
 
-`GitStrategist` encapsulates the trust-level → git-strategy mapping and executes the
+`GitStrategist` encapsulates the trust-level → git-strategy mapping. It executes the
 actual commit / branch / push / PR operations via an injected `GitOps` instance
 (from `src/cosa/agents/bug_fix_expediter/git_ops.py`). It has **two entry points**:
 
-- `commit_and_pr_single()` — BFE path (one fix → one commit OR one branch+PR)
+- `commit_and_pr_single()` — BFE path (one fix → one commit or one branch+PR)
 - `commit_and_pr_multi()` — TFE path (K cluster fixes → one branch, N commits, one PR)
 
 **Source**: `src/cosa/agents/shared/git_strategist.py`
@@ -164,10 +171,10 @@ Same table for both entry points:
 
 | Trust Level | Mode | Git Strategy | Notes |
 |-------------|------|--------------|-------|
-| **L1 Shadow** | passive | `commit_only` on current branch | Baseline, no auto-branching |
-| **L2 Suggest** | passive | `commit_only` on current branch | Reviewing mode |
-| **L3+ Active** | active | `branch_and_pr` via `gh` CLI | Full auto: branch, push, PR |
-| `gh` missing | — | Degrade L3+ → `branch_only` | Branch + push succeed; PR step skipped |
+| **Level 1 Shadow** | passive | `commit_only` on current branch | Baseline, no auto-branching |
+| **Level 2 Suggest** | passive | `commit_only` on current branch | Reviewing mode |
+| **Level 3+ Active** | active | `branch_and_pr` via `gh` CLI | Full auto: branch, push, PR |
+| `gh` missing | — | Degrade level 3+ → `branch_only` | Branch + push succeed; PR step skipped |
 | Proxy unavailable | — | `commit_only` | Conservative fallback |
 
 ### Static helpers
@@ -187,8 +194,8 @@ slug = GitStrategist.generate_slug( "Fix null pointer in auth module" )
 
 ### `commit_and_pr_single()` (BFE path)
 
-Used when one fix produces one commit. If trust is L1-L2, commits on the current
-branch; if L3+, creates a new `fix/...` branch, pushes, and opens a PR via `gh`.
+Used when one fix produces one commit. If trust is level 1 or 2, it commits on the current
+branch. At level 3 or above, it creates a new `fix/...` branch, pushes, and opens a PR via `gh`.
 
 ```python
 strategist = GitStrategist( debug=False, verbose=False )
@@ -241,15 +248,17 @@ result = await strategist.commit_and_pr_multi(
 # }
 ```
 
-**Partial-progress semantics**: If cluster C2's commit fails mid-batch, C1 and C3 still
+**Partial-progress semantics**: If the second cluster's commit fails mid-batch, the first and third still
 commit successfully. `commit_hashes` comes back with fewer entries than clusters, and
 `error` is set to the first failure message. Callers decide whether to proceed.
 
-**Trust 3 and above pushes only when the caller's flag is on.** `commit_and_pr_multi` takes `push_enabled`, `False`
+**Trust 3 and above pushes only when the caller's flag is on.**
+
+`commit_and_pr_multi` takes `push_enabled`, `False`
 by default, and TFE passes `test fix expediter push fix branch enabled`. After the N commits the strategist pushes once,
 through `git_ops.push_branch( slug )`, and only then says "Pushed N commit(s)" and calls `create_pr`.
 `GitOps.push_branch` pushes the branch `fix/<name>` with one explicit refspec, never forced, and refuses any other name.
-With the flag off, `git_strategy` is `commit_only`, `pr_url` is `None` and `error` reads "push disabled
+With the flag off, `git_strategy` is `commit_only` and `pr_url` is `None`. The `error` reads "push disabled
 (test fix expediter push fix branch enabled is false): nothing was pushed and no pull request was opened".
 With no `push_branch`, or when it fails, nothing is pushed either and `error` names the cause. In every case the commits stay on the
 new local branch, `create_pr` is not called, and the original branch is checked out again.
@@ -399,7 +408,7 @@ register_fix_prompts(
 )
 ```
 
-**Import order matters**: the registration must run BEFORE any code attempts to
+**Import order matters**: the registration must run before any code attempts to
 construct a `FixExecutor` with `prompt_builder_key="tfe"`. In practice, both BFE and
 TFE orchestrators import `prompts.fix` at the top of the orchestrator module, so the
 registration happens on first import.
@@ -437,48 +446,48 @@ integration test failures. Here's the checklist:
 
 4. **Register at import time** at the bottom of `prompts/fix.py`:
 
-   ```python
-   from cosa.agents.shared.fix_executor import register_fix_prompts
+```python
+from cosa.agents.shared.fix_executor import register_fix_prompts
 
-   register_fix_prompts(
-       "ife",  # pick a short agent key
-       build_fix_prompt        = build_fix_prompt,
-       build_verify_prompt     = build_verification_prompt,
-       build_redelegate_prompt = build_redelegation_prompt,
-       coder_system_prompt     = CODER_SYSTEM_PROMPT,
-       tester_system_prompt    = TESTER_SYSTEM_PROMPT,
-   )
-   ```
+register_fix_prompts(
+    "ife",  # pick a short agent key
+    build_fix_prompt        = build_fix_prompt,
+    build_verify_prompt     = build_verification_prompt,
+    build_redelegate_prompt = build_redelegation_prompt,
+    coder_system_prompt     = CODER_SYSTEM_PROMPT,
+    tester_system_prompt    = TESTER_SYSTEM_PROMPT,
+)
+```
 
 5. **In your orchestrator's Phase 3** (fix delegation), construct a `FixExecutor`:
 
-   ```python
-   from cosa.agents.shared.fix_executor import FixExecutor
-   from cosa.agents.integration_fix_expediter import voice_io, cosa_interface
+```python
+from cosa.agents.shared.fix_executor import FixExecutor
+from cosa.agents.integration_fix_expediter import voice_io, cosa_interface
 
-   executor = FixExecutor(
-       config                 = self.config,
-       fix_context            = your_context_object,
-       job_id                 = self.id_hash,
-       prompt_builder_key     = "ife",
-       voice_io_module        = voice_io,
-       cosa_interface_module  = cosa_interface,
-       notify_fn              = self._notify,
-       is_cancelled_fn        = self._is_cancelled,
-       delegate_to_coder_fn   = self._delegate_to_coder,   # your own method
-       verify_fix_fn          = self._verify_fix,           # your own method
-       debug                  = self.debug,
-       verbose                = self.verbose,
-   )
-   fix_result, files_changed = await executor.execute_fix(
-       diagnosis=diagnosis, selected_fix=selected_fix,
-   )
-   ```
+executor = FixExecutor(
+    config                 = self.config,
+    fix_context            = your_context_object,
+    job_id                 = self.id_hash,
+    prompt_builder_key     = "ife",
+    voice_io_module        = voice_io,
+    cosa_interface_module  = cosa_interface,
+    notify_fn              = self._notify,
+    is_cancelled_fn        = self._is_cancelled,
+    delegate_to_coder_fn   = self._delegate_to_coder,   # your own method
+    verify_fix_fn          = self._verify_fix,           # your own method
+    debug                  = self.debug,
+    verbose                = self.verbose,
+)
+fix_result, files_changed = await executor.execute_fix(
+    diagnosis=diagnosis, selected_fix=selected_fix,
+)
+```
 
 6. **Implement `_delegate_to_coder()` and `_verify_fix()` on your orchestrator**.
-   These are the SDK wiring: they construct `ClaudeAgentOptions` with the right
-   `system_prompt` (pulled from `FIX_PROMPT_BUILDERS["ife"]["coder_system_prompt"]`),
-   call `sdk_query()`, and iterate the message stream collecting text + tool uses.
+   These are the SDK wiring. They construct `ClaudeAgentOptions` with the right
+   `system_prompt` (pulled from `FIX_PROMPT_BUILDERS["ife"]["coder_system_prompt"]`).
+   They call `sdk_query()` and iterate the message stream collecting text + tool uses.
    Copy the pattern from `src/cosa/agents/test_fix_expediter/orchestrator.py`.
 
 7. **Use `GitStrategist.commit_and_pr_single()` or `commit_and_pr_multi()`** in your
@@ -489,7 +498,7 @@ integration test failures. Here's the checklist:
    reference — specifically the `TestTFEPromptRegistration` and `TestFixContextConstruction`
    test classes.
 
-**What you do NOT need**: your own retry loop, your own escalation gate, your own
+**What you do not need**: your own retry loop, your own escalation gate, your own
 git-strategy mapping, your own plan-writer. All of that is reused from `shared/`.
 
 ---
@@ -502,8 +511,8 @@ git-strategy mapping, your own plan-writer. All of that is reused from `shared/`
 |-----------|----------------|
 | `src/tests/unit/test_tfe_phase3_fix.py::TestTFEPromptRegistration` | TFE prompts land in `FIX_PROMPT_BUILDERS["tfe"]` on import |
 | `src/tests/unit/test_tfe_phase3_fix.py::TestFixContextConstruction` | `FixExecutor` constructor receives the right context + callbacks |
-| `src/tests/unit/test_tfe_phase5_git.py::TestCommitAndPrMultiL1` | `commit_and_pr_multi()` L1 path (commit_only N sequential commits) |
-| `src/tests/unit/test_tfe_phase5_git.py::TestCommitAndPrMultiL3` | `commit_and_pr_multi()` L3+ path (branch + N commits + push + PR) |
+| `src/tests/unit/test_tfe_phase5_git.py::TestCommitAndPrMultiL1` | `commit_and_pr_multi()` level 1 path (commit_only N sequential commits) |
+| `src/tests/unit/test_tfe_phase5_git.py::TestCommitAndPrMultiL3` | `commit_and_pr_multi()` level 3+ path (branch + N commits + push + PR) |
 | `src/tests/unit/test_tfe_phase5_git.py::TestPhase5GitHelpers` | `resolve_trust_level`, `generate_slug`, static helpers |
 | `src/tests/unit/test_bfe_phase5.py` | BFE's `commit_and_pr_single()` path (inherited via the extraction shim) |
 | `src/tests/unit/test_bfe_fix.py` | BFE's `FixExecutor` callbacks still exercised through the post-extraction shim |
@@ -529,7 +538,7 @@ pytest src/tests/unit/test_tfe_*.py -v
 pytest src/tests/unit/ --tb=no -q
 ```
 
-All green as of 2026-04-10: **3119 passed, 1 xfailed**.
+All green: **3119 passed, 1 xfailed**.
 
 ---
 

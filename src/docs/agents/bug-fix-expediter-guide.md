@@ -1,16 +1,15 @@
 # Bug Fix Expediter (BFE) Guide
 
-> **Audience**: Lupin operators enabling automated dead-job recovery, and developers maintaining or extending BFE
->
-> **Scope**: `src/cosa/agents/bug_fix_expediter/`, `src/cosa/rest/dead_queue_watchdog.py`, BFE INI keys
->
-> **Last Updated**: 2026-04-10
->
-> **See Also**:
-> - [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — `PlanWriter`, `GitStrategist`, `FixExecutor`
-> - [Test Fix Expediter Guide](test-fix-expediter-guide.md) — sister agent for test-failure recovery
-> - [Decision Proxy Admin Guide](../proxy-admin-guide.md) — trust levels BFE uses for Phase 5 git strategy
-> - R&D: [BFE plan index](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/00-index.md)
+**Audience**: Lupin operators enabling automated dead-job recovery, and developers maintaining or extending BFE.
+
+**Scope**: `src/cosa/agents/bug_fix_expediter/`, `src/cosa/rest/dead_queue_watchdog.py`, BFE INI keys.
+
+**See Also**:
+
+- [Shared Fix Primitives Reference](shared-fix-primitives-reference.md) — `PlanWriter`, `GitStrategist`, `FixExecutor`
+- [Test Fix Expediter Guide](test-fix-expediter-guide.md) — sister agent for test-failure recovery
+- [Decision Proxy Admin Guide](../proxy-admin-guide.md) — trust levels BFE uses for Phase 5 git strategy
+- R&D: [BFE plan index](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/00-index.md)
 
 ---
 
@@ -31,15 +30,15 @@
 ## 1. What BFE Does
 
 The **Bug Fix Expediter** is an agentic job that recovers from dead (failed or
-interrupted) jobs in CJ Flow. When an agentic job — deep research, presentation
-generator, podcast generator, etc. — crashes with an error and lands in the dead
-queue, BFE picks it up, diagnoses the root cause, proposes fixes, applies the
-best one, and (if configured) retries the original job.
+interrupted) jobs in CJ Flow. An agentic job (deep research, presentation
+generator, podcast generator and so on) can crash with an error and land in the
+dead queue. BFE then picks it up and diagnoses the root cause. It proposes fixes
+and applies the best one. If configured, it retries the original job.
 
 **When BFE fires**: A job completes with `status="failed"` or `status="interrupted"`
-and lands in the `jobs_dead_queue`. The `DeadQueueWatchdog` (running inside the
-`RunningFifoQueue` consumer thread) evaluates the dead job against its eligibility
-gates and, if everything checks out, dispatches a `BugFixExpediterJob` to the
+and lands in the `jobs_dead_queue`. The `DeadQueueWatchdog` runs inside the
+`RunningFifoQueue` consumer thread. It evaluates the dead job against its eligibility
+gates. If everything checks out, it dispatches a `BugFixExpediterJob` to the
 `jobs_todo_queue`.
 
 **What BFE produces**:
@@ -51,10 +50,12 @@ gates and, if everything checks out, dispatches a `BugFixExpediterJob` to the
 4. **Voice notifications** to the user through cosa-voice MCP at each phase.
 5. **Optionally**: a resubmission of the original failed job (Phase 6 auto-retry).
 
-**What BFE does NOT do**: modify test files (fixes land only in production code),
-run destructive commands (blocked by `SafetyGuard`), commit unrelated cleanup
-(prompts enforce minimal-diff discipline), or act on transient errors classified
-as infrastructure problems (rate limits, timeouts, OOMs — these skip BFE).
+**What BFE does not do**:
+
+- Modify test files (fixes land only in production code).
+- Run destructive commands (blocked by `SafetyGuard`).
+- Commit unrelated cleanup (prompts enforce minimal-diff discipline).
+- Act on transient errors classified as infrastructure problems (rate limits, timeouts, OOMs); these skip BFE.
 
 ---
 
@@ -77,9 +78,9 @@ flowchart LR
     P6 --> Todo[Back to Todo Queue]
 ```
 
-The six phases are numbered historically — Phases 0 and 4 don't exist (Phase 0 was
-reserved for upfront context gathering which got folded into the Packaging step,
-and Phase 4 collapsed into Phase 3 during implementation). The numbering is
+The six phases are numbered historically, and the numbers zero and four are unused.
+Zero was reserved for upfront context gathering, which got folded into the Packaging step.
+The fourth phase collapsed into Phase 3 during implementation. The numbering is
 preserved because the R&D planning docs reference it.
 
 ---
@@ -94,7 +95,7 @@ preserved because the R&D planning docs reference it.
 Matches the "forensic analyst" role defined in
 `src/cosa/agents/bug_fix_expediter/prompts/diagnosis.py`.
 
-**Input**: `DeadJobContext` built by `dead_job_packager.package_dead_job()`, which
+**Input**: `DeadJobContext` built by `dead_job_packager.package_dead_job()`. It
 queries `job_history` for the failed job and extracts error messages, stack traces,
 metadata, the original user question, and timing info.
 
@@ -160,7 +161,7 @@ with `prompt_builder_key="bfe"` and delegates.
 - **Coder**: Sonnet (`claude-sonnet-4-6`), edit-capable (`Read`, `Edit`, `Bash`).
   Applies the changes described in the selected `ProposedFix`.
 - **Tester**: Sonnet, edit + read + bash. Writes targeted tests, runs them via
-  `pytest`, reports PASS or FAIL. Independent `pytest` validation via
+  `pytest`, reports `PASS` or `FAIL`. Independent `pytest` validation via
   `run_pytest()` overrides the tester's self-report when the tester touched a
   test file we can re-run.
 
@@ -185,22 +186,22 @@ Engineering category.
 **Source of trust level**: the SWE Team Trust Proxy — same one documented in the
 [Decision Proxy Admin Guide](../proxy-admin-guide.md). BFE reads
 `proxy.trust_tracker.get_level("engineering")` to decide between `commit_only`
-(L1-L2) and `branch_and_pr` (L3+).
+(trust levels 1 and 2) and `branch_and_pr` (level 3 and above).
 
 **Git ops**: delegated to `shared.GitStrategist.commit_and_pr_single()` (see
 [Shared Primitives Reference §4](shared-fix-primitives-reference.md#4-gitstrategist--trust-aware-git-operations)).
 BFE's orchestrator builds the commit message and PR body; the strategist
 handles the actual git/gh calls.
 
-**Plan update**: `PlanWriter.update_implementation_log()` replaces the Phase 4
-placeholder with real coder output + files changed; `update_git_references()`
+**Plan update**: `PlanWriter.update_implementation_log()` replaces the placeholder
+of the collapsed fourth phase with real coder output + files changed. `update_git_references()`
 replaces the Phase 5 placeholder with the branch/commit/PR metadata.
 
 ### Phase 6: Automated Repair Loop
 
 **Goal**: resubmit the original failed job to prove the fix worked end-to-end.
 
-**Status as of 2026-04-10**: code-complete with 58 unit tests passing. Live E2E
+**Status**: code-complete with 58 unit tests passing. Live E2E
 verification is in progress in a separate console.
 
 **How it works**:
@@ -209,15 +210,15 @@ verification is in progress in a separate console.
    evaluates every job pushed to the dead queue. Source:
    `src/cosa/rest/dead_queue_watchdog.py`.
 2. **Eligibility gates**: enabled-flag check, agentic-job-type match, classification
-   heuristic (transient/infra errors skip BFE), not-a-BFE-recursion guard,
-   `RepairAttemptTracker` limits (cost budget + iteration cap + wall-clock timeout
-   keyed by `(job_id, routing_command)`).
+   heuristic (transient/infra errors skip BFE) and not-a-BFE-recursion guard.
+   The `RepairAttemptTracker` limits also apply: cost budget, iteration cap and
+   wall-clock timeout, keyed by `(job_id, routing_command)`.
 3. **Dispatch**: constructs a `BugFixExpediterJob` with the dead job's `id_hash`,
    user identity, and pushes it to `jobs_todo_queue`. The watchdog sets
    `metadata["triggered_by_bfe"] = True` on the new job.
 4. **Resubmit**: after a successful Phase 5 (fix applied + committed), the BFE
-   job's `_resubmit_original_job()` method reconstructs the original job via
-   `agentic_job_factory.create_agentic_job()` using the saved `routing_command` and
+   job's `_resubmit_original_job()` method reconstructs the original job.
+   It calls `agentic_job_factory.create_agentic_job()` with the saved `routing_command` and
    `original_args` from `job_history`. The resubmitted job runs normally — if it
    succeeds, the fix is validated end-to-end; if it fails again, BFE's
    `RepairAttemptTracker` gates prevent an infinite loop.
@@ -225,7 +226,7 @@ verification is in progress in a separate console.
 **INI tuning for Phase 6**:
 - `bug fix expediter auto retry on fix` — master switch, default `false`
 - `bug fix expediter enabled` — BFE feature flag (agent router + REST endpoint), default `false`
-- `auto fix enabled` — `DeadQueueWatchdog` master switch (the actual auto-dispatch toggle), default `true` as of Session 1cfcdf73 (run unless told otherwise). BFE is INI-only — there is no per-run override surface.
+- `auto fix enabled` — `DeadQueueWatchdog` master switch (the actual auto-dispatch toggle), default `true` (run unless told otherwise). BFE is INI-only — there is no per-run override surface.
 
 **Resuming a stalled job**: a voice gate that times out or cannot reach a human stalls the job with a checkpoint. The checkpoint's phase is the phase that was gated (`diagnosing` or `proposing`), never `waiting_confirmation`. A resumed job reuses the stored diagnosis and proposals instead of running the Lead agent again, and asks the gate that stalled again. A timeout checkpoint taken before this change holds ordinal -1 and re-runs from the start. The skip test is `resume_covers` in `src/cosa/agents/shared/resume_guard.py`, shared with TFE.
 
@@ -254,7 +255,7 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 | `bug fix expediter narrate progress` | `true` | Voice breadcrumbs during each phase. Set false for silent overnight runs. |
 | `bug fix expediter auto retry on fix` | `false` | Phase 6 auto-resubmit of the original job after a successful fix. |
 | `bug fix expediter require user confirm` | `true` | Ask user confirmation at Phase 1 (diagnosis) and Phase 2 (fix selection) gates. |
-| `bug fix expediter trust mode` | `shadow` | Trust proxy mode: `shadow` (L1, commit_only), `suggest` (L2, commit_only), `active` (L3+, branch_and_pr). |
+| `bug fix expediter trust mode` | `shadow` | Trust proxy mode: `shadow` (level 1, commit_only), `suggest` (level 2, commit_only), `active` (level 3+, branch_and_pr). |
 | `bug fix expediter push fix branch enabled` | `false` | Whether trust level 3 and above pushes the fix branch and opens the PR. Off, the fix stays a local commit on its fix branch and the run says nothing was pushed. |
 
 **Config loading**: `BugFixExpediterConfig.from_config(config_mgr)` reads all keys
@@ -268,9 +269,9 @@ See `src/cosa/agents/bug_fix_expediter/config.py`.
 stores them as `self.lead_model_override` / `self.worker_model_override`
 and applies them in `_execute()` after `from_config()` loads the INI defaults.
 
-**Watchdog-spawned BFE**: if the originally failed job carried
+**Watchdog-spawned BFE**: the originally failed job may carry
 `bfe_lead_model_override` / `bfe_worker_model_override` in its
-`args_dict`, `DeadQueueWatchdog` propagates them to the spawned BFE (same
+`args_dict`. If so, `DeadQueueWatchdog` propagates them to the spawned BFE (same
 pattern as `dry_run` propagation). This lets the E2E script's `--cheap`
 flag flow through the full watchdog → BFE path without bypassing dispatch.
 
@@ -288,22 +289,24 @@ for the canonical table. In summary:
 
 | Trust Level | `trust_mode` value | Git Strategy | Produces |
 |-------------|---------------------|--------------|----------|
-| L1 Shadow | `shadow` | `commit_only` | Commit on current branch |
-| L2 Suggest | `suggest` | `commit_only` | Commit on current branch |
-| L3+ Active | `active` | `branch_and_pr` | New `fix/YYYY-MM-DD-{slug}` branch + push + PR via `gh` |
+| Level 1 Shadow | `shadow` | `commit_only` | Commit on current branch |
+| Level 2 Suggest | `suggest` | `commit_only` | Commit on current branch |
+| Level 3+ Active | `active` | `branch_and_pr` | New `fix/YYYY-MM-DD-{slug}` branch + push + PR via `gh` |
 | `gh` missing | any | `branch_only` (degraded) | Branch + commit + push; no PR |
 | Proxy down | any | `commit_only` (fallback) | Commit on current branch |
 
-**The push is behind its own flag.** At trust level 3 and above the `branch_and_pr` row applies only when
+**The push is behind its own flag.**
+
+At trust level 3 and above the `branch_and_pr` row applies only when
 `bug fix expediter push fix branch enabled` is `true`. It is `false` by default. With it off, BFE commits the fix on a
 new `fix/...` branch, pushes nothing, opens no PR and checks the original branch out again. The result is
-`commit_only` and its error reads "push disabled (bug fix expediter push fix branch enabled is false): nothing was
+`commit_only`. Its error reads "push disabled (bug fix expediter push fix branch enabled is false): nothing was
 pushed and no pull request was opened". TFE has its own key. Trust levels 1 and 2 never push.
 
 The trust level is read at Phase 5 time via
 `GitStrategist.resolve_trust_level(orchestrator.proxy)`. If the SWE Team Trust
 Proxy isn't wired up (e.g., local dev without the proxy DB), the resolver returns
-L1 and BFE operates in commit-only mode regardless of the `trust_mode` INI setting.
+level 1. BFE then operates in commit-only mode regardless of the `trust_mode` INI setting.
 
 **Commit message format**: `[BFE] Fix: {first 60 chars of fix.details}` (or
 `[BFE] Fix` if details is empty). PR title follows the same convention.
@@ -337,7 +340,7 @@ Start with `shadow` (the default). In shadow mode, BFE will:
 
 Monitor BFE's behavior for a few runs before moving to `suggest` or `active`.
 
-To graduate to `active` (L3+ branching + PR):
+To graduate to `active` (level 3+ branching + PR):
 
 ```ini
 bug fix expediter trust mode = active
@@ -348,7 +351,7 @@ The second line is what allows the push. Left at its default `false`, `active` s
 
 This requires a populated SWE Team Trust Proxy and functional `gh` CLI.
 See the [Decision Proxy Admin Guide](../proxy-admin-guide.md) for how to earn
-L3+ trust through the ratification workflow.
+level 3+ trust through the ratification workflow.
 
 ### Step 3: Enable Phase 6 auto-retry (optional)
 
@@ -420,10 +423,10 @@ bug fix expediter narrate progress = false
 
 ### Git history
 
-At L3+ trust, BFE creates branches named `fix/YYYY-MM-DD-{slug}`. Use `git branch --all`
+At level 3+ trust, BFE creates branches named `fix/YYYY-MM-DD-{slug}`. Use `git branch --all`
 to find them, or check the PR list on GitHub (`gh pr list --state all`).
 
-At L1-L2, fixes land as new commits on your current branch with `[BFE] Fix:`
+At trust levels 1 and 2, fixes land as new commits on your current branch with `[BFE] Fix:`
 prefixes. Use `git log --grep="\[BFE\]"` to find them.
 
 ### Debug logging
@@ -477,7 +480,7 @@ Possible causes:
    for `RateLimitEvent` warnings in the log.
 3. **Budget exhausted**: `bug fix expediter budget usd` was hit mid-run. Check the
    cost tracker summary in the plan doc footer.
-4. **Root cause genuinely obscure**: some bugs need human investigation.
+4. **Root cause obscure**: some bugs need human investigation.
    Lowering `bug fix expediter min diagnosis confidence` (e.g., 0.5) lets BFE
    proceed with lower-confidence diagnoses, but the fix success rate drops.
 
@@ -495,7 +498,7 @@ The Coder keeps producing changes but the Tester rejects them. This often indica
 
 ### Git branch conflicts
 
-L3+ mode creates branches named `fix/YYYY-MM-DD-{slug}`. If a branch with the same
+Level 3+ mode creates branches named `fix/YYYY-MM-DD-{slug}`. If a branch with the same
 name already exists from a prior BFE run, `create_fix_branch()` fails and the
 strategy degrades. Options:
 
@@ -506,9 +509,9 @@ strategy degrades. Options:
 ### PR creation fails (`gh not found`)
 
 The strategist degrades to `branch_only` mode automatically and emits a
-high-priority notification. The fix branch still exists and, with
-`bug fix expediter push fix branch enabled = true`, has been pushed — you
-can manually create the PR via `gh pr create` or the GitHub web UI. To prevent this,
+high-priority notification. The fix branch still exists.
+With `bug fix expediter push fix branch enabled = true`, it has also been pushed.
+You can manually create the PR via `gh pr create` or the GitHub web UI. To prevent this,
 install `gh` CLI on the host:
 
 ```bash
@@ -566,12 +569,12 @@ Historical planning documents live under
 
 - `00-index.md` — navigation
 - `01-implementation-plan.md` — original end-to-end plan
-- `02-agentic-job-consistency-audit.md` — Phase 0 prerequisite audit
+- `02-agentic-job-consistency-audit.md` — phase-zero prerequisite audit
 - `03-phase2-diagnose-orchestrator-plan.md` through `08-phase6-automated-repair-loop-plan.md` — per-phase detailed plans
 - `07-phase5-execution-log.md` — Phase 5 implementation log (actual work done)
 
-These are frozen planning artifacts — they explain WHY BFE is designed the way it
-is. The guide you're reading now explains HOW to use and maintain it.
+These are frozen planning artifacts — they explain why BFE is designed the way it
+is. The guide you're reading now explains how to use and maintain it.
 
 ---
 

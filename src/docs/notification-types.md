@@ -1,14 +1,14 @@
 # Notification Types Reference
 
-> Catalogue of the custom `type` values accepted by `POST /api/notify/*` and emitted
-> through the `notification_queue_update` WebSocket envelope.
->
-> **Last verified**: 2026-05-12 — `valid_types` mirror at `src/cosa/rest/routers/notifications.py:359-363`.
->
-> For the full notification system (architecture, queues, persistence, CLI clients),
-> see [`notification-api.md`](notification-api.md). For the WebSocket event catalog,
-> see [`websocket-events.md`](websocket-events.md). This document is a focused
-> reference for **what the `type` field means** and how the UI handles each value.
+Catalogue of the custom `type` values accepted by `POST /api/notify/*` and emitted
+through the `notification_queue_update` WebSocket envelope.
+
+**Verified against**: `valid_types` mirror at `src/cosa/rest/routers/notifications.py:359-363`.
+
+For the full notification system (architecture, queues, persistence, CLI clients),
+see [`notification-api.md`](notification-api.md). For the WebSocket event catalog,
+see [`websocket-events.md`](websocket-events.md). This document is a focused
+reference for **what the `type` field means** and how the UI handles each value.
 
 ---
 
@@ -22,14 +22,14 @@ Three categories exist:
 |---|---|---|
 | **User-facing messages** | `task`, `progress`, `alert`, `custom`, `user_initiated_message` | Render as a notification card; may speak via TTS |
 | **Session-scoped control** | `session_topic` | Header span update only — no notification card |
-| **Custom state-update** | `voice_persona_assigned`, `voice_persona_released`, `speakerphone_changed`, `commons_broadcast_ack` | Dispatch through a `switch` in `notifications.js:5332` that handles the state mutation and returns BEFORE the message-render path |
+| **Custom state-update** | `voice_persona_assigned`, `voice_persona_released`, `speakerphone_changed`, `commons_broadcast_ack` | Dispatch through a `switch` in `notifications.js:5332` that handles the state mutation and returns before the message-render path |
 
 The **custom state-update** category exists because the multiplexer / notifications-UI
 needs out-of-band state changes (persona allocation, speakerphone toggles,
-broadcast acks) but the team agreed in
+broadcast acks). The team agreed in
 [`src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md`](../rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md)
-that the notification envelope is the canonical transport — NOT new top-level
-WebSocket events. New control signals MUST extend this category, not invent new
+that the notification envelope is the canonical transport, not new top-level
+WebSocket events. New control signals must extend this category, not invent new
 `notification_queue_update`-adjacent events.
 
 ---
@@ -47,7 +47,7 @@ agentic jobs or MCP shims.
 Notification envelope carrying an **action directive** for a CC session listener.
 The `title` field encodes the action verb (e.g., `"action:disable_speakerphone"`,
 `"action:broadcast_received"`). The listener's `_handle_action()` dispatcher reads
-the verb after `action:` and routes to the appropriate handler. UI does NOT render
+the verb after `action:` and routes to the appropriate handler. UI does not render
 these as visible notifications — they are consumed by the listener and produce
 side effects (tmux injection, ack post).
 
@@ -78,9 +78,9 @@ state + (solo mode only) the monopoly-pin / green glow. In chorus mode the
 `displaced` field is always `false` and no pinning fires. See
 [`src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/)
 for the mode-aware lifecycle and the bridge field rename from
-`conversation_mode_active` → `speakerphone_on` (Phase 2).
+`conversation_mode_active` → `speakerphone_on` (phase two of that work).
 
-### `commons_broadcast_ack` (Phase 2)
+### `commons_broadcast_ack` (phase two)
 
 Fires when a CC session listener processes an inter-session-commons broadcast and
 posts its ack. Originated by `CommonsAckWatcher` daemon in
@@ -97,7 +97,7 @@ topic in `<LUPIN_ROOT>/io/commons/broadcast-acks.md` and dispatches one
 - Each recipient listener processes the directive and posts an ack to
   `broadcast-acks` via `CommonsStore.post(topic="broadcast-acks", ...)`.
 - The watcher daemon tails the topic every `commons broadcast ack watch interval seconds`
-  (INI key, default 1) and dispatches one `commons_broadcast_ack` notification
+  (INI key, default 1). It dispatches one `commons_broadcast_ack` notification
   per new ack whose `metadata.broadcast_id` matches a tracked in-flight broadcast.
 
 #### Payload shape
@@ -128,7 +128,7 @@ topic in `<LUPIN_ROOT>/io/commons/broadcast-acks.md` and dispatches one
 aggregate (`N/Total complete`) and renders the per-session row with the
 listener-side persona stamp.
 
-Defense-in-depth (Pass 2 T10): `body_summary` is rendered via `.textContent`
+Defense-in-depth: `body_summary` is rendered via `.textContent`
 **only** — never `.innerHTML` — even though the field is composed server-side
 from the broadcast body. Test coverage at
 `src/tests/e2e_ui/test_broadcast_panel.py::TestBroadcastAggregate::test_body_summary_xss_lands_as_text_not_html`.
@@ -139,12 +139,12 @@ The in-flight broadcast is tracked by `CommonsAckWatcher` for 5 minutes from
 registration (matches the UI's auto-dismiss timer). Acks arriving after the
 window are ignored silently. Unknown `broadcast_id` values (e.g., from a
 different user's broadcast that somehow landed in this user's stream) are
-silently dropped — the watcher requires the broadcast to be registered in its
+silently dropped. The watcher requires the broadcast to be registered in its
 local `_in_flight` dict for the user-routing payload field to be safe.
 
 #### Cross-references
 
-- Architecture: [`src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md`](../rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md) AC7 + AC9
+- Architecture: [`src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md`](../rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md) acceptance criteria 7 and 9
 - Producer: `src/cosa/rest/commons_ack_watcher.py:223-249` `_push_ack_event()`
 - Consumer: `src/lupin_app/static/js/broadcast-panel.js` `handleAck()`
 - E2E coverage: `src/tests/smoke/test_broadcast_two_session_e2e.py` (backend) +
@@ -156,14 +156,14 @@ local `_in_flight` dict for the user-routing payload field to be safe.
 
 1. Append the string to `valid_types` in `src/cosa/rest/routers/notifications.py:359-363`.
 2. Add a `case "your_new_type":` branch in the switch at
-   `src/lupin_app/static/js/notifications.js:5332` that handles the state
-   update and `return`s BEFORE the message-render path. The branch should never
+   `src/lupin_app/static/js/notifications.js:5332` that handles the
+   state update and `return`s before the message-render path. The branch should never
    produce a visible notification card unless it's user-facing.
 3. Document the trigger, payload shape, and UI handler here.
 4. Reference the originating design doc.
 5. Land unit tests for both the producer (server-side `_push_*_event`) and the
    consumer (UI switch branch — DOM-mocked or Playwright E2E).
 
-The team agreed (Phase 1 of the WS event cleanup) that NEW transport-level WS
-events are an anti-pattern; the canonical envelope is `notification_queue_update`
+The team agreed in the first phase of the WS event cleanup that new transport-level WS
+events are an anti-pattern. The canonical envelope is `notification_queue_update`
 and the type discriminator does the routing.
