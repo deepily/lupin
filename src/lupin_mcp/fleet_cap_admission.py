@@ -536,30 +536,51 @@ def _live_stdin_is_tty() -> bool:
     return sys.stdin.isatty()
 
 
+def _live_credit_spend( manager_session_id: str, slug: str ) -> bool:
+    """Spend the re-spin credit in the real credit folder."""
+    from lupin_mcp import respin_credit
+    return respin_credit.spend( manager_session_id, slug )
+
+
 def _skeleton_refusal( headless: bool, skeleton_fn: Callable, stdin_is_tty_fn: Callable,
-                       environ: Any, stderr: Any ) -> Optional[ str ]:
+                       environ: Any, stderr: Any, credit_spend_fn: Callable = _live_credit_spend ) -> Optional[ str ]:
     """
     The skeleton crew refusal for this launch, or None when it may go on.
 
     Ensures:
         - returns None for a person at a terminal, whatever the switch says
         - returns the refusal text for an agent launch when the switch is on
+        - returns None for a re-spin whose credit this call spent, once
+        - never spends a credit when the switch is off
         - a check that raises is allowed, and says so on stderr, like the cap guard
-        - never raises
+        - a credit that cannot be spent, for any reason, leaves the refusal in place
     """
     try:
         if not _launched_by_an_agent( headless, stdin_is_tty_fn, environ ):
             return None
-        return skeleton_fn()
+        refusal = skeleton_fn()
+        if refusal is None:
+            return None
     except Exception as error:
         stderr.write( f"\n[SKELETON-CREW] check could not run, ALLOWING the launch: {error}\n\n" )
         return None
+
+    from lupin_mcp import respin_credit
+    parsed = respin_credit.parse_env_value( environ.get( respin_credit.CREDIT_ENV ) )
+    if parsed is None:
+        return refusal
+    try:
+        spent = credit_spend_fn( parsed[ 0 ], parsed[ 1 ] )
+    except Exception:
+        return refusal
+    return None if spent else refusal
 
 
 def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under_lock,
           release_fn: Callable = release, dir_fn: Callable = reservation_dir,
           stderr = None, skeleton_fn: Optional[ Callable ] = None,
-          stdin_is_tty_fn: Optional[ Callable ] = None, environ: Any = None ) -> int:
+          stdin_is_tty_fn: Optional[ Callable ] = None, environ: Any = None,
+          credit_spend_fn: Optional[ Callable ] = None ) -> int:
     """
     The command line `start-cc-with-tmux.sh` runs before it creates a tmux session.
 
@@ -597,7 +618,8 @@ def main( argv: Optional[ List[ str ] ] = None, admit_fn: Callable = admit_under
             skeleton_fn     if skeleton_fn     is not None else _live_skeleton_refusal,
             stdin_is_tty_fn if stdin_is_tty_fn is not None else _live_stdin_is_tty,
             environ         if environ         is not None else os.environ,
-            stderr )
+            stderr,
+            credit_spend_fn if credit_spend_fn is not None else _live_credit_spend )
         if refusal is not None:
             stderr.write( f"\n[SKELETON-CREW] REFUSING TO LAUNCH: {refusal}\n\n" )
             return EXIT_REFUSED

@@ -758,6 +758,29 @@ def _isolate_heartbeat_poke_mute_switch( tmp_path, monkeypatch ):
 
 
 @pytest.fixture( scope="session" )
+def _respin_credit_folder( tmp_path_factory ):
+    """
+    One folder for the whole run that holds re-spin credits.
+
+    Ensures:
+        - lives in a session temp folder, so no test writes into the live sessions folder
+    """
+    return str( tmp_path_factory.mktemp( "respin-credits" ) )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_respin_credit_folder( _respin_credit_folder, monkeypatch ):
+    """
+    Point the re-spin credit folder at the run's own folder.
+
+    Ensures:
+        - during any test, a dismissal that names a re-spin persona writes no credit into the
+          live sessions folder
+    """
+    monkeypatch.setenv( "LUPIN_RESPIN_CREDIT_DIR", _respin_credit_folder )
+
+
+@pytest.fixture( scope="session" )
 def _skeleton_crew_off_file( tmp_path_factory ):
     """
     One configuration file for the whole run that says the skeleton crew switch is off.
