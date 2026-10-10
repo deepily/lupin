@@ -2,13 +2,13 @@
 capability: mcp-commons-and-dm
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - lupin_mcp.commons_store.CommonsStore@d6898c6724
-  - lupin_mcp.commons_store.CommonsStore.post@f275887ce9
+  - lupin_mcp.commons_store.CommonsStore@19c8089b56
+  - lupin_mcp.commons_store.CommonsStore.post@b1c0fe5ff2
   - lupin_mcp.commons_store.CommonsStore.read@8d46e9aee9
   - lupin_mcp.commons_store.CommonsStore.who@115766fdcb
   - lupin_mcp.commons_ask.ask_sync@9afd873bda
-  - lupin_mcp.cosa_voice_mcp.dm_respond@3124640cce
-  - lupin_mcp.cosa_voice_mcp.dm_list@51eb3e41a6
+  - lupin_mcp.cosa_voice_mcp.dm_respond@013b7c91ba
+  - lupin_mcp.cosa_voice_mcp.dm_list@eb21eadaed
   - lupin_mcp.cosa_voice_mcp.dm_get@cdf31216e5
 ---
 # MCP commons and direct messages
@@ -17,7 +17,7 @@ The cosa-voice MCP server gives a session two ways to talk to peers: a file blac
 
 ## Commons blackboard
 - `CommonsStore` keeps one markdown file per topic under `io/commons/` in the main tree, even when the caller passes a worktree path. The archiver does not do this resolution.
-- `post` appends under an exclusive file lock. A free-form topic file is created on the first post.
+- `post` appends under an exclusive file lock and flushes the entry before it releases the lock. A free-form topic file is created on the first post.
 - Persona name, icon and color are stamped from the session bridge at post time. Missing values become `<unknown>`, a speech-bubble icon and `#888888`.
 - `read` returns newest first without `since`, ascending with it, capped at `limit`. A missing reserved topic raises; a missing free-form topic still consults the archive, so it returns an empty list only when the archive has nothing.
 - `read` opens archived daily files only when the active file cannot answer. Without `since`, that means fewer than `limit` entries. With `since`, it means `since` predates the oldest entry or the file is empty. It de-duplicates on timestamp, sender and body.
@@ -35,6 +35,6 @@ The cosa-voice MCP server gives a session two ways to talk to peers: a file blac
 - `dm_send` posts the body inline to `/api/dm/send` with an `X-API-Key` header. Without a key it returns `missing_auth_header` and sends nothing.
 - A given `recipient_session_id` is sent instead of the recipient persona name. Replies pass `reply_to` and `thread_id`.
 - Results map from HTTP status: 201 `sent`, 422 `recipient_unresolved`, 413 `dm_too_long`, anything else `http_<code>`; a transport failure gives `request_failed`.
-- `dm_send` returns `borrowed_identity` when the session id was guessed from the working directory. The `dm_respond` body does not make that check.
+- `dm_send`, `dm_respond`, `dm_list`, `commons_post` and both ask tools return `borrowed_identity` when the session id was guessed from the working directory. `dm_get` and the read tools make no such check.
 - `dm_respond` takes `reply_to` and `thread_id` as required arguments and posts to `/api/dm/respond`. `dm_get` fetches one DM by id.
 - `dm_list` sends this session's id whenever it is known, and sends `scope` only when it is `account`.
