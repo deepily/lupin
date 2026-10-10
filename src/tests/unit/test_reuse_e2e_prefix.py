@@ -56,8 +56,8 @@ def test_one_prefix_only_for_a_step_that_spends_and_a_clean_name_for_every_prefi
     for step in ( "canary", "run" ):
         assert run.cli( prefixed( setup, step, [ "--prefix", "e2e,pg" ] ) ) == 2 and "one prefix" in capsys.readouterr().err
     assert run.cli( setup.args( "approve", "--by", "x", "--why", "y", extra=[ "--prefix", "e2e,pg" ] ) ) == 2 and "one prefix" in capsys.readouterr().err
-    for bad in ( "", "Bad", "../x", "a b", "s2", "x" * 17 ):
-        assert run.cli( prefixed( setup, "canary", [ "--prefix", bad ] ) ) == 2 and "prefix" in capsys.readouterr().err
+    for bad in ( "", "Bad", "../x", "a b", "s2", "x" * 17, "1pg", "-pg" ):
+        assert run.cli( prefixed( setup, "canary", [ f"--prefix={bad}" ] ) ) == 2 and "prefix" in capsys.readouterr().err
     assert not results( setup ).exists()                                                           # every refusal came before a run was opened
 
 
