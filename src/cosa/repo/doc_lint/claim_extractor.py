@@ -62,6 +62,12 @@ CLAUSE_STOP_WORDS  = frozenset( (
     "their them they his her him she he you your we our us i me my"
 ).split() )
 
+# The limiting words the prompt names. A sentence holding one of them, with no quote of TIGHT_QUOTE_WORDS words or
+# fewer around it, is put to the model once more (see loose_qualifiers). Fixed before any count was taken.
+QUALIFIER_PHRASES = ( "only", "never", "always", "until", "unless", "rather than", "at most", "at least", "no longer", "without" )
+QUALIFIER_REGEX   = re.compile( r"\b(?:" + "|".join( re.escape( p ) for p in QUALIFIER_PHRASES ) + r")\b", re.IGNORECASE )
+TIGHT_QUOTE_WORDS = 10
+
 Claim            = namedtuple( "Claim", [ "text", "quote", "start", "end" ] )
 ExtractionResult = namedtuple( "ExtractionResult", [ "claims", "discarded", "uncovered_fraction", "longest_quote_share",
                                                      "discards", "flags", "reextract_calls", "flag_words", "parse_failed", "retry_calls" ], defaults=( (), (), 0, (), False, 0 ) )
@@ -409,6 +415,22 @@ def unsupported_claim_indexes( claims ):
     return [ i for i, claim in enumerate( claims ) if says_more_than_quote( claim ) ]
 
 
+def loose_qualifiers( old_text, claims ):
+    """
+    Return the spans of limiting words that no tight quote covers.
+
+    Requires:
+        - claims are verified Claims whose spans index old_text
+
+    Ensures:
+        - returns ( start, end ) for each whole-word, any-case occurrence of a QUALIFIER_PHRASES entry, in text order
+        - an occurrence is covered when a claim span of at most TIGHT_QUOTE_WORDS words contains it entirely
+        - uses no model
+    """
+    tight = [ ( c.start, c.end ) for c in claims if len( old_text[ c.start:c.end ].split() ) <= TIGHT_QUOTE_WORDS ]
+    return [ m.span() for m in QUALIFIER_REGEX.finditer( old_text ) if not any( a <= m.start() and m.end() <= b for a, b in tight ) ]
+
+
 async def _ask( old_text, model, query_fn, quoted_from=None, on_unreadable=None, attempt="first" ):
     """
     Make one extractor call and verify its quotes against quoted_from (default: the text).
@@ -448,6 +470,8 @@ async def extract_claims( old_text, model, query_fn=None, on_unreadable=None ):
           (see uncovered_runs) are put to the model once more, as their enclosing sentences, under the
           same prompt and floors, in one extra call (reextract_calls is 1, else 0); a run still under no
           kept quote afterwards is returned in flags as ( start, end ), for a person
+        - the sentences that hold a limiting word with no tight quote around it (see loose_qualifiers) go in the
+          same extra call, so it is still one call at most; they add claims but never flags
         - flag_words holds the word count of each flagged run, in the order of flags
         - an unreadable reply to that second call leaves its runs flagged; a failed call raises
         - an unreadable first reply is asked for once more (retry_calls is 1); if the retry is unreadable too,
@@ -476,11 +500,12 @@ async def extract_claims( old_text, model, query_fn=None, on_unreadable=None ):
             return ExtractionResult( [], [], 1.0, 0.0, [], [ ( 0, len( old_text ) ) ], 0, [ len( old_text.split() ) ], True, retries )
     rows  = discard_rows( discarded, old_text )
     runs  = uncovered_runs( old_text, [ ( c.start, c.end ) for c in claims ] )
+    loose = loose_qualifiers( old_text, claims )
     calls = 0
-    if runs:
+    if runs or loose:
         calls = 1
         try:
-            more, _ = await _ask( enclosing_sentences( old_text, runs ), model, query_fn, quoted_from=old_text,
+            more, _ = await _ask( enclosing_sentences( old_text, runs + loose ), model, query_fn, quoted_from=old_text,
                                   on_unreadable=on_unreadable, attempt="second" )
         except ExtractionParseError:
             more = []
