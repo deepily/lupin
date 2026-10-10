@@ -287,7 +287,7 @@ def run_arm( env, question, arm, need, entries, ceiling_tokens, attempt_limit=No
         try: budget = rc.TokenBudget( attempt_limit, ceiling_tokens, ledger=env.ledger, run=name )
         except ValueError as e: raise DriverRefused( str( e ) ) from e                    # a run name used before, refused by the ledger
     try:
-        ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit, call_budget_cap=attempt_cap )
+        ctx   = rt.ReuseContext( env.root, env.data, transport=env.transport_factory( budget ), template=template, model=env.model, call_budget=attempt_limit, call_budget_cap=attempt_cap, run_budget=budget )
         sweep = rp.sweep_packed( ctx, need, entries, size, workers=env.workers, key_mode="stage1", run_index=index, template=template, model=env.model, budget=budget )
         rows  = _rows_with_reserve( sweep[ "rows" ], need, { e[ "id" ]: e for e in entries }, template, env.model )
         record.update( state="complete" if not ( sweep[ "failed" ] or sweep[ "not_reached" ] ) else "incomplete", stop_reason=_stop_reason( sweep, budget ),
