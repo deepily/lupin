@@ -134,9 +134,13 @@ def terminate_sessions_sql( as_test_role ):
 
     Ensures:
         - returns SQL text with one named parameter, :n, the database name
-        - the text selects pg_terminate_backend over the sessions of that database, never the caller's own
+        - the text selects pg_terminate_backend over the client sessions of that database, never the caller's own
+        - for the test role the text keeps to sessions of the caller's own role, because Postgres
+          refuses that role the end of a superuser's session and one refusal fails the whole statement
     """
-    return "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity WHERE datname = :n AND pid <> pg_backend_pid()"
+    own_role = " AND usename = current_user" if as_test_role else ""
+    return ( "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity "
+             "WHERE datname = :n AND pid <> pg_backend_pid() AND backend_type = 'client backend'" + own_role )
 
 
 def drop_database( server_url, name, engine_factory=create_engine, use_template=None ):

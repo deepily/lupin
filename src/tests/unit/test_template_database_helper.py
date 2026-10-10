@@ -161,6 +161,19 @@ def test_the_drop_closes_connections_then_drops_with_a_bound_name():
     assert factory.engines[ 0 ].disposed
 
 
+def test_the_test_role_statement_keeps_to_its_own_client_sessions():
+    sql = td.terminate_sessions_sql( True )
+    assert "backend_type = 'client backend'" in sql
+    assert "usename = current_user" in sql
+    assert ":n" in sql and "pid <> pg_backend_pid()" in sql
+
+
+def test_the_superuser_statement_takes_any_roles_client_sessions():
+    sql = td.terminate_sessions_sql( False )
+    assert "backend_type = 'client backend'" in sql
+    assert "usename" not in sql
+
+
 def test_the_throwaway_database_drops_when_the_body_raises():
     factory = _Factory()
     with pytest.raises( RuntimeError ):
