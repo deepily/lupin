@@ -191,8 +191,8 @@ class Notification( Base ):
 **Relationship**: `recipient: Mapped["User"]` via `back_populates="notifications"`.
 
 **Migrations**:
-- `275fb8d9c75c` - Original table creation (2025-12-30)
-- `62ec6f256d27` - Added `job_id` column (2026-01-23)
+- `275fb8d9c75c` - Original table creation
+- `62ec6f256d27` - Added `job_id` column
 - `9184990becdf` - Added `payload` column + the partial broadcast-ack index
 
 ---

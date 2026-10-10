@@ -76,7 +76,7 @@ That is six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`:
 (`get_sender_last_activities`, `get_sender_last_activities_visible`) and the four
 conversation/history reads (`get_sender_conversation`,
 `get_sender_conversations_by_date`, `get_sender_date_summaries`,
-`get_active_conversation`). Deliberately not `count_by_sender` or `get_by_recipient`, which also return acks but have no caller outside tests. Those queries group by `sender_id` and
+`get_active_conversation`). It leaves out `count_by_sender` and `get_by_recipient`, which also return acks but have no caller outside tests. Those queries group by `sender_id` and
 filter on nothing else, so any row saved into `notifications` becomes a *sender*. Without the exclusion a seat appears in `/api/notifications/senders-visible` — and
 therefore in the multiplexer's strip and the operator focus bar. Which hydrate from it —
 purely for having acked a broadcast. Before the conversation reads were covered too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that had merely acked.

@@ -143,7 +143,7 @@ The notification UI groups notifications into conversations using the sender ID:
   Date Grouping. And Sender-Dates endpoints above are **unaffected** — a reaped
   sender's notifications remain fully readable in history/audit. The eviction is a roster-query exclusion, **not** an `is_hidden` soft-delete.
 `is_hidden=True` would also hide the rows from every history view.
-That is the user's clear-conversation action, and it is deliberately not used here.
+That is the user's clear-conversation action, and it is not used here (a choice, not an oversight).
 - Roster is a *liveness* view (a reaped session is gone). History is the *durable
   record* (the reaped session's messages stay). Re-spawn-safe: a new session has a new
   `sender_id` (8-hex session suffix), so it is never masked by a prior session's marker.
