@@ -396,3 +396,68 @@ def test_a_credit_folder_that_cannot_be_written_never_breaks_the_reap( tmp_path,
     mgr, result = _reap( tmp_path, [ "Tiffany" ] )
     assert result[ "bridges_deleted" ] == 1
     assert result[ "respin_credits_minted" ] == []
+
+
+# ── a credit with a minted time that cannot be trusted never lives ───────────
+
+def _plant( folder, minted ):
+    folder.mkdir( parents=True, exist_ok=True )
+    ( folder / "mgr-1.tiffany.json" ).write_text(
+        json.dumps( { "manager_session_id": "mgr-1", "persona_slug": "tiffany", "minted_ts": minted } ),
+        encoding="utf-8" )
+
+
+@pytest.mark.parametrize( "minted", [
+    "abc", None, True, [ 1 ], { "t": 1 }, float( "nan" ), float( "inf" ), float( "-inf" ),
+    NOW.timestamp() + 60, NOW.timestamp() + 10 ** 9,
+] )
+def test_a_minted_time_that_is_not_a_past_number_is_expired_and_unspendable( folder, minted ):
+    _plant( folder, minted )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is False
+    assert ( folder / "mgr-1.tiffany.json" ).exists()
+
+
+def test_a_credit_minted_this_instant_is_still_good( folder ):
+    _plant( folder, NOW.timestamp() )
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+
+
+# ── a credit is minted only for a seat this dismissal actually killed ────────
+
+def _reap_with( tmp_path, runner, respin ):
+    sd  = Path( tmp_path )
+    mgr = "mgr-abc12345"
+    ss._write_manifest( ss._manifest_path( mgr, sd ), [ { "session_name": "cc-author-x-1", "session_id": "sid-1" } ] )
+    ( sd / "cc-99999.json" ).write_text( json.dumps( {
+        "tmux_session"      : "cc-author-x-1",
+        "stable_session_id" : "abcd1234-aaaa-bbbb",
+        "voice_persona"     : { "name": "Tiffany", "icon": "💍", "color": "#FFD600" },
+    } ) )
+    result = ss.dismiss_sessions(
+        mgr, session_names=[ "cc-author-x-1" ], runner=runner, session_dir=sd,
+        emit_reap_fn=lambda i, reason="": None, emit_reaped_fn=lambda i: None,
+        clear_hold_fn=lambda i: True, respin_personas=respin )
+    return mgr, result
+
+
+def test_a_seat_that_was_already_gone_earns_no_credit( tmp_path, folder ):
+    gone = lambda argv, env=None: SimpleNamespace( returncode=1 )
+    mgr, result = _reap_with( tmp_path, gone, [ "Tiffany" ] )
+    assert result[ "dismissed" ][ 0 ][ "status" ] == "already_gone"
+    assert result[ "respin_credits_minted" ] == []
+    assert rc.find( mgr, "tiffany" ) is None
+
+
+def test_a_seat_this_dismissal_killed_earns_its_credit( tmp_path, folder ):
+    killed = lambda argv, env=None: SimpleNamespace( returncode=0 )
+    mgr, result = _reap_with( tmp_path, killed, [ "Tiffany" ] )
+    assert result[ "dismissed" ][ 0 ][ "status" ] == "killed"
+    assert result[ "respin_credits_minted" ] == [ "tiffany" ]
+    assert rc.find( mgr, "tiffany" ) is not None
+
+
+def test_an_already_gone_seat_still_keeps_its_rows_through_a_re_spin( tmp_path, folder ):
+    gone = lambda argv, env=None: SimpleNamespace( returncode=1 )
+    mgr, result = _reap_with( tmp_path, gone, [ "Tiffany" ] )
+    assert result[ "retained_owner_personas" ] == [ "tiffany" ]
