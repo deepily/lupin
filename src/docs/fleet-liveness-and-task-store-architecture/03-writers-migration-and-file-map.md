@@ -28,7 +28,7 @@ They boot a persona and read `task_prompt` as their brief.
 **Migration drain** — `src/lupin_cli/claude_code/hooks/lib/task_store_drain.py`: per **active session**, it replays the transcript's owed native items and `task_create`s any missing ones.
 It is idempotent via `correlation_key` and `query_by_correlation_key`, and dry-run by default (`--apply` writes). Includes a per-session **count-parity** check (store owed-count == transcript owed-count). Run before flipping the flag so no session goes dark at cutover.
 
-**Cutover sequence (executed 2026-06-17, Rick-supervised)**:
+**Cutover sequence (executed, Rick-supervised)**:
 1. `drain --apply` → parity 4/4.
 2. verify parity (would_create = 0).
 3. flip `heartbeat.owed_source_from_store=True` in `~/.claude/settings.json`; verify it reads `True`.

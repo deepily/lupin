@@ -20,7 +20,7 @@ Inputs 2 and 3 are **local / store-independent** and must keep poking even durin
 **The cutover flag**: `heartbeat.owed_source_from_store` in `~/.claude/settings.json`. `False` = old transcript path; `True` = store-count path. Flipping it fleet-wide is the cutover (every session's Stop hook reads it). **Reversible**: flip back to `False` to revert.
 
 **Fail-safe**: when the store is unreachable, times out or answers malformed, `owed_items` contributes 0.
-The hook logs a distinct `heartbeat_store_unreachable` phase and does **not** spurious-poke. Bounce-windows (Rick restarts `:7999` constantly under `--reload`) = no-poke windows by design.
+The hook logs a distinct `heartbeat_store_unreachable` phase and does **not** spurious-poke. Bounce-windows (Rick restarts `:7999` constantly under `--reload`) = no-poke windows, and the hook is written to stay quiet in them.
 
 **Muting the poke** (two switches, either one mutes): `heartbeat.poke_output_enabled = false` in `~/.claude/settings.json` is the hand switch. The fleet switch is a small file an admin flips from a notification client's toolbar (multiplexer or legacy) through `PUT /api/heartbeat/poke-mute`. The Stop hook reads it on every stop through `hooks/lib/heartbeat_poke_mute.py`, so a flip lands on each seat's next stop with no restart. The file sits in the flow-ratio settings folder, which both rest containers already mount. A missing or malformed file reads as not muted, and no timer touches it. While muted, a seat is shown `heartbeat.poke_disabled_message` when that is set. And otherwise a line naming who muted it and when. `heartbeat.enabled` must stay `true` for either message to appear.
 
@@ -61,7 +61,7 @@ They also include **bridge-mtime**, which any tool call refreshes, and live brid
 The owning-manager *cc* ("X is blocking worker Y") is deduped on a `(blocker, blocked_item, recipient)` cooldown.
 It reuses the advisory-cooldown machinery.
 A persistent block therefore cc's the manager at most once per window.
-A genuinely-new block (different `blocked_item`) still announces once.
+A new block (different `blocked_item`) still announces once.
 The arbiter is a **headless observer with no DM inbox**.
 The canonical channel for a chase-ack back to the arbiter is a **commons `system-events` post**, not a DM reply.
 Ratified: no inbound inbox is added to the observe-only service.
@@ -72,8 +72,8 @@ So an idle-but-finished or legitimately Rick-gated manager gets false MANAGER-DO
 Mitigations in use: keep management loops under 40 minutes.
 Represent user-gated work as a `gate_class=ricks_court` item transitioned to `blocked_by:[{kind:user}]`.
 
-**The sibling-gate lesson** (2026-07-12, Krishna 🦚: three fixes, one family).
-Every arbiter false-positive class fixed on 2026-07-12 had the same signature: **a correctness gate wired into one consumer of a signal but not its siblings**.
+**The sibling-gate lesson** (Krishna 🦚: three fixes, one family).
+Every arbiter false-positive class fixed then had the same signature: **a correctness gate wired into one consumer of a signal but not its siblings**.
 The three fixes were these:
 
 - The blocked-edge roster leg lacked the store-corroboration the ping leg had (`edge_is_store_backed`).

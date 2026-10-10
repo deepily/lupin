@@ -3,7 +3,7 @@
 # Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)
 
 **Status**: canonical architecture reference.
-It was established 2026-06-17, right after the store-canonical cutover went live.
+It was established right after the store-canonical cutover went live.
 
 **Scope**: how the Lupin fleet tracks owed work and keeps multi-session ("fleet") agents alive and driven to completion.
 It covers the **unified task-store**, the **heartbeat self-poke**, the **out-of-band arbiter** and the **human UI card**.
@@ -24,7 +24,7 @@ It does so without long idle stalls and without burning context re-reading a tas
 Every earlier liveness bug traced to **two sources of truth**.
 One was the native Claude Code harness task list, which is transcript-reconstructed and vocabulary-poor.
 The other was the unified store, kept in sync by a fragile mirror.
-The **store-canonical cutover (2026-06-17)** collapsed that to one source.
+The **store-canonical cutover** collapsed that to one source.
 The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`)* (cascade review, build ACs, cutover log).
 A separate plan document was intended and never authored.
 
@@ -46,9 +46,9 @@ flowchart TD
 
 - **The store is the single source of truth**.
   Owed work lives here and nowhere else: your tasks, work you assign, decisions, gates, bugs and review-requests.
-  The native harness task list is **no longer** the liveness source, because the 2026-06-17 cutover jettisoned it.
+  The native harness task list is **no longer** the liveness source, because the cutover jettisoned it.
 - The three readers cannot disagree about "who owes what", because they read the same store with the same query shape.
-  The old two-sources-of-truth bug is eliminated *by construction*, not patched.
+  The old two-sources-of-truth bug is eliminated structurally, not patched.
 
 ### Data model (item shape)
 
@@ -78,7 +78,7 @@ It has the same root, with internal spaces turned into a separator (`dm-mr_radio
 Noisy free-text human input resolves via `normalize_for_match`, which is the root minus spaces.
 
 **Never** hand-roll a `.lower()` or `re.sub` persona normalizer.
-Divergence here is the exact bug that produced the 2026-06-18 false-idle P0.
+Divergence here is the exact bug that produced the false-idle P0.
 The read queried `maría`, the store held `maria`, and zero rows matched.
 It also split the DM-topic (`dm-maría` vs `dm-maria`). Authority: `src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md`.
 
