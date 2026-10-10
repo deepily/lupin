@@ -807,7 +807,7 @@ class NotificationsUI {
         this.conversationModes = JSON.parse( localStorage.getItem( this.CONVERSATION_MODES_KEY ) ) || {};
 
         // CC focus mode state (client-only, per-browser). Persists across reload via localStorage.
-        // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+        // Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
         this.ccFocusState = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) )
                             || { enabled: false, focused_sender_id: null };
         // Per-sender unread counter for the strip's peripheral-awareness badge while focus is on.
@@ -17691,7 +17691,7 @@ class NotificationsUI {
 
     // ============================================================
     // CC SESSION SELECTOR STRIP + EXCLUSIVE FOCUS MODE
-    // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+    // Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
     // Permanent chrome above #notifications-list. One icon per active CC
     // session. Leftmost = most recently updated. Embedded toggle pill
     // enters/exits focus mode (only the focused session's card is rendered).
@@ -20893,7 +20893,7 @@ class NotificationsUI {
             container.appendChild( card );
         }
 
-        // CC focus mode + selector strip hooks (Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md):
+        // CC focus mode + selector strip hooks (Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md):
         // 1. If focus mode is on and this isn't the focused session, hide the card.
         // 2. If this is a CC session, register an icon in the strip.
         // 3. If focus is on and this isn't focused, bump the unread badge so the

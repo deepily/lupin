@@ -79,7 +79,7 @@ VENV_ACTIVATE="$LUPIN_ROOT/.venv/bin/activate"
 
 # ── --vertex: route THIS session to GCP Vertex (metered billing), not Max ─────
 #
-# Design: src/rnd/v0.1.9/2026.07.13-vertex-model-garden-toggle-search-and-logging.md
+# Design: src/docs/decisions/2026.07.13-vertex-model-garden-per-session-toggle.md
 #
 # The default `claude` path stays UNTOUCHED on Max. Only the flagged session is
 # metered. Everything below exists because of three findings that each nearly

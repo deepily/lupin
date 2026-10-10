@@ -1974,7 +1974,7 @@
            Embedded toggle pill enters/exits focus mode: when ON, all
            sender cards except the focused one are hidden via
            data-focus-hidden="true" → display:none.
-           Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+           Design: src/docs/decisions/2026.04.30-cc-session-selector-strip-and-focus-mode.md
            Orthogonal to conversation-mode pin.
            ======================================== */
         .cc-session-strip {
