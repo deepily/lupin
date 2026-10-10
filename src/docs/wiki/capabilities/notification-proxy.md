@@ -6,7 +6,7 @@ pins:
   - cosa.agents.notification_proxy.responder.NotificationResponder.handle_event@23ea9bdd9a
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy@bf4c4fe8e4
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy.can_handle@edfcb2354c
-  - cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmScriptMatcherStrategy@96aa4d1fb7
+  - cosa.agents.notification_proxy.strategies.llm_script_matcher.LlmScriptMatcherStrategy@0fb793df8e
   - cosa.agents.notification_proxy.strategies.llm_fallback.LLMFallbackStrategy.can_handle@5d4011dcca
   - cosa.agents.notification_proxy.option_sentinels.resolve@ea4d9954a8
   - cosa.agents.notification_proxy.scalar_answers.drop_non_scalar_answers@01e3287d5a
