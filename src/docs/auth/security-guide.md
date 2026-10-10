@@ -37,7 +37,7 @@ The Lupin Authentication System implements defense-in-depth with multiple securi
 - **Least Privilege**: Default user role has minimal permissions
 - **Defense in Depth**: Multiple security layers
 - **Fail Secure**: Errors default to denying access
-- **Privacy-first design**: No email enumeration, secure error messages
+- **Privacy-by-Design framework**: No email enumeration, secure error messages
 
 ---
 

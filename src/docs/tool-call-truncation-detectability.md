@@ -120,4 +120,4 @@ the tree.
 - **The store and DM bodies were not swept for truncation**, because no signal exists to sweep
   them with. Naming it rather than implying the sweep was complete.
 - **Whether the harness reports anything at the call layer** when the remainder text is orphaned.
-  Establishing that means triggering the bug, which the row forbids.
+  Establishing that means triggering the bug by choice, which the row forbids.
