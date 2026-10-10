@@ -15,6 +15,7 @@ the only layer at which the defect was ever visible.
 Venue: :7999 (in-process TestClient, no server, no state mutation).
 """
 
+import os
 import unittest
 
 from fastapi import FastAPI
@@ -180,9 +181,15 @@ class TestInitGateIsVisibleAndDocumented( unittest.TestCase ):
         """
         gated = _route_is_auth_gated( _init_route() )
 
-        path = cu.get_project_root() + "/src/docs/rest-api-reference.md"
-        with open( path, encoding="utf-8" ) as handle:
-            rows = [ line for line in handle if "`/api/init`" in line and line.lstrip().startswith( "|" ) ]
+        path   = cu.get_project_root() + "/src/docs/rest-api-reference.md"
+        folder = path[ : -len( ".md" ) ]
+        parts  = [ os.path.join( folder, name ) for name in sorted( os.listdir( folder ) ) if name.endswith( ".md" ) ] if os.path.isdir( folder ) else []
+        self.assertGreater( len( parts ), 0, f"no parts found in {folder}: the page is an index and the reference is in its parts" )
+        paths  = [ path ] + parts
+        rows   = []
+        for each in paths:
+            with open( each, encoding="utf-8" ) as handle:
+                rows += [ line for line in handle if "`/api/init`" in line and line.lstrip().startswith( "|" ) ]
 
         self.assertEqual( len( rows ), 1, f"expected one /api/init row in {path}, found {len( rows )}" )
         auth_column = rows[ 0 ].split( "|" )[ 3 ].strip()

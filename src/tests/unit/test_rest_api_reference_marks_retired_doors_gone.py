@@ -57,19 +57,30 @@ _GONE_MARKERS = ( "410", "GONE", "Gone", "Retired", "retired" )
 
 def _doc_lines():
     """
-    Read the API reference from the project root.
+    Read the API reference from the project root: the index page and every part in its folder.
 
     Requires:
         - LUPIN_ROOT resolves to a checkout holding DOC_RELATIVE_PATH
+        - the parts sit in the folder named after the page
 
     Ensures:
-        - returns the document's lines, newline-stripped
+        - returns the index's lines, then each part's lines in file-name order, newline-stripped
 
     Raises:
         - FileNotFoundError if the document is missing, which is itself the finding
+        - AssertionError if the folder holds no parts
     """
-    with open( os.path.join( cu.get_project_root(), DOC_RELATIVE_PATH ) ) as handle:
-        return handle.read().splitlines()
+    root   = cu.get_project_root()
+    lines  = []
+    paths  = [ os.path.join( root, DOC_RELATIVE_PATH ) ]
+    folder = os.path.join( root, DOC_RELATIVE_PATH[ : -len( ".md" ) ] )
+    parts  = [ os.path.join( folder, name ) for name in sorted( os.listdir( folder ) ) if name.endswith( ".md" ) ] if os.path.isdir( folder ) else []
+    assert len( parts ) > 0, f"no parts found in {folder}: the page is an index and the reference is in its parts"
+    paths += parts
+    for path in paths:
+        with open( path ) as handle:
+            lines += handle.read().splitlines()
+    return lines
 
 
 def _names_door( text, door ):
