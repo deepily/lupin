@@ -67,8 +67,7 @@ nightly runs averaging 2 red days: $30 per month. Tune
 
 ## 9. Interaction with TFE
 
-As of this guide's last survey, `test fix expediter auto fix enabled = true`
-is the default. Every TestSuiteJob that lands in the done queue is evaluated by
+The default is `test fix expediter auto fix enabled = true`. Every TestSuiteJob that lands in the done queue is evaluated by
 `TestSuiteCompletionWatchdog`. If the job's remediation snapshot shows failures,
 the watchdog auto-dispatches a TFE job. The TFE job then walks its six-phase pipeline, from cluster to rerun validation, as
 described in the [TFE guide](../test-fix-expediter-guide.md).
