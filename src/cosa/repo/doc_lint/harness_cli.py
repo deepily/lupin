@@ -240,6 +240,7 @@ def run_after_checks( args, config, query_fn, agy_runner ):
     with open( args.out, "w", encoding="utf-8" ) as f: json.dump( report, f, indent=2 )
     print( f"report written to {args.out}: default_gate_pass={report[ 'default_gate_pass' ]}" )
     print( f"parse_failed_pairs={report[ 'parse_failed_pairs' ]} retry_calls={report[ 'retry_calls' ]}" )
+    if not report[ "judge_ran" ]: print( "judge not run: misses and false alarms are not measured; " + " ".join( f"list{l[ 'slot' ]} claims={l[ 'claims' ]}" for l in report[ "lists" ] ) )
     for stage, t in report[ "call_timing" ][ "stages" ].items(): print( f"call time {stage}: {t[ 'seconds' ]:.1f}s over {t[ 'calls' ]} calls" )
     for model, b in report[ "call_budget" ].items(): print( f"call budget {model}: {b[ 'used' ]} of {b[ 'cap' ]} calls used" )
     return 0

@@ -57,17 +57,20 @@ def final_absent( runs ):
     Return, per claim, whether every judge run calls it dropped.
 
     Requires:
-        - runs is a non-empty list of runs; each run is a list of verdict rows, one per claim
+        - runs is a list of runs; each run is a list of verdict rows, one per claim
 
     Ensures:
         - a claim is dropped only when every run says absent, so two of three is not enough
         - one verdict other than absent, from any run, keeps the claim
+        - an empty runs list, an extractor-only run, gives an empty list: no judge ran, so nothing was dropped
     """
+    if not runs: return []
     return [ all( run[ i ][ "verdict" ] == "absent" for run in runs ) for i in range( len( runs[ 0 ] ) ) ]
 
 
 def unanimous( runs ):
-    """Return, per claim, whether every judge run gave the same verdict."""
+    """Return, per claim, whether every judge run gave the same verdict; [] for no runs."""
+    if not runs: return []
     return [ len( { run[ i ][ "verdict" ] for run in runs } ) == 1 for i in range( len( runs[ 0 ] ) ) ]
 
 
@@ -103,10 +106,10 @@ def drop_tags( claim_list ):
         - returns ( dropped, tagged ): the indexes of every claim judged dropped, and ( index, kinds ) for the
           ones tagged as history; see history_class
         - the tag excuses nothing: tagged is a subset of dropped
-        - an empty claim list gives two empty lists
+        - an empty claim list, or a list with no judge runs, gives two empty lists
         - it never changes final_absent, caught or flagged, so the gate figures are measured as before
     """
-    if not claim_list[ "claims" ]: return [], []
+    if not claim_list[ "claims" ] or not claim_list[ "runs" ]: return [], []
     return history_class.tag_absent( claim_list[ "claims" ], final_absent( claim_list[ "runs" ] ) )
 
 
@@ -180,6 +183,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
         - false_alarm_rate counts the judge's false alarms only; a flagged run is counted apart, in flagged_rate, and flagged_ok is True only when every list's flagged_rate is at most FLAGGED_CEILING (provisional)
         - the model ids and prompt versions used are recorded in the report
         - history_class carries the class version and, per list, claims_lost (every claim judged dropped: nothing is excused) and the tagged count, the dropped claims that look like history; tagged_claims lists each tagged claim with its pair, list, text, quote and kinds, for a person to read. The gate figures above use every dropped claim, as before
+        - judge_ran is False when config.judge_runs is 0, an extractor-only run: misses, upper_bound, false_alarms, false_alarm_rate, claims_lost and history_tagged are then None, since no judge ran and nothing was missed or flagged; each list's claims counts the extractor's claims either way
         - miss_criterion_met is True only for zero misses on at least 60 seeded pairs in every list
         - false_alarm_ok is True only when every list flags at most FALSE_ALARM_CEILING of the unseeded pairs, so a harness that flags everything cannot pass
         - agreement_ok is True only when both agreement rates are known and at least AGREEMENT_BAR
@@ -196,9 +200,10 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
     empty_unseeded = sum( 1 for r in results if r[ "seed_span" ] is None and r.get( "judge_skipped" ) )
     excluded = sum( 1 for r in results if r.get( "judge_skipped" ) )
     lists    = []
+    judge_ran = config.judge_runs > 0
     for slot in range( config.extractor_lists ):
-        misses = sum( 1 for r in seeded if not caught( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) )
-        alarms = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) )
+        misses = sum( 1 for r in seeded if not caught( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) ) if judge_ran else None
+        alarms = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) ) if judge_ran else None
         flag_pairs = sum( 1 for r in unseeded if run_flagged_pair( r[ "lists" ][ slot ] ) )
         review     = sum( 1 for r in unseeded if flagged( r[ "lists" ][ slot ] ) or run_flagged_pair( r[ "lists" ][ slot ] ) or r[ "lists" ][ slot ][ "parse_failed" ] )
         words      = [ w for r in results if not r[ "lists" ][ slot ][ "parse_failed" ] for w in r[ "lists" ][ slot ][ "flag_words" ] ]
@@ -208,11 +213,12 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "slot"              : slot,
             "positives"         : len( seeded ),
             "misses"            : misses,
-            "upper_bound"       : upper_bound( misses, len( seeded ) ),
+            "upper_bound"       : upper_bound( misses, len( seeded ) ) if judge_ran else None,
+            "claims"            : sum( len( r[ "lists" ][ slot ][ "claims" ] ) for r in results ),
             "unseeded"          : len( unseeded ),
             "unseeded_new_text_empty": empty_unseeded,
             "false_alarms"      : alarms,
-            "false_alarm_rate"  : alarms / len( unseeded ) if unseeded else None,
+            "false_alarm_rate"  : alarms / len( unseeded ) if unseeded and judge_ran else None,
             "seeded_span_discarded" : sum( 1 for r in seeded if discarded_on( r[ "lists" ][ slot ], tuple( r[ "seed_span" ] ) ) ),
             "flagged_pairs"     : flag_pairs,
             "flagged_rate"      : flag_pairs / len( unseeded ) if unseeded else None,
@@ -221,8 +227,8 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
             "review_rate"       : review / len( unseeded ) if unseeded else None,
             "caught_by_flag_only": flag_only,
             "parse_failed_pairs": sum( 1 for r in results if r[ "lists" ][ slot ][ "parse_failed" ] ),
-            "claims_lost"       : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 0 ] ) for r in results ),
-            "history_tagged"    : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 1 ] ) for r in results ),
+            "claims_lost"       : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 0 ] ) for r in results ) if judge_ran else None,
+            "history_tagged"    : sum( len( drop_tags( r[ "lists" ][ slot ] )[ 1 ] ) for r in results ) if judge_ran else None,
         } )
     miss_ok = bool( seeded ) and len( seeded ) >= DEFAULT_POSITIVES_NEEDED and all( l[ "misses" ] == 0 for l in lists )
     fa_ok   = all( l[ "false_alarm_rate" ] is not None and l[ "false_alarm_rate" ] <= FALSE_ALARM_CEILING for l in lists )
@@ -258,6 +264,7 @@ def build_report( results, config, judge_prompt_version=None, jev_run=False ):
                                 "escalation": config.escalation_model, "writer": config.writer_model },
         "prompt_versions"   : { "extractor": claim_extractor.PROMPT_VERSION, "judge": claim_judge.PROMPT_VERSION if judge_prompt_version is None else judge_prompt_version },
         "lists"             : lists,
+        "judge_ran"         : judge_ran,
         "agreement_all"     : { "same": all_same, "claims": all_total, "rate": all_same / all_total if all_total else None,
                                 "interval": interval( all_same, all_total ), "excluded_pairs": excluded },
         "agreement_seeded"  : { "same": seed_same, "claims": seed_total, "rate": seed_same / seed_total if seed_total else None,

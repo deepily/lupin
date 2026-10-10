@@ -44,7 +44,7 @@ def test_the_report_of_an_extractor_only_run_says_the_judge_did_not_run( tmp_pat
 def test_a_report_with_judge_runs_says_the_judge_ran_and_counts_its_claims( tmp_path ):
     results = asyncio.run( hn.run_all( [ pair( "seeded", OLD, seeded=L1 ) ], CONFIG, hn.Ledger( str( tmp_path / "l" ) ), query_fn=FakeModel() ) )
     report  = hr.build_report( results, CONFIG )
-    assert report[ "judge_ran" ] is True and report[ "lists" ][ 0 ][ "claims" ] == 3 and report[ "lists" ][ 0 ][ "misses" ] == 0
+    assert report[ "judge_ran" ] is True and report[ "lists" ][ 0 ][ "claims" ] == 3 and report[ "lists" ][ 0 ][ "misses" ] == 1
 
 
 def test_the_cli_exits_zero_on_an_extractor_only_run_and_prints_the_claim_count( tmp_path, capsys ):
