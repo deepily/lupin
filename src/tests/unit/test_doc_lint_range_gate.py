@@ -7,6 +7,7 @@ stand-in that reports what the worktree holds, so the tests read the staging and
 
 import io
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -364,3 +365,7 @@ def test_a_sweep_over_a_holder_named_with_a_non_numeric_pid_removes_it_and_does_
     os.makedirs( odd )
     assert range_gate.sweep_stale( repo[ "root" ], os.path.dirname( odd ) ) == [ "range-gate-x-y" ]
     assert not os.path.exists( odd )
+
+
+def test_now_gives_local_time_to_the_second_with_its_offset():
+    assert re.fullmatch( r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d", range_gate.now() )
