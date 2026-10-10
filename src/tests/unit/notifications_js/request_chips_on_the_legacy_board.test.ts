@@ -671,7 +671,7 @@ test( "each persona group shows its own pending-request count on the closed head
   assert.equal( groupBadge( "Krishna" )!.getAttribute( "aria-label" ), "2 pending requests" );
   assert.equal( groupBadge( "Mr Radio" )!.textContent, "1 request" );
   assert.equal( groupBadge( "Mr Radio" )!.getAttribute( "aria-label" ), "1 pending request" );
-  assert.equal( groupBadge( "Sam" ), null, "no request means no badge, not a zero" );
+  assert.ok( groupBadge( "Sam" ) === null, "no request means no badge, not a zero" );
   assert.equal( document.querySelectorAll( "#holding-area-container .holding-area-group:not(.collapsed)" ).length, 0 );
 } );
 
@@ -680,7 +680,7 @@ test( "a repaint after the request is answered drops the badge", () => {
   ui.renderHoldingArea( { status: "ok", tasks: [ filedBy( "a1", "krishna 420f5ec9", "admit" ) ] } );
   assert.ok( groupBadge( "Krishna" ) );
   ui.renderHoldingArea( { status: "ok", tasks: [ { ...filedBy( "a1", "krishna 420f5ec9", "admit" ), request_state: "approved" } ] } );
-  assert.equal( groupBadge( "Krishna" ), null );
+  assert.ok( groupBadge( "Krishna" ) === null, "answering the request must drop the badge" );
 } );
 
 test( "without the shared module the group still paints, just with no badge", () => {
@@ -690,7 +690,7 @@ test( "without the shared module the group still paints, just with no badge", ()
   try {
     ui.renderHoldingArea( { status: "ok", tasks: [ filedBy( "a1", "krishna 420f5ec9", "admit" ) ] } );
     assert.ok( document.querySelector( '#holding-area-container .holding-area-group[data-filer="Krishna"]' ) );
-    assert.equal( groupBadge( "Krishna" ), null );
+    assert.ok( groupBadge( "Krishna" ) === null, "no shared module means no badge" );
   } finally {
     window.LUPIN_TASK_REQUEST = shared;
   }

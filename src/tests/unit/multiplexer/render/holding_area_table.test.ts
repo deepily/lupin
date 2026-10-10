@@ -350,8 +350,8 @@ test( "a persona with several pending requests shows the count; the row total is
 test( "a persona with no pending request has NO badge — not a zero, not a hidden span", () => {
   const el = renderHoldingAreaGroup( flatGroup( "Sam", [
     requestRow( "t1", "Sam", null, null ), requestRow( "t2", "Sam", "approved", "admit" ) ] ), null );
-  assert.equal( el.querySelector( ".holding-area-group-request-badge" ), null );
-  assert.equal( el.querySelector( ".task-request-badge" ), null );
+  assert.ok( el.querySelector( ".holding-area-group-request-badge" ) === null, "a group with no pending request must carry no group badge" );
+  assert.ok( el.querySelector( ".task-request-badge" ) === null, "a group with no pending request must carry no row badge" );
 } );
 
 test( "in a fragment only the personas with requests carry a badge", () => {
