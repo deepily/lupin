@@ -4,9 +4,9 @@ pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
   - cosa.agents.test_fix_expediter.job.TestFixExpediterJob@402076182b
   - cosa.agents.test_fix_expediter.job.TestFixExpediterJob.do_all@14c1dab6f0
-  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator@71b61f0581
-  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase2_propose@a962b5c905
-  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase5_git@c558da9428
+  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator@c4582ce640
+  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase2_propose@a9dcce6363
+  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase5_git@6ee1c150b3
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase6_validation@b7f67e93c3
   - cosa.agents.test_fix_expediter.cluster.llm_refine@a616338366
   - cosa.agents.test_fix_expediter.resume_resolver.resolve_resume_target@a22583b016
@@ -31,7 +31,7 @@ TFE takes the failures from one finished test-suite run, groups them into cluste
 
 ## Fix, git, rerun
 - `run_phase3_fix` hands each selected fix to the shared `FixExecutor` with prompt key `tfe`. With `continue on cluster failure` false, one failed cluster stops the rest; shipped value is true.
-- `run_phase5_git` makes one commit per fixed cluster. At trust level 1 or 2 they go on the current branch and no pull request is opened. At 3 and above it creates a branch, commits per cluster and runs `gh pr create`. The strategist's push step needs a `push_branch` that `GitOps` does not have, so no push runs today. Delete this clause when the bug "GitStrategist.commit_and_pr_multi says Pushed and opens a PR without pushing: no push_branch exists" closes. If the PR step fails the branch is left. `trust mode` `inherit` (shipped) gives level 1 because TFE wires no proxy, so shipped TFE opens no PR; `fixed_l3` gives 3.
+- `run_phase5_git` makes one commit per fixed cluster. At trust level 1 or 2 they go on the current branch and no pull request is opened. At 3 and above it creates a branch and commits per cluster. It pushes and runs `gh pr create` only when `test fix expediter push fix branch enabled` is true; the shipped value is false. The push is `GitOps.push_branch`, which pushes only a branch named `fix/<name>`. With the key false the commits stay local, the original branch is restored, no pull request opens and the error names the key. If the PR step fails the branch is left. `trust mode` `inherit` (shipped) gives level 1 because TFE wires no proxy, so shipped TFE opens no PR; `fixed_l3` gives 3.
 - `run_phase6_validation` queues a `TestSuiteJob` only if a fix succeeded, and does not wait for it. `rerun scope` `affected` (shipped) reruns the original suites; `full` runs all.
 - The rerun carries `triggered_by_tfe`, and `test_suite_completion_watchdog` skips such jobs, so a rerun does not start another TFE.
 
