@@ -272,3 +272,16 @@ def test_a_canary_stopped_early_is_reported_with_its_own_repeats_not_refused( se
     capsys.readouterr()
     assert frun.cli( setup.args( "report" ) ) == 0
     assert "left out as incomplete" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize( "short", [ "fl-run", "fl-canary" ] )
+def test_the_repeat_check_reads_both_files_so_a_short_one_in_either_place_is_refused( setup, capsys, short ):
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000" ) ) == 0
+    results = setup.data / "e2e-results"
+    canary  = json.loads( ( results / "fl-canary.json" ).read_text( encoding="utf-8" ) )
+    for name in ( "fl-canary", "fl-run" ):
+        record = dict( canary, run_name=name, questions=canary[ "questions" ][ :3 ] if name == short else canary[ "questions" ] )
+        ( results / f"{name}.json" ).write_text( json.dumps( record ), encoding="utf-8" )
+    capsys.readouterr()
+    assert frun.cli( setup.args( "report", extra=[ "--repeats", "5" ] ) ) == 2
+    assert "3 repeats per need" in capsys.readouterr().err

@@ -485,3 +485,13 @@ def test_a_revised_estimate_that_clears_the_projection_is_refused_when_the_ledge
     with pytest.raises( s1.CanaryTripped, match="above the allowance" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=projection )
     path = scratch.data / "e2e-results" / "e2e-canary.canary.json"
     assert json.loads( path.read_text() )[ "approved" ] is None
+
+
+def test_the_estimate_is_held_against_the_room_after_the_spend_already_on_the_ledger( tmp_path ):
+    scratch = Env( tmp_path, limit=2_000_000 )
+    rl.AccountLedger( scratch.path ).begin_run( "earlier", 500_000 )                            # 500,000 held, so 1,500,000 of the limit is room
+    with pytest.raises( s1.DriverRefused, match="1500000 tokens of room" ):
+        run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5, spec=dict( run.E2E_SPEC, estimate=1_600_000 ) )
+    assert not scratch.env().results_dir.exists()
+    report = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5, spec=dict( run.E2E_SPEC, estimate=1_500_000 ) )
+    assert report[ "allowance_tokens" ] <= 1_500_000
