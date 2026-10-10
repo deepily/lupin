@@ -2527,8 +2527,9 @@ def get_session_info() -> dict:
     Returns:
         dict with project name, session_id, sender_id, server_url, version,
         speakerphone_on flag, claude_code metadata from the session bridge,
-        and voice_persona dict (None if allocation failed; otherwise
-        {name, voice_id, icon, color, borrowed, display_name?})
+        voice_persona dict (None if allocation failed; otherwise
+        {name, voice_id, icon, color, borrowed, display_name?}), and skeleton_crew
+        ({on, since, set_by, settings_mute_while_off}, or None when unreadable)
     """
     resolved_sender = _wait_for_sender_id()
     # Resolve the global TTS interaction mode (solo | chorus) so the consumer
@@ -2549,6 +2550,15 @@ def get_session_info() -> dict:
         "speakerphone_on"      : False,
         "tts_interaction_mode" : _tts_mode
     }
+
+    # The skeleton crew switch, read fresh from the configuration file on every call so a
+    # flip shows up with no restart. None means the state could not be read. A manager
+    # reads None as unknown and not as off.
+    try:
+        from lupin_mcp import skeleton_crew
+        info[ "skeleton_crew" ] = skeleton_crew.describe()
+    except Exception:
+        info[ "skeleton_crew" ] = None
 
     # Include CC session bridge metadata when available
     try:
