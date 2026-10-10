@@ -194,7 +194,7 @@ While most platforms route via system prompts or keyword matching, Lupin fine-tu
 
 When an agent solves a problem, the solution is embedded and cached in the vector store. Next time the same (or similar) question arrives, the answer comes from vector search -- not from re-running the agent.
 
-**As of v0.1.9 the backend is PostgreSQL + pgvector** (cutover 2026-07-07; ~202,000 vectors backfilled, dual-engine equivalence proven, exact scan chosen over HNSW). The LanceDB path remains behind a one-flag rollback. The speedup numbers below are the original file-based → LanceDB benchmark that motivated a real vector store in the first place:
+**As of v0.1.9 the backend is PostgreSQL + pgvector** (~202,000 vectors backfilled, dual-engine equivalence proven, exact scan chosen over HNSW). The LanceDB path remains behind a one-flag rollback. The speedup numbers below are the original file-based → LanceDB benchmark that motivated a real vector store in the first place:
 
 | Operation | File-Based | Vector store | Speedup |
 |-----------|------------|--------------|---------|
@@ -239,9 +239,9 @@ The first decision proxy for AI agents with academic-grade statistical rigor:
 | **Total authored test cases** | **29,167** | 26,743 Python + 2,424 TypeScript |
 | Interactive proxy scenarios | 12 | Calculator, CRUD, and Expediter agents via auto-proxy (script-driven, not counted above) |
 
-Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`. They were **re-derived 2026-08-28**, and the previous table was a 2026-08-07 snapshot. Rows are grouped by directory so anyone can reproduce the number. WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number. The extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
+Counts are of authored test functions (`def test_*` / `it(` / `test(`) across `src/tests/` and `src/cosa/tests/`. They were **re-derived** for this table, and the previous table was an older snapshot. Rows are grouped by directory so anyone can reproduce the number. WebSocket coverage is no longer a single row because those tests now live where the code they exercise lives. A repo-wide grep returns a slightly larger number. The extra matches are self-test functions embedded in production modules, which are not part of any suite. **The suite figure is the one to quote.**
 
-**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured 2026-08-26 across the unit and CoSA tiers, with the gate floor set at 98. The floor is deliberately the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime. Its paths execute under the test-server tiers that are not yet folded into this figure. So the number is honest about the half of the system it can see, and explicit that a whole-system figure does not yet exist.
+**Coverage: 98.46%**, lines and branches, over 62,225 statements — measured across the unit and CoSA tiers, with the gate floor set at 98. The floor is set at the integer *below* the measurement: a gate set above the truth is a gate that is red about nothing. The remaining 960 uncovered statements are concentrated in the server runtime. Its paths execute under the test-server tiers that are not yet folded into this figure. So the number is honest about the half of the system it can see, and explicit that a whole-system figure does not yet exist.
 
 Built and maintained by a single engineer. Every PR must pass all tiers before merge, at 100% line, branch, and function coverage. A hash-chained attestation ledger records that each tier actually ran -- a green report that cannot prove it executed is not a green report.
 
@@ -312,7 +312,7 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
 
-**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — a 2026-04-12 snapshot of LoC distribution with a mermaid diagram and a 60/40 Python split. It also covers docstring-ratio observations and the operational implications of the CoSA-never-commit rule.
+**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — a snapshot of LoC distribution with a mermaid diagram and a 60/40 Python split. It also covers docstring-ratio observations and the operational implications of the CoSA-never-commit rule.
 
 ---
 
