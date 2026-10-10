@@ -19,13 +19,13 @@ pins:
 How a job tells the user something or asks a question: by voice when a notification path is configured, by console text when not. Agent jobs call `cosa.agents.utils.voice_io`; [[agentic-job-contract]] describes the jobs.
 
 ## What it does
-- `notify` announces progress, `ask_yes_no` asks for a yes or no, `present_choices` asks a multiple-choice question and returns a dict, `choose`, `select_themes` and `select_topics` return a bare label or list.
+- `notify` announces progress, `ask_yes_no` asks for a yes or no, `present_choices` asks a multiple-choice question and returns a dict. `choose`, `select_themes` and `select_topics` return a bare label or list.
 - `configure( cosa_interface )` binds the module to one agent's `cosa_interface`, which must provide `notify_progress`, `ask_confirmation`, `get_feedback` and `present_choices`.
-- `AgentNotificationDispatcher` is what seven of the ten `cosa_interface.py` files build (not decision_proxy, notification_proxy or test_fix_expediter, which reuses bug_fix_expediter's): it builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
+- `AgentNotificationDispatcher` is what seven of the ten `cosa_interface.py` files build (not decision_proxy, notification_proxy or test_fix_expediter, which reuses bug_fix_expediter's). It builds the sender id (`{agent}@{project}.deepily.ai[#suffix]`, from `build_sender_id`) and sends from a worker thread. `sync_notify.notify` is the fire-and-forget REST call for the synchronous proxy agents, which have no event loop.
 
 ## When nobody can answer
-- On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`, and raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers; on the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
-- One path bypasses that: `AgentNotificationDispatcher.ask_confirmation` swallows an unexpected error and returns `default == "yes"` (bug row 6734ff14). An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`), and `ask_confirmation` returns it as the answer. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`.
+- On a run with no terminal, when voice is unavailable or the dispatch raises, `ask_yes_no` returns the caller's `unattended_default`. It raises `VoiceGateNoDefaultError` if none was given. At a terminal `default` is only what the prompt offers. On the dispatched path it is also sent on as the notification's `response_default`, so the two are not fully separate.
+- One path bypasses that: `AgentNotificationDispatcher.ask_confirmation` swallows an unexpected error and returns `default == "yes"`. It is filed as the bug "ask_confirmation answers with `default` on an unexpected error, ignoring unattended_default". An offline user does not raise: the server streams the `response_default` straight back (exit code 0, `default_used`). `ask_confirmation` returns it as the answer. A timeout (exit code 2), another non-zero code, a validation error or a connection error is raised as `VoiceGateTimeoutError`.
 - `read_gate_answer` returns the answer under a header. A missing header raises `VoiceGateNoDefaultError` unless the caller passed an `unattended_default`, which is then returned; a default used is logged as a warning.
 
 ## Invariants
@@ -37,4 +37,4 @@ How a job tells the user something or asks a question: by voice when a notificat
 - A new agent adds a `cosa_interface.py` that wraps an `AgentNotificationDispatcher( agent_type=... )` and a `voice_io.py` that calls `configure` and re-exports the core functions. Copy deep_research's pair.
 
 ## Don't
-- Don't answer a gate with `options[0]` or a hard-coded fallback; pass `unattended_default` or `response_default` so the choice is on the record. Don't import `cosa.agents.test_fix_expediter` from inside a gate: that package's `__init__` rebinds the interface to swe_team's, which has no `present_choices`.
+- A gate answered with `options[0]` or a hard-coded fallback leaves no record of the choice; `unattended_default` or `response_default` puts it on the record. Importing `cosa.agents.test_fix_expediter` from inside a gate breaks it, because that package's `__init__` rebinds the interface to swe_team's, which has no `present_choices`.

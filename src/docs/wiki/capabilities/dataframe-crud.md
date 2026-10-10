@@ -28,7 +28,7 @@ A voice request such as "add milk to my groceries list" becomes a stored change 
 ## Don't
 - Don't match on `id`, `list_name` or `created_at` in `match_fields`. They are infrastructure columns and the match is refused.
 - Don't assume `update_item` guards against many matches. Only `delete_item` refuses a `match_fields` delete that hits more than one row.
-- Don't skip the confirmation for `delete`, `delete_list` or `update`. `needs_confirmation` is true for those exact lowercase names whatever the model says. `dispatch` lowercases and strips the operation, but `is_destructive` does not. So `Delete` runs unconfirmed unless the model also set `requires_confirmation` to true. It is tracked on bug row 1143336c-f840-4cfe-aeb9-246c3695e99b.
+- Don't skip the confirmation for `delete`, `delete_list` or `update`. `needs_confirmation` is true for those exact lowercase names whatever the model says. `dispatch` lowercases and strips the operation, but `is_destructive` does not. So `Delete` runs unconfirmed unless the model also set `requires_confirmation` to true. It is tracked as the bug titled "CRUD voice confirmation is skipped when the operation is Delete or update".
 
 ## Invariants
 - A confirmation asks by voice with a 30 second wait. Denial, timeout or error all mean no. A job traced to a test suite takes no without asking.

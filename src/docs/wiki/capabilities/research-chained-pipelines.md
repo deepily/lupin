@@ -18,7 +18,7 @@ Two queue jobs run [[deep-research]] and then hand its saved report to [[podcast
 - The agent runs research first, then passes the saved report path to the second generator: as `research_doc_path` for the podcast, as `source_path` for the presentation.
 - The agent skips the second step if research was cancelled (state `CANCELLED`) or returned no `report_path` (state `FAILED`).
 - Any exception after the voice setup ends the run with state `FAILED` and `error` set; the agent returns the result instead of raising. The job then raises on `FAILED`, so the queue records a failure. A cancelled run returns a text answer and does not raise.
-- `ChainedResult` carries both legs' cost (`dr_cost`, `pg_cost`) and `total_cost`, their sum. `is_partial()` is true when the state is `DEEP_RESEARCH_DONE` or `FAILED`, `research_path` is set and the final artifact is `None` (`audio_path` for the podcast, `yaml_path` for the presentation). A cancelled run is not partial.
+- `ChainedResult` carries both legs' cost (`dr_cost`, `pg_cost`) and `total_cost`, their sum. `is_partial()` is true when the state is `DEEP_RESEARCH_DONE` or `FAILED`, `research_path` is set and the final artifact is `None`. The final artifact is `audio_path` for the podcast and `yaml_path` for the presentation. A cancelled run is not partial.
 - The agent never sets `PODCAST_GEN_DONE` or `PRESENTATION_GEN_DONE`; a finished run ends at `COMPLETED`.
 
 ## How to call it

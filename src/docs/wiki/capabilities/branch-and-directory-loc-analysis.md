@@ -19,7 +19,7 @@ Counts lines of code two ways: what a branch changed against a base (`BranchChan
 - Run it with `python -m cosa.repo.run_branch_analyzer` (flags `--repo-path`, `--base`, `--head`, `--config`, `--output console|json|markdown`, `--save-output`). It exits 0 on success, 1 on error, 130 on Ctrl-C.
 - From code: `BranchChangeAnalyzer( repo_path=..., base_branch=..., head_branch=... ).analyze()` returns a stats dict; `format_results( stats, format=... )` renders it. With no arguments it compares `HEAD` to `main`, using a three-dot `git diff`.
 - The stats dict has `overall` (`total_added`, `total_removed`, `net_change`, `files_changed`), `by_file_type`, `language_details` and `files_changed_set`.
-- Only added lines are split into code, comment and docstring, and only for languages in `analysis.supported_languages` (default python, javascript, typescript); the statistics collectors hard-code those same three names for the per-language report, so a language added to the config is not reported separately. A blank added line counts toward the file type's `added` total but toward none of the three.
+- Only added lines are split into code, comment and docstring, and only for languages in `analysis.supported_languages` (default python, javascript, typescript). The statistics collectors hard-code those same three names for the per-language report, so a language added to the config is not reported separately. A blank added line counts toward the file type's `added` total but toward none of the three.
 
 ## Directory count: `DirectoryAnalyzer`
 - Run it with `python -m cosa.repo.run_directory_analyzer --path <dir>` (same output flags). From code: `DirectoryAnalyzer().analyze( path )`, then `format_results( stats, path, format=... )`.
@@ -28,7 +28,7 @@ Counts lines of code two ways: what a branch changed against a base (`BranchChan
 
 ## What the directory scan skips
 - A directory is skipped when its name is exactly in `directory.exclude_dirs`. The match is exact string membership, so a glob-looking entry such as `*.lancedb` matches nothing.
-- Files matching `directory.exclude_files`, binary files (judged by extension only, so an extensionless file is never binary), files over `max_file_size` and files no configured encoding can decode are skipped. Symlinks are not followed unless `follow_symlinks` is set. Skips are counted in `get_scan_stats()`, except a skipped symlink, which is not counted; none raises.
+- Files matching `directory.exclude_files` are skipped, and so are binary files (judged by extension only, so an extensionless file is never binary). Files over `max_file_size` and files no configured encoding can decode are skipped too. Symlinks are not followed unless `follow_symlinks` is set. Skips are counted in `get_scan_stats()`, except a skipped symlink, which is not counted; none raises.
 
 ## Daily deltas: `git_loc_delta`
 - `python -m cosa.repo.run_git_loc_delta` buckets `git log --numstat` rows by committer date and file type. Modes: today (default), `--since/--until`, `--branch`. `--all-branches` is refused with `--branch`.

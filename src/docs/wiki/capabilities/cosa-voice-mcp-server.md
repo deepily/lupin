@@ -9,12 +9,12 @@ pins:
 ---
 # cosa-voice MCP server
 
-`src/lupin_mcp/cosa_voice_mcp.py` is the FastMCP server (`mcp`) a Claude Code seat uses to speak to the user, ask blocking questions and read or change its own session state. It runs on the host as a stdio subprocess of the seat and talks to the Lupin server over HTTP.
+`src/lupin_mcp/cosa_voice_mcp.py` is the FastMCP server (`mcp`) of a Claude Code seat. The seat uses it to speak to the user, ask blocking questions and read or change its own session state. It runs on the host as a stdio subprocess of the seat and talks to the Lupin server over HTTP.
 
 ## Tools covered here
 - `notify` announces and returns at once; `converse`, `ask_yes_no`, `ask_multiple_choice` and `ask_open_ended_batch` block until the user answers or the timeout passes.
 - `get_session_info` reads project, session id, sender id, server URL, speakerphone flag, voice persona and bridge metadata. `set_session_topic` writes the topic into the session bridge file and pushes it to the UI.
-- `enable_speakerphone`, `disable_speakerphone` and `request_persona` change speakerphone and voice-persona state through the Lupin server. The two speakerphone verbs fall back to writing the bridge file when the server is unreachable, refuses the login or toggle, or no credentials are found; `request_persona` has no fallback. Their docstrings say to call them only on a user's instruction; the function bodies check nothing of the kind.
+- `enable_speakerphone`, `disable_speakerphone` and `request_persona` change speakerphone and voice-persona state through the Lupin server. The two speakerphone verbs fall back to writing the bridge file when the server is unreachable or refuses the login or toggle. They also fall back when no credentials are found. `request_persona` has no fallback. Their docstrings say to call them only on a user's instruction; the function bodies check nothing of the kind.
 - Other families live in the same file. They have their own pages: commons and DM ([[mcp-commons-and-dm]]), spawn, dismiss and `self_respin` ([[mcp-session-spawn-and-reap]]), task store ([[mcp-task-store-tools]]), and reuse search ([[reuse-search-tools]]).
 
 ## How a call reaches the Lupin server

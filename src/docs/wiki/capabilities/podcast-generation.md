@@ -25,11 +25,11 @@ pins:
 - `from_saved_script` with `do_review_only_async` or `do_audio_only_async` resumes from a script file; only the CLI (`__main__.py`) uses them.
 
 ## Invariants
-- The script review gate fails open: no answer within `script_review_timeout_seconds` (600) continues as "Approve script", and the completion notice says the script was approved automatically (`auto_approval_notice`). Each translated script has its own gate, with "Skip language".
+- The script review gate fails open: no answer within `script_review_timeout_seconds` (600) continues as "Approve script". The completion notice says the script was approved automatically (`auto_approval_notice`). Each translated script has its own gate, with "Skip language".
 - "Revise script" followed by silence raises `PodcastGenerationError` and the job fails; it is not turned into an approval. The feedback wait is 300 seconds.
 - A script with zero segments raises `PodcastGenerationError` before the gate; it is never offered for approval.
 - If some segments fail, the job asks whether to continue with partial audio and takes "yes" when nobody can answer. A language with no successful segment is skipped; if no language has audio, the job fails with a `RuntimeError` that names `ELEVENLABS_API_KEY`.
-- The `PodcastConfig` code default is `claude-opus-4-6` with at most 5 turns, but the shipped INI (`[Lupin: Baseline]`) sets `podcast script model` to `claude-opus-5`; `podcast script max turns` is 5 there too.
+- The `PodcastConfig` code default is `claude-opus-4-6` with at most 5 turns. The shipped INI (`[Lupin: Baseline]`) sets `podcast script model` to `claude-opus-5` instead. `podcast script max turns` is 5 there too.
 
 ## How to extend
 - A new phase gets an `OrchestratorState` value and a step in `do_all_async` followed by `_check_stop()`.

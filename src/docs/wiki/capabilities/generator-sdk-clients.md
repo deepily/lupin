@@ -25,14 +25,14 @@ The podcast, presentation and deep-research agents each have one client class th
 - Each call returns an `APIResponse` (text, model, tokens, stop reason, `sdk_cost_usd`). Podcast and presentation total usage in a `CostEstimate`; research records it in `CostTracker`, which can raise `BudgetExceededError`.
 
 ## Invariants
-- `max_tokens` is accepted and ignored. `temperature` is turned into a sentence appended to the system prompt (podcast and presentation: 0.75 and above creative, 0.55 and below precise; research: 0.9 and above, 0.5 and below). It does not change sampling.
-- A call with no tools uses permission mode `"default"`. In `"plan"` mode the model writes a plan for the output and the JSON parser then fails (podcast job `pg-efc6b2c8`, presentation job `pr-62254a7f`, 2026-08-04). Only research calls that have tools use `"plan"`.
+- `max_tokens` is accepted and ignored. `temperature` is turned into a sentence appended to the system prompt. In podcast and presentation, 0.75 and above reads creative and 0.55 and below precise. In research, the cut-offs are 0.9 and above, and 0.5 and below. It does not change sampling.
+- A call with no tools uses permission mode `"default"`. In `"plan"` mode the model writes a plan for the output and the JSON parser then fails. This happened on 4 Aug 2026 to a podcast job, `pg-efc6b2c8`, and to a presentation job. Only research calls that have tools use `"plan"`.
 - `call_with_json_output` raises `ValueError` when no JSON object can be recovered, and never returns a default. Podcast and presentation use `recover_json_object` ([[xml-io-models]]); research has its own `extract_json_object`.
 - Construction raises `ImportError` if `claude_agent_sdk` is missing. `close()` does nothing.
 - `sdk_cost_usd` is the SDK's telemetry, covered by the plan; the token prices in `CostEstimate` are approximate.
 
 ## How to extend
-- Add a `call_for_*` method that calls `_call_api` with a new `call_type`. Keep `tools=[]`; the nine `call_for_*` methods in podcast and presentation are one exact-clone group in the duplicate report, so a change to one usually belongs in the other.
+- Add a `call_for_*` method that calls `_call_api` with a new `call_type`. Keep `tools=[]`. The nine `call_for_*` methods in podcast and presentation are one exact-clone group in the duplicate report. A change to one usually belongs in the other.
 
 ## Don't
 - Don't set permission mode `"plan"` on a call without tools.

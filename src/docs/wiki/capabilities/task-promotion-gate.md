@@ -21,7 +21,7 @@ The rules for moving a row out of the holding area (`not_approved`) onto somebod
 - A worker is refused and the owner is never asked. A manager's promotion causes the ask. The operator's own promotion skips it. Persona `rick` in `ASK_EXEMPT_PERSONAS` is allowed at once, stamped `self`. The async door mints no ticket for it. Only a yes allows; a no, an answer it cannot read and a timed-out default all refuse.
 - The async path returns a ticket at once. `resolve_ticket` then asks, re-validates under a fresh row lock and applies the move. If the transition is no longer legal, the ticket resolves `superseded`.
 - A manager's promote or demote request (`task_request_lifecycle`) stays pending until the operator answers. A denial closes it and the manager must file again. An admit request must also name one of the manager's own tickets to delete (`task_request_pledge`, switch `sword_of_damocles_active`).
-- `task_priority_firewall` keeps three separate checks: P0 only for the operator, raising into P1 to P4 only for the operator or a manager, and creating above P5 only for the operator or a manager.
+- `task_priority_firewall` keeps three separate checks. P0 is only for the operator. Raising into P1 to P4 is only for the operator or a manager. Creating above P5 is only for the operator or a manager.
 
 ## Invariants
 - Credentials come before the owner is asked. A validated account persona passes `manager_refusal` first, because a browser has no session bridge. An unreadable bridge is refused, not waved through.
@@ -33,6 +33,6 @@ The rules for moving a row out of the holding area (`not_approved`) onto somebod
 - The actor a caller declares buys no approver authority. `refusal_for_admission` only names it in a refusal; authority comes from the account email on the validated token. For an account caller, `recorded_actor` writes `<identity> (<declared>)`. The identity is the mapped approver persona or the email, so a false claim can be traced. An API-key caller has no account, and its declared actor is recorded unchanged.
 
 ## How to extend
-- Add a rule as a pure function in its own module and have the router call it, so a test can watch it refuse without a database.
+- Add a rule as a pure function in its own module and have the router call it. A test can then watch it refuse without a database.
 - Keep the three priority rules as three checks. They key on different evidence.
 - Change a live setting through `set_overrides` in `task_approval_settings`; a hand-edited file is read once at boot and then ignored.

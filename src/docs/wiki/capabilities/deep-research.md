@@ -20,15 +20,15 @@ pins:
 ## What it does
 - `run_research` runs four steps inline: clarify the query, plan sub-topics, research each topic, synthesize one report. The job then makes an abstract (`generate_abstract_for_cli`) and saves the report (`save_report_with_frontmatter`, local or GCS).
 - Topics are researched one after another, not in parallel. Each result is cached for the day under `io/deep-research/{user_email}/cache/{date}`; the key is the topic's six alphabetically-first words (`normalize_query`).
-- The `ResearchConfig` code default is `claude-opus-4-6` for the lead, but the shipped INI (`[Lupin: Baseline]`, every section inherits it) sets `deep research lead model` to `claude-opus-5`. Subagents run `claude-sonnet-4-6` and at most 20 turns per call in both. The job's `lead_model`, `audience` and `audience_context` override.
+- The `ResearchConfig` code default is `claude-opus-4-6` for the lead. The shipped INI (`[Lupin: Baseline]`, every section inherits it) sets `deep research lead model` to `claude-opus-5` instead. Subagents run `claude-sonnet-4-6` and at most 20 turns per call in both. The job's `lead_model`, `audience` and `audience_context` override.
 - `source_document` paths are already validated by the v2 door; `query_with_seed_context` puts them in front of the question for this job and for the chained ones.
 
 ## Invariants
-- `ResearchOrchestratorAgent` is not on this path: its docstring says it is reserved and not wired into production, and outside its own file only `cli.py` imports it (unused) and `__init__.py` exports it.
-- The job defaults to `no_confirm=True`: no clarification question and no plan yes/no. With `confirm_topics` (set for a document run) the user ticks topics; no answer in 600 seconds cancels with nothing spent, unless the INI key `deep research cancel when no topics ticked` is false.
+- `ResearchOrchestratorAgent` is not on this path. Its docstring says it is reserved and not wired into production. Outside its own file, only `cli.py` imports it (unused) and `__init__.py` exports it.
+- The job defaults to `no_confirm=True`: no clarification question and no plan yes/no. With `confirm_topics` (set for a document run) the user ticks topics. No answer in 600 seconds cancels with nothing spent, unless the INI key `deep research cancel when no topics ticked` is false.
 - Cancellation is polled after clarification, after planning, before each topic and before synthesis.
-- A `CostTracker` raises `BudgetExceededError` when a recorded call would pass `budget`. `run_research` catches it, notifies and returns `None`, so the job answers "Research was cancelled by the user" and ends `COMPLETED` (bug row 2911d2a2). The abstract step also swallows every exception, so the job's own `BudgetExceededError` handler is not reached in practice.
-- `DeepResearchJob` does not pass `user_email` to `run_research`, so its cache folder has an empty user segment and is shared by all users (bug row 20827e36). The chained agents pass theirs.
+- A `CostTracker` raises `BudgetExceededError` when a recorded call would pass `budget`. `run_research` catches it, notifies and returns `None`, so the job answers "Research was cancelled by the user" and ends `COMPLETED`. This is the filed bug "Deep research budget overrun is reported as cancelled by the user and the job ends `COMPLETED`". The abstract step also swallows every exception, so the job's own `BudgetExceededError` handler is not reached in practice.
+- `DeepResearchJob` does not pass `user_email` to `run_research`, so its cache folder has an empty user segment and is shared by all users. This is the filed bug "DeepResearchJob omits user_email in run_research, so its search cache folder is shared by all users". The chained agents pass theirs.
 
 ## How to extend
 - Add a step inside `run_research` with a cancel check before it; keep JSON steps on `call_with_json_output`.

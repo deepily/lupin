@@ -17,7 +17,7 @@ How a notification is created, queued, answered, expired and pushed to a phone. 
 ## What it does
 - `POST /api/notify` (`notify_user`) checks the per-sender rate limit, finds the target user and stores a row unless `persist` is false. If the user has a live connection it pushes a `NotificationItem` onto the `NotificationFifoQueue`, which emits a WebSocket event. If not, and the request carries a `job_id`, it tries that job's `cc-listener` session. Otherwise it answers `user_not_available` and queues nothing.
 - A notification can ask for a response; `POST /api/notify/response` records the answer.
-- `check_notify_allowed` is a sliding window per `sender_id`: 60 sends per 10 seconds by default, read from `messaging backpressure *` keys and re-read when the INI file changes. Over the cap the route answers 429 with `Retry-After`.
+- `check_notify_allowed` is a sliding window per `sender_id`. The default is 60 sends per 10 seconds, read from `messaging backpressure *` keys and re-read when the INI file changes. Over the cap the route answers 429 with `Retry-After`.
 - `notification_expiry_sweeper` closes response-required notifications whose asker walked away. The loop in `lupin_app/main.py` runs `sweep_once` every `notification expiry sweep interval seconds` (300 in the INI) on at most 200 rows.
 - When a user-targeted notification is enqueued, before the queue checks whether emission is enabled, it calls `FcmWakeService.maybe_send_wake`. The wake is a content-free `ws_wake` push that tells the mobile app to fetch over the API. Device tokens are registered at `/api/fcm/register-token` and removed at `/api/fcm/unregister-token`.
 - `/api/fcm/push-pause` (admin) turns wake pushes off in memory, optionally for a set number of minutes.
@@ -25,7 +25,7 @@ How a notification is created, queued, answered, expired and pushed to a phone. 
 ## Invariants
 - `/api/notify/response` accepts an answer to a `delivered` row with no deadline, and to an `expired` row only until `notification grace period seconds` (300) after `expires_at`. After that it answers 400, and a row already `responded` answers 400.
 - The sweeper waits that same grace key past `expires_at` before it marks a row expired. It reads one key and not a second delay, so the two cannot disagree. It never writes `response_default`, because nobody was waiting for it.
-- A notification with no `user_id` never wakes a device. The wake policy runs in this order: enabled, paused, a live mobile WebSocket, debounce, at least one registered token, send. A push inside the debounce window (60 seconds in the INI) is deferred to one trailing wake and not dropped, and a device that reconnected meanwhile is not woken.
+- A notification with no `user_id` never wakes a device. The wake policy runs in this order: enabled, paused, a live mobile WebSocket, debounce, at least one registered token, send. A push inside the debounce window (60 seconds in the INI) is deferred to one trailing wake and not dropped. A device that reconnected meanwhile is not woken.
 - A pause lives only in memory. Restarting the server restores the boot value of `fcm wake push enabled`.
 - A wake failure never reaches the notification path: the hook catches every exception.
 

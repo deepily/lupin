@@ -27,7 +27,7 @@ Each pane renderer owns one mount node and repaints from store events on the bus
 - `FleetStatusRendererImpl` repaints on `store_fleet_status_changed`. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
 
 ## Don't
-- Don't add a card input without adding it to `inputsFor` or dropping the caches, as `setAppTimezone` does. Don't mutate a `Notification` row in place; rows are compared by identity.
+- A card input has to be added to `inputsFor` or the caches dropped, as `setAppTimezone` does. A `Notification` row is never mutated in place, because rows are compared by identity.
 - Don't answer a card by another route. This tree's `.ts` files POST `/api/notify/response` only from `respondAndAwait`, which refuses states other than pending or failed.
 - Don't wait for a `BroadcastStore` event; it emits none. `BroadcastCardRenderer` must call `recipientsChanged` on the tally after the latest fetch settles, passing `false` when it failed.
 

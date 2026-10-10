@@ -19,7 +19,7 @@ The command-line side of notifications: scripts and functions that call `POST /a
 - `notify_user` sends one notification and returns `True` or `False`. `notify_user_async` is fire-and-forget with retries and returns an `AsyncNotificationResponse`. `notify_user_sync` sends a response-required notification and blocks on the server's SSE stream until an answer or a timeout.
 - `notify_user_sync` returns a `NotificationResponse` whose exit code is 0 for an answer (or an offline default). It is 2 for a timeout that used a default, a request timeout or a re-attach that timed out. Every other failure is 1, including an expiry with no default (`status` is `expired_no_default`, `is_timeout` is true). It retries on any timeout response with a growing timeout, but only when `retry_on_timeout` is set and `max_attempts` is above 1. The default is one attempt.
 - When the SSE stream dies, `_reattach_after_stream_death` polls the answer by notification id inside the time left. A landed answer is returned without an ack, so the next turn's catch-up still delivers it.
-- `calculate_retry_intervals` sets the async retry waits: `[1, 1, 2, 2, 3]` for a 10-second budget and `[1, 2, 4, 5, 5, ...]` capped at 5 seconds for a longer one.
+- `calculate_retry_intervals` sets the async retry waits. A 10-second budget gets `[1, 1, 2, 2, 3]`. A longer one gets `[1, 2, 4, 5, 5, ...]`, capped at 5 seconds.
 - `resolve_target_user` picks the recipient from, in order: the explicit value, `LUPIN_DEV_EMAIL`, the config file's `global_notification_recipient`, and otherwise raises `ValueError`.
 - Notification types and priorities are defined twice: `notification_types` (5 types) and `notification_models` (6 types, adding `session_topic`). `notify_user` imports the first. `notify_user_sync` and `notify_user_async` import the types and priorities from `notification_models`, and take only the default server URL and its variable name from `notification_types`.
 
@@ -30,7 +30,7 @@ The command-line side of notifications: scripts and functions that call `POST /a
 - The sync client is the one blocking path. A fire-and-forget `notify_user_async` never waits for the user.
 
 ## Known duplicates
-- The duplicate report (`symindex dups`, 2026-10-07, tree `b94451536`) lists six members here. `validate_environment` is identical in `notify_user` and `notify_user_async`. Four `NotificationTestSuite.run_*` methods in `test_notifications.py` are exact or near copies of each other.
+- The duplicate report (`symindex dups`, 7 Oct 2026, tree `b94451536`) lists six members here. `validate_environment` is identical in `notify_user` and `notify_user_async`. Four `NotificationTestSuite.run_*` methods in `test_notifications.py` are exact or near copies of each other.
 
 ## How to extend
 - Add a new notification type to both enums, or the scripts and the models disagree.

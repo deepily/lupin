@@ -10,7 +10,7 @@ pins:
 ---
 # Database repositories
 
-Most Postgres tables have one repository class, all built on one generic base. Four have none: `job_history`, `server_lifecycle`, `task_events` and `task_promotion_tickets`. `TaskRepository` writes the `task_events` rows itself. This page is a map from each repository to the capability that uses it; the behaviour of a repository is described by the capability, not here. [[db-session-and-schema]] owns the engine, the models and schema drift.
+Most Postgres tables have one repository class, all built on one generic base. Four have none: `job_history`, `server_lifecycle`, `task_events` and `task_promotion_tickets`. `TaskRepository` writes the `task_events` rows itself. This page is a map from each repository to the capability that uses it. The behaviour of a repository is described by the capability, not here. The engine, the models and schema drift belong to [[db-session-and-schema]].
 
 ## What it does
 - `BaseRepository( model, session )` gives every table `get_by_id`, `get_all`, `create`, `update`, `delete`, `count` and `exists`. Each subclass adds the queries its capability needs.
@@ -33,7 +33,7 @@ Most Postgres tables have one repository class, all built on one generic base. F
 - A repository never commits. Open the session with `get_db()`, or commit it yourself, or the write is lost.
 - `dot_topk` ranks by inner product by default, and `similarity_pct` is `dot * 100`. That equals cosine only when both vectors have unit length.
 - Pass `metric="cosine"` when either side may be unnormalized. Any other metric value raises `ValueError`.
-- `dot_topk` does not check vector length. Both engines in `cosa.memory.local_embedding_engine` now L2-normalize their output, so the default is correct for today's embeddings. The `vector_search` docstring records a query norm of 19.809 against stored rows at 1.000 that turned a true cosine of 0.517 into 1024.15%.
+- `dot_topk` does not check vector length. Both engines in `cosa.memory.local_embedding_engine` now normalize their output to unit Euclidean length, so the default is correct for today's embeddings. The `vector_search` docstring records a query norm of 19.809 against stored rows at 1.000 that turned a true cosine of 0.517 into 1024.15%.
 
 ## How to extend
 - Subclass `BaseRepository[ThatModel]` under `cosa.rest.db.repositories`. One module per repository is the convention, not a rule: `TrustStateRepository` shares `proxy_decision_repository.py`. Put its model in `cosa.rest.postgres_models` or `cosa.rest.db.vector_store_models`. The first holds the tasks, notifications, auth, proxy-decision, trust, approval-setting, push-token, prediction-log, job-history and server-lifecycle models. The second holds the input-and-output rows, embeddings, snapshots, query log, gist cache, synonyms and prediction decisions.

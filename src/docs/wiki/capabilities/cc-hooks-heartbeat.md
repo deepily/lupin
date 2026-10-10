@@ -13,7 +13,7 @@ pins:
 ---
 # Stop-hook heartbeat
 
-When a Claude Code seat stops, `stop.py` asks whether it still owes work and, if so, blocks the stop with a poke. `decide_heartbeat` is the pure decision; the rest of the `heartbeat_*` modules gather its inputs. [[heartbeat-arbiter]] is the fleet-side watcher of the same hold files; [[cc-session-bridge]] supplies persona and role.
+When a Claude Code seat stops, `stop.py` asks whether it still owes work and, if so, blocks the stop with a poke. `decide_heartbeat` is the pure decision; the rest of the `heartbeat_*` modules gather its inputs. The fleet-side watcher of the same hold files is [[heartbeat-arbiter]]. [[cc-session-bridge]] supplies persona and role.
 
 ## Decision order (`decide_heartbeat`)
 - If the verdict's signals include `needs_verification` or `outstanding_user_gate`, hold checks are skipped. The seat goes straight to the cap check.
@@ -24,12 +24,12 @@ When a Claude Code seat stops, `stop.py` asks whether it still owes work and, if
 ## Holds
 - A hold is `.heartbeat-hold-<session_id>.json`, written atomically by `write_hold`. `write_hold` refuses a blank reason and a non-positive or non-numeric `ttl_seconds`; the default ttl is 900 s.
 - Fresh means the age is under `ttl_seconds`, measured from the file's mtime when the reader stamped one, else from `held_at`.
-- Declare one with `python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write|read|clear`, not by hand. `write` reads the hold back through the Stop hook's own search. If the hold would not be honored, it restores the previous file (or deletes the new one when none existed) and exits 3; an existing hold carrying extra fields is refused with exit 6.
+- Declare one with `python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write|read|clear`, not by hand. `write` reads the hold back through the Stop hook's own search. If the hold would not be honored, it restores the previous file (or deletes the new one when none existed) and exits 3. An existing hold carrying extra fields is refused with exit 6.
 
 ## What counts as owed (`evaluate_work_owed`)
 - Signals, in fixed order: `todo_in_progress`, `todo_unstarted`, `pending_decision`, `unanswered_inbound_question`, `outstanding_delegation`, `needs_verification`, `outstanding_user_gate`, `surface_operator_gates`, `spinup_nudge`. Owed means at least one fired. In `stop.py`, `unanswered_inbound_question` counts only when `count_inbound_questions_as_owed` is true; it defaults to false.
 - `stop.py` takes owned rows from the task store when `heartbeat.owed_source_from_store` is on (see [[task-store]]), else replays `TaskCreate`/`TaskUpdate` from the transcript. A store that cannot be read counts as 0 owed and marks the result unknown.
-- A user gate is due only when it is not answered and not deferred by a future `next_chase_ts` or a store-side user deferral. It must also not be past its re-ask cap with no chase, and it was either never asked or last asked at least its re-ask interval (default 600 s) ago.
+- A user gate is due only when it is not answered and not deferred by a future `next_chase_ts` or a store-side user deferral. It must also not be past its re-ask cap with no chase. It was either never asked or last asked at least its re-ask interval (default 600 s) ago.
 
 ## Caps, mute and switches
 - Settings come from the `heartbeat` block of `~/.claude/settings.json`. `enabled` defaults to false; `poke_cap` defaults to 1 and a non-positive or non-int value raises, which `stop.py` treats as no poke.

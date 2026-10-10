@@ -32,7 +32,7 @@ The Postgres engine, the session context manager, the ORM base, the boot-time Al
 ## Drift alarm
 - `emit_startup_drift_alarm` runs after the migration. It compares every table and column in `Base.metadata` with the live database by name only. It flags a missing table or a missing column.
 - It also reads the stamped revision and the migration head. If both are readable and differ it adds a revision-behind finding. If either is unreadable it adds nothing.
-- On a finding it prints the alarm to stderr and returns the report. The header says CRITICAL when a table or column is missing and WARNING when only the revision differs. The server keeps booting.
+- On a finding it prints the alarm to stderr and returns the report. The header says `CRITICAL` when a table or column is missing and `WARNING` when only the revision differs. The server keeps booting.
 - It never raises. An internal failure prints a warning and returns `None`.
 
 ## When not to use

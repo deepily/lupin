@@ -30,7 +30,7 @@ The multiplexer page opens two WebSockets, keeps a refreshable login token, and 
 - Don't share one session id between the sockets. The server keeps one socket and one subscription list per id.
 - Don't log out with `AuthManager.invalidate`. `logout` must call `StorageService.clearTokens`, which removes the persisted tokens.
 - Don't pass `Authorization` in `ApiCallOptions.headers`. The client sets its own header after the caller's, so it wins.
-- Don't expect `failed` to recover on its own. Only the Retry-now button in the System Status pane sends the machine's `restart` event, for each transport in `failed`. Not run in a browser; bug row 5a8bd0c6-6a18-4283-9722-bba10064ff5f.
+- Don't expect `failed` to recover on its own. Only the Retry-now button in the System Status pane sends the machine's `restart` event, for each transport in `failed`. Not run in a browser; filed as the bug "Multiplexer: a transport in `failed` never restarts, and nothing routes close codes 4001/4002/4003".
 
 ## Invariants
 - A drop on one socket does not reset the other's backoff.

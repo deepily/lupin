@@ -31,10 +31,10 @@ Login, JWT access and refresh tokens, API keys, user accounts, password rules, e
 - Any `authenticate_user` failure (unknown email, inactive account, wrong password) calls `record_failed_login( email, ip )`, audits `login_failure`, and returns 401. Success calls `clear_failed_attempts` and audits `login_success`.
 - Locked means failed rows within `auth lockout duration minutes` (default 15) number at least `auth max failed attempts` (default 5). A database error in the check returns not locked.
 - `POST /auth/refresh` calls `rotate_refresh_token`. The old token must verify as a refresh token, have a stored row, be unrevoked, and match its stored SHA-256 hash. The old row is revoked before the new token is made and stored, and no step undoes the revoke if a later step fails.
-- `POST /auth/logout` revokes the refresh token by `jti`. If the token fails verification for any reason, such as expiry or a bad signature, it reads the `jti` without checking the signature and revokes that. No code looks an access token up in a revocation table, so it stays valid until `exp`.
+- `POST /auth/logout` revokes the refresh token by `jti`. If the token fails verification for any reason, such as expiry or a bad signature, it reads the `jti` without checking the signature. It then revokes that `jti`. No code looks an access token up in a revocation table, so it stays valid until `exp`.
 - `POST /auth/register` is unauthenticated. It returns 403 if `roles` names anything but `user`, and always stores `["user"]`.
 
 ## Admin and audit
 - `/admin/users` routes need `require_admin`. Roles are limited to `admin` and `user`. An admin cannot remove their own admin role or deactivate themselves. Deactivating revokes the user's refresh tokens.
-- `admin_delete_user` refuses self, a protected account, and an admin target while at most one active admin exists (the target's own active status is not checked), then revokes tokens and hard-deletes. `POST /admin/users/batch-delete` takes 1 to 50 ids and runs each through it.
+- `admin_delete_user` refuses self, a protected account, and an admin target while at most one active admin exists (the target's own active status is not checked). It then revokes tokens and hard-deletes. `POST /admin/users/batch-delete` takes 1 to 50 ids and runs each through it.
 - The admin router also holds snapshot and source-refresh routes; they are not covered here. See [[system-admin-and-stats]].

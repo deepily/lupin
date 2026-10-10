@@ -23,7 +23,7 @@ The v2 door onto CJ Flow: `AskFlow` takes a question, or a command that is alrea
 - Missing arguments return the first question at once. An interactive call parks the request in `PendingRequests` and answers `parked`; `resume` fills the next argument from a second call. A non-interactive call answers `needs_input` and parks nothing.
 - `submit` is the door beside `ask` for a command that is already named: no routing, no cache, no argument extraction. It never parks. `scheduled_at`, `monopolize` and `parent_id_hash` are queue directives, not agent arguments.
 - `registry` is the one table from routing command to agent. `resolve` returns conversational commands and `resolve_agentic` the agentic ones.
-- `make_executor` builds the executor named by `v2 executor`: `inline` runs on the calling thread, `queued` pushes to the todo queue and answers `waiting`, which counts as success. The code default is `inline`; `[Lupin: Baseline]` sets `queued`, and Production, Development and Testing resolve to `queued` through inheritance (resolved through `ConfigurationManager` on 2026-10-07).
+- `make_executor` builds the executor named by `v2 executor`. `inline` runs on the calling thread. `queued` pushes to the todo queue and answers `waiting`, which counts as success. The code default is `inline`. `[Lupin: Baseline]` sets `queued`, and Production, Development and Testing resolve to `queued` through inheritance (resolved through `ConfigurationManager` on 7 Oct 2026).
 
 ## Invariants
 - A failing agent, replay or argument extraction degrades to the receptionist with its own `route_reason`. A router reply that cannot be parsed lands in `unknown`, which degrades the same way. An error in the router call itself (the LLM call or a missing prompt file) is not caught. Neither is an error in the cache lookup. Both end as an HTTP 500. `ask-audio` and `transcribe` answer 500 with one fixed detail for an unexpected failure.
@@ -32,8 +32,8 @@ The v2 door onto CJ Flow: `AskFlow` takes a question, or a command that is alrea
 - `quantities_differ` refuses a near match when either question contains a number and the ordered numbers and words differ. "Convert 10 miles to kilometers" once replayed the answer to "How many miles is 10 kilometers?" at a score of 93.4.
 - An unknown or expired `pending_id` on `resume` answers `status='expired'`, `route_reason='pending_expired'`. Parked entries expire after `ttl_seconds` (3600 by default).
 - `submit` raises `ValueError` unless exactly one of `command` and `job` is given.
-- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for an admin, the configured test account, a caller holding the per-run suite token (header `X-Lupin-Lineage-Token`, Development and Testing only, valid while that run holds the monopoly slot), or the owner of the parent job. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`, and the request still runs without it, never as a 4xx.
+- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for four callers. They are an admin, the configured test account, a caller holding the per-run suite token, and the owner of the parent job. The suite token is the header `X-Lupin-Lineage-Token`, which works in Development and Testing only and is valid while that run holds the monopoly slot. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`. The request still runs without it, never as a 4xx.
 
 ## How to extend
 - Add a command as one `AgentSpec` row in `cosa.rest.v2.registry`; do not add a branch to `AskFlow`.
-- A job builder that declines on purpose raises `SubmitRefused`, so the reason reaches the caller as a failed result and not as a generic build error.
+- A job builder that chooses to decline raises `SubmitRefused`. The reason then reaches the caller as a failed result and not as a generic build error.

@@ -30,7 +30,7 @@ Both [[fix-expediter-bfe]] and [[fix-expediter-tfe]] use these: a coder and test
 ## GitStrategist
 - `resolve_trust_level` returns 1 when the proxy is missing or anything goes wrong; otherwise it returns the level read from the proxy's trust tracker.
 - Below level 3, the commits stay on the current branch (`commit_only`). At 3 and above, `commit_and_pr_single` makes a fix branch, commits and pushes, then opens a pull request through `gh`. After any PR failure the result is `branch_only`.
-- `commit_and_pr_single` makes one commit. `commit_and_pr_multi` is what TFE uses: one commit per cluster, and a pull request only at level 3 and above. Its push step needs a `push_branch` that `GitOps` lacks, so no push runs today (delete this clause when row c07aef9f-b7b9-4001-969b-7b74c2a87bab closes).
+- `commit_and_pr_single` makes one commit. `commit_and_pr_multi` is what TFE uses: one commit per cluster, and a pull request only at level 3 and above. Its push step needs a `push_branch` that `GitOps` lacks, so no push runs today. Delete this clause when the bug "GitStrategist.commit_and_pr_multi says Pushed and opens a PR without pushing: no push_branch exists" closes.
 - Both return a dict with an `error` field instead of raising.
 
 ## Plan and report files

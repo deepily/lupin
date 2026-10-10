@@ -13,7 +13,7 @@ pins:
 ---
 # SWE Team orchestrator
 
-`SweTeamJob` (`JOB_TYPE` `swe_team`) runs one task through `SweTeamOrchestrator`. A Lead splits the task, a Coder does each piece, and a Tester checks it. [[fix-expediter-bfe]] and [[fix-expediter-tfe]] import its safety guard, hooks and test runner.
+`SweTeamJob` (`JOB_TYPE` `swe_team`) runs one task through `SweTeamOrchestrator`. A Lead splits the task, a Coder does each piece, and a Tester checks it. Its safety guard, hooks and test runner are imported by [[fix-expediter-bfe]] and [[fix-expediter-tfe]].
 
 ## The run
 - `run` returns the final summary, or `None` on failure. A `SafetyLimitError` or any other exception sets the state to failed and sends an urgent notification.
