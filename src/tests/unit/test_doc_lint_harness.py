@@ -830,6 +830,24 @@ def test_a_claim_with_any_run_that_does_not_say_absent_is_kept( verdicts ):
     assert hr.final_absent( _runs( *[ [ v ] for v in verdicts ] ) ) == [ False ]
 
 
+@pytest.mark.parametrize( "count", [ 1, 2, 3, 4 ] )
+def test_a_claim_is_dropped_when_all_of_any_number_of_judge_runs_say_absent( count ):
+    assert hr.final_absent( _runs( *[ [ "absent", "absent" ] ] * count ) ) == [ True, True ]
+
+
+@pytest.mark.parametrize( "other", [ "present", "unclear" ] )
+@pytest.mark.parametrize( "count,spot", [ ( c, i ) for c in ( 1, 2, 3, 4 ) for i in range( c ) ] )
+def test_one_run_that_does_not_say_absent_keeps_the_claim_at_every_run_count_and_position( count, spot, other ):
+    runs = _runs( *[ [ other if i == spot else "absent" ] for i in range( count ) ] )
+    assert hr.final_absent( runs ) == [ False ]
+
+
+@pytest.mark.parametrize( "count", [ 1, 2, 3, 4 ] )
+def test_each_claim_is_decided_on_its_own_verdicts_at_every_run_count( count ):
+    runs = _runs( *[ [ "absent", "present" if i == count - 1 else "absent", "present" ] for i in range( count ) ] )
+    assert hr.final_absent( runs ) == [ True, False, False ]
+
+
 def test_each_claim_is_decided_on_its_own_three_verdicts():
     runs = _runs( [ "absent", "absent", "present" ], [ "absent", "present", "present" ], [ "absent", "absent", "present" ] )
     assert hr.final_absent( runs ) == [ True, False, False ]
