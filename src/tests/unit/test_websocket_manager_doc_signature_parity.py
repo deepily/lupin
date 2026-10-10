@@ -143,6 +143,25 @@ import cosa.utils.util as cu
 ROOT       = Path( cu.get_project_root() )
 SOURCE     = ROOT / "src" / "cosa" / "rest" / "websocket_manager.py"
 DOC        = ROOT / "src" / "docs" / "websocket-architecture.md"
+PARTS      = ROOT / "src" / "docs" / "websocket-architecture"
+
+
+def _doc_text():
+    """
+    Read the architecture page: the index and every part in its folder.
+
+    Requires:
+        - the parts sit in the folder named after the page
+
+    Ensures:
+        - returns the index text followed by each part's text in file-name order
+
+    Raises:
+        - AssertionError if the folder holds no parts
+    """
+    parts = sorted( PARTS.glob( "*.md" ) ) if PARTS.is_dir() else []
+    assert len( parts ) > 0, f"no parts found in {PARTS}: the page is an index and the reference is in its parts"
+    return "\n".join( [ DOC.read_text( encoding="utf-8" ) ] + [ p.read_text( encoding="utf-8" ) for p in parts ] )
 
 
 def _public_methods():
@@ -209,7 +228,7 @@ def test_every_public_method_appears_in_the_architecture_doc():
     Ensures:
         - each public method name appears somewhere in websocket-architecture.md
     """
-    doc     = DOC.read_text( encoding="utf-8" )
+    doc     = _doc_text()
     missing = [ m for m in _public_methods() if m not in doc ]
 
     assert not missing, (
@@ -225,7 +244,7 @@ def test_the_documented_connect_signature_names_every_parameter():
     Ensures:
         - every parameter of connect() appears inside its documented signature cell
     """
-    doc = DOC.read_text( encoding="utf-8" )
+    doc = _doc_text()
     row = next( ( ln for ln in doc.splitlines() if ln.startswith( "| `connect` |" ) ), None )
     if row is None: pytest.fail( "no `connect` row found in the Connection Management table" )
 
