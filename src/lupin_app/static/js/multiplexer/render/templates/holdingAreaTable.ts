@@ -36,6 +36,7 @@ import { holdingPlanId, type HeldFilerGroup, type HeldPlan } from "../holdingAre
 import type { TaskItem } from "../taskListModel";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
+import { groupRequestBadgeText } from "../../../shared/task-request.js";
 
 /**
  * The batch-approve tooltip for one filer. Carbon copy of
@@ -119,6 +120,17 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
   countEl.className   = "holding-area-group-count";
   countEl.textContent = String( group.tasks.length );
   header.appendChild( countEl );
+
+  // The persona's pending requests, visible with the group closed. Absent, not a zero, when
+  // the persona has none.
+  const requestText = groupRequestBadgeText( group.tasks );
+  if ( requestText !== "" ) {
+    const badge = document.createElement( "span" );
+    badge.className   = "task-request-badge holding-area-group-request-badge";
+    badge.dataset.filer = group.filer;
+    badge.textContent = requestText;
+    header.appendChild( badge );
+  }
 
   header.appendChild( batchButton(
     "holding-approve-all", group.filer, "Approve all", holdingApproveAllTitle( group.filer ) ) );

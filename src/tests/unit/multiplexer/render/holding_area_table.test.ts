@@ -313,3 +313,51 @@ test( "reassignTargets reach the row's owner select through this pane too", () =
   assert.ok( options.some( ( o ) => o === "rachel" ), `owner select never received the roster: ${ JSON.stringify( options ) }` );
   assert.ok( options.some( ( o ) => o === "sam" ) );
 } );
+
+// ---------------------------------------------------------------------------
+// Row fa5415af — a persona group shows how many requests wait on it, closed or open.
+// ---------------------------------------------------------------------------
+
+function requestRow( id: string, filer: string, state: string | null, move: string | null ): TaskItem {
+  return { ...heldTask( id, filer ), request_state: state, request_move: move, request_ts: "2026-09-10T09:00:00Z" } as unknown as TaskItem;
+}
+
+test( "a persona with one pending request carries a '1 request' badge on its COLLAPSED header", () => {
+  const el    = renderHoldingAreaGroup( flatGroup( "Mr Radio", [
+    requestRow( "t1", "Mr Radio", "pending", "admit" ), requestRow( "t2", "Mr Radio", null, null ) ] ), null, [], false );
+  const badge = el.querySelector<HTMLElement>( ".holding-area-group-header .holding-area-group-request-badge" );
+  assert.ok( badge, "no request badge on the group header" );
+  assert.equal( badge.textContent, "1 request" );
+  assert.equal( badge.dataset.filer, "Mr Radio" );
+  assert.ok( badge.classList.contains( "task-request-badge" ), "it must reuse the pane badge's look" );
+  assert.ok( el.classList.contains( "collapsed" ), "the badge must be there with the group closed" );
+} );
+
+test( "a persona with several pending requests shows the count; the row total is untouched", () => {
+  const el = renderHoldingAreaGroup( flatGroup( "Krishna", [
+    requestRow( "t1", "Krishna", "pending", "admit" ),
+    requestRow( "t2", "Krishna", "pending", "demote" ),
+    requestRow( "t3", "Krishna", "pending", "admit" ),
+    requestRow( "t4", "Krishna", null, null ),
+  ] ), null );
+  assert.equal( el.querySelector( ".holding-area-group-request-badge" )!.textContent, "3 requests" );
+  assert.equal( el.querySelector( ".holding-area-group-count" )!.textContent, "4" );
+} );
+
+test( "a persona with no pending request has NO badge — not a zero, not a hidden span", () => {
+  const el = renderHoldingAreaGroup( flatGroup( "Sam", [
+    requestRow( "t1", "Sam", null, null ), requestRow( "t2", "Sam", "approved", "admit" ) ] ), null );
+  assert.equal( el.querySelector( ".holding-area-group-request-badge" ), null );
+  assert.equal( el.querySelector( ".task-request-badge" ), null );
+} );
+
+test( "in a fragment only the personas with requests carry a badge", () => {
+  const frag = renderHoldingAreaGroups( [
+    flatGroup( "Krishna", [ requestRow( "t1", "Krishna", "pending", "admit" ) ] ),
+    flatGroup( "Sam",     [ requestRow( "t2", "Sam", null, null ) ] ),
+  ], null );
+  const holder = document.createElement( "div" );
+  holder.appendChild( frag );
+  const badged = Array.from( holder.querySelectorAll<HTMLElement>( ".holding-area-group-request-badge" ) ).map( ( b ) => b.dataset.filer );
+  assert.deepEqual( badged, [ "Krishna" ] );
+} );

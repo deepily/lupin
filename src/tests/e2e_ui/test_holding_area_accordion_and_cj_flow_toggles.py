@@ -49,13 +49,28 @@ def _tokens() -> tuple[ str, str ]:
     return tokens[ "access_token" ], tokens[ "refresh_token" ]
 
 
-def _open_multiplexer( page ) -> None:
+# Krishna has two requests waiting, Mr Radio one, and a third persona none.
+HELD_WITH_REQUESTS = {
+    "tasks" : [
+        { **row, "request_state": state, "request_move": move, "request_ts": "2026-09-10T09:00:00Z" }
+        for row, state, move in [
+            ( { **HELD[ "tasks" ][ 0 ] },                                                     "pending", "admit" ),
+            ( { **HELD[ "tasks" ][ 1 ] },                                                     "pending", "demote" ),
+            ( { **HELD[ "tasks" ][ 2 ] },                                                     "pending", "admit" ),
+            ( { **HELD[ "tasks" ][ 2 ], "id": "held3", "created_by": "sam 11112222" },        None,      None ),
+        ]
+    ],
+    "count" : 4,
+}
+
+
+def _open_multiplexer( page, holding_body=HELD ) -> None:
     access, refresh = _tokens()
     page.context.add_init_script(
         f"window.localStorage.setItem('lupin_access_token', { json.dumps( access ) });"
         f"window.localStorage.setItem('lupin_refresh_token', { json.dumps( refresh ) });"
     )
-    page.route( TASKS_ROUTE, tasks_route_handler( EMPTY_TASKS, holding_body=HELD ) )
+    page.route( TASKS_ROUTE, tasks_route_handler( EMPTY_TASKS, holding_body=holding_body ) )
     page.goto( f"{BASE_URL}/app/multiplexer", wait_until="networkidle", timeout=15_000 )
     page.wait_for_function(
         "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
@@ -94,6 +109,32 @@ def test_legacy_holding_area_groups_load_hidden_and_open_on_click( logged_in_pag
 def test_multiplexer_holding_area_groups_load_hidden_and_open_on_click( page ):
     _open_multiplexer( page )
     _assert_accordion( page, MUX_HOLDING_AREA_PANE )
+
+
+def _assert_persona_request_badges( page, pane: str ) -> None:
+    """With every group collapsed, a persona's pending requests are readable off its bar."""
+    page.wait_for_selector( f"{pane} .holding-area-group", state="attached", timeout=10_000 )
+
+    def badge( filer: str ):
+        return page.locator( f'{pane} .holding-area-group[data-filer="{ filer }"] .holding-area-group-request-badge' )
+
+    assert badge( "Krishna" ).is_visible(), "Krishna's request badge is not visible with the group closed"
+    assert badge( "Krishna" ).text_content() == "2 requests"
+    assert badge( "Mr Radio" ).text_content() == "1 request"
+    assert badge( "Sam" ).count() == 0, "a persona with no request must carry no badge"
+    assert not page.locator( f"{pane} tr.task-row" ).first.is_visible(), "a row is open — the badge was not measured closed"
+
+
+def test_legacy_holding_area_shows_a_request_badge_per_persona( logged_in_page ):
+    page = logged_in_page
+    page.route( TASKS_ROUTE, tasks_route_handler( EMPTY_TASKS, holding_body=HELD_WITH_REQUESTS ) )
+    page.goto( f"{BASE_URL}/app/notifications?classic=1", wait_until="networkidle", timeout=15_000 )
+    _assert_persona_request_badges( page, "#holding-area-container" )
+
+
+def test_multiplexer_holding_area_shows_a_request_badge_per_persona( page ):
+    _open_multiplexer( page, HELD_WITH_REQUESTS )
+    _assert_persona_request_badges( page, MUX_HOLDING_AREA_PANE )
 
 
 def _show_jobs_pane( page ):

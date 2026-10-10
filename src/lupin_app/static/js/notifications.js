@@ -15189,13 +15189,19 @@ class NotificationsUI {
         // opens it; the open set survives the 60s repaint (see _toggleHoldingAreaGroup).
         const expanded = this._holdingAreaExpandedFilers instanceof Set && this._holdingAreaExpandedFilers.has( filer );
 
+        // The persona's pending requests, visible with the group closed. No badge (not a zero)
+        // when it has none, or when the shared module did not load.
+        const sharedRequest = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        const requestText   = sharedRequest ? sharedRequest.groupRequestBadgeText( tasks ) : "";
+        const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge" data-filer="${key}">${this.escapeHtml( requestText )}</span>`;
+
         return `
             <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">
                 <div class="holding-area-group-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
                      title="Click to show or hide this filer's held rows">
                     <span class="holding-area-group-chevron" aria-hidden="true">${expanded ? "▼" : "▶"}</span>
                     <span class="holding-area-filer">${label}</span>
-                    <span class="holding-area-group-count">${tasks.length}</span>
+                    <span class="holding-area-group-count">${tasks.length}</span>${requestBadge}
                     <button type="button" class="task-action-btn holding-approve-all" data-filer="${key}"
                             title="Approve every row ${label} filed — reversible, a row approved by mistake can be demoted straight back">Approve all</button>
                     <button type="button" class="task-action-btn holding-wont-fix-all" data-filer="${key}"

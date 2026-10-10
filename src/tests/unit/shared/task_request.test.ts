@@ -22,6 +22,7 @@ import {
   BADGE_HOLDING_AREA, BADGE_TASK_AREA, REQUEST_BADGES_PATH, DEMOTE_NEEDS_TRIAGE_DATE_MESSAGE,
   requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
   REQUEST_FILED_TRANSITION, REQUEST_REASON_SEPARATOR, requestEventsPath, requestFiledDetail,
+  pendingRequestCount, groupRequestBadgeText,
 } from "../../../lupin_app/static/js/shared/task-request.js";
 import { TRIAGE_DATE_LABEL } from "../../../lupin_app/static/js/shared/task-request.js";
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
@@ -160,4 +161,33 @@ test( "the chip's triage label IS the demote verb's own date label (Tiffany F4)"
   // Two copies of one string drift; this is the tie. Approving a demote asks for the same date
   // Rick's own Demote asks for, so a renamed label must rename both or redden here.
   assert.equal( TRIAGE_DATE_LABEL, ( TASK_VERB_SPECS as Record<string, { dateLabel: string }> ).demote!.dateLabel );
+} );
+
+// Row fa5415af — the per-persona request badge on the holding area.
+const heldRow = ( state: string | null, move: string | null ) =>
+  ( { id: "r", request_state: state, request_move: move, request_ts: "2026-09-10T09:00:00Z" } );
+
+test( "pendingRequestCount counts exactly the rows the row chip would paint", () => {
+  const rows = [
+    heldRow( "pending",  "admit" ),
+    heldRow( "pending",  "demote" ),
+    heldRow( "approved", "admit" ),     // answered — no chip, so no count
+    heldRow( "pending",  "sideways" ),  // unknown move — no chip, so no count
+    heldRow( null,       null ),
+    null,
+  ];
+  assert.equal( pendingRequestCount( rows ), 2 );
+  // Tie to the chip itself: the count is the number of non-null chips, computed the other way.
+  assert.equal( pendingRequestCount( rows ), rows.filter( ( r ) => pendingRequestChip( r as never, NOW ) !== null ).length );
+  assert.equal( pendingRequestCount( [] ), 0 );
+  assert.equal( pendingRequestCount( null ), 0 );
+  assert.equal( pendingRequestCount( undefined ), 0 );
+  assert.equal( pendingRequestCount( "pending" as never ), 0 );
+} );
+
+test( "a persona group's badge text is one request, N requests, or nothing — never a zero", () => {
+  assert.equal( groupRequestBadgeText( [ heldRow( "pending", "admit" ) ] ), "1 request" );
+  assert.equal( groupRequestBadgeText( [ heldRow( "pending", "admit" ), heldRow( "pending", "demote" ), heldRow( "pending", "admit" ) ] ), "3 requests" );
+  assert.equal( groupRequestBadgeText( [ heldRow( null, null ) ] ), "" );
+  assert.equal( groupRequestBadgeText( [] ), "" );
 } );

@@ -183,6 +183,37 @@ export function requestBadgeText( counts, badge ) {
     return n === 1 ? "1 request" : `${n} requests`;
 }
 
+/**
+ * How many of these rows carry a pending request.
+ *
+ * A holding-area persona group shows this beside its name, so the operator sees which persona
+ * has a request waiting without opening each group. It uses the same test as the row chip
+ * (`pendingRequestChip`), so a badge of N sits over exactly N chips.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {number} 0 for a non-array, an empty array, or rows with nothing pending
+ */
+export function pendingRequestCount( rows ) {
+    if ( !Array.isArray( rows ) ) return 0;
+    let n = 0;
+    for ( const row of rows ) {
+        if ( pendingRequestChip( row, 0 ) !== null ) n += 1;
+    }
+    return n;
+}
+
+/**
+ * A persona group's request badge text, or "" when none.
+ *
+ * It reads "1 request" or "3 requests". The wording is that of `requestBadgeText`, so the group badge and the pane badge read alike.
+ *
+ * @param {ReadonlyArray<unknown> | null | undefined} rows
+ * @returns {string}
+ */
+export function groupRequestBadgeText( rows ) {
+    return requestBadgeText( { group: pendingRequestCount( rows ) }, "group" );
+}
+
 // The classic-script bridge, mirroring task-lookup.js: notifications.js reads these at
 // CALL time. See window-globals.d.ts for the declaration that keeps this typechecking.
 if ( typeof window !== "undefined" ) {
@@ -190,6 +221,6 @@ if ( typeof window !== "undefined" ) {
         REQUEST_BADGES_PATH, BADGE_HOLDING_AREA, BADGE_TASK_AREA,
         VERDICT_APPROVED, VERDICT_DENIED, TRIAGE_DATE_LABEL,
         requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
-        requestEventsPath, requestFiledDetail,
+        requestEventsPath, requestFiledDetail, pendingRequestCount, groupRequestBadgeText,
     };
 }

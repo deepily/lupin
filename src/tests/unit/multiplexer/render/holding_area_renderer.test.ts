@@ -460,3 +460,49 @@ test( "row 52142a84: Enter and Space on a focused header toggle it; other keys a
     "Space typed in the reason box is NOT swallowed" );
   assert.ok( g.classList.contains( "collapsed" ) );
 } );
+
+// ---------------------------------------------------------------------------
+// Row fa5415af — the per-persona request badge, through the assembled pane.
+// ---------------------------------------------------------------------------
+
+function withRequest( t: TaskItem, state: string | null, move: string | null ): TaskItem {
+  return { ...t, request_state: state, request_move: move, request_ts: "2026-09-10T09:00:00Z" } as unknown as TaskItem;
+}
+
+function badgeOf( container: HTMLElement, filer: string ): HTMLElement | null {
+  return groupOf( container, filer ).querySelector<HTMLElement>( ".holding-area-group-request-badge" );
+}
+
+test( "row fa5415af: each persona's badge counts ITS pending requests; none, one and several all read right", () => {
+  const { container } = mountPane( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "pending", "admit" ),
+    withRequest( heldTask( "k2", "Krishna 420f5ec9" ), "pending", "demote" ),
+    heldTask( "k3", "Krishna 420f5ec9" ),
+    withRequest( heldTask( "m1", "mr radio 0e61abe3" ), "pending", "admit" ),
+    heldTask( "s1", "Sam 11112222" ),
+  ] } );
+
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "2 requests" );
+  assert.equal( badgeOf( container, "Mr Radio" )!.textContent, "1 request" );
+  assert.equal( badgeOf( container, "Sam" ), null, "a persona with no request must show no badge at all" );
+  // Everything is still collapsed: the badge is the at-a-glance signal, with nothing expanded.
+  assert.equal( container.querySelectorAll( ".holding-area-group:not(.collapsed)" ).length, 0 );
+} );
+
+test( "row fa5415af: the badge follows the poll — a verdict that clears the request removes it, a new one adds it", () => {
+  const { bus, store, container } = mountPane( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "pending", "admit" ),
+    heldTask( "s1", "Sam 11112222" ),
+  ] } );
+  assert.equal( badgeOf( container, "Krishna" )!.textContent, "1 request" );
+  assert.equal( badgeOf( container, "Sam" ), null );
+
+  store.setComposite( { tasks: [
+    withRequest( heldTask( "k1", "Krishna 420f5ec9" ), "approved", "admit" ),
+    withRequest( heldTask( "s1", "Sam 11112222" ), "pending", "admit" ),
+  ] } );
+  repaint( bus );
+
+  assert.equal( badgeOf( container, "Krishna" ), null, "an answered request must not keep its badge" );
+  assert.equal( badgeOf( container, "Sam" )!.textContent, "1 request" );
+} );
