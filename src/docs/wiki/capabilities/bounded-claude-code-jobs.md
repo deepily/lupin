@@ -5,7 +5,7 @@ pins:
   - cosa.agents.claude_code.job.ClaudeCodeJob@1b092e0e63
   - cosa.agents.claude_code.job.ClaudeCodeJob.do_all@24cbb970c0
   - cosa.orchestration.claude_code.dispatcher.TaskType@516e546e49
-  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@4917d3e67e
+  - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@669f3fae51
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc
   - cosa.agents.utils.proxy_agents.base_config.get_anthropic_api_key@4d25966729
 ---
