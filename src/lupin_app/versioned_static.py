@@ -63,6 +63,16 @@ class VersionedStaticFiles( StaticFiles ):
     """
 
     def file_response( self, full_path, stat_result, scope, status_code=200 ):
+        """
+        Return the file response, with Cache-Control set from the request's `v=` token.
+
+        Requires:
+            - scope is an ASGI scope dict
+
+        Ensures:
+            - the header is `public, max-age=31536000, immutable` when the query string carries a `v` parameter
+            - the header is `no-cache` otherwise, replacing any value StaticFiles set
+        """
         response = super().file_response( full_path, stat_result, scope, status_code )
         response.headers[ "Cache-Control" ] = _IMMUTABLE if _has_version_token( scope ) else _REVALIDATE
         return response
