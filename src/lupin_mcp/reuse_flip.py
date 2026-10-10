@@ -19,6 +19,7 @@ from lupin_mcp import reuse_tools as rt
 MIN_NEEDS   = 30
 MIN_REPEATS = 5
 PASS_LIMIT  = 0.05
+ROUTES      = ( "full", "pages" )
 
 
 def repeat_sweeper( size, workers, run_index, breaker=None ):
@@ -44,24 +45,27 @@ def repeat_sweeper( size, workers, run_index, breaker=None ):
     return sweeper
 
 
-def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT ):
+def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route="full" ):
     """
     Ask one need once, as repeat number run_index, with the member left out.
 
     Requires:
         - ctx is a packed context: it has a sweeper and a pack size
         - need is a non-empty description; member is None or a symbol id of the index
+        - route is "full" (every entry is asked) or "pages" (the page route: pages, then their entries, then every entry)
     Ensures:
-        - returns the public result of the full sweep, as sweep_need_impl does
+        - returns the public result of that route, as sweep_need_impl does
+        - the page questions carry the repeat number as the entry questions do
         - no receipt is written, so repeat two cannot be handed repeat one's receipt
         - the caller's context is not changed
     Raises:
-        - ValueError for a context that is not packed, or a run_index out of range
+        - ValueError for a context that is not packed, a route that is neither full nor pages, or a run_index out of range
     """
+    if route not in ROUTES: raise ValueError( f"route must be one of {ROUTES}, got {route!r}" )
     if ctx.sweeper is None or ctx.pack_size is None: raise ValueError( "a repeat is asked on a packed context only" )
     repeat         = copy.copy( ctx )
     repeat.sweeper = repeat_sweeper( ctx.pack_size, workers, run_index )
-    return rt.unstored_need_impl( need, member, repeat )
+    return rt.unstored_need_impl( need, member, repeat, page_route=route == "pages" )
 
 
 def signature( result ):

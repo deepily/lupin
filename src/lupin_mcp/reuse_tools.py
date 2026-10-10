@@ -1200,9 +1200,9 @@ def page_route_need_impl( need, exclude_id, ctx ):
     return _need_impl( need, exclude_id, ctx, "choice", False )
 
 
-def unstored_need_impl( need, exclude_id, ctx ):
+def unstored_need_impl( need, exclude_id, ctx, page_route=False ):
     """
-    Sweep every entry for a free-text need and store no receipt.
+    Ask a free-text need and store no receipt.
 
     Requires:
         - need is a non-empty description of the capability
@@ -1210,9 +1210,9 @@ def unstored_need_impl( need, exclude_id, ctx ):
     Ensures:
         - returns the same shape as sweep_need_impl, from a receipt that is built and not written
         - a second ask of the same need is therefore not handed the first ask's receipt, which a stored receipt would be
-        - the page route is off, as in sweep_need_impl
+        - the page route is off, as in sweep_need_impl, unless page_route is true
     """
-    return _need_impl( need, exclude_id, ctx, "choice", True, False )
+    return _need_impl( need, exclude_id, ctx, "choice", not page_route, False )
 
 
 def _need_impl( need, exclude_id, ctx, question, sweep_only, write=True ):
