@@ -38,6 +38,8 @@ export interface FleetLiveCounts {
   total    : number;
   managers : number;
   workers  : number;
+  /** Sessions the census could not classify; the server sends it, the dial does not show it. */
+  unknown? : number;
 }
 
 /**

@@ -1,0 +1,84 @@
+{
+  "get_never_flipped": {
+    "status": 200,
+    "body": {
+      "cap": 8,
+      "ceiling": 18,
+      "live": {
+        "total": 0,
+        "managers": 0,
+        "workers": 0,
+        "unknown": 0
+      },
+      "skeleton_crew": {
+        "on": false,
+        "since": null,
+        "set_by": null,
+        "settings_mute_while_off": false
+      }
+    }
+  },
+  "put_on": {
+    "status": 200,
+    "body": {
+      "cap": 8,
+      "ceiling": 18,
+      "live": {
+        "total": 0,
+        "managers": 0,
+        "workers": 0,
+        "unknown": 0
+      },
+      "skeleton_crew": {
+        "on": true,
+        "since": "2026-10-10T13:25:43.079954-04:00",
+        "set_by": "rick@example.com",
+        "settings_mute_while_off": false
+      }
+    }
+  },
+  "put_refused_for_an_api_key": {
+    "status": 403,
+    "body": {
+      "detail": "Only an administrator may change the skeleton crew switch."
+    }
+  },
+  "put_off_while_settings_mute_is_set": {
+    "status": 200,
+    "body": {
+      "cap": 8,
+      "ceiling": 18,
+      "live": {
+        "total": 0,
+        "managers": 0,
+        "workers": 0,
+        "unknown": 0
+      },
+      "skeleton_crew": {
+        "on": false,
+        "since": "2026-10-10T13:25:43.102710-04:00",
+        "set_by": "rick@example.com",
+        "settings_mute_while_off": true
+      }
+    }
+  },
+  "get_settings_file_unreadable": {
+    "status": 200,
+    "body": {
+      "cap": 8,
+      "ceiling": 18,
+      "live": {
+        "total": 0,
+        "managers": 0,
+        "workers": 0,
+        "unknown": 0
+      },
+      "skeleton_crew": {
+        "on": false,
+        "since": "2026-10-10T13:25:43.102710-04:00",
+        "set_by": "rick@example.com",
+        "settings_mute_while_off": null
+      }
+    }
+  }
+}
