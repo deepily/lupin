@@ -21,6 +21,7 @@
 
 ### Cost model
 - Prefer bounded Claude Code (`ClaudeCodeJob`, `task_type=BOUNDED`, covered by the Max plan) over the direct Anthropic SDK (`ANTHROPIC_API_KEY_FIREWALLED`, billed per token) for LLM-driven agents that fit its tool surface.
+- On bounded CC today: BFE (`src/cosa/agents/bug_fix_expediter/`), TFE (`src/cosa/agents/test_fix_expediter/`), podcast script generation (`src/cosa/agents/podcast_generator/`), presentation content generation (`src/cosa/agents/presentation_generator/`), Deep Research (`src/cosa/agents/deep_research/`).
 - Never use the bare `ANTHROPIC_API_KEY`; it is reserved for the Claude Code CLI.
 - The SDK's `cost_usd` telemetry on a bounded job is a notional figure: the Anthropic console balance does not move for it.
 - Deferred and not ratified for migration: OpenAI call sites and the Runtime Argument Expeditor (see TODO.md).
@@ -60,7 +61,7 @@ To run a job later, submit through `/api/v2/submit` with the command `agent rout
 - Read `history.md` and the implementation document named at its top; older context is in `history/YYYY-MM-history.md`.
 - Do not read the sub-repo histories (`src/lupin-plugin-firefox/history.md`, `../lupin-mobile/history.md`). `src/cosa/history.md` is an ordinary in-tree doc and may be read.
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN].
-- `src/cosa/` is a regular in-tree directory of this repository, not a separate repo or submodule. It keeps its own `README.md` and `CLAUDE.md`; where `src/cosa/CLAUDE.md` talks about a submodule, this file governs.
+- `src/cosa/` is a regular in-tree directory of this repository, not a separate repo or submodule. It keeps its own `README.md` and `CLAUDE.md`.
 
 ### Servers
 - Assume a server is bound to port 7999; the user starts and stops it. Start another instance only for ephemeral use on port 8000.
@@ -659,6 +660,6 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 - **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
 - **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
 
-The floor blocklist, runtime discovery, supported file types, Folder/Roots/Upload and example URLs are in `src/docs/wiki/capabilities/doc-viewer.md`.
+The floor blocklist and upload are described in `src/docs/wiki/capabilities/doc-viewer.md`. Runtime discovery, supported file types, Folder/Roots/Upload and the example URLs are in `src/docs/doctrine/claude-md-receipts-archive.md` § "Doc viewer scope (unified path-prefix routing)".
 
 **For sessions emitting links**: ALWAYS prefix with the project name. `scope=` is dead — do not include it. The endpoint will 400 immediately if you do, with an educational message naming the canonical form + the live registered-project list.

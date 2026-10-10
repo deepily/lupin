@@ -51,6 +51,6 @@
 | LLM clients | `src/docs/wiki/capabilities/agent-llm-clients.md` | changing how an agent calls a model |
 | Configuration | `src/docs/wiki/capabilities/configuration.md` | adding or reading an INI key |
 | Docstring rules | `src/docs/docstring-standard.md` | writing a docstring |
-| Slash commands (`/plan-*`, `/p-is-p-*`) | `.claude/commands/` | looking for a workflow |
-| Backup | `src/scripts/backup.sh`, `src/scripts/conf/rsync-exclude.txt` | running a backup (`/plan-backup-check`, `/plan-backup`, `/plan-backup-write`) |
+| Slash commands (`/plan-*`, `/p-is-p-*`) | `.claude/commands/` | looking for a workflow; the entry point is `/p-is-p-00-start-here` |
+| Backup | `src/scripts/backup.sh`, `src/scripts/conf/rsync-exclude.txt` | running a backup: `/plan-backup-check` checks the script version, `/plan-backup` is the dry run, `/plan-backup-write` writes |
 | Everything this file used to say | `src/docs/doctrine/claude-md-receipts-archive.md` | tracing where a rule came from |
