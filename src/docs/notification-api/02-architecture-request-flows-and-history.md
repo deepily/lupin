@@ -1,4 +1,4 @@
-> Part 2 of 16 of the [Lupin Notification API Reference](../notification-api.md): architecture, request flows, history.
+> Part 2 of 17 of the [Lupin Notification API Reference](../notification-api.md): architecture, request flows, history.
 
 ### System Architecture Diagram
 

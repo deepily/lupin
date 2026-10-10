@@ -1,4 +1,4 @@
-> Part 7 of 16 of the [Lupin Notification API Reference](../notification-api.md): SSE events, helpers, persistence models.
+> Part 7 of 17 of the [Lupin Notification API Reference](../notification-api.md): SSE events, helpers, persistence models.
 
 ### 5.4 SSE Event Models
 

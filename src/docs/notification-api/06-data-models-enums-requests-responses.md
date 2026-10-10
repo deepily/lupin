@@ -1,4 +1,4 @@
-> Part 6 of 16 of the [Lupin Notification API Reference](../notification-api.md): enums, requests and responses.
+> Part 6 of 17 of the [Lupin Notification API Reference](../notification-api.md): enums, requests and responses.
 
 ## 5. Data Models & Enums
 

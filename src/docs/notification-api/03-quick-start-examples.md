@@ -1,4 +1,4 @@
-> Part 3 of 16 of the [Lupin Notification API Reference](../notification-api.md): quick-start examples.
+> Part 3 of 17 of the [Lupin Notification API Reference](../notification-api.md): quick-start examples.
 
 ## 2. Quick-Start Examples
 

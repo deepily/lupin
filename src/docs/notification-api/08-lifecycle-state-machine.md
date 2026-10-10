@@ -1,4 +1,4 @@
-> Part 8 of 16 of the [Lupin Notification API Reference](../notification-api.md): lifecycle and state machine.
+> Part 8 of 17 of the [Lupin Notification API Reference](../notification-api.md): lifecycle and state machine.
 
 ## 6. Notification Lifecycle / State Machine
 

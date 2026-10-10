@@ -1,4 +1,4 @@
-> Part 9 of 16 of the [Lupin Notification API Reference](../notification-api.md): sender identity and routing.
+> Part 9 of 17 of the [Lupin Notification API Reference](../notification-api.md): sender identity and routing.
 
 ## 7. Sender Identity & Multi-Project Routing
 

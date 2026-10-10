@@ -1,4 +1,4 @@
-> Part 13 of 16 of the [Lupin Notification API Reference](../notification-api.md): voice I/O integration.
+> Part 13 of 17 of the [Lupin Notification API Reference](../notification-api.md): voice I/O integration.
 
 ## 10. Voice I/O Integration
 

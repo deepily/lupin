@@ -1,4 +1,4 @@
-> Part 1 of 16 of the [Lupin Notification API Reference](../notification-api.md): overview, layers and key concepts.
+> Part 1 of 17 of the [Lupin Notification API Reference](../notification-api.md): overview, layers and key concepts.
 
 # Lupin Notification API Reference
 

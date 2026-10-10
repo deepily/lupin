@@ -22,8 +22,8 @@ This page is an index. The reference itself is in the parts below, in document o
 - [9. Receiving Notifications](notification-api/12-receiving-notifications.md#9-receiving-notifications)
 - [10. Voice I/O Integration](notification-api/13-voice-io-integration.md#10-voice-io-integration)
 - [11. Notification Proxy Agent](notification-api/14-notification-proxy-agent.md#11-notification-proxy-agent)
-- [12. Configuration Reference](notification-api/15-configuration-reference.md#12-configuration-reference)
-- [13. Testing Guide](notification-api/16-testing-guide.md#13-testing-guide)
+- [12. Configuration Reference](notification-api/16-configuration-reference.md#12-configuration-reference)
+- [13. Testing Guide](notification-api/17-testing-guide.md#13-testing-guide)
 
 ## Parts
 
@@ -42,6 +42,7 @@ This page is an index. The reference itself is in the parts below, in document o
 | [11-sending-tiers-3-and-4.md](notification-api/11-sending-tiers-3-and-4.md) | sending: CLI clients and direct HTTP |
 | [12-receiving-notifications.md](notification-api/12-receiving-notifications.md) | receiving notifications |
 | [13-voice-io-integration.md](notification-api/13-voice-io-integration.md) | voice I/O integration |
-| [14-notification-proxy-agent.md](notification-api/14-notification-proxy-agent.md) | the notification proxy agent |
-| [15-configuration-reference.md](notification-api/15-configuration-reference.md) | configuration reference |
-| [16-testing-guide.md](notification-api/16-testing-guide.md) | testing guide |
+| [14-notification-proxy-agent.md](notification-api/14-notification-proxy-agent.md) | the notification proxy agent: overview, architecture, tiers, running it |
+| [15-proxy-agent-test-profiles-scripts-and-listener.md](notification-api/15-proxy-agent-test-profiles-scripts-and-listener.md) | proxy agent test profiles, Q&A scripts, credentials, listener and response submission |
+| [16-configuration-reference.md](notification-api/16-configuration-reference.md) | configuration reference |
+| [17-testing-guide.md](notification-api/17-testing-guide.md) | testing guide |

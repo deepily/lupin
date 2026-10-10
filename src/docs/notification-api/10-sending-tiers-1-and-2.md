@@ -1,4 +1,4 @@
-> Part 10 of 16 of the [Lupin Notification API Reference](../notification-api.md): sending: MCP tools and cosa_interface.
+> Part 10 of 17 of the [Lupin Notification API Reference](../notification-api.md): sending: MCP tools and cosa_interface.
 
 ## 8. Sending Notifications Programmatically
 
