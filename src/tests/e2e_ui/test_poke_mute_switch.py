@@ -27,6 +27,7 @@ import pytest
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_mute import MUTE_FILE_ENV, read_poke_mute, write_poke_mute
 from .conftest import BASE_URL
+from .poke_mute_served_state import assert_served_matches_file
 
 # The switch file the SERVER writes, captured at import (collection) time. src/conftest.py's
 # autouse isolation fixture points this process's MUTE_FILE_ENV at an empty tmp file for every
@@ -99,7 +100,9 @@ def test_an_admin_mutes_from_the_legacy_client_and_the_multiplexer_shows_it( adm
 
     served = _server_state( page )
     assert served[ "muted" ] is True
-    assert read_poke_mute() == served, "the file the Stop hook reads must be the one the server wrote"
+    # The GET names its source (design F4); the file never carries one. The test server's skeleton
+    # crew switch is off, so a muted file reads as "file".
+    assert_served_matches_file( read_poke_mute(), served, "file" )
 
     page.goto( MULTIPLEXER_URL )
     mux = _wait_known( page, MUX_BUTTON )
