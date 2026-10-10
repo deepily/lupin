@@ -327,6 +327,15 @@ def test_an_rnd_citer_not_yet_classified_holds_a_doc():
     assert final[ B ][ "class" ] == "new"
 
 
+def test_an_rnd_citer_outside_the_population_has_no_class_and_holds_the_doc_as_new():
+    outside = "src/rnd/v0.1.7/x/not-in-the-gate.md"
+    gate    = { A: _entry( rnd_path_citers=[ outside ] ) }
+    assert outside not in gate
+    final   = rnd_gate0.resolve( gate, { A: "history", outside: "history" } )
+    assert final[ A ][ "class" ] == "new"
+    assert final[ A ][ "holding_citers" ] == [ outside ] and final[ A ][ "free_citers" ] == []
+
+
 @pytest.mark.parametrize( "citer_class", [ "history", "superseded" ] )
 def test_an_rnd_citer_classed_history_or_superseded_does_not_hold_a_doc( citer_class ):
     gate  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry() }
