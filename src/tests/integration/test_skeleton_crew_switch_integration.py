@@ -41,13 +41,20 @@ SKELETON_KEYS = { "on", "since", "set_by", "settings_mute_while_off" }
 
 REAL_INI = os.path.join( os.environ.get( "LUPIN_ROOT", "/var/lupin" ), "src", "conf", "lupin-app.ini" )
 
+# The switch file the SERVER reads, captured at import (collection) time. src/conftest.py's autouse
+# isolation fixture points this process's variable at an off file for every test, so reading it
+# inside a test names a file the server never touches. docker-compose.yml gives the :8000
+# container a test-only file in this variable, and the suite subprocess inherits it.
+_SERVER_SWITCH_INI = os.environ.get( skeleton_crew.INI_OVERRIDE_ENV )
+
 
 def _test_ini():
     """
     The test-only copy of the configuration file, seeded from the real one on first use.
 
     Requires:
-        - LUPIN_SKELETON_CREW_INI names a file other than the real configuration file
+        - LUPIN_SKELETON_CREW_INI named a file other than the real configuration file when this
+          module was imported, before the suite's isolation fixture replaced it
 
     Ensures:
         - returns the path of a file that holds the switch key and the cap keys
@@ -57,7 +64,7 @@ def _test_ini():
         - pytest.fail when the variable is unset or names the real file, because the server would
           then write the file the whole fleet reads
     """
-    path = os.environ.get( skeleton_crew.INI_OVERRIDE_ENV )
+    path = _SERVER_SWITCH_INI
     if not path:
         pytest.fail( f"{skeleton_crew.INI_OVERRIDE_ENV} is not set, so a flip would write the real "
                      f"configuration file and put the fleet on skeleton crew. Refusing to run." )
