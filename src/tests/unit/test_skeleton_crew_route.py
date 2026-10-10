@@ -281,6 +281,9 @@ class _FakeCommons:
         self.posted = []
         self.raises = raises
 
+    def get_notification_queue( self ):
+        return "queue-from-main"
+
     async def post_broadcast_to_cc_sessions( self, body, authenticated_user_id, notification_queue ):
         if self.raises is not None:
             raise self.raises
@@ -317,3 +320,8 @@ def test_a_broadcast_that_fails_never_fails_the_flip( commons, capsys ):
     commons.raises = RuntimeError( "commons not initialized" )
     asyncio.run( arbiter._announce_flip( True, "rick", "queue" ) )
     assert "flip broadcast failed" in capsys.readouterr().out
+
+
+def test_the_queue_is_resolved_from_the_app_when_none_is_given( commons ):
+    asyncio.run( arbiter._announce_flip( True, "rick" ) )
+    assert commons.posted[ 0 ][ 2 ] == "queue-from-main"

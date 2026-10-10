@@ -21,17 +21,22 @@ answer cleanly says so.
 This module only reads. The route that writes the key, and the copy made before each write,
 live with the other writer of that file.
 """
+import datetime
+import json
 import os
 import sys
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
-from lupin_mcp import fleet_cap_ini_io, fleet_size_cap
+from lupin_mcp import config_write_lock, fleet_cap_ini_io, fleet_size_cap
 
 
 SKELETON_CREW_KEY = "cc session skeleton crew enabled"
 INI_OVERRIDE_ENV  = "LUPIN_SKELETON_CREW_INI"
 LOG_TAG           = "[SKELETON-CREW-GATE]"
+SETTINGS_ENV      = "STOP_POKE_SETTINGS"
+STATE_FILENAME    = "skeleton-crew-state.json"
+UNKNOWN_SETTER    = "unknown (file edited)"
 
 _DOORS = {
     "spawn"  : "spawning",
@@ -178,3 +183,112 @@ def skeleton_crew_refusal(
     if not skeleton_crew_is_on( config_mgr, disk_fn=disk_fn ):
         return None
     return refusal_text( door )
+
+
+def state_path() -> str:
+    """
+    The small file that records who flipped the switch and when.
+
+    Ensures:
+        - lives in the same folder as the write lock, outside the source tree
+        - holds attribution only. The switch itself is the key in the configuration file
+    """
+    return os.path.join( config_write_lock.lock_dir(), STATE_FILENAME )
+
+
+def write_state_file( on: bool, set_by: str, now: Optional[ datetime.datetime ] = None ) -> None:
+    """
+    Record who flipped the switch and when.
+
+    Requires:
+        - on is the value about to be written to the configuration file
+        - set_by is the administrator's email or user id
+
+    Ensures:
+        - the file is replaced atomically
+        - written before the configuration file, so a failed second write leaves a record
+          that disagrees with the file and reads as an unknown setter
+
+    Raises:
+        - OSError when the folder or the file cannot be written
+    """
+    moment = now if now is not None else datetime.datetime.now( datetime.timezone.utc )
+    record = { "on": bool( on ), "since": moment.astimezone().isoformat(), "set_by": set_by }
+    path   = state_path()
+    os.makedirs( os.path.dirname( path ), exist_ok=True )
+    partial = path + ".partial"
+    with open( partial, "w", encoding="utf-8" ) as handle:
+        json.dump( record, handle )
+        handle.flush()
+        os.fsync( handle.fileno() )
+    os.replace( partial, path )
+
+
+def read_state_file() -> Optional[ Dict[ str, Any ] ]:
+    """
+    The attribution record, or None when it is missing or unreadable.
+
+    Ensures:
+        - never raises
+    """
+    try:
+        with open( state_path(), "r", encoding="utf-8" ) as handle:
+            record = json.load( handle )
+    except ( OSError, ValueError ):
+        return None
+    return record if isinstance( record, dict ) else None
+
+
+def settings_json_poke_muted() -> Optional[ bool ]:
+    """
+    Whether the Stop poke is muted in the user's settings file.
+
+    Ensures:
+        - returns True when `heartbeat.poke_output_enabled` is false
+        - returns False when the file is readable and the poke is not muted there
+        - returns None when the file is missing or is not valid JSON, which is the case in
+          a container that does not see the host's settings
+        - never raises
+    """
+    path = os.environ.get( SETTINGS_ENV ) or os.path.expanduser( "~/.claude/settings.json" )
+    try:
+        with open( path, "r", encoding="utf-8" ) as handle:
+            settings = json.load( handle )
+    except ( OSError, ValueError ):
+        return None
+    block = settings.get( "heartbeat" ) if isinstance( settings, dict ) else None
+    if not isinstance( block, dict ):
+        return False
+    return block.get( "poke_output_enabled", True ) is False
+
+
+def describe() -> Dict[ str, Any ]:
+    """
+    The switch state as clients and session info report it.
+
+    Ensures:
+        - returns on, since, set_by and settings_mute_while_off
+        - `on` comes from the configuration file, read fresh. An unreadable file is off
+        - since and set_by come from the attribution record only while it agrees with the file
+        - set_by is the unknown-setter text when the record disagrees with the file
+        - settings_mute_while_off is None when the settings file cannot be read, and
+          otherwise true only when the poke is muted there while the switch is off
+        - never raises
+    """
+    on     = bool( read_state_from_disk() )
+    record = read_state_file()
+    since  = None
+    set_by = None
+    if record is not None:
+        if record.get( "on" ) is on:
+            since  = record.get( "since" )
+            set_by = record.get( "set_by" )
+        else:
+            set_by = UNKNOWN_SETTER
+    muted = settings_json_poke_muted()
+    return {
+        "on"                      : on,
+        "since"                   : since,
+        "set_by"                  : set_by,
+        "settings_mute_while_off" : None if muted is None else bool( muted and not on ),
+    }

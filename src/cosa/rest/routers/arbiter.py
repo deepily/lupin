@@ -35,9 +35,10 @@ rule that there is no standalone arbiter HTTP server is retired with it.
 from typing import Annotated, Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
+from cosa.rest.auth_middleware import require_admin
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest import arbiter_snapshot_store as snapshot_store
 
@@ -280,7 +281,8 @@ def _fleet_size_cap_payload():
     The dial's whole state: what is enforced, what the ceiling is, who is occupying it.
 
     Ensures:
-        - returns { cap, ceiling, live } where `live` is the census dict or None
+        - returns { cap, ceiling, live, skeleton_crew } where `live` is the census dict or None
+        - `skeleton_crew` is the switch state: on, since, set_by, settings_mute_while_off
         - `cap` prefers the value on disk over the cached configuration singleton
         - never raises
     """
@@ -292,11 +294,13 @@ def _fleet_size_cap_payload():
     except Exception:
         config_mgr = None
 
+    from lupin_mcp import skeleton_crew
     return {
-        "cap"     : fleet_size_cap.resolve_fleet_cap(
-                        config_mgr, disk_fn=fleet_size_cap.default_disk_cap_reader ),
-        "ceiling" : fleet_size_cap.resolve_fleet_ceiling( config_mgr ),
-        "live"    : _safe_live_counts(),
+        "cap"           : fleet_size_cap.resolve_fleet_cap(
+                              config_mgr, disk_fn=fleet_size_cap.default_disk_cap_reader ),
+        "ceiling"       : fleet_size_cap.resolve_fleet_ceiling( config_mgr ),
+        "live"          : _safe_live_counts(),
+        "skeleton_crew" : skeleton_crew.describe(),
     }
 
 
@@ -444,4 +448,120 @@ def put_fleet_size_cap(
         except Exception:
             pass                      # the FILE is the source of truth; this is a cache
 
+    return _fleet_size_cap_payload()
+
+
+class SkeletonCrewIn( BaseModel ):
+    """
+    Body for PUT /api/arbiter/skeleton-crew.
+
+    `on` is a bare JSON boolean. Any other field, and any other type, is a 422.
+    """
+    model_config = ConfigDict( extra="forbid" )
+    on : StrictBool = Field( description="True turns skeleton crew on, false turns it off." )
+
+
+async def refuse_api_key_flipper(
+    x_api_key     : Annotated[ Optional[ str ], Header() ] = None,
+    authorization : Annotated[ Optional[ str ], Header() ] = None
+) -> None:
+    """
+    Turn away a caller that presents only an API key, before the admin check runs.
+
+    Ensures:
+        - raises 403 when X-API-Key is present and Authorization is not, which is how a
+          Claude session calls. A manager's own key therefore cannot flip the switch
+        - otherwise returns None, and the admin check decides
+    """
+    if x_api_key and not authorization:
+        raise HTTPException(
+            status_code = 403,
+            detail      = "Only an administrator may change the skeleton crew switch."
+        )
+
+
+def _flip_message( on: bool ) -> str:
+    """
+    The words the live sessions receive when the switch flips.
+
+    Ensures:
+        - on: tells workers to finish the step and stop, and managers to reap them
+        - off: tells managers they may spawn inside the cap
+    """
+    if on:
+        return ( "Skeleton crew is ON. No spawning and no asking for seats. Each worker: finish "
+                 "your current step, write your memento and stop. Each manager: reap your "
+                 "workers once they are done and take over what is left." )
+    return ( "Skeleton crew is OFF. Managers may spawn the seats they need inside the cap, and "
+             "may ask the operator to raise the cap by just enough for the work in hand." )
+
+
+async def _announce_flip( on: bool, authenticated_user_id: str, notification_queue: Any = None ) -> None:
+    """
+    Tell every live session the switch flipped, and never fail the flip because of it.
+
+    Requires:
+        - the flip is already written to the file
+
+    Ensures:
+        - posts one acknowledged broadcast through the commons broadcast route's handler
+        - resolves the notification queue itself when none is given
+        - a failure is printed and swallowed
+    """
+    try:
+        from cosa.rest.routers import commons
+        queue = notification_queue if notification_queue is not None else commons.get_notification_queue()
+        body  = commons.BroadcastRequestBody( message=_flip_message( on ), require_ack=True )
+        await commons.post_broadcast_to_cc_sessions( body, authenticated_user_id, queue )
+    except Exception as error:
+        print( f"[SKELETON-CREW] flip broadcast failed: {type( error ).__name__}: {error}", flush=True )
+
+
+@router.put(
+    "/arbiter/skeleton-crew",
+    summary     = "Admin: turn skeleton crew on or off",
+    description = "Body { on: bool }. Writes `cc session skeleton crew enabled` to the "
+                  "configuration file, tells the live sessions, and returns the same body as "
+                  "GET /api/arbiter/fleet-size-cap, re-read from the file. Admin login only: "
+                  "an API-key caller is refused with 403 and nothing changes."
+)
+async def put_skeleton_crew(
+    body                  : SkeletonCrewIn,
+    _no_key               : Annotated[ None, Depends( refuse_api_key_flipper ) ],
+    user                  : Annotated[ Dict, Depends( require_admin ) ],
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Flip the switch and report what the file now says.
+
+    Requires:
+        - an administrator login (403 for an API key alone or a non-admin user)
+        - body.on is a bare boolean (422 otherwise)
+
+    Ensures:
+        - the attribution record is written first and the configuration file second
+        - a missing key is inserted after the cap maximum line instead of refused
+        - a key defined twice answers 409 with the writer's own message, writing nothing
+        - an OS error answers 500 naming the cause, and nothing is announced
+        - on success the live sessions are told, and a failed broadcast does not fail the flip
+        - returns { cap, ceiling, live, skeleton_crew } read back from the file
+        - never copies the value into the configuration manager. The file is the one value
+    """
+    from lupin_mcp import fleet_cap_ini_io, fleet_size_cap, skeleton_crew
+    who = user.get( "email" ) or user.get( "uid" ) or "unknown"
+    try:
+        skeleton_crew.write_state_file( body.on, who )
+        fleet_cap_ini_io.write_bool_to_disk(
+            skeleton_crew.ini_path(), skeleton_crew.SKELETON_CREW_KEY, body.on,
+            insert_after=fleet_size_cap.FLEET_CEILING_KEY )
+    except ( fleet_cap_ini_io.KeyNotFound, fleet_cap_ini_io.KeyDefinedTwice ) as refusal:
+        raise HTTPException( status_code=409, detail=str( refusal ) )
+    except OSError as failure:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"The skeleton crew switch could not be written: {failure}. "
+                          f"Nothing is guaranteed to have changed; read "
+                          f"GET /api/arbiter/fleet-size-cap to see what it says now."
+        )
+    await _announce_flip( body.on, authenticated_user_id, None )
     return _fleet_size_cap_payload()
