@@ -189,3 +189,17 @@ def test_the_splainer_explains_the_key():
     root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
     path = os.path.join( root, "src", "conf", "lupin-app-splainer.ini" )
     assert io.read_value_from_disk( path, sc.SKELETON_CREW_KEY ) is not None
+
+
+# ── the attribution record follows the file it describes ─────────────────────
+
+def test_the_record_sits_beside_an_overridden_configuration_file( tmp_path, monkeypatch ):
+    monkeypatch.setenv( sc.INI_OVERRIDE_ENV, str( tmp_path / "copy.ini" ) )
+    monkeypatch.setenv( sc.config_write_lock.LOCK_DIR_ENV, str( tmp_path / "locks" ) )
+    assert sc.state_path() == str( tmp_path / "copy.ini.state.json" )
+
+
+def test_without_an_override_the_record_lives_in_the_lock_folder( tmp_path, monkeypatch ):
+    monkeypatch.delenv( sc.INI_OVERRIDE_ENV, raising=False )
+    monkeypatch.setenv( sc.config_write_lock.LOCK_DIR_ENV, str( tmp_path / "locks" ) )
+    assert sc.state_path() == str( tmp_path / "locks" / sc.STATE_FILENAME )

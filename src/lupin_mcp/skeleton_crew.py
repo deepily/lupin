@@ -197,9 +197,14 @@ def state_path() -> str:
     The small file that records who flipped the switch and when.
 
     Ensures:
-        - lives in the same folder as the write lock, outside the source tree
+        - sits beside the override file when the configuration file is overridden, so a server
+          that flips a copy never rewrites the real record
+        - otherwise lives in the same folder as the write lock, outside the source tree
         - holds attribution only. The switch itself is the key in the configuration file
     """
+    override = os.environ.get( INI_OVERRIDE_ENV )
+    if override:
+        return f"{override}.state.json"
     return os.path.join( config_write_lock.lock_dir(), STATE_FILENAME )
 
 
