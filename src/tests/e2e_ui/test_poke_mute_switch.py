@@ -81,7 +81,8 @@ def switch_restored( monkeypatch ):
 
 
 def _wait_known( page, selector ):
-    page.wait_for_selector( KNOWN.format( sel=selector ), timeout=15000 )
+    # Row 6f72dc83: both buttons are hidden now, so wait for them attached, not visible.
+    page.wait_for_selector( KNOWN.format( sel=selector ), state="attached", timeout=15000 )
     return page.locator( selector )
 
 
@@ -93,8 +94,8 @@ def test_an_admin_mutes_from_the_legacy_client_and_the_multiplexer_shows_it( adm
     assert legacy.get_attribute( "data-muted" ) == "false"
     assert legacy.is_enabled()
 
-    legacy.click()
-    page.wait_for_selector( f"{LEGACY_BUTTON}[data-muted='true']", timeout=10000 )
+    legacy.dispatch_event( "click" )    # hidden since row 6f72dc83: a real click would wait for it to show
+    page.wait_for_selector( f"{LEGACY_BUTTON}[data-muted='true']", state="attached", timeout=10000 )
 
     served = _server_state( page )
     assert served[ "muted" ] is True
@@ -105,8 +106,8 @@ def test_an_admin_mutes_from_the_legacy_client_and_the_multiplexer_shows_it( adm
     assert mux.get_attribute( "data-muted" ) == "true"
     assert mux.is_enabled()
 
-    mux.click()
-    page.wait_for_selector( f"{MUX_BUTTON}[data-muted='false']", timeout=10000 )
+    mux.dispatch_event( "click" )
+    page.wait_for_selector( f"{MUX_BUTTON}[data-muted='false']", state="attached", timeout=10000 )
     assert _server_state( page )[ "muted" ] is False
     assert read_poke_mute()[ "muted" ] is False
 
