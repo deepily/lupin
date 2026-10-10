@@ -49,7 +49,7 @@ import os
 import re
 import tempfile
 
-from lupin_mcp import config_backup
+from lupin_mcp import config_write_lock
 from typing import List, NamedTuple, Optional, Tuple
 
 
@@ -221,7 +221,7 @@ def _replace_value_line( path: str, key: str, value_text: str, insert_after: Opt
         - KeyNotFound or KeyDefinedTwice without writing anything
         - OSError when the lock or the replacement fails
     """
-    with config_backup.write_lock():
+    with config_write_lock.write_lock():
         try:
             definition = locate_key( path, key )      # refuses before touching anything
         except KeyNotFound:

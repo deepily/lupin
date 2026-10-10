@@ -26,7 +26,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_mcp import fleet_cap_ini_io as io
-from lupin_mcp import config_backup as cb
+from lupin_mcp import config_write_lock as cb
 
 
 CAP_KEY    = "cc session fleet size cap"
@@ -111,7 +111,7 @@ def test_a_failed_replace_leaves_no_temp_file_and_the_file_unchanged( tmp_path, 
 
 def test_the_writer_waits_for_the_lock_and_then_writes( tmp_path ):
     path = _ini( tmp_path )
-    os.makedirs( cb.backup_dir(), exist_ok=True )
+    os.makedirs( cb.lock_dir(), exist_ok=True )
     holder = open( cb.lock_path(), "w" )
     fcntl.flock( holder.fileno(), fcntl.LOCK_EX )
     finished = []
@@ -138,30 +138,30 @@ def test_a_lock_that_cannot_be_created_refuses_the_write( tmp_path, monkeypatch 
     path = _ini( tmp_path )
     blocker = tmp_path / "not-a-folder"
     blocker.write_text( "x", encoding="utf-8" )
-    monkeypatch.setenv( cb.BACKUP_DIR_ENV, str( blocker / "inside" ) )
+    monkeypatch.setenv( cb.LOCK_DIR_ENV, str( blocker / "inside" ) )
     with pytest.raises( OSError ):
         io.write_bool_to_disk( path, SWITCH_KEY, True )
     assert open( path, encoding="utf-8" ).read() == WELL_FORMED
 
 
-def test_the_lock_lives_in_the_backup_folder_not_beside_the_configuration_file( tmp_path ):
-    assert os.path.dirname( cb.lock_path() ) == cb.backup_dir()
+def test_the_lock_lives_in_the_lock_folder_not_beside_the_configuration_file( tmp_path ):
+    assert os.path.dirname( cb.lock_path() ) == cb.lock_dir()
     assert os.path.basename( cb.lock_path() ) == cb.LOCK_FILENAME
 
 
-def test_the_backup_folder_follows_the_env_override( tmp_path, monkeypatch ):
-    monkeypatch.setenv( cb.BACKUP_DIR_ENV, str( tmp_path / "x" ) )
-    assert cb.backup_dir() == str( tmp_path / "x" )
+def test_the_lock_folder_follows_the_env_override( tmp_path, monkeypatch ):
+    monkeypatch.setenv( cb.LOCK_DIR_ENV, str( tmp_path / "x" ) )
+    assert cb.lock_dir() == str( tmp_path / "x" )
 
 
-def test_the_backup_folder_in_a_container_is_inside_the_flow_ratio_mount( tmp_path, monkeypatch ):
-    monkeypatch.delenv( cb.BACKUP_DIR_ENV, raising=False )
+def test_the_lock_folder_in_a_container_is_the_flow_ratio_mount( tmp_path, monkeypatch ):
+    monkeypatch.delenv( cb.LOCK_DIR_ENV, raising=False )
     monkeypatch.setenv( "LUPIN_FLOW_RATIO_DIR", str( tmp_path / "flow" ) )
-    assert cb.backup_dir() == str( tmp_path / "flow" / "config-backups" )
+    assert cb.lock_dir() == str( tmp_path / "flow" )
 
 
-def test_the_backup_folder_on_the_host_is_under_the_fleet_data_root( monkeypatch ):
-    monkeypatch.delenv( cb.BACKUP_DIR_ENV, raising=False )
+def test_the_lock_folder_on_the_host_is_under_the_fleet_data_root( monkeypatch ):
+    monkeypatch.delenv( cb.LOCK_DIR_ENV, raising=False )
     monkeypatch.delenv( "LUPIN_FLOW_RATIO_DIR", raising=False )
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-    assert cb.backup_dir() == os.path.join( str( fleet_data_root() ), "flow-ratio", "config-backups" )
+    assert cb.lock_dir() == os.path.join( str( fleet_data_root() ), "flow-ratio" )
