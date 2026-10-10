@@ -235,7 +235,7 @@ two things on every Rick-bound escalation:
    (`escalation_live_notify_error`).
 
 The live hop (`arbiter_live_notify.py`) is the **only** :7999-capable hop and is
-**escalation-path only**. The detection path stays :7999-free, so a :7999 outage can never block detection.
+**escalation-path only**. The detection path stays :7999-free.
 It carries:
 
 - a **content+window dedup guard** (`make_live_notify_fn`) so N identical
