@@ -177,3 +177,24 @@ def test_a_directory_named_like_a_part_is_not_a_sibling( tmp_path ):
 
 def test_the_index_and_every_other_part_are_the_siblings_of_a_part( tmp_path ):
     assert md_lint.sibling_paths( "foo/01-intro.md", _split_tree( tmp_path ) ) == [ "foo.md", "foo/02-steps.md" ]
+
+
+def test_only_two_digit_names_are_parts( tmp_path ):
+    root = _split_tree( tmp_path )
+    _write( root, "foo/1-a.md", "# One\n" )
+    _write( root, "foo/001-a.md", "# Three\n" )
+    assert md_lint.sibling_paths( "foo.md", root ) == [ "foo/01-intro.md", "foo/02-steps.md" ]
+
+
+def test_a_dotted_section_mark_is_resolved_by_the_dotted_heading_of_a_sibling( tmp_path ):
+    root = str( tmp_path )
+    _write( root, "foo.md", PAGE_WITH_PARTS )
+    _write( root, "foo/01-a.md", "# A\n\nSee §4.2 and §4.3 here.\n" )
+    _write( root, "foo/02-b.md", "# B\n\n### 4.2 Detail\n" )
+    assert _bare( root, "foo/01-a.md" ) == [ "section reference '§4.3' has no path" ]
+
+
+def test_without_a_root_the_working_directory_is_not_searched( tmp_path, monkeypatch ):
+    root = _split_tree( tmp_path )
+    monkeypatch.chdir( root )
+    assert md_lint.sibling_paths( "foo/01-intro.md", None ) == []
