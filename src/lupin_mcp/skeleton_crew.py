@@ -50,12 +50,16 @@ def ini_path() -> str:
 
     Ensures:
         - returns the env override when it is set, so tests never touch the live file
-        - otherwise returns the same file the fleet cap lives in
+        - otherwise returns the configuration file of the main checkout. A seat in a
+          worktree reads the main checkout's file and not its own tracked copy
     """
     override = os.environ.get( INI_OVERRIDE_ENV )
     if override:
         return override
-    return fleet_size_cap.config_file_path()
+    import cosa.utils.util as cu
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _main_repo_path
+    main = _main_repo_path( cu.get_project_root() )
+    return os.path.join( str( main ), "src", "conf", "lupin-app.ini" )
 
 
 def _say( detail: str ) -> None:
