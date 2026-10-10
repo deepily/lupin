@@ -69,6 +69,13 @@ class DoorRefusal( Exception ):
     """
 
     def __init__( self, code, message ):
+        """
+        Build the refusal from a machine-readable code and a sentence for a person.
+
+        Ensures:
+            - code and message are kept as attributes, and str( exc ) is the message
+            - the code is not checked against the list in the class docstring
+        """
         super().__init__( message )
         self.code, self.message = code, message
 
@@ -339,6 +346,12 @@ class StartRefusal( Exception ):
     """A start the server refuses: HTTP status, the client-facing code, and the message."""
 
     def __init__( self, status, code, message ):
+        """
+        Build the refusal from an HTTP status, a client-facing code and a message.
+
+        Ensures:
+            - status, code and message are kept as attributes, and str( exc ) is the message
+        """
         super().__init__( message )
         self.status, self.code, self.message = status, code, message
 

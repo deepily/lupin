@@ -31,6 +31,12 @@ class NotifyRateLimiter:
     """
 
     def __init__( self ):
+        """
+        Start with no source recorded.
+
+        Ensures:
+            - takes no arguments; the cap and the window arrive with each check_and_record call
+        """
         self._hits = defaultdict( deque )   # source -> deque[ float timestamps ]
         self._lock = threading.Lock()
 

@@ -19,6 +19,12 @@ class PodcastProxySpentRepository( BaseRepository[ PodcastProxySpentCard ] ):
     """Claim, annotate and release the spent-card record. The caller commits."""
 
     def __init__( self, session: Session ):
+        """
+        Bind the repository to PodcastProxySpentCard rows and the given session.
+
+        Ensures:
+            - nothing is read or written; the session stays the caller's to commit
+        """
         super().__init__( PodcastProxySpentCard, session )
 
     def claim( self, card_id: uuid.UUID, started_by: str, scope_path: str, sha256: str ) -> bool:

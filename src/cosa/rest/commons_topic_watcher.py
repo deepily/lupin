@@ -68,6 +68,13 @@ class CommonsTopicWatcher:
         debug                  : bool  = False,
         thread_name            : str   = "CommonsTopicWatcher",
     ):
+        """
+        Hold the store, the two intervals and the thread name, with an empty in-flight map.
+
+        Ensures:
+            - both intervals are kept as floats
+            - no thread exists and no cursor is set; start() creates the thread
+        """
         self.store                 = store
         self.poll_interval_seconds = float( poll_interval_seconds )
         self.in_flight_ttl_seconds = float( in_flight_ttl_seconds )

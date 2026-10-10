@@ -10,6 +10,12 @@ from .user_id_generator import get_user_info, email_to_system_id, email_to_user_
 class TokenExpiredException( HTTPException ):
     """Raised when a JWT access token has expired. Subclass of HTTPException for compatibility."""
     def __init__( self ):
+        """
+        Build an HTTPException with status 401 and the detail "Token expired".
+
+        Ensures:
+            - takes no arguments; status_code and detail are fixed
+        """
         super().__init__(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired"
@@ -50,7 +56,21 @@ def init_firebase():
 from fastapi import Request
 
 class HTTPBearerWith401(HTTPBearer):
+    """
+    HTTPBearer that answers 401, not 403, when a request carries no usable credentials.
+
+    Ensures:
+        - a request with credentials gets them back unchanged
+        - a request without them raises HTTPException 401 with a `WWW-Authenticate: Bearer` header
+        - the missing-credentials case prints a line saying whether an Authorization header was present
+    """
     def __init__(self):
+        """
+        Set up HTTPBearer with auto_error off, so __call__ raises the 401 itself.
+
+        Ensures:
+            - takes no arguments
+        """
         # Initialize with auto_error=False to handle errors manually
         super().__init__(auto_error=False)
 

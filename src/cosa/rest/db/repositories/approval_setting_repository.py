@@ -20,6 +20,12 @@ class ApprovalSettingRepository( BaseRepository[ApprovalSetting] ):
     """
 
     def __init__( self, session ):
+        """
+        Bind the repository to ApprovalSetting rows and the given session.
+
+        Ensures:
+            - nothing is read or written; the session stays the caller's to commit
+        """
         super().__init__( ApprovalSetting, session )
 
     def get_all( self ) -> dict:

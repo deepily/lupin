@@ -65,6 +65,15 @@ class CommonsActivityWatcher( CommonsTopicWatcher ):
         poll_interval_seconds    : float = _DEFAULT_POLL_INTERVAL,
         debug                    : bool  = False,
     ):
+        """
+        Build the activity watcher on a store, a push function, excluded topics and a resolver.
+
+        Ensures:
+            - store, the poll interval and debug go to the base class, under the thread name "CommonsActivityWatcher"
+            - excluded_topics is kept as a set
+            - push_notification_fn and bridge_owner_resolver_fn are kept as given
+            - no thread is started; start() does that
+        """
         super().__init__(
             store                  = store,
             poll_interval_seconds  = poll_interval_seconds,

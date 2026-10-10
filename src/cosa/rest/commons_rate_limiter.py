@@ -40,6 +40,15 @@ class CommonsBroadcastRateLimiter:
     """
 
     def __init__( self, window_seconds: float ):
+        """
+        Set the window length in seconds and start with no user recorded.
+
+        Ensures:
+            - window_seconds is kept as a float
+
+        Raises:
+            - ValueError when window_seconds is zero or negative
+        """
         if window_seconds <= 0:
             raise ValueError( f"window_seconds must be positive, got {window_seconds}" )
         self.window_seconds = float( window_seconds )

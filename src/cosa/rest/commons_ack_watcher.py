@@ -101,6 +101,14 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
         in_flight_ttl_seconds  : float = _DEFAULT_TTL_SECONDS,
         debug                  : bool  = False,
     ):
+        """
+        Build the ack watcher on a store and a push function, with an empty in-flight map.
+
+        Ensures:
+            - store, the poll interval, the in-flight ttl and debug go to the base class, under the thread name "CommonsAckWatcher"
+            - push_notification_fn is kept as given
+            - no thread is started; start() does that
+        """
         super().__init__(
             store                 = store,
             poll_interval_seconds = poll_interval_seconds,

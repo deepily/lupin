@@ -24,6 +24,13 @@ class RepairAttempt:
     """Record of a single repair attempt within a chain."""
     def __init__( self, attempt_number, bfe_job_id, fix_gist="", fix_gist_embedding=None,
                   cost_usd=0.0, outcome="pending" ):
+        """
+        Record one attempt: its number, the BFE job, the fix gist, its cost and its outcome.
+
+        Ensures:
+            - started_at is the local time now, as an ISO string
+            - resubmitted_job_id and completed_at are None
+        """
         self.attempt_number     = attempt_number
         self.bfe_job_id         = bfe_job_id
         self.resubmitted_job_id = None
@@ -35,6 +42,12 @@ class RepairAttempt:
         self.outcome            = outcome   # pending | fixed | fix_failed | resubmit_failed | same_error | different_error | escalated
 
     def to_dict( self ):
+        """
+        Return the attempt's fields as a dict, without the gist embedding.
+
+        Ensures:
+            - the keys are attempt_number, bfe_job_id, resubmitted_job_id, fix_gist, cost_usd, started_at, completed_at and outcome
+        """
         return {
             "attempt_number"     : self.attempt_number,
             "bfe_job_id"         : self.bfe_job_id,
@@ -50,6 +63,13 @@ class RepairAttempt:
 class RepairChain:
     """Tracks all attempts for a single failed job."""
     def __init__( self, original_job_id, max_attempts=3, max_cost_usd=10.0, max_wall_clock_seconds=1800 ):
+        """
+        Start a chain for one failed job, with its three limits and the clock set to now.
+
+        Ensures:
+            - first_failure_time is time.time() at this call, not the time of any attempt
+            - attempts is empty
+        """
         self.original_job_id       = original_job_id
         self.max_attempts          = max_attempts
         self.max_cost_usd          = max_cost_usd
@@ -59,14 +79,17 @@ class RepairChain:
 
     @property
     def attempt_count( self ):
+        """Return how many attempts the chain holds."""
         return len( self.attempts )
 
     @property
     def cumulative_cost( self ):
+        """Return the summed cost_usd of the chain's attempts, 0 when it has none."""
         return sum( a.cost_usd for a in self.attempts )
 
     @property
     def elapsed_seconds( self ):
+        """Return the seconds from first_failure_time to now."""
         return time.time() - self.first_failure_time
 
     def can_attempt( self ) -> tuple:
@@ -101,6 +124,14 @@ class RepairChain:
         return self.attempts[ -1 ] if self.attempts else None
 
     def to_dict( self ):
+        """
+        Return the chain's counts, two of its limits and its attempts as a dict.
+
+        Ensures:
+            - the keys are original_job_id, attempt_count, cumulative_cost, elapsed_seconds, max_attempts,
+              max_cost_usd, first_failure_time and attempts; max_wall_clock_seconds is not among them
+            - attempts holds each attempt's to_dict()
+        """
         return {
             "original_job_id"  : self.original_job_id,
             "attempt_count"    : self.attempt_count,
@@ -205,6 +236,16 @@ class RepairAttemptTracker:
     """
 
     def __init__( self, config_mgr, debug=False ):
+        """
+        Read the three circuit-breaker limits from config, once, and start with no chains.
+
+        Requires:
+            - config_mgr.get( key, default=, return_type= ) answers the three `auto fix` keys
+
+        Ensures:
+            - max_attempts, max_cost_usd and max_wall_clock default to 3, 10.0 and 1800 when a key is absent
+            - a later change to the config is not seen by this tracker
+        """
         self.config_mgr = config_mgr
         self.debug      = debug
         self._chains    = {}  # { original_job_id: RepairChain }
