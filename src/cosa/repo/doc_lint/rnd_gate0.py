@@ -11,10 +11,9 @@ A bare file name is cited loosely, and a stem without its extension more loosely
 class has a minimum length so a short stem such as `00-index` does not match everything. All three
 block the history class, because a wrong "history" is the costly error here.
 
-Three tracked files never count as citers. The R&D index lists every doc to prove compliance. The
-ledger lists every doc because it is the ledger. The deletion census is a manifest of candidates.
-This module and its test file also never count, because they name docs as examples. None of them
-is a decision to keep.
+Two tracked files never count as citers. The R&D index lists every doc to prove compliance. The
+ledger lists every doc because it is the ledger. This module and its test file also never count,
+because they name docs as examples. None of them is a decision to keep.
 
 The second half of the module applies the manager's ruling on the word "live". A citer holds a doc
 out of history only when its category says so. `resolve` settles the classes over passes, because an
@@ -34,7 +33,6 @@ MIN_STEM_LENGTH = 12
 NON_CITING = frozenset( {
     "src/rnd/README.md",
     "src/docs/rnd-ledger.tsv",
-    "src/docs/2026.09.22-pre-september-rnd-deletion-candidates.md",
     "src/cosa/repo/doc_lint/rnd_gate0.py",
     "src/tests/unit/test_doc_lint_rnd_gate0.py",
 } )

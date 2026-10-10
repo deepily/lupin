@@ -88,18 +88,17 @@ def test_a_citer_under_the_cosa_rnd_root_counts_as_rnd( tmp_path ):
 
 
 @pytest.mark.parametrize( "index_path", sorted( rnd_gate0.NON_CITING ) )
-def test_the_index_the_ledger_and_the_census_manifest_prove_nothing( tmp_path, index_path ):
+def test_the_index_and_the_ledger_prove_nothing( tmp_path, index_path ):
     root = _repo( tmp_path, { DOC: "# doc\n", index_path: "- %s\n" % DOC } )
     found = rnd_gate0.gate0( root, [ DOC ] )[ DOC ]
     assert found[ "live_path_citers" ] == [] and found[ "rnd_path_citers" ] == []
     assert found[ "blocks_history" ] is False
 
 
-def test_the_non_citing_list_is_exactly_the_five_named_files():
+def test_the_non_citing_list_is_exactly_the_four_named_files():
     assert rnd_gate0.NON_CITING == frozenset( {
         "src/rnd/README.md",
         "src/docs/rnd-ledger.tsv",
-        "src/docs/2026.09.22-pre-september-rnd-deletion-candidates.md",
         "src/cosa/repo/doc_lint/rnd_gate0.py",
         "src/tests/unit/test_doc_lint_rnd_gate0.py",
     } )
