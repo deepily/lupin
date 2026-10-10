@@ -30,6 +30,7 @@ export interface FleetApiClient {
 
 export const FLEET_STATE_ENDPOINT          = "/api/arbiter/fleet-state";
 export const FLEET_SIZE_CAP_ENDPOINT       = "/api/arbiter/fleet-size-cap";
+export const FLEET_SKELETON_CREW_ENDPOINT  = "/api/arbiter/skeleton-crew";
 export const FLEET_STATUS_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (D4)
 
 /** Who occupies the cap right now — every session counts, managers included. */
@@ -48,6 +49,8 @@ export interface FleetSizeCap {
   cap?     : number;
   ceiling? : number;
   live?    : FleetLiveCounts | null;
+  /** Skeleton crew on: no spawning, stop poke muted. Absent before the toggle shipped. */
+  skeleton_crew? : boolean;
 }
 
 export interface FleetStatusStore {
@@ -71,6 +74,10 @@ export interface FleetStatusStore {
   refreshSizeCap(): Promise<void>;
   /** PUT a new cap, then hold the SERVER's answer — or re-read on a refusal. Never throws. */
   setSizeCap( cap: number ): Promise<void>;
+  /** The state being saved while a skeleton crew write is in flight, else null. */
+  skeletonCrewSaving(): boolean | null;
+  /** Write { on }, then hold the server's answer, or re-read on a refusal. Never throws. */
+  setSkeletonCrew( on: boolean ): Promise<void>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -101,6 +108,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   private pollHandle    : number | null = null;
   private lastSizeCap   : FleetSizeCap | null = null;
   private savingCap     : number | null = null;
+  private savingCrew    : boolean | null = null;
 
   constructor( opts: FleetStatusStoreOptions ) {
     this.bus = opts.bus;
@@ -203,6 +211,34 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
+  skeletonCrewSaving(): boolean | null {
+    return this.savingCrew;
+  }
+
+  async setSkeletonCrew( on: boolean ): Promise<void> {
+    this.savingCrew = on;
+    this.emitSizeCapChanged();
+    let persisted: FleetSizeCap | null = null;
+    try {
+      // The answer is the server's re-read of the configuration file, not the value sent,
+      // so the switch cannot show a state the spawn path is not enforcing.
+      persisted = await this.api.put<FleetSizeCap>( FLEET_SKELETON_CREW_ENDPOINT, { on } );
+    } catch ( err ) {
+      const status = ( err as { status?: number } ).status;
+      this.errorFn( typeof status === "number"
+        ? `Skeleton crew not saved: ${serverDetail( err, status )}`
+        : `Skeleton crew save failed: ${err}` );
+    }
+    this.savingCrew = null;
+    // A refusal re-reads, so the switch snaps back to the state that is actually enforced.
+    if ( persisted === null ) {
+      await this.refreshSizeCap();
+      return;
+    }
+    this.lastSizeCap = persisted;
+    this.emitSizeCapChanged();
+  }
+
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
@@ -226,7 +262,7 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   private emitSizeCapChanged(): void {
     this.bus.emit<StoreFleetSizeCapChangedPayload>( {
       type    : "store_fleet_size_cap_changed",
-      payload : { saving: this.savingCap !== null },
+      payload : { saving: this.savingCap !== null || this.savingCrew !== null },
       source  : "FleetStatusStore",
       ts      : this.nowFn(),
     } );

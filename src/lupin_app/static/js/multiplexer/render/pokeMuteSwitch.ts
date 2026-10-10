@@ -53,6 +53,10 @@ export function createPokeMuteSwitch( opts: PokeMuteSwitchOptions ): PokeMuteSwi
   btn.className = "notifications-bounce-server notifications-poke-mute";
   btn.id        = "poke-mute";
   btn.setAttribute( "data-testid", "multiplexer-poke-mute" );
+  // Row 6f72dc83: the skeleton crew toggle in the Fleet Status pane now mutes the poke, so
+  // this separate control is hidden, not removed. Its paint and handlers stay, so a revert
+  // is deleting this one line.
+  btn.hidden    = true;
 
   function paint( state: unknown ): void {
     if ( !isState( state ) ) {

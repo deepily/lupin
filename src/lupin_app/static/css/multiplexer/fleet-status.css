@@ -352,3 +352,39 @@
     font-size: 11px;
     font-style: italic;
 }
+
+/* ---- Skeleton crew switch (row 6f72dc83) ----
+   Sits in the cap cluster beside the dial. The state is said in TEXT, never by colour
+   alone (WCAG 1.4.1); the switch is disabled while its PUT is in flight. */
+.fleet-skeleton-crew-field {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* `display: inline-flex` beats the UA `[hidden]` rule, and the renderer relies on the
+   attribute to keep a switch off the page when the server does not send the field. */
+.fleet-skeleton-crew-field[hidden] {
+    display: none;
+}
+
+.fleet-skeleton-crew-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.fleet-skeleton-crew-label input[ type="checkbox" ]:disabled {
+    cursor: not-allowed;
+    opacity: 0.75;
+}
+
+.fleet-skeleton-crew-label input[ type="checkbox" ] {
+    accent-color: #5e35b1;
+}
+
+.fleet-skeleton-crew-state {
+    font-variant-numeric: tabular-nums;
+}
