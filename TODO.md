@@ -16,6 +16,50 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-09 evening to 10-10 evening (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `e675ba48`, `6827207a`, `7ab9bdde`, `c3b461b9`; crew Tiberius · Arnold · Chloé · Extra 2 · John, then Clayton · Chloé) — podcast button, identity refusals, the permanent `.env` keys, the kill guard
+
+### Rick's rulings (an answered card, a broadcast or his own words; none a timeout default; times from my record)
+
+| time (EDT) | ruling |
+|---|---|
+| 10-09 18:22 | Env keys run, row `80513825`: "I run it myself". 18:49: "Right now". |
+| 10-09 about 18:53, voice | "not my job to run processes for you, much less [report] on their results". A seat reads a run's result itself and never asks him to launch or report on one. |
+| 10-09 19:23 | Podcast button in the doc viewer, row `e23b9ed6`: "One click, in-page yes". |
+| 10-09 about 19:48 | Tools that write under a resolved identity, row `0c21fc5d`: "All ten refuse". |
+| 10-09 about 23:22 | Managers work all night. Held rows go to him as admit requests that pledge a live ticket, one pending request per row. |
+| 10-09 about 23:22 | Env keys log: yes, summary and FAILED lines only. |
+| 10-09 about 23:22 | Test container Claude login: not tonight. He renewed it at 12:37 on 10-10. |
+| 10-10 14:27 | Env keys: the result is kept (recorded in my 16:03 note as "RESULT KEPT at 14:27"; the card's wording is not in the notes I read). |
+| 10-10 18:24 | Staffing my held rows: "Nothing now". All stay in the holding area. |
+
+Carried from earlier days and still in force: never ask about a push; staffing is the manager's job; an ask is its own card.
+
+### Not ruled, waiting on Rick
+
+- **A real click on the "Make a podcast" button.** No real job has gone through it. The dry-run setting is off, so a click starts a real job.
+- **The kill guard now refuses `pkill -u $USER` style commands in a seat.** Told to him at 15:00 on 10-10; no answer, which is not approval.
+- **The allow line for the keys script** is still in `.claude/settings.local.json`; his to remove.
+- **The uncommitted `src/conf/lupin-app.ini` in the main tree** (fleet cap 17, written 19:30 on 10-09); not mine.
+- **Per-item rulings for row `6afda7d8`** (kill guard gaps): for each, refuse, handle, or keep documented as unseen.
+
+### My rulings, which Rick may overturn
+
+- **Kill guard, row `7479a389`.** Plan decisions D1, D2 and D3 as the plan recommends (`io/tmp/2026.10.10-kill-guard-plan-row-7479a389.md`). A `pgrep` that rejects the selector (exit 2) refuses after the own-children skip; a timeout, a missing `pgrep` or exit 3 allows and writes one log line. An expansion the guard cannot evaluate is refused. Kept unseen and documented: `bash -c`, `xargs`, `ssh`, `eval`, `env -S`, `systemd-run`, `docker exec`, `watch`, `find -exec`, `parallel`, `python -c`, a quoted-split command name, a variable holding the command name, an alias.
+- **Stop rule for that row (16:17 on 10-10).** The series merges on no regression against `1d5e24322`, no false refusal of an ordinary command, and linear time. Other gaps go to a later row (`6afda7d8`).
+- **No merge without a whole unit tier green on the exact tip** (my rule for this seat after the 12:10 badge merge).
+- **Agreed with Cheech, 15:13 on 10-10.** Each of us DMs the other before a merge to the working branch and waits for "go". A `:8000` job tests the main tree through the bind mount, so the head and the main tree stay still while one runs.
+- **Every worker brief says: kill by pid only, never by pattern.**
+- **The coverage waiter's quiet check** is `ps -eo comm=,args= | awk '$1 ~ /^(python|pytest)/ && /pytest/'`, not `pgrep -f`, which also matches a process that only quotes the command.
+
+### Open, carried forward
+
+- Held rows I own, 12, none approved: `87d19d27` (P2), `2f5c2b80` (P2), `6afda7d8` (P3), `a798d296` (P3), `cc86889e` (P3), `147ce846` (P4), and at P5 `0fcb3fd2`, `80535f46`, `867ab3a3`, `4c88947e`, `0c695d2a`, `3b2514f0`.
+- Post-games: none written for either crew in this period, and no row carries one. The older post-game row `74394bba` reads `dropped` in the store (read 19:25 on 10-10).
+- Wanted, no row: a warning before the test container's Claude login lapses (it expires 2026-10-11T00:37Z); whether `src/tests/run-census-guards.sh` should include `test_dom_assert_lint.py`; a status file for the keys script so a seat can read its exit code.
+- Not run by me on `991ba93ad`: TypeScript, both browser halves, integration, the coverage gate.
+
+---
+
 ## 📚 DECISIONS LOG 2026-10-09 day to 10-10 night (Cheech 🌿 `e281ef6f`; crew Rio · Krishna · Rachel · Clayton · maya · arnold · extra 1 · pocholo · chloe) — Jev live runs done, reference pages rewritten and split, the claim-judge vote rule, a range gate for landings
 
 ### Rick's rulings (an answered card, a broadcast, a keypress or his own words; none a timeout default; times from my record)
