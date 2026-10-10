@@ -18,3 +18,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [AI to AI messages are notifications with the body inline](2026.06.15-notification-native-ai-to-ai-messaging.md) | `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md` |
 | [Each Claude Code session speaks with its own voice persona](2026.04.28-per-session-voice-personas.md) | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` |
 | [The idle-aware Stop hook, and what runs on an idle Stop](2026.04.29-idle-aware-stop-hook.md) | `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md` |
+| [TFE-to-CC, a parallel Claude Code engine for the first and third TFE phases](2026.04.19-tfe-to-cc-parallel-claude-code-engine.md) | `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md` |
