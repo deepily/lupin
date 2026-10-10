@@ -404,36 +404,36 @@ echo "Audit log cleanup complete"
 **Key Metrics to Monitor**:
 
 1. **Authentication Success Rate**
-```sql
-SELECT
-    COUNT(CASE WHEN event_type = 'login_success' THEN 1 END) as successes,
-    COUNT(CASE WHEN event_type = 'login_failure' THEN 1 END) as failures,
-    ROUND(100.0 * COUNT(CASE WHEN event_type = 'login_success' THEN 1 END) /
-          COUNT(*), 2) as success_rate
-FROM auth_audit_log
-WHERE event_type IN ('login_success', 'login_failure')
-  AND created_at > datetime('now', '-1 hour');
-```
+   ```sql
+   SELECT
+       COUNT(CASE WHEN event_type = 'login_success' THEN 1 END) as successes,
+       COUNT(CASE WHEN event_type = 'login_failure' THEN 1 END) as failures,
+       ROUND(100.0 * COUNT(CASE WHEN event_type = 'login_success' THEN 1 END) /
+             COUNT(*), 2) as success_rate
+   FROM auth_audit_log
+   WHERE event_type IN ('login_success', 'login_failure')
+     AND created_at > datetime('now', '-1 hour');
+   ```
 
 2. **Active Users**
-```sql
-SELECT COUNT(DISTINCT user_id) as active_users
-FROM auth_audit_log
-WHERE event_type = 'login_success'
-  AND created_at > datetime('now', '-24 hours');
-```
+   ```sql
+   SELECT COUNT(DISTINCT user_id) as active_users
+   FROM auth_audit_log
+   WHERE event_type = 'login_success'
+     AND created_at > datetime('now', '-24 hours');
+   ```
 
 3. **Failed Login Rate** (suspicious activity)
-```sql
-SELECT
-    strftime('%Y-%m-%d %H:00:00', created_at) as hour,
-    COUNT(*) as failed_attempts
-FROM auth_audit_log
-WHERE event_type = 'login_failure'
-  AND created_at > datetime('now', '-24 hours')
-GROUP BY hour
-ORDER BY hour;
-```
+   ```sql
+   SELECT
+       strftime('%Y-%m-%d %H:00:00', created_at) as hour,
+       COUNT(*) as failed_attempts
+   FROM auth_audit_log
+   WHERE event_type = 'login_failure'
+     AND created_at > datetime('now', '-24 hours')
+   GROUP BY hour
+   ORDER BY hour;
+   ```
 
 4. **Database Size**
    ```bash

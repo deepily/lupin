@@ -448,43 +448,43 @@ integration test failures. Here's the checklist:
 
 4. **Register at import time** at the bottom of `prompts/fix.py`:
 
-```python
-from cosa.agents.shared.fix_executor import register_fix_prompts
+   ```python
+   from cosa.agents.shared.fix_executor import register_fix_prompts
 
-register_fix_prompts(
-    "ife",  # pick a short agent key
-    build_fix_prompt        = build_fix_prompt,
-    build_verify_prompt     = build_verification_prompt,
-    build_redelegate_prompt = build_redelegation_prompt,
-    coder_system_prompt     = CODER_SYSTEM_PROMPT,
-    tester_system_prompt    = TESTER_SYSTEM_PROMPT,
-)
-```
+   register_fix_prompts(
+       "ife",  # pick a short agent key
+       build_fix_prompt        = build_fix_prompt,
+       build_verify_prompt     = build_verification_prompt,
+       build_redelegate_prompt = build_redelegation_prompt,
+       coder_system_prompt     = CODER_SYSTEM_PROMPT,
+       tester_system_prompt    = TESTER_SYSTEM_PROMPT,
+   )
+   ```
 
 5. **In your orchestrator's Phase 3** (fix delegation), construct a `FixExecutor`:
 
-```python
-from cosa.agents.shared.fix_executor import FixExecutor
-from cosa.agents.integration_fix_expediter import voice_io, cosa_interface
+   ```python
+   from cosa.agents.shared.fix_executor import FixExecutor
+   from cosa.agents.integration_fix_expediter import voice_io, cosa_interface
 
-executor = FixExecutor(
-    config                 = self.config,
-    fix_context            = your_context_object,
-    job_id                 = self.id_hash,
-    prompt_builder_key     = "ife",
-    voice_io_module        = voice_io,
-    cosa_interface_module  = cosa_interface,
-    notify_fn              = self._notify,
-    is_cancelled_fn        = self._is_cancelled,
-    delegate_to_coder_fn   = self._delegate_to_coder,   # your own method
-    verify_fix_fn          = self._verify_fix,           # your own method
-    debug                  = self.debug,
-    verbose                = self.verbose,
-)
-fix_result, files_changed = await executor.execute_fix(
-    diagnosis=diagnosis, selected_fix=selected_fix,
-)
-```
+   executor = FixExecutor(
+       config                 = self.config,
+       fix_context            = your_context_object,
+       job_id                 = self.id_hash,
+       prompt_builder_key     = "ife",
+       voice_io_module        = voice_io,
+       cosa_interface_module  = cosa_interface,
+       notify_fn              = self._notify,
+       is_cancelled_fn        = self._is_cancelled,
+       delegate_to_coder_fn   = self._delegate_to_coder,   # your own method
+       verify_fix_fn          = self._verify_fix,           # your own method
+       debug                  = self.debug,
+       verbose                = self.verbose,
+   )
+   fix_result, files_changed = await executor.execute_fix(
+       diagnosis=diagnosis, selected_fix=selected_fix,
+   )
+   ```
 
 6. **Implement `_delegate_to_coder()` and `_verify_fix()` on your orchestrator**.
    These are the SDK wiring. They construct `ClaudeAgentOptions` with the right

@@ -404,5 +404,3 @@ flowchart TD
 [`src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md`](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md)
 (judgment calls ratified by Rick 2026-06-08), distilled in
 [`2026.06.09-arbiter-routing-and-recipients-summary.md`](../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md).
-</content>
-</invoke>
