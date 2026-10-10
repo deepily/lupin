@@ -841,3 +841,27 @@ def test_a_strong_match_wins_through_check_exists_and_the_receipt_lists_the_doub
     assert [ d[ "id" ] for d in stored[ "doubtful" ] ] == [ "cosa.mathx.add" ] and stored[ "policy" ][ "strong" ] == 0.9
     back = rt.replay_impl( r[ "receipt_id" ], c )                                                  # the stored receipt replays to the same verdict
     assert back[ "frozen" ][ "verdict" ] == "REUSE" and back[ "differences" ][ "frozen" ] == []
+
+
+def _git( cwd, *args ):
+    """Run one git command in cwd with a fixed identity; raises on a non-zero exit."""
+    subprocess.run( [ "git", "-C", str( cwd ), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args ],
+                    check=True, capture_output=True, text=True )
+
+
+def test_a_receipt_written_from_a_worktree_is_readable_from_main( tmp_path, monkeypatch ):
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "fleet" ) )                          # the data root resolves here, outside both trees
+    monkeypatch.delenv( "LUPIN_REUSE_DATA_DIR", raising=False ); monkeypatch.delenv( "LUPIN_REUSE_OUT_DIR", raising=False )
+    main = make_lupin_repo( tmp_path / "projects" )
+    _git( main, "init", "-q" ); _git( main, "add", "." ); _git( main, "commit", "-q", "-m", "base" )
+    seat = tmp_path / "seat"
+    _git( main, "worktree", "add", "-q", "--detach", str( seat ) )
+    ctx_seat, ctx_main = rt.context_from_environment( seat ), rt.context_from_environment( main )
+    assert ctx_seat.root == seat and ctx_main.root == main and ctx_seat.out_dir != ctx_main.out_dir    # two index roots...
+    assert ctx_seat.data == ctx_main.data == tmp_path / "fleet" / "lupin" / "reuse-review"            # ...one data root
+    ctx_seat.transport = FakeJev()
+    r = rt.check_exists_impl( NEED, ctx_seat )
+    assert r[ "status" ] == "ok" and ( ctx_seat.data / "receipts" / f"{r[ 'receipt_id' ]}.json" ).exists()
+    assert not list( seat.rglob( "receipts" ) )                                                         # nothing was written inside the worktree
+    again = rt.load_receipt( ctx_main, r[ "receipt_id" ] )                                              # main reads the seat's receipt
+    assert again[ "id" ] == r[ "receipt_id" ] and again[ "query" ] == NEED
