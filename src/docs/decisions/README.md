@@ -17,3 +17,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [Router prompt list and training menu come from the registry](2026.08.16-router-prompt-and-corpus-from-registry.md) | `src/rnd/v0.2.0/2026.08.16-generate-router-prompt-and-corpus-from-registry.md` |
 | [AI to AI messages are notifications with the body inline](2026.06.15-notification-native-ai-to-ai-messaging.md) | `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md` |
 | [Each Claude Code session speaks with its own voice persona](2026.04.28-per-session-voice-personas.md) | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` |
+| [The idle-aware Stop hook, and what runs on an idle Stop](2026.04.29-idle-aware-stop-hook.md) | `src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md` |
