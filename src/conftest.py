@@ -757,6 +757,33 @@ def _isolate_heartbeat_poke_mute_switch( tmp_path, monkeypatch ):
     monkeypatch.setenv( "LUPIN_HEARTBEAT_POKE_MUTE_FILE", str( tmp_path / "heartbeat-poke-mute.json" ) )
 
 
+@pytest.fixture( scope="session" )
+def _skeleton_crew_off_file( tmp_path_factory ):
+    """
+    One configuration file for the whole run that says the skeleton crew switch is off.
+
+    Ensures:
+        - lives in a session temp folder, so no test's own tmp_path gains an extra file
+    """
+    switch_file = tmp_path_factory.mktemp( "skeleton-crew" ) / "switch.ini"
+    switch_file.write_text( "[Lupin: Baseline]\ncc session skeleton crew enabled = false\n", encoding="utf-8" )
+    return str( switch_file )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_skeleton_crew_switch( _skeleton_crew_off_file, monkeypatch ):
+    """
+    Keep the operator's live skeleton crew switch out of every test.
+
+    The gates read the switch from the main configuration file. Without this, the operator
+    turning it on would redden every test that reaches a spawn gate.
+
+    Ensures:
+        - during any test, the switch is read from a file that says it is off
+    """
+    monkeypatch.setenv( "LUPIN_SKELETON_CREW_INI", _skeleton_crew_off_file )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Visual-snapshot failures: run-scoped, and touched only by visual sessions (row d51ffc36)
 # ══════════════════════════════════════════════════════════════════════════════
