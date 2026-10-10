@@ -77,6 +77,10 @@ DEFAULT_POKE_OUTPUT_ENABLED = True
 # poke_output_enabled is False.
 DEFAULT_POKE_DISABLED_MESSAGE = ""
 
+# What a seat reads in place of the poke while skeleton crew is on and nobody wrote a line
+# of their own. The operator asked for the poke to simply say this.
+SKELETON_CREW_POKE_MESSAGE = "You are on skeleton crew."
+
 
 def load_heartbeat_settings() -> dict:
     """
@@ -164,6 +168,15 @@ def load_heartbeat_settings() -> dict:
             # The operator's own line wins when there is one (Rick: "I want the poke to
             # simply say you're on skeleton crew"); the who-and-when line fills a blank.
             poke_disabled_message = poke_disabled_message or mute_message( fleet_switch )
+
+    # The skeleton crew switch is the third input. It has one stored value, the key in the
+    # main configuration file, read here at read time, so the poke has no copy of its own.
+    # A key that is absent or unreadable never mutes.
+    if poke_output_enabled:
+        from lupin_mcp import skeleton_crew
+        if skeleton_crew.is_on_quietly():
+            poke_output_enabled   = False
+            poke_disabled_message = poke_disabled_message or SKELETON_CREW_POKE_MESSAGE
 
     return {
         "enabled"                        : enabled,

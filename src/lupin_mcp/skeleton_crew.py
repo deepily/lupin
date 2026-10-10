@@ -70,7 +70,7 @@ def _say( detail: str ) -> None:
         pass
 
 
-def read_state_from_disk( path: Optional[ str ] = None ) -> Optional[ bool ]:
+def read_state_from_disk( path: Optional[ str ] = None, quiet: bool = False ) -> Optional[ bool ]:
     """
     Read the switch fresh from the configuration file.
 
@@ -81,21 +81,24 @@ def read_state_from_disk( path: Optional[ str ] = None ) -> Optional[ bool ]:
         - returns True or False for a clean boolean
         - returns True for a value that is present but is not a clean boolean
         - returns None when the key is absent, defined twice, or the file cannot be read
-        - prints one tagged line to stderr for every answer that is not a clean boolean
+        - prints one tagged line to stderr for every answer that is not a clean boolean,
+          unless quiet is true. The Stop hook asks quietly
         - never raises
     """
     target = path if path is not None else ini_path()
     raw    = fleet_cap_ini_io.read_value_from_disk( target, SKELETON_CREW_KEY )
     if raw is None:
-        _say( f"could not read `{SKELETON_CREW_KEY}` from {target} (absent, defined twice or "
-              f"unreadable); the switch reads as OFF." )
+        if not quiet:
+            _say( f"could not read `{SKELETON_CREW_KEY}` from {target} (absent, defined twice or "
+                  f"unreadable); the switch reads as OFF." )
         return None
     lowered = raw.strip().lower()
     if lowered == "true":
         return True
     if lowered == "false":
         return False
-    _say( f"`{SKELETON_CREW_KEY}` holds {raw!r}, which is not true or false; the switch reads as ON." )
+    if not quiet:
+        _say( f"`{SKELETON_CREW_KEY}` holds {raw!r}, which is not true or false; the switch reads as ON." )
     return True
 
 
@@ -296,3 +299,18 @@ def describe() -> Dict[ str, Any ]:
         "set_by"                  : set_by,
         "settings_mute_while_off" : None if muted is None else bool( muted and not on ),
     }
+
+
+def is_on_quietly() -> bool:
+    """
+    Whether the switch is on, asked without printing anything.
+
+    Ensures:
+        - True for true, and for a present value that is not a clean boolean
+        - False for false, an absent key, an unreadable file or any failure
+        - never raises and never prints
+    """
+    try:
+        return bool( read_state_from_disk( quiet=True ) )
+    except Exception:  # pragma: no cover - read_state_from_disk already never raises
+        return False

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, StrictBool
 
 from cosa.rest.auth_middleware import require_admin
+from lupin_mcp import skeleton_crew
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_mute import read_poke_mute, write_poke_mute
 from ..middleware.api_key_auth import require_api_key_or_jwt
 
@@ -30,6 +31,30 @@ router = APIRouter( prefix="/api/heartbeat", tags=[ "heartbeat" ] )
 
 class PokeMuteRequest( BaseModel ):
     muted : StrictBool
+
+
+def derived_poke_mute_state() -> dict:
+    """
+    The mute state a client should show: the fleet file's state combined with skeleton crew.
+
+    Ensures:
+        - `muted` is true when the file says muted or skeleton crew is on
+        - `source` is "file", "skeleton_crew", "both" or "none"
+        - set_by and set_at are the file's own record, unchanged
+        - the file is not written and nothing is retired
+    """
+    state    = read_poke_mute()
+    skeleton = skeleton_crew.is_on_quietly()
+    file_on  = bool( state[ "muted" ] )
+    if file_on and skeleton:
+        source = "both"
+    elif skeleton:
+        source = "skeleton_crew"
+    elif file_on:
+        source = "file"
+    else:
+        source = "none"
+    return { **state, "muted": file_on or skeleton, "source": source }
 
 
 async def refuse_api_key_writer(
@@ -68,9 +93,10 @@ async def get_poke_mute(
         - caller is authenticated by API key or JWT (401 otherwise)
 
     Ensures:
-        - returns 200 with the switch state, changing nothing
+        - returns 200 with the derived state, changing nothing: the file's own fields plus
+          `muted` combined with skeleton crew and a `source`
     """
-    return JSONResponse( content=read_poke_mute() )
+    return JSONResponse( content=derived_poke_mute_state() )
 
 
 @router.put(
@@ -94,7 +120,8 @@ async def put_poke_mute(
     Ensures:
         - the switch file holds the new value, who set it and when
         - one line is appended to the audit log beside it
-        - returns 200 with the state as read back from the file
+        - returns 200 with the derived state, which is the file's state combined with skeleton crew
     """
     who = user.get( "email" ) or user.get( "uid" ) or "unknown"
-    return JSONResponse( content=write_poke_mute( body.muted, who ) )
+    write_poke_mute( body.muted, who )
+    return JSONResponse( content=derived_poke_mute_state() )
