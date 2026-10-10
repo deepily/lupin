@@ -342,7 +342,7 @@ localStorage.setItem( 'session_id', sessionId );
 
 #### Output Encoding
 - [ ] **Escape HTML in Responses** - Prevent reflected XSS
-- [ ] **Content-Type Headers** - Set correct MIME types
+- [ ] **Content-Type Headers** - Set correct mime types
   ```http
   Content-Type: application/json; charset=utf-8
   ```

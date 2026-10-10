@@ -97,7 +97,7 @@
    ```json
    {"subscribed_events": ["job_state_transition"]}
    ```
-   This will NOT receive `notification_queue_update` events.
+   This will not receive `notification_queue_update` events.
 
 2. **Use wildcard for debugging**: Subscribe to `["*"]` to receive all events, then narrow down.
 
@@ -154,8 +154,8 @@ If `single_session_per_user` is `True`, connecting a new session closes the prev
 ### Problem: Audio WebSocket Not Receiving Audio
 
 1. **Verify audio WebSocket is connected**: Check `/ws/audio/{session_id}` in Network tab
-2. **Check WHICH session id the audio socket is on** — it is not always the queue's.
-   The mobile app and the web multiplexer share one id across both sockets; the web app
+2. **Check which session id the audio socket is on** — it is not always the queue's.
+   The mobile app and the web multiplexer share one id across both sockets. The web app
    (`notifications.js`) gives the audio socket its own id and names it in the TTS request.
    Compare the id in the `/ws/audio/{session_id}` URL against the one the TTS POST sent —
    those two must match. The queue socket's id need not.

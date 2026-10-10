@@ -17,7 +17,14 @@ Run it from an ordinary host terminal. Typed into a Claude pane with `!`, sudo c
 | 2 | writes `/etc/sudoers.d/lupin-install-db-secrets` (root, mode 0440): `<you> ALL=(root) NOPASSWD: <that copy> ""`. The trailing `""` forbids arguments. | lets the copy be rerun without a password, for one file only |
 | 3 | runs the installed copy, which writes `/etc/lupin/secrets/db_test_password` (root:1002, 0440) from `~/.lupin/db_test_pw` and repairs the owner and mode of `db_app_password` | the test container mounts these files |
 
-Nothing is carried between steps in a shell variable. Everything that can be checked is checked **before** the copy. The checks are: root; a sudo operator whose name agrees with `SUDO_UID`; the payload is a plain file; `visudo` exists; `~/.lupin/db_test_pw` passes the payload's own checks; `db_app_password` exists and is not empty.
+Nothing is carried between steps in a shell variable. Everything that can be checked is checked **before** the copy. The checks are:
+
+- root;
+- a sudo operator whose name agrees with `SUDO_UID`;
+- the payload is a plain file;
+- `visudo` exists;
+- `~/.lupin/db_test_pw` passes the payload's own checks;
+- `db_app_password` exists and is not empty.
 
 The sudoers line goes live only after `visudo -cf` accepts it. Once it is in, `visudo -c` checks the whole set, and a failure there takes the new line out again.
 
@@ -48,7 +55,7 @@ A refusal prints the reason and a line such as `done: copy of the payload; did n
 ## What stays manual
 
 - Creating `/etc/lupin/secrets/db_app_password` (the runbook's app-password step) and `~/.lupin/db_test_pw`, which must hold the password `lupin_test` was given.
-- Creating the `lupin_test` role and the template database: `src/scripts/provision-db-roles.sh` (it also writes the secret files, but only on a host where it runs as root with the database reachable).
+- Creating the `lupin_test` role and the template database: `src/scripts/provision-db-roles.sh`. It also writes the secret files, but only on a host where it runs as root with the database reachable.
 - Cloud SQL (the `lupin_test` user and the template database) and applying terraform. The VM gets the password as `LUPIN_TEST_DB_PASSWORD` in `cloud-gpu.env`. Push it with `lupin-vm.sh push-test-login`.
 - Recreating the test container afterwards: `docker compose up -d --force-recreate lupin-rest-test`, only when `PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000` exits 0.
 
