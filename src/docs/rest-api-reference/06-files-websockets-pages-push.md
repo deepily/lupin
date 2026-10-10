@@ -114,7 +114,7 @@ Auth for all three: X-API-Key or Bearer JWT.
 | GET | `/api/podcast-proxy/from-viewer/check` | Query `path` in doc-viewer form. Runs the start's whole file judgement without keeping content, so the doc viewer shows its "Make a podcast" button only for a file that can be podcast. Returns `{ ok, name, size }`. 403 `not_a_person` (API key, or a token with no email); 400 with a door code. Bearer JWT of a signed-in person. |
 | POST | `/api/podcast-proxy/from-viewer` | Body `{ path }`. The in-page confirmation is the yes, so there is no card. Judges the file, claims one job per person, file and bytes inside `podcast proxy card max age seconds` (a derived id in the spent-card table; a click after the window starts a new job), queues the job for the caller, returns `{ job_id, status, name, queue_position, size }`. 403 `not_a_person`; 400 with a door code; 409 `spent` with `job_id` beside the code, or `claimed_no_job`; 502 `queue_failed`. Each click writes its copy under its own folder. Dry run applies as for start. |
 
-## 25c. Skeleton Crew Switch (`/api/arbiter/*`)
+## 25c. Skeleton Crew Switch and Fleet Cap (`/api/arbiter/*`)
 
 One operator switch that stops all spawning and mutes the Stop poke.
 The value is the boolean `cc session skeleton crew enabled` in `src/conf/lupin-app.ini`.
@@ -124,6 +124,7 @@ Design note: `src/rnd/v0.2.2/2026.10.10-skeleton-crew-toggle-design.md`. Full sc
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/arbiter/fleet-size-cap` | API key or JWT | The fleet dial: `{ cap, ceiling, live, skeleton_crew }`. `skeleton_crew` is `{ on, since, set_by, settings_mute_while_off }`, read fresh from the file. An unreadable file reads as off. `set_by` says the setter is unknown when the attribution record disagrees with the file. `settings_mute_while_off` is true when the poke is muted in `settings.json` while the switch is off. |
+| PUT | `/api/arbiter/fleet-size-cap` | Admin JWT | Body `{ cap }`, a whole number from 1 up to the configured ceiling (422 above it, and nothing is written). Writes `cc session fleet size cap` to the configuration file and returns the body of the GET above, re-read from the file. 403 for a caller presenting only `X-API-Key`, so a manager cannot raise its own cap, and 403 for a signed-in user without the admin role. 409 when the key is absent or defined twice. The GET stays open to an API key or a JWT. |
 | PUT | `/api/arbiter/skeleton-crew` | Admin JWT | Body `{ on }` (a bare JSON boolean, else 422). Writes the attribution record, then the file, then tells every live session through an acknowledged broadcast. Returns the same body as the GET above, re-read from the file. 403 for a caller presenting only `X-API-Key`, so a manager cannot flip it. 409 when the key is defined twice. 500 naming the cause when the file cannot be written, and nothing is announced. A failed broadcast does not fail the flip. |
 
 **What the switch does while on.**

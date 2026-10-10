@@ -41,7 +41,7 @@ This page is an index. The reference itself is in the parts below, in document o
 - [25. FCM Wake Push (`/api/fcm/*`)](rest-api-reference/06-files-websockets-pages-push.md#25-fcm-wake-push-apifcm)
 - [25a. Heartbeat Stop Poke Switch (`/api/heartbeat/*`)](rest-api-reference/06-files-websockets-pages-push.md#25a-heartbeat-stop-poke-switch-apiheartbeat)
 - [25b. Podcast Proxy (`/api/podcast-proxy/*`)](rest-api-reference/06-files-websockets-pages-push.md#25b-podcast-proxy-apipodcast-proxy)
-- [25c. Skeleton Crew Switch (`/api/arbiter/*`)](rest-api-reference/06-files-websockets-pages-push.md#25c-skeleton-crew-switch-apiarbiter)
+- [25c. Skeleton Crew Switch and Fleet Cap (`/api/arbiter/*`)](rest-api-reference/06-files-websockets-pages-push.md#25c-skeleton-crew-switch-and-fleet-cap-apiarbiter)
 - [26. Task Store — Promote/Demote Requests (`/api/tasks/*`)](rest-api-reference/07-task-store-and-cc-transcript.md#26-task-store--promotedemote-requests-apitasks)
 - [27. CC Transcript Console (`/api/cc-transcript/*`)](rest-api-reference/07-task-store-and-cc-transcript.md#27-cc-transcript-console-apicc-transcript)
 - [Job ID Prefixes](rest-api-reference/08-job-ids-and-cross-reference.md#job-id-prefixes)
