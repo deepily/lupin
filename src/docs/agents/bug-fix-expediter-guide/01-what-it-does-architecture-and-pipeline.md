@@ -6,8 +6,6 @@
 
 **Scope**: `src/cosa/agents/bug_fix_expediter/`, `src/cosa/rest/dead_queue_watchdog.py`, BFE INI keys.
 
-**Last Updated**: 2026-04-10.
-
 **See Also**:
 
 - [Shared Fix Primitives Reference](../shared-fix-primitives-reference.md) — `PlanWriter`, `GitStrategist`, `FixExecutor`
@@ -205,7 +203,7 @@ replaces the Phase 5 placeholder with the branch/commit/PR metadata.
 
 **Goal**: resubmit the original failed job to prove the fix worked end-to-end.
 
-**Status as of 2026-04-10**: code-complete with 58 unit tests passing. Live E2E
+**Status**: code-complete with 58 unit tests passing. Live E2E
 verification is in progress in a separate console.
 
 **How it works**:

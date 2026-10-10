@@ -138,7 +138,7 @@ script's answer"*, so the entry carries a **directive** instead:
 
 **A missing entry does not error — the run cancels at the card**, which is
 indistinguishable from a user declining. That is exactly what happened to a live
-presentation job on 2026-08-21 (`[Expeditor] User cancelled at arg 'source'`).
+presentation job (`[Expeditor] User cancelled at arg 'source'`).
 Podcast had been able to show the same card with no
 entry either, and simply never landed on 2+ matches in an automated run.
 

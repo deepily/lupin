@@ -99,7 +99,7 @@ failures) leaves overrides unset → use INI defaults.
 
 ### Step 1: Master switch (INI default)
 
-As of 2026-04-10, auto-fix is **enabled by default**:
+Auto-fix is **enabled by default**:
 
 ```ini
 # src/conf/lupin-app.ini
@@ -195,7 +195,7 @@ test fix expediter feedback timeout seconds = 10       # fail fast on no respons
 
 Then the gates still fire but time out quickly to fallback behavior. (Full
 autonomous operation — skipping gates entirely — is not currently supported;
-this is by design. Gates are a safety feature.)
+that is intended. Gates are a safety feature.)
 
 ---
 

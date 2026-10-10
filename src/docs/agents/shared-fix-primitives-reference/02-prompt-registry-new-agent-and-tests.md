@@ -170,7 +170,7 @@ pytest src/tests/unit/test_tfe_*.py -v
 pytest src/tests/unit/ --tb=no -q
 ```
 
-All green as of 2026-04-10: **3119 passed, 1 xfailed**.
+All green at the last recorded run: **3119 passed, 1 xfailed**.
 
 ---
 

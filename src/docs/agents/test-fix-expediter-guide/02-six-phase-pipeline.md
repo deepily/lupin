@@ -134,7 +134,7 @@ specific tests pass now."
 **`continue_on_cluster_failure`**: when a cluster fix fails verification and
 exhausts `max_fix_attempts`, TFE decides whether to abort the rest of the batch or
 continue with remaining clusters. Default: `true` (continue). Rationale: cluster
-fixes are independent by construction (Phase 0 clustering ensures distinct root
+fixes are independent (Phase 0 clustering ensures distinct root
 causes), so a failed second cluster shouldn't block the first or third.
 
 **Dry-run mode**: when `dry_run=True` on the TFE job, Phase 3 synthesizes success

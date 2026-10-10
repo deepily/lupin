@@ -6,8 +6,6 @@
 
 **Scope**: `src/cosa/agents/test_fix_expediter/`, `src/cosa/rest/test_suite_completion_watchdog.py`, TFE INI keys.
 
-**Last Updated**: 2026-04-10.
-
 **See Also**:
 
 - [Shared Fix Primitives Reference](../shared-fix-primitives-reference.md) — shared `FixExecutor`, `GitStrategist`, `PlanWriter`

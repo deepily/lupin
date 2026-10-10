@@ -14,7 +14,7 @@ src/scripts/lupin-vm.sh preflight full
 A failing check prints the fix as a paste-ready line. This page says what each check means,
 so the symptom can be recognised without the script.
 
-## The four items (found 2026-09-30)
+## The four items
 
 Check ids:
 
@@ -67,7 +67,7 @@ docker compose -f docker-compose.cloud-gpu.yml up -d --no-deps --force-recreate 
 A `docker restart` does not pick it up. A hand-run `git config --global --add safe.directory`
 inside the container works until the next recreate and then is gone.
 
-## Three things that tripped the first deploy (found 2026-10-01)
+## Three things that tripped the first deploy
 
 Not preflight checks: they happen before the preflight can run, or are an instance of C11 above.
 
@@ -77,7 +77,7 @@ Not preflight checks: they happen before the preflight can run, or are an instan
 | `lupin-vm.sh` stops with "LUPIN_GCP_PROJECT_ID is not set" | Every subcommand that calls gcloud needs the project id in the shell; the script does not fall back to `gcloud config`, which may name a different project | `export LUPIN_GCP_PROJECT_ID=<your-project-id>`, then re-run. `--dry-run` prints a placeholder instead of stopping |
 | Preflight C11 warns "no roster line for `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH`" | A project is worked on the VM (it has a Claude Code project dir) but `~/.claude/fleet-roster.env` has no line for it | Add `COSA_VOICE_MANAGERS__WEIL_PARALLEL_SEARCH="<Persona>"` to `~/.claude/fleet-roster.env`. This is the C11 fix above applied to that project; the persona is Rick's choice, so the check cannot supply it |
 
-## The voice-server registration (found 2026-10-02)
+## The voice-server registration
 
 | check | what must exist | level | symptom when missing |
 |---|---|---|---|

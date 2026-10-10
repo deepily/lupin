@@ -1,7 +1,6 @@
 # Authentication Troubleshooting Guide
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: Developers, DevOps Engineers
 
 ---
@@ -760,5 +759,4 @@ Include:
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Support Team

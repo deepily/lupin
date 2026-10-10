@@ -3,8 +3,6 @@
 # Lupin Frontend Architecture
 
 > **Plain-vanilla HTML/CSS/JS** — no framework, no build step, no bundler.
->
-> Generated: 2026-02-23
 
 ---
 

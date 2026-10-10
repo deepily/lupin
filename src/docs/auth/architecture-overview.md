@@ -1,7 +1,6 @@
 # Authentication Architecture Overview
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Target Audience**: Architects, Senior Developers
 
 ---
@@ -761,5 +760,4 @@ engine = create_engine(
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Architecture Team

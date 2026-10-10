@@ -12,7 +12,7 @@ only processes agentic jobs — regular code-runner jobs and notifications are
 skipped by the dead-queue watchdog.
 
 **Check 3**: Was the error classified as transient/infra (timeout, OOM, rate limit)?
-The `DeadQueueWatchdog` skips these on purpose — they're usually not code bugs. Check
+The `DeadQueueWatchdog` skips these: they're usually not code bugs. Check
 the FastAPI log for `[DeadQueueWatchdog]` lines explaining why a job was skipped.
 
 **Check 4**: Has the `RepairAttemptTracker` already exhausted its budget for this
@@ -43,7 +43,7 @@ Possible causes:
    for `RateLimitEvent` warnings in the log.
 3. **Budget exhausted**: `bug fix expediter budget usd` was hit mid-run. Check the
    cost tracker summary in the plan doc footer.
-4. **Root cause genuinely obscure**: some bugs need human investigation.
+4. **Root cause obscure**: some bugs need human investigation.
    Lowering `bug fix expediter min diagnosis confidence` (e.g., 0.5) lets BFE
    proceed with lower-confidence diagnoses, but the fix success rate drops.
 

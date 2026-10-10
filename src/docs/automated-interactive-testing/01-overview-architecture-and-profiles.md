@@ -6,7 +6,6 @@ Comprehensive reference for Lupin's notification proxy testing system.
 Covers architecture, strategy chain, test profiles, Q&A scripts, base classes,
 scenario authoring, CLI reference, and troubleshooting.
 
-**Last Updated**: 2026-02-14
 **Status**: Current
 
 ---

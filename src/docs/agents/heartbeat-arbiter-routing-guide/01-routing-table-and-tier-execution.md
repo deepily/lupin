@@ -8,12 +8,12 @@
 
 **Scope**: `src/cosa/agents/heartbeat_arbiter/` (routing table, consumer job, manager resolver) + `src/lupin_arbiter_app/` (the :8001 service that wires the two loops to their delivery sinks).
 
-**Last Updated**: 2026-06-09 — verified against `arbiter_routing.py`, `arbiter_job.py`, `manager_resolver.py`, `fleet_arbiter_loop.py`, `app.py`, `arbiter_live_notify.py`, `health_watcher.py`.
+**Verified against**: `arbiter_routing.py`, `arbiter_job.py`, `manager_resolver.py`, `fleet_arbiter_loop.py`, `app.py`, `arbiter_live_notify.py`, `health_watcher.py`.
 
 **See Also**:
 
 - R&D origin: [Arbiter routing & recipients summary](../../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md) — the one-page distillation this guide formalizes
-- R&D design: [Arbiter consumption gap & operator loop](../../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md) **Part 6** — the ratified 12-case routing model (Rick's judgment calls, 2026-06-08)
+- R&D design: [Arbiter consumption gap & operator loop](../../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md) **Part 6** — the ratified 12-case routing model (Rick's judgment calls)
 - [Agentic Jobs & Recovery README](../README.md) — sibling agent guides (BFE, TFE)
 
 ---
@@ -120,8 +120,7 @@ defaulted.
 | 12 | arbiter poll-error | B | `LOG_THEN_RICK` | demoted from a per-error ping; escalate only if persistent |
 | 13 | auto-poke reap-**recommendation** | B | `RICK_AND_MANAGERS` | post-Part-6 (2b-3) addition; **recommendation only** |
 
-**Cases #1–#12** are the ratified **Part-6** model (Rick's judgment calls,
-2026-06-08). **Case #13** (`CASE_AUTO_POKE_REAP_REC`) is a post-Part-6 (2b-3)
+**Cases #1–#12** are the ratified **Part-6** model (Rick's judgment calls). **Case #13** (`CASE_AUTO_POKE_REAP_REC`) is a post-Part-6 (2b-3)
 addition routed through the same dispatcher. After a stuck **live** session
 absorbs ≤N bounded non-destructive pokes with no recovery, the arbiter recommends
 a reap/replace to Rick + all active managers. It **never executes it** (the

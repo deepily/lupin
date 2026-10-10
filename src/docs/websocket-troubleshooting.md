@@ -1,6 +1,5 @@
 # WebSocket Troubleshooting Guide
 
-**Date**: 2026.03.20
 **Source of truth**: `src/cosa/rest/websocket_manager.py`, `src/cosa/rest/routers/websocket.py`
 **Status**: Active
 

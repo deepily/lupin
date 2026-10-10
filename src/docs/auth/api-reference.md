@@ -3,7 +3,6 @@
 **Version**: 1.0
 **Base URL**: `http://localhost:7999` (development) | `https://your-domain.com` (production)
 **Authentication**: Bearer tokens (JWT)
-**Last Updated**: 2025.10.04
 
 ---
 
@@ -946,5 +945,4 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains
 ---
 
 **Version**: 1.0
-**Last Updated**: 2025.10.04
 **Maintained By**: Lupin Development Team

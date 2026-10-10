@@ -1,6 +1,5 @@
 # WebSocket Configuration Guide
 
-**Date**: 2026.03.20
 **Source of truth**: `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`
 **Status**: Active
 
@@ -56,7 +55,7 @@ All WebSocket configuration lives in `src/conf/lupin-app.ini` under the `[Lupin:
 
 **No copy of the value is kept here.**
 
-This block used to list 18 names under the heading "Current value". The key held **25** when that was checked on 2026.09.27, and `websocket-events.md` separately claimed 22. A transcribed copy of a config value is a second source of truth that nothing keeps in step. Its being wrong is invisible: it reads exactly like the right answer.
+This block used to list 18 names under the heading "Current value". The key held **25** when that was checked, and `websocket-events.md` separately claimed 22. A transcribed copy of a config value is a second source of truth that nothing keeps in step. Its being wrong is invisible: it looks the same as the right answer.
 
 Read it through the reader the server itself uses:
 
@@ -65,7 +64,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
 
-Added 2026.10.03: `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
+Added: `task_store_changed`, the task panes' invalidation push. No other key is needed for it; the web client's `QueueTransport` carries it in its subscribed-events list. The legacy page's `_buildQueueAuthMessage` in `notifications.js` carries it as well.
 
 Warning: **That reader is a bare `value.split( ", " )` with no per-token strip.**
 

@@ -77,7 +77,7 @@ It carries:
   missing/bad credential **disables live push** (escalations still land durably on
   the commons topic) rather than crashing startup or spamming failed POSTs.
 
-> Both channels are degrade-safe by design: a failure on either is swallowed and
+> Both channels are degrade-safe: a failure on either is swallowed and
 > logged, never propagated to the poll loop.
 
 ### Mechanism B — to managers / blockers (`commons.send_to`)
@@ -185,7 +185,7 @@ flowchart TD
 
 - **Service & supervision:** the arbiter runs in `lupin-arbiter-app` on **:8001**.
   `FleetArbiterLoop` relaunches a fresh `ArbiterConsumerJob` on each clean
-  12h-cap exit (single-instance by construction — sequential recycle). The health
+  12h-cap exit (single-instance, since the recycle is sequential). The health
   watcher runs on its own background thread; `GET /health` never touches docker.
 - **Warm-up suppression:** each fresh job suppresses escalations while
   `(now − job_start) < start_period_seconds` (default 120s) — so cold boot,
@@ -199,7 +199,7 @@ flowchart TD
   min-interval. Manager-down escalates once per un-acked tap. Fleet-stall
   escalates once per stall episode. Auto-poke is capped per stall episode (≤N
   pokes → one reap-recommendation → silence). The live-push dedup guard is
-  belt-and-suspenders on top of these.
+  a second safeguard on top of these.
 - **Config knobs** (all under `[Lupin: …]`, read in `assemble_app` /
   `_build_live_notify_fn`):
   - `arbiter poll seconds`
@@ -231,5 +231,5 @@ flowchart TD
 
 **Design origin:** Part 6 of
 [`src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md`](../../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.08-arbiter-consumption-gap-and-operator-loop.md)
-(judgment calls ratified by Rick 2026-06-08), distilled in
+(judgment calls ratified by Rick), distilled in
 [`2026.06.09-arbiter-routing-and-recipients-summary.md`](../../../rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-arbiter-routing-and-recipients-summary.md).

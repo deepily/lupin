@@ -2,8 +2,6 @@
 
 **Audience**: Lupin operators enabling automated repair + test scheduling, and developers maintaining or extending the agentic job ecosystem.
 
-**Last Updated**: 2026-04-10
-
 This subsystem covers the three agentic job patterns that deal with **automated
 recovery and test scheduling**. They are Bug Fix Expediter (BFE), Test Fix Expediter (TFE),
 and the `TestSuiteJob` / `/schedule-tests` scheduler. These three patterns share
@@ -80,7 +78,7 @@ maintain them in production.
 
 ## Test coverage
 
-As of 2026-04-10:
+Test counts:
 
 | Suite | Tests | Location |
 |-------|-------|----------|

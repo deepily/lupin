@@ -4,7 +4,7 @@
 |---|---|
 | **Scope** | The Lupin-platform runtime knobs that live inside Claude Code's `~/.claude/settings.json` |
 | **Read by** | `src/lupin_cli/claude_code/hooks/**` (the Lupin hook scripts Claude Code invokes on events) |
-| **Verified** | 2026-07-23 (Mr. Radio 🦉) |
+| **Verified** | Mr. Radio 🦉 |
 | **Companion** | `src/docs/fleet-liveness-and-task-store-architecture.md` (architecture of the readers below) |
 
 ---
@@ -47,7 +47,7 @@ bogus `poke_cap` or `verification_threshold_seconds`).
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `enabled` | bool | `False` | Master switch. Dormant until wired on. |
-| `poke_cap` | int > 0 | **`1`** | Max times the Stop-hook poke fires per session before it stops nagging. Was `3`; lowered to `1` (2026-07-23) — rapid repeated pokes were noise. Owned by `heartbeat_poke_cap.DEFAULT_POKE_CAP`. |
+| `poke_cap` | int > 0 | **`1`** | Max times the Stop-hook poke fires per session before it stops nagging. Was `3`; lowered to `1` — rapid repeated pokes were noise. Owned by `heartbeat_poke_cap.DEFAULT_POKE_CAP`. |
 | `count_inbound_questions_as_owed` | bool | `False` | Whether an unanswered inbound DM counts as owed work. Off by default (arbiter self-inflation). |
 | `owed_source_from_store` | bool | `False` | Owed-items source: `False` = transcript replay (legacy); `True` = unified task-store count. The store-only cutover flag. Reversible. |
 | `verification_threshold_seconds` | number > 0 | `600` | Manager worker-verification debounce; fires `needs_verification` while a manager's last look-in is older than this and workers are out. |
