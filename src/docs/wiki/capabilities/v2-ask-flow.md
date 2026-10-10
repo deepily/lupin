@@ -10,8 +10,8 @@ pins:
   - cosa.rest.v2.executor.make_executor@0ac07563f3
   - cosa.rest.v2.pending.PendingRequests@5eace53fc7
   - cosa.rest.v2.near_match_guard.quantities_differ@b58fa386e0
-  - cosa.rest.routers.v2_ask.v2_submit@3b33933089
-  - cosa.rest.routers.v2_ask.vet_parent_id_hash@9e7a61093e
+  - cosa.rest.routers.v2_ask.v2_submit@6e29ca1c64
+  - cosa.rest.routers.v2_ask.vet_parent_id_hash@a20b272a96
 ---
 # V2 ask flow
 
@@ -32,7 +32,7 @@ The v2 door onto CJ Flow: `AskFlow` takes a question, or a command that is alrea
 - `quantities_differ` refuses a near match when either question contains a number and the ordered numbers and words differ. "Convert 10 miles to kilometers" once replayed the answer to "How many miles is 10 kilometers?" at a score of 93.4.
 - An unknown or expired `pending_id` on `resume` answers `status='expired'`, `route_reason='pending_expired'`. Parked entries expire after `ttl_seconds` (3600 by default).
 - `submit` raises `ValueError` unless exactly one of `command` and `job` is given.
-- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for four callers. They are an admin, the configured test account, a caller holding the per-run suite token, and the owner of the parent job. The suite token is the header `X-Lupin-Lineage-Token`, which works in Development and Testing only and is valid while that run holds the monopoly slot. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`. The request still runs without it, never as a 4xx.
+- The doors `/api/v2/ask` and `/api/v2/submit` keep a caller's `parent_id_hash` only for four callers. They are an admin, the configured test account, a caller holding the per-run suite token, and the owner of the parent job. The suite token is the header `X-Lupin-Lineage-Token`, which works in Development and Testing only and is valid while that run holds the monopoly slot. Any other claim is dropped, logged and traced as `parent_id_hash_dropped`, and the request still runs without it. The one exception is a claim naming the test-suite job that holds the monopoly slot now; it answers 403 with `parent_id_hash_refused` and the reason.
 
 ## How to extend
 - Add a command as one `AgentSpec` row in `cosa.rest.v2.registry`; do not add a branch to `AskFlow`.
