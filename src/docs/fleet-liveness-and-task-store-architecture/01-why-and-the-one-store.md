@@ -25,7 +25,7 @@ Every earlier liveness bug traced to **two sources of truth**.
 One was the native Claude Code harness task list, which is transcript-reconstructed and vocabulary-poor.
 The other was the unified store, kept in sync by a fragile mirror.
 The **store-canonical cutover** collapsed that to one source.
-The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`)* (cascade review, build ACs, cutover log).
+The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED` in Rick's R&D cut; the git history of this path has it)* (cascade review, build ACs, cutover log).
 A separate plan document was intended and never authored.
 
 ---

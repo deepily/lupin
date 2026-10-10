@@ -94,8 +94,7 @@ proposal prompt caps each fix at 5 file changes — larger scopes get rejected a
 "diagnosis too broad."
 
 **Plan document**: `PlanWriter.write_plan()` (from the shared package) writes one
-multi-section Markdown document listing every cluster + its proposals. Each
-cluster becomes a `## Cluster C1: ...` section. The number in the heading is the cluster's position, starting at 1. The document lives at
+Markdown document listing every cluster's proposals. Each proposal is a `### Fix N: ...` heading under `## Proposed Fixes`. The TFE orchestrator prefixes each title with the cluster id in square brackets. Cluster ids count from 1 in cluster order. The document lives at
 `io/swe-team/plans/{user_email}/YYYY.MM.DD-{slug}-plan.md`.
 
 **Aggregated voice gate**: `ask_multiple_choice()` with `multiSelect=True`. The

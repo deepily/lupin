@@ -6,7 +6,7 @@
 
 *Named after Arsène Lupin, the gentleman thief. The **AF** is **Agent Factory** -- and, yes, the other thing too.*
 
-> **Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code so a person who can't type can still drive an agentic coding session as a first-class UX citizen -- not just ride along as a passenger. And that's cool AF.**
+> **Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code. A person who can't type can still drive an agentic coding session as a first-class UX citizen -- not just ride along as a passenger. And that's cool AF.**
 >
 > -- R. P. Ruiz, *[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
 
@@ -14,7 +14,7 @@
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `PostgreSQL + pgvector` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.2.0** (dev) | License: [Apache 2.0](LICENSE)
+Current version: **v0.2.0** (dev) | License: Apache 2.0 (the `LICENSE` file)
 
 ---
 
@@ -33,7 +33,7 @@ I can't type. That constraint is why this isn't a position paper. Since March 20
 ## Came here from the articles?
 
 - **The workflow corpus** -- 51 canonical workflow documents in [planning-is-prompting](https://github.com/deepily/planning-is-prompting/tree/main/workflow), the methodology repo this one runs on. In-repo: [agentic-voice-workflow.md](src/workflow/agentic-voice-workflow.md).
-- **The SWE team role definitions** -- [spin-up-swe-team/SKILL.md](.claude/skills/spin-up-swe-team/SKILL.md) is the activation. The per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
+- **The SWE team role definitions** -- `.claude/skills/spin-up-swe-team/SKILL.md` is the activation. The per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
 - **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's five trust levels, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
 - **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure; the transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
 
@@ -312,7 +312,7 @@ Bug Fix Expediter (dead-job auto-recovery), Test Fix Expediter (test-failure aut
 
 Over 1,000 dated planning and research documents in [`src/rnd/`](src/rnd/README.md).
 
-**Codebase metrics**: [Lupin parent vs CoSA comparison](src/rnd/v0.1.6/2026.04.12-codebase-analysis-lupin-vs-cosa.md) — a snapshot of LoC distribution with a mermaid diagram and a 60/40 Python split. It also covers docstring-ratio observations and the operational implications of the CoSA-never-commit rule.
+**Codebase metrics**: the Lupin parent vs CoSA comparison was a snapshot of LoC distribution with a mermaid diagram and a 60/40 Python split. It also covered docstring-ratio observations and the operational implications of the CoSA-never-commit rule. Rick's R&D cut removed that document from the tree (the git history has it).
 
 ---
 
@@ -484,4 +484,4 @@ Each band below is a talk that could exist.
 
 ## License
 
-[Apache 2.0](LICENSE)
+Apache 2.0 (the `LICENSE` file)

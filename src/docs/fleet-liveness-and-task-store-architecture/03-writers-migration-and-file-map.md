@@ -56,7 +56,7 @@ The collision fix (generation-aware correlation keys) makes it safe during the i
 | Arbiter launch | `src/scripts/run-lupin-arbiter-app.sh` + systemd `--user` `lupin-arbiter-app.service` |
 | Cutover flag | `~/.claude/settings.json` → `heartbeat.owed_source_from_store` |
 | Spawn/reap | cosa-voice `spawn_sessions` / `dismiss_sessions` |
-| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED`; recover: `git show b113a3a7^:src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md`)* (review + cutover log) |
+| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` *(`REMOVED` in Rick's R&D cut; the git history of this path has it)* (review + cutover log) |
 | Arbiter routing | `src/docs/agents/heartbeat-arbiter-routing-guide.md` |
 
 ---

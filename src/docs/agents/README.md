@@ -67,7 +67,7 @@ Historical design + execution logs live under `src/rnd/v0.1.6/`:
 
 - **BFE**: [`src/rnd/v0.1.6/2026.03.27-bug-fix-expediter/`](../../rnd/v0.1.6/2026.03.27-bug-fix-expediter/00-index.md) — 10 files, design + execution logs for all six phases
 - **TFE**: [`src/rnd/v0.1.6/2026.04.10-test-fix-expediter/`](../../rnd/v0.1.6/2026.04.10-test-fix-expediter/00-index.md) — 14 design docs + 6 execution logs
-- **TestSuiteJob**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(removed by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design
+- **TestSuiteJob**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(`REMOVED` in Rick's R&D cut; the git history of this path has it)* — original design
 - **CJ Flow packaging**: [`src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`](../../rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md) — agentic job packaging conventions
 
 These are **frozen planning artifacts** — they explain why the agents are
