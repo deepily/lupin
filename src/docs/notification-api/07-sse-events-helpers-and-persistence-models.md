@@ -1,4 +1,4 @@
-> Part 7 of 16 of the [Lupin Notification API Reference](../notification-api.md): SSE event models, helper functions, the PostgreSQL notification model and the in-memory queue item (sections 5.4 to 5.7).
+> Part 7 of 16 of the [Lupin Notification API Reference](../notification-api.md): SSE events, helpers, persistence models.
 
 ### 5.4 SSE Event Models
 

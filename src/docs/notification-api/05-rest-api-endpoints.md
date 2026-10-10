@@ -1,4 +1,4 @@
-> Part 5 of 16 of the [Lupin Notification API Reference](../notification-api.md): the REST API endpoints (section 4).
+> Part 5 of 16 of the [Lupin Notification API Reference](../notification-api.md): REST API endpoints.
 
 ## 4. REST API Endpoints
 

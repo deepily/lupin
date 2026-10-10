@@ -1,4 +1,4 @@
-> Part 4 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): the CC transcript watcher registry, event emission, user routing, subscriptions, session policy, background tasks, the authentication flow and session id validation.
+> Part 4 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): watcher registry, emission, auth.
 
 ### 2b. CC Transcript Console Watcher Registry
 

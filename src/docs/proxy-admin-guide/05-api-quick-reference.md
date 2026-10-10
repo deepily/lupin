@@ -1,4 +1,4 @@
-> Part 5 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): the quick reference to the API endpoints.
+> Part 5 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): API quick reference.
 
 ## 8. Quick Reference: API Endpoints
 

@@ -1,4 +1,4 @@
-> Part 12 of 16 of the [Lupin Notification API Reference](../notification-api.md): receiving notifications (section 9).
+> Part 12 of 16 of the [Lupin Notification API Reference](../notification-api.md): receiving notifications.
 
 ## 9. Receiving Notifications
 

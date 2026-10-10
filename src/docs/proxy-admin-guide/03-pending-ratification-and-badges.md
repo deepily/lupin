@@ -1,4 +1,4 @@
-> Part 3 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): pending ratification and the badge and color reference.
+> Part 3 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): ratification and badges.
 
 ## 5. Pending Ratification (`/app/admin/proxy-ratify`)
 

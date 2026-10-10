@@ -1,4 +1,4 @@
-> Part 2 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): reader 1 (heartbeat self-poke), reader 2 (the arbiter) and reader 3 (the human UI card).
+> Part 2 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): the three readers.
 
 ## 3. Reader 1 — the heartbeat self-poke (Stop-hook liveness path)
 

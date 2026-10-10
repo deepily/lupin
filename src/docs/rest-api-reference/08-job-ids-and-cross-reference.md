@@ -1,4 +1,4 @@
-> Part 8 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): job id prefixes and the cross-reference to the deep-dive documents.
+> Part 8 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): job id prefixes and cross-reference.
 
 ## Job ID Prefixes
 

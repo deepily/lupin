@@ -1,4 +1,4 @@
-> Part 6 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): I/O files, WebSocket admin and connections, pages, multiplexer, FCM wake push, heartbeat switch and podcast proxy (sections 20 to 25b).
+> Part 6 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 20 to 25b: files, WebSockets, pages, push.
 
 ## 20. I/O Files (`/api/io/*`)
 

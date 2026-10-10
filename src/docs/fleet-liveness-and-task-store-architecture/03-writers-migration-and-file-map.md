@@ -1,4 +1,4 @@
-> Part 3 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): the writers, the migration and cutover machinery, the file map and the open follow-ups.
+> Part 3 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): writers, migration and file map.
 
 ## 6. Writers — the manager/worker session lifecycle
 

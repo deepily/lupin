@@ -1,4 +1,4 @@
-> Part 1 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): the authentication legend and the retired queue doors, with the survivors, the table and the test-suite and mock-job doors.
+> Part 1 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): legend and retired queue doors.
 
 # Lupin REST API Quick Reference
 

@@ -1,4 +1,4 @@
-> Part 1 of 16 of the [Lupin Notification API Reference](../notification-api.md): the table of contents, the executive summary, the three delivery layers with the FCM wake push side channel, and the key concepts.
+> Part 1 of 16 of the [Lupin Notification API Reference](../notification-api.md): overview, layers and key concepts.
 
 # Lupin Notification API Reference
 

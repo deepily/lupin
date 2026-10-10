@@ -1,4 +1,4 @@
-> Part 5 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): deprecated events, frame seq, resume and ack, close code semantics and related documentation.
+> Part 5 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): deprecated events, frame resume, close codes.
 
 ## Close Code Semantics
 

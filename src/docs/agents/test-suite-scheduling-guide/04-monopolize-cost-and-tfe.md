@@ -1,4 +1,4 @@
-> Part 4 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): monopolize mode, the cost model and the interaction with TFE.
+> Part 4 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): monopolize, cost and TFE.
 
 ## 7. Monopolize Mode
 

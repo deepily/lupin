@@ -1,4 +1,4 @@
-> Part 5 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): the thread-safety model, dynamic subscription updates, the CC transcript console channel and related documentation.
+> Part 5 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): thread safety, subscriptions, transcript channel.
 
 ## Thread-Safety Model
 

@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-Quick reference to every REST route Lupin serves: method, path, authentication and a one-line summary, grouped by section. The retired queue doors and their replacements come first.
+Quick reference to every REST route Lupin serves, with its method, path, authentication and summary.
 
 ## Contents
 
@@ -50,11 +50,11 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-overview-and-retired-doors.md](rest-api-reference/01-overview-and-retired-doors.md) | the authentication legend and the retired queue doors, with the survivors, the table and the test-suite and mock-job doors |
-| [02-retired-doors-continued.md](rest-api-reference/02-retired-doors-continued.md) | the resume doors, the Claude Code pair and the permanent survivor route |
-| [03-core-routes.md](rest-api-reference/03-core-routes.md) | authentication, admin, system, queue management, notifications, speech I/O and job stubs (sections 1 to 7) |
-| [04-agents-and-expediters.md](rest-api-reference/04-agents-and-expediters.md) | embeddings, mode, statistics, deep research, podcast, presentation, research pipelines, Claude Code, SWE team, test suite and the two expediters (sections 8 to 17b) |
-| [05-commons-proxy-mock-job.md](rest-api-reference/05-commons-proxy-mock-job.md) | inter-session commons, decision proxy and mock job (sections 17c to 19) |
-| [06-files-websockets-pages-push.md](rest-api-reference/06-files-websockets-pages-push.md) | I/O files, WebSocket admin and connections, pages, multiplexer, FCM wake push, heartbeat switch and podcast proxy (sections 20 to 25b) |
-| [07-task-store-and-cc-transcript.md](rest-api-reference/07-task-store-and-cc-transcript.md) | task store promote and demote requests, and the CC transcript console (sections 26 and 27) |
-| [08-job-ids-and-cross-reference.md](rest-api-reference/08-job-ids-and-cross-reference.md) | job id prefixes and the cross-reference to the deep-dive documents |
+| [01-overview-and-retired-doors.md](rest-api-reference/01-overview-and-retired-doors.md) | legend and retired queue doors |
+| [02-retired-doors-continued.md](rest-api-reference/02-retired-doors-continued.md) | retired doors continued: resume, Claude Code, survivors |
+| [03-core-routes.md](rest-api-reference/03-core-routes.md) | routes 1 to 7: auth, admin, system, queue, notify |
+| [04-agents-and-expediters.md](rest-api-reference/04-agents-and-expediters.md) | routes 8 to 17b: agents, expediters, test suite |
+| [05-commons-proxy-mock-job.md](rest-api-reference/05-commons-proxy-mock-job.md) | routes 17c to 19: commons, proxy, mock job |
+| [06-files-websockets-pages-push.md](rest-api-reference/06-files-websockets-pages-push.md) | routes 20 to 25b: files, WebSockets, pages, push |
+| [07-task-store-and-cc-transcript.md](rest-api-reference/07-task-store-and-cc-transcript.md) | routes 26 and 27: task store, CC transcript |
+| [08-job-ids-and-cross-reference.md](rest-api-reference/08-job-ids-and-cross-reference.md) | job id prefixes and cross-reference |

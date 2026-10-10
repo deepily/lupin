@@ -1,4 +1,4 @@
-> Part 1 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): the executive summary, key architectural principles, the high-level data flow and the dual-session design.
+> Part 1 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): overview and architecture.
 
 # WebSocket Architecture Overview
 

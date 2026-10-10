@@ -1,4 +1,4 @@
-> Part 6 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): known limitations and related documentation.
+> Part 6 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): known limitations, related docs.
 
 ## 9. Known Limitations
 

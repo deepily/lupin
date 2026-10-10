@@ -1,4 +1,4 @@
-> Part 3 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): frame sequence numbers, resume, replay and ack for a device slot.
+> Part 3 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): frame seq, resume and ack.
 
 #### Frame seq, resume, and ack (part 2)
 

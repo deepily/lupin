@@ -1,4 +1,4 @@
-> Part 1 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): the table of contents, what the TestSuiteJob does, and the supported suite types.
+> Part 1 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): what it does and suite types.
 
 # Test-Suite Scheduling Guide
 

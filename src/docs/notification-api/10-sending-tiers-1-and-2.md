@@ -1,4 +1,4 @@
-> Part 10 of 16 of the [Lupin Notification API Reference](../notification-api.md): sending notifications programmatically: the introduction, MCP tools and the cosa_interface pattern (sections 8 to 8.2).
+> Part 10 of 16 of the [Lupin Notification API Reference](../notification-api.md): sending: MCP tools and cosa_interface.
 
 ## 8. Sending Notifications Programmatically
 

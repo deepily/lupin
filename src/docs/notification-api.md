@@ -1,6 +1,6 @@
 # Lupin Notification API Reference
 
-Everything about Lupin notifications: how they are delivered, the REST endpoints, data models, lifecycle, sender routing, sending and receiving, voice I/O, the proxy agent, configuration and tests.
+How Lupin notifications are delivered, sent, received and configured, with endpoints, models and lifecycle.
 
 ## Contents
 
@@ -29,19 +29,19 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-overview-layers-and-concepts.md](notification-api/01-overview-layers-and-concepts.md) | the table of contents, the executive summary, the three delivery layers with the FCM wake push side channel, and the key concepts |
-| [02-architecture-request-flows-and-history.md](notification-api/02-architecture-request-flows-and-history.md) | the system architecture diagram, the component map, the two request flows and the historical evolution |
-| [03-quick-start-examples.md](notification-api/03-quick-start-examples.md) | the quick-start recipes (section 2) |
-| [04-authentication.md](notification-api/04-authentication.md) | authentication (section 3) |
-| [05-rest-api-endpoints.md](notification-api/05-rest-api-endpoints.md) | the REST API endpoints (section 4) |
-| [06-data-models-enums-requests-responses.md](notification-api/06-data-models-enums-requests-responses.md) | enums, request models, the persist query parameter and response models (sections 5.1 to 5.3) |
-| [07-sse-events-helpers-and-persistence-models.md](notification-api/07-sse-events-helpers-and-persistence-models.md) | SSE event models, helper functions, the PostgreSQL notification model and the in-memory queue item (sections 5.4 to 5.7) |
-| [08-lifecycle-state-machine.md](notification-api/08-lifecycle-state-machine.md) | the notification lifecycle and state machine (section 6) |
-| [09-sender-identity-and-routing.md](notification-api/09-sender-identity-and-routing.md) | sender identity and multi-project routing (section 7) |
-| [10-sending-tiers-1-and-2.md](notification-api/10-sending-tiers-1-and-2.md) | sending notifications programmatically: the introduction, MCP tools and the cosa_interface pattern (sections 8 to 8.2) |
-| [11-sending-tiers-3-and-4.md](notification-api/11-sending-tiers-3-and-4.md) | sending through CLI clients and direct HTTP (sections 8.3 and 8.4) |
-| [12-receiving-notifications.md](notification-api/12-receiving-notifications.md) | receiving notifications (section 9) |
-| [13-voice-io-integration.md](notification-api/13-voice-io-integration.md) | voice I/O integration (section 10) |
-| [14-notification-proxy-agent.md](notification-api/14-notification-proxy-agent.md) | the notification proxy agent (section 11) |
-| [15-configuration-reference.md](notification-api/15-configuration-reference.md) | the configuration reference (section 12) |
-| [16-testing-guide.md](notification-api/16-testing-guide.md) | the testing guide (section 13) |
+| [01-overview-layers-and-concepts.md](notification-api/01-overview-layers-and-concepts.md) | overview, layers and key concepts |
+| [02-architecture-request-flows-and-history.md](notification-api/02-architecture-request-flows-and-history.md) | architecture, request flows, history |
+| [03-quick-start-examples.md](notification-api/03-quick-start-examples.md) | quick-start examples |
+| [04-authentication.md](notification-api/04-authentication.md) | authentication |
+| [05-rest-api-endpoints.md](notification-api/05-rest-api-endpoints.md) | REST API endpoints |
+| [06-data-models-enums-requests-responses.md](notification-api/06-data-models-enums-requests-responses.md) | enums, requests and responses |
+| [07-sse-events-helpers-and-persistence-models.md](notification-api/07-sse-events-helpers-and-persistence-models.md) | SSE events, helpers, persistence models |
+| [08-lifecycle-state-machine.md](notification-api/08-lifecycle-state-machine.md) | lifecycle and state machine |
+| [09-sender-identity-and-routing.md](notification-api/09-sender-identity-and-routing.md) | sender identity and routing |
+| [10-sending-tiers-1-and-2.md](notification-api/10-sending-tiers-1-and-2.md) | sending: MCP tools and cosa_interface |
+| [11-sending-tiers-3-and-4.md](notification-api/11-sending-tiers-3-and-4.md) | sending: CLI clients and direct HTTP |
+| [12-receiving-notifications.md](notification-api/12-receiving-notifications.md) | receiving notifications |
+| [13-voice-io-integration.md](notification-api/13-voice-io-integration.md) | voice I/O integration |
+| [14-notification-proxy-agent.md](notification-api/14-notification-proxy-agent.md) | the notification proxy agent |
+| [15-configuration-reference.md](notification-api/15-configuration-reference.md) | configuration reference |
+| [16-testing-guide.md](notification-api/16-testing-guide.md) | testing guide |

@@ -1,4 +1,4 @@
-> Part 4 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): the trust feedback loop.
+> Part 4 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): trust feedback loop.
 
 ## 7. The Trust Feedback Loop
 

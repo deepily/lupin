@@ -1,4 +1,4 @@
-> Part 2 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): the morning coffee workflow and the trust dashboard.
+> Part 2 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): morning coffee and dashboard.
 
 ## 3. The Morning Coffee Workflow
 

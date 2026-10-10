@@ -1,6 +1,6 @@
 # Decision Proxy — Admin Guide
 
-How an administrator runs the Decision Proxy: why it exists, trust levels, the morning coffee workflow, the dashboard, ratification, the feedback loop, the API and known limitations.
+How an administrator runs the Decision Proxy: trust levels, ratification, the feedback loop and the API.
 
 ## Contents
 
@@ -22,9 +22,9 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-why-trust-levels-and-contents.md](proxy-admin-guide/01-why-trust-levels-and-contents.md) | the table of contents, why the Decision Proxy exists, and how trust levels work |
-| [02-morning-coffee-and-trust-dashboard.md](proxy-admin-guide/02-morning-coffee-and-trust-dashboard.md) | the morning coffee workflow and the trust dashboard |
-| [03-pending-ratification-and-badges.md](proxy-admin-guide/03-pending-ratification-and-badges.md) | pending ratification and the badge and color reference |
-| [04-trust-feedback-loop.md](proxy-admin-guide/04-trust-feedback-loop.md) | the trust feedback loop |
-| [05-api-quick-reference.md](proxy-admin-guide/05-api-quick-reference.md) | the quick reference to the API endpoints |
-| [06-known-limitations-and-related-docs.md](proxy-admin-guide/06-known-limitations-and-related-docs.md) | known limitations and related documentation |
+| [01-why-trust-levels-and-contents.md](proxy-admin-guide/01-why-trust-levels-and-contents.md) | why, trust levels, contents |
+| [02-morning-coffee-and-trust-dashboard.md](proxy-admin-guide/02-morning-coffee-and-trust-dashboard.md) | morning coffee and dashboard |
+| [03-pending-ratification-and-badges.md](proxy-admin-guide/03-pending-ratification-and-badges.md) | ratification and badges |
+| [04-trust-feedback-loop.md](proxy-admin-guide/04-trust-feedback-loop.md) | trust feedback loop |
+| [05-api-quick-reference.md](proxy-admin-guide/05-api-quick-reference.md) | API quick reference |
+| [06-known-limitations-and-related-docs.md](proxy-admin-guide/06-known-limitations-and-related-docs.md) | known limitations, related docs |

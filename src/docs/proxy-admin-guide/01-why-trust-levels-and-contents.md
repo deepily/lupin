@@ -1,4 +1,4 @@
-> Part 1 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): the table of contents, why the Decision Proxy exists, and how trust levels work.
+> Part 1 of 6 of the [Decision Proxy — Admin Guide](../proxy-admin-guide.md): why, trust levels, contents.
 
 # Decision Proxy — Admin Guide
 

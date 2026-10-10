@@ -1,4 +1,4 @@
-> Part 2 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): the WebSocketManager API: class attributes, lifecycle, connection management and device slots.
+> Part 2 of 5 of the [WebSocket Architecture Overview](../websocket-architecture.md): manager API through device slots.
 
 ## WebSocketManager — Complete API
 

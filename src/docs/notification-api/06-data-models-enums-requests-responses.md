@@ -1,4 +1,4 @@
-> Part 6 of 16 of the [Lupin Notification API Reference](../notification-api.md): enums, request models, the persist query parameter and response models (sections 5.1 to 5.3).
+> Part 6 of 16 of the [Lupin Notification API Reference](../notification-api.md): enums, requests and responses.
 
 ## 5. Data Models & Enums
 

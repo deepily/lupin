@@ -1,6 +1,6 @@
 # WebSocket Architecture Overview
 
-How the WebSocket layer is built: the manager API and its state, device slots and frame resume, the authentication flow, the thread-safety model and the CC transcript console channel.
+How the WebSocket layer is built: the manager API, device slots, authentication, thread safety and the CC transcript channel.
 
 ## Contents
 
@@ -22,8 +22,8 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-overview-and-architecture.md](websocket-architecture/01-overview-and-architecture.md) | the executive summary, key architectural principles, the high-level data flow and the dual-session design |
-| [02-manager-api-attributes-to-device-slots.md](websocket-architecture/02-manager-api-attributes-to-device-slots.md) | the WebSocketManager API: class attributes, lifecycle, connection management and device slots |
-| [03-frame-seq-resume-and-ack.md](websocket-architecture/03-frame-seq-resume-and-ack.md) | frame sequence numbers, resume, replay and ack for a device slot |
-| [04-watcher-registry-emission-and-auth.md](websocket-architecture/04-watcher-registry-emission-and-auth.md) | the CC transcript watcher registry, event emission, user routing, subscriptions, session policy, background tasks, the authentication flow and session id validation |
-| [05-thread-safety-subscriptions-and-transcript-channel.md](websocket-architecture/05-thread-safety-subscriptions-and-transcript-channel.md) | the thread-safety model, dynamic subscription updates, the CC transcript console channel and related documentation |
+| [01-overview-and-architecture.md](websocket-architecture/01-overview-and-architecture.md) | overview and architecture |
+| [02-manager-api-attributes-to-device-slots.md](websocket-architecture/02-manager-api-attributes-to-device-slots.md) | manager API through device slots |
+| [03-frame-seq-resume-and-ack.md](websocket-architecture/03-frame-seq-resume-and-ack.md) | frame seq, resume and ack |
+| [04-watcher-registry-emission-and-auth.md](websocket-architecture/04-watcher-registry-emission-and-auth.md) | watcher registry, emission, auth |
+| [05-thread-safety-subscriptions-and-transcript-channel.md](websocket-architecture/05-thread-safety-subscriptions-and-transcript-channel.md) | thread safety, subscriptions, transcript channel |

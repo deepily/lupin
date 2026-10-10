@@ -1,4 +1,4 @@
-> Part 3 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): the REST API for submitting a test suite and the remediation snapshot schema.
+> Part 3 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): REST API and snapshot schema.
 
 ## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 

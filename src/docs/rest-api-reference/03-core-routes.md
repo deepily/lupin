@@ -1,4 +1,4 @@
-> Part 3 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): authentication, admin, system, queue management, notifications, speech I/O and job stubs (sections 1 to 7).
+> Part 3 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 1 to 7: auth, admin, system, queue, notify.
 
 ## 1. Authentication (`/auth/*`)
 

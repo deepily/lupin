@@ -1,4 +1,4 @@
-> Part 16 of 16 of the [Lupin Notification API Reference](../notification-api.md): the testing guide (section 13).
+> Part 16 of 16 of the [Lupin Notification API Reference](../notification-api.md): testing guide.
 
 ## 13. Testing Guide
 

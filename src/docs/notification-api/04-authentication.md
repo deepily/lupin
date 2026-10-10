@@ -1,4 +1,4 @@
-> Part 4 of 16 of the [Lupin Notification API Reference](../notification-api.md): authentication (section 3).
+> Part 4 of 16 of the [Lupin Notification API Reference](../notification-api.md): authentication.
 
 ## 3. Authentication
 

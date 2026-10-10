@@ -1,6 +1,6 @@
 # Test-Suite Scheduling Guide
 
-How to schedule and run test suites through the TestSuiteJob: suite types, architecture, the /schedule-tests skill, the submit API, the remediation snapshot, monopolize mode, cost, TFE and troubleshooting.
+How to schedule and run test suites through the TestSuiteJob, from suite types to troubleshooting.
 
 ## Contents
 
@@ -23,8 +23,8 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-what-it-does-and-suite-types.md](test-suite-scheduling-guide/01-what-it-does-and-suite-types.md) | the table of contents, what the TestSuiteJob does, and the supported suite types |
-| [02-architecture-and-schedule-tests-skill.md](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md) | the architecture and the /schedule-tests skill |
-| [03-rest-api-and-remediation-snapshot.md](test-suite-scheduling-guide/03-rest-api-and-remediation-snapshot.md) | the REST API for submitting a test suite and the remediation snapshot schema |
-| [04-monopolize-cost-and-tfe.md](test-suite-scheduling-guide/04-monopolize-cost-and-tfe.md) | monopolize mode, the cost model and the interaction with TFE |
-| [05-troubleshooting-and-related-docs.md](test-suite-scheduling-guide/05-troubleshooting-and-related-docs.md) | troubleshooting and related documentation |
+| [01-what-it-does-and-suite-types.md](test-suite-scheduling-guide/01-what-it-does-and-suite-types.md) | what it does and suite types |
+| [02-architecture-and-schedule-tests-skill.md](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md) | architecture and the schedule-tests skill |
+| [03-rest-api-and-remediation-snapshot.md](test-suite-scheduling-guide/03-rest-api-and-remediation-snapshot.md) | REST API and snapshot schema |
+| [04-monopolize-cost-and-tfe.md](test-suite-scheduling-guide/04-monopolize-cost-and-tfe.md) | monopolize, cost and TFE |
+| [05-troubleshooting-and-related-docs.md](test-suite-scheduling-guide/05-troubleshooting-and-related-docs.md) | troubleshooting and related docs |

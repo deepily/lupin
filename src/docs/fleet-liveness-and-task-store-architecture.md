@@ -1,6 +1,6 @@
 # Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)
 
-How the Lupin fleet tracks owed work and keeps sessions alive: the unified task store, its three readers (heartbeat poke, arbiter, human UI card), the writers, and the migration.
+How the fleet tracks owed work and stays alive: the task store, its three readers, the writers and the migration.
 
 ## Contents
 
@@ -20,6 +20,6 @@ This page is an index. The reference itself is in the parts below, in document o
 
 | Part | Covers |
 |---|---|
-| [01-why-and-the-one-store.md](fleet-liveness-and-task-store-architecture/01-why-and-the-one-store.md) | why the page exists and the core design: one store, three readers |
-| [02-readers-heartbeat-arbiter-card.md](fleet-liveness-and-task-store-architecture/02-readers-heartbeat-arbiter-card.md) | reader 1 (heartbeat self-poke), reader 2 (the arbiter) and reader 3 (the human UI card) |
-| [03-writers-migration-and-file-map.md](fleet-liveness-and-task-store-architecture/03-writers-migration-and-file-map.md) | the writers, the migration and cutover machinery, the file map and the open follow-ups |
+| [01-why-and-the-one-store.md](fleet-liveness-and-task-store-architecture/01-why-and-the-one-store.md) | why it exists and the one store |
+| [02-readers-heartbeat-arbiter-card.md](fleet-liveness-and-task-store-architecture/02-readers-heartbeat-arbiter-card.md) | the three readers |
+| [03-writers-migration-and-file-map.md](fleet-liveness-and-task-store-architecture/03-writers-migration-and-file-map.md) | writers, migration and file map |

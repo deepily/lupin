@@ -1,4 +1,4 @@
-> Part 14 of 16 of the [Lupin Notification API Reference](../notification-api.md): the notification proxy agent (section 11).
+> Part 14 of 16 of the [Lupin Notification API Reference](../notification-api.md): the notification proxy agent.
 
 ## 11. Notification Proxy Agent
 

@@ -1,4 +1,4 @@
-> Part 2 of 16 of the [Lupin Notification API Reference](../notification-api.md): the system architecture diagram, the component map, the two request flows and the historical evolution.
+> Part 2 of 16 of the [Lupin Notification API Reference](../notification-api.md): architecture, request flows, history.
 
 ### System Architecture Diagram
 

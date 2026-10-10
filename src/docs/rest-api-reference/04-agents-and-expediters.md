@@ -1,4 +1,4 @@
-> Part 4 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): embeddings, mode, statistics, deep research, podcast, presentation, research pipelines, Claude Code, SWE team, test suite and the two expediters (sections 8 to 17b).
+> Part 4 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 8 to 17b: agents, expediters, test suite.
 
 ## 8. Embeddings (`/api/embeddings/*`)
 

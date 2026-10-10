@@ -1,4 +1,4 @@
-> Part 15 of 16 of the [Lupin Notification API Reference](../notification-api.md): the configuration reference (section 12).
+> Part 15 of 16 of the [Lupin Notification API Reference](../notification-api.md): configuration reference.
 
 ## 12. Configuration Reference
 

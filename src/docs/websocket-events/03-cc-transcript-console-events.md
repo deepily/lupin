@@ -1,4 +1,4 @@
-> Part 3 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): the CC transcript console events.
+> Part 3 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): CC transcript console events.
 
 ## CC Transcript Console Events
 

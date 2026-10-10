@@ -1,4 +1,4 @@
-> Part 11 of 16 of the [Lupin Notification API Reference](../notification-api.md): sending through CLI clients and direct HTTP (sections 8.3 and 8.4).
+> Part 11 of 16 of the [Lupin Notification API Reference](../notification-api.md): sending: CLI clients and direct HTTP.
 
 ### 8.3 Tier 3 -- CLI Clients
 

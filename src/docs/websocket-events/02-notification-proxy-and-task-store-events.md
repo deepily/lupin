@@ -1,4 +1,4 @@
-> Part 2 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): notification events, proxy and ratification events and task store events.
+> Part 2 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): notification, proxy and task store events.
 
 ## Notification Events
 

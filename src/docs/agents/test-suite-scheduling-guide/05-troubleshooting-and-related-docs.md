@@ -1,4 +1,4 @@
-> Part 5 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): troubleshooting and related documentation.
+> Part 5 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): troubleshooting and related docs.
 
 ## 10. Troubleshooting
 

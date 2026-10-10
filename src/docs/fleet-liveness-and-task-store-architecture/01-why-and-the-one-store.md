@@ -1,4 +1,4 @@
-> Part 1 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): why the page exists and the core design: one store, three readers.
+> Part 1 of 3 of the [Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)](../fleet-liveness-and-task-store-architecture.md): why it exists and the one store.
 
 # Fleet Liveness & Unified Task-Store — Architecture (Top to Bottom)
 
