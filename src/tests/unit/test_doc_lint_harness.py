@@ -810,3 +810,35 @@ def test_the_command_line_refuses_parallel_below_one_and_thinking_off_with_jev(t
     assert "--parallel must be 1 or more" in capsys.readouterr().err
     assert cli.main( cli_args( tmp_path ) + [ "--judge-backend", "jev", "--judge-thinking", "off", "--t-lo", "0.3", "--t-hi", "0.8" ], query_fn=FakeModel() ) == 2
     assert "--judge-thinking only applies" in capsys.readouterr().err
+
+
+def _runs( *verdicts_per_run ):
+    """One run per argument; each argument lists one verdict per claim."""
+    return [ [ { "verdict": v, "escalated": False } for v in run ] for run in verdicts_per_run ]
+
+
+def test_a_claim_is_dropped_only_when_all_three_judge_runs_say_absent():
+    assert hr.final_absent( _runs( [ "absent" ], [ "absent" ], [ "absent" ] ) ) == [ True ]
+
+
+@pytest.mark.parametrize( "verdicts", [
+    ( "absent", "absent", "present" ), ( "absent", "present", "absent" ), ( "present", "absent", "absent" ),
+    ( "absent", "present", "present" ), ( "present", "present", "present" ),
+] )
+def test_a_claim_with_any_run_that_does_not_say_absent_is_kept( verdicts ):
+    assert hr.final_absent( _runs( *[ [ v ] for v in verdicts ] ) ) == [ False ]
+
+
+def test_each_claim_is_decided_on_its_own_three_verdicts():
+    runs = _runs( [ "absent", "absent", "present" ], [ "absent", "present", "present" ], [ "absent", "absent", "present" ] )
+    assert hr.final_absent( runs ) == [ True, False, False ]
+
+
+def test_two_runs_out_of_three_absent_neither_catches_a_seeded_removal_nor_flags_a_pair():
+    claim_list = { "claims": [ { "start": 0, "end": 10, "text": "q", "quote": "q" } ], "discarded": 0, "discards": [], "flags": [], "flag_words": [],
+                   "reextract_calls": 0, "parse_failed": False, "retry_calls": 0, "uncovered": 0.0, "longest_quote": 0.25,
+                   "runs": _runs( [ "absent" ], [ "absent" ], [ "present" ] ) }
+    assert hr.caught( claim_list, ( 2, 5 ) ) is False and hr.flagged( claim_list ) is False
+    assert hr.drop_tags( claim_list ) == ( [], [] )
+    unanimous_list = dict( claim_list, runs=_runs( [ "absent" ], [ "absent" ], [ "absent" ] ) )
+    assert hr.caught( unanimous_list, ( 2, 5 ) ) is True and hr.flagged( unanimous_list ) is True
