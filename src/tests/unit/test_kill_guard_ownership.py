@@ -1440,3 +1440,132 @@ def test_a_wrapper_with_a_path_or_a_tilde_does_not_hide_a_sweep( command, worktr
 def test_a_path_wrapper_does_not_turn_an_argument_into_a_command( worktree, elsewhere ):
     proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
     assert _guard( "/usr/bin/sudo -u root grep pkill TOK", [ 700 ], proc, worktree ) is None
+
+
+# ---------------------------------------------------------------------------
+# A quoted mention is text, not a command
+# ---------------------------------------------------------------------------
+
+def _mention_forms( repeats ):
+    """Commit-message shapes that only talk about a sweep, at `repeats` mentions."""
+    many = lambda piece: piece * repeats
+    return {
+        "double-quoted listing"   : 'git commit -m "note: ' + many( "pgrep -f foo; " ) + 'done"',
+        "double-quoted pipeline"  : 'git commit -m "' + many( "run pgrep -f foo | xargs kill; " ) + 'done"',
+        "single-quoted listing"   : "git commit -m '" + many( "pgrep -f foo; " ) + "done'",
+        "single-quoted pipeline"  : "git commit -m '" + many( "pgrep -f foo | xargs kill; " ) + "done'",
+        "escaped inner quotes"    : 'git commit -m "see ' + many( '\\"pgrep -f foo\\"; ' ) + 'done"',
+        "pkill mentions"          : 'git commit -m "' + many( "ran pkill -f foo; " ) + 'done"',
+        "kill mentions"           : "git commit -m '" + many( "then kill 4242; " ) + "done'",
+        "loop mentions"           : "git commit -m '" + many( "for p in $(pgrep foo); do kill $p; done; " ) + "done'",
+        "echo then real command"  : "echo '" + many( "pgrep -f foo; " ) + "' && ls",
+    }
+
+
+def _never_probed( selector ):
+    raise AssertionError( f"a quoted mention reached pgrep: {selector!r}" )
+
+
+@pytest.mark.parametrize( "repeats", [ 60, 600 ] )
+@pytest.mark.parametrize( "form", sorted( _mention_forms( 1 ) ) )
+def test_a_quoted_mention_of_a_sweep_is_allowed_and_cheap( form, repeats, worktree ):
+    command = _mention_forms( repeats )[ form ]
+    started = time.perf_counter()
+    reason  = kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: CLAUDE_COMM,
+        pgrep_probe=_never_probed, cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
+    )
+    assert reason is None
+    assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize( "command", [
+    "echo \\'; pgrep x | xargs kill; echo \\'",
+    "echo \\\"; pgrep x | xargs kill; echo \\\"",
+    "# it's here\npgrep x | xargs kill",
+    "ls # don't\npgrep x | xargs kill",
+    "echo 'a; pgrep x | xargs kill",
+    "echo \"it's\"; pgrep x | xargs kill; echo \"ok\"",
+    "echo \"$(pgrep x | xargs kill)\"",
+    "echo \"`pgrep x | xargs kill`\"",
+    "git commit -m 'note'; pgrep x | xargs kill",
+    "git commit -m \"a\" && pgrep x | xargs kill",
+] )
+def test_a_real_sweep_beside_quotes_is_still_refused( command, worktree ):
+    reason = kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: "bash",
+        pgrep_probe=lambda selector: [], cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
+    )
+    assert reason is not None
+
+
+@pytest.mark.parametrize( "command", [
+    "echo \\'; pkill -f TOK; echo \\'",
+    "# it's\npkill -f TOK",
+    "echo \"it's\"; pkill -f TOK; echo \"ok\"",
+    "echo \"$(pkill -f TOK)\"",
+    "git commit -m 'x'; pkill -f TOK",
+] )
+def test_a_real_pkill_beside_quotes_still_reaches_the_ownership_check( command, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( command, [ 700 ], proc, worktree ) is not None
+
+
+@pytest.mark.parametrize( "command, spans", [
+    ( "echo 'a b' \"c d\"",              [ ( 5, 10, "'" ), ( 11, 16, '"' ) ] ),
+    ( "echo \\'x\\'",                    [] ),
+    ( "echo 'a\\'",                      [ ( 5, 9, "'" ) ] ),
+    ( "echo \"a\\\"b\"",                 [ ( 5, 11, '"' ) ] ),
+    ( "ls # it's\necho 'x'",             [ ( 15, 18, "'" ) ] ),
+    ( "echo 'unterminated",              [] ),
+    ( "echo $'a\\'b'",                   [ ( 6, 12, "'" ) ] ),
+] )
+def test_quote_spans_follow_the_shell( command, spans ):
+    assert [ ( a, b, q ) for a, b, q, _ in kill_guard._quote_spans( command ) ] == spans
+
+
+def test_a_double_quoted_span_with_a_substitution_is_live_and_one_without_is_a_mention():
+    plain = kill_guard._quote_spans( 'echo "a; pgrep x"' )
+    live  = kill_guard._quote_spans( 'echo "a; $(pgrep x)"' )
+    tick  = kill_guard._quote_spans( 'echo "a; `pgrep x`"' )
+    assert kill_guard._is_mention( 'echo "a; pgrep x"', 10 ) is True
+    assert kill_guard._is_mention( 'echo "a; $(pgrep x)"', 10 ) is False
+    assert kill_guard._is_mention( 'echo "a; `pgrep x`"', 10 ) is False
+    assert kill_guard._is_mention( "echo 'a; $(pgrep x)'", 10 ) is True
+    assert kill_guard._is_mention( "echo 'a'; pgrep x", 12 ) is False
+    assert ( len( plain ), len( live ), len( tick ) ) == ( 1, 1, 1 )
+
+
+@pytest.mark.parametrize( "command", [
+    '"pkill" -f TOK',
+    "'pkill' -f TOK",
+    '"/usr/bin/pkill" -f TOK',
+    'true; "pkill" -f TOK',
+    "sudo 'pkill' -f TOK",
+    'if true; then "/usr/bin/pkill" -f TOK; fi',
+] )
+def test_a_quoted_command_word_is_a_sweep_not_a_mention( command, worktree, elsewhere ):
+    """The quotes sit around the verb itself; the command still starts outside them."""
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    reason = _guard( command, [ 700 ], proc, worktree )
+    assert reason is not None
+    assert "700" in reason
+
+
+def test_a_hatch_that_is_only_mentioned_does_not_open_the_guard( worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    command = "echo 'x; LUPIN_ALLOW_UNSCOPED_KILL=1 pkill'; pkill -f TOK"
+    assert _guard( command, [ 700 ], proc, worktree ) is not None
+    assert kill_guard._hatch_in_prefix( command ) is False
+    assert kill_guard._hatch_in_prefix( "LUPIN_ALLOW_UNSCOPED_KILL=1 pkill -f TOK" ) is True
+
+
+def test_a_mention_is_skipped_on_the_claude_only_path_and_for_a_kill_substitution():
+    seat = lambda pid: CLAUDE_COMM
+    for command in ( "echo 'then pkill -f foo'", "echo 'x; kill $(pgrep foo)'" ):
+        assert kill_deny_reason(
+            "Bash", { "command": command }, enabled=True, comm_reader=seat, pgrep_probe=_never_probed,
+        ) is None
+    assert kill_deny_reason(
+        "Bash", { "command": "kill $(pgrep foo)" }, enabled=True, comm_reader=lambda pid: "bash",
+    ) is not None

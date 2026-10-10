@@ -46,6 +46,7 @@ import shlex
 import signal
 import subprocess
 from bisect import bisect_left, bisect_right
+from functools import lru_cache
 from typing import List, Optional, Tuple
 
 
@@ -179,7 +180,7 @@ _OWN_CHILDREN_RE = re.compile( rf"(?:-P|--parent|--ppid)[ \t]*=?[ \t]*{_OWN_PID}
 # Quoted spans, removed before any structural test. `pgrep -f "node|esbuild"`
 # carries a pipe INSIDE an argument; reading that as a pipeline is how the guard
 # first mis-flagged a real monitoring loop that killed only its own `$!`.
-_QUOTED_RE = re.compile( r'''\'[^\']*\'|"[^"]*"''' )
+_QUOTED_RE = re.compile( r'''\'[^\']*\'|"[^"]*"''' )  # legacy pairing; kept for importers, the guard reads `_quote_spans`
 
 # A single `|` — the pipeline operator. `||` is control flow and pipes nothing.
 _PIPE_RE = re.compile( r"(?<!\|)\|(?!\|)" )
@@ -694,10 +695,11 @@ def _hatch_in_prefix( command ) -> bool:
     """
     if not command: return False
 
-    found = _INLINE_FLAG_RE.search( command )
-    if not found: return False
-
-    return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
+    for found in _INLINE_FLAG_RE.finditer( command ):
+        if _is_mention( command, found.start() ):
+            continue
+        return found.group( "value" ).strip().strip( "'\"" ).lower() in _TRUE_VALUES
+    return False
 
 
 def _guard_disabled( env=None ) -> bool:
@@ -759,19 +761,113 @@ def _claude_pids_targeted( command: str, comm_reader ) -> list:
     """
     hits = []
     for match in _KILL_LITERAL_RE.finditer( command ):
+        if _is_mention( command, match.start() ):
+            continue
         for pid in _literal_pids( match.group( "args" ) ):
             if comm_reader( pid ) == CLAUDE_COMM:
                 hits.append( pid )
     return hits
 
 
+@lru_cache( maxsize=8 )
+def _quote_spans( command: str ) -> tuple:
+    """
+    The quoted spans of a command, read the way the shell reads quotes.
+
+    Requires:
+        - command is the shell command string
+
+    Ensures:
+        - returns ( start, end, quote, live ) tuples in order; start is the opening quote,
+          end is one past the closing quote, quote is `'` or `"`, and live is True for a
+          double-quoted span that holds `$(` or a backtick, which the shell runs
+        - a backslash outside single quotes takes the next character, so an escaped quote is no quote
+        - a `#` that begins a word comments out the rest of the line, quotes included
+        - `$'...'` is a single-quoted span in which a backslash takes the next character
+        - an opening quote with no partner is a plain character, not a span
+    """
+    spans = []
+    size  = len( command )
+    index = 0
+    while index < size:
+        char = command[ index ]
+        if char == "\\":
+            index += 2
+            continue
+        if char == "#" and ( index == 0 or command[ index - 1 ] in " \t\n;&|(" ):
+            newline = command.find( "\n", index )
+            index   = size if newline < 0 else newline
+            continue
+        if char == "'":
+            ansi = index > 0 and command[ index - 1 ] == "$"
+            end  = index + 1
+            while end < size:
+                if ansi and command[ end ] == "\\":
+                    end += 2
+                    continue
+                if command[ end ] == "'":
+                    break
+                end += 1
+            if end < size:
+                spans.append( ( index, end + 1, "'", False ) )
+                index = end + 1
+            else:
+                index += 1
+            continue
+        if char == '"':
+            end  = index + 1
+            live = False
+            while end < size:
+                inner = command[ end ]
+                if inner == "\\":
+                    end += 2
+                    continue
+                if inner == '"':
+                    break
+                if inner == "`" or ( inner == "$" and command[ end + 1 : end + 2 ] == "(" ):
+                    live = True
+                end += 1
+            if end < size:
+                spans.append( ( index, end + 1, '"', live ) )
+                index = end + 1
+            else:
+                index += 1
+            continue
+        index += 1
+    return tuple( spans )
+
+
+@lru_cache( maxsize=8 )
+def _span_starts( command: str ) -> tuple:
+    """The opening offsets of `_quote_spans( command )`, for bisection."""
+    return tuple( span[ 0 ] for span in _quote_spans( command ) )
+
+
+def _is_mention( command: str, position: int ) -> bool:
+    """
+    True iff the text at `position` is only quoted text, never a command.
+
+    Requires:
+        - command is the shell command string; position is an offset into it
+
+    Ensures:
+        - a position strictly inside a single-quoted span is a mention: the shell never runs it
+        - a position strictly inside a double-quoted span is a mention too, unless the span
+          holds `$(` or a backtick, in which case it is live and is judged like any command
+        - a position outside every span, or at a span's opening quote, is not a mention
+        - there is no size limit: a commit message or a pasted document of any length is
+          one span and costs one lookup
+    """
+    found = bisect_right( _span_starts( command ), position ) - 1
+    if found < 0:
+        return False
+    start, end, quote, live = _quote_spans( command )[ found ]
+    return start < position < end and not live
+
+
 _STOP_RE        = re.compile( r"[;\n)]" )
 _CLOSER_RE      = re.compile( r"\bdone\b|\}" )
 _CLOSE_CHARS_RE = re.compile( r"[)`]" )
-
-
-_TAIL_BUDGET_FACTOR = 16
-_TAIL_BUDGET_FLOOR  = 16384
 
 
 class _CommandIndex:
@@ -794,9 +890,16 @@ class _CommandIndex:
             - every list below is sorted by position
         """
         self.command     = command
-        self.spans       = [ match.span() for match in _QUOTED_RE.finditer( command ) ]
-        self.span_starts = [ start for start, _ in self.spans ]
-        blanked          = _QUOTED_RE.sub( lambda match: " " * len( match.group( 0 ) ), command )
+        pieces           = []
+        cursor           = 0
+        for start, end, _, live in _quote_spans( command ):
+            if live:
+                continue                                       # the shell runs it: keep it visible
+            pieces.append( command[ cursor : start ] )
+            pieces.append( " " * ( end - start ) )
+            cursor = end
+        pieces.append( command[ cursor: ] )
+        blanked          = "".join( pieces )
         self.blanked     = blanked
         self.stops       = [ match.start() for match in _STOP_RE.finditer( blanked ) ]
         self.compounds   = [ match.start() for match in _COMPOUND_RE.finditer( blanked ) ]
@@ -810,14 +913,6 @@ class _CommandIndex:
         self.for_ends    = [ match.end() for match in fors ]
         self.for_vars    = [ match.group( "var" ) for match in fors ]
         self.closes      = [ match.start() for match in _CLOSE_CHARS_RE.finditer( command ) ]
-
-    def inside_quote( self, position: int ) -> bool:
-        """True iff `position` falls strictly inside a quoted span, so a tail cannot start there."""
-        found = bisect_right( self.span_starts, position ) - 1
-        if found < 0:
-            return False
-        start, end = self.spans[ found ]
-        return start < position < end
 
     def window_end( self, start: int ) -> int:
         """
@@ -923,23 +1018,14 @@ def _sweeps_unscoped( command: str ) -> bool:
     """
     index   = _CommandIndex( command )
     checked = {}
-    # A listing that sits inside a quoted span has its tail paired afresh, which costs a pass over
-    # that tail. The budget keeps the total linear: a command that spends all of it is refused,
-    # because the guard can no longer say what it does in bounded time.
-    budget  = _TAIL_BUDGET_FACTOR * len( command ) + _TAIL_BUDGET_FLOOR
     for listing in _UNSCOPED_LISTING_RE.finditer( command ):
-        end = listing.end()
-        if index.inside_quote( end ):
-            budget -= len( command ) - end
-            if budget < 0:
-                return True
-            view, low = _CommandIndex( command[ end: ] ), 0     # the tail pairs its quotes afresh
-        else:
-            view, low = index, end
-        high = view.window_end( low )
-        if view.window_scoped( low, high ):
+        if _is_mention( command, listing.start() ):
             continue
-        if view.window_reaches_a_kill( low, high ):
+        end  = listing.end()
+        high = index.window_end( end )
+        if index.window_scoped( end, high ):
+            continue
+        if index.window_reaches_a_kill( end, high ):
             return True
         variable = index.loop_variable( end )
         if variable is None:
@@ -953,6 +1039,8 @@ def _sweeps_unscoped( command: str ) -> bool:
 
     # SHAPE D — the listing sits inside a substitution that IS the kill's argument.
     for subst in _KILL_SUBST_RE.finditer( command ):
+        if _is_mention( command, subst.start() ):
+            continue
         inner = subst.group( "subst" )
         if _UNSCOPED_LISTING_RE.search( "\n" + inner ) and not _OWN_CHILDREN_RE.search( inner ):
             return True
@@ -974,6 +1062,8 @@ def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
           bare `pkill` with no selector, and for any pattern matching no seat
     """
     for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        if _is_mention( command, sweep.start() ):
+            continue
         args = sweep.group( "args" )
         if not args.strip() or _OWN_CHILDREN_RE.search( args ):
             continue
@@ -1146,6 +1236,8 @@ def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Owne
         - ( [], [] ) for scoped sweeps, empty selectors, and matches that are all the caller's
     """
     for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        if _is_mention( command, sweep.start() ):
+            continue
         args = sweep.group( "args" )
         if not args.strip() or _OWN_CHILDREN_RE.search( args ):
             continue
@@ -1291,6 +1383,8 @@ def kill_deny_reason(
           provably not the caller's) or Shape D (a kill fed by a listing)
         - Shape A is reported in preference to Shape B — it can name the victims
         - None for own-children sweeps and for listings with no kill downstream
+        - None for a sweep that is only mentioned: text inside a single-quoted span, or inside
+          a double-quoted span with no `$(` or backtick, is never judged; see `_is_mention`
         - FAIL-OPEN: any unexpected error → None
     """
     try:
