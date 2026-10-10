@@ -302,6 +302,17 @@ def test_a_heading_shaped_line_inside_a_fence_is_not_a_home_for_a_repoint():
     assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "[go](#x)" ]
 
 
+def test_a_link_to_a_part_through_a_directory_is_a_changed_line_not_a_repoint():
+    old    = "## One\n\n[go](#two)\n\n## Two\n"
+    for target in ( "sub/b.md#two", "./b.md#two", "../x/b.md#two" ):
+        parts  = { "a.md": f"## One\n\n[go]({target})\n", "b.md": "## Two\n" }
+        result = sc.compare( old, "# idx\n", parts )
+        assert result[ "pass" ] is False, target
+        assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "[go](#two)" ], target
+    bare = sc.compare( old, "# idx\n", { "a.md": "## One\n\n[go](b.md#two)\n", "b.md": "## Two\n" } )
+    assert bare[ "pass" ] is True and bare[ "parts" ][ "a.md" ][ "repointed" ] == [ { "line_number": 3, "old": "#two", "new": "b.md#two" } ]
+
+
 def test_non_blank_lines_drop_trailing_white_space_and_blank_lines():
     assert sc.non_blank_lines( "a  \r\n\n  b\n \t\n" ) == [ ( 1, "a" ), ( 3, "  b" ) ]
 

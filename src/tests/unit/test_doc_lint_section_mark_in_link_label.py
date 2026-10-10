@@ -73,3 +73,19 @@ def test_a_stray_closing_bracket_after_a_mark_outside_any_label_does_not_borrow_
 def test_a_mark_after_a_closed_link_does_not_borrow_a_later_target():
     text = "[a](#b) then §3 and " + "w " * 40 + "](../deep/page.md)"
     assert _bare( text ) == [ "section reference '§3' has no path" ]
+
+
+FAR = "../" + "x/" * 40 + "page.md"
+
+
+def test_an_unclosed_bracket_on_an_earlier_line_does_not_make_a_mark_on_a_later_line_a_label():
+    text = "an unclosed [ bracket here\n§3 ](" + FAR + ")"
+    assert _bare( text ) == [ "section reference '§3' has no path" ]
+
+
+def test_a_mark_before_an_opening_bracket_of_a_later_link_does_not_borrow_that_links_target():
+    assert _bare( "[a §3 [b](" + FAR + ")" ) == [ "section reference '§3' has no path" ]
+
+
+def test_a_mark_before_a_closing_bracket_that_closes_nothing_does_not_borrow_the_target():
+    assert _bare( "[a §3 ] b](" + FAR + ")" ) == [ "section reference '§3' has no path" ]
