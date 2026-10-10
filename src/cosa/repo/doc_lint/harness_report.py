@@ -54,15 +54,16 @@ def interval( successes, trials ):
 
 def final_absent( runs ):
     """
-    Return, per claim, whether the majority of judge runs call it dropped.
+    Return, per claim, whether every judge run calls it dropped.
 
     Requires:
         - runs is a non-empty list of runs; each run is a list of verdict rows, one per claim
 
     Ensures:
-        - a claim is dropped when more than half of the runs say absent
+        - a claim is dropped only when every run says absent, so two of three is not enough
+        - one verdict other than absent, from any run, keeps the claim
     """
-    return [ sum( 1 for run in runs if run[ i ][ "verdict" ] == "absent" ) * 2 > len( runs ) for i in range( len( runs[ 0 ] ) ) ]
+    return [ all( run[ i ][ "verdict" ] == "absent" for run in runs ) for i in range( len( runs[ 0 ] ) ) ]
 
 
 def unanimous( runs ):

@@ -323,9 +323,16 @@ def test_a_group_chart_is_left_out_when_the_keys_have_no_pair_of_its_kinds( run 
 # ---- a ledger written by a real model ----------------------------------------------------------
 
 FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "fixtures", "judge_comparison" )
+FIGURES_UNDER_ALL_THREE = [ ( 3, 1, 3, 0 ), ( 3, 1, 3, 0 ) ]      # ( positives, misses, unseeded, false alarms ) per extractor list; measured 23:30 by rebuilding the fixture ledger
 
 
-def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_and_to_pinned_literals( monkeypatch ):
+def _majority_absent( runs ):
+    """The majority rule the real run was reported under: more than half of the runs say absent."""
+    return [ sum( 1 for run in runs if run[ i ][ "verdict" ] == "absent" ) * 2 > len( runs ) for i in range( len( runs[ 0 ] ) ) ]
+
+
+def _real_run( monkeypatch ):
+    """Rebuild the comparison of the real run's ledger; returns ( out, judge, report )."""
     # The fixture ledger was written by the extractor before row ed2f9b4e (version extractor-a3bde07306, entries
     # without discards or flags). Its keys carry that version, so the rebuild is pinned to it; the new extractor has another.
     monkeypatch.setattr( hn.claim_extractor, "PROMPT_VERSION", "extractor-a3bde07306" )
@@ -338,7 +345,13 @@ def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_a
     for p in pairs: p[ "seed_span" ] = tuple( p[ "seed_span" ] ) if p.get( "seed_span" ) else None
     config = hn.HarnessConfig( "claude-sonnet-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "tracked-docstrings", 2, 3 )
     out    = jc.build_comparison( "dev", [ dict( p, design=None ) for p in pairs ], { k[ "id" ]: { f: k[ f ] for f in jc.KEY_FIELDS } for k in keys }, ledger, { "sonnet": ( config, None ) } )
-    judge  = out[ "judges" ][ "sonnet" ]
+    return out, out[ "judges" ][ "sonnet" ], report
+
+
+def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_under_the_rule_it_ran_with( monkeypatch ):
+    # The committed report was written when a claim was dropped on a majority of the three runs; the rebuild is held to that rule.
+    monkeypatch.setattr( hr, "final_absent", _majority_absent )
+    out, judge, report = _real_run( monkeypatch )
     assert "incomplete" not in judge, judge
     # the committed report predates the ed2f9b4e fields; compare the figures it does carry
     assert [ { k: l[ k ] for k in r } for l, r in zip( judge[ "headline" ][ "lists" ], report[ "lists" ] ) ] == report[ "lists" ] and judge[ "headline" ][ "escalations" ] == report[ "escalations" ] == 2
@@ -347,6 +360,14 @@ def test_a_ledger_from_a_real_run_rebuilds_to_the_figures_the_harness_reported_a
     groups = { g[ "group" ]: ( g[ "n" ], g[ "wrong" ] ) for g in judge[ "groups" ] }
     assert groups == { "delete": ( 3, 0 ), "paraphrase": ( 3, 0 ) }
     assert "| sonnet | 3 | 0 | 0.0% | 63.2% | 3 | 0 | 0.0% | 70.8% | 97.8% | 66.7% |" in jc.render_markdown( out ), "the real judge agreed with itself on 97.8% of claims and only 66.7% of the seeded ones"
+
+
+def test_the_same_ledger_under_the_all_three_rule_counts_the_dissent_as_a_miss( monkeypatch ):
+    out, judge, report = _real_run( monkeypatch )
+    assert "incomplete" not in judge, judge
+    figures = [ ( l[ "positives" ], l[ "misses" ], l[ "unseeded" ], l[ "false_alarms" ] ) for l in judge[ "headline" ][ "lists" ] ]
+    assert figures == FIGURES_UNDER_ALL_THREE
+    assert judge[ "headline" ][ "lists" ][ 0 ][ "misses" ] > report[ "lists" ][ 0 ][ "misses" ], "the committed report says 0; one dissenting run now keeps a seeded claim"
 
 
 # ---- Jev: passes the harness never ledgered, and the report that must square with them ---------

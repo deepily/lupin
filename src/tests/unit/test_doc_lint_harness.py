@@ -216,7 +216,7 @@ def test_agreement_is_counted_per_claim_over_all_claims_and_over_seeded_claims_a
     assert report[ "agreement_all" ][ "claims" ] == 6 and report[ "agreement_all" ][ "same" ] == 5
     assert report[ "agreement_seeded" ][ "claims" ] == 2 and report[ "agreement_seeded" ][ "same" ] == 1
     assert report[ "agreement_seeded" ][ "interval" ][ 0 ] < 0.5 < report[ "agreement_seeded" ][ "interval" ][ 1 ]
-    assert report[ "lists" ][ 0 ][ "misses" ] == 0
+    assert report[ "lists" ][ 0 ][ "misses" ] == 1      # the dissenting run keeps the seeded claim; under the old majority rule this was 0
 
 
 def test_escalations_discards_and_models_are_reported(tmp_path):
@@ -407,7 +407,8 @@ def test_agreement_below_the_bar_blocks_the_default_gate():
             lst[ "runs" ] = [ lst[ "runs" ][ 0 ], [ { "verdict": "present", "escalated": False } ], lst[ "runs" ][ 2 ] ]
     report = hr.build_report( wobbly, CONFIG )
     assert report[ "agreement_seeded" ][ "rate" ] < 0.95 and report[ "agreement_ok" ] is False
-    assert report[ "miss_criterion_met" ] is True and report[ "false_alarm_ok" ] is True and report[ "default_gate_pass" ] is False
+    assert report[ "false_alarm_ok" ] is True and report[ "default_gate_pass" ] is False
+    assert report[ "miss_criterion_met" ] is False      # a dissenting run keeps the seeded claim, so wobble now also costs misses; the old majority rule hid it
     assert hr.build_report( synthetic( 60, unseeded=20 ), CONFIG )[ "default_gate_pass" ] is True
 
 
