@@ -18,6 +18,10 @@ Known limits:
     - an unnamed extension ( extension on Foo ) has no name and its blocks read "<unattached>"
     - a renamed or moved symbol is reported as gone and as new, never as a pair
     - two declarations with the same name under one owner are named name, name#2, name#3 in file order
+    - a doc comment is paired with the declaration under its run of /// lines, as Dart reads it. A doc written on
+      the wrong member is paired where it sits. That happens when it is stacked on a neighbour's doc with no
+      blank line, or sits above the first of a group of one-line consts. The member it belongs to has no old
+      doc and so no pair. The text then reads as lost when it has only moved
 """
 
 import argparse
