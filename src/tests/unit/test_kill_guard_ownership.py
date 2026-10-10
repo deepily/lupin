@@ -25,6 +25,12 @@ import pytest
 from lupin_cli.claude_code.hooks.lib import kill_guard
 from lupin_cli.claude_code.hooks.lib.kill_guard import kill_deny_reason, CLAUDE_COMM
 
+@pytest.fixture( autouse=True )
+def _isolated_hook_log( tmp_path, monkeypatch ):
+    """A failed probe writes a hook-log line; keep it out of the real log directory."""
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hooklogs" ) )
+
+
 CALLER = 4000   # stand-in for the caller's claude pid in the stubbed tests
 
 
@@ -331,7 +337,7 @@ def test_with_no_proc_view_given_the_real_proc_is_used( worktree ):
 # Driven: real processes, the real pgrep, the real /proc
 # ---------------------------------------------------------------------------
 
-_SLEEPER = "import time; time.sleep(120)  # {token}"
+_SLEEPER = "import time; time.sleep(30)  # {token}"
 
 _SPAWN_DETACHED = (
     "import subprocess, sys\n"
@@ -356,8 +362,14 @@ def _spawn_orphan( cwd, token ):
     return int( out.stdout.strip() )
 
 
-def _stop( pid ):
-    """Signal a process this module started, by pid, and wait for it to be gone."""
+def _stop( pid, token ):
+    """Signal a process this module started, by pid, once its argv shows our token."""
+    try:
+        with open( f"/proc/{pid}/cmdline", "rb" ) as handle:
+            if token.encode() not in handle.read():
+                return
+    except OSError:
+        return
     try:
         os.kill( pid, 15 )
     except ProcessLookupError:
@@ -388,7 +400,7 @@ def test_driven_a_real_process_in_another_directory_is_refused_and_a_control_is_
         assert elsewhere in reason
         assert _real_guard( control, worktree ) is None          # matches nothing
     finally:
-        _stop( pid )
+        _stop( pid, token )
 
 
 def test_driven_a_real_orphan_inside_my_worktree_is_allowed( worktree ):
@@ -397,7 +409,7 @@ def test_driven_a_real_orphan_inside_my_worktree_is_allowed( worktree ):
     try:
         assert _real_guard( token, worktree ) is None
     finally:
-        _stop( pid )
+        _stop( pid, token )
 
 
 def test_driven_a_real_orphan_inside_the_main_checkout_is_refused( main_checkout ):
@@ -408,7 +420,7 @@ def test_driven_a_real_orphan_inside_the_main_checkout_is_refused( main_checkout
         assert reason is not None
         assert str( pid ) in reason
     finally:
-        _stop( pid )
+        _stop( pid, token )
 
 
 def test_driven_a_real_child_this_test_started_is_allowed_wherever_it_stands( worktree, elsewhere ):
@@ -491,7 +503,7 @@ def test_driven_a_redirect_does_not_hide_a_foreign_process( suffix, worktree, el
         assert reason is not None
         assert str( pid ) in reason
     finally:
-        _stop( pid )
+        _stop( pid, token )
 
 
 @pytest.mark.parametrize( "shape", [ '"{token}|zzzz{token2}"', "'zzzz{token2}|{token}'", '"{token}|{token2};"' ] )
@@ -510,7 +522,7 @@ def test_driven_a_quoted_pattern_holding_a_metacharacter_does_not_hide_a_foreign
         assert reason is not None
         assert str( pid ) in reason
     finally:
-        _stop( pid )
+        _stop( pid, token )
 
 
 def test_driven_the_control_with_a_redirect_and_a_quoted_alternation_matches_nothing( worktree ):
@@ -520,3 +532,203 @@ def test_driven_the_control_with_a_redirect_and_a_quoted_alternation_matches_not
     assert kill_deny_reason(
         "Bash", { "command": command }, enabled=True, cwd=worktree, caller_pid=os.getpid(),
     ) is None
+
+
+# ---------------------------------------------------------------------------
+# Review survivors: the separator prefix, a symlinked cwd, a permission error
+# ---------------------------------------------------------------------------
+
+def test_a_sibling_directory_sharing_the_prefix_is_not_inside_the_tree( tmp_path ):
+    """`/x/tree2` starts with `/x/tree` and is still another tree."""
+    tree    = tmp_path / "tree"
+    sibling = tmp_path / "tree2"
+    for directory in ( tree, sibling ):
+        directory.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere\n" )
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: str( sibling ) } )
+    reason = _guard( PATTERN, [ 700 ], proc, str( tree ) )
+    assert reason is not None
+    assert "700" in reason
+
+
+def test_a_symlinked_payload_cwd_resolves_to_the_real_tree( tmp_path ):
+    real = tmp_path / "real-wt"
+    real.mkdir()
+    ( real / ".git" ).write_text( "gitdir: /elsewhere\n" )
+    link = tmp_path / "link-to-wt"
+    link.symlink_to( real )
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: str( real ) } )   # /proc reports the real path
+    assert _guard( PATTERN, [ 700 ], proc, str( link ) ) is None
+
+
+def test_the_real_proc_view_reads_a_permission_error_as_unreadable( monkeypatch ):
+    def refuse( path, *args, **kwargs ):
+        raise PermissionError( 13, "Permission denied", path )
+    monkeypatch.setattr( os, "readlink", refuse )
+    assert kill_guard._ProcFs().cwd( 1 ) is None
+
+
+def test_one_unreadable_match_does_not_flip_the_verdict_on_a_foreign_one( worktree, elsewhere, monkeypatch ):
+    """A permission error on one pid must not become an allow for the others."""
+    real_readlink = os.readlink
+    def selective( path, *args, **kwargs ):
+        if str( path ) == "/proc/701/cwd":
+            raise PermissionError( 13, "Permission denied", path )
+        if str( path ) == "/proc/702/cwd":
+            return elsewhere
+        return real_readlink( path, *args, **kwargs )
+    monkeypatch.setattr( os, "readlink", selective )
+    real_open = open
+    def fake_open( path, *args, **kwargs ):
+        if str( path ) in ( "/proc/701/stat", "/proc/702/stat" ):
+            import io
+            return io.StringIO( f"{str( path ).split( '/' )[ 2 ]} (x) S 1 1 1 0\n" )
+        return real_open( path, *args, **kwargs )
+    monkeypatch.setattr( "builtins.open", fake_open )
+    reason = kill_deny_reason(
+        "Bash", { "command": PATTERN }, enabled=True, comm_reader=_comm(),
+        pgrep_probe=lambda s: [ "701", "702" ], cwd=worktree, caller_pid=CALLER,
+    )
+    assert reason is not None
+    assert "702" in reason
+
+
+# ---------------------------------------------------------------------------
+# Own-children scoping keys on the shell's own pid, not on any -P value (review F4)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "scope", [ "-P 1", "-P 1346", "--parent 1", "-P 99999" ] )
+def test_P_with_a_literal_pid_is_not_own_children_scoping( scope, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( f"pkill {scope} -f TOK", [ 700 ], proc, worktree ) is not None
+
+
+@pytest.mark.parametrize( "scope", [
+    "-P $$", "-P ${$}", "-P $PPID", "-P ${PPID}", "-P $BASHPID", "-P $!", "--ppid $$", '-P "$$"',
+] )
+def test_P_with_the_shells_own_pid_is_own_children_scoping( scope, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( f"pkill {scope} -f TOK", [ 700 ], proc, worktree ) is None
+
+
+# ---------------------------------------------------------------------------
+# `timeout` is a transparent wrapper (review F6)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "prefix", [
+    "timeout 5", "timeout 5s", "timeout 1.5m", "timeout -s KILL 5", "timeout --signal=KILL 5",
+    "timeout -k 2 10", "sudo timeout 5", "env FOO=1 timeout 5",
+] )
+def test_a_timeout_wrapper_does_not_hide_a_foreign_match( prefix, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( f"{prefix} pkill -f TOK", [ 700 ], proc, worktree ) is not None
+
+
+def test_a_timeout_wrapper_does_not_hide_a_literal_claude_pid():
+    reason = kill_deny_reason(
+        "Bash", { "command": "timeout 5 kill 4242" }, enabled=True, comm_reader=lambda pid: CLAUDE_COMM,
+    )
+    assert reason is not None
+
+
+def test_the_hatch_is_honoured_behind_a_timeout_wrapper( worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    command = "timeout 5 env LUPIN_ALLOW_UNSCOPED_KILL=1 pkill -f TOK"
+    assert _guard( command, [ 700 ], proc, worktree ) is None
+
+
+def test_the_word_timeout_as_an_argument_is_not_a_wrapper( worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( "echo timeout 5 pkill -f TOK", [ 700 ], proc, worktree ) is None
+
+
+# ---------------------------------------------------------------------------
+# A probe that cannot answer still allows, and says so (review: the probe row)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def hook_log( tmp_path, monkeypatch ):
+    """Redirect the hook log and return a reader of the lines written to it."""
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hooklogs" ) )
+    def lines():
+        import json
+        path = tmp_path / "hooklogs" / "hook-events.jsonl"
+        if not path.exists():
+            return []
+        return [ json.loads( line ) for line in path.read_text().splitlines() if line.strip() ]
+    return lines
+
+
+class _Completed:
+    def __init__( self, returncode, stdout="" ):
+        self.returncode = returncode
+        self.stdout     = stdout
+
+
+@pytest.mark.parametrize( "code", [ 2, 3 ] )
+def test_a_pgrep_failure_exit_allows_and_writes_one_log_line( code, monkeypatch, hook_log ):
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( code ) )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
+    written = hook_log()
+    assert len( written ) == 1
+    assert written[ 0 ][ "hook" ] == "kill_guard_probe_failed"
+    assert written[ 0 ][ "exit_code" ] == code
+    assert written[ 0 ][ "selector" ] == [ "-f", "x" ]
+
+
+def test_pgrep_exit_one_is_no_match_and_writes_nothing( monkeypatch, hook_log ):
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 1 ) )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
+    assert hook_log() == []
+
+
+def test_pgrep_exit_zero_returns_the_pids_and_writes_nothing( monkeypatch, hook_log ):
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 0, "12\n34\n" ) )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == [ "12", "34" ]
+    assert hook_log() == []
+
+
+def test_a_pgrep_timeout_allows_and_writes_one_log_line( monkeypatch, hook_log ):
+    def slow( *args, **kwargs ):
+        raise subprocess.TimeoutExpired( "pgrep", 5 )
+    monkeypatch.setattr( kill_guard.subprocess, "run", slow )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
+    written = hook_log()
+    assert len( written ) == 1
+    assert "timeout" in written[ 0 ][ "reason" ]
+
+
+def test_a_missing_pgrep_allows_and_writes_one_log_line( monkeypatch, hook_log ):
+    def missing( *args, **kwargs ):
+        raise FileNotFoundError( "pgrep" )
+    monkeypatch.setattr( kill_guard.subprocess, "run", missing )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
+    written = hook_log()
+    assert len( written ) == 1
+    assert "pgrep" in written[ 0 ][ "reason" ]
+
+
+def test_an_empty_selector_is_not_a_probe_failure( hook_log ):
+    assert kill_guard._default_pgrep_probe( [] ) == []
+    assert hook_log() == []
+
+
+def test_a_log_write_that_fails_does_not_break_the_probe( monkeypatch ):
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 2 ) )
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", "/proc/definitely/not/writable" )
+    assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
+
+
+# ---------------------------------------------------------------------------
+# The ownership view is built only when a sweep is on the line (review F9)
+# ---------------------------------------------------------------------------
+
+def test_the_ownership_view_is_not_built_for_a_command_with_no_sweep( worktree, monkeypatch ):
+    calls = []
+    monkeypatch.setattr( kill_guard, "_resolve_ownership", lambda *a, **k: calls.append( 1 ) )
+    for command in ( "ls -la", "git status", "kill %1" ):
+        kill_deny_reason(
+            "Bash", { "command": command }, enabled=True, comm_reader=_comm(),
+            pgrep_probe=lambda s: [], cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
+        )
+    assert calls == []

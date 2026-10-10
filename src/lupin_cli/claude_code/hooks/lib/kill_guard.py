@@ -24,12 +24,12 @@ What is denied, and nothing wider:
     It is refused before any PID is known. That is the only moment it can still be
     refused, since the PIDs are not in the command text.
 
-Heredoc bodies are stripped before matching. A file that documents a sweep is data, not a sweep.
-This module's own test file is such a file, and the guard denied it on first wiring.
+Heredoc bodies are stripped before matching: a file that documents a sweep is data, as this module's test file is.
 
 What stays allowed: any listing with no kill downstream, and killing your own children.
-Own-children forms are `pkill -P $$`, `pgrep -P $$ | xargs kill`, `ps --ppid $$`, `kill $!` and `kill %1`.
-Read-only `ps` and `pgrep` are how you find out what is running.
+A pattern sweep is allowed while every process it matches is yours.
+Own-children forms: `pkill -P $$`, `pgrep -P $$ | xargs kill`, `ps --ppid $$`, `kill $!`, `kill %1`.
+Read-only `ps` and `pgrep` stay allowed; they are how you find out what is running.
 
 This runs inside the hot-path PreToolUse hook (every tool call, every session), so two
 requirements are not negotiable:
@@ -86,7 +86,10 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 # `kill` that is part of a value — a false allow traded for a false deny. Pinning the
 # value to a real token end does neither.
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|setsid|ionice)"
-_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*"
+# `timeout` takes a duration (and options) before the command it wraps, so it is
+# not a bare word like the others: `timeout 5 pkill ...`, `timeout -s KILL 5 pkill ...`.
+_TIMEOUT_SPAN = r"timeout(?:\s+(?:-[sk]\s+\w+|-\S+))*\s+\d+(?:\.\d*)?[smhd]?(?=\s)"
+_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b))*"
 
 # A signal flag on a kill verb: `-9`, `-KILL`, `-SIGTERM`. Not a selector.
 _SIGNAL_FLAG_RE = re.compile( r"-\d+|-(?:SIG)?[A-Z]+" )
@@ -125,7 +128,10 @@ _UNSCOPED_LISTING_RE = re.compile(
 )
 
 # Scoping that makes a listing safe: it can only ever return our own children.
-_OWN_CHILDREN_RE = re.compile( r"(?:-P|--parent|--ppid)\s*=?\s*\S" )
+# Only the shell's own pid scopes a listing to its children. A literal pid (`-P 1`, the
+# subreaper every orphan reparents to) scopes it to somebody else's.
+_OWN_PID = r"""["']?(?:\$\$|\$\{\$\}|\$PPID|\$\{PPID\}|\$BASHPID|\$\{BASHPID\}|\$!|\$\{!\})["']?"""
+_OWN_CHILDREN_RE = re.compile( rf"(?:-P|--parent|--ppid)\s*=?\s*{_OWN_PID}" )
 
 # Quoted spans, removed before any structural test. `pgrep -f "node|esbuild"`
 # carries a pipe INSIDE an argument; reading that as a pipeline is how the guard
@@ -294,6 +300,28 @@ def _sweep_selector( args: str ) -> List[ str ]:
     return kept
 
 
+def _log_probe_failure( selector: List[ str ], reason: str, exit_code: Optional[ int ] ) -> None:
+    """
+    Record that the pgrep probe could not answer, so failures can be counted.
+
+    Requires:
+        - selector is the argument list handed to pgrep, reason a short phrase
+
+    Ensures:
+        - appends one `kill_guard_probe_failed` line to the hook event stream
+          (`<root>/io/claude_code_hooks/logs/hook-events.jsonl`)
+        - never raises: a log that cannot be written must not break a tool call
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
+        log_to_stream(
+            "kill_guard_probe_failed", None,
+            extra={ "selector": list( selector ), "exit_code": exit_code, "reason": reason },
+        )
+    except Exception:                    # pragma: no cover - logging backstop; the stream writer already swallows its own errors
+        pass
+
+
 def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
     """
     The PIDs `pgrep <selector>` reports right now.
@@ -303,8 +331,10 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
 
     Ensures:
         - returns the matching PIDs as strings, or [] when pgrep matches nothing
-        - returns [] on any failure (pgrep missing, timeout, OSError) — a probe
-          that cannot answer must not manufacture a refusal
+        - exit 1 is "no match" and is silent
+        - exit 2 or more, a timeout, or a pgrep that cannot run returns [] and writes
+          one log line: a probe that cannot answer must not manufacture a refusal,
+          and must not pass for "no match" without a trace
     """
     if not selector:
         return []
@@ -312,9 +342,16 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
         result = subprocess.run(
             [ "pgrep", *selector ], capture_output=True, text=True, timeout=5
         )
-        return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
-    except ( OSError, subprocess.SubprocessError ):
+    except subprocess.TimeoutExpired:
+        _log_probe_failure( selector, "pgrep timeout after 5s", None )
         return []
+    except ( OSError, subprocess.SubprocessError ) as error:
+        _log_probe_failure( selector, f"pgrep could not run: {error}", None )
+        return []
+    if result.returncode >= 2:
+        _log_probe_failure( selector, "pgrep rejected the selector", result.returncode )
+        return []
+    return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
 
 
 def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str ]:
@@ -328,11 +365,10 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
 
     Ensures:
         - returns the matching PIDs whose /proc comm is `claude`, in pgrep order
-        - returns [] when the pattern matches no seat, which is the ordinary
-          case and must stay allowed: 21 of 6,492 real fleet commands were this
-          shape, nearly all of them a seat stopping its own superseded test run.
-          Refusing all of them is how a guard gets routed around, and routing
-          around the refusal is what stopped three seats in the original incident.
+        - returns [] when the pattern matches no seat. This is the claude-only view,
+          used when the payload carries no cwd to judge ownership by; with a cwd the
+          caller is `_sweep_hits_with_owner`, which also refuses a match that is
+          provably not the caller's
         - the reading is a snapshot: a seat that starts matching between this
           check and the command running is not covered. That race is accepted;
           it is far narrower than the risk, and no PreToolUse check can close it
@@ -366,7 +402,7 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
     rf"(?:^|[;&|(`{{]|\n|\bdo\b)"
-    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_WRAPPERS}\b))*?"
+    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b))*?"
     rf"\s*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
 
@@ -837,8 +873,10 @@ def kill_deny_reason(
 
     Ensures:
         - None unless the guard is enabled and tool_name is Bash and the command
-          matches Shape A (kills a PID /proc reports as `claude`) or Shape B (an
-          unscoped listing with a kill downstream)
+          matches Shape A (kills a PID /proc reports as `claude`), Shape B (an
+          unscoped listing with a kill downstream), Shape C (a pkill/killall
+          pattern reaching a live `claude`, or, given a cwd, any process that is
+          provably not the caller's) or Shape D (a kill fed by a listing)
         - Shape A is reported in preference to Shape B — it can name the victims
         - None for own-children sweeps and for listings with no kill downstream
         - FAIL-OPEN: any unexpected error → None
@@ -865,7 +903,9 @@ def kill_deny_reason(
         if claude_pids:
             return _deny_reason_for( claude_pids )
         prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
-        owner       = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
+        owner       = None
+        if _PATTERN_SWEEP_RE.search( command ):
+            owner = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
         if owner is not None:
             sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
             if foreign:

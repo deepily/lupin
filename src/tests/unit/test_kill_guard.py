@@ -46,6 +46,12 @@ INCIDENT_COMMAND = (
 )
 
 
+@pytest.fixture( autouse=True )
+def _isolated_hook_log( tmp_path, monkeypatch ):
+    """A failed probe writes a hook-log line; keep it out of the real log directory."""
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path / "hooklogs" ) )
+
+
 def _no_claude( pid ):
     """comm_reader stub: nothing on the box is a seat."""
     return "pytest"
