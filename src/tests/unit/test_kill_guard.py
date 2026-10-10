@@ -494,8 +494,46 @@ def test_a_pattern_sweep_that_would_hit_a_seat_is_denied( command ):
     assert "127519" in reason
 
 
-def test_the_same_sweep_is_ALLOWED_when_no_seat_matches():
-    """21 of 6,492 real fleet commands are this shape, nearly all of them safe."""
+def test_the_same_sweep_is_ALLOWED_when_no_seat_matches_and_it_reaches_only_my_own( tmp_path ):
+    """The pytest pattern is allowed only while every match is the caller's own."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere\n" )
+
+    class _Proc:
+        def ppid( self, pid ): return 500   # the caller's claude, so a descendant
+        def cwd( self, pid ):  return str( tree )
+
+    reason = kill_deny_reason(
+        "Bash", { "command": 'pkill -f "pytest src/tests/unit"' }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM if pid == "500" else "pytest",
+        pgrep_probe=_hits( [ "999" ] ), cwd=str( tree ), proc=_Proc(), caller_pid=500,
+    )
+    assert reason is None
+
+
+def test_the_same_sweep_is_DENIED_when_it_reaches_a_process_in_another_tree( tmp_path ):
+    """The pytest pattern is no longer a free pass when another tree's run matches."""
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    ( tree / ".git" ).write_text( "gitdir: /elsewhere\n" )
+
+    class _Proc:
+        def ppid( self, pid ): return 1                      # not a descendant of anyone here
+        def cwd( self, pid ):  return "/some/other/worktree"
+
+    reason = kill_deny_reason(
+        "Bash", { "command": 'pkill -f "pytest src/tests/unit"' }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM if pid == "500" else "pytest",
+        pgrep_probe=_hits( [ "999" ] ), cwd=str( tree ), proc=_Proc(), caller_pid=500,
+    )
+    assert reason is not None
+    assert "999" in reason
+    assert "/some/other/worktree" in reason
+
+
+def test_the_old_call_shape_without_a_cwd_still_allows_a_non_seat_match():
+    """No cwd in the payload means the ownership check is skipped, as before."""
     assert _sweep( 'pkill -f "pytest src/tests/unit"', _hits( [ "999" ] ), _no_claude ) is None
 
 

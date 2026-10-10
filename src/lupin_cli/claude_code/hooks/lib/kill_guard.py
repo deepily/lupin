@@ -18,6 +18,8 @@ What is denied, and nothing wider:
   - Shape C: a `pkill` or `killall` pattern with no own-children scoping.
     The shadow `pkill` refuses only a pattern matching your own pid.
     A pattern that matches another seat and not you goes through it untouched.
+    It also refuses a pattern matching a process that is provably not the caller's;
+    the ownership rule sits above `_ProcFs`.
   - Shape D: `kill $(pgrep ...)`, identical in behaviour to the piped form B denies.
     It is refused before any PID is known. That is the only moment it can still be
     refused, since the PIDs are not in the command text.
@@ -42,7 +44,7 @@ import os
 import re
 import shlex
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 # Bash tool name as it appears in the PreToolUse hook payload.
@@ -522,6 +524,215 @@ def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
     return []
 
 
+# Ownership. Which processes a pattern reaches is only half the question; whose they
+# are is the other half. Every read below answers None when the process cannot be
+# read, and None is never evidence of anything.
+#
+# A process is the caller's iff it descends from the caller's `claude`, or its cwd is
+# inside the caller's tree and that tree is a linked worktree. The main checkout is
+# shared by several seats, so a cwd there proves nothing. A pattern kill from one
+# seat's tree has stopped a unit tier running in another worktree.
+_MAX_ANCESTOR_HOPS = 64
+_MAX_FOREIGN_NAMED = 5
+
+
+class _ProcFs:
+    """The two /proc reads the ownership rule needs, behind one seam so tests can fake them."""
+
+    def ppid( self, pid ) -> Optional[ int ]:
+        """
+        The parent pid of `pid`, or None when it is gone or unreadable.
+
+        Requires:
+            - pid is an int or a decimal string
+
+        Ensures:
+            - parses the field after the final `)`, because comm may hold spaces and parentheses
+            - returns None on OSError or a malformed line, never raises
+        """
+        try:
+            with open( f"/proc/{pid}/stat", "r" ) as handle:
+                line = handle.read()
+            return int( line[ line.rindex( ")" ) + 2 : ].split()[ 1 ] )
+        except ( OSError, ValueError, IndexError ):
+            return None
+
+    def cwd( self, pid ) -> Optional[ str ]:
+        """The working directory of `pid`, or None when it is gone or unreadable (other uid, zombie)."""
+        try:
+            return os.readlink( f"/proc/{pid}/cwd" )
+        except OSError:
+            return None
+
+
+def _nearest_claude( start: int, comm_reader, proc ) -> Optional[ int ]:
+    """
+    The pid of the nearest `claude` at or above `start`, or None.
+
+    Requires:
+        - start is a pid, comm_reader( pid_str ) -> comm or None, proc has ppid( pid )
+
+    Ensures:
+        - walks at most 64 hops and stops at init or an unreadable parent
+        - returns None when no ancestor reads `claude`
+    """
+    current = start
+    for _ in range( _MAX_ANCESTOR_HOPS ):
+        if comm_reader( str( current ) ) == CLAUDE_COMM:
+            return current
+        parent = proc.ppid( current )
+        if parent is None or parent <= 1:
+            return None
+        current = parent
+    return None
+
+
+class _Ownership:
+    """Answers, for a pid, whether it is provably not the caller's."""
+
+    def __init__( self, caller_pid: int, tree_root: str, tree_is_worktree: bool, proc ):
+        self.caller_pid       = caller_pid
+        self.tree_root        = tree_root
+        self.tree_is_worktree = tree_is_worktree
+        self.proc             = proc
+
+    def _descends_from_caller( self, pid ) -> Optional[ bool ]:
+        """True/False when the walk reached an answer; None when a link was unreadable."""
+        current = int( pid )
+        for _ in range( _MAX_ANCESTOR_HOPS ):
+            if current == self.caller_pid:
+                return True
+            parent = self.proc.ppid( current )
+            if parent is None:
+                return None
+            if parent <= 1:
+                return False
+            current = parent
+        return False
+
+    def foreign_cwd( self, pid ) -> Optional[ str ]:
+        """
+        The pid's cwd when it is provably not the caller's, else None.
+
+        Ensures:
+            - None for a descendant of the caller's claude
+            - None when any read fails: not evidence, so not counted
+            - None for a cwd inside the tree when the tree is a linked worktree
+            - the cwd string otherwise
+        """
+        descends = self._descends_from_caller( pid )
+        if descends is None or descends:
+            return None
+        cwd = self.proc.cwd( pid )
+        if cwd is None:
+            return None
+        inside = cwd == self.tree_root or cwd.startswith( self.tree_root + os.sep )
+        if inside and self.tree_is_worktree:
+            return None
+        return cwd
+
+
+def _tree_root_of( cwd: str ) -> Tuple[ Optional[ str ], bool ]:
+    """
+    The nearest directory at or above `cwd` holding a `.git`, and whether it is a worktree.
+
+    Ensures:
+        - ( None, False ) when no `.git` exists above cwd
+        - the flag is True iff `.git` is a plain file (a linked worktree), False for a directory
+    """
+    current = os.path.realpath( cwd )
+    while True:
+        marker = os.path.join( current, ".git" )
+        if os.path.exists( marker ):
+            return current, os.path.isfile( marker )
+        parent = os.path.dirname( current )
+        if parent == current:
+            return None, False
+        current = parent
+
+
+def _resolve_ownership( cwd, caller_pid, comm_reader, proc ) -> Optional[ _Ownership ]:
+    """
+    Build the ownership view, or None when the caller or its tree cannot be established.
+
+    Requires:
+        - cwd is the payload's working directory (any value; non-strings and "" give None)
+        - caller_pid is the caller's claude pid, or None to find it from this process
+
+    Ensures:
+        - None means "skip the ownership check", never "deny"
+    """
+    if not isinstance( cwd, str ) or not cwd:
+        return None
+    if caller_pid is None:
+        caller_pid = _nearest_claude( os.getpid(), comm_reader, proc )
+    if caller_pid is None:
+        return None
+    root, is_worktree = _tree_root_of( cwd )
+    if root is None:
+        return None
+    return _Ownership( caller_pid, root, is_worktree, proc )
+
+
+def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Ownership ) -> Tuple[ list, list ]:
+    """
+    Shape C with ownership: ( claude pids, foreign rows ) for the first sweep that hits.
+
+    Requires:
+        - command is the shell command string; owner answers foreign_cwd( pid )
+
+    Ensures:
+        - claude pids win: when a sweep matches a live claude the foreign list is []
+        - a foreign row is ( pid, comm, cwd )
+        - ( [], [] ) for scoped sweeps, empty selectors, and matches that are all the caller's
+    """
+    for sweep in _PATTERN_SWEEP_RE.finditer( command ):
+        args = sweep.group( "args" )
+        if not args.strip() or _OWN_CHILDREN_RE.search( args ):
+            continue
+        selector = _sweep_selector( args )
+        if not selector:
+            continue
+        pids   = pgrep_probe( selector )
+        claude = [ pid for pid in pids if comm_reader( pid ) == CLAUDE_COMM ]
+        if claude:
+            return claude, []
+        foreign = []
+        for pid in pids:
+            cwd = owner.foreign_cwd( pid )
+            if cwd is not None:
+                foreign.append( ( pid, comm_reader( pid ) or "?", cwd ) )
+        if foreign:
+            return [], foreign
+    return [], []
+
+
+def _foreign_deny_reason( foreign: list ) -> str:
+    """Compose the deny text for a pattern that reaches processes the caller does not own."""
+    shown = foreign[ : _MAX_FOREIGN_NAMED ]
+    lines = [ f"  pid {pid}  comm={comm}  cwd={cwd}" for pid, comm, cwd in shown ]
+    more  = len( foreign ) - len( shown )
+    if more > 0:
+        lines.append( f"  ... and {more} more" )
+    listing = "\n".join( lines )
+    return (
+        "This `pkill`/`killall` pattern matches process(es) that this session did not "
+        "start and that are not in this tree:\n"
+        f"{listing}\n"
+        "They belong to another seat or another job. On 2026-10-09 "
+        "`pkill -f \"pytest src/tests/unit/\"` from one seat's tree stopped a unit tier "
+        "running in another worktree (row 7479a389).\n"
+        "USE INSTEAD:\n"
+        "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`, or "
+        "`pgrep -P $$ -f <pattern> | xargs -r kill`;\n"
+        "  · a job you started in this shell — `kill %1`, `kill $!`;\n"
+        "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+        "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+        "If you have read the PIDs and confirmed none is another seat's, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
+
+
 def _deny_reason_for( claude_pids: list ) -> str:
     """Compose the deny text, naming the seats at risk and the substitute."""
     if claude_pids:
@@ -564,6 +775,9 @@ def kill_deny_reason(
     env         = None,
     comm_reader = None,
     pgrep_probe = None,
+    cwd         = None,
+    proc        = None,
+    caller_pid  = None,
 ) -> Optional[ str ]:
     """
     Return a deny-reason string iff a Bash call can signal a seat it does not own.
@@ -574,6 +788,9 @@ def kill_deny_reason(
           key carries the shell command, when present
         - enabled is None (resolved from env) or injected for testing
         - comm_reader is None (real /proc) or injected for testing
+        - cwd is the payload's working directory; None skips the ownership check
+        - proc is None (real /proc) or an object with ppid( pid ) and cwd( pid )
+        - caller_pid is None (found by walking up from this process) or the caller's claude pid
 
     Ensures:
         - None unless the guard is enabled and tool_name is Bash and the command
@@ -605,7 +822,13 @@ def kill_deny_reason(
         if claude_pids:
             return _deny_reason_for( claude_pids )
         prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
-        sweep_hits  = _sweep_seat_hits( command, prober, reader )
+        owner       = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
+        if owner is not None:
+            sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
+            if foreign:
+                return _foreign_deny_reason( foreign )
+        else:
+            sweep_hits = _sweep_seat_hits( command, prober, reader )
         if sweep_hits:
             return _deny_reason_for( sweep_hits )
         if _sweeps_unscoped( command ):

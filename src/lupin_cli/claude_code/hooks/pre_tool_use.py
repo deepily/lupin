@@ -117,7 +117,9 @@ def main():
     from lupin_cli.claude_code.hooks.lib.kill_guard import (
         kill_deny_reason, build_kill_deny_response,
     )
-    kill_reason = kill_deny_reason( payload.get( "tool_name", "" ), payload.get( "tool_input", {} ) )
+    kill_reason = kill_deny_reason(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
+    )
     if kill_reason:
         emit_json( build_kill_deny_response( kill_reason ) )
         sys.exit( 0 )
