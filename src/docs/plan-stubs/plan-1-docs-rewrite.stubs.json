@@ -371,7 +371,7 @@
                     "name": "Split the 13 long pages, old path kept as index",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "Every part is under 1,500 words (md_lint reference-length), every claim is in one part, no citer of an old path changes; Rick's ruling of 2026-10-09 is in the TODO.md Decisions Log",
+                    "acceptance": "Every part is under 1,500 words (md_lint reference-length), every claim is in one part, no citer of an old path changes; Rick's ruling of 2026-10-09 is recorded in the message of commit 4ff852cd4",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph5-s2"
