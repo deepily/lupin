@@ -11,6 +11,7 @@ import collections
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 
@@ -25,8 +26,8 @@ from lupin_mcp import reuse_tools as rt
 FORMAT           = "e2e-run-1"
 CANARY_FORMAT    = "e2e-canary-1"
 CANARY_MEMBERS   = 5
-CANARY_NAME      = "e2e-canary"
-RUN_NAME         = "e2e-run"
+PREFIX_RE        = re.compile( r"[a-z][a-z0-9-]{0,15}" )
+RESERVED_PREFIXES = ( "s2", )                                 # stage two's own result files
 ESTIMATE_TOKENS  = 420_000_000
 E2E_SPEC         = { "prefix": "e2e", "members": e2e.MEMBERS, "estimate": ESTIMATE_TOKENS, "canary_members": CANARY_MEMBERS }
 ESTIMATE_FACTOR  = 1.5
@@ -347,6 +348,40 @@ def report_lines( searches, questions ):
     return lines
 
 
+def _prefixes( text ):
+    """
+    Read the run prefixes of a command line.
+
+    Ensures:
+        - returns the comma-separated prefixes in order
+    Raises:
+        - DriverRefused for a prefix that is not a lowercase name of 1 to 16 letters, digits and dashes, or that is stage two's
+    """
+    names = text.split( "," )
+    for name in names:
+        if not PREFIX_RE.fullmatch( name ) or name in RESERVED_PREFIXES:
+            raise s1.DriverRefused( f"prefix {name!r} is not a lowercase name of 1 to 16 letters, digits and dashes, or it is stage two's" )
+    return names
+
+
+def _spec_of( args ):
+    """
+    Build the run spec a command line asks for, and the prefixes it reads.
+
+    Ensures:
+        - returns ( spec, prefixes ): spec is E2E_SPEC with the prefix and the estimate of the command line
+        - a step that spends (canary, approve, run) has exactly one prefix; a report may have several, and its spec is the first
+    Raises:
+        - DriverRefused for a bad prefix, several prefixes on a spending step, or an estimate under one token
+    """
+    prefixes = _prefixes( args.prefix )
+    if args.command in ( "canary", "approve", "run" ) and len( prefixes ) != 1:
+        raise s1.DriverRefused( f"a step that spends takes one prefix only, got {args.prefix!r}" )
+    estimate = E2E_SPEC[ "estimate" ] if args.estimate_tokens is None else args.estimate_tokens
+    if estimate < 1: raise s1.DriverRefused( f"the estimate is a positive whole number of tokens, got {estimate!r}" )
+    return { **E2E_SPEC, "prefix": prefixes[ 0 ], "estimate": estimate }, prefixes
+
+
 def _parser():
     """Ensures: returns the command line parser."""
     ap = argparse.ArgumentParser( description=__doc__ )
@@ -356,6 +391,8 @@ def _parser():
     ap.add_argument( "--live", action="store_true" )
     ap.add_argument( "--pack-size", type=int, default=50 )
     ap.add_argument( "--questions", default="old" )
+    ap.add_argument( "--prefix", default=E2E_SPEC[ "prefix" ] )
+    ap.add_argument( "--estimate-tokens", type=int, default=None )
     sub = ap.add_subparsers( dest="command", required=True )
     for name in ( "status", "ledger-init", "canary", "approve", "run", "report" ):
         p = sub.add_parser( name )
@@ -411,20 +448,21 @@ def main( argv=None ):
         print( f"ledger {env.ledger.snapshot()}  pack size {env.pack_size}  questions {names}" )
         return 0
     asks = _asks( names )
+    spec, prefixes = _spec_of( args )
     members = e2e.load_sample( args.sample, args.sample_sha )
     items   = e2e.load_needs( args.needs, args.needs_sha, members, args.sample_sha )
     twins   = e2e.load_twins( args.manifest, args.manifest_sha )
     env     = _open_env( root, args.data, args.ledger, args.live, asks, args.pack_size )
     if args.command == "canary":
-        print( canary_line( run_canary( env, items, twins, args.ceiling ) ) )
+        print( canary_line( run_canary( env, items, twins, args.ceiling, spec=spec ) ) )
     elif args.command == "approve":
-        approve_canary( env, args.by, args.why, revised_estimate=args.revised_estimate )
+        approve_canary( env, args.by, args.why, spec=spec, revised_estimate=args.revised_estimate )
         print( f"canary approved by {args.by}" )
     elif args.command == "run":
-        print( run_line( run_full( env, items, twins, args.ceiling ) ) )
+        print( run_line( run_full( env, items, twins, args.ceiling, spec=spec ) ) )
     else:
         searches = []
-        for name in ( CANARY_NAME, RUN_NAME ):
+        for name in [ f"{p}-{part}" for p in prefixes for part in ( "canary", "run" ) ]:
             path = env.results_dir / f"{name}.json"
             if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
         print( "\n".join( report_lines( searches, names ) ) )
