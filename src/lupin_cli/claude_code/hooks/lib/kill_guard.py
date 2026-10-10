@@ -86,18 +86,34 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 # greedy value backtrack INTO the program name, so `FOO=barkill 123` would match a
 # `kill` that is part of a value — a false allow traded for a false deny. Pinning the
 # value to a real token end does neither.
-_WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|setsid|ionice)"
+_WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt)"
+# A wrapper may carry options, each with at most one value: `nice -n 5`, `sudo -u root`,
+# `env -i`, `ionice -c3`. A value is never a wrapper, a verb or an assignment, so every
+# word has exactly one reading and the pattern cannot backtrack exponentially: a command
+# of fifty nested wrappers took more than ten seconds before this was pinned.
+_WRAPPER_VALUE    = (
+    r"(?!(?:[\w./+-]*/)?(?:" + _WRAPPERS[ 3: -1 ] + r"|pkill|killall|kill)\b)"
+    r"(?![A-Za-z_][A-Za-z0-9_]*=)[^\s;&|()`-][^\s;&|()`]*"
+)
+_WRAPPER_OPERANDS = r"(?:\s+-[^\s;&|()`]+(?:\s+" + _WRAPPER_VALUE + r")?)*"
 # `timeout` takes a duration (and options) before the command it wraps, so it is
 # not a bare word like the others: `timeout 5 pkill ...`, `timeout -s KILL 5 pkill ...`.
 _TIMEOUT_SPAN = r"timeout(?:\s+(?:-[sk]\s+\w+|-\S+))*\s+\d+(?:\.\d*)?[smhd]?(?=\s)"
-_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b))*"
+_PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b{_WRAPPER_OPERANDS}))*"
+
+# Where a command can start: a line, a separator, a group, a keyword, a negation or a case arm.
+_CMD_START = r"(?:^|[;&|(`{)]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
+
+# A command word is judged by its basename: `/usr/bin/pkill`, `\pkill`, `"pkill"` all name pkill.
+_WORD_PRE  = r"""\\?["']?(?:[\w./+-]*/)?"""
+_WORD_POST = r"""["']?(?![\w./-])"""
 
 # A signal given as an option: `-9`, `-KILL`, `-SIGTERM`. The names come from the
 # platform's own table, so `-P`, `-U` and `-G` stay options that select processes.
 _SIGNAL_NAMES = frozenset(
     name[ 3: ] for name in signal.Signals.__members__ if name.startswith( "SIG" )
 ) | { "RTMIN", "RTMAX" }
-_SIGNAL_FLAG_RE = re.compile( r"-(?:\d+|(?:SIG)?[A-Z][A-Z0-9]*)" )
+_SIGNAL_FLAG_RE = re.compile( r"-(?:\d+|(?:SIG)?[A-Z][A-Z0-9]*(?:[+-]\d+)?)" )
 
 
 def _is_signal_option( token: str ) -> bool:
@@ -107,6 +123,7 @@ def _is_signal_option( token: str ) -> bool:
     body = token[ 1: ]
     if body.isdigit():
         return True
+    body = re.sub( r"[+-]\d+$", "", body )
     return ( body[ 3: ] if body.startswith( "SIG" ) else body ) in _SIGNAL_NAMES
 
 
@@ -120,10 +137,10 @@ CLAUDE_COMM = "claude"
 # about a PID the author typed.
 _KILL_LITERAL_RE = re.compile(
     r"""
-    (?:^|[;&|(`]|\n)             # command position
+    """ + _CMD_START + r"""       # command position
     """ + _PREFIXES + r"""       # env assignments / transparent wrappers (row 084adbaf)
     \s*
-    kill\b                       # the verb (not pkill/killall — different shapes)
+    """ + _WORD_PRE + r"""kill""" + _WORD_POST + r"""   # the verb (not pkill/killall — different shapes)
     (?P<args>(?:\s+[^\s;&|)`\n]+)*)   # the remainder of THIS command only
     """,
     re.VERBOSE,
@@ -133,8 +150,9 @@ _KILL_LITERAL_RE = re.compile(
 # an all-processes selector; `pgrep` is fleet-wide unless told otherwise.
 _UNSCOPED_LISTING_RE = re.compile(
     r"""
-    (?:^|[;&|(`]|\n)
+    """ + _CMD_START + r"""
     """ + _PREFIXES + r"""\s*
+    """ + _WORD_PRE + r"""
     (?:
         ps\b(?=(?:\s+[^\s;&|)`\n]+)*\s+-?[aAe])   # ps -e / ps -A / ps aux / ps ax
       | pgrep\b
@@ -178,28 +196,28 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # through to the plain character class.
 _ARG_CHAR = r"""(?:\\.|"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
 _PATTERN_SWEEP_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?P<verb>pkill|killall)\b(?P<args>(?:\s+{_ARG_CHAR}+)*)"
+    rf"{_CMD_START}{_PREFIXES}\s*{_WORD_PRE}(?P<verb>pkill|killall){_WORD_POST}(?P<args>(?:\s+(?!#){_ARG_CHAR}+)*)"
 )
 
 # One raw (still quoted) argument, and the two redirection shapes. A redirection is
 # the shell's, and pkill never sees it: `2>/dev/null`, `>/dev/null`, `2>&1`, `< in`.
 _RAW_ARG_RE        = re.compile( r"""(?:\\.|"[^"]*"|'[^']*'|[^\s"'])+""" )
-_REDIRECT_ATTACHED = re.compile( r"(?:\d*|&)(?:>>?|<)&?\S+" )
-_REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<)&?" )
+_REDIRECT_ATTACHED = re.compile( r"(?:\d*|&)(?:>>?|<{1,3})&?\S+" )
+_REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<{1,3})&?" )
 
 # SHAPE D — a substitution feeding a kill DIRECTLY: `kill $(pgrep …)` has the
 # exact semantics of `pgrep … | xargs kill`, which SHAPE B already denies.
 # Denying one and not the other draws an arbitrary line through identical
 # behaviour.
 _KILL_SUBST_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*kill(?:all)?\b[^;&|\n]*?"
+    rf"{_CMD_START}{_PREFIXES}\s*{_WORD_PRE}kill(?:all)?{_WORD_POST}[^;&|\n]*?"
     r"(?:\$\(|`)(?P<subst>[^)`]*)"
 )
 
 # `sudo` can sit before `xargs` OR between it and the kill (`xargs sudo kill`),
 # so it is optional in BOTH slots rather than only the first.
 _KILL_VERB_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:xargs\s+(?:-[^\s]+\s+)*{_PREFIXES}\s*)?kill(?:all)?\b"
+    rf"{_CMD_START}{_PREFIXES}\s*(?:xargs\s+(?:-[^\s]+\s+)*{_PREFIXES}\s*)?{_WORD_PRE}kill(?:all)?{_WORD_POST}"
 )
 
 
@@ -285,6 +303,8 @@ _PKILL_LONG     = {
 _PKILL_LONG_PLAIN = frozenset( ( "ns", "nslist" ) )   # long-only, valued, kept as given
 
 # Options of killall (psmisc). Names are matched exactly against the command name.
+# The kernel keeps 15 characters of a command name, so a longer name is probed on its first 15.
+_COMM_LENGTH = 15
 _KILLALL_VALUED   = frozenset( "suyoZn" )
 _KILLALL_DROP     = frozenset( "egilqvwV" )
 _KILLALL_LONG     = {
@@ -449,6 +469,7 @@ def _killall_selectors( words: List[ str ] ) -> List[ List[ str ] ]:
         selector = []
         if exact:
             selector.append( "-x" )
+            name = name[ :_COMM_LENGTH ]
         if ignore:
             selector.append( "-i" )
         if user:
@@ -456,6 +477,39 @@ def _killall_selectors( words: List[ str ] ) -> List[ List[ str ] ]:
         selector.append( name )
         selectors.append( selector )
     return selectors
+
+
+def _has_expansion( word: str ) -> bool:
+    """
+    True iff a raw (still quoted) shell word holds an expansion the guard cannot read.
+
+    Ensures:
+        - `$NAME`, `${..}`, `$(..)`, `$1`, `$$`, `$'..'`, `$".."` and backticks count, quoted or not
+        - a single-quoted span, a backslash-escaped `$`, and a `$` that ends the word or
+          is followed by anything else (a regexp anchor) do not
+    """
+    in_single = False
+    in_double = False
+    index     = 0
+    while index < len( word ):
+        char = word[ index ]
+        if char == "\\" and not in_single:
+            index += 2
+            continue
+        if in_single:
+            in_single = char != "'"
+        elif char == "'" and not in_double:
+            in_single = True
+        elif char == '"':
+            in_double = not in_double
+        elif char == "`":
+            return True
+        elif char == "$":
+            following = word[ index + 1 : index + 2 ]
+            if following and ( following.isalnum() or following in "_{(@*#?!$" or ( following in "'\"" and not in_double ) ):
+                return True
+        index += 1
+    return False
 
 
 def _sweep_selectors( verb: str, args: str ) -> List[ List[ str ] ]:
@@ -469,8 +523,13 @@ def _sweep_selectors( verb: str, args: str ) -> List[ List[ str ] ]:
         - returns [] when nothing selects (a bare verb, only a signal), so the
           guard has nothing to probe
         - a pkill gives at most one selector; a killall gives one per name
+        - raises `_SelectorRejected` when a word holds a variable, a substitution or an
+          ANSI-C string: its value is unknown to a guard that runs before the shell does
         - the split is shell-aware and redirection-free (see `_split_args`)
     """
+    for raw in _drop_redirections( _RAW_ARG_RE.findall( args ) ):
+        if _has_expansion( raw ):
+            raise _SelectorRejected( [ raw ], None, "expansion" )
     words = _split_args( args )
     if verb == "killall":
         return _killall_selectors( words )
@@ -487,10 +546,11 @@ def _sweep_selector( args: str, verb: str = "pkill" ) -> List[ str ]:
 class _SelectorRejected( Exception ):
     """pgrep rejected the guard's selector, so the sweep's reach cannot be named."""
 
-    def __init__( self, selector, exit_code ):
-        super().__init__( f"pgrep rejected {selector!r} (exit {exit_code})" )
+    def __init__( self, selector, exit_code, why="pgrep" ):
+        super().__init__( f"{why} rejected {selector!r} (exit {exit_code})" )
         self.selector  = list( selector )
         self.exit_code = exit_code
+        self.why       = why
 
 
 def _log_probe_failure( selector: List[ str ], reason: str, exit_code: Optional[ int ] ) -> None:
@@ -599,8 +659,8 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "
 # way the documented instruction ever worked. stash_guard learned this same lesson the
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b)"
-    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b))*?"
+    rf"{_CMD_START}"
+    rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b{_WRAPPER_OPERANDS}))*?"
     rf"\s*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
 
@@ -986,6 +1046,19 @@ def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Owne
 def _rejected_deny_reason( rejected: "_SelectorRejected" ) -> str:
     """Compose the deny text for a sweep whose selector pgrep rejected."""
     shown = " ".join( shlex.quote( word ) for word in rejected.selector )
+    if rejected.why == "expansion":
+        return (
+            f"This `pkill`/`killall` holds an expansion the guard cannot read: `{rejected.selector[ 0 ]}`. "
+            "A variable, a command substitution or a `$'..'` string has no value yet when this check "
+            "runs, so the guard cannot say what the pattern or option value reaches.\n"
+            "USE INSTEAD:\n"
+            "  · write the literal value (`-u rruiz`, not `-u $USER`);\n"
+            "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`;\n"
+            "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+            "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+            "If you have read the PIDs and confirmed none is another seat's, re-run with "
+            "LUPIN_ALLOW_UNSCOPED_KILL=1."
+        )
     return (
         "This `pkill`/`killall` could not be checked: pgrep rejected the selector the guard "
         f"built from it (`pgrep {shown}`, exit {rejected.exit_code}). A selector pgrep cannot "

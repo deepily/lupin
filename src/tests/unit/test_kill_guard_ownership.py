@@ -503,7 +503,7 @@ def test_a_redirection_is_not_part_of_the_pattern( command, worktree ):
     ( 'pkill -f "TOK;"',                     [ "-f", "TOK;" ] ),
     ( 'pkill -f "a&b"',                      [ "-f", "a&b" ] ),
     ( 'pkill -f "pytest|vitest" 2>/dev/null', [ "-f", "pytest|vitest" ] ),
-    ( 'pkill -f "has (parens) and `tick`"',  [ "-f", "has (parens) and `tick`" ] ),
+    ( "pkill -f 'has (parens) and `tick`'",  [ "-f", "has (parens) and `tick`" ] ),
     ( 'pkill -f ">TOK"',                     [ "-f", ">TOK" ] ),
     ( 'pkill -f "a b" -9',                   [ "-f", "a b" ] ),
     ( r"pkill -f TOK\|zzz",                  [ "-f", "TOK|zzz" ] ),
@@ -823,20 +823,20 @@ _OPTION_TABLE = [
     ( f"pkill -f {_NONE}\\ more",          "resolved", [ [ "-f", f"{_NONE} more" ] ] ),
     ( f'pkill -f "{_NONE} more"',          "resolved", [ [ "-f", f"{_NONE} more" ] ] ),
     # killall: names are exact comm matches, one probe per name
-    ( f"killall -q {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -e {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -v -w -i -l {_NONE}",      "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -y 5m {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -o 5m {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -Z ctx {_NONE}",           "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -g {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -s TERM {_NONE}",          "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -TERM {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -9 {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
-    ( f"killall -u 0 {_NONE}",             "resolved", [ [ "-x", "-u", "0", _NONE ] ] ),
-    ( f"killall -I {_NONE}",               "resolved", [ [ "-x", "-i", _NONE ] ] ),
+    ( f"killall -q {_NONE}",               "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -e {_NONE}",               "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -v -w -i -l {_NONE}",      "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -y 5m {_NONE}",            "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -o 5m {_NONE}",            "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -Z ctx {_NONE}",           "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -g {_NONE}",               "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -s TERM {_NONE}",          "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -TERM {_NONE}",            "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -9 {_NONE}",               "resolved", [ [ "-x", _NONE[ :15 ] ] ] ),
+    ( f"killall -u 0 {_NONE}",             "resolved", [ [ "-x", "-u", "0", _NONE[ :15 ] ] ] ),
+    ( f"killall -I {_NONE}",               "resolved", [ [ "-x", "-i", _NONE[ :15 ] ] ] ),
     ( f"killall -r {_NONE}.*",             "resolved", [ [ f"{_NONE}.*" ] ] ),
-    ( f"killall {_NONE}-a {_NONE}-b",      "resolved", [ [ "-x", f"{_NONE}-a" ], [ "-x", f"{_NONE}-b" ] ] ),
+    ( "killall kgnone-a kgnone-b",         "resolved", [ [ "-x", "kgnone-a" ], [ "-x", "kgnone-b" ] ] ),
     # what cannot become a valid selector is refused, with the remedy
     ( "pkill -f ${VAR_" + uuid.uuid4().hex[ :6 ] + "}", "refused", None ),
     ( f"pkill -f `echo {_NONE}`",          "refused", None ),
@@ -857,7 +857,7 @@ def test_every_option_form_is_resolved_refused_or_allowed_on_purpose( command, o
     reason = _run_real( command, worktree, spy )
     if outcome == "refused":
         assert reason is not None
-        assert "rejected" in reason
+        assert "rejected" in reason or "cannot read" in reason
         assert "LUPIN_ALLOW_UNSCOPED_KILL=1" in reason
         assert "/proc/<pid>/comm" in reason
         return
@@ -1029,3 +1029,276 @@ def test_driven_killall_matches_the_exact_comm_and_not_a_longer_sibling( worktre
             _stop( exact, token_b )
     finally:
         _stop( sibling, token_a )
+
+
+# ---------------------------------------------------------------------------
+# Expansions the guard cannot read are refused, in a pattern or an option value
+# ---------------------------------------------------------------------------
+
+_UNREADABLE_FORMS = [
+    "pkill -f $'TOK zed'",
+    'pkill -f "$PAT"',
+    'pkill -f "${PAT}"',
+    'pkill -f "$(echo TOK)"',
+    "pkill -f $(echo TOK)",
+    'pkill -f "`echo TOK`"',
+    "pkill -f ${VAR}",
+    "pkill -f $PAT",
+    "pkill -f $1",
+    "pkill -f $$",
+    'pkill -f "a${B}c"',
+    "pkill -u $USER -f TOK",
+    'pkill -u "$USER" -f TOK',
+    "pkill -u ${USER} -f TOK",
+    "pkill -U $(id -u) -f TOK",
+    "pkill -g $PGID -f TOK",
+    "pkill -P $PARENT -f TOK",
+    'killall -r "$P"',
+    "killall -u $USER TOK",
+    "killall $NAME",
+]
+
+
+@pytest.mark.parametrize( "command", _UNREADABLE_FORMS )
+def test_an_expansion_the_guard_cannot_read_is_refused_without_a_probe( command, worktree ):
+    spy    = _Spy()
+    reason = _run_real( command, worktree, spy )
+    assert reason is not None
+    assert "cannot read" in reason
+    assert "LUPIN_ALLOW_UNSCOPED_KILL=1" in reason
+    assert spy.selectors == []
+
+
+_READABLE_DOLLARS = [
+    ( f"pkill -f '{_NONE}$b'",       [ [ "-f", f"{_NONE}$b" ] ] ),
+    ( f'pkill -f "{_NONE}$"',        [ [ "-f", f"{_NONE}$" ] ] ),
+    ( f"pkill -f {_NONE}$",          [ [ "-f", f"{_NONE}$" ] ] ),
+    ( f"pkill -f {_NONE}\\$bar",    [ [ "-f", f"{_NONE}$bar" ] ] ),
+    ( f'pkill -f "{_NONE}$|{_NONE}2$"', [ [ "-f", f"{_NONE}$|{_NONE}2$" ] ] ),
+    ( f"pkill -f '{_NONE}$(not run)'", [ [ "-f", f"{_NONE}$(not run)" ] ] ),
+    ( f"pkill -f '{_NONE}`y`'",      [ [ "-f", f"{_NONE}`y`" ] ] ),
+    ( f'pkill -f "{_NONE}$\'x\'"',    [ [ "-f", f"{_NONE}$'x'" ] ] ),
+]
+
+
+@pytest.mark.parametrize( "command, selectors", _READABLE_DOLLARS )
+def test_a_dollar_that_is_not_an_expansion_is_a_pattern( command, selectors, worktree ):
+    spy = _Spy()
+    assert _run_real( command, worktree, spy ) is None
+    assert spy.selectors == selectors
+
+
+def test_own_children_scoping_still_comes_before_the_expansion_check( worktree ):
+    spy = _Spy()
+    assert _run_real( 'pkill -P $$ -f "$PAT"', worktree, spy ) is None
+    assert spy.selectors == []
+
+
+# ---------------------------------------------------------------------------
+# The command word is judged by its basename, wherever a command can start
+# ---------------------------------------------------------------------------
+
+_COMMAND_FORMS = [
+    "pkill -f TOK",
+    "/usr/bin/pkill -f TOK",
+    "/bin/killall -q TOK",
+    r"\pkill -f TOK",
+    '"pkill" -f TOK',
+    "'/usr/bin/pkill' -f TOK",
+    "command pkill -f TOK",
+    "env -i pkill -f TOK",
+    "env -u X pkill -f TOK",
+    "env FOO=1 pkill -f TOK",
+    "sudo -n pkill -f TOK",
+    "sudo -E pkill -f TOK",
+    "sudo -u root pkill -f TOK",
+    "nice -n 5 pkill -f TOK",
+    "ionice -c3 pkill -f TOK",
+    "stdbuf -oL pkill -f TOK",
+    "time pkill -f TOK",
+    "nohup pkill -f TOK &",
+    "doas pkill -f TOK",
+    "if true; then pkill -f TOK; fi",
+    "if true; then echo x; else pkill -f TOK; fi",
+    "if pkill -f TOK; then echo gone; fi",
+    "! pkill -f TOK",
+    "case x in x) pkill -f TOK ;; esac",
+    "while true; do pkill -f TOK; done",
+    "true && pkill -f TOK",
+    "true || pkill -f TOK",
+    "echo x | pkill -f TOK",
+    "(pkill -f TOK)",
+    "{ pkill -f TOK; }",
+    "echo a\npkill -f TOK",
+]
+
+
+@pytest.mark.parametrize( "command", _COMMAND_FORMS, ids=[ c.replace( "\n", "\\n" ) for c in _COMMAND_FORMS ] )
+def test_a_command_word_named_pkill_is_a_sweep_wherever_a_command_can_start( command, worktree, elsewhere ):
+    proc   = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    reason = _guard( command, [ 700 ], proc, worktree )
+    assert reason is not None
+    assert "700" in reason
+
+
+_NOT_COMMANDS = [
+    "echo pkill -f TOK",
+    "echo /usr/bin/pkill -f TOK",
+    "grep pkill notes.txt",
+    "env FOO=1 grep pkill TOK",
+    "sudo -u root grep pkill TOK",
+    "man pkill",
+    "which pkill",
+    "cat pkill-notes.txt",
+    "pkill-helper -f TOK",
+    "mypkill -f TOK",
+    "git commit -m 'pkill -f TOK'",
+    "ls /usr/bin/pkill",
+    "echo wow! pkill -f TOK",
+]
+
+
+@pytest.mark.parametrize( "command", _NOT_COMMANDS )
+def test_a_word_named_pkill_that_is_not_a_command_is_not_a_sweep( command, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( command, [ 700 ], proc, worktree ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "/bin/kill 4242", r"\kill 4242", "sudo -n kill 4242", "if true; then kill 4242; fi", "! kill 4242",
+] )
+def test_a_literal_kill_of_a_claude_pid_is_found_behind_the_same_prefixes( command ):
+    reason = kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: CLAUDE_COMM,
+    )
+    assert reason is not None
+    assert "4242" in reason
+
+
+def test_a_listing_behind_a_path_still_feeds_a_kill_downstream():
+    reason = kill_deny_reason(
+        "Bash", { "command": "/usr/bin/pgrep -f TOK | xargs /bin/kill" }, enabled=True,
+        comm_reader=lambda pid: "bash",
+    )
+    assert reason is not None
+
+
+# ---------------------------------------------------------------------------
+# killall: every name is probed, and a long name is probed on the kernel's 15
+# ---------------------------------------------------------------------------
+
+def _names_probe( matches ):
+    """A probe that answers per selector and records every selector it saw."""
+    seen = []
+    def probe( selector ):
+        seen.append( list( selector ) )
+        return list( matches.get( tuple( selector ), [] ) )
+    probe.seen = seen
+    return probe
+
+
+def test_killall_with_two_names_denies_when_only_the_first_matches( worktree, elsewhere ):
+    probe = _names_probe( { ( "-x", "FIRST" ): [ "700" ] } )
+    proc  = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    reason = kill_deny_reason(
+        "Bash", { "command": "killall FIRST SECOND" }, enabled=True, comm_reader=_comm(),
+        pgrep_probe=probe, cwd=worktree, proc=proc, caller_pid=CALLER,
+    )
+    assert reason is not None
+    assert "700" in reason
+    assert probe.seen == [ [ "-x", "FIRST" ], [ "-x", "SECOND" ] ]
+
+
+def test_killall_with_two_names_denies_when_only_the_first_matches_a_seat_without_a_cwd():
+    probe = _names_probe( { ( "-x", "FIRST" ): [ "700" ] } )
+    reason = kill_deny_reason(
+        "Bash", { "command": "killall FIRST SECOND" }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM, pgrep_probe=probe,
+    )
+    assert reason is not None
+    assert "700" in reason
+
+
+def test_killall_without_a_cwd_still_reads_s_as_a_signal_and_probes_the_name():
+    probe = _names_probe( {} )
+    assert kill_deny_reason(
+        "Bash", { "command": "killall -s TERM NAME" }, enabled=True,
+        comm_reader=lambda pid: CLAUDE_COMM, pgrep_probe=probe,
+    ) is None
+    assert probe.seen == [ [ "-x", "NAME" ] ]
+
+
+def test_a_killall_name_longer_than_the_kernel_comm_is_probed_on_its_first_15():
+    assert kill_guard._sweep_selectors( "killall", " abcdefghijklmnopqrstuvwxyz" ) == [ [ "-x", "abcdefghijklmno" ] ]
+    assert kill_guard._sweep_selectors( "killall", " -r abcdefghijklmnopqrstuvwxyz" ) == [ [ "abcdefghijklmnopqrstuvwxyz" ] ]
+
+
+def test_driven_killall_of_a_name_longer_than_the_comm_finds_the_foreign_process( worktree, elsewhere, tmp_path ):
+    long_name = "kgqlong" + uuid.uuid4().hex[ :14 ]         # 21 characters, comm keeps 15
+    token     = "kgprobe-" + uuid.uuid4().hex
+    pid       = _spawn_named( elsewhere, long_name, token, tmp_path )
+    try:
+        assert len( long_name ) > 15
+        assert open( f"/proc/{pid}/comm" ).read().strip() == long_name[ :15 ]
+        _denied_for( f"killall -q {long_name}", worktree, pid )
+        control = "kgqnone" + uuid.uuid4().hex[ :14 ]
+        assert kill_deny_reason(
+            "Bash", { "command": f"killall -q {control}" }, enabled=True, cwd=worktree, caller_pid=os.getpid(),
+        ) is None
+    finally:
+        _stop( pid, token )
+
+
+# ---------------------------------------------------------------------------
+# Ordinary trailers are not patterns: a comment, a here-string, a real-time signal
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "command", [
+    "pkill -f TOK # stop it",
+    "pkill -f TOK <<< x",
+    "pkill -f TOK <<<x",
+    "pkill -RTMIN+1 -f TOK",
+    "pkill -SIGRTMIN+1 -f TOK",
+    "pkill -RTMAX-2 -f TOK",
+] )
+def test_a_comment_a_here_string_or_a_realtime_signal_is_not_part_of_the_pattern( command, worktree ):
+    assert _selector_seen( command, worktree ) == [ "-f", "TOK" ]
+
+
+def test_a_hash_inside_a_word_is_part_of_the_pattern( worktree ):
+    assert _selector_seen( "pkill -f a#b", worktree ) == [ "-f", "a#b" ]
+
+
+# ---------------------------------------------------------------------------
+# The command matcher runs before every Bash call, so it must not backtrack
+# ---------------------------------------------------------------------------
+
+def _bounded( command, seconds=10 ):
+    """Run the guard over `command` and return how long it took, failing instead of hanging."""
+    import signal as signal_module
+    def expired( *args ):
+        raise AssertionError( f"the guard did not finish within {seconds} s" )
+    previous = signal_module.signal( signal_module.SIGALRM, expired )
+    signal_module.alarm( seconds )
+    started = time.perf_counter()
+    try:
+        kill_deny_reason(
+            "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: "bash",
+            pgrep_probe=lambda selector: [],
+        )
+    finally:
+        signal_module.alarm( 0 )
+        signal_module.signal( signal_module.SIGALRM, previous )
+    return time.perf_counter() - started
+
+
+@pytest.mark.parametrize( "command", [
+    " ".join( [ "sudo -n nice -n 5 env -i" ] * 60 ) + " ls",
+    " ".join( [ "env -i FOO=1" ] * 200 ) + " ls",
+    " ".join( [ "sudo -u root" ] * 200 ) + " ls",
+    " ".join( [ "timeout 5 nice -n 1 ionice -c3" ] * 100 ) + " ls",
+    "sudo " + " ".join( f"-o{i} v{i}" for i in range( 1000 ) ) + " ls",
+    "env " + "-a b " * 500 + "-",
+] )
+def test_a_long_run_of_wrappers_and_options_does_not_backtrack( command ):
+    assert _bounded( command ) < 2.0
