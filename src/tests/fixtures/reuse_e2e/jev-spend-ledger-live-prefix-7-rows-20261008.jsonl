@@ -1,0 +1,7 @@
+{"at": "2026-10-08T17:43:05-0400", "by": "cheech", "kind": "limit", "tokens": 952380952, "why": "account limit $40, Rick go 2026-10-08 17:42 EDT"}
+{"at": "2026-10-08T17:43:12-0400", "kind": "begin", "run": "s1-q1-canary", "tokens": 200000}
+{"at": "2026-10-08T17:43:13-0400", "kind": "spend", "run": "s1-q1-canary", "tokens": 2498}
+{"at": "2026-10-08T17:43:13-0400", "kind": "end", "run": "s1-q1-canary"}
+{"at": "2026-10-08T17:43:41-0400", "kind": "begin", "run": "s1-q1-single1", "tokens": 4000000}
+{"at": "2026-10-08T17:43:41-0400", "kind": "spend", "run": "s1-q1-single1", "tokens": 586}
+{"at": "2026-10-08T17:43:41-0400", "kind": "spend", "run": "s1-q1-single1", "tokens": 507}

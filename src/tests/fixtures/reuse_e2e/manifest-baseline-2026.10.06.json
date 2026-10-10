@@ -1,0 +1,5838 @@
+{
+ "commit": "ac0f91673",
+ "counts": {
+  "distinct_members": 376,
+  "dropped_by_sendable": 18,
+  "exact_clusters": 89,
+  "exact_members": 214,
+  "index_symbols": 7622,
+  "members_not_in_index": 0,
+  "members_not_sendable": 0,
+  "near_pairs": 189,
+  "sendable_entries": 7604
+ },
+ "exact": [
+  {
+   "cluster": 0,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_analysis",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_revision",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_analysis",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_d2",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_elaboration",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_matplotlib",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_mermaid",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_for_outline",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 1,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 2,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 3,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/self_respin_observer.py",
+     "file_sha256": "3eba464f6d2c96731157a10ff51e751b39f33f83e28f90609e843318bbfb9cbf",
+     "id": "cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop.stop",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/turn_age_watchdog.py",
+     "file_sha256": "493581936d2dce9d61d8e24818ee28ff632cb74b972cb0eded675b27f742e8e8",
+     "id": "cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog.stop",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/follow_through_escalation_watcher.py",
+     "file_sha256": "7c62bc59ad45d3b29bf56fcc703901c4b4995d94945474ddb26a4bed1423f26f",
+     "id": "cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher.stop",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_chase_consumer.py",
+     "file_sha256": "38a3975e1911d4fc5b58266d9c7ed3f3f6b6e4afd3059b8b53f6187ad0b66ce3",
+     "id": "cosa.rest.task_chase_consumer.TaskChaseConsumer.stop",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 4,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/api_key_repository.py",
+     "file_sha256": "9836b798ae11d60d7473241a2937753130371e68b68fb24cedf023f2c1f849ab",
+     "id": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.activate",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/api_key_repository.py",
+     "file_sha256": "9836b798ae11d60d7473241a2937753130371e68b68fb24cedf023f2c1f849ab",
+     "id": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.deactivate",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/email_verification_token_repository.py",
+     "file_sha256": "35c72362d4368ca619f03420176b87727973c47a15e3cafeb60368dfd098d106",
+     "id": "cosa.rest.db.repositories.email_verification_token_repository.EmailVerificationTokenRepository.mark_used",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/password_reset_token_repository.py",
+     "file_sha256": "ef180d4167de1b0962dcb9848cd62002a07d4ab4e2fba70be7ef5b7a6b4e9eab",
+     "id": "cosa.rest.db.repositories.password_reset_token_repository.PasswordResetTokenRepository.mark_used",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 5,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.check_exists",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.fetch_similar",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.read_capability",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.replay",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 6,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.matched_command",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.response_path",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.response_route_reason",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.response_trace_id",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 7,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/job.py",
+     "file_sha256": "3477f333da024128c87c97268e0b0a1450e51668bdf6e0d91244cad00cf3ae19",
+     "id": "cosa.agents.claude_code.job.ClaudeCodeJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob.do_all",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 8,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 9,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 10,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/prompts/clarification.py",
+     "file_sha256": "f48c06f2fe66747c255c4b030677c9a661be6bfb2488eb4befb4b587602f534b",
+     "id": "cosa.agents.deep_research.prompts.clarification.parse_clarification_response",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/prompts/planning.py",
+     "file_sha256": "1260a90f940af26693979ade3802101a3cdf65f1c54299bdf6fba46b06dc8070",
+     "id": "cosa.agents.deep_research.prompts.planning.parse_planning_response",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/prompts/subagent.py",
+     "file_sha256": "6bdd72b0a0d2be71520acbbcc19dc12d934dc60f97793e9d06d27686fd1d237e",
+     "id": "cosa.agents.deep_research.prompts.subagent.parse_subagent_response",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 11,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/turn_age_watchdog.py",
+     "file_sha256": "493581936d2dce9d61d8e24818ee28ff632cb74b972cb0eded675b27f742e8e8",
+     "id": "cosa.agents.heartbeat_arbiter.turn_age_watchdog.TurnAgeWatchdog.start",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/follow_through_escalation_watcher.py",
+     "file_sha256": "7c62bc59ad45d3b29bf56fcc703901c4b4995d94945474ddb26a4bed1423f26f",
+     "id": "cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher.start",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_chase_consumer.py",
+     "file_sha256": "38a3975e1911d4fc5b58266d9c7ed3f3f6b6e4afd3059b8b53f6187ad0b66ce3",
+     "id": "cosa.rest.task_chase_consumer.TaskChaseConsumer.start",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 12,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeBrainstormResponse.get_function_name",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeResponse.get_function_name",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.get_function_name",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 13,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeBrainstormResponse.process_xml_data",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeResponse.process_xml_data",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.process_xml_data",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 14,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/d2.py",
+     "file_sha256": "af909812f5f176fb446425c87085d40d18a45f7fdaa7f95cf1b6357bcb305242",
+     "id": "cosa.agents.presentation_generator.prompts.d2.get_d2_prompt",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/matplotlib.py",
+     "file_sha256": "0313e483330fbf3fecf35c358a9cae405fb14b7aed1b10da09ea3fa1e7bc8eb3",
+     "id": "cosa.agents.presentation_generator.prompts.matplotlib.get_matplotlib_prompt",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/visual.py",
+     "file_sha256": "dc84d59e2eb043fd3bece64d9114e622d78fa60360c12a7761d2d0a08723b97c",
+     "id": "cosa.agents.presentation_generator.prompts.visual.get_mermaid_prompt",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 15,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/crud_for_dataframes/schemas.py",
+     "file_sha256": "a6a1f21407831007897c4250bd5cff768d159cd7a207cdd4a2dc19fd8243c3a2",
+     "id": "cosa.crud_for_dataframes.schemas.get_date_columns",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/schemas.py",
+     "file_sha256": "a6a1f21407831007897c4250bd5cff768d159cd7a207cdd4a2dc19fd8243c3a2",
+     "id": "cosa.crud_for_dataframes.schemas.get_datetime_columns",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/schemas.py",
+     "file_sha256": "a6a1f21407831007897c4250bd5cff768d159cd7a207cdd4a2dc19fd8243c3a2",
+     "id": "cosa.crud_for_dataframes.schemas.get_time_columns",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 16,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/memory/solution_snapshot.py",
+     "file_sha256": "5b3ce3b840b18f729cc852a430adb40102f0f619fd57d19de95f8b0684d300ba",
+     "id": "cosa.memory.solution_snapshot.SolutionSnapshot.get_code_similarity",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/solution_snapshot.py",
+     "file_sha256": "5b3ce3b840b18f729cc852a430adb40102f0f619fd57d19de95f8b0684d300ba",
+     "id": "cosa.memory.solution_snapshot.SolutionSnapshot.get_question_similarity",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/solution_snapshot.py",
+     "file_sha256": "5b3ce3b840b18f729cc852a430adb40102f0f619fd57d19de95f8b0684d300ba",
+     "id": "cosa.memory.solution_snapshot.SolutionSnapshot.get_solution_summary_similarity",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 17,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.find_exact_gist",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.find_exact_normalized",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.find_exact_verbatim",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 18,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/email_verification_token_repository.py",
+     "file_sha256": "35c72362d4368ca619f03420176b87727973c47a15e3cafeb60368dfd098d106",
+     "id": "cosa.rest.db.repositories.email_verification_token_repository.EmailVerificationTokenRepository.cleanup_expired",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/password_reset_token_repository.py",
+     "file_sha256": "ef180d4167de1b0962dcb9848cd62002a07d4ab4e2fba70be7ef5b7a6b4e9eab",
+     "id": "cosa.rest.db.repositories.password_reset_token_repository.PasswordResetTokenRepository.cleanup_expired",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/refresh_token_repository.py",
+     "file_sha256": "c660f588892527a58c6e235f9cb482a77d49d24787dc2ffc3981df5b44755507",
+     "id": "cosa.rest.db.repositories.refresh_token_repository.RefreshTokenRepository.cleanup_expired",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 19,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/email_verification_token_repository.py",
+     "file_sha256": "35c72362d4368ca619f03420176b87727973c47a15e3cafeb60368dfd098d106",
+     "id": "cosa.rest.db.repositories.email_verification_token_repository.EmailVerificationTokenRepository.is_valid",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/password_reset_token_repository.py",
+     "file_sha256": "ef180d4167de1b0962dcb9848cd62002a07d4ab4e2fba70be7ef5b7a6b4e9eab",
+     "id": "cosa.rest.db.repositories.password_reset_token_repository.PasswordResetTokenRepository.is_valid",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/refresh_token_repository.py",
+     "file_sha256": "c660f588892527a58c6e235f9cb482a77d49d24787dc2ffc3981df5b44755507",
+     "id": "cosa.rest.db.repositories.refresh_token_repository.RefreshTokenRepository.is_valid",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 20,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/embedding_cache_repository.py",
+     "file_sha256": "ba1080e434ea0dd2284622eb33d3f1a7e09c492653a5bf5ffa19e9f3c7ce131c",
+     "id": "cosa.rest.db.repositories.embedding_cache_repository.EmbeddingCacheRepository.has_cached_embedding",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/prediction_decision_repository.py",
+     "file_sha256": "8bf283e1b7eb488b5b4f101cc851a98c7ad1f72b8299807302c15056ad311afb",
+     "id": "cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository.exists",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/question_embedding_repository.py",
+     "file_sha256": "a39596d8adc153249eec9d545bdc260aabba866a1ade60cfbaae1112de98ff41",
+     "id": "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository.has",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 21,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/solution_snapshot_repository.py",
+     "file_sha256": "353a7952daf3f78a826385575ca574d5d9508a658299461353722100433ffff5",
+     "id": "cosa.rest.db.repositories.solution_snapshot_repository.SolutionSnapshotRepository.get_snapshots_by_code_similarity",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/solution_snapshot_repository.py",
+     "file_sha256": "353a7952daf3f78a826385575ca574d5d9508a658299461353722100433ffff5",
+     "id": "cosa.rest.db.repositories.solution_snapshot_repository.SolutionSnapshotRepository.get_snapshots_by_question",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/solution_snapshot_repository.py",
+     "file_sha256": "353a7952daf3f78a826385575ca574d5d9508a658299461353722100433ffff5",
+     "id": "cosa.rest.db.repositories.solution_snapshot_repository.SolutionSnapshotRepository.get_snapshots_by_solution_similarity",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 22,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/task_approval_settings.py",
+     "file_sha256": "9c81811e391da1910ed2062475e1bc135cf9a62e841ee573fb6d3628ab2d7005",
+     "id": "cosa.rest.task_approval_settings.get_enforcement_active",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_approval_settings.py",
+     "file_sha256": "9c81811e391da1910ed2062475e1bc135cf9a62e841ee573fb6d3628ab2d7005",
+     "id": "cosa.rest.task_approval_settings.get_manager_pull_disabled",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_approval_settings.py",
+     "file_sha256": "9c81811e391da1910ed2062475e1bc135cf9a62e841ee573fb6d3628ab2d7005",
+     "id": "cosa.rest.task_approval_settings.get_sword_of_damocles_active",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 23,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/heartbeat_events.py",
+     "file_sha256": "44003b3aae4f21de7135dba395094b75fb3c90ca6126446804227535fe8cac88",
+     "id": "lupin_cli.claude_code.hooks.lib.heartbeat_events.emit_idle_prompt",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/heartbeat_events.py",
+     "file_sha256": "44003b3aae4f21de7135dba395094b75fb3c90ca6126446804227535fe8cac88",
+     "id": "lupin_cli.claude_code.hooks.lib.heartbeat_events.emit_reaped",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/heartbeat_events.py",
+     "file_sha256": "44003b3aae4f21de7135dba395094b75fb3c90ca6126446804227535fe8cac88",
+     "id": "lupin_cli.claude_code.hooks.lib.heartbeat_events.emit_task_transition",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 24,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/orchestrator.py",
+     "file_sha256": "d86c0f5357cc5c1317f921795ecc58a99696392595d89ad35fad03cb5049837e",
+     "id": "cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.worktree_scope",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/test_fix_expediter/orchestrator.py",
+     "file_sha256": "bb3f254901aba3ebce0317507b5fc7fbdab0fb16da0222b4f0d3387af2c198bc",
+     "id": "cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.worktree_scope",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 25,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/calculator/dispatcher.py",
+     "file_sha256": "acbdaba21a47c9291508b23c43e919d934e342f3f5c85207009ca958a360539d",
+     "id": "cosa.agents.calculator.dispatcher.extract_calc_intent_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/dispatcher.py",
+     "file_sha256": "79d775849bd3ebbd5fb96a69737a7834e54744e653e4c258058964d5c545f0bf",
+     "id": "cosa.crud_for_dataframes.dispatcher.extract_intent_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 26,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/date_and_time_agent.py",
+     "file_sha256": "e032ac53667654605369db3fc2263043188f4d5836c4c98dc667670e520c2ee5",
+     "id": "cosa.agents.date_and_time_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/math_agent.py",
+     "file_sha256": "61e77dbea4bb478a44d7498faa74d507b2491fa7ca225581c9db83ad823dd3b0",
+     "id": "cosa.agents.math_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 27,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/responder.py",
+     "file_sha256": "3a6865c03aa264ee5bebd808d81c7cfd07d5dccbc833b31b1c2413a1b15e0756",
+     "id": "cosa.agents.decision_proxy.responder.DecisionResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/notification_proxy/responder.py",
+     "file_sha256": "1f18d1b9f9588c0e37e28297ec2bbf0795f5529c18b065ce9ba53112e15b7c03",
+     "id": "cosa.agents.notification_proxy.responder.NotificationResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 28,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/voice_io.py",
+     "file_sha256": "61a9968542705f17a74055e1135be056224a44957a1a3bdff6f8e6c41f9fc346",
+     "id": "cosa.agents.decision_proxy.voice_io.notify",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/notification_proxy/voice_io.py",
+     "file_sha256": "8ef5ddec3820c5bdd56dfdef8989a0ade7634b4ed92f8c734d0f0271aa08c172",
+     "id": "cosa.agents.notification_proxy.voice_io.notify",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 29,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/__main__.py",
+     "file_sha256": "761c8541387a216d5330bf6e39a5bdc351d2e15a220ae83e84df62019f8e4fd5",
+     "id": "cosa.agents.deep_research_to_podcast.__main__.main",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/__main__.py",
+     "file_sha256": "7d06d72598c30ee29a6cf9ed96c7971302fd3656c6f50e9cb39621344d4c4a8e",
+     "id": "cosa.agents.deep_research_to_presentation.__main__.main",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 30,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/state.py",
+     "file_sha256": "b151d0a8d5f6a3a7cde6315bea87e1e6ce5e9169bde787c9b1cba75d302bba5f",
+     "id": "cosa.agents.deep_research_to_podcast.state.ChainedResult.is_partial",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/state.py",
+     "file_sha256": "f55a6e65c7a3adcdfe00c50b2904f00a63711873cbac7b49fa76f14451c32937",
+     "id": "cosa.agents.deep_research_to_presentation.state.ChainedResult.is_partial",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 31,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/dm_compression/xml_models.py",
+     "file_sha256": "972926fdea7969c5e7ac01187636524d3b88d0793dccf55150df784ebeaea1d5",
+     "id": "cosa.agents.dm_compression.xml_models.DmCompressionResponse.from_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/dm_tutor/xml_models.py",
+     "file_sha256": "dc65bbc2709dfb751af9ba447eca1bf17e08a27870b7e4d24d49e52825722b54",
+     "id": "cosa.agents.dm_tutor.xml_models.DmTutorResponse.from_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 32,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/lineage_carry.py",
+     "file_sha256": "be75d2853e0ed3ab038725f4bd3c1115a0145ce6bdb57038f266534a40406eb8",
+     "id": "cosa.agents.heartbeat_arbiter.lineage_carry.write_carry",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/outreach_ledger.py",
+     "file_sha256": "fc044e945a61d2fa6b0cc11d40aff4faadf587334d5a911537b374e0587d7138",
+     "id": "cosa.agents.heartbeat_arbiter.outreach_ledger.write_pending",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 33,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.AgentRouterResponse.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.VoxCommandResponse.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 34,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 35,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.FuzzyFileMatchResponse.get_matches_list",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.TFEResumeMatchResponse.get_matches_list",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 36,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.CostEstimate.get_summary",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.CostEstimate.get_summary",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 37,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 38,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_with_json_output",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_with_json_output",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 39,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/narrative.py",
+     "file_sha256": "a60ed040335f0239493d0a40ea39c9c0bc85236116c70ae1fbe95fbb26bed79a",
+     "id": "cosa.agents.presentation_generator.prompts.narrative.extract_narrative_metadata",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/outline.py",
+     "file_sha256": "01a6fea181c5e8c14e3cbd97279f706be2d3a939d1dc18bd0035492550311aac",
+     "id": "cosa.agents.presentation_generator.prompts.outline.extract_outline_metadata",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 40,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/receptionist_agent.py",
+     "file_sha256": "8a50f7d64f011cbf902dae4338aac8ab6963dac176c13cf692aaa8d707dcbb94",
+     "id": "cosa.agents.receptionist_agent.ReceptionistAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/todo_list_agent.py",
+     "file_sha256": "5dc8f1d7d9e71f5f85af6d3ac25f9646ebe92c00edc187ccf61c4f697c197e5f",
+     "id": "cosa.agents.todo_list_agent.TodoListAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 41,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/shared/worktree_refusal_ledger.py",
+     "file_sha256": "c85b2bd38f47b76c4ea269cfdef0b090d0aa0565e1d95c8c53c450ebc7c71297",
+     "id": "cosa.agents.shared.worktree_refusal_ledger.load_ledger",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/shared/worktree_straggler_tickets.py",
+     "file_sha256": "38071500cf50fce81501b51d68e8dc9d8e36df07a4ea7a9eb38171523b168fdc",
+     "id": "cosa.agents.shared.worktree_straggler_tickets.load_state",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 42,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/agents/tfe_to_cc/prompts/output_contract.py",
+     "file_sha256": "b4049b361e550ec39ef618d44df9b120885ba922bfe1d0ff9d9cb143b401d7af",
+     "id": "cosa.agents.tfe_to_cc.prompts.output_contract.parse_diagnosis_block",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/tfe_to_cc/prompts/output_contract.py",
+     "file_sha256": "b4049b361e550ec39ef618d44df9b120885ba922bfe1d0ff9d9cb143b401d7af",
+     "id": "cosa.agents.tfe_to_cc.prompts.output_contract.parse_result_block",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 43,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/crud_for_dataframes/calendar_crud_agent.py",
+     "file_sha256": "c8986572bad622a5db2755a92ec68a5d78b511965c18573345ecea2231d6d8a5",
+     "id": "cosa.crud_for_dataframes.calendar_crud_agent.CalendarCrudAgent.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/todo_crud_agent.py",
+     "file_sha256": "997d616d1b628aa50d5f1c2f38687b8844433802d55d69d7c8d25dd8d90007c3",
+     "id": "cosa.crud_for_dataframes.todo_crud_agent.TodoCrudAgent.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 44,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/crud_for_dataframes/calendar_crud_agent.py",
+     "file_sha256": "c8986572bad622a5db2755a92ec68a5d78b511965c18573345ecea2231d6d8a5",
+     "id": "cosa.crud_for_dataframes.calendar_crud_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/todo_crud_agent.py",
+     "file_sha256": "997d616d1b628aa50d5f1c2f38687b8844433802d55d69d7c8d25dd8d90007c3",
+     "id": "cosa.crud_for_dataframes.todo_crud_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 45,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/memory/embedding_cache_table.py",
+     "file_sha256": "67ef586728f49f8aa97037095f4138bb0163721dbd6fa752d9e12240d428f090",
+     "id": "cosa.memory.embedding_cache_table.EmbeddingCacheTable.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/query_log_table.py",
+     "file_sha256": "ebef7635d6d012284645a4fa7ba1bc5d6350f896d3c0646594352ea3d5620e2e",
+     "id": "cosa.memory.query_log_table.QueryLogTable.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 46,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/memory/input_and_output_table.py",
+     "file_sha256": "5d880cd8fca4d13b65c58d73d0b435877db99c4e6f78ae25aaec7c3424620bd8",
+     "id": "cosa.memory.input_and_output_table.InputAndOutputTable.get_all_io",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/input_and_output_table.py",
+     "file_sha256": "5d880cd8fca4d13b65c58d73d0b435877db99c4e6f78ae25aaec7c3424620bd8",
+     "id": "cosa.memory.input_and_output_table.InputAndOutputTable.get_all_qnr",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 47,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/memory/local_embedding_engine.py",
+     "file_sha256": "000b23a50e88ba20f916af1b56b2fea2d648d20d6a27d049b7a34b8b53877c1a",
+     "id": "cosa.memory.local_embedding_engine.ProseEmbeddingEngine.encode_document",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/local_embedding_engine.py",
+     "file_sha256": "000b23a50e88ba20f916af1b56b2fea2d648d20d6a27d049b7a34b8b53877c1a",
+     "id": "cosa.memory.local_embedding_engine.ProseEmbeddingEngine.encode_query",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 48,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/memory/postgres_solution_manager.py",
+     "file_sha256": "054ba231fdce8d27c5634eda278b22f7424596b623063ef6cdf3746c402b93c5",
+     "id": "cosa.memory.postgres_solution_manager.PostgresSolutionManager.get_snapshots_by_code_similarity",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/postgres_solution_manager.py",
+     "file_sha256": "054ba231fdce8d27c5634eda278b22f7424596b623063ef6cdf3746c402b93c5",
+     "id": "cosa.memory.postgres_solution_manager.PostgresSolutionManager.get_snapshots_by_solution_similarity",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 49,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/exceptions.py",
+     "file_sha256": "45ea1bd83980e18ca483975050c63821bf3bdecce995571b5c08d1808c0c2b30",
+     "id": "cosa.repo.branch_analyzer.exceptions.ClassificationError.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/branch_analyzer/exceptions.py",
+     "file_sha256": "45ea1bd83980e18ca483975050c63821bf3bdecce995571b5c08d1808c0c2b30",
+     "id": "cosa.repo.branch_analyzer.exceptions.ParserError.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 50,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/exceptions.py",
+     "file_sha256": "45ea1bd83980e18ca483975050c63821bf3bdecce995571b5c08d1808c0c2b30",
+     "id": "cosa.repo.branch_analyzer.exceptions.ConfigurationError.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/directory_analyzer/exceptions.py",
+     "file_sha256": "e184d4ec961d0446e72fdc4eafd03fb232ea333f5544de49ad08384ccde0f611",
+     "id": "cosa.repo.directory_analyzer.exceptions.ConfigurationError.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 51,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/statistics_collector.py",
+     "file_sha256": "3fc73431f18f53344c6978d17b8841ef0be63371a09a9dc1490676d9ddac5b54",
+     "id": "cosa.repo.branch_analyzer.statistics_collector.StatisticsCollector.reset",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/directory_analyzer/statistics_collector.py",
+     "file_sha256": "ed9836c2fdb3b9157a53d000a34408c93edbea0f7ab70446ac8c6e0aa21a5c30",
+     "id": "cosa.repo.directory_analyzer.statistics_collector.DirectoryStatisticsCollector.reset",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 52,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/repo/doc_lint/dart_pool_builder.py",
+     "file_sha256": "cdaf56b72ab84c83fe1a18944a435d9d87554e438676e7ebfa5659cde1e384fe",
+     "id": "cosa.repo.doc_lint.dart_pool_builder.write_pool",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/doc_lint/pool_builder.py",
+     "file_sha256": "af75cfb580cfd62cfcb3f525ab2bdc47aca70ab6e67c6c7e90a98e27cc8d83a8",
+     "id": "cosa.repo.doc_lint.pool_builder.write_pool",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 53,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/auth_middleware.py",
+     "file_sha256": "13ddc6acb60aa1f73aaaab7816ac13b2b3fa9e4fd4ad9f852d9455e00ed27ae5",
+     "id": "cosa.rest.auth_middleware.has_all_roles",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/auth_middleware.py",
+     "file_sha256": "13ddc6acb60aa1f73aaaab7816ac13b2b3fa9e4fd4ad9f852d9455e00ed27ae5",
+     "id": "cosa.rest.auth_middleware.has_any_role",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 54,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/commons_topic_watcher.py",
+     "file_sha256": "3f3de33a0bf0f78e7b06796d2e668f0238b8ae2dd4eab5ebaf327b8e483cfb30",
+     "id": "cosa.rest.commons_topic_watcher.CommonsTopicWatcher.stop",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/commons_archival.py",
+     "file_sha256": "e34343d3ab56ce0a9a3e3807f6537fe0ad667a2b25bed017a0af302d24197a0f",
+     "id": "lupin_mcp.commons_archival.CommonsArchiver.stop",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 55,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/api_key_repository.py",
+     "file_sha256": "9836b798ae11d60d7473241a2937753130371e68b68fb24cedf023f2c1f849ab",
+     "id": "cosa.rest.db.repositories.api_key_repository.ApiKeyRepository.get_by_user",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/refresh_token_repository.py",
+     "file_sha256": "c660f588892527a58c6e235f9cb482a77d49d24787dc2ffc3981df5b44755507",
+     "id": "cosa.rest.db.repositories.refresh_token_repository.RefreshTokenRepository.get_by_user",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 56,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/auth_audit_log_repository.py",
+     "file_sha256": "9033ac7099ba0b01c0a86b7e01f4009e3d2ebea5b6fa792d00150dd8a3b2d40a",
+     "id": "cosa.rest.db.repositories.auth_audit_log_repository.AuthAuditLogRepository.cleanup_old",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/failed_login_attempt_repository.py",
+     "file_sha256": "ef05cc284069c1c62e107d23db754786cfcef1a9e8d748697ed0fb6f71acaa23",
+     "id": "cosa.rest.db.repositories.failed_login_attempt_repository.FailedLoginAttemptRepository.cleanup_old",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 57,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/auth_audit_log_repository.py",
+     "file_sha256": "9033ac7099ba0b01c0a86b7e01f4009e3d2ebea5b6fa792d00150dd8a3b2d40a",
+     "id": "cosa.rest.db.repositories.auth_audit_log_repository.AuthAuditLogRepository.get_by_event_type",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/auth_audit_log_repository.py",
+     "file_sha256": "9033ac7099ba0b01c0a86b7e01f4009e3d2ebea5b6fa792d00150dd8a3b2d40a",
+     "id": "cosa.rest.db.repositories.auth_audit_log_repository.AuthAuditLogRepository.get_by_user",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 58,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.get_statistics",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/gist_cache_repository.py",
+     "file_sha256": "aa12f110ef930c9c93b6827dcccbc9fb2edf79538baf860c52fa4ac65345766e",
+     "id": "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository.get_statistics",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 59,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/email_verification_token_repository.py",
+     "file_sha256": "35c72362d4368ca619f03420176b87727973c47a15e3cafeb60368dfd098d106",
+     "id": "cosa.rest.db.repositories.email_verification_token_repository.EmailVerificationTokenRepository.create_token",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/password_reset_token_repository.py",
+     "file_sha256": "ef180d4167de1b0962dcb9848cd62002a07d4ab4e2fba70be7ef5b7a6b4e9eab",
+     "id": "cosa.rest.db.repositories.password_reset_token_repository.PasswordResetTokenRepository.create_token",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 60,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/embedding_cache_repository.py",
+     "file_sha256": "ba1080e434ea0dd2284622eb33d3f1a7e09c492653a5bf5ffa19e9f3c7ce131c",
+     "id": "cosa.rest.db.repositories.embedding_cache_repository.EmbeddingCacheRepository.get_cached_embedding",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/question_embedding_repository.py",
+     "file_sha256": "a39596d8adc153249eec9d545bdc260aabba866a1ade60cfbaae1112de98ff41",
+     "id": "cosa.rest.db.repositories.question_embedding_repository.QuestionEmbeddingRepository.get_embedding",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 61,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/proxy_decision_repository.py",
+     "file_sha256": "4c3616d4bffb1e6b54eece6690d743620fc52ffb86701b819434f2f7e2544592",
+     "id": "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository.update_circuit_breaker_state",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/proxy_decision_repository.py",
+     "file_sha256": "4c3616d4bffb1e6b54eece6690d743620fc52ffb86701b819434f2f7e2544592",
+     "id": "cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository.update_trust_level",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 62,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_priority",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_status",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 63,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/email_service.py",
+     "file_sha256": "6f02d67d4502c87c18d07609803f50ea727fc2ceeb9eba36264be480ebecd437",
+     "id": "cosa.rest.email_service.send_password_reset_email",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/email_service.py",
+     "file_sha256": "6f02d67d4502c87c18d07609803f50ea727fc2ceeb9eba36264be480ebecd437",
+     "id": "cosa.rest.email_service.send_verification_email",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 64,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/email_token_service.py",
+     "file_sha256": "8c414058f1b09b51ce726fe9b4fbb9bfb097d00810906b128587ef1937f18a8c",
+     "id": "cosa.rest.email_token_service.generate_password_reset_token",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/email_token_service.py",
+     "file_sha256": "8c414058f1b09b51ce726fe9b4fbb9bfb097d00810906b128587ef1937f18a8c",
+     "id": "cosa.rest.email_token_service.generate_verification_token",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 65,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/email_token_service.py",
+     "file_sha256": "8c414058f1b09b51ce726fe9b4fbb9bfb097d00810906b128587ef1937f18a8c",
+     "id": "cosa.rest.email_token_service.validate_password_reset_token",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/email_token_service.py",
+     "file_sha256": "8c414058f1b09b51ce726fe9b4fbb9bfb097d00810906b128587ef1937f18a8c",
+     "id": "cosa.rest.email_token_service.validate_verification_token",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 66,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/flow_ratio_settings.py",
+     "file_sha256": "d2ce321e08b0ece1854b2eb669f20901a07c23e4fdc0eb0d2be6329a037af481",
+     "id": "cosa.rest.flow_ratio_settings.get_allow_below",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/flow_ratio_settings.py",
+     "file_sha256": "d2ce321e08b0ece1854b2eb669f20901a07c23e4fdc0eb0d2be6329a037af481",
+     "id": "cosa.rest.flow_ratio_settings.get_window_hours",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 67,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/flow_ratio_settings.py",
+     "file_sha256": "d2ce321e08b0ece1854b2eb669f20901a07c23e4fdc0eb0d2be6329a037af481",
+     "id": "cosa.rest.flow_ratio_settings.override_path",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_approval_settings.py",
+     "file_sha256": "9c81811e391da1910ed2062475e1bc135cf9a62e841ee573fb6d3628ab2d7005",
+     "id": "cosa.rest.task_approval_settings.legacy_override_path",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 68,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_completed_from_metadata",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_stalled_from_metadata",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 69,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/multimodal_munger.py",
+     "file_sha256": "23f7f5062124776bd7482a19898aaf0198da886fc4ef79083d9fb891c189ef07",
+     "id": "cosa.rest.multimodal_munger.MultiModalMunger.munge_python_punctuation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/multimodal_munger.py",
+     "file_sha256": "23f7f5062124776bd7482a19898aaf0198da886fc4ef79083d9fb891c189ef07",
+     "id": "cosa.rest.multimodal_munger.MultiModalMunger.munge_sql_punctuation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 70,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.post_dm_respond",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.post_dm_send",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 71,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/speakerphone.py",
+     "file_sha256": "bd1a5400eefe70d2f798a9a5ee4beafe64d2fe4c49cefa2a6ba1f6165a563b7e",
+     "id": "cosa.rest.routers.speakerphone.get_speakerphone_endpoint",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/voice_persona.py",
+     "file_sha256": "366c710127d5d3c6aab46a30d2b7aa7d5a674341cb5612f59dd17f7b59902bb8",
+     "id": "cosa.rest.routers.voice_persona.get_voice_persona_endpoint",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 72,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/task_store_owed.py",
+     "file_sha256": "800e4252c7a265cc3e884a1f8f066f858f7dc975220204798ce65c86e0a07f96",
+     "id": "cosa.rest.task_store_owed.holding_is_active",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_store_owed.py",
+     "file_sha256": "800e4252c7a265cc3e884a1f8f066f858f7dc975220204798ce65c86e0a07f96",
+     "id": "cosa.rest.task_store_owed.park_is_active",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 73,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/task_store_owed.py",
+     "file_sha256": "800e4252c7a265cc3e884a1f8f066f858f7dc975220204798ce65c86e0a07f96",
+     "id": "cosa.rest.task_store_owed.holding_is_active_clause",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_store_owed.py",
+     "file_sha256": "800e4252c7a265cc3e884a1f8f066f858f7dc975220204798ce65c86e0a07f96",
+     "id": "cosa.rest.task_store_owed.park_is_active_clause",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 74,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/rest/user_service.py",
+     "file_sha256": "48956cb627d901496278bc275835cb4f82883bf14f04ae56daee53b3dff3a81e",
+     "id": "cosa.rest.user_service.deactivate_user",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/user_service.py",
+     "file_sha256": "48956cb627d901496278bc275835cb4f82883bf14f04ae56daee53b3dff3a81e",
+     "id": "cosa.rest.user_service.mark_email_verified",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 75,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/tools/search_lupin.py",
+     "file_sha256": "6f516d65562ff927b3784850e63855731bd9e02d90c9001ecf6480f90a55051a",
+     "id": "cosa.tools.search_lupin.LupinSearch.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/tools/search_lupin_v010.py",
+     "file_sha256": "99d7a9aa03af46b366f39d5c8c74cadb6621a787a542e8b192c84ae0ddec505d",
+     "id": "cosa.tools.search_lupin_v010.LupinSearch.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 76,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/cosa/tools/search_lupin.py",
+     "file_sha256": "6f516d65562ff927b3784850e63855731bd9e02d90c9001ecf6480f90a55051a",
+     "id": "cosa.tools.search_lupin.LupinSearch.get_results",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/tools/search_lupin_v010.py",
+     "file_sha256": "99d7a9aa03af46b366f39d5c8c74cadb6621a787a542e8b192c84ae0ddec505d",
+     "id": "cosa.tools.search_lupin_v010.LupinSearch.get_results",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 77,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_arbiter_app/context_pressure_writer.py",
+     "file_sha256": "50e53af9b36c5d609a2cdd517e7857e6efe71c2552d6981c04edd8ae29e219f4",
+     "id": "lupin_arbiter_app.context_pressure_writer.ContextPressureWriterLoop.run",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_arbiter_app/health_watcher.py",
+     "file_sha256": "36c354e2a5267e511177c179bb1cd07e2433b0d6839a541be2c7c28f247f305a",
+     "id": "lupin_arbiter_app.health_watcher.HealthWatcherLoop.run",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 78,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_arbiter_app/health_watcher.py",
+     "file_sha256": "36c354e2a5267e511177c179bb1cd07e2433b0d6839a541be2c7c28f247f305a",
+     "id": "lupin_arbiter_app.health_watcher.docker_inspect_health",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_arbiter_app/health_watcher.py",
+     "file_sha256": "36c354e2a5267e511177c179bb1cd07e2433b0d6839a541be2c7c28f247f305a",
+     "id": "lupin_arbiter_app.health_watcher.docker_inspect_restart_count",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 79,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/heartbeat_work_owed.py",
+     "file_sha256": "69a2b90e444acff6ed14cffb5f9603e37ff1aae5abbc245600aebbd3ca5b3b43",
+     "id": "lupin_cli.claude_code.hooks.lib.heartbeat_work_owed.manager_needs_question_surface",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/heartbeat_work_owed.py",
+     "file_sha256": "69a2b90e444acff6ed14cffb5f9603e37ff1aae5abbc245600aebbd3ca5b3b43",
+     "id": "lupin_cli.claude_code.hooks.lib.heartbeat_work_owed.manager_needs_verification",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 80,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.get_idle_detection",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.get_voice_persona",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 81,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.set_owner_user_id",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 82,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/notify_user.py",
+     "file_sha256": "980b61dd2f8c50ffe87b9cf86732824b197cb22985d3dcb8da7319d098b405e3",
+     "id": "lupin_cli.notifications.notify_user.validate_environment",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/notify_user_async.py",
+     "file_sha256": "7dbfccc0af3dc9d0c23e065004a9ff0eca0a8237d57e1e55b1cff14826271f18",
+     "id": "lupin_cli.notifications.notify_user_async.validate_environment",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 83,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_basic_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_realistic_workflow_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 84,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/create_api_keys_table.py",
+     "file_sha256": "af8ca9050f2ecddea550407b1e9b85a9af18df1827a1126a5765d33435613921",
+     "id": "scripts.create_api_keys_table.main",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/create_notifications_table.py",
+     "file_sha256": "e6fbbef2af22389ce020ab43f6438e94f9973f0ed10c4e918c75d3ab374f0af8",
+     "id": "scripts.create_notifications_table.main",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 85,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/create_api_keys_table.py",
+     "file_sha256": "af8ca9050f2ecddea550407b1e9b85a9af18df1827a1126a5765d33435613921",
+     "id": "scripts.create_api_keys_table.validate_schema",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/create_notifications_table.py",
+     "file_sha256": "e6fbbef2af22389ce020ab43f6438e94f9973f0ed10c4e918c75d3ab374f0af8",
+     "id": "scripts.create_notifications_table.validate_schema",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 86,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/create_service_account.py",
+     "file_sha256": "dfada1c8873f97ec7afe49b8acfc4ef5dda1f61a656bade6bff12c10eb3d92f6",
+     "id": "scripts.create_service_account.write_key_to_file",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/create_service_account_postgres.py",
+     "file_sha256": "0d9e42f94652f857a93950fbb133edd94d017d5146c65554d1f91774bf74bc09",
+     "id": "scripts.create_service_account_postgres.write_key_to_file",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 87,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/rejoin-done-blocked-rows.py",
+     "file_sha256": "93d8bdb4c15262ed1908266b4b217250ec4ed6663c37fa9502cd5865b0349294",
+     "id": "scripts.rejoin-done-blocked-rows.fetch_board",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/scan-prose-task-refs.py",
+     "file_sha256": "2ea9fa75a733d1169340fdc6454e2d8d1ecc24be826258bb8b9506235688610e",
+     "id": "scripts.scan-prose-task-refs.fetch_board",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "cluster": 88,
+   "kind": "exact",
+   "members": [
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.reported_route_reason",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/v2_eval.py",
+     "file_sha256": "e3a62e6c5189e8f5daea5f1a50df0f93ae0c05c80bfb8345abb4978d23d92d93",
+     "id": "scripts.v2_eval.response_status",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  }
+ ],
+ "near": [
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/config.py",
+     "file_sha256": "4bb570984682c33b78c0c30e48228723825bf579a89e77aeffa4d5e037572575",
+     "id": "cosa.agents.bug_fix_expediter.config.BugFixExpediterConfig.from_config",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/config.py",
+     "file_sha256": "d6864368f84f046e6d20bf1206ec5d7e129eabf3d23bab0bb3327d3b8584303d",
+     "id": "cosa.agents.swe_team.config.SweTeamConfig.from_config",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+     "file_sha256": "bffc06605956003713fa50f379543963b4db71285e75ffc97fec33aed2d2fcda",
+     "id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+     "file_sha256": "ac2afe6bba8b447031baf50377102b7c156327c5a20476376b13ed1361578d81",
+     "id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/cbr_decision_store.py",
+     "file_sha256": "db9461f02d16221c9c3011c3a43c38f279b4aa957e8b983416e20e5bcf84be63",
+     "id": "cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/arbiter_gateway.py",
+     "file_sha256": "2a41602cbdd4bbeeebb52113603afa951263700a914813cc7cacc03a9a2fbcd0",
+     "id": "cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cli.py",
+     "file_sha256": "a3d30dfc4a8f94a7f6d48101faca24009ef34ee21808a9c38a2c285ee47dbf95",
+     "id": "cosa.agents.deep_research.cli.parse_args",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/__main__.py",
+     "file_sha256": "761c8541387a216d5330bf6e39a5bdc351d2e15a220ae83e84df62019f8e4fd5",
+     "id": "cosa.agents.deep_research_to_podcast.__main__.parse_args",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cli.py",
+     "file_sha256": "a3d30dfc4a8f94a7f6d48101faca24009ef34ee21808a9c38a2c285ee47dbf95",
+     "id": "cosa.agents.deep_research.cli.parse_args",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/__main__.py",
+     "file_sha256": "7d06d72598c30ee29a6cf9ed96c7971302fd3656c6f50e9cb39621344d4c4a8e",
+     "id": "cosa.agents.deep_research_to_presentation.__main__.parse_args",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/job.py",
+     "file_sha256": "77a0b9eedde22a25e78d50e628d9402de3ebef476bdb46a005a8ed6c735feb1d",
+     "id": "cosa.agents.deep_research.job.DeepResearchJob.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/job.py",
+     "file_sha256": "77a0b9eedde22a25e78d50e628d9402de3ebef476bdb46a005a8ed6c735feb1d",
+     "id": "cosa.agents.deep_research.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/job.py",
+     "file_sha256": "77a0b9eedde22a25e78d50e628d9402de3ebef476bdb46a005a8ed6c735feb1d",
+     "id": "cosa.agents.deep_research.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/__main__.py",
+     "file_sha256": "761c8541387a216d5330bf6e39a5bdc351d2e15a220ae83e84df62019f8e4fd5",
+     "id": "cosa.agents.deep_research_to_podcast.__main__.parse_args",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/__main__.py",
+     "file_sha256": "7d06d72598c30ee29a6cf9ed96c7971302fd3656c6f50e9cb39621344d4c4a8e",
+     "id": "cosa.agents.deep_research_to_presentation.__main__.parse_args",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/state.py",
+     "file_sha256": "b151d0a8d5f6a3a7cde6315bea87e1e6ce5e9169bde787c9b1cba75d302bba5f",
+     "id": "cosa.agents.deep_research_to_podcast.state.ChainedResult.get_summary",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/state.py",
+     "file_sha256": "f55a6e65c7a3adcdfe00c50b2904f00a63711873cbac7b49fa76f14451c32937",
+     "id": "cosa.agents.deep_research_to_presentation.state.ChainedResult.get_summary",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CalendarResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CalendarResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/notification_proxy/listener.py",
+     "file_sha256": "86274a40eb8408b70ea1a3cbe4369229bdf464ce839c65582e2b9f44ee3412e5",
+     "id": "cosa.agents.notification_proxy.listener.WebSocketListener.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/utils/proxy_agents/base_listener.py",
+     "file_sha256": "97f5f8afa9857bcf2e120e02c71c24381eb4f42331419c80c9a88d018956b483",
+     "id": "cosa.agents.utils.proxy_agents.base_listener.BaseWebSocketListener.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/__main__.py",
+     "file_sha256": "01917a4d0e0b7a8dec2949ededbb4fff3b235bf93c03537e2a62e1c1b55d52ce",
+     "id": "cosa.agents.podcast_generator.__main__.run_all_smoke_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/__main__.py",
+     "file_sha256": "9f550c604f63374ae5d6a8db6d9765f145650ac18696bf56be6ebcb2fd7f0274",
+     "id": "cosa.agents.presentation_generator.__main__.run_all_smoke_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/prediction_engine/prediction_result.py",
+     "file_sha256": "1275817dbfc4381b15aea870e3751576251fcc4ff511314f497c8415d89c429e",
+     "id": "cosa.agents.prediction_engine.prediction_result.PredictionResult.to_log_dict",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/notification_fifo_queue.py",
+     "file_sha256": "c7f5a4de5416557c6ec6d1e5dd638d4fee050e84e8d777972f1aa981f2e1b9ca",
+     "id": "cosa.rest.notification_fifo_queue.NotificationItem.to_dict",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.get_feedback",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.notify_progress",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+     "file_sha256": "7e940d80f4cacfd94b0970369eaba74bd7cea580381f32b8d2fba63e601952de",
+     "id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/utils/cc_memory_watch.py",
+     "file_sha256": "21f833dbd3dd1afb6b1029d169cf3f85ad61527656b40ff8d5c178c40479ea0a",
+     "id": "cosa.utils.cc_memory_watch.Sample.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/d2.py",
+     "file_sha256": "af909812f5f176fb446425c87085d40d18a45f7fdaa7f95cf1b6357bcb305242",
+     "id": "cosa.agents.presentation_generator.prompts.d2.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/matplotlib.py",
+     "file_sha256": "0313e483330fbf3fecf35c358a9cae405fb14b7aed1b10da09ea3fa1e7bc8eb3",
+     "id": "cosa.agents.presentation_generator.prompts.matplotlib.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/memory/embedding_cache_table.py",
+     "file_sha256": "67ef586728f49f8aa97037095f4138bb0163721dbd6fa752d9e12240d428f090",
+     "id": "cosa.memory.embedding_cache_table.EmbeddingCacheTable.cache_embedding",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/question_embeddings_table.py",
+     "file_sha256": "cbc53b552c1a1caeeffc6cfb55d2a5cf297d25a12feb3d553ddef4c941e448d6",
+     "id": "cosa.memory.question_embeddings_table.QuestionEmbeddingsTable.add_embedding",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/report_formatter.py",
+     "file_sha256": "5d876d4a31f1927789c42ee154d9c454dfe6f4ddf57131ab8b4bb773aed78135",
+     "id": "cosa.repo.branch_analyzer.report_formatter.ReportFormatter.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/directory_analyzer/report_formatter.py",
+     "file_sha256": "c9a3dd2c27791d3ba89c8cc3455d2636e61d034e93bbbba3f7496755efd09dbe",
+     "id": "cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_change_analysis.py",
+     "file_sha256": "7f7b175e8f07fe7318ec21da535442605ce46fc19702d934b1833e167df220c1",
+     "id": "cosa.repo.branch_change_analysis.is_javascript_comment",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/branch_change_analysis.py",
+     "file_sha256": "7f7b175e8f07fe7318ec21da535442605ce46fc19702d934b1833e167df220c1",
+     "id": "cosa.repo.branch_change_analysis.is_python_comment_or_docstring",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/run_branch_analyzer.py",
+     "file_sha256": "5da464de987307a7be16c19598996b13cb8a137aa2537a6743e653b25aa78502",
+     "id": "cosa.repo.run_branch_analyzer.create_parser",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/run_directory_analyzer.py",
+     "file_sha256": "54c7337c8a19857a1d27aed5836cc2e27a9cc6d5aa46bb6128af18fdf265cb79",
+     "id": "cosa.repo.run_directory_analyzer.create_parser",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/auth_audit_log_repository.py",
+     "file_sha256": "9033ac7099ba0b01c0a86b7e01f4009e3d2ebea5b6fa792d00150dd8a3b2d40a",
+     "id": "cosa.rest.db.repositories.auth_audit_log_repository.AuthAuditLogRepository.count_by_event_type",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/failed_login_attempt_repository.py",
+     "file_sha256": "ef05cc284069c1c62e107d23db754786cfcef1a9e8d748697ed0fb6f71acaa23",
+     "id": "cosa.rest.db.repositories.failed_login_attempt_repository.FailedLoginAttemptRepository.count_recent_by_ip",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.add_synonym",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/input_and_output_repository.py",
+     "file_sha256": "aa697a776139c214317c7a39a72bcaba77caaf5ca064e60640604f7f2b57dd54",
+     "id": "cosa.rest.db.repositories.input_and_output_repository.InputAndOutputRepository.insert_io_row",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.add_synonym",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/query_log_repository.py",
+     "file_sha256": "8ae00b84d2d9d89fb60928750051d6ded587ae96f9467894a11fecef459d0ff1",
+     "id": "cosa.rest.db.repositories.query_log_repository.QueryLogRepository.log_query",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/input_and_output_repository.py",
+     "file_sha256": "aa697a776139c214317c7a39a72bcaba77caaf5ca064e60640604f7f2b57dd54",
+     "id": "cosa.rest.db.repositories.input_and_output_repository.InputAndOutputRepository.insert_io_row",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/query_log_repository.py",
+     "file_sha256": "8ae00b84d2d9d89fb60928750051d6ded587ae96f9467894a11fecef459d0ff1",
+     "id": "cosa.rest.db.repositories.query_log_repository.QueryLogRepository.log_query",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/deep_research_to_podcast.py",
+     "file_sha256": "4f9a52cc7374864352e379d7ff50f906a6764b1c75243eade29193d13e9e388a",
+     "id": "cosa.rest.routers.deep_research_to_podcast.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/deep_research_to_presentation.py",
+     "file_sha256": "74f93f7391805a413f6d383eb2a266bca0f9ecb6ed2ff53d5809326e453452a4",
+     "id": "cosa.rest.routers.deep_research_to_presentation.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.format_dm_length_audit_line",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.format_dm_quality_audit_line",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.reset_dm_length_audit",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.reset_dm_quality_audit",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/notifications.py",
+     "file_sha256": "df5641dd834aab4d08a11adff082c29b308d1846c18f995472c0bc0c1db53022",
+     "id": "cosa.rest.routers.notifications.get_formatted_date_display",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/notifications.py",
+     "file_sha256": "df5641dd834aab4d08a11adff082c29b308d1846c18f995472c0bc0c1db53022",
+     "id": "cosa.rest.routers.notifications.get_formatted_time_display",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/podcast_generator.py",
+     "file_sha256": "ab60356a032b65c6c97805a05bebf0dc33139b634e46483ebe221ef4f8d0f041",
+     "id": "cosa.rest.routers.podcast_generator.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/presentation_generator.py",
+     "file_sha256": "28511a8a438ce9b9b460b72b7e2a5685e6cb77affe8edbcf591ba3e75195a68e",
+     "id": "cosa.rest.routers.presentation_generator.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_basic_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_priority_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_basic_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_quick_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_priority_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_quick_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_priority_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_realistic_workflow_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_quick_tests",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/notifications/test_notifications.py",
+     "file_sha256": "028bb622683c31d3b80c4cb088bb9360eb9a2d29e88631a827c2e3e6ee54cee1",
+     "id": "lupin_cli.notifications.test_notifications.NotificationTestSuite.run_realistic_workflow_tests",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 1.0,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.task_create",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.task_transition",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9798,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/job.py",
+     "file_sha256": "3477f333da024128c87c97268e0b0a1450e51668bdf6e0d91244cad00cf3ae19",
+     "id": "cosa.agents.claude_code.job.ClaudeCodeJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.SweTeamJob.do_all",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9798,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.SweTeamJob.do_all",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9798,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.DeepResearchToPresentationJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.SweTeamJob.do_all",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9794,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/dm_quality_judge/judge.py",
+     "file_sha256": "963327f7c95e3bf63c50cc5d099883586f0e194f313963da7d52bfd15ae080b7",
+     "id": "cosa.agents.dm_quality_judge.judge.DmQualityJudge.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/dm_quality_judge/judge_v2.py",
+     "file_sha256": "3ddca719c1a0fdf04d5d01dbd332e7f60dfd5023d7f1fd1393fff2c201739c76",
+     "id": "cosa.agents.dm_quality_judge.judge_v2.DmQualityJudgeV2.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9774,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/state.py",
+     "file_sha256": "b151d0a8d5f6a3a7cde6315bea87e1e6ce5e9169bde787c9b1cba75d302bba5f",
+     "id": "cosa.agents.deep_research_to_podcast.state.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/state.py",
+     "file_sha256": "f55a6e65c7a3adcdfe00c50b2904f00a63711873cbac7b49fa76f14451c32937",
+     "id": "cosa.agents.deep_research_to_presentation.state.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9741,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/voice_io.py",
+     "file_sha256": "c53cb69593ea048383ee6ad01cd384010dd8ddae7e7753322b3a0ec821f67c71",
+     "id": "cosa.agents.deep_research.voice_io.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/voice_io.py",
+     "file_sha256": "d0182f13558136532448e0998b8d731e5f6e7df0bb1f2ca49d93e1214c30bcdb",
+     "id": "cosa.agents.podcast_generator.voice_io.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9722,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/job.py",
+     "file_sha256": "bc0e6d690bd2f36d492ba777b7206d30a3c16f7f27eed5611339dd730c34dac0",
+     "id": "cosa.agents.bug_fix_expediter.job.BugFixExpediterJob.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.SweTeamJob.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9714,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9703,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/d2.py",
+     "file_sha256": "af909812f5f176fb446425c87085d40d18a45f7fdaa7f95cf1b6357bcb305242",
+     "id": "cosa.agents.presentation_generator.prompts.d2.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/visual.py",
+     "file_sha256": "dc84d59e2eb043fd3bece64d9114e622d78fa60360c12a7761d2d0a08723b97c",
+     "id": "cosa.agents.presentation_generator.prompts.visual.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9703,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/matplotlib.py",
+     "file_sha256": "0313e483330fbf3fecf35c358a9cae405fb14b7aed1b10da09ea3fa1e7bc8eb3",
+     "id": "cosa.agents.presentation_generator.prompts.matplotlib.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/prompts/visual.py",
+     "file_sha256": "dc84d59e2eb043fd3bece64d9114e622d78fa60360c12a7761d2d0a08723b97c",
+     "id": "cosa.agents.presentation_generator.prompts.visual.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9662,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/agent.py",
+     "file_sha256": "9eced9284806146d58aa3e09536efe97378ddb18ae8a730c3e7796fa5b4f32f8",
+     "id": "cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent.run_async",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/agent.py",
+     "file_sha256": "df14ad6f2fed7d2c4564c452fa8f54b74b50a1a362b4eae614e3fc5b942c86b3",
+     "id": "cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent.run_async",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9587,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/d2_renderer.py",
+     "file_sha256": "cdb820ce497610c70019e9e52b733c2af56560c394cd689989cc0e8969607077",
+     "id": "cosa.agents.presentation_generator.renderers.d2_renderer.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/mermaid.py",
+     "file_sha256": "355c59d48b2e87370c18bf5ef0046fdd5d6ea861589643485873ed34d0d536f0",
+     "id": "cosa.agents.presentation_generator.renderers.mermaid.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9583,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/agent.py",
+     "file_sha256": "9eced9284806146d58aa3e09536efe97378ddb18ae8a730c3e7796fa5b4f32f8",
+     "id": "cosa.agents.deep_research_to_podcast.agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/agent.py",
+     "file_sha256": "df14ad6f2fed7d2c4564c452fa8f54b74b50a1a362b4eae614e3fc5b942c86b3",
+     "id": "cosa.agents.deep_research_to_presentation.agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9565,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/gemini_client.py",
+     "file_sha256": "5500bf666d65ef164fee3f51ddadf334cdc3ab6218a69605e19ebf0725cdd3bb",
+     "id": "cosa.agents.presentation_generator.gemini_client.GeminiImageClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/veo_renderer.py",
+     "file_sha256": "a4b3010b9c95e6a2744dc967dfdc0c70d6512d4d02ac248ef42a6752e729058f",
+     "id": "cosa.agents.presentation_generator.renderers.veo_renderer.VeoRenderer.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9559,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/memory/local_embedding_engine.py",
+     "file_sha256": "000b23a50e88ba20f916af1b56b2fea2d648d20d6a27d049b7a34b8b53877c1a",
+     "id": "cosa.memory.local_embedding_engine.CodeEmbeddingEngine.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/local_embedding_engine.py",
+     "file_sha256": "000b23a50e88ba20f916af1b56b2fea2d648d20d6a27d049b7a34b8b53877c1a",
+     "id": "cosa.memory.local_embedding_engine.ProseEmbeddingEngine.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9545,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/iterative_debugging_agent.py",
+     "file_sha256": "ecce119e68a5394f9eb0a6030d255107acafb3bfd2dbff8591667d22a918433f",
+     "id": "cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/receptionist_agent.py",
+     "file_sha256": "8a50f7d64f011cbf902dae4338aac8ab6963dac176c13cf692aaa8d707dcbb94",
+     "id": "cosa.agents.receptionist_agent.ReceptionistAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9545,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/iterative_debugging_agent.py",
+     "file_sha256": "ecce119e68a5394f9eb0a6030d255107acafb3bfd2dbff8591667d22a918433f",
+     "id": "cosa.agents.iterative_debugging_agent.IterativeDebuggingAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/todo_list_agent.py",
+     "file_sha256": "5dc8f1d7d9e71f5f85af6d3ac25f9646ebe92c00edc187ccf61c4f697c197e5f",
+     "id": "cosa.agents.todo_list_agent.TodoListAgent.restore_from_serialized_state",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9545,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/canonical_synonym_repository.py",
+     "file_sha256": "00989f67352b55f59fe4f5fa2e9b44070d5f6aafd69f17770d1359ae292e29c8",
+     "id": "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository.add_synonym",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/gist_cache_repository.py",
+     "file_sha256": "aa12f110ef930c9c93b6827dcccbc9fb2edf79538baf860c52fa4ac65345766e",
+     "id": "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository.cache_gist",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9545,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/gist_cache_repository.py",
+     "file_sha256": "aa12f110ef930c9c93b6827dcccbc9fb2edf79538baf860c52fa4ac65345766e",
+     "id": "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository.cache_gist",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/input_and_output_repository.py",
+     "file_sha256": "aa697a776139c214317c7a39a72bcaba77caaf5ca064e60640604f7f2b57dd54",
+     "id": "cosa.rest.db.repositories.input_and_output_repository.InputAndOutputRepository.insert_io_row",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9545,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/gist_cache_repository.py",
+     "file_sha256": "aa12f110ef930c9c93b6827dcccbc9fb2edf79538baf860c52fa4ac65345766e",
+     "id": "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository.cache_gist",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/query_log_repository.py",
+     "file_sha256": "8ae00b84d2d9d89fb60928750051d6ded587ae96f9467894a11fecef459d0ff1",
+     "id": "cosa.rest.db.repositories.query_log_repository.QueryLogRepository.log_query",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9512,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.get_dm_length_audit",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/dm.py",
+     "file_sha256": "98f2676f603e21d6a92a2e0a3990d8501a0998f2fd3a9d6ae771e7d03d6c4872",
+     "id": "cosa.rest.routers.dm.get_dm_quality_audit",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.95,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+     "file_sha256": "bffc06605956003713fa50f379543963b4db71285e75ffc97fec33aed2d2fcda",
+     "id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+     "file_sha256": "10ec05a839745599cbfebb8183f614dff5b1f0e1cfd10934864d87cc8671f26f",
+     "id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.95,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+     "file_sha256": "bffc06605956003713fa50f379543963b4db71285e75ffc97fec33aed2d2fcda",
+     "id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.95,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+     "file_sha256": "10ec05a839745599cbfebb8183f614dff5b1f0e1cfd10934864d87cc8671f26f",
+     "id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+     "file_sha256": "ac2afe6bba8b447031baf50377102b7c156327c5a20476376b13ed1361578d81",
+     "id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.95,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+     "file_sha256": "ac2afe6bba8b447031baf50377102b7c156327c5a20476376b13ed1361578d81",
+     "id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9474,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+     "file_sha256": "bffc06605956003713fa50f379543963b4db71285e75ffc97fec33aed2d2fcda",
+     "id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+     "file_sha256": "7e940d80f4cacfd94b0970369eaba74bd7cea580381f32b8d2fba63e601952de",
+     "id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9474,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/base_decision_strategy.py",
+     "file_sha256": "bffc06605956003713fa50f379543963b4db71285e75ffc97fec33aed2d2fcda",
+     "id": "cosa.agents.decision_proxy.base_decision_strategy.DecisionResult.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/utils/cc_memory_watch.py",
+     "file_sha256": "21f833dbd3dd1afb6b1029d169cf3f85ad61527656b40ff8d5c178c40479ea0a",
+     "id": "cosa.utils.cc_memory_watch.Sample.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9474,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+     "file_sha256": "7e940d80f4cacfd94b0970369eaba74bd7cea580381f32b8d2fba63e601952de",
+     "id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+     "file_sha256": "ac2afe6bba8b447031baf50377102b7c156327c5a20476376b13ed1361578d81",
+     "id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9474,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/git_loc_delta/git_log_parser.py",
+     "file_sha256": "ac2afe6bba8b447031baf50377102b7c156327c5a20476376b13ed1361578d81",
+     "id": "cosa.repo.git_loc_delta.git_log_parser.GitLogParser.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/utils/cc_memory_watch.py",
+     "file_sha256": "21f833dbd3dd1afb6b1029d169cf3f85ad61527656b40ff8d5c178c40479ea0a",
+     "id": "cosa.utils.cc_memory_watch.Sample.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9444,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/cbr_decision_store.py",
+     "file_sha256": "db9461f02d16221c9c3011c3a43c38f279b4aa957e8b983416e20e5bcf84be63",
+     "id": "cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/heartbeat_poker_commons_gateway.py",
+     "file_sha256": "5af9edd9b5817f11b50c9e53ba9aeb26deea33cb7c30e0bfffad96dfbbbe9877",
+     "id": "cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9444,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/arbiter_gateway.py",
+     "file_sha256": "2a41602cbdd4bbeeebb52113603afa951263700a914813cc7cacc03a9a2fbcd0",
+     "id": "cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/heartbeat_poker_commons_gateway.py",
+     "file_sha256": "5af9edd9b5817f11b50c9e53ba9aeb26deea33cb7c30e0bfffad96dfbbbe9877",
+     "id": "cosa.agents.heartbeat_poker_commons_gateway.LupinCommonsGateway.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9397,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.PodcastGeneratorJob.do_all",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/job.py",
+     "file_sha256": "e59b33a0a53b27d82fd32e7f7802df7ef0e76a37680630e07066de2ac85e1b8f",
+     "id": "cosa.agents.presentation_generator.job.PresentationGeneratorJob.do_all",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9355,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/calculator/agent.py",
+     "file_sha256": "4c4eb750d11571cf75776b3edb857ed17a807a4204dae33bb74023f7e8df09a4",
+     "id": "cosa.agents.calculator.agent.CalculatorAgent.run_prompt",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/crud_for_dataframes/agent.py",
+     "file_sha256": "2a475eb189e4bef092c367c09deeab4d449486ec591d4bb6c5f3f76b29d536aa",
+     "id": "cosa.crud_for_dataframes.agent.CrudForDataFramesAgent.run_prompt",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9333,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/agent.py",
+     "file_sha256": "9eced9284806146d58aa3e09536efe97378ddb18ae8a730c3e7796fa5b4f32f8",
+     "id": "cosa.agents.deep_research_to_podcast.agent.DeepResearchToPodcastAgent.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/agent.py",
+     "file_sha256": "df14ad6f2fed7d2c4564c452fa8f54b74b50a1a362b4eae614e3fc5b942c86b3",
+     "id": "cosa.agents.deep_research_to_presentation.agent.DeepResearchToPresentationAgent.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9324,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_priority",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_project",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9324,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_project",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/task_repository.py",
+     "file_sha256": "b700db0037d5488782d24a42173887dcb708591e7346cafc3709ad1e5702285a",
+     "id": "cosa.rest.db.repositories.task_repository.TaskRepository.count_tasks_by_status",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9306,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/report_formatter.py",
+     "file_sha256": "5d876d4a31f1927789c42ee154d9c454dfe6f4ddf57131ab8b4bb773aed78135",
+     "id": "cosa.repo.branch_analyzer.report_formatter.ReportFormatter.format_markdown",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/directory_analyzer/report_formatter.py",
+     "file_sha256": "c9a3dd2c27791d3ba89c8cc3455d2636e61d034e93bbbba3f7496755efd09dbe",
+     "id": "cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter.format_markdown",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9265,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/auth.py",
+     "file_sha256": "f5d0c27952f21832403211f313934dae0ab1fd04a327944a0358a0e05322565e",
+     "id": "cosa.rest.routers.auth.reset_password",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/auth.py",
+     "file_sha256": "f5d0c27952f21832403211f313934dae0ab1fd04a327944a0358a0e05322565e",
+     "id": "cosa.rest.routers.auth.verify_email",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9195,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/scripts/vertex_publisher_config_guard.py",
+     "file_sha256": "f14ce9f623d79612bd8176726f00c34e01846ebaa5ea60dd6bba0228a73102fa",
+     "id": "scripts.vertex_publisher_config_guard.find_added_keys",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/vertex_publisher_config_guard.py",
+     "file_sha256": "f14ce9f623d79612bd8176726f00c34e01846ebaa5ea60dd6bba0228a73102fa",
+     "id": "scripts.vertex_publisher_config_guard.find_missing_keys",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/claude_code/cosa_interface.py",
+     "file_sha256": "35f5588c94d3202d86ea34c6f3f94749750ad153d96212a6920159e67ef32440",
+     "id": "cosa.agents.claude_code.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9143,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.task_correlate",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_mcp/cosa_voice_mcp.py",
+     "file_sha256": "c27e0d2cd90e8f9ffb2fdc512cb61a99446d5887d7ccac6b0bba33ca89baf2c1",
+     "id": "lupin_mcp.cosa_voice_mcp.task_request",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9098,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/task_store_client.py",
+     "file_sha256": "a57a8306f055a2d1a3aadad01c7a56822b4dce4b765377bad05745c6a7848757",
+     "id": "lupin_cli.claude_code.hooks.lib.task_store_client.query_owed",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/task_store_client.py",
+     "file_sha256": "a57a8306f055a2d1a3aadad01c7a56822b4dce4b765377bad05745c6a7848757",
+     "id": "lupin_cli.claude_code.hooks.lib.task_store_client.query_owed_breakdowns",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.907,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/d2_renderer.py",
+     "file_sha256": "cdb820ce497610c70019e9e52b733c2af56560c394cd689989cc0e8969607077",
+     "id": "cosa.agents.presentation_generator.renderers.d2_renderer.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/matplotlib_renderer.py",
+     "file_sha256": "1c5e6c0708c006d574df33f03d0092e69a01dff35017095c9642a8b20789849f",
+     "id": "cosa.agents.presentation_generator.renderers.matplotlib_renderer.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9048,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+     "file_sha256": "10ec05a839745599cbfebb8183f614dff5b1f0e1cfd10934864d87cc8671f26f",
+     "id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9012,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/v2_ask.py",
+     "file_sha256": "92e0b9dacfa454cc97b1e9512651893792b9e0d867255223d18bbc657934d0d2",
+     "id": "cosa.rest.routers.v2_ask.v2_ask",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/v2_ask.py",
+     "file_sha256": "92e0b9dacfa454cc97b1e9512651893792b9e0d867255223d18bbc657934d0d2",
+     "id": "cosa.rest.routers.v2_ask.v2_resume",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+     "file_sha256": "10ec05a839745599cbfebb8183f614dff5b1f0e1cfd10934864d87cc8671f26f",
+     "id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+     "file_sha256": "7e940d80f4cacfd94b0970369eaba74bd7cea580381f32b8d2fba63e601952de",
+     "id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/trust_tracker.py",
+     "file_sha256": "10ec05a839745599cbfebb8183f614dff5b1f0e1cfd10934864d87cc8671f26f",
+     "id": "cosa.agents.decision_proxy.trust_tracker.TrustTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/utils/cc_memory_watch.py",
+     "file_sha256": "21f833dbd3dd1afb6b1029d169cf3f85ad61527656b40ff8d5c178c40479ea0a",
+     "id": "cosa.utils.cc_memory_watch.Sample.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/deck_verdict.py",
+     "file_sha256": "7e940d80f4cacfd94b0970369eaba74bd7cea580381f32b8d2fba63e601952de",
+     "id": "cosa.agents.presentation_generator.deck_verdict.DeckVerdict.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/utils/cc_memory_watch.py",
+     "file_sha256": "21f833dbd3dd1afb6b1029d169cf3f85ad61527656b40ff8d5c178c40479ea0a",
+     "id": "cosa.utils.cc_memory_watch.Sample.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.9,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/queues.py",
+     "file_sha256": "573480b76572e1034a00b8aa9790028c2b3c0454ce3d99e415e1782dda13069c",
+     "id": "cosa.rest.routers.queues.pause_job",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/queues.py",
+     "file_sha256": "573480b76572e1034a00b8aa9790028c2b3c0454ce3d99e415e1782dda13069c",
+     "id": "cosa.rest.routers.queues.resume_job",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8974,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/utils/feedback_analysis.py",
+     "file_sha256": "77af48be438760ad8ba40f72dd39fbfe3ce1d592edb3a0609490bd1028b77b38",
+     "id": "cosa.agents.utils.feedback_analysis.is_approval",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/utils/feedback_analysis.py",
+     "file_sha256": "77af48be438760ad8ba40f72dd39fbfe3ce1d592edb3a0609490bd1028b77b38",
+     "id": "cosa.agents.utils.feedback_analysis.is_rejection",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8955,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/responder.py",
+     "file_sha256": "3a6865c03aa264ee5bebd808d81c7cfd07d5dccbc833b31b1c2413a1b15e0756",
+     "id": "cosa.agents.decision_proxy.responder.DecisionResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/utils/proxy_agents/base_responder.py",
+     "file_sha256": "94a4fd403b63a8cfc0c895039d38a8b78b379ae542e649d67a829678dda4c315",
+     "id": "cosa.agents.utils.proxy_agents.base_responder.BaseResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8955,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/notification_proxy/responder.py",
+     "file_sha256": "1f18d1b9f9588c0e37e28297ec2bbf0795f5529c18b065ce9ba53112e15b7c03",
+     "id": "cosa.agents.notification_proxy.responder.NotificationResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/utils/proxy_agents/base_responder.py",
+     "file_sha256": "94a4fd403b63a8cfc0c895039d38a8b78b379ae542e649d67a829678dda4c315",
+     "id": "cosa.agents.utils.proxy_agents.base_responder.BaseResponder.print_stats",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8936,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/scripts/dm-experiment/generate_schedule.py",
+     "file_sha256": "623389483ef392f19740578ca494d3123a1ec22a7b7194cc100f2c9cd4ad079a",
+     "id": "scripts.dm-experiment.generate_schedule.build_extension_slots",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/dm-experiment/generate_schedule.py",
+     "file_sha256": "623389483ef392f19740578ca494d3123a1ec22a7b7194cc100f2c9cd4ad079a",
+     "id": "scripts.dm-experiment.generate_schedule.build_week2_slots",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8933,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_completed_from_metadata",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_failed_from_metadata",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8933,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_failed_from_metadata",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/job_persistence.py",
+     "file_sha256": "b06fad9460c839fba7519be7fd7028a2b271cb7feef5c9e7803404a2ccc8e5b2",
+     "id": "cosa.rest.job_persistence.persist_job_stalled_from_metadata",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/job.py",
+     "file_sha256": "77a0b9eedde22a25e78d50e628d9402de3ebef476bdb46a005a8ed6c735feb1d",
+     "id": "cosa.agents.deep_research.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/job.py",
+     "file_sha256": "77a0b9eedde22a25e78d50e628d9402de3ebef476bdb46a005a8ed6c735feb1d",
+     "id": "cosa.agents.deep_research.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_presentation/job.py",
+     "file_sha256": "44c1595ee95405a75bbd7f11edca0af516bdd61bef3d84b6838cba5678ae9dbf",
+     "id": "cosa.agents.deep_research_to_presentation.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8917,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/job.py",
+     "file_sha256": "082d6417b623f0f7dade04f4f75ee8c1d77c80a4a73f8a094fa64f72b9fc6cae",
+     "id": "cosa.agents.swe_team.job.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/bug_fix_expediter/cosa_interface.py",
+     "file_sha256": "81f7252ff7e46d904f5e5a230a8be781ca52f8fa8c78e1b69ff921b4b82d5d79",
+     "id": "cosa.agents.bug_fix_expediter.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/decision_proxy/cbr_decision_store.py",
+     "file_sha256": "db9461f02d16221c9c3011c3a43c38f279b4aa957e8b983416e20e5bcf84be63",
+     "id": "cosa.agents.decision_proxy.cbr_decision_store.CBRDecisionStore.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/d2_renderer.py",
+     "file_sha256": "cdb820ce497610c70019e9e52b733c2af56560c394cd689989cc0e8969607077",
+     "id": "cosa.agents.presentation_generator.renderers.d2_renderer.D2Renderer.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/cosa_interface.py",
+     "file_sha256": "a51ea573320607b84ad90e904a42e84fa496a4c6560960bc2a858c6b8859e471",
+     "id": "cosa.agents.deep_research.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/heartbeat_arbiter/arbiter_gateway.py",
+     "file_sha256": "2a41602cbdd4bbeeebb52113603afa951263700a914813cc7cacc03a9a2fbcd0",
+     "id": "cosa.agents.heartbeat_arbiter.arbiter_gateway.LupinArbiterGateway.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/d2_renderer.py",
+     "file_sha256": "cdb820ce497610c70019e9e52b733c2af56560c394cd689989cc0e8969607077",
+     "id": "cosa.agents.presentation_generator.renderers.d2_renderer.D2Renderer.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/cosa_interface.py",
+     "file_sha256": "1a98e77b3282a83ef799195cd99e5c0128a77a54041f58b82508cda49014236e",
+     "id": "cosa.agents.podcast_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8889,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/cosa_interface.py",
+     "file_sha256": "9f78c5888fb4caa96bd7cfac5fa58c95be9423d8484592cda0bbf183b0f34f00",
+     "id": "cosa.agents.presentation_generator.cosa_interface.present_choices",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/swe_team/cosa_interface.py",
+     "file_sha256": "14b2ce87302b38a085e6c1e3b206eb9d78d5bf08940871fc2067b1c5c333e281",
+     "id": "cosa.agents.swe_team.cosa_interface.request_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8879,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/routers/admin.py",
+     "file_sha256": "6588f1cace746dd5188e5a5a41e33955a2303f4dede8c8db4050b60756e80222",
+     "id": "cosa.rest.routers.admin.update_roles",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/routers/admin.py",
+     "file_sha256": "6588f1cace746dd5188e5a5a41e33955a2303f4dede8c8db4050b60756e80222",
+     "id": "cosa.rest.routers.admin.update_status",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8851,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/scripts/rejoin-done-blocked-rows.py",
+     "file_sha256": "93d8bdb4c15262ed1908266b4b217250ec4ed6663c37fa9502cd5865b0349294",
+     "id": "scripts.rejoin-done-blocked-rows.fetch_board",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/scan-epic-key-drift.py",
+     "file_sha256": "3166282b5811c872492d1fcb49188341a98484b2d879a9910b2e74bfe1d232bf",
+     "id": "scripts.scan-epic-key-drift.fetch_board",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8851,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/scripts/scan-epic-key-drift.py",
+     "file_sha256": "3166282b5811c872492d1fcb49188341a98484b2d879a9910b2e74bfe1d232bf",
+     "id": "scripts.scan-epic-key-drift.fetch_board",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/scripts/scan-prose-task-refs.py",
+     "file_sha256": "2ea9fa75a733d1169340fdc6454e2d8d1ecc24be826258bb8b9506235688610e",
+     "id": "scripts.scan-prose-task-refs.fetch_board",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8824,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/test_fix_expediter/state.py",
+     "file_sha256": "dd7c939978fcf087353533d421cfd962b2c9c491322062df5dce7cd91515549f",
+     "id": "cosa.agents.test_fix_expediter.state.StalledException.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/test_fix_expediter/state.py",
+     "file_sha256": "dd7c939978fcf087353533d421cfd962b2c9c491322062df5dce7cd91515549f",
+     "id": "cosa.agents.test_fix_expediter.state.VoiceGateUnreachableError.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.881,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CalendarResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingMinimalistResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.881,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.CodeResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingMinimalistResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.881,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingFullResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.IterativeDebuggingMinimalistResponse.to_xml",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.88,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/calendaring_agent.py",
+     "file_sha256": "9cabd945fb93d66a550a894ee03cfafc070bbacae702ff73abd8a82aa16eba05",
+     "id": "cosa.agents.calendaring_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/todo_list_agent.py",
+     "file_sha256": "5dc8f1d7d9e71f5f85af6d3ac25f9646ebe92c00edc187ccf61c4f697c197e5f",
+     "id": "cosa.agents.todo_list_agent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.88,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_arbiter_app/health_watcher.py",
+     "file_sha256": "36c354e2a5267e511177c179bb1cd07e2433b0d6839a541be2c7c28f247f305a",
+     "id": "lupin_arbiter_app.health_watcher.ContainerHealthTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_arbiter_app/health_watcher.py",
+     "file_sha256": "36c354e2a5267e511177c179bb1cd07e2433b0d6839a541be2c7c28f247f305a",
+     "id": "lupin_arbiter_app.health_watcher.RestartLoopTracker.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.875,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/chat_client.py",
+     "file_sha256": "b7580908f53f2f2dcaa080b162f88322910aaf5c21d384bae4bb74af9029a8f2",
+     "id": "cosa.agents.chat_client.ChatClient.run",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/completion_client.py",
+     "file_sha256": "af5a084c3f060d85c1bfb86d440989ed4b27fe1135990e8ed030aabcd6ed253e",
+     "id": "cosa.agents.completion_client.CompletionClient.run",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.874,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/__main__.py",
+     "file_sha256": "01917a4d0e0b7a8dec2949ededbb4fff3b235bf93c03537e2a62e1c1b55d52ce",
+     "id": "cosa.agents.podcast_generator.__main__.main",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/__main__.py",
+     "file_sha256": "9f550c604f63374ae5d6a8db6d9765f145650ac18696bf56be6ebcb2fd7f0274",
+     "id": "cosa.agents.presentation_generator.__main__.main",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8732,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/shared/worktree_refusal_ledger.py",
+     "file_sha256": "c85b2bd38f47b76c4ea269cfdef0b090d0aa0565e1d95c8c53c450ebc7c71297",
+     "id": "cosa.agents.shared.worktree_refusal_ledger.write_ledger",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/shared/worktree_straggler_tickets.py",
+     "file_sha256": "38071500cf50fce81501b51d68e8dc9d8e36df07a4ea7a9eb38171523b168fdc",
+     "id": "cosa.agents.shared.worktree_straggler_tickets.write_state",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8722,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/matplotlib_renderer.py",
+     "file_sha256": "1c5e6c0708c006d574df33f03d0092e69a01dff35017095c9642a8b20789849f",
+     "id": "cosa.agents.presentation_generator.renderers.matplotlib_renderer.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/renderers/mermaid.py",
+     "file_sha256": "355c59d48b2e87370c18bf5ef0046fdd5d6ea861589643485873ed34d0d536f0",
+     "id": "cosa.agents.presentation_generator.renderers.mermaid.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8696,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/mock_clients.py",
+     "file_sha256": "de92f5050867667225eee90113b845cf49442291e117a30529687d635051d529",
+     "id": "cosa.agents.podcast_generator.mock_clients.MockTTSClient.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/gemini_client.py",
+     "file_sha256": "5500bf666d65ef164fee3f51ddadf334cdc3ab6218a69605e19ebf0725cdd3bb",
+     "id": "cosa.agents.presentation_generator.gemini_client.GeminiImageClient.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.869,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/notification_repository.py",
+     "file_sha256": "b5a6647f62ef4141467afe7c7447ed7ac20ddcbf2f7610d42030014d0b2ab912",
+     "id": "cosa.rest.db.repositories.notification_repository.NotificationRepository.get_dm_inbox",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/notification_repository.py",
+     "file_sha256": "b5a6647f62ef4141467afe7c7447ed7ac20ddcbf2f7610d42030014d0b2ab912",
+     "id": "cosa.rest.db.repositories.notification_repository.NotificationRepository.get_dm_thread",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8679,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research_to_podcast/job.py",
+     "file_sha256": "540fd0499583e8e3bd0e333759176a35b12a1a5f34bada44223c8f1ac6e00b87",
+     "id": "cosa.agents.deep_research_to_podcast.job.DeepResearchToPodcastJob.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/podcast_generator/job.py",
+     "file_sha256": "95a33eb319a294c92af5f690bd0926c34b3b19fa5ac0ccd4bd4e41295293431d",
+     "id": "cosa.agents.podcast_generator.job.PodcastGeneratorJob.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8667,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.FuzzyFileMatchResponse.get_matches_list",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/runtime_argument_expeditor/xml_models.py",
+     "file_sha256": "20ae968b9ed4ae308ae9faca194e9fc22b8ee4c2bf41b0d9d138cc58b7cb9cbf",
+     "id": "cosa.agents.runtime_argument_expeditor.xml_models.ExpeditorResponse.get_missing_list",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8667,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/io_models/xml_models.py",
+     "file_sha256": "33d269ecdaf4b73355d09d87d64d02fd861a1d55d10d41ba1ee44c7877bbbb91",
+     "id": "cosa.agents.io_models.xml_models.TFEResumeMatchResponse.get_matches_list",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/runtime_argument_expeditor/xml_models.py",
+     "file_sha256": "20ae968b9ed4ae308ae9faca194e9fc22b8ee4c2bf41b0d9d138cc58b7cb9cbf",
+     "id": "cosa.agents.runtime_argument_expeditor.xml_models.ExpeditorResponse.get_missing_list",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8646,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/podcast_generator/api_client.py",
+     "file_sha256": "2478797767dbb0215f9079cac0f571ba12a92d7c6256423c7d50c2c9bec166ff",
+     "id": "cosa.agents.podcast_generator.api_client.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/presentation_generator/api_client.py",
+     "file_sha256": "88de486e6b065da43007cc170c1f95858602619e878a481c455a1197ca1f8f08",
+     "id": "cosa.agents.presentation_generator.api_client.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8636,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/memory/canonical_synonyms_table.py",
+     "file_sha256": "ffbdbfef0a1aac526d351bd21ef38be3523de7e7ac3fbdc45ade456eb8ce760a",
+     "id": "cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/memory/question_embeddings_table.py",
+     "file_sha256": "cbc53b552c1a1caeeffc6cfb55d2a5cf297d25a12feb3d553ddef4c941e448d6",
+     "id": "cosa.memory.question_embeddings_table.QuestionEmbeddingsTable.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8636,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/gist_cache_repository.py",
+     "file_sha256": "aa12f110ef930c9c93b6827dcccbc9fb2edf79538baf860c52fa4ac65345766e",
+     "id": "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository.cache_gist",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/prediction_decision_repository.py",
+     "file_sha256": "8bf283e1b7eb488b5b4f101cc851a98c7ad1f72b8299807302c15056ad311afb",
+     "id": "cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository.add_decision",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.863,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/notification_proxy/xml_models.py",
+     "file_sha256": "02522538dc73e0489b46cbd8709cc004e0a10df6369705764169370528eb344b",
+     "id": "cosa.agents.notification_proxy.xml_models.ScriptMatcherResponse.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/notification_proxy/xml_models.py",
+     "file_sha256": "02522538dc73e0489b46cbd8709cc004e0a10df6369705764169370528eb344b",
+     "id": "cosa.agents.notification_proxy.xml_models.VerificationResponse.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8571,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/chat_client.py",
+     "file_sha256": "b7580908f53f2f2dcaa080b162f88322910aaf5c21d384bae4bb74af9029a8f2",
+     "id": "cosa.agents.chat_client.ChatClient.run_async",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/completion_client.py",
+     "file_sha256": "af5a084c3f060d85c1bfb86d440989ed4b27fe1135990e8ed030aabcd6ed253e",
+     "id": "cosa.agents.completion_client.CompletionClient.run_async",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8559,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/agents/deep_research/prompts/planning.py",
+     "file_sha256": "1260a90f940af26693979ade3802101a3cdf65f1c54299bdf6fba46b06dc8070",
+     "id": "cosa.agents.deep_research.prompts.planning.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/agents/deep_research/prompts/subagent.py",
+     "file_sha256": "6bdd72b0a0d2be71520acbbcc19dc12d934dc60f97793e9d06d27686fd1d237e",
+     "id": "cosa.agents.deep_research.prompts.subagent.quick_smoke_test",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8548,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.set_last_autonarrated_turn_id",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/lupin_cli/claude_code/hooks/lib/session_bridge.py",
+     "file_sha256": "7b7601fa44b483a4f220159034f6ab946c5b58a09c465cd4c65caf5192b7b8e8",
+     "id": "lupin_cli.claude_code.hooks.lib.session_bridge.set_voice_persona",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8537,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/branch_analyzer/statistics_collector.py",
+     "file_sha256": "3fc73431f18f53344c6978d17b8841ef0be63371a09a9dc1490676d9ddac5b54",
+     "id": "cosa.repo.branch_analyzer.statistics_collector.StatisticsCollector.__init__",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/directory_analyzer/statistics_collector.py",
+     "file_sha256": "ed9836c2fdb3b9157a53d000a34408c93edbea0f7ab70446ac8c6e0aa21a5c30",
+     "id": "cosa.repo.directory_analyzer.statistics_collector.DirectoryStatisticsCollector.__init__",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8529,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/db/repositories/failed_login_attempt_repository.py",
+     "file_sha256": "ef05cc284069c1c62e107d23db754786cfcef1a9e8d748697ed0fb6f71acaa23",
+     "id": "cosa.rest.db.repositories.failed_login_attempt_repository.FailedLoginAttemptRepository.get_recent_attempts_by_email",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/db/repositories/failed_login_attempt_repository.py",
+     "file_sha256": "ef05cc284069c1c62e107d23db754786cfcef1a9e8d748697ed0fb6f71acaa23",
+     "id": "cosa.rest.db.repositories.failed_login_attempt_repository.FailedLoginAttemptRepository.get_recent_attempts_by_ip",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8522,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/task_promotion_resolver.py",
+     "file_sha256": "1d94e0ac9f709846582d3a98066b9f2157ba8f6503dfb0708eaec0eb132f5093",
+     "id": "cosa.rest.task_promotion_resolver.reconcile_on_startup",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/task_promotion_resolver.py",
+     "file_sha256": "1d94e0ac9f709846582d3a98066b9f2157ba8f6503dfb0708eaec0eb132f5093",
+     "id": "cosa.rest.task_promotion_resolver.sweep_stalled_tickets",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8519,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/repo/run_git_loc_delta.py",
+     "file_sha256": "810cba8811b8bc5e26a7db6e20ef322b5f88a79ea742dad98fa8fa87ced7d6e3",
+     "id": "cosa.repo.run_git_loc_delta.create_parser",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/repo/run_git_loc_delta_global.py",
+     "file_sha256": "38b8802bf8110e6190a6476190a1e887727998ba121296bd1387909d291b73d4",
+     "id": "cosa.repo.run_git_loc_delta_global.create_parser",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8514,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/refresh_token_service.py",
+     "file_sha256": "d04cbfe10063eb8b854e2022bd2b3568fce7f91ff9e59c8e234f9085c3832109",
+     "id": "cosa.rest.refresh_token_service.revoke_refresh_token",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/user_service.py",
+     "file_sha256": "48956cb627d901496278bc275835cb4f82883bf14f04ae56daee53b3dff3a81e",
+     "id": "cosa.rest.user_service.deactivate_user",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  },
+  {
+   "jaccard": 0.8514,
+   "kind": "near",
+   "members": [
+    {
+     "file": "src/cosa/rest/refresh_token_service.py",
+     "file_sha256": "d04cbfe10063eb8b854e2022bd2b3568fce7f91ff9e59c8e234f9085c3832109",
+     "id": "cosa.rest.refresh_token_service.revoke_refresh_token",
+     "in_index": true,
+     "sendable": true
+    },
+    {
+     "file": "src/cosa/rest/user_service.py",
+     "file_sha256": "48956cb627d901496278bc275835cb4f82883bf14f04ae56daee53b3dff3a81e",
+     "id": "cosa.rest.user_service.mark_email_verified",
+     "in_index": true,
+     "sendable": true
+    }
+   ]
+  }
+ ],
+ "provenance": {
+  "considered": 3658,
+  "index_root": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees/rachel-baseline",
+  "kind": "structural only: exact clones and near pass; not an evaluation set by itself",
+  "min_nodes": 40,
+  "shingle": 5,
+  "threshold": 0.85
+ }
+}
