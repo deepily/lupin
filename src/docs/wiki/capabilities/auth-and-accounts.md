@@ -5,7 +5,7 @@ pins:
   - cosa.rest.jwt_service.create_access_token@9802b174e8
   - cosa.rest.jwt_service.decode_and_validate_token@91d44cf713
   - cosa.rest.routers.auth.login@59ab1f21ed
-  - cosa.rest.refresh_token_service.rotate_refresh_token@ec964812ca
+  - cosa.rest.refresh_token_service.rotate_refresh_token@2cd3e99f75
   - cosa.rest.rate_limiter.check_account_lockout@d2aa947aba
   - cosa.rest.middleware.api_key_auth.require_api_key@8f714353bd
   - cosa.rest.auth.verify_token@d3ed427a0d
@@ -30,7 +30,7 @@ Login, JWT access and refresh tokens, API keys, user accounts, password rules, e
 - `POST /auth/login` first calls `check_account_lockout`. A locked email gets 429 and an audited `login_failure`, and the password is not checked.
 - Any `authenticate_user` failure (unknown email, inactive account, wrong password) calls `record_failed_login( email, ip )`, audits `login_failure`, and returns 401. Success calls `clear_failed_attempts` and audits `login_success`.
 - Locked means failed rows within `auth lockout duration minutes` (default 15) number at least `auth max failed attempts` (default 5). A database error in the check returns not locked.
-- `POST /auth/refresh` calls `rotate_refresh_token`. The old token must verify as a refresh token, have a stored row, be unrevoked, and match its stored SHA-256 hash. The old row is revoked before the new token is made and stored, and no step undoes the revoke if a later step fails.
+- `POST /auth/refresh` calls `rotate_refresh_token`. The old token must verify as a refresh token, have a stored row, be unrevoked, and match its stored SHA-256 hash. The new token is made and stored first, and the old row is revoked last. If the revoke fails or a later step raises, the new token is revoked again and the caller keeps the old one. Store and revoke are separate commits, so two rotations of the same old token at once are not serialised.
 - `POST /auth/logout` revokes the refresh token by `jti`. If the token fails verification for any reason, such as expiry or a bad signature, it reads the `jti` without checking the signature. It then revokes that `jti`. No code looks an access token up in a revocation table, so it stays valid until `exp`.
 - `POST /auth/register` is unauthenticated. It returns 403 if `roles` names anything but `user`, and always stores `["user"]`.
 
