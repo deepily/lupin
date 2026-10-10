@@ -2,7 +2,7 @@
 capability: scheduled-test-suite
 pin_algorithm: py3.13.xf75af6/ts5.9.3
 pins:
-  - cosa.agents.test_suite.job.TestSuiteJob@ea20f71658
+  - cosa.agents.test_suite.job.TestSuiteJob@ff64d1ba50
   - cosa.agents.test_suite.job.TestSuiteJob.do_all@e22090c710
   - cosa.agents.test_suite.job.unknown_suite_names@9f548f8b52
   - cosa.agents.test_suite.job.BetweenSuiteResetError@d5be6190f9
@@ -24,7 +24,7 @@ pins:
 - The job always runs with `monopolize=True`, because the scripts swap the database config.
 
 ## Running
-- Before the first suite, a preflight raises `RuntimeError` if a non-test agentic job is in flight on `lupin_db_test`. Off that database it does nothing.
+- Before the first suite, a preflight raises `RuntimeError` if a non-test agentic job is in flight on `lupin_db_test`. Off that database it does nothing. On it, a second preflight raises `RuntimeError` naming each database grant a role lacks; where it cannot check, it logs and goes on.
 - Suites run one after another. A failing suite does not stop the sweep; a cancel request or a failed reset does.
 - Each suite has its own timeout in `SUITE_TIMEOUTS_SECONDS`. An unknown suite name is refused at submit and never runs.
 - Between two suites, and never before the first or after the last, the shared test database is reset. Non-protected users are deleted and residue tables truncated. Off `lupin_db_test` the reset is a logged no-op.
