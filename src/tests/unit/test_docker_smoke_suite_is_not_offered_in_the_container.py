@@ -69,6 +69,7 @@ def test_a_host_server_admits_docker_smoke( client, queue, monkeypatch ):
 
 
 def test_the_scheduling_guide_says_the_container_refuses_docker_smoke():
-    guide = ( ROOT / "src/docs/agents/test-suite-scheduling-guide.md" ).read_text()
+    from tests.helpers.split_doc import read_split_page
+    guide = read_split_page( ROOT, "src/docs/agents/test-suite-scheduling-guide.md" )
     row   = next( line for line in guide.splitlines() if line.startswith( "| `docker_smoke` |" ) )
     assert "host" in row and "refus" in row, row

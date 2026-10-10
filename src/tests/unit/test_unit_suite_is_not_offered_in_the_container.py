@@ -117,6 +117,7 @@ def test_no_tracked_command_doc_or_example_offers_unit_through_the_scheduled_doo
 
 
 def test_the_scheduling_guide_says_the_container_refuses_unit():
-    guide = ( ROOT / "src/docs/agents/test-suite-scheduling-guide.md" ).read_text()
+    from tests.helpers.split_doc import read_split_page
+    guide = read_split_page( ROOT, "src/docs/agents/test-suite-scheduling-guide.md" )
     row   = next( line for line in guide.splitlines() if line.startswith( "| `unit` |" ) )
     assert "host" in row and "refus" in row, row

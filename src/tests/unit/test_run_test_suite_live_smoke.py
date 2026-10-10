@@ -111,7 +111,8 @@ def test_the_skip_reason_names_the_runner():
 
 
 def test_the_scheduling_guide_names_the_runner():
-    guide = open( os.path.join( ROOT, "src/docs/agents/test-suite-scheduling-guide.md" ) ).read()
+    from tests.helpers.split_doc import read_split_page
+    guide = read_split_page( ROOT, "src/docs/agents/test-suite-scheduling-guide.md" )
     assert RUNNER in guide
 
 
