@@ -47,7 +47,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 
 ## Web client
 
-- [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (JS and TypeScript docs are out of scope for plan 1, per Rick's JS and TypeScript ruling; the slug exists so the symbols have a home)
+- [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (the slug exists so the symbols have a home). JS and TypeScript docs are out of scope for plan 1, per Rick's JS and TypeScript ruling.
 
 ## Written pages (added at assembly)
 
@@ -58,7 +58,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[deep-research]] — answering a question from the web and saving a markdown report. `cosa.agents.deep_research` (cli, search_cache, seed_context)
 - [[generator-sdk-clients]] — the Claude Agent SDK client classes of the podcast, presentation and deep-research agents. `cosa.agents.podcast_generator`, `cosa.agents.presentation_generator`, `cosa.agents.deep_research` (api_client)
 - [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
-- [[presentation-visual-renderers]] — phase 7: replacing each VISUAL marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
+- [[presentation-visual-renderers]] — the seventh pipeline phase, which replaces each `VISUAL` marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
 - [[podcast-generation]] — turning a research document into a two-host script and one MP3 per language. `cosa.agents.podcast_generator` (orchestrator)
 - [[fix-expediter-bfe]] — the bug-fix expediter: takes one dead queue job and tries to fix the code that killed it. `cosa.agents.bug_fix_expediter`
 - [[fix-expediter-tfe]] — the test-fix expediter: clusters one finished suite's failures, fixes them and queues a rerun. `cosa.agents.test_fix_expediter` (cluster, resume_resolver)
@@ -82,7 +82,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[db-session-and-schema]] — the Postgres engine, session manager, ORM base, boot-time Alembic upgrade and schema drift check. `cosa.rest.db` (database, auto_migrate, schema_drift)
 - [[branch-and-directory-loc-analysis]] — counting lines of code by branch change, by directory and by day. `cosa.repo` (branch_analyzer, directory_analyzer, git_loc_delta)
 - [[claude-code-dispatch]] — `ClaudeCodeDispatcher`: runs one bounded or interactive Claude Code task and returns its result. `cosa.orchestration.claude_code`
-- [[worktree-lifecycle]] — how git worktrees are made for each spawned seat and each BFE or TFE job, and removed by teardown, the reaper and the janitor. `cosa.agents.shared` (seat_teardown, worktree_reaper, worktree_refusal_ledger, worktree_straggler_tickets), `cosa.utils` (seat_worktree, worktree_artifacts)
+- [[worktree-lifecycle]] — how git worktrees are made for each spawned seat and each BFE or TFE job. Teardown, the reaper and the janitor remove them. `cosa.agents.shared` (seat_teardown, worktree_reaper, worktree_refusal_ledger, worktree_straggler_tickets), `cosa.utils` (seat_worktree, worktree_artifacts)
 - [[small-agents-core]] — seven small agents that answer one voice or text request each, inline on the queue's consumer thread. `cosa.agents` (calculator), `cosa.rest.v2`, `cosa.utils.util_code_runner`
 - [[mcp-session-spawn-and-reap]] — the four MCP tools a manager seat uses to start, list and end Claude Code seats. `lupin_mcp` (session_spawner, reap_memento, self_respin_core)
 - [[session-transcript-console]] — showing another seat's transcript as display blocks: a REST backlog plus a live WebSocket tail, admin accounts only. `cosa.rest` (cc_transcript_mapper, cc_transcript_tailer), `cosa.rest.routers` (cc_transcript, websocket)
@@ -103,10 +103,10 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
-- [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task, replaying frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
+- [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task. It replays frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
 - [[voice-persona-allocation]] — how each Claude Code session gets a named voice, the speakerphone switch beside it, and the name normalization every persona lookup shares. `cosa.rest` (voice_persona_helpers), `cosa.rest.routers` (voice_persona, speakerphone), `lupin_mcp` (persona_normalization, commons_persona_matcher, commons_llm_disambiguator)
 - [[task-store]] — the store of owed work: one row per task, decision, review request, bug or gate, with an append-only event trail, served through `/api/tasks`. `cosa.rest` (task_store_rules, task_store_owed, task_store_rejoin, task_chase_consumer, task_store_change_notifier, task_store_epic_keys, task_store_prose_refs)
-- [[v2-ask-flow]] — the v2 door onto CJ Flow: `AskFlow` takes a question or a decided command and returns one result, over `/api/v2/ask`, `ask-audio`, `transcribe`, `submit`, `resume`, `resume-job` and `agents`. `cosa.rest.v2` (flow, registry), `cosa.rest.routers` (v2_ask)
+- [[v2-ask-flow]] — the v2 door onto CJ Flow. `AskFlow` takes a question or a decided command and returns one result, over `/api/v2/ask`, `ask-audio`, `transcribe`, `submit`, `resume`, `resume-job` and `agents`. `cosa.rest.v2` (flow, registry), `cosa.rest.routers` (v2_ask)
 - [[model-server]] — the standalone FastAPI app that holds Whisper and two text encoders on one GPU, which compute containers call over HTTP. `lupin_model_server` (main)
 - [[speech-to-text-routing]] — how `SpeechToTextProvider` sends audio to in-process Whisper or to the model server, and the four routes that call it. `cosa.memory` (speech_to_text_provider), `cosa.rest.routers` (speech)
-- [[utils-config-secrets-and-vertex]] — three `cosa.utils` helpers: the API config loader, secret redaction for reports and logs, and the Vertex daily spend ceiling that no caller outside its tests uses. `cosa.utils` (config_loader, secret_redaction, vertex_spend_ceiling)
+- [[utils-config-secrets-and-vertex]] — three `cosa.utils` helpers: the API config loader, secret redaction for reports and logs, and the Vertex daily spend ceiling. No caller outside its tests uses the ceiling. `cosa.utils` (config_loader, secret_redaction, vertex_spend_ceiling)
