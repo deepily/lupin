@@ -1,4 +1,4 @@
-> Part 2 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): retired doors continued: resume, Claude Code, survivors.
+> Part 2 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): retired doors continued: resume, Claude Code, survivors.
 
 **The two resume doors retired**. Rick ruled: "build v2 resume, then retire".
 They rebuild a job from server-side state, which a `SubmitRequest` cannot express. They needed a verb of their own: `POST /api/v2/resume-job`.

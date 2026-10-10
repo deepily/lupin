@@ -1,4 +1,4 @@
-> Part 5 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 17c to 19: commons, proxy, mock job.
+> Part 5 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 17c to 19: commons, proxy, mock job.
 
 ## 17c. Inter-Session Commons (`/api/commons/*`)
 

@@ -1,4 +1,4 @@
-> Part 1 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): legend and retired queue doors.
+> Part 1 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): legend and retired queue doors.
 
 # Lupin REST API Quick Reference
 

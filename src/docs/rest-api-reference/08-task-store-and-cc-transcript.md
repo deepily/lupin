@@ -1,4 +1,4 @@
-> Part 7 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 26 and 27: task store, CC transcript.
+> Part 8 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 26 and 27: task store, CC transcript.
 
 ## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
 

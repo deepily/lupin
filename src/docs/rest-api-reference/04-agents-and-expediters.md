@@ -1,4 +1,4 @@
-> Part 4 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 8 to 17b: agents, expediters, test suite.
+> Part 4 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 8 to 17b: agents, expediters, test suite.
 
 ## 8. Embeddings (`/api/embeddings/*`)
 
