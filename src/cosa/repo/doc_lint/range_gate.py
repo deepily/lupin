@@ -244,6 +244,24 @@ def report( base, head, results ):
     return "\n".join( lines ) + "\n"
 
 
+def holder_pid( name ):
+    """
+    Read the pid out of a holder's name.
+
+    Requires:
+        - name is the name of a folder under the worktrees folder
+
+    Ensures:
+        - returns the integer in a name shaped range-gate-PID-suffix, PID being decimal digits
+        - returns None for any other name, so such a folder is treated as left behind
+
+    Raises:
+        - nothing
+    """
+    parts = name.split( "-", 3 )
+    return int( parts[ 2 ] ) if len( parts ) == 4 and parts[ 0 ] == "range" and parts[ 1 ] == "gate" and parts[ 2 ].isdigit() else None
+
+
 def sweep_stale( root, parent ):
     """
     Remove the holders that a killed run left under the worktrees folder.
@@ -252,9 +270,10 @@ def sweep_stale( root, parent ):
         - root is a git working tree; parent is the folder that holds the range-gate-* holders
 
     Ensures:
-        - a holder whose pid file names a live process is kept
-        - a holder with no readable pid file, or with the pid of a dead process, is removed with its worktree
+        - a holder whose name carries the pid of a live process is kept, from the moment the folder exists
+        - a holder whose pid is dead, or whose name carries no pid, is removed with its worktree
         - a folder whose name does not start with range-gate- is never touched
+        - stale registrations are pruned, so a holder whose tree is already gone leaves no entry
         - returns the names of the holders it removed, sorted
 
     Raises:
@@ -264,10 +283,8 @@ def sweep_stale( root, parent ):
     for name in sorted( os.listdir( parent ) ):
         holder = os.path.join( parent, name )
         if not name.startswith( "range-gate-" ) or not os.path.isdir( holder ): continue
-        try:
-            with open( os.path.join( holder, "pid" ), encoding="utf-8" ) as handle: alive = os.path.exists( f"/proc/{int( handle.read().strip() )}" )
-        except ( OSError, ValueError ): alive = False
-        if alive: continue
+        pid = holder_pid( name )
+        if pid is not None and os.path.exists( f"/proc/{pid}" ): continue
         subprocess.run( [ "git", "-C", root, "worktree", "remove", "--force", os.path.join( holder, "tree" ) ], capture_output=True )
         shutil.rmtree( holder, ignore_errors=True )
         removed.append( name )
@@ -304,6 +321,7 @@ def main( argv=None, out=None, runner=run_gate ):
         - returns 0 when every commit passes, 1 when any is refused and 2 when any could not be judged
         - returns 2 and prints the reason when the range is empty or holds a merge commit
         - a termination signal removes the worktree before the process ends
+        - the holder folder is named range-gate-PID-suffix from the moment it exists, so a sweep never takes a live run's
         - a holder left by a run that was killed outright is swept when the next run starts
 
     Raises:
@@ -320,8 +338,7 @@ def main( argv=None, out=None, runner=run_gate ):
     parent = os.path.join( os.path.dirname( common ), ".claude", "worktrees" )
     os.makedirs( parent, exist_ok=True )
     sweep_stale( args.repo_root, parent )
-    holder = tempfile.mkdtemp( prefix="range-gate-", dir=parent )
-    with open( os.path.join( holder, "pid" ), "w", encoding="utf-8" ) as handle: handle.write( str( os.getpid() ) )
+    holder = tempfile.mkdtemp( prefix=f"range-gate-{os.getpid()}-", dir=parent )
     work   = os.path.join( holder, "tree" )
     previous = signal.signal( signal.SIGTERM, _terminate )
     try:

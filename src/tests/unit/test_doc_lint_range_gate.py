@@ -319,3 +319,11 @@ def test_the_refusal_of_a_merge_range_names_the_merge_and_not_only_the_head( rep
     assert head != merge
     with pytest.raises( range_gate.RangeRefused ) as raised: range_gate.check_range( repo[ "root" ], repo[ "base" ], head, _worktree( repo, tmp_path ), _runner_for( [] ) )
     assert f"merge commit, {merge}" in str( raised.value )
+
+
+def test_the_sweep_prunes_a_registration_whose_whole_holder_folder_is_gone( repo ):
+    holder = _stale_holder( repo, f"range-gate-{os.getpid()}-gone" )
+    shutil.rmtree( holder )
+    assert "range-gate" in _git( repo[ "root" ], "worktree", "list" )
+    assert range_gate.sweep_stale( repo[ "root" ], os.path.dirname( holder ) ) == []
+    assert "range-gate" not in _git( repo[ "root" ], "worktree", "list" )
