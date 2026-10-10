@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "45f01b8f132e92ed",
+  "rules_stamp": "7720e737ebefb535",
   "files": {
     "src/cosa/repo/symindex/ts_extract.js": 2,
     "src/lupin_app/static/html/admin/js/admin-snapshots.js": 6,
@@ -33,6 +33,7 @@
     "src/lupin_app/static/js/multiplexer/console/boot.ts": 2,
     "src/lupin_app/static/js/multiplexer/console/consolePage.ts": 36,
     "src/lupin_app/static/js/multiplexer/console/consolePageUrl.ts": 32,
+    "src/lupin_app/static/js/multiplexer/docPodcast/docPodcast.ts": 8,
     "src/lupin_app/static/js/multiplexer/render/ActionRequiredRenderer.ts": 49,
     "src/lupin_app/static/js/multiplexer/render/BroadcastAckTallyRenderer.ts": 146,
     "src/lupin_app/static/js/multiplexer/render/BroadcastCardRenderer.ts": 53,
@@ -259,6 +260,7 @@
     "src/tests/unit/multiplexer/connection_state_machine.test.ts": 2,
     "src/tests/unit/multiplexer/console_page.test.ts": 16,
     "src/tests/unit/multiplexer/debug_sink_parity.test.ts": 57,
+    "src/tests/unit/multiplexer/docPodcast/doc_podcast.test.ts": 4,
     "src/tests/unit/multiplexer/epic_board_collapse.test.ts": 33,
     "src/tests/unit/multiplexer/epic_board_model.test.ts": 28,
     "src/tests/unit/multiplexer/epic_stories_store.test.ts": 43,

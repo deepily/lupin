@@ -78,6 +78,31 @@ def strip_markdown( text ):
     return HTML_COMMENT.sub( "", text )
 
 
+LINK_LABEL_REST = re.compile( r"[^\[\]\n]*\]\(([^)\s]+)" )
+
+
+def link_target_of_label( text, match ):
+    """
+    Return the target of the markdown link whose label holds a section mark.
+
+    Requires:
+        - match is a SECTION_REGEX match over text
+
+    Ensures:
+        - returns the text between the parentheses of [label](target) when the mark sits in the label
+        - returns None when the mark is outside any link label, or the label is not followed by a target
+        - the target counts in full, however long, so a long split-page path is not cut
+
+    Raises:
+        - nothing
+    """
+    line_start = text.rfind( "\n", 0, match.start() ) + 1
+    before     = text[ line_start : match.start() ]
+    if before.rfind( "[" ) == -1 or before.rfind( "[" ) < before.rfind( "]" ): return None
+    rest = LINK_LABEL_REST.match( text, match.end() )
+    return None if rest is None else rest.group( 1 )
+
+
 def is_section_ref_resolved( text, match ):
     """
     Say whether a section mark has a path beside it in the same paragraph.
@@ -88,12 +113,15 @@ def is_section_ref_resolved( text, match ):
     Ensures:
         - True when a path occurs within SECTION_PATH_LOOKBACK characters before the mark or
           SECTION_PATH_LOOKAHEAD characters after it, without crossing a blank line
+        - a mark in the label of a markdown link is resolved when the link target holds a path, however long the target
         - a hard-wrapped line break does not separate the mark from its path
         - False otherwise, which makes the section mark a bare reference
 
     Raises:
         - nothing
     """
+    target = link_target_of_label( text, match )
+    if target is not None and PATH_REGEX.search( target ) is not None: return True
     para_start = text.rfind( "\n\n", 0, match.start() ) + 1
     para_end   = text.find( "\n\n", match.end() )
     if para_end == -1: para_end = len( text )

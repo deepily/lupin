@@ -30,8 +30,8 @@ SHA256       = {
     PARTS[ 2 ]: "a9a9ffda2d41b6d892f0371ded25a694c196b2ea30582fc47ea581cef225699b",
     PARTS[ 3 ]: "bc4a8e29ce83fa366098608580c2ab2fc15f385fdca601c7362ce87fe9d525cb",
 }
-# Bare-ref findings per part read alone, measured on the fixture before the change.
-ALONE        = { PARTS[ 0 ]: 9, PARTS[ 1 ]: 3, PARTS[ 2 ]: 17, PARTS[ 3 ]: 9 }
+# Bare-ref findings per part read alone, measured on the fixture. Part 2 had 3 until a mark in a link label took its link target as the path.
+ALONE        = { PARTS[ 0 ]: 9, PARTS[ 1 ]: 1, PARTS[ 2 ]: 17, PARTS[ 3 ]: 9 }
 
 
 def _root():
@@ -83,11 +83,10 @@ def test_a_phase_label_is_resolved_by_a_heading_in_another_part():
     assert "bare reference 'Phase 3'" not in _bare( _root(), PARTS[ 0 ] )
 
 
-def test_a_section_mark_is_resolved_by_a_numbered_heading_in_a_sibling():
+def test_the_section_marks_in_part_two_link_labels_are_resolved_by_their_link_targets():
     alone = _bare( _root(), PARTS[ 1 ], with_root=False )
-    assert "section reference '§5' has no path" in alone and "section reference '§4' has no path" in alone
-    assert "section reference '§5' has no path" not in _bare( _root(), PARTS[ 1 ] )
-    assert "section reference '§4' has no path" not in _bare( _root(), PARTS[ 1 ] )
+    assert "section reference '\u00a75' has no path" not in alone and "section reference '\u00a74' has no path" not in alone
+    assert "\u00a75](../shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#" in _read( _root(), PARTS[ 1 ] )
 
 
 PAGE_WITH_PARTS = "# Foo\n\nContents.\n"
