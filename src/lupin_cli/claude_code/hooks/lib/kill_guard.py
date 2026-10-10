@@ -130,6 +130,9 @@ _PREFIXES = rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*"
 
 # Where a command can start: a line, a separator, a group, a keyword, a negation or a case arm.
 _CMD_START = r"(?:^|[;&|(`{)]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
+# The same without `)`. The hatch must sit in the assignment prefix of the command it overrides, and a `)`
+# also closes `$(pgrep -f T)`, after which a trailing word is an argument, not a prefix.
+_HATCH_START = r"(?:^|[;&|(`{]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
 
 
 # A signal given as an option: `-9`, `-KILL`, `-SIGTERM`. The names come from the
@@ -685,7 +688,7 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "
 # way the documented instruction ever worked. stash_guard learned this same lesson the
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
-    rf"{_CMD_START}"
+    rf"{_HATCH_START}"
     rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*?"
     rf"{_WS}*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )

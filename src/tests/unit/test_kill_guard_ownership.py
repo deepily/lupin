@@ -1627,6 +1627,35 @@ def test_a_hatch_that_is_only_mentioned_does_not_open_the_guard( worktree, elsew
     assert kill_guard._hatch_in_prefix( "LUPIN_ALLOW_UNSCOPED_KILL=1 pkill -f TOK" ) is True
 
 
+_HATCH = "LUPIN_ALLOW_UNSCOPED_KILL=1"
+
+
+@pytest.mark.parametrize( "command", [
+    f"kill $(pgrep -f TOK) {_HATCH}",
+    f"kill $(pgrep -f TOK) {_HATCH} pkill -f TOK",
+    f"pkill -f TOK {_HATCH}",
+    f"echo {_HATCH}; pkill -f TOK",
+    f"echo $(true) {_HATCH}; pkill -f TOK",
+])
+def test_the_hatch_counts_only_in_the_assignment_prefix_of_the_command_it_overrides( command, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert kill_guard._hatch_in_prefix( command ) is False
+    assert _guard( command, [ 700 ], proc, worktree ) is not None
+
+
+@pytest.mark.parametrize( "command", [
+    f"{_HATCH} pkill -f TOK",
+    f"sudo -u root env {_HATCH} pkill -f TOK",
+    f"true && {_HATCH} pkill -f TOK",
+    f"if true; then {_HATCH} pkill -f TOK; fi",
+    f"! {_HATCH} pkill -f TOK",
+])
+def test_the_hatch_in_a_real_prefix_is_honoured( command, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert kill_guard._hatch_in_prefix( command ) is True
+    assert _guard( command, [ 700 ], proc, worktree ) is None
+
+
 def test_a_mention_is_skipped_on_the_claude_only_path_and_for_a_kill_substitution():
     seat = lambda pid: CLAUDE_COMM
     for command in ( "echo 'then pkill -f foo'", "echo 'x; kill $(pgrep foo)'" ):
