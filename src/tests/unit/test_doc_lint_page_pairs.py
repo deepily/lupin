@@ -148,3 +148,57 @@ def test_main_writes_the_pairs_file_and_prints_the_counts( repo, tmp_path_factor
     assert rc == 0
     assert json.loads( out.read_text() )[ 0 ][ "id" ] == "page.md#000"
     assert "1 pages, 1 pairs" in capsys.readouterr().out
+
+
+def _section( tag, words_in_section ):
+    """A section whose word count, heading included, is exactly words_in_section."""
+    return f"## {tag}\n{_words( words_in_section - 2, tag )}\n"
+
+
+def test_sections_summing_to_the_target_stay_one_chunk_and_one_word_over_splits_them():
+    even = _section( "a", 300 ) + _section( "b", 300 )
+    over = _section( "a", 300 ) + _section( "b", 301 )
+    assert len( pp.chunk_text( even, target_words=600 ) ) == 1
+    assert len( pp.chunk_text( over, target_words=600 ) ) == 2
+
+
+def test_the_default_target_is_600_words_for_chunks_and_for_pairs():
+    assert pp.DEFAULT_TARGET_WORDS == 600
+    even = _section( "a", 300 ) + _section( "b", 300 )
+    over = _section( "a", 300 ) + _section( "b", 301 )
+    assert len( pp.chunk_text( even ) ) == 1 and len( pp.chunk_text( over ) ) == 2
+    assert len( pp.page_pairs( "p.md", even, "n" ) ) == 1 and len( pp.page_pairs( "p.md", over, "n" ) ) == 2
+
+
+def test_only_second_and_third_level_headings_start_a_section_even_after_the_first_line():
+    text = "intro\n# One\nbody\n#### Four\nx\n## Two\ny\n### Three\nz\n"
+    sections = pp.split_sections( text )
+    assert [ s.splitlines()[ 0 ] for s in sections ] == [ "intro", "## Two", "### Three" ]
+    assert "".join( sections ) == text
+
+
+def test_a_long_new_text_reaches_every_pair_whole():
+    new = "\n".join( f"line {i} of the new page" for i in range( 400 ) )
+    old = _section( "a", 400 ) + _section( "b", 400 )
+    pairs = pp.page_pairs( "p.md", old, new, target_words=500 )
+    assert len( pairs ) == 2 and all( p[ "new" ] == new for p in pairs )
+    assert len( new ) > 5000
+
+
+def test_a_long_new_file_is_read_whole_by_build_pairs( repo ):
+    root, old_sha = repo
+    long_text = "".join( f"sentence number {i} of a long part.\n" for i in range( 500 ) )
+    ( root / "part.md" ).write_text( long_text )
+    _git( root, "add", "part.md" )
+    _git( root, "commit", "-q", "-m", "long part" )
+    manifest = [ { "page": "page.md", "old_ref": old_sha, "old_path": "page.md", "new_ref": "HEAD", "new_paths": [ "page.md", "part.md" ] } ]
+    pairs = pp.build_pairs( str( root ), manifest, target_words=600 )
+    assert long_text.rstrip() in pairs[ 0 ][ "new" ]
+
+
+def test_a_byte_that_is_not_utf8_is_replaced_not_raised( repo ):
+    root, _ = repo
+    ( root / "latin.md" ).write_bytes( b"caf\xe9 and more\n" )
+    _git( root, "add", "latin.md" )
+    _git( root, "commit", "-q", "-m", "latin" )
+    assert pp.read_at( str( root ), "HEAD", "latin.md" ) == "caf\ufffd and more\n"
