@@ -326,3 +326,11 @@ def test_running_the_module_exits_with_main_s_code( repo, monkeypatch, capsys ):
         runpy.run_module( "cosa.repo.doc_lint.split_check", run_name="__main__" )
     assert raised.value.code == 2
     assert "REFUSED" in capsys.readouterr().out
+
+
+def test_a_part_that_holds_the_moved_line_and_an_unmoved_copy_fails_on_unmoved_alone():
+    old    = "See [x](a.md) here.\nTail line.\n"
+    result = sc.compare( old, "# idx\n", { "p1": "See [x](../a.md) here.\nTail line.\nSee [x](a.md) here.\n" } )
+    assert result[ "dropped" ] == [] and result[ "doubled" ] == []
+    assert result[ "unmoved" ] == [ { "part": "p1", "line_number": 3, "line": "See [x](a.md) here." } ]
+    assert result[ "pass" ] is False
