@@ -229,3 +229,18 @@ def test_a_clean_report_over_enough_needs_has_an_upper_bound_under_the_line_and_
 def test_a_command_with_no_root_given_and_none_in_the_environment_is_refused( setup, monkeypatch ):
     monkeypatch.delenv( "LUPIN_ROOT", raising=False )
     with pytest.raises( rr.RunnerRefused, match = "LUPIN_ROOT" ): frun.main( [ "--data", str( setup.data ), "--ledger", str( setup.ledger ), "report", "--needs", str( setup.needs ), "--needs-sha", setup.sha ] )
+
+
+def test_every_ask_sends_the_excluded_symbol_of_its_need_to_the_route( monkeypatch ):
+    seen = []
+    monkeypatch.setattr( rf, "ask_repeat", lambda ctx, need, member, run_index, **kw: seen.append( ( need, member, run_index ) ) or { "status": "failed" } )
+    asks = frun.repeat_asks( 2, "full" )
+    for name, ask in asks.items(): ask( None, { "need": "a need", "exclude": "cosa.wide.f001" } )
+    assert seen == [ ( "a need", "cosa.wide.f001", 1 ), ( "a need", "cosa.wide.f001", 2 ) ]
+
+
+def test_the_report_leaves_out_a_need_with_fewer_complete_records_than_repeats( tmp_path ):
+    items = frun.load_flip_needs( *( lambda s: ( s.needs, s.sha ) )( Setup( tmp_path ) ) )
+    runs  = [ r for r in steady( items ) if not ( r[ "member" ] == "n03" and r[ "question" ] in ( "r4", "r5" ) ) ]
+    text  = "\n".join( frun.report_lines( runs, items, 5 ) )
+    assert "left out as incomplete: n03" in text and "0 of 29 needs flipped" in text
