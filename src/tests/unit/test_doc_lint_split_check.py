@@ -86,14 +86,14 @@ PART_B = """Part B of the page.
 
 ## Beta
 
-Beta prose, back to [Alpha](#alpha).
+Beta prose, back to [Alpha](a.md#alpha).
 
 ---
 
 Last line.
 """
 
-NORMAL_KEYS = { "dropped", "doubled", "unmoved", "index_added", "index_repeats", "parts", "structure", "unresolved_anchors", "max_added_exceeded", "pass", "old", "index", "refused", "message" }
+NORMAL_KEYS = { "dropped", "doubled", "unmoved", "dangling", "index_added", "index_repeats", "parts", "structure", "unresolved_anchors", "max_added_exceeded", "pass", "old", "index", "refused", "message" }
 
 
 def _compare( index=INDEX, a=PART_A, b=PART_B, **kwargs ):
@@ -158,7 +158,7 @@ def test_any_other_change_to_a_line_is_a_drop_and_an_addition():
     result = _compare( b=PART_B.replace( "Beta prose, back", "Beta prose, going back" ) )
     assert result[ "pass" ] is False
     assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "Beta prose, back to [Alpha](#alpha)." ]
-    assert [ line for _, line in result[ "parts" ][ "b.md" ][ "added" ] ] == [ "Part B of the page.", "Beta prose, going back to [Alpha](#alpha)." ]
+    assert [ line for _, line in result[ "parts" ][ "b.md" ][ "added" ] ] == [ "Part B of the page.", "Beta prose, going back to [Alpha](a.md#alpha)." ]
 
 
 def test_a_line_that_changed_inside_a_fence_or_a_code_span_is_not_excused_by_the_prefix_rule():
@@ -203,10 +203,48 @@ def test_structure_counts_ignore_separator_rules_and_fenced_text():
     assert result[ "structure" ][ "parts" ][ "headings" ] == 3 and result[ "structure" ][ "index" ][ "headings" ] == 1 and result[ "structure" ][ "new_total" ][ "headings" ] == 4
 
 
-def test_an_in_page_link_whose_heading_is_in_another_part_is_listed():
-    result = _compare( a=PART_A.replace( "[top](#page-title)", "[top](#page-title) and [Beta](#beta)" ) )
-    assert result[ "unresolved_anchors" ] == [ { "part": "a.md", "anchor": "beta" }, { "part": "b.md", "anchor": "alpha" } ]
-    assert sc.github_slug( "`Foo` Bar: the (baz)!" ) == "foo-bar-the-baz"
+def test_an_in_page_link_to_a_heading_that_moved_may_become_a_link_to_that_part_and_is_listed():
+    result = _compare()
+    assert result[ "pass" ] is True and result[ "dangling" ] == []
+    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [ { "line_number": 5, "old": "#alpha", "new": "a.md#alpha" } ]
+    assert result[ "parts" ][ "a.md" ][ "repointed" ] == []
+
+
+def test_an_in_page_link_left_pointing_at_a_heading_now_in_another_part_is_dangling_and_fails_by_name():
+    result = _compare( b=PART_B.replace( "[Alpha](a.md#alpha)", "[Alpha](#alpha)" ) )
+    assert result[ "pass" ] is False
+    assert result[ "dropped" ] == [] and result[ "doubled" ] == [] and result[ "unmoved" ] == []
+    assert result[ "dangling" ] == [ { "part": "b.md", "line_number": 5, "anchor": "alpha", "should_be": "a.md#alpha" } ]
+    assert "DANGLING in-page link in b.md L5 (#alpha is in a.md)" in "\n".join( sc.format_report( { **result, "old": "r:p", "index": "i", "refused": None, "message": "x" } ) )
+
+
+def test_a_link_to_the_wrong_part_for_the_heading_is_a_changed_line_not_a_repoint():
+    result = _compare( b=PART_B.replace( "[Alpha](a.md#alpha)", "[Alpha](b.md#alpha)" ) )
+    assert result[ "pass" ] is False
+    assert [ d[ "line" ] for d in result[ "dropped" ] ] == [ "Beta prose, back to [Alpha](#alpha)." ]
+
+
+def test_an_in_page_link_with_the_heading_in_its_own_part_stays_and_one_with_no_heading_anywhere_is_only_listed():
+    old    = "## One\n\n[self](#one) and [gone](#nowhere)\n"
+    result = sc.compare( old, "# idx\n", { "p.md": old } )
+    assert result[ "pass" ] is True and result[ "dangling" ] == []
+    assert result[ "unresolved_anchors" ] == [ { "part": "p.md", "anchor": "nowhere" } ]
+
+
+def test_a_repointed_link_inside_a_code_span_or_a_fence_is_not_excused():
+    old    = "## One\n\n`[x](#two)` is code.\n\n```\n[y](#two)\n```\n\n## Two\n"
+    parts  = { "a.md": "## One\n\n`[x](#two)` is code.\n\n```\n[y](#two)\n```\n", "b.md": "## Two\n" }
+    assert sc.compare( old, "# idx\n", parts )[ "pass" ] is True
+    moved  = { "a.md": parts[ "a.md" ].replace( "`[x](#two)`", "`[x](b.md#two)`" ), "b.md": "## Two\n" }
+    assert sc.compare( old, "# idx\n", moved )[ "pass" ] is False
+
+
+def test_a_second_heading_with_the_same_text_has_the_suffixed_anchor():
+    old    = "## Notes\n\nfirst\n\n## Notes\n\nsecond, see [first](#notes) and [again](#notes-1)\n"
+    parts  = { "a.md": "## Notes\n\nfirst\n", "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](#notes-1)\n" }
+    result = sc.compare( old, "# idx\n", parts )
+    assert result[ "pass" ] is True and result[ "dangling" ] == []
+    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [ { "line_number": 7, "old": "#notes", "new": "a.md#notes" } ]
 
 
 def test_non_blank_lines_drop_trailing_white_space_and_blank_lines():
