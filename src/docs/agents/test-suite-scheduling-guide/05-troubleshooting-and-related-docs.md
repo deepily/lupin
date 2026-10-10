@@ -53,7 +53,7 @@ or one of the watchdog constructors raised. Check the FastAPI startup log.
 **Check 4**: Is the metadata recursion guard tripped? Check
 `completed_job.metadata.get("triggered_by_tfe")` — if set, the watchdog skips.
 
-See also [TFE guide section 8 troubleshooting](../test-fix-expediter-guide.md#8-troubleshooting).
+See also [TFE guide section 8 troubleshooting](../test-fix-expediter-guide/04-troubleshooting-and-code-map.md#8-troubleshooting).
 
 ### Overlapping scheduled runs
 

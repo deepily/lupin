@@ -46,7 +46,7 @@ However, there are indirect costs:
 2. **TFE auto-fix** (if enabled). When a test suite fails and TFE takes over,
    TFE's diagnose, propose and fix phases consume Claude API budget.
    The cap is `test fix expediter cost cap usd` (default $15 per TFE run). See the
-   [TFE guide section 8 Cost Model](../test-fix-expediter-guide.md#6-ini-reference).
+   [TFE guide section 8 Cost Model](../test-fix-expediter-guide/03-watchdog-ini-and-enabling.md#6-ini-reference).
 3. **Validation rerun** triggered by TFE's rerun-validation phase. It submits a *new*
    TestSuiteJob targeting the affected suites. That job has the same cost
    profile (nearly $0 direct, risk of triggering TFE again if clusters remain

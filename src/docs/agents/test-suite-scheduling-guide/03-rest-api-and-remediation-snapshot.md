@@ -179,6 +179,6 @@ snapshot file path.
 
 TFE's `snapshot_loader.load_from_artifacts()` then re-reads the snapshot, validates
 the schema version, strips PII from tracebacks, and builds a `TestRemediationContext`
-that the cluster phase consumes. See the [TFE guide cluster section](../test-fix-expediter-guide.md#phase-0-cluster).
+that the cluster phase consumes. See the [TFE guide cluster section](../test-fix-expediter-guide/02-six-phase-pipeline.md#phase-0-cluster).
 
 ---
