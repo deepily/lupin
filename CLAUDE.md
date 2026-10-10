@@ -67,6 +67,7 @@ To run a job later, submit through `/api/v2/submit` with the command `agent rout
 - Before clicking Resume on a TFE/BFE stalled job, or before scheduling a live E2E run on `:8000`, run `src/scripts/preflight-test-container.sh`.
 - Server lifecycle (when a change lands, when to bounce, which command): skill `server-lifecycle`.
 - `uvicorn --reload` is **off by default on `:7999`** (opt in with `LUPIN_RELOAD`). **A `.py` change does not go live on its own; both servers need a bounce.** Anybody may bounce `:7999`, within reason, with `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner), which warns the fleet first and polls `/health`.
+- **Database grants after a bounce**: `bounce-dev-server.sh` and `preflight-test-container.sh` run `src/scripts/lib/check-db-grants.sh`, which checks that the three database roles hold every grant in `cosa.utils.db_grants`. A red answer is a warning. `LUPIN_DB_GRANTS_REPAIR=on` makes the helper run `db_roles --grants-only --apply` once and check again. It stays off until the one-time apply has been run by hand.
 - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>`; a restart reuses the old values and your change silently does not land.
 
 ### Git
