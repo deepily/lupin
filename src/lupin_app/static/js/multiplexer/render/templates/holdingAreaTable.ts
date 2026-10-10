@@ -128,6 +128,7 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
     const badge = document.createElement( "span" );
     badge.className     = "task-request-badge holding-area-group-request-badge";
     badge.dataset.filer = group.filer;
+    badge.setAttribute( "role", "img" );
     badge.setAttribute( "aria-label", groupRequestBadgeLabel( group.tasks ) );
     badge.textContent   = requestText;
     header.appendChild( badge );

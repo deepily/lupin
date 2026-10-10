@@ -329,6 +329,7 @@ test( "a persona with one pending request carries a '1 request' badge on its COL
   assert.ok( badge, "no request badge on the group header" );
   assert.equal( badge.textContent, "1 request" );
   assert.equal( badge.dataset.filer, "Mr Radio" );
+  assert.equal( badge.getAttribute( "role" ), "img", "a label on a bare span is not announced; the role is what makes it a name" );
   assert.equal( badge.getAttribute( "aria-label" ), "1 pending request", "the badge needs an accessible name that joins it to what it counts" );
   assert.ok( badge.classList.contains( "task-request-badge" ), "it must reuse the pane badge's look" );
   assert.ok( el.classList.contains( "collapsed" ), "the badge must be there with the group closed" );

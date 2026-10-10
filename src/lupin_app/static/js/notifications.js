@@ -15195,7 +15195,7 @@ class NotificationsUI {
         const requestText   = sharedRequest ? sharedRequest.groupRequestBadgeText( tasks ) : "";
         const requestLabel  = sharedRequest ? sharedRequest.groupRequestBadgeLabel( tasks ) : "";
         const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge"`
-            + ` aria-label="${this.escapeHtml( requestLabel )}">${this.escapeHtml( requestText )}</span>`;
+            + ` role="img" aria-label="${this.escapeHtml( requestLabel )}">${this.escapeHtml( requestText )}</span>`;
 
         return `
             <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">

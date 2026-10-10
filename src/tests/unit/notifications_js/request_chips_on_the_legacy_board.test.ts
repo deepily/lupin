@@ -667,6 +667,7 @@ test( "each persona group shows its own pending-request count on the closed head
   ] } );
 
   assert.equal( groupBadge( "Krishna" )!.textContent, "2 requests" );
+  assert.equal( groupBadge( "Krishna" )!.getAttribute( "role" ), "img", "a label on a bare span is not announced" );
   assert.equal( groupBadge( "Krishna" )!.getAttribute( "aria-label" ), "2 pending requests" );
   assert.equal( groupBadge( "Mr Radio" )!.textContent, "1 request" );
   assert.equal( groupBadge( "Mr Radio" )!.getAttribute( "aria-label" ), "1 pending request" );
