@@ -770,6 +770,28 @@ def _skeleton_crew_off_file( tmp_path_factory ):
     return str( switch_file )
 
 
+@pytest.fixture( scope="session" )
+def _config_backup_folder( tmp_path_factory ):
+    """
+    One folder for the whole run that holds the configuration write lock and backup copies.
+
+    Ensures:
+        - lives in a session temp folder, so no test writes under the live data root
+    """
+    return str( tmp_path_factory.mktemp( "config-backups" ) )
+
+
+@pytest.fixture( autouse=True )
+def _isolate_config_backup_folder( _config_backup_folder, monkeypatch ):
+    """
+    Point the configuration writers' lock and backup folder at the run's own folder.
+
+    Ensures:
+        - during any test, a configuration write never touches the live data root
+    """
+    monkeypatch.setenv( "LUPIN_CONFIG_BACKUP_DIR", _config_backup_folder )
+
+
 @pytest.fixture( autouse=True )
 def _isolate_skeleton_crew_switch( _skeleton_crew_off_file, monkeypatch ):
     """
