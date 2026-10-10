@@ -27,7 +27,7 @@ The podcast, presentation and deep-research agents each have one client class th
 
 ## Invariants
 - `max_tokens` is accepted and ignored. `temperature` is turned into a sentence appended to the system prompt. In podcast and presentation, 0.75 and above reads creative and 0.55 and below precise. In research, the cut-offs are 0.9 and above, and 0.5 and below. It does not change sampling.
-- A call with no tools uses permission mode `"default"`. In `"plan"` mode the model writes a plan for the output and the JSON parser then fails. This happened on 4 Aug 2026 to a podcast job, `pg-efc6b2c8`, and to a presentation job, `pr-62254a7f`. Only research calls that have tools use `"plan"`.
+- A call with no tools uses permission mode `"default"`. In `"plan"` mode the model writes a plan for the output and the JSON parser then fails. This happened on 4 Aug 2026 to a podcast job, `pg-efc6b2c8`, and to a presentation job. Only research calls that have tools use `"plan"`.
 - `call_with_json_output` raises `ValueError` when no JSON object can be recovered, and never returns a default. Podcast and presentation use `recover_json_object` ([[xml-io-models]]); research has its own `extract_json_object`.
 - Construction raises `ImportError` if `claude_agent_sdk` is missing. `close()` does nothing.
 - `sdk_cost_usd` is the SDK's telemetry, covered by the plan; the token prices in `CostEstimate` are approximate.
