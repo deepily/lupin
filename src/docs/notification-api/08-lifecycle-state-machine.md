@@ -194,7 +194,7 @@ Warning: **there is no `/reattach` route, so do not go looking for one**.
 Verified against the live app's OpenAPI: `reattach` appears in **zero** paths,
 with `/api/notify/response` present as the positive control proving the lookup
 reaches. Re-attachment is reachable **only** through the notify POST's
-idempotency branch. That is the specified behaviour, not an omission.
+idempotency branch. That is by choice, not an omission.
 
 Warning: **this is a workaround a caller has to know to make, not a fix**. The
 beacon still lies about when the call finished; re-POSTing is how you recover
