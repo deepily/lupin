@@ -364,7 +364,7 @@ A read-only live window onto what a Claude Code seat is printing. The source is 
 1. **`cc_session_id` is the seat's `stable_session_id`** — the full id that survives a `/clear`. Never the post-clear id, and never the 8-character form the fleet uses elsewhere (`sender_id`'s `#<8hex>` suffix, a DM's `recipient_session_hash8`). Three id widths circulate in this fleet; a silent mismatch shows up as a roster row that cannot be watched.
 2. **`offset` is the sequence number**. It is a byte offset into the source file. There is no separate `seq`, and `next_offset` always lands at the end of a **complete** line.
 3. **`file_epoch` scopes every offset**. It names the transcript file. A `/clear` **swaps the path** rather than shrinking the file. So the epoch — not a shrink — is what tells a client its offset is void.
-4. **Admin only**, enforced on **both** surfaces: the WS verb checks `websocket_manager.session_is_admin[ session_id ]`, and the REST backlog uses `require_admin`. Two different gates; both are essential. No redaction in v1 — the stream carries whatever the seat read, including file contents.
+4. **Admin only**, enforced on **both** surfaces: the WS verb checks `websocket_manager.session_is_admin[ session_id ]`, and the REST backlog uses `require_admin`. Two different gates; both are load-bearing. No redaction in v1 — the stream carries whatever the seat read, including file contents.
 
 ### `cc_transcript_watch` (Client → Server)
 
@@ -475,7 +475,7 @@ A **real idle seat** is not refused: its transcript exists, so it resolves and r
 **Why a `/clear` is a path swap and not a shrink**. `register_session.py` runs on every SessionStart, and `/clear` fires SessionStart.
 The hook rewrites the bridge with the **new** `transcript_path` while **preserving** `stable_session_id`. The old JSONL does not shrink; it simply stops growing while a different file appears elsewhere. So the tailer **re-resolves the bridge on every poll, and a changed `transcript_path` is the primary `/clear` detector**. A tailer watching only for a shrink sits on the dead file forever.
 There is no epoch bump and no state frame, and the pane silently freezes at the moment of the clear.
-That is the failure `file_epoch` exists to prevent. The shrink path stays as the **secondary** detector, for genuine in-place truncation.
+That is the precise failure `file_epoch` exists to prevent. The shrink path stays as the **secondary** detector, for genuine in-place truncation.
 
 ### REST companion
 

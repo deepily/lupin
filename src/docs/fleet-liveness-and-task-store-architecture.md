@@ -175,7 +175,7 @@ A persistent block therefore cc's the manager at most once per window.
 A genuinely-new block (different `blocked_item`) still announces once.
 The arbiter is a **headless observer with no DM inbox**.
 The canonical channel for a chase-ack back to the arbiter is a **commons `system-events` post**, not a DM reply.
-No inbound inbox is added to the observe-only service.
+Ratified: no inbound inbox is added to the observe-only service.
 
 **Known gaps (follow-ups)**: the manager tap-ACK (600s) is tighter than any practical management loop.
 Neither tap-ACK nor whole-fleet-stall is **blocked-on-user / done-aware**.
@@ -196,7 +196,7 @@ Examples are `edges=1, pings_fired=0, taps_fired=1`, or `arbiter_stuck_bridge_ve
 
 **Rule for new gates**: when adding a correctness gate to a consumer of a fleet-view signal, enumerate that signal's other consumers.
 Grep the producer's field name to find them.
-Then either wire the gate uniformly or document per consumer why not.
+Then either wire the gate uniformly or document per-consumer why not.
 
 Recovery-outcome membership rule: a recovery outcome is a liveness beacon **the session itself emits**.
 Arbiter-side markers never qualify (`fleet_data_model.py`, `RECOVERY_OUTCOMES`).
