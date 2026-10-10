@@ -16,6 +16,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from cosa.rest.auth_middleware import require_admin
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers import arbiter
 from lupin_mcp import fleet_cap_admission as fca
@@ -72,6 +73,7 @@ def test_the_slider_over_ceiling_refusal_does_not_coach_raising_the_ceiling( mon
     app = FastAPI()
     app.include_router( arbiter.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    app.dependency_overrides[ require_admin ] = lambda: { "email": "rick@example.com" }
 
     response = TestClient( app ).put( "/api/arbiter/fleet-size-cap", json={ "cap": 42 } )
     assert response.status_code == 422

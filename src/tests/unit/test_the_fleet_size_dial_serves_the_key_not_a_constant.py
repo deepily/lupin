@@ -38,6 +38,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest.routers import arbiter
+from cosa.rest.auth_middleware import require_admin
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 
@@ -71,6 +72,7 @@ def client( monkeypatch ):
     app = FastAPI()
     app.include_router( arbiter.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    app.dependency_overrides[ require_admin ] = lambda: { "email": "rick@example.com" }
     return TestClient( app )
 
 

@@ -17,9 +17,9 @@ JWT, the canonical machine-or-human credential):
       persona-keyed budget-headroom map.
     - GET  /api/arbiter/fleet-size-cap — the fleet-size dial: the enforced cap, the
       configured ceiling, and the live manager/worker split occupying it.
-    - PUT  /api/arbiter/fleet-size-cap — set the cap. It writes through to the
-      configuration file and returns what it re-read from disk, never an echo of the
-      request, because the values are serialized and reused the next time.
+    - PUT  /api/arbiter/fleet-size-cap — set the cap. Administrator login only. It writes
+      through to the configuration file. It returns what it re-read from disk, never an echo
+      of the request, because the values are serialized and reused the next time.
     - GET  /api/arbiter/fleet-snapshot — legacy: read the cached snapshot.
     - POST /api/arbiter/fleet-snapshot — legacy: the in-process arbiter pushes its latest
       snapshot here, which updates the server singleton directly.
@@ -364,23 +364,45 @@ def get_fleet_size_cap(
     return _fleet_size_cap_payload()
 
 
+async def refuse_api_key_cap_writer(
+    x_api_key     : Annotated[ Optional[ str ], Header() ] = None,
+    authorization : Annotated[ Optional[ str ], Header() ] = None
+) -> None:
+    """
+    Turn away a caller that presents only an API key, before the admin check runs.
+
+    Ensures:
+        - raises 403 when X-API-Key is present and Authorization is not, which is how a
+          Claude session calls. A manager's own key therefore cannot set the cap
+        - otherwise returns None, and the admin check decides
+    """
+    if x_api_key and not authorization:
+        raise HTTPException(
+            status_code = 403,
+            detail      = "Only an administrator may change the fleet cap."
+        )
+
+
 @router.put(
     "/arbiter/fleet-size-cap",
-    summary     = "Set the fleet-size cap — writes through to configuration and persists",
+    summary     = "Admin: set the fleet-size cap — writes through to configuration and persists",
     description = "Writes `cc session fleet size cap` to the configuration FILE and "
                   "returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a "
                   "value outside 1..`cc session fleet size cap maximum`. "
-                  "Auth: X-API-Key or Bearer JWT — the same guard as the GET."
+                  "Admin login only: an API-key caller is refused with 403 and nothing "
+                  "changes. The GET stays open to an API key or a JWT."
 )
 def put_fleet_size_cap(
     body                  : FleetSizeCapIn,
+    _no_key               : Annotated[ None, Depends( refuse_api_key_cap_writer ) ],
+    user                  : Annotated[ Dict, Depends( require_admin ) ],
     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
     """
     Persist the operator's new fleet cap and report what the file now says.
 
     Requires:
-        - authenticated caller (X-API-Key or Bearer JWT)
+        - an administrator login (403 for an API key alone or a non-admin user)
         - body.cap >= 1 (enforced by the model, not here)
 
     Ensures:
