@@ -1,6 +1,6 @@
 # Decision records
 
-Each file here records one decision that is still in force, with its source document, who decided it as the source states, what was left open, and where it lives in the tree. A record is short; the source document keeps the argument.
+Each file here records one decision that is still in force. It gives the source document, who decided as the source states, what was left open, and where it lives in the tree. A record is short, and the source document keeps the argument.
 
 A record names a decision as Rick's only when its source says so. Where the source does not name who ruled, the record says that.
 
