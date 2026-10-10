@@ -11,7 +11,7 @@ pins:
   - cosa.repo.symindex.spec.spec_for@dcc9afbd88
   - cosa.repo.symindex.paths.default_out_dir@f298ce42ab
   - cosa.repo.symindex.wiki_lint.queue@e0e0d92208
-  - lupin_mcp.reuse_tools.prepare@f9dcbbdae1
+  - lupin_mcp.reuse_tools.prepare@cb63b067e8
 ---
 # Symbol index
 
