@@ -5,7 +5,7 @@ pins:
   - cosa.agents.presentation_generator.job.PresentationGeneratorJob@4b5a46a0ef
   - cosa.agents.presentation_generator.job.resolve_source_path@f8ce01e248
   - cosa.agents.presentation_generator.job.source_path_is_inside_the_project@8c961318e6
-  - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent@da1062acda
+  - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent@e2694fb0dd
   - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent.do_all_async@3a74dac461
   - cosa.agents.presentation_generator.orchestrator.PresentationOrchestratorAgent.render_from_yaml_async@ec3c03c31d
   - cosa.agents.presentation_generator.orchestrator.VoiceGateNotAnsweredError@610a429f17
@@ -26,7 +26,7 @@ pins:
 
 ## Invariants
 - The job refuses a `source_path` that resolves outside the project root (`ValueError` in `__init__`). A leading slash means project-relative, so `/etc/passwd` becomes `<root>/etc/passwd`.
-- A gate that hears nothing within `review_timeout_seconds` (600 by default), or whose ask cannot be delivered or fails, continues as "Approve". `present_choices` returns the declared default, logged as such. An answer payload with no answer for the gate's header, or any other exception inside the gate, raises `VoiceGateNotAnsweredError` and fails the job.
+- A gate that hears nothing within `review_timeout_seconds` (600 by default), or whose ask cannot be delivered or fails, continues as "Approve". `present_choices` returns the declared default, logged as such. An answer payload with no answer for the gate's header, or any other exception inside the gate, raises `VoiceGateNotAnsweredError` and fails the job. A failed re-analysis at gate 1 is the exception: it fails the job with its own error type and message.
 - An empty result from analyze, outline or elaborate raises `ValueError` and fails the job.
 - Above `LARGE_DECK_CHUNK_THRESHOLD` (20) slides, elaboration runs in batches. On 5 Aug 2026, decks of 40 and 60 slides came back as valid JSON with zero slides.
 - The `.pptx` export is not fatal: if it fails or `pptx_export_enabled` is off, the YAML and Marp files are still delivered.
