@@ -41,6 +41,7 @@ This page is an index. The reference itself is in the parts below, in document o
 - [25. FCM Wake Push (`/api/fcm/*`)](rest-api-reference/06-files-websockets-pages-push.md#25-fcm-wake-push-apifcm)
 - [25a. Heartbeat Stop Poke Switch (`/api/heartbeat/*`)](rest-api-reference/06-files-websockets-pages-push.md#25a-heartbeat-stop-poke-switch-apiheartbeat)
 - [25b. Podcast Proxy (`/api/podcast-proxy/*`)](rest-api-reference/06-files-websockets-pages-push.md#25b-podcast-proxy-apipodcast-proxy)
+- [25c. Skeleton Crew Switch (`/api/arbiter/*`)](rest-api-reference/06-files-websockets-pages-push.md#25c-skeleton-crew-switch-apiarbiter)
 - [26. Task Store — Promote/Demote Requests (`/api/tasks/*`)](rest-api-reference/07-task-store-and-cc-transcript.md#26-task-store--promotedemote-requests-apitasks)
 - [27. CC Transcript Console (`/api/cc-transcript/*`)](rest-api-reference/07-task-store-and-cc-transcript.md#27-cc-transcript-console-apicc-transcript)
 - [Job ID Prefixes](rest-api-reference/08-job-ids-and-cross-reference.md#job-id-prefixes)
@@ -55,6 +56,6 @@ This page is an index. The reference itself is in the parts below, in document o
 | [03-core-routes.md](rest-api-reference/03-core-routes.md) | routes 1 to 7: auth, admin, system, queue, notify |
 | [04-agents-and-expediters.md](rest-api-reference/04-agents-and-expediters.md) | routes 8 to 17b: agents, expediters, test suite |
 | [05-commons-proxy-mock-job.md](rest-api-reference/05-commons-proxy-mock-job.md) | routes 17c to 19: commons, proxy, mock job |
-| [06-files-websockets-pages-push.md](rest-api-reference/06-files-websockets-pages-push.md) | routes 20 to 25b: files, WebSockets, pages, push |
+| [06-files-websockets-pages-push.md](rest-api-reference/06-files-websockets-pages-push.md) | routes 20 to 25c: files, WebSockets, pages, push |
 | [07-task-store-and-cc-transcript.md](rest-api-reference/07-task-store-and-cc-transcript.md) | routes 26 and 27: task store, CC transcript |
 | [08-job-ids-and-cross-reference.md](rest-api-reference/08-job-ids-and-cross-reference.md) | job id prefixes and cross-reference |

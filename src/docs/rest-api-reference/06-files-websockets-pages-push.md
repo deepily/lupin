@@ -1,4 +1,4 @@
-> Part 6 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 20 to 25b: files, WebSockets, pages, push.
+> Part 6 of 8 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 20 to 25c: files, WebSockets, pages, push.
 
 ## 20. I/O Files (`/api/io/*`)
 
@@ -94,8 +94,8 @@ A flip therefore takes effect on each seat's next stop, with no restart.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/heartbeat/poke-mute` | API key or JWT | Read the switch: `{ muted, set_by, set_at }`. A missing or unreadable switch file reads as not muted. |
-| PUT | `/api/heartbeat/poke-mute` | Admin JWT | Body `{ muted }` (a JSON boolean, else 422). Returns the state as read back. 403 for a signed-in user without the admin role, 403 for a caller presenting only `X-API-Key` (a Claude session may read the switch and may not flip it), 401 with no credentials. Each flip appends one line to `heartbeat-poke-mute.log` beside the switch file. |
+| GET | `/api/heartbeat/poke-mute` | API key or JWT | Read the switch: `{ muted, set_by, set_at, source }`. `muted` is true when the switch file says muted or skeleton crew is on. `source` is `file`, `skeleton_crew`, `both` or `none`. A missing or unreadable switch file reads as not muted. |
+| PUT | `/api/heartbeat/poke-mute` | Admin JWT | Body `{ muted }` (a JSON boolean, else 422). Returns the state as read back, in the same shape as the GET. The file changes only when this route is called, so turning skeleton crew off does not clear a mute set here. 403 for a signed-in user without the admin role, 403 for a caller presenting only `X-API-Key` (a Claude session may read the switch and may not flip it), 401 with no credentials. Each flip appends one line to `heartbeat-poke-mute.log` beside the switch file. |
 
 ## 25b. Podcast Proxy (`/api/podcast-proxy/*`)
 
@@ -113,5 +113,29 @@ Auth for all three: X-API-Key or Bearer JWT.
 | GET | `/api/podcast-proxy/card/{card_id}` | Where a card stands: `{ card_id, scope_path, name, size, sha256, asked_by_session, state, expires_at, spent, job_id }`, with `state` one of `waiting`, `yes`, `no`, `default_answer`, `expired`, `wrong_login`, `claimed_no_job`. 404 `no_card`. |
 | GET | `/api/podcast-proxy/from-viewer/check` | Query `path` in doc-viewer form. Runs the start's whole file judgement without keeping content, so the doc viewer shows its "Make a podcast" button only for a file that can be podcast. Returns `{ ok, name, size }`. 403 `not_a_person` (API key, or a token with no email); 400 with a door code. Bearer JWT of a signed-in person. |
 | POST | `/api/podcast-proxy/from-viewer` | Body `{ path }`. The in-page confirmation is the yes, so there is no card. Judges the file, claims one job per person, file and bytes inside `podcast proxy card max age seconds` (a derived id in the spent-card table; a click after the window starts a new job), queues the job for the caller, returns `{ job_id, status, name, queue_position, size }`. 403 `not_a_person`; 400 with a door code; 409 `spent` with `job_id` beside the code, or `claimed_no_job`; 502 `queue_failed`. Each click writes its copy under its own folder. Dry run applies as for start. |
+
+## 25c. Skeleton Crew Switch (`/api/arbiter/*`)
+
+One operator switch that stops all spawning and mutes the Stop poke.
+The value is the boolean `cc session skeleton crew enabled` in `src/conf/lupin-app.ini`.
+Every reader reads that file fresh, so a flip needs no restart. A key that is absent reads as off.
+Design note: `src/rnd/v0.2.2/2026.10.10-skeleton-crew-toggle-design.md`. Full schemas: `/docs`.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/arbiter/fleet-size-cap` | API key or JWT | The fleet dial: `{ cap, ceiling, live, skeleton_crew }`. `skeleton_crew` is `{ on, since, set_by, settings_mute_while_off }`, read fresh from the file. An unreadable file reads as off. `set_by` says the setter is unknown when the attribution record disagrees with the file. `settings_mute_while_off` is true when the poke is muted in `settings.json` while the switch is off. |
+| PUT | `/api/arbiter/skeleton-crew` | Admin JWT | Body `{ on }` (a bare JSON boolean, else 422). Writes the attribution record, then the file, then tells every live session through an acknowledged broadcast. Returns the same body as the GET above, re-read from the file. 403 for a caller presenting only `X-API-Key`, so a manager cannot flip it. 409 when the key is defined twice. 500 naming the cause when the file cannot be written, and nothing is announced. A failed broadcast does not fail the flip. |
+
+**What the switch does while on.**
+
+| Door | Result |
+|---|---|
+| `spawn_sessions` and `start-cc-with-tmux.sh` called by an agent | Refused with a message that names the state. A person at a terminal is still allowed |
+| A one-for-one re-spin | Allowed while the credit is fresh. `dismiss_sessions` mints one credit per persona it killed, valid for 15 minutes. The launcher spends it once |
+| Stop-hook poke | Muted, and a manager's Stop text is the operator's single line, with no staffing text |
+| The arbiter's external manager pokes on `:8001` | Unchanged, because the operator kept them as the stall alarm |
+
+The file mute from 25a stays a separate lever.
+`GET /api/heartbeat/poke-mute` reports which of the two muted the poke in its `source` field.
 
 ---
