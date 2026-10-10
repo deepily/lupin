@@ -24,7 +24,7 @@ This page is an index. The reference itself is in the parts below, in document o
 | Part | Covers |
 |---|---|
 | [01-what-it-does-and-suite-types.md](test-suite-scheduling-guide/01-what-it-does-and-suite-types.md) | what it does and suite types |
-| [02-architecture-and-schedule-tests-skill.md](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md) | architecture and the schedule-tests skill |
+| [02-architecture-and-schedule-tests-skill.md](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md) | architecture and the /schedule-tests skill |
 | [03-rest-api-and-remediation-snapshot.md](test-suite-scheduling-guide/03-rest-api-and-remediation-snapshot.md) | REST API and snapshot schema |
 | [04-monopolize-cost-and-tfe.md](test-suite-scheduling-guide/04-monopolize-cost-and-tfe.md) | monopolize, cost and TFE |
 | [05-troubleshooting-and-related-docs.md](test-suite-scheduling-guide/05-troubleshooting-and-related-docs.md) | troubleshooting and related docs |

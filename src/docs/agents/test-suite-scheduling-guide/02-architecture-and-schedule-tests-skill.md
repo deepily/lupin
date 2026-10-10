@@ -1,4 +1,4 @@
-> Part 2 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): architecture and the schedule-tests skill.
+> Part 2 of 5 of the [Test-Suite Scheduling Guide](../test-suite-scheduling-guide.md): architecture and the /schedule-tests skill.
 
 ## 3. Architecture
 
