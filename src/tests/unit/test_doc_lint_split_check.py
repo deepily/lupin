@@ -93,6 +93,8 @@ Beta prose, back to [Alpha](a.md#alpha).
 Last line.
 """
 
+PART_B_GIT = PART_B.replace( "(a.md#alpha)", "(part-a.md#alpha)" )
+
 NORMAL_KEYS = { "dropped", "doubled", "unmoved", "dangling", "index_added", "index_repeats", "parts", "structure", "unresolved_anchors", "max_added_exceeded", "pass", "old", "index", "refused", "message" }
 
 
@@ -244,7 +246,7 @@ def test_a_second_heading_with_the_same_text_has_the_suffixed_anchor():
     parts  = { "a.md": "## Notes\n\nfirst\n", "b.md": "## Notes\n\nsecond, see [first](a.md#notes) and [again](#notes-1)\n" }
     result = sc.compare( old, "# idx\n", parts )
     assert result[ "pass" ] is True and result[ "dangling" ] == []
-    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [ { "line_number": 7, "old": "#notes", "new": "a.md#notes" } ]
+    assert result[ "parts" ][ "b.md" ][ "repointed" ] == [ { "line_number": 3, "old": "#notes", "new": "a.md#notes" } ]
 
 
 def test_non_blank_lines_drop_trailing_white_space_and_blank_lines():
@@ -268,7 +270,7 @@ def repo( tmp_path ):
     ( tmp_path / "docs" / "page" ).mkdir()
     ( tmp_path / "docs" / "page.md" ).write_text( INDEX, encoding="utf-8" )
     ( tmp_path / "docs" / "page" / "part-a.md" ).write_text( PART_A, encoding="utf-8" )
-    ( tmp_path / "docs" / "page" / "part-b.md" ).write_text( PART_B, encoding="utf-8" )
+    ( tmp_path / "docs" / "page" / "part-b.md" ).write_text( PART_B_GIT, encoding="utf-8" )
     _git( tmp_path, "add", "." )
     _git( tmp_path, "commit", "-q", "-m", "split" )
     return { "root": tmp_path, "old": old, "new": _git( tmp_path, "rev-parse", "HEAD" ) }
@@ -292,7 +294,7 @@ def test_check_split_reads_new_files_as_of_a_revision_when_given_one( repo ):
 
 
 def test_check_split_names_a_dropped_line_in_its_message( repo ):
-    ( repo[ "root" ] / "docs" / "page" / "part-b.md" ).write_text( PART_B.replace( "Last line.\n", "" ), encoding="utf-8" )
+    ( repo[ "root" ] / "docs" / "page" / "part-b.md" ).write_text( PART_B_GIT.replace( "Last line.\n", "" ), encoding="utf-8" )
     result = sc.check_split( repo[ "root" ], repo[ "old" ], "docs/page.md", "docs/page.md", PARTS )
     assert result[ "pass" ] is False and result[ "message" ] == "1 dropped, 0 doubled"
 
@@ -312,7 +314,7 @@ def test_check_split_refuses_with_a_reason_and_no_partial_result( repo, kwargs, 
 
 
 def test_format_report_leads_with_the_verdict_and_names_each_defect():
-    bad    = sc.check_split.__globals__[ "compare" ]( OLD_PAGE, INDEX, { "a.md": PART_A.replace( "[sibling](../other.md)", "[sibling](other.md)" ), "b.md": PART_B.replace( "Last line.\n", "" ) + "---\n---\n" }, max_added=0 )
+    bad    = sc.check_split.__globals__[ "compare" ]( OLD_PAGE, INDEX, { "a.md": PART_A.replace( "[sibling](../other.md)", "[sibling](other.md)" ), "b.md": PART_B_GIT.replace( "Last line.\n", "" ) + "---\n---\n" }, max_added=0 )
     bad.update( { "old": "r:p", "index": "i", "refused": None, "message": "x" } )
     lines  = sc.format_report( bad )
     assert lines[ 0 ].startswith( "FAIL: x" )
@@ -329,7 +331,7 @@ def test_format_report_leads_with_the_verdict_and_names_each_defect():
 def test_format_report_lists_an_in_page_link_that_leaves_its_part():
     result = sc.compare( "## A\n\n[b](#b)\n", "# idx\n", { "p.md": "## A\n\n[b](#b)\n" } )
     result.update( { "old": "r:p", "index": "i", "refused": None, "message": "x" } )
-    assert "in-page link not resolved inside its part: p.md #b" in sc.format_report( result )
+    assert "in-page link with no heading in any part (not made by the split): p.md #b" in sc.format_report( result )
 
 
 def test_main_exit_codes_and_the_result_file( repo, tmp_path ):
@@ -340,7 +342,7 @@ def test_main_exit_codes_and_the_result_file( repo, tmp_path ):
     assert out.getvalue().startswith( "PASS: nothing lost" )
     saved  = json.loads( ( tmp_path / "res" / sc.RESULT_NAME ).read_text( encoding="utf-8" ) )
     assert saved[ "pass" ] is True and saved[ "refused" ] is None
-    ( repo[ "root" ] / "docs" / "page" / "part-b.md" ).write_text( PART_B.replace( "Last line.\n", "" ), encoding="utf-8" )
+    ( repo[ "root" ] / "docs" / "page" / "part-b.md" ).write_text( PART_B_GIT.replace( "Last line.\n", "" ), encoding="utf-8" )
     out    = io.StringIO()
     assert sc.main( base + parts, out ) == 1
     assert "DROPPED (old line 29, 1 missing): Last line." in out.getvalue()

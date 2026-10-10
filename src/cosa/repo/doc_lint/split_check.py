@@ -11,6 +11,10 @@ One difference is allowed, because a part sits in a folder beside the old path. 
 code spans, a link or image target "](X)" whose X does not start with a scheme, "#" or "/" becomes "](../X)".
 Each such target is counted and listed per part. Any other change to a line is a dropped line plus an added
 line. A relative target a part leaves without the "../" is named as unmoved, since that link would break.
+
+A second form is allowed for an in-page link. In a part, "](#x)" may become "](<part-file>.md#x)" when
+heading x is in that part file. A "](#x)" left in a part whose heading x is now in another part would
+break, so it is named as dangling and fails. Each repointed link is listed per part.
 """
 
 import argparse
@@ -29,6 +33,7 @@ FENCE        = re.compile( r"^\s*(?:```|~~~)" )
 HEADING      = re.compile( r"^#{1,6}\s+(\S.*?)\s*#*\s*$" )
 INPAGE_LINK  = re.compile( r"\]\(#([^)\s]+)\)" )
 LINK_TARGET  = re.compile( r"\]\(([^)\s]*)" )
+FILE_ANCHOR  = re.compile( r"\]\(([^)#\s/]+\.md)#([^)\s]+)\)" )
 
 
 def non_blank_lines( text ):
@@ -163,33 +168,129 @@ def structure_counts( text ):
     return counts
 
 
-def unresolved_anchors( part_texts ):
+def heading_homes( part_texts ):
     """
-    Find in-page links in a part whose heading is not in that part.
+    Map each heading anchor to the part file that holds it.
 
     Requires:
-        - part_texts is { name: text }
+        - part_texts is { name: text } in reading order
 
     Ensures:
-        - returns [ { part, anchor } ] for each "](#anchor)" link outside fences whose anchor is no heading slug of the same part
-        - the slug is github_slug's approximation; the list is a prompt to look, not a proof
+        - returns { anchor: basename of the part file }, anchors as github_slug makes them
+        - a heading repeated across or within parts gets the suffixes -1, -2 in reading order, as GitHub does
+        - headings inside code fences are skipped
+
+    Raises:
+        - nothing
+    """
+    homes, seen = {}, Counter()
+    for name, text in part_texts.items():
+        inside = False
+        for raw in text.split( "\n" ):
+            if FENCE.match( raw ):
+                inside = not inside
+                continue
+            match = None if inside else HEADING.match( raw )
+            if match is None: continue
+            slug = github_slug( match.group( 1 ) )
+            n    = seen[ slug ]
+            seen[ slug ] += 1
+            homes[ slug if n == 0 else f"{slug}-{n}" ] = os.path.basename( name )
+    return homes
+
+
+def unresolved_anchors( part_texts, homes ):
+    """
+    Find in-page links whose heading is in no part.
+
+    Requires:
+        - part_texts is { name: text }; homes is heading_homes( part_texts )
+
+    Ensures:
+        - returns [ { part, anchor } ] for each "](#anchor)" link outside fences and code spans whose anchor is no heading of any part
+        - such a link was not made by the split, and is listed, never failed
 
     Raises:
         - nothing
     """
     found = []
     for name, text in part_texts.items():
-        slugs, links, inside = set(), [], False
+        inside = False
         for raw in text.split( "\n" ):
             if FENCE.match( raw ):
                 inside = not inside
                 continue
             if inside: continue
-            match = HEADING.match( raw )
-            if match: slugs.add( github_slug( match.group( 1 ) ) )
-            links += INPAGE_LINK.findall( raw )
-        found += [ { "part": name, "anchor": a } for a in links if a not in slugs ]
+            for i, piece in enumerate( CODE_SPAN.split( raw ) ):
+                if i % 2 == 0: found += [ { "part": name, "anchor": a } for a in INPAGE_LINK.findall( piece ) if a not in homes ]
     return found
+
+
+def repoint_back( line, homes ):
+    """
+    Undo the allowed in-page repoint on a part line.
+
+    Requires:
+        - line is a str; homes is heading_homes of the parts
+
+    Ensures:
+        - returns ( line, repointed ): each "](F.md#x)" outside a code span whose heading x is in part file F turned back to "](#x)"
+        - repointed is [ { old, new } ] with old "#x" and new "F.md#x", in order
+        - a target with a directory part, or whose anchor is in another file, is left alone
+
+    Raises:
+        - nothing
+    """
+    repointed = []
+    def one( match ):
+        file, anchor = match.group( 1 ), match.group( 2 )
+        if homes.get( anchor ) != file: return match.group( 0 )
+        repointed.append( { "old": f"#{anchor}", "new": f"{file}#{anchor}" } )
+        return f"](#{anchor})"
+    pieces = CODE_SPAN.split( line )
+    return "".join( p if i % 2 else FILE_ANCHOR.sub( one, p ) for i, p in enumerate( pieces ) ), repointed
+
+
+def dangling_in( line, part_base, homes ):
+    """
+    List the in-page links of a line whose heading is now in another part.
+
+    Requires:
+        - line is a str outside a code fence; part_base is the basename of the part holding it; homes is heading_homes
+
+    Ensures:
+        - returns [ ( anchor, home file ) ] for each "](#anchor)" outside code spans whose heading is in a part file other than part_base
+
+    Raises:
+        - nothing
+    """
+    found = []
+    for i, piece in enumerate( CODE_SPAN.split( line ) ):
+        if i % 2 == 0: found += [ ( a, homes[ a ] ) for a in INPAGE_LINK.findall( piece ) if a in homes and homes[ a ] != part_base ]
+    return found
+
+
+def part_rows( text ):
+    """
+    Number the non-blank lines of a part with whether each is inside a code fence.
+
+    Requires:
+        - text is a str
+
+    Ensures:
+        - returns [ ( line number, line, inside ) ]; a fence line itself is not inside, white space is stripped from the right
+
+    Raises:
+        - nothing
+    """
+    rows, inside = [], False
+    for number, raw in enumerate( text.split( "\n" ), 1 ):
+        if FENCE.match( raw ):
+            inside = not inside
+            if raw.strip(): rows.append( ( number, raw.rstrip(), False ) )
+            continue
+        if raw.strip(): rows.append( ( number, raw.rstrip(), inside ) )
+    return rows
 
 
 def compare( old_text, index_text, part_texts, allow_index_lines=False, max_added=None ):
@@ -202,12 +303,13 @@ def compare( old_text, index_text, part_texts, allow_index_lines=False, max_adde
         - max_added is an int cap on lines a single part may add, or None for no cap
 
     Ensures:
-        - returns { dropped, doubled, unmoved, index_added, index_repeats, parts, structure, unresolved_anchors, max_added_exceeded, pass }
+        - returns { dropped, doubled, unmoved, dangling, index_added, index_repeats, parts, structure, unresolved_anchors, max_added_exceeded, pass }
         - dropped is [ { line, old_line, missing } ] and doubled is [ { line, extra, parts } ], each naming the old line
         - unmoved is [ { part, line_number, line } ] for a part line that is an old line with relative targets and kept them as they were
-        - parts is { name: { lines, added, moved } }; added is [ ( number, line ) ]; moved is [ { line_number, old, new } ], one per target that gained "../"
-        - a part line must equal an old line, or the form move_targets gives it; anything else is added, and the old line it came from is dropped
-        - pass is True only when nothing is dropped, doubled or unmoved and no part adds more than max_added lines
+        - dangling is [ { part, line_number, anchor, should_be } ] for a "](#anchor)" in a part whose heading is in another part file
+        - parts is { name: { lines, added, moved, repointed } }; added is [ ( number, line ) ]; moved is [ { line_number, old, new } ], one per target that gained "../"; repointed is [ { line_number, old, new } ], one per in-page link made a link to the part that holds its heading
+        - a part line must equal an old line, or the form move_targets gives it, or either with in-page links repointed to the part that holds the heading; anything else is added, and the old line it came from is dropped
+        - pass is True only when nothing is dropped, doubled, unmoved or dangling and no part adds more than max_added lines
         - without allow_index_lines the index never covers an old line; its lines are index_repeats or index_added
 
     Raises:
@@ -230,22 +332,29 @@ def compare( old_text, index_text, part_texts, allow_index_lines=False, max_adde
             index_repeats.append( { "line_number": number, "line": line } )
             key = plain.get( line, line )
             if allow_index_lines and left[ key ] > 0: left[ key ] -= 1
-    doubled, unmoved, parts = {}, [], {}
+    homes     = heading_homes( part_texts )
+    doubled, unmoved, dangling, parts = {}, [], [], {}
     for name, text in part_texts.items():
-        added, moved, lines = [], [], non_blank_lines( text )
-        for number, line in lines:
+        base                      = os.path.basename( name )
+        added, moved, repointed   = [], [], []
+        rows_in                   = part_rows( text )
+        for number, raw, inside in rows_in:
+            line, again = ( raw, [] ) if inside else repoint_back( raw, homes )
+            if not inside:
+                dangling += [ { "part": name, "line_number": number, "anchor": a, "should_be": f"{h}#{a}" } for a, h in dangling_in( raw, base, homes ) ]
             if line in totals:
                 if left[ line ] > 0:
                     left[ line ] -= 1
                     old = original[ line ]
                     if old != line: moved += [ { "line_number": number, "old": o, "new": n } for o, n in zip( targets_of( old ), targets_of( line ) ) if o != n ]
+                    repointed += [ { "line_number": number, **r } for r in again ]
                 else:
                     entry = doubled.setdefault( line, { "line": original[ line ], "extra": 0, "parts": [] } )
                     entry[ "extra" ] += 1
                     if name not in entry[ "parts" ]: entry[ "parts" ].append( name )
-            elif line in plain: unmoved.append( { "part": name, "line_number": number, "line": line } )
-            else: added.append( ( number, line ) )
-        parts[ name ] = { "lines": len( lines ), "added": added, "moved": moved }
+            elif line in plain: unmoved.append( { "part": name, "line_number": number, "line": raw } )
+            else: added.append( ( number, raw ) )
+        parts[ name ] = { "lines": len( rows_in ), "added": added, "moved": moved, "repointed": repointed }
     dropped = [ { "line": original[ key ], "old_line": first[ key ], "missing": count } for key, count in left.items() if count > 0 ]
     new_all = "\n".join( [ index_text ] + list( part_texts.values() ) )
     over    = max_added is not None and any( len( p[ "added" ] ) > max_added for p in parts.values() )
@@ -262,9 +371,10 @@ def compare( old_text, index_text, part_texts, allow_index_lines=False, max_adde
             "index"     : structure_counts( index_text ),
             "new_total" : structure_counts( new_all )
         },
-        "unresolved_anchors" : unresolved_anchors( part_texts ),
+        "unresolved_anchors" : unresolved_anchors( part_texts, homes ),
+        "dangling"           : dangling,
         "max_added_exceeded" : over,
-        "pass"               : not dropped and not doubled and not unmoved and not over
+        "pass"               : not dropped and not doubled and not unmoved and not dangling and not over
     }
 
 
@@ -343,7 +453,7 @@ def format_report( result ):
         - result is a check_split result
 
     Ensures:
-        - returns a list of lines: the verdict first, then each dropped, doubled and unmoved line by name, the lines added and the targets moved, and the structure counts old against new
+        - returns a list of lines: the verdict first, then each dropped, doubled, unmoved and dangling line by name, the lines added, the targets moved and the links repointed, and the structure counts old against new
         - a refused result is its reason only
 
     Raises:
@@ -353,16 +463,18 @@ def format_report( result ):
     out = [ ( "PASS" if result[ "pass" ] else "FAIL" ) + f": {result[ 'message' ]}  ({result[ 'old' ]} -> {result[ 'index' ]} + {len( result[ 'parts' ] )} parts)" ]
     for d in result[ "dropped" ]: out.append( f"DROPPED (old line {d[ 'old_line' ]}, {d[ 'missing' ]} missing): {d[ 'line' ]}" )
     for d in result[ "doubled" ]: out.append( f"DOUBLED ({d[ 'extra' ]} extra, in {', '.join( d[ 'parts' ] )}): {d[ 'line' ]}" )
+    for d in result[ "dangling" ]: out.append( f"DANGLING in-page link in {d[ 'part' ]} L{d[ 'line_number' ]} (#{d[ 'anchor' ]} is in {d[ 'should_be' ].split( '#' )[ 0 ]}): should be {d[ 'should_be' ]}" )
     for u in result[ "unmoved" ]: out.append( f"UNMOVED link in {u[ 'part' ]} L{u[ 'line_number' ]} (relative target without ../): {u[ 'line' ]}" )
     if result[ "max_added_exceeded" ]: out.append( "FAIL: a part adds more lines than --max-added allows" )
     for name, part in result[ "parts" ].items():
         out.append( f"part {name}: {part[ 'lines' ]} lines, {len( part[ 'added' ] )} added, {len( part[ 'moved' ] )} link targets gained ../" )
         for number, line in part[ "added" ]: out.append( f"  added L{number}: {line}" )
         for row in part[ "moved" ]: out.append( f"  moved L{row[ 'line_number' ]}: {row[ 'old' ]} -> {row[ 'new' ]}" )
+        for row in part[ "repointed" ]: out.append( f"  repointed L{row[ 'line_number' ]}: {row[ 'old' ]} -> {row[ 'new' ]}" )
     out.append( f"index: {len( result[ 'index_added' ] )} lines added, {len( result[ 'index_repeats' ] )} repeat old lines" )
     for row in result[ "index_added" ]: out.append( f"  index added L{row[ 'line_number' ]}: {row[ 'line' ]}" )
     for row in result[ "index_repeats" ]: out.append( f"  index repeats L{row[ 'line_number' ]}: {row[ 'line' ]}" )
-    for anchor in result[ "unresolved_anchors" ]: out.append( f"in-page link not resolved inside its part: {anchor[ 'part' ]} #{anchor[ 'anchor' ]}" )
+    for anchor in result[ "unresolved_anchors" ]: out.append( f"in-page link with no heading in any part (not made by the split): {anchor[ 'part' ]} #{anchor[ 'anchor' ]}" )
     out.append( "structure          old   parts   index   new_total" )
     for key in ( "table_rows", "fences", "headings", "link_targets" ):
         s = result[ "structure" ]
@@ -379,7 +491,7 @@ def main( argv=None, out=None ):
 
     Ensures:
         - prints the report and, with --out, writes split-check.json there
-        - returns 0 when nothing is lost, 1 when a line is dropped, doubled or unmoved, or a part adds too many, 2 on a refusal
+        - returns 0 when nothing is lost, 1 when a line is dropped, doubled, unmoved or dangling, or a part adds too many, 2 on a refusal
 
     Raises:
         - nothing
