@@ -49,7 +49,7 @@ A window's edge is where they can differ: the live index may still remember a ca
 **A block's `kind` comes from the content block's type, never from the record's role**. In a census of 8,115 records across four recent lupin transcripts, **760 of the 1,026 `user` records carried tool results**. A role-based mapping would render three quarters of them as fake human turns.
 
 **`kind` decides the renderer, and prose and tool content do not share one**. `text` renders as markdown. `tool_call`, `tool_result` and `thinking` render as **plain text** (`<pre>` / `textContent` on the web), collapsed and truncated.
-`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is open-ended by rule.
+`thinking` is folded and expandable. **A kind the client does not recognise renders as plain text — never dropped, never thrown on**. The mapper is open-ended by choice.
 So a switch over three literals with no fallback would render nothing, silently, in the one surface whose whole job is to show everything.
 The risk here is **mangling, not injection**.
 A markdown renderer turns a raw file dump into markup, so `#` becomes a heading and a diff renders wrong.

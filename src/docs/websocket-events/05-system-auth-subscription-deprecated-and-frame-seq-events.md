@@ -212,6 +212,6 @@ Eviction takes the oldest slot with no connected holder. A connected slot is nev
 the number of connected holders (one warning per crossing) and settles back at the next write.
 Without an `ack` the buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
 
-`resume_complete` is, by rule, **not** in `websocket available events`: the endpoint
+`resume_complete` is, by choice, **not** in `websocket available events`: the endpoint
 sends it directly, like `auth_success`, and it never passes through the subscription
 filter. Listing it would imply a path that does not exist.
