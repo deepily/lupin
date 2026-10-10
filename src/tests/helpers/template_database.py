@@ -125,6 +125,20 @@ def create_from_template( server_url, name, engine_factory=create_engine, use_te
     return make_url( server_url ).set( database=name ).render_as_string( hide_password=False )
 
 
+def terminate_sessions_sql( as_test_role ):
+    """
+    The statement that closes the sessions on a scratch database before it is dropped.
+
+    Requires:
+        - as_test_role is True when the caller logs in as the restricted test role
+
+    Ensures:
+        - returns SQL text with one named parameter, :n, the database name
+        - the text selects pg_terminate_backend over the sessions of that database, never the caller's own
+    """
+    return "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity WHERE datname = :n AND pid <> pg_backend_pid()"
+
+
 def drop_database( server_url, name, engine_factory=create_engine, use_template=None ):
     """
     Drop database ``name``, closing its connections first.
@@ -142,7 +156,7 @@ def drop_database( server_url, name, engine_factory=create_engine, use_template=
     engine = _admin_engine( server_url, engine_factory )
     try:
         with engine.connect() as conn:
-            conn.execute( text( "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity WHERE datname = :n AND pid <> pg_backend_pid()" ), { "n": name } )
+            conn.execute( text( terminate_sessions_sql( use_template ) ), { "n": name } )
             conn.execute( text( f"DROP DATABASE IF EXISTS {name}" ) )
     except OperationalError as error:
         if use_template: fail_on_a_refusal( error )
