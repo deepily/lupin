@@ -302,13 +302,14 @@ def lint_comments( path, comments, root=None, not_checked=None ):
     return sorted( findings, key=lambda f: ( f.line, f.rule, f.message ) )
 
 
-def run_extractor( repo_root, files ):
+def run_extractor( repo_root, files, source_root=None ):
     """
     Run the Node extractor over files and group its records by file.
 
     Requires:
         - repo_root is a git working tree that holds the extractor script
         - files is a list of repo-relative paths
+        - source_root is the directory the files are read from, or None for repo_root
 
     Ensures:
         - returns { path: [ record, ... ] } with a key for every file asked for, in extractor order
@@ -321,7 +322,7 @@ def run_extractor( repo_root, files ):
     by_file = { path: [] for path in files }
     script  = os.path.join( str( repo_root ), EXTRACTOR_REL )
     for i in range( 0, len( files ), CHUNK_SIZE ):
-        cmd = [ "node", script, "--repo-root", str( repo_root ), *files[ i : i + CHUNK_SIZE ] ]
+        cmd = [ "node", script, "--repo-root", str( repo_root if source_root is None else source_root ), *files[ i : i + CHUNK_SIZE ] ]
         try:
             res = subprocess.run( cmd, capture_output=True, text=True, encoding="utf-8" )
         except OSError as err:

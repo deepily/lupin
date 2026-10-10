@@ -6,7 +6,7 @@ doc_lint rules and prints the findings to stderr. It exits 0 on its own crash to
 The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 
-Three refusals break warn mode, and all exit REFUSAL_EXIT.
+Four refusals break warn mode, and all exit REFUSAL_EXIT.
 
 1. The swept scope, defined once in swept_scope.is_swept. A staged Python file for which it is True is refused when its docstring
    lint holds any finding on any line, touched or not, from any rule. The refusal names the file,
@@ -18,14 +18,17 @@ Three refusals break warn mode, and all exit REFUSAL_EXIT.
    not raise an entry, except in the one commit that regenerates it under changed rules. A table cut
    under other rules refuses a commit that stages a counted file. With no table anywhere the scope is
    reported as not checked. The same waiver marker lowers a count.
-3. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
+3. The TypeScript and JavaScript counted scope: every tracked file tsdoc_lint accepts. The same rule as the Python
+   counted scope, with its own table (ts_counts.TABLE_PATH) and its own rules stamp. A staged file is counted from
+   the index through the Node extractor, in one run for the commit. A commit that stages none runs no extractor.
+4. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
 Before any of these, a tracked rule file that differs between the index and the working tree refuses the commit.
-The rule files are every tracked file in the doc_lint package, the word list and the chain script.
+The rule files are every tracked file in the doc_lint package, the word list, the chain script and the extractor script.
 The findings would be counted under rules that are not the ones being committed.
 
-Every run prints the denominator for both scopes: files checked, docstrings or counts, waivers honoured.
+Every run prints the denominator for all three scopes: files checked, docstrings or counts, waivers honoured.
 Everything else stays warn mode: findings on staged lines are printed and the commit goes through.
 """
 
@@ -36,7 +39,9 @@ import sys
 import traceback
 
 from . import comment_lint, docstring_lint, md_lint
-from . import counts
+from collections import namedtuple
+
+from . import counts, ts_counts, tsdoc_lint
 from .changed_ranges import changed_line_ranges, filter_findings
 from .cli import in_scope
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
@@ -103,6 +108,35 @@ def swept_refusal_line( finding, source_line, state ):
     )
 
 
+def staged_changes( root ):
+    """
+    List the staged additions, copies, modifications and renames.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( names, renamed_from ), names being the new path of every change in git's order
+        - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--name-status", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    tokens = res.stdout.decode( "utf-8", "replace" ).split( "\0" )
+    names, renamed_from, i = [], {}, 0
+    while i < len( tokens ) and tokens[ i ]:
+        status = tokens[ i ]
+        if status[ 0 ] == "R":
+            old, new, i = tokens[ i + 1 ], tokens[ i + 2 ], i + 3
+            renamed_from[ new ] = old
+        else:
+            new, i = tokens[ i + 1 ], i + 2
+        names.append( new )
+    return names, renamed_from
+
+
 def staged_counted( root ):
     """
     List the staged counted Python files, with their renames and whether the table is staged.
@@ -113,26 +147,34 @@ def staged_counted( root ):
     Ensures:
         - returns ( paths, renamed_from, table_staged )
         - paths holds every added, copied, modified or renamed .py file that is not swept, with no in_scope filter
-        - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
+        - renamed_from is the map staged_changes gives
         - table_staged is True when counts.TABLE_PATH is among the staged files
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--name-status", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
-    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    tokens = res.stdout.decode( "utf-8", "replace" ).split( "\0" )
-    paths, renamed_from, table_staged, i = [], {}, False, 0
-    while i < len( tokens ) and tokens[ i ]:
-        status = tokens[ i ]
-        if status[ 0 ] == "R":
-            old, new, i = tokens[ i + 1 ], tokens[ i + 2 ], i + 3
-            renamed_from[ new ] = old
-        else:
-            new, i = tokens[ i + 1 ], i + 2
-        if new == counts.TABLE_PATH: table_staged = True
-        if new.endswith( ".py" ) and not is_swept( new ): paths.append( new )
-    return paths, renamed_from, table_staged
+    names, renamed_from = staged_changes( root )
+    return [ n for n in names if n.endswith( ".py" ) and not is_swept( n ) ], renamed_from, counts.TABLE_PATH in names
+
+
+def staged_ts_counted( root ):
+    """
+    List the staged TypeScript and JavaScript files, with renames and the table flag.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( paths, renamed_from, table_staged )
+        - paths holds every added, copied, modified or renamed file that tsdoc_lint.in_scope accepts
+        - renamed_from is the map staged_changes gives
+        - table_staged is True when ts_counts.TABLE_PATH is among the staged files
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    names, renamed_from = staged_changes( root )
+    return [ n for n in names if tsdoc_lint.in_scope( n ) ], renamed_from, ts_counts.TABLE_PATH in names
 
 
 def staged_bytes( root, path ):
@@ -154,12 +196,13 @@ def staged_bytes( root, path ):
     with open( f"{root}/{path}", "rb" ) as handle: return handle.read()
 
 
-def head_table_text( root ):
+def head_table_text( root, table_path=counts.TABLE_PATH ):
     """
-    Read the count table as the last commit has it.
+    Read a count table as the last commit has it.
 
     Requires:
         - root is a git working tree
+        - table_path is the table's repo-relative path, the Python table by default
 
     Ensures:
         - returns the text, or None when HEAD has no table or there is no HEAD yet
@@ -167,11 +210,13 @@ def head_table_text( root ):
     Raises:
         - nothing
     """
-    res = subprocess.run( [ "git", "-C", root, "show", f"HEAD:{counts.TABLE_PATH}" ], capture_output=True )
+    res = subprocess.run( [ "git", "-C", root, "show", f"HEAD:{table_path}" ], capture_output=True )
     return res.stdout.decode( "utf-8", "replace" ) if res.returncode == 0 else None
 
 
 REGENERATE_COMMAND = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write'
+REGENERATE_TS      = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.ts_counts --repo-root "$PWD" --write'
+TS_NAME            = "TypeScript and JavaScript"
 
 
 def staged_deleted( root ):
@@ -245,13 +290,87 @@ def rule_divergence( compared, differing, judged ):
     )
 
 
-def counted_check( root, ranges ):
+Scope = namedtuple( "Scope", [ "noun", "table_path", "staged", "count_many", "census", "stamp", "regenerate" ] )
+
+
+def _python_counts( root, paths ):
     """
-    Hold the staged counted files to the count table.
+    Count the findings of staged counted Python files, read from the index.
+
+    Requires:
+        - root is a git working tree; paths are staged Python files
+
+    Ensures:
+        - returns { path: counts.FileCount }; a file that is not UTF-8 counts as one finding
+
+    Raises:
+        - RuntimeError from git when a read fails
+    """
+    found = {}
+    for path in paths:
+        try:
+            found[ path ] = counts.file_count( path, staged_source( root, path ), root )
+        except UnicodeDecodeError as err:
+            found[ path ] = counts.unreadable_count( path, err )
+    return found
+
+
+def _ts_counts( root, paths ):
+    """
+    Count the findings of staged TypeScript and JavaScript files, read from the index.
+
+    Requires:
+        - root is a git working tree; paths are staged TypeScript or JavaScript files
+
+    Ensures:
+        - returns { path: counts.FileCount }; a file that is not UTF-8 counts as one finding
+        - one extractor run covers every readable file
+
+    Raises:
+        - RuntimeError from git or the extractor
+    """
+    found, texts = {}, {}
+    for path in paths:
+        try:
+            texts[ path ] = staged_source( root, path )
+        except UnicodeDecodeError as err:
+            found[ path ] = counts.unreadable_count( path, err )
+    found.update( ts_counts.counts_for( root, texts ) if texts else {} )
+    return found
+
+
+def _python_stamp( root, read ):
+    """Return the Python rules stamp, looked up when called."""
+    return counts.rules_stamp( root, read=read )
+
+
+def _python_census( root, read ):
+    """Return the Python census, looked up when called."""
+    return counts.census( root, read=read )
+
+
+def _ts_stamp( root, read ):
+    """Return the TypeScript and JavaScript rules stamp, looked up when called."""
+    return ts_counts.rules_stamp( root, read=read )
+
+
+def _ts_census( root, read ):
+    """Return the TypeScript and JavaScript census, looked up when called."""
+    return ts_counts.census( root, read=read )
+
+
+PYTHON_SCOPE = Scope( "", counts.TABLE_PATH, staged_counted, _python_counts, _python_census, _python_stamp, REGENERATE_COMMAND )
+TS_SCOPE     = Scope( f"{TS_NAME} ", ts_counts.TABLE_PATH, staged_ts_counted, _ts_counts, _ts_census, _ts_stamp, REGENERATE_TS )
+
+
+def scope_check( root, ranges, scope ):
+    """
+    Hold the staged files of one counted scope to its count table.
 
     Requires:
         - root is a git working tree
         - ranges is the staged diff's changed-line map
+        - scope is PYTHON_SCOPE or TS_SCOPE
 
     Ensures:
         - returns ( refusals, warnings, stats ); each refusal is one printable string, stats is the denominator
@@ -262,52 +381,52 @@ def counted_check( root, ranges ):
         - the current stamp is that of the staged rule files, so a staged rule edit moves it and an unstaged one does not
         - a table whose stamp is not the current one refuses a commit that stages a counted file
         - a counted file above its allowance is refused; a renamed file inherits its old entry; a new file has none
+        - a commit without staged files of the scope counts nothing and runs no extractor
 
     Raises:
         - RuntimeError from git when a listing or read fails
         - OSError when a rule file cannot be read
     """
-    paths, renamed_from, table_staged = staged_counted( root )
+    paths, renamed_from, table_staged = scope.staged( root )
+    noun     = scope.noun
     stats    = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "absent" }
     refusals = []
     warnings = []
-    head_text = head_table_text( root )
+    head_text = head_table_text( root, scope.table_path )
     try:
         head = counts.parse_table( head_text ) if head_text is not None else None
     except counts.TableError as err:
         stats[ "table" ] = "malformed"
-        return [], [ f"[doc-lint] WARNING: the count table at HEAD is malformed ({err}), the counted scope was NOT checked" ], stats
+        return [], [ f"[doc-lint] WARNING: the {noun}count table at HEAD is malformed ({err}), the {noun}counted scope was NOT checked" ], stats
     try:
-        staged = counts.parse_table( staged_source( root, counts.TABLE_PATH ) ) if table_staged else None
+        staged = counts.parse_table( staged_source( root, scope.table_path ) ) if table_staged else None
     except counts.TableError as err:
         stats[ "table" ] = "malformed"
-        return [ f"[doc-lint] REFUSED {counts.TABLE_PATH}: the staged table is malformed: {err}" ], [], stats
+        return [ f"[doc-lint] REFUSED {scope.table_path}: the staged table is malformed: {err}" ], [], stats
     table = staged if staged is not None else head
     if table is None:
-        if paths: warnings.append( "[doc-lint] WARNING: there is no count table at HEAD or staged, so the counted scope was NOT checked" )
+        if paths: warnings.append( f"[doc-lint] WARNING: there is no {noun}count table at HEAD or staged, so the {noun}counted scope was NOT checked" )
         return refusals, warnings, stats
-    current = counts.rules_stamp( root, read=lambda p: staged_bytes( root, p ) )
+    current = scope.stamp( root, lambda p: staged_bytes( root, p ) )
     if staged is not None and ( head is None or staged.stamp != head.stamp ):
-        found, _walked = counts.census( root, read=lambda p: staged_source( root, p ) )
+        found, _walked = scope.census( root, lambda p: staged_source( root, p ) )
         problems       = counts.check_table( staged, found, current )
         stats[ "table" ] = "regenerated" if not problems else "stale"
         if problems:
             shown = [ f"[doc-lint]   {line}" for line in problems[ : SHOWN_FINDINGS ] ]
             if len( problems ) > SHOWN_FINDINGS: shown.append( f"[doc-lint]   and {len( problems ) - SHOWN_FINDINGS} more" )
-            refusals.append( "\n".join( [ f"[doc-lint] REFUSED {counts.TABLE_PATH}: a regenerated table must equal a census of the staged tree under the current rules" ] + shown ) )
+            refusals.append( "\n".join( [ f"[doc-lint] REFUSED {scope.table_path}: a regenerated table must equal a census of the staged tree under the current rules" ] + shown ) )
         return refusals, warnings, stats
     if staged is not None:
         for path, old, new in counts.table_raises( staged.files, head.files ):
-            refusals.append( f"[doc-lint] REFUSED {counts.TABLE_PATH}: {path} raised from {old} to {new}; the table may only fall" )
+            refusals.append( f"[doc-lint] REFUSED {scope.table_path}: {path} raised from {old} to {new}; the table may only fall" )
     stats[ "table" ] = "ok" if table.stamp == current else "stale"
     if stats[ "table" ] == "stale":
-        if paths: refusals.append( f"[doc-lint] REFUSED: the count table was cut under other rules (stamp {table.stamp}, now {current}); regenerate it with: {REGENERATE_COMMAND} and stage the table with the rule change" )
+        if paths: refusals.append( f"[doc-lint] REFUSED: the {noun}count table was cut under other rules (stamp {table.stamp}, now {current}); regenerate it with: {scope.regenerate} and stage the table with the rule change" )
         return refusals, warnings, stats
+    results = scope.count_many( root, paths )
     for path in paths:
-        try:
-            result = counts.file_count( path, staged_source( root, path ), root )
-        except UnicodeDecodeError as err:
-            result = counts.unreadable_count( path, err )
+        result  = results[ path ]
         allowed = counts.allowance( path, table.files, renamed_from )
         gone    = [ p for p in staged_deleted( root ) if p in table.files ] if allowed == 0 and path not in table.files and result.count > 0 else []
         stats[ "files" ]   += 1
@@ -318,6 +437,42 @@ def counted_check( root, ranges ):
         else:
             stats[ "at_or_below" ] += 1
     return refusals, warnings, stats
+
+
+def counted_check( root, ranges ):
+    """
+    Hold the staged counted Python files to the count table.
+
+    Requires:
+        - root is a git working tree
+        - ranges is the staged diff's changed-line map
+
+    Ensures:
+        - returns what scope_check returns for the Python scope
+
+    Raises:
+        - RuntimeError from git when a listing or read fails
+        - OSError when a rule file cannot be read
+    """
+    return scope_check( root, ranges, PYTHON_SCOPE )
+
+
+def ts_counted_check( root, ranges ):
+    """
+    Hold the staged TypeScript and JavaScript files to their count table.
+
+    Requires:
+        - root is a git working tree
+        - ranges is the staged diff's changed-line map
+
+    Ensures:
+        - returns what scope_check returns for the TypeScript and JavaScript scope
+
+    Raises:
+        - RuntimeError from git or the extractor when a listing, read or extraction fails
+        - OSError when a rule file cannot be read
+    """
+    return scope_check( root, ranges, TS_SCOPE )
 
 
 def git_toplevel( start ):
@@ -492,9 +647,11 @@ def collect( root ):
     refusals = [ f for f in findings if in_blocking_package( f.path, BLOCKING_PACKAGES ) and is_mechanical( f ) ]
     lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
     staged_counted_paths, _renames, table_staged = staged_counted( root )
+    staged_ts_paths, _ts_renames, ts_table_staged = staged_ts_counted( root )
     compared, differing = counts.differing_rule_files( root )
     tally[ "rules" ]    = { "compared": compared, "differing": len( differing ) }
-    diverged = rule_divergence( compared, differing, bool( swept ) or bool( staged_counted_paths ) or table_staged )
+    judged   = bool( swept ) or bool( staged_counted_paths ) or table_staged or bool( staged_ts_paths ) or ts_table_staged
+    diverged = rule_divergence( compared, differing, judged )
     if diverged:
         lines_out.append( diverged )
         swept = []
@@ -517,11 +674,15 @@ def collect( root ):
                 refusals.append( f )
                 lines_out.append( swept_refusal_line( f, lines[ f.line - 1 ], state ) )
     if diverged:
-        tally[ "counted" ] = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "diverged" }
+        tally[ "counted" ]    = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "diverged" }
+        tally[ "ts_counted" ] = dict( tally[ "counted" ] )
     else:
         counted_refusals, counted_warnings, tally[ "counted" ] = counted_check( root, ranges )
         lines_out += counted_refusals
         warnings  += counted_warnings
+        ts_refusals, ts_warnings, tally[ "ts_counted" ] = ts_counted_check( root, ranges )
+        lines_out += ts_refusals
+        warnings  += ts_warnings
     kept     = [ f for f in filter_findings( findings, ranges ) if f not in refusals and f not in waived ]
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 
@@ -563,6 +724,8 @@ def main( argv=None, err=None ):
     err.write( f"[doc-lint] rule files compared: {tally[ 'rules' ][ 'compared' ]}, differing: {tally[ 'rules' ][ 'differing' ]}\n" )
     c = tally[ "counted" ]
     err.write( f"[doc-lint] counted scope: {c[ 'files' ]} files checked, {c[ 'at_or_below' ]} at or below their count, {c[ 'over' ]} over, {c[ 'waivers' ]} waivers honoured, table {c[ 'table' ]}\n" )
+    t = tally[ "ts_counted" ]
+    err.write( f"[doc-lint] {TS_NAME} counted scope: {t[ 'files' ]} files checked, {t[ 'at_or_below' ]} at or below their count, {t[ 'over' ]} over, {t[ 'waivers' ]} waivers honoured, table {t[ 'table' ]}\n" )
     if refusals:
         err.write( f"[doc-lint] {len( refusals )} refusals, commit REFUSED\n" )
         return REFUSAL_EXIT

@@ -204,14 +204,11 @@ def test_census_over_an_empty_tree_reports_zero_walked( repo, monkeypatch ):
     assert ts_counts.census( str( repo ) ) == ( {}, 0 )
 
 
-def test_the_disk_census_reads_the_working_tree_without_a_scratch_copy( repo, monkeypatch ):
+def test_the_disk_census_reads_the_working_tree_text_and_drops_a_byte_order_mark( repo, extractor ):
     _track( repo, { "src/a.ts": ONE } )
-    seen = {}
-    def fake_run( root, files, source_root=None ):
-        seen[ "source_root" ] = source_root
-        return fake_extract( root, { f: open( os.path.join( str( root ), f ), encoding="utf-8" ).read() for f in files } )
-    monkeypatch.setattr( tsdoc_lint, "run_extractor", fake_run )
-    assert ts_counts.census( str( repo ) ) == ( { "src/a.ts": 1 }, 1 ) and seen[ "source_root" ] is None
+    ( repo / "src/b.ts" ).write_bytes( b"\xef\xbb\xbf" + TWO.encode( "utf-8" ) )
+    _git( repo, "add", "-f", "src/b.ts" )
+    assert ts_counts.census( str( repo ) ) == ( { "src/a.ts": 1, "src/b.ts": 2 }, 2 )
 
 
 # ---- the command line ----------------------------------------------------------------------

@@ -180,7 +180,7 @@ def test_rule_files_are_the_tracked_files_of_the_package_the_word_list_and_the_c
 def test_the_rule_files_of_the_real_tree_match_what_git_lists_for_that_set_and_are_not_empty():
     root   = cu.get_project_root()
     found  = counts.rule_files( root )
-    listed = sorted( p for p in _git( root, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" ).split( "\n" ) if p )
+    listed = sorted( p for p in _git( root, "ls-files", "--", "src/cosa/repo/doc_lint", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs" ).split( "\n" ) if p )
     assert len( found ) > 0 and found == listed and "src/cosa/repo/doc_lint/gate.py" in found and "src/cosa/repo/doc_lint/swept_scope.py" in found
 
 

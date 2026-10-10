@@ -1290,10 +1290,7 @@ def test_the_real_chain_refuses_a_commit_when_a_tracked_rule_file_is_edited_and_
 
 # ---- the TypeScript and JavaScript counted scope ---------------------------------------------
 
-try:
-    from cosa.repo.doc_lint import ts_counts
-except ImportError:                    # before the module exists the new tests fail by name and the old ones still run
-    ts_counts = None
+from cosa.repo.doc_lint import ts_counts
 
 TS_TABLE = "src/conf/doc-lint-ts-counts.json"
 TS_NAME  = "TypeScript and JavaScript"
@@ -1457,7 +1454,7 @@ def test_a_staged_ts_table_that_lowers_or_deletes_an_entry_is_the_allowance_for_
     _ts_table( ts_stamped, { "src/a.ts": 1 } )
     rc, text = _gate( ts_stamped )
     assert rc == 0 and "REFUSED" not in text and "2 at or below their count" in text
-    _stage( ts_stamped, { "src/a.ts": TS_TWO } )                                           # the file now rises against the staged entry
+    _stage( ts_stamped, { "src/a.ts": _ts_block( "This is NOT fine and NEVER good, again." ) } )    # two findings against the staged entry of one
     rc, text = _gate( ts_stamped )
     assert rc == 3 and "REFUSED src/a.ts: 2 findings, the count table allows 1 (+1)" in text
 

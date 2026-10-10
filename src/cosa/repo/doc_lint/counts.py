@@ -30,7 +30,7 @@ STAMP_FILES      = (
     "src/cosa/repo/doc_lint/waivers.py",
     "src/conf/dm-tutor-lowercase-words.txt",
 )
-RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh" )
+RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs" )
 EXIT_TIGHT       = 0
 EXIT_MISMATCH    = 1
 EXIT_NOT_CHECKED = 2
@@ -148,13 +148,14 @@ def census( root, read=None ):
     return counts, len( paths )
 
 
-def rules_stamp( root, read=None ):
+def rules_stamp( root, read=None, stamp_files=STAMP_FILES ):
     """
     Hash the files that decide what a finding is.
 
     Requires:
         - root is a working tree that holds every file in STAMP_FILES
         - read( path ) returns a rule file's bytes, or None to read the working tree
+        - stamp_files lists the rule files to hash, the Python ones by default
 
     Ensures:
         - returns the first 16 hex characters of a sha256 over each path and its bytes
@@ -168,7 +169,7 @@ def rules_stamp( root, read=None ):
         with open( f"{root}/{path}", "rb" ) as handle: return handle.read()
     read   = read if read is not None else disk
     digest = hashlib.sha256()
-    for path in STAMP_FILES:
+    for path in stamp_files:
         digest.update( path.encode( "utf-8" ) + b"\0" + read( path ) + b"\0" )
     return digest.hexdigest()[ : 16 ]
 
@@ -181,7 +182,7 @@ def rule_files( root ):
         - root is a git working tree
 
     Ensures:
-        - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list and the chain script
+        - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list, the chain script and the extractor script
         - the set comes from git at run time, so a new file in the package is covered the day it is added
 
     Raises:
