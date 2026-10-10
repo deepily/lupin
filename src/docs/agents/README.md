@@ -32,7 +32,7 @@ respective R&D directories under `src/rnd/`.
 | Your situation | Start here |
 |---------------|------------|
 | "One of my deep research jobs died — can I auto-fix it?" | [Bug Fix Expediter Guide](bug-fix-expediter-guide.md) |
-| "I want to enable automated BFE on failed agentic jobs" | [Bug Fix Expediter Guide §6 How to Enable Auto-Fix](bug-fix-expediter-guide.md#6-how-to-enable-auto-fix) |
+| "I want to enable automated BFE on failed agentic jobs" | [Bug Fix Expediter Guide §6 How to Enable Auto-Fix](bug-fix-expediter-guide/02-ini-trust-enabling-and-observability.md#6-how-to-enable-auto-fix) |
 | "My test run has 22 failures — can TFE cluster and fix them?" | [Test Fix Expediter Guide](test-fix-expediter-guide.md) |
 | "How does TFE decide which tests to rerun?" | [Test Fix Expediter Guide §4, Rerun Validation phase](test-fix-expediter-guide.md#4-six-phase-pipeline) |
 | "I want to run the full test pyramid every night at 1am" | [Test-Suite Scheduling Guide §4 The `/schedule-tests` Skill](test-suite-scheduling-guide/02-architecture-and-schedule-tests-skill.md#4-the-schedule-tests-skill) |
