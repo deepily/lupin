@@ -67,6 +67,16 @@ test( "it starts unknown and disabled, before anything has been read", () => {
   assert.equal( calls.length, 0 );
 } );
 
+test( "it is hidden, not removed: the skeleton crew toggle is the one control now (row 6f72dc83)", async () => {
+  const { api } = fakeApi( [ ON ] );
+  const sw = createPokeMuteSwitch( { api, isAdmin: () => true } );
+  assert.equal( sw.element.hidden, true, "hidden from the first paint" );
+
+  await sw.refresh();
+  assert.equal( sw.element.hidden, true, "a repaint does not bring it back" );
+  assert.equal( sw.element.textContent, "🔔 Poke on", "the handlers and paint are intact, so a revert is one line" );
+} );
+
 test( "an admin gets a working button showing the state the server reported", async () => {
   const { api, calls } = fakeApi( [ ON, OFF ] );
   const sw = createPokeMuteSwitch( { api, isAdmin: () => true } );

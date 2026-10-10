@@ -73,6 +73,17 @@ function shippedButton(): string {
   return found[ 0 ];
 }
 
+// Row 6f72dc83: one skeleton crew toggle now controls the stop poke, so the separate
+// button is hidden in the page as shipped (not deleted: its handlers and paint stay).
+test( "the shipped poke-mute button carries `hidden`, and a paint does not lift it", () => {
+  const ui = newUI( true );
+  document.body.innerHTML = shippedButton();
+  assert.equal( button().hidden, true );
+  ui._paintPokeMute( ON );
+  assert.equal( button().hidden, true );
+  assert.equal( button().dataset.muted, "false", "it still paints, so a revert is one attribute" );
+} );
+
 function button(): HTMLButtonElement {
   return document.getElementById( "poke-mute-btn" ) as HTMLButtonElement;
 }

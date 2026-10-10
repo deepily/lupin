@@ -197,6 +197,8 @@ function mountDial() {
     sizeCap           : () => fleet.cap,
     sizeCapSaving     : () => fleet.saving,
     setSizeCap        : async ( cap ) => { fleet.setCalls.push( cap ); },
+    skeletonCrewSaving: () => null,
+    setSkeletonCrew   : async () => {},
   };
   const renderer = createFleetStatusRenderer( { eventBus: bus, stores: { fleet } } );
   const root = document.createElement( "section" );
