@@ -145,3 +145,11 @@ def test_prompt_states_the_clause_rule_and_keeps_the_reply_contract_without_the_
 def test_the_prompt_version_changed_with_the_prompt_and_still_names_the_extractor():
     assert ce.PROMPT_VERSION.startswith( "extractor-" )
     assert ce.PROMPT_VERSION not in ( "extractor-bb5fabc9a0", "extractor-945e42d978" )
+
+
+def test_prompt_carries_the_quote_the_reason_sentence_the_draws_measured():
+    assert "If the text states a reason, quote the words that state it." in ce.SYSTEM_PROMPT
+
+
+def test_prompt_version_is_the_one_the_a2_draws_were_measured_under():
+    assert ce.PROMPT_VERSION == "extractor-87aea8ac7b"
