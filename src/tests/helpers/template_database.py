@@ -137,6 +137,8 @@ def terminate_sessions_sql( as_test_role ):
         - the text selects pg_terminate_backend over the client sessions of that database, never the caller's own
         - for the test role the text keeps to sessions of the caller's own role, because Postgres
           refuses that role the end of a superuser's session and one refusal fails the whole statement
+        - a superuser client session left on the database still makes the drop fail with
+          "is being accessed by other users"; this statement only stops itself raising
     """
     own_role = " AND usename = current_user" if as_test_role else ""
     return ( "SELECT pg_terminate_backend( pid ) FROM pg_stat_activity "

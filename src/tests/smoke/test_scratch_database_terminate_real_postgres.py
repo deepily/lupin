@@ -12,6 +12,10 @@ Arms:
    lupin_test, must finish, end the own session and leave the superuser session alive.
 2. Control: a bare terminate over every session, as the helper wrote it before, is refused by Postgres with the
    superuser message, so arm 1 fails for the reason named and not for an unrelated one.
+3. The drop. With the superuser session still attached, the statement succeeds and the drop is refused with
+   "is being accessed by other users". Once that session is gone the same pair of steps drops the database.
+   The helper cannot end a superuser's session. The fix covers a foreign backend that is not a client session.
+   It does not make the drop pass while a superuser client session stays on the database.
 
 It reuses the throwaway harness of test_db_roles_rollback_real_postgres.py. Docker is reached by exec only.
 Venue: host-side, docker required. The merge gate's containers have no docker socket, so there it skips.
@@ -111,3 +115,21 @@ def test_arm1_the_helper_statement_ends_the_own_session_and_spares_the_superuser
 def test_arm2_control_the_unfiltered_statement_is_refused_for_the_superuser_session( scratch ):
     code, err = _run( scratch, UNFILTERED )
     assert code != 0 and REFUSAL in err, f"the wall was not seen: code={code} err={err!r}"
+
+
+@needs_docker
+def test_arm3_a_superuser_client_session_still_blocks_the_drop_until_it_is_gone( scratch ):
+    drop = f"DROP DATABASE IF EXISTS {SCRATCH};\n"
+    code, err = _run( scratch, td.terminate_sessions_sql( True ) )
+    assert code == 0, f"the helper statement was refused: {err}"
+    blocked, _out, why = _as( scratch, "lupin_test", "postgres", drop )
+    assert blocked != 0 and "being accessed by other users" in why, f"the drop was not refused for the named reason: code={blocked} err={why!r}"
+    assert _sessions( scratch, SCRATCH ) == [ SUPERUSER ], "the superuser session must be what blocks the drop"
+    _psql( scratch[ "name" ], "postgres", f"SELECT pg_terminate_backend( pid ) FROM pg_stat_activity WHERE datname = '{SCRATCH}' AND usename = '{SUPERUSER}';\n" )
+    _wait_for_sessions( scratch, SCRATCH, [ ] )
+    code, err = _run( scratch, td.terminate_sessions_sql( True ) )
+    assert code == 0, f"the helper statement was refused: {err}"
+    dropped, _out, why = _as( scratch, "lupin_test", "postgres", drop )
+    assert dropped == 0, f"the drop failed with no superuser session left: {why}"
+    gone = _psql( scratch[ "name" ], "postgres", f"SELECT count(*) FROM pg_database WHERE datname = '{SCRATCH}';\n" ).strip()
+    assert gone == "0", "the database is still there after a successful drop"

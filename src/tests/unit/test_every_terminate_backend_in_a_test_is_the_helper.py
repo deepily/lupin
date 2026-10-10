@@ -6,7 +6,7 @@ database. Run as the restricted test login, an unfiltered copy is refused by Pos
 session on the database is enough, and the drop behind the statement then fails. Twelve test files carried such a copy
 when this guard was written; the helper fixed the statement once, so a copy keeps the old defect.
 
-This guard counts the tracked test files that name pg_terminate_backend outside the helper. A file may
+This guard counts the tracked files under src/tests that name pg_terminate_backend outside the helper. A file may
 appear only in the allowlist below, with the count it holds. The allowlist is a debt list and it is empty,
 because every file now calls the helper.
 
