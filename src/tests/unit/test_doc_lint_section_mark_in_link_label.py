@@ -66,5 +66,10 @@ def test_a_link_target_with_a_dot_and_no_path_does_not_resolve_the_mark():
 
 
 def test_a_stray_closing_bracket_after_a_mark_outside_any_label_does_not_borrow_the_target():
+    text = "then §3 and " + "w " * 40 + "](../deep/page.md)"
+    assert _bare( text ) == [ "section reference '§3' has no path" ]
+
+
+def test_a_mark_after_a_closed_link_does_not_borrow_a_later_target():
     text = "[a](#b) then §3 and " + "w " * 40 + "](../deep/page.md)"
     assert _bare( text ) == [ "section reference '§3' has no path" ]
