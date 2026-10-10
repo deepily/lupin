@@ -803,3 +803,24 @@ def test_the_launcher_hands_its_own_parent_pid_to_the_credit( folder, monkeypatc
     assert fca._live_credit_spend( "mgr-1", "tiffany", "seatX" ) is True
     record = json.loads( ( folder / f"{rc.CLAIM_PREFIX}seatX.json" ).read_text( encoding="utf-8" ) )
     assert record[ "owner_pid" ] == os.getppid()
+
+
+def test_an_owner_that_cannot_be_recorded_leaves_the_claim_as_it_was( folder ):
+    folder.mkdir( parents=True, exist_ok=True )
+    rc._record_owner( str( folder / "claimed.nothing.json" ), os.getpid() )
+    garbled = folder / "claimed.garbled.json"
+    garbled.write_text( "{not json", encoding="utf-8" )
+    rc._record_owner( str( garbled ), os.getpid() )
+    assert garbled.read_text( encoding="utf-8" ) == "{not json"
+
+
+def test_a_process_that_does_not_exist_has_no_start_time_and_is_not_running( folder ):
+    gone = subprocess.Popen( [ sys.executable, "-c", "pass" ] )
+    gone.wait()
+    assert rc._process_start( gone.pid ) is None
+    assert rc._owner_is_running( { "owner_pid": gone.pid, "owner_start": "1" } ) is False
+
+
+@pytest.mark.parametrize( "pid", [ None, True, "12", 0, -4, 1.5 ] )
+def test_an_owner_pid_that_is_not_a_positive_integer_is_not_running( pid ):
+    assert rc._owner_is_running( { "owner_pid": pid } ) is False

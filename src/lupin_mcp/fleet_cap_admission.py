@@ -539,7 +539,8 @@ def _live_stdin_is_tty() -> bool:
 def _live_credit_spend( manager_session_id: str, slug: str, session_name: str ) -> bool:
     """Take the re-spin credit in the real credit folder, for this launch."""
     from lupin_mcp import respin_credit
-    return respin_credit.spend( manager_session_id, slug, session_name=session_name )
+    return respin_credit.spend( manager_session_id, slug, session_name=session_name,
+                                owner_pid=os.getppid() )
 
 
 def _live_credit_restore( session_name: str ) -> bool:

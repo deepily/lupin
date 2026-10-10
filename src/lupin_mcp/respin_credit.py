@@ -150,12 +150,13 @@ def _claim_path( session_name: Optional[ str ] ) -> Optional[ str ]:
 
 
 def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime ] = None,
-           session_name: Optional[ str ] = None ) -> bool:
+           session_name: Optional[ str ] = None, owner_pid: Optional[ int ] = None ) -> bool:
     """
     Use up the credit, once.
 
     Requires:
         - session_name is the launch that takes the credit, or None
+        - owner_pid is the process that is launching, or None
 
     Ensures:
         - returns True for exactly one caller when several race for one fresh credit
@@ -163,6 +164,7 @@ def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime 
         - the credit is no longer spendable afterwards
         - with a safe session_name the credit waits in a claim file, so `restore` can give
           it back if that session never starts. Without one it is simply removed
+        - the claim file records owner_pid and that process's start time, when given
         - never raises
     """
     if find( manager_session_id, slug, now=now ) is None:
@@ -176,8 +178,70 @@ def spend( manager_session_id: str, slug: str, now: Optional[ datetime.datetime 
             os.rename( path, claim )
     except OSError:
         return False
+    if claim is not None and owner_pid is not None:
+        _record_owner( claim, owner_pid )
     _sweep_claims( now )
     return True
+
+
+def _record_owner( claim: str, owner_pid: int ) -> None:
+    """
+    Write the launcher's pid and start time into a claim file, replacing it whole.
+
+    Ensures:
+        - a claim that cannot be read or written is left as it was
+        - never raises
+    """
+    try:
+        with open( claim, "r", encoding="utf-8" ) as handle:
+            record = json.load( handle )
+        record[ "owner_pid" ]   = int( owner_pid )
+        record[ "owner_start" ] = _process_start( owner_pid )
+        partial = claim + ".partial"
+        with open( partial, "w", encoding="utf-8" ) as handle:
+            json.dump( record, handle )
+            handle.flush()
+            os.fsync( handle.fileno() )
+        os.replace( partial, claim )
+    except ( OSError, ValueError, TypeError, AttributeError ):
+        return
+
+
+def _process_start( pid: int ) -> Optional[ str ]:
+    """
+    The start time of a process in clock ticks since boot, or None when it cannot be read.
+
+    Ensures:
+        - returns the text of field 22 of /proc/<pid>/stat
+        - returns None when the process is gone or the file cannot be parsed
+        - never raises
+    """
+    try:
+        with open( f"/proc/{int( pid )}/stat", "r", encoding="utf-8" ) as handle:
+            text = handle.read()
+        return text.rsplit( ")", 1 )[ 1 ].split()[ 19 ]
+    except ( OSError, ValueError, IndexError ):
+        return None
+
+
+def _owner_is_running( record: dict ) -> bool:
+    """
+    Whether the launcher that took a claim is still the same running process.
+
+    Ensures:
+        - returns False for a claim that names no owner
+        - returns False when the pid is gone, or now belongs to a process with another
+          start time
+        - never raises
+    """
+    pid = record.get( "owner_pid" )
+    if isinstance( pid, bool ) or not isinstance( pid, int ) or pid <= 0:
+        return False
+    started = _process_start( pid )
+    if started is None:
+        return False
+    recorded = record.get( "owner_start" )
+    return recorded is None or recorded == started
 
 
 def _session_is_live( session_name: str ) -> bool:
@@ -187,8 +251,9 @@ def _session_is_live( session_name: str ) -> bool:
     Ensures:
         - returns True when a live bridge names the session
         - returns True when `tmux has-session` finds it
-        - returns False when tmux is not installed and no bridge names it
-        - returns True when the check itself fails, so a credit is never handed back on a guess
+        - returns False only when tmux ran and found no such session
+        - returns True when the check itself cannot run, including tmux missing from the
+          search path, so a credit is never handed back on a guess
     """
     try:
         from lupin_mcp import fleet_cap_admission
@@ -197,19 +262,19 @@ def _session_is_live( session_name: str ) -> bool:
         found = subprocess.run( [ "tmux", "has-session", "-t", f"={session_name}" ],
                                 capture_output=True, timeout=5 )
         return found.returncode == 0
-    except FileNotFoundError:
-        return False
     except Exception:
         return True
 
 
 def restore( session_name: str, now: Optional[ datetime.datetime ] = None,
-             live_fn: Optional[ Callable[ [ str ], bool ] ] = None ) -> bool:
+             live_fn: Optional[ Callable[ [ str ], bool ] ] = None,
+             caller_pid: Optional[ int ] = None ) -> bool:
     """
     Give a claimed credit back because the launch it was taken for did not start a session.
 
     Requires:
         - live_fn, when given, answers whether a session of that name is running
+        - caller_pid is the launcher process asking, which defaults to this process's parent
 
     Ensures:
         - returns True when the credit is spendable again, with its original clock
@@ -217,6 +282,9 @@ def restore( session_name: str, now: Optional[ datetime.datetime ] = None,
           expired, or when a newer credit for the same manager and persona already exists
         - returns False and removes the claim when a live bridge or tmux session carries that
           name, so one credit never buys a second seat
+        - returns False and keeps the claim while the launcher that took it is still running,
+          unless that launcher is the caller. A release from another shell cannot undo a
+          launch that has not yet made its session
         - a second restore of the same claim returns False
         - never raises
     """
@@ -233,6 +301,10 @@ def restore( session_name: str, now: Optional[ datetime.datetime ] = None,
             os.unlink( claim )
         except OSError:
             pass
+        return False
+    owner = record.get( "owner_pid" ) if isinstance( record, dict ) else None
+    asker = caller_pid if caller_pid is not None else os.getppid()
+    if isinstance( record, dict ) and owner != asker and _owner_is_running( record ):
         return False
     manager = record.get( "manager_session_id" ) if isinstance( record, dict ) else None
     slug    = record.get( "persona_slug" ) if isinstance( record, dict ) else None
