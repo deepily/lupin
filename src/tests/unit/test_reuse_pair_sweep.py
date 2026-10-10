@@ -175,3 +175,10 @@ def test_a_measurement_sweep_of_the_pair_reads_only_its_own_repeat_and_never_the
     again  = sweep( ctx_for( client ), ENTRIES[ :3 ], key_mode="stage1", run_index=1 )
     assert prod[ "calls" ] == 3 and one[ "calls" ] == 3 and one[ "cache_hits" ] == 0 and two[ "calls" ] == 3 and two[ "cache_hits" ] == 0
     assert again[ "calls" ] == 0 and again[ "cache_hits" ] == 3 and again[ "answers" ] == one[ "answers" ]
+
+
+def test_a_pair_sweep_in_candidate_mode_ignores_a_run_index_and_keys_by_the_plain_key( ctx_for ):
+    client = fake.PairFake( ENTRIES )
+    first  = sweep( ctx_for( client ), ENTRIES[ :3 ], key_mode="candidate", run_index=3 )
+    plain  = sweep( ctx_for( client ), ENTRIES[ :3 ] )
+    assert first[ "calls" ] == 3 and plain[ "calls" ] == 0 and plain[ "cache_hits" ] == 3          # one key, so the run index was not part of it

@@ -240,3 +240,11 @@ def test_asking_a_repeat_of_the_new_question_leaves_the_callers_context_as_it_wa
 
 def test_the_context_has_no_pair_sweeper_unless_it_is_given_one( env ):
     assert rt.ReuseContext( env[ 0 ], env[ 1 ] ).pair_sweeper is None
+
+
+def test_the_unstored_ask_with_no_question_sends_the_three_way_question_and_stores_nothing( env ):
+    fake = PackedFake( NEED )
+    out  = rt.unstored_need_impl( NEED, "cosa.mathx.add", packed_ctx( env, fake ) )
+    types = { q.get( "type" ) for body in fake.bodies for q in body[ "questions" ].values() }
+    assert out[ "status" ] == "ok" and fake.bodies and types == { "choice" }                     # no Noul or Score question was sent
+    assert not ( env[ 1 ] / "receipts" ).exists()

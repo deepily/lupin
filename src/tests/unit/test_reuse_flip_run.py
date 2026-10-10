@@ -326,7 +326,16 @@ def test_a_need_whose_excluded_symbol_is_not_an_entry_is_refused_before_any_spen
 
 
 def test_the_exclude_check_names_every_missing_symbol_and_passes_a_tree_it_cannot_read( setup, tmp_path ):
-    items = [ { "member": "a", "exclude": "cosa.wide.nope" }, { "member": "b", "exclude": None }, { "member": "c", "exclude": IDS[ 0 ] } ]
-    with pytest.raises( s1.DriverRefused, match=r"a \(cosa.wide.nope\)" ) as caught: frun.check_excludes( items, setup.root, setup.data )
-    assert "c (" not in str( caught.value ) and "b (" not in str( caught.value )
+    items = [ { "member": "a", "exclude": "cosa.wide.nope" }, { "member": "b", "exclude": None }, { "member": "c", "exclude": IDS[ 0 ] },
+              { "member": "d", "exclude": "cosa.wide.gone" } ]
+    with pytest.raises( s1.DriverRefused ) as caught: frun.check_excludes( items, setup.root, setup.data )
+    text = str( caught.value )
+    assert "a (cosa.wide.nope)" in text and "d (cosa.wide.gone)" in text and "c (" not in text and "b (" not in text
     assert frun.check_excludes( items, tmp_path / "not-a-tree", tmp_path / "d2" ) is None
+
+
+def test_a_row_written_before_the_question_was_recorded_reads_as_the_old_question():
+    old_shape = [ { "member": "n00", "question": f"r{i}", "status": "complete", "rows": [ { "repeat": i, "route": "full", "verdict": "NEW", "shortlist": [] } ] } for i in range( 1, 6 ) ]
+    items     = [ { "member": "n00", "need": "x", "exclude": None, "kind": "distinct" } ]
+    lines     = frun.report_lines( old_shape, items, 5 )
+    assert "(old question, route full)" in lines[ 0 ]

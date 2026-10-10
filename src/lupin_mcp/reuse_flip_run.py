@@ -103,7 +103,7 @@ def report_lines( searches, items, repeats ):
             continue
         rows = sorted( ( s[ "rows" ][ 0 ] for s in runs ), key=lambda row: row[ "repeat" ] )
         routes.update( row[ "route" ] for row in rows )
-        questions.update( row[ "question" ] for row in rows )
+        questions.update( row[ "question" ] if "question" in row else "choice" for row in rows )                    # a row written before the question was recorded is the old question
         counted[ item[ "member" ] ] = [ { "status": "ok", "verdict": row[ "verdict" ], "shortlist": [ { "id": i } for i in row[ "shortlist" ] ] } for row in rows ]
     lines = []
     if left_out: lines.append( f"left out as incomplete: {', '.join( left_out )}" )
