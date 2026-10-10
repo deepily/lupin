@@ -4510,11 +4510,11 @@ src/cosa/rest/routers/queues.py                     # 410 tombstones for the two
 
 ## Version History
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 3.2 | 2026-04-12 | Cross-agent rollout: BFE gets completion voice report + checkpoint-resume (re-exports TFE exception types VoiceGateTimeoutError / StalledException / CheckpointData — single source of truth). Podcast Generator gets completion voice report (no checkpoint-resume; audio generation is stateless). 18 new unit tests across 3 files (4 BFE completion + 3 Podcast completion + 11 BFE checkpoint). Source: the TFE forensics session, cross-agent rollout. |
-| 3.1 | 2026-04-12 | Artifact-Based Resume expanded with full component breakdown. ResumeTarget model, smart endpoint, LLM fuzzy match infrastructure (INI keys + XML response model + prompt template), UI submission card, voice training data. TFE reference implementation complete (the TFE forensics session's follow-ups). |
-| 3.0 | 2026-04-12 | Phase 11 (Completion Report) + Phase 12 (Checkpoint-Resume) added. `STALLED` JobState for voice gate timeouts. Artifact-based resume pattern. Cross-agent patterns from TFE forensics (the TFE forensics session). Reference implementations updated with TFE + BFE entries. |
-| 2.1 | 2026-02-07 | Completeness review: fixed training template naming + JSON path (Surface 4), added agent_registry.py + agentic_job_factory.py registration (Phase 5), added FastAPI router template (Phase 5b), added notification UI submission card guide (Surface 3), added artifact storage pattern + WebSocket state transition notes (Phase 5), added model string convention note (Phase 6), expanded final checklist |
-| 2.0 | 2026-02-06 | Complete lifecycle guide: Part I concept, Part `II` build expanded (build phases six to ten), Part `III` validate Testing Ladder (5 surfaces), Part `IV` Reference Implementations |
-| 1.0 | 2026-01-27 | Initial workflow documentation (build phases zero to five only) |
+| Version | Changes |
+|---------|---------|
+| 3.2 | Cross-agent rollout: BFE gets completion voice report + checkpoint-resume (re-exports TFE exception types VoiceGateTimeoutError / StalledException / CheckpointData — single source of truth). Podcast Generator gets completion voice report (no checkpoint-resume; audio generation is stateless). 18 new unit tests across 3 files (4 BFE completion + 3 Podcast completion + 11 BFE checkpoint). Source: the TFE forensics session, cross-agent rollout. |
+| 3.1 | Artifact-Based Resume expanded with full component breakdown. ResumeTarget model, smart endpoint, LLM fuzzy match infrastructure (INI keys + XML response model + prompt template), UI submission card, voice training data. TFE reference implementation complete (the TFE forensics session's follow-ups). |
+| 3.0 | Phase 11 (Completion Report) + Phase 12 (Checkpoint-Resume) added. `STALLED` JobState for voice gate timeouts. Artifact-based resume pattern. Cross-agent patterns from TFE forensics (the TFE forensics session). Reference implementations updated with TFE + BFE entries. |
+| 2.1 | Completeness review: fixed training template naming + JSON path (Surface 4), added agent_registry.py + agentic_job_factory.py registration (Phase 5), added FastAPI router template (Phase 5b), added notification UI submission card guide (Surface 3), added artifact storage pattern + WebSocket state transition notes (Phase 5), added model string convention note (Phase 6), expanded final checklist |
+| 2.0 | Complete lifecycle guide: Part I concept, Part `II` build expanded (build phases six to ten), Part `III` validate Testing Ladder (5 surfaces), Part `IV` Reference Implementations |
+| 1.0 | Initial workflow documentation (build phases zero to five only) |
