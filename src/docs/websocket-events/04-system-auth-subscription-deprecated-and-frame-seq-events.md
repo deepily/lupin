@@ -1,4 +1,4 @@
-> Part 4 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): system, auth, lifecycle, subscriptions.
+> Part 4 of 5 of the [WebSocket Event System Documentation](../websocket-events.md): system, auth, lifecycle, subscriptions, deprecated, frame seq.
 
 ## System Events
 

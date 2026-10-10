@@ -13,15 +13,15 @@ This page is an index. The reference itself is in the parts below, in document o
 - [Proxy / Ratification Events](websocket-events/02-notification-proxy-and-task-store-events.md#proxy--ratification-events)
 - [Task Store Events](websocket-events/02-notification-proxy-and-task-store-events.md#task-store-events)
 - [CC Transcript Console Events](websocket-events/03-cc-transcript-console-events.md#cc-transcript-console-events)
-- [System Events](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#system-events)
-- [Auth Handshake Events](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#auth-handshake-events)
-- [Lifecycle Events](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#lifecycle-events)
-- [Subscription Management Events](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#subscription-management-events)
-- [Subscription Patterns](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#subscription-patterns)
-- [Deprecated Events](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#deprecated-events)
-- [Frame seq, resume, and ack (part 2)](websocket-events/04-system-auth-lifecycle-and-subscription-events.md#frame-seq-resume-and-ack-part-2)
-- [Close Code Semantics](websocket-events/05-deprecated-frame-seq-and-close-codes.md#close-code-semantics)
-- [Related Documentation](websocket-events/05-deprecated-frame-seq-and-close-codes.md#related-documentation)
+- [System Events](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#system-events)
+- [Auth Handshake Events](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#auth-handshake-events)
+- [Lifecycle Events](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#lifecycle-events)
+- [Subscription Management Events](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#subscription-management-events)
+- [Subscription Patterns](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#subscription-patterns)
+- [Deprecated Events](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#deprecated-events)
+- [Frame seq, resume, and ack (part 2)](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md#frame-seq-resume-and-ack-part-2)
+- [Close Code Semantics](websocket-events/05-close-codes-and-related-docs.md#close-code-semantics)
+- [Related Documentation](websocket-events/05-close-codes-and-related-docs.md#related-documentation)
 
 ## Parts
 
@@ -30,5 +30,5 @@ This page is an index. The reference itself is in the parts below, in document o
 | [01-event-catalog-and-job-audio-events.md](websocket-events/01-event-catalog-and-job-audio-events.md) | catalog, job and audio events |
 | [02-notification-proxy-and-task-store-events.md](websocket-events/02-notification-proxy-and-task-store-events.md) | notification, proxy and task store events |
 | [03-cc-transcript-console-events.md](websocket-events/03-cc-transcript-console-events.md) | CC transcript console events |
-| [04-system-auth-lifecycle-and-subscription-events.md](websocket-events/04-system-auth-lifecycle-and-subscription-events.md) | system, auth, lifecycle, subscriptions |
-| [05-deprecated-frame-seq-and-close-codes.md](websocket-events/05-deprecated-frame-seq-and-close-codes.md) | deprecated events, frame resume, close codes |
+| [04-system-auth-subscription-deprecated-and-frame-seq-events.md](websocket-events/04-system-auth-subscription-deprecated-and-frame-seq-events.md) | system, auth, lifecycle, subscriptions, deprecated, frame seq |
+| [05-close-codes-and-related-docs.md](websocket-events/05-close-codes-and-related-docs.md) | close code semantics and related documentation |
