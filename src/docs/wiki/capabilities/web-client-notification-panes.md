@@ -8,7 +8,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.render.BroadcastCardRenderer.BroadcastCardRendererImpl@ffe2082dc8
   - src.lupin_app.static.js.multiplexer.render.BroadcastAckTallyRenderer.BroadcastAckTallyRendererImpl@c827b16ffb
   - src.lupin_app.static.js.multiplexer.render.CommonsActivityRenderer.CommonsActivityRendererImpl@3c39de597e
-  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@c62b8d8f91
+  - src.lupin_app.static.js.multiplexer.render.FleetStatusRenderer.FleetStatusRendererImpl@057ae78239
 ---
 # Web client: notification panes
 
@@ -24,7 +24,7 @@ Each pane renderer owns one mount node and repaints from store events on the bus
 - Submit and ✕ call `respondAndAwait`, which POSTs `/api/notify/response`. P and Esc click the first card's own controls, and Y, N, C do on a yes/no card, unless focus is in an input.
 - `BroadcastCardRendererImpl` loads `/api/commons/active-sessions`. After a confirm modal it POSTs `/api/commons/broadcast-to-cc-sessions` and hands the returned id to the tally.
 - `CommonsActivityRendererImpl` inserts a `prepended` row alone when it matches the filter. `hydrated` and `filter-changed` redraw all rows.
-- `FleetStatusRendererImpl` repaints on `store_fleet_status_changed`. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
+- `FleetStatusRendererImpl` repaints on `store_fleet_status_changed`. It paints a skeleton crew switch beside the size dial. The switch is hidden when the payload has no `skeleton_crew` field, and disabled while its write is in flight. The store polls `/api/arbiter/fleet-state` every 60000 ms once boot calls `startPolling`.
 
 ## Don't
 - A card input has to be added to `inputsFor` or the caches dropped, as `setAppTimezone` does. A `Notification` row is never mutated in place, because rows are compared by identity.
