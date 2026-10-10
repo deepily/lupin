@@ -17,6 +17,7 @@ They signal only processes this module started, and only by pid.
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -337,11 +338,24 @@ def test_with_no_proc_view_given_the_real_proc_is_used( worktree ):
 # Driven: real processes, the real pgrep, the real /proc
 # ---------------------------------------------------------------------------
 
-_SLEEPER = "import time; time.sleep(30)  # {token}"
+_SLEEPER = (
+    "import os, time  # {token}\n"
+    "end = time.time() + 300\n"
+    "while time.time() < end and not os.path.exists( {stop!r} ): time.sleep( 0.05 )\n"
+)
 
 _SPAWN_DETACHED = (
     "import subprocess, sys\n"
     "p = subprocess.Popen( [ sys.executable, '-c', sys.argv[2] ], cwd=sys.argv[1],\n"
+    "    start_new_session=True, stdin=subprocess.DEVNULL,\n"
+    "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )\n"
+    "print( p.pid, flush=True )\n"
+)
+
+
+_SPAWN_DETACHED_AS = (
+    "import subprocess, sys\n"
+    "p = subprocess.Popen( [ sys.argv[1], '-c', sys.argv[3] ], cwd=sys.argv[2],\n"
     "    start_new_session=True, stdin=subprocess.DEVNULL,\n"
     "    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL )\n"
     "print( p.pid, flush=True )\n"
@@ -356,30 +370,47 @@ def _spawn_orphan( cwd, token ):
     The pid is read from the parent's stdout.
     """
     out = subprocess.run(
-        [ sys.executable, "-c", _SPAWN_DETACHED, cwd, _SLEEPER.format( token=token ) ],
+        [ sys.executable, "-c", _SPAWN_DETACHED, cwd, _SLEEPER.format( token=token, stop=_stop_file( token ) ) ],
         capture_output=True, text=True, timeout=20, check=True,
     )
     return int( out.stdout.strip() )
 
 
+def _stop_file( token ):
+    """The path whose appearance ends the sleeper that carries `token`."""
+    return os.path.join( tempfile.gettempdir(), token + ".stop" )
+
+
 def _stop( pid, token ):
-    """Signal a process this module started, by pid, once its argv shows our token."""
+    """
+    End a sleeper this module started, without sending it any signal.
+
+    The sleeper polls for its stop file, so creating the file asks it to leave.
+    The argv token is read first, so a recycled pid is never touched.
+    The wait ends when the process is gone or only a zombie.
+    """
     try:
         with open( f"/proc/{pid}/cmdline", "rb" ) as handle:
             if token.encode() not in handle.read():
                 return
     except OSError:
         return
+    with open( _stop_file( token ), "w" ) as handle:
+        handle.write( "stop\n" )
     try:
-        os.kill( pid, 15 )
-    except ProcessLookupError:
-        return
-    for _ in range( 50 ):
+        for _ in range( 100 ):
+            try:
+                with open( f"/proc/{pid}/stat" ) as handle:
+                    if handle.read().rsplit( ")", 1 )[ 1 ].split()[ 0 ] == "Z":
+                        return
+            except OSError:
+                return
+            time.sleep( 0.1 )
+    finally:
         try:
-            os.kill( pid, 0 )
-        except ProcessLookupError:
-            return
-        time.sleep( 0.1 )
+            os.unlink( _stop_file( token ) )
+        except OSError:
+            pass
 
 
 def _real_guard( token, tree ):
@@ -426,7 +457,7 @@ def test_driven_a_real_orphan_inside_the_main_checkout_is_refused( main_checkout
 def test_driven_a_real_child_this_test_started_is_allowed_wherever_it_stands( worktree, elsewhere ):
     token = "kgprobe-" + uuid.uuid4().hex
     child = subprocess.Popen(
-        [ sys.executable, "-c", _SLEEPER.format( token=token ) ],
+        [ sys.executable, "-c", _SLEEPER.format( token=token, stop=_stop_file( token ) ) ],
         cwd=elsewhere, stdin=subprocess.DEVNULL,
     )
     try:
@@ -475,6 +506,10 @@ def test_a_redirection_is_not_part_of_the_pattern( command, worktree ):
     ( 'pkill -f "has (parens) and `tick`"',  [ "-f", "has (parens) and `tick`" ] ),
     ( 'pkill -f ">TOK"',                     [ "-f", ">TOK" ] ),
     ( 'pkill -f "a b" -9',                   [ "-f", "a b" ] ),
+    ( r"pkill -f TOK\|zzz",                  [ "-f", "TOK|zzz" ] ),
+    ( r"pkill -f a\;b",                      [ "-f", "a;b" ] ),
+    ( r"pkill -f a\&b -9",                   [ "-f", "a&b" ] ),
+    ( r"pkill -f foo\ bar",                  [ "-f", "foo bar" ] ),
 ] )
 def test_a_quoted_pattern_is_kept_whole_whatever_it_holds( command, expected, worktree ):
     assert _selector_seen( command, worktree ) == expected
@@ -665,7 +700,7 @@ class _Completed:
         self.stdout     = stdout
 
 
-@pytest.mark.parametrize( "code", [ 2, 3 ] )
+@pytest.mark.parametrize( "code", [ 3, 4 ] )
 def test_a_pgrep_failure_exit_allows_and_writes_one_log_line( code, monkeypatch, hook_log ):
     monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( code ) )
     assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
@@ -714,7 +749,7 @@ def test_an_empty_selector_is_not_a_probe_failure( hook_log ):
 
 
 def test_a_log_write_that_fails_does_not_break_the_probe( monkeypatch ):
-    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 2 ) )
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 3 ) )
     monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", "/proc/definitely/not/writable" )
     assert kill_guard._default_pgrep_probe( [ "-f", "x" ] ) == []
 
@@ -732,3 +767,265 @@ def test_the_ownership_view_is_not_built_for_a_command_with_no_sweep( worktree, 
             pgrep_probe=lambda s: [], cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
         )
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# The selector is the SHELL's view of the options pkill and killall accept, and
+# a selector pgrep rejects is refused, never read as "no match"
+# ---------------------------------------------------------------------------
+
+class _Spy:
+    """Wraps the real probe and records every selector it was handed."""
+
+    def __init__( self ):
+        self.selectors = []
+
+    def __call__( self, selector ):
+        self.selectors.append( list( selector ) )
+        return kill_guard._default_pgrep_probe( selector )
+
+
+def _run_real( command, cwd, spy ):
+    """The guard over `command` with the real pgrep and real /proc, selector recorded."""
+    return kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, comm_reader=None,
+        pgrep_probe=spy, cwd=cwd, caller_pid=os.getpid(),
+    )
+
+
+# ( command, outcome, the selectors pgrep must have been handed )
+_NONE = "none-of-these-match-" + uuid.uuid4().hex
+_OPTION_TABLE = [
+    # selecting options are translated, output-only ones are dropped
+    ( f"pkill -e -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -l -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -a -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -w -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -c {_NONE}",                 "resolved", [ [ _NONE ] ] ),
+    ( f"pkill -q 1 -f {_NONE}",            "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -U 0 -f {_NONE}",            "resolved", [ [ "-U", "0", "-f", _NONE ] ] ),
+    ( f"pkill -G 0 -f {_NONE}",            "resolved", [ [ "-G", "0", "-f", _NONE ] ] ),
+    ( f"pkill -u 0 -f {_NONE}",            "resolved", [ [ "-u", "0", "-f", _NONE ] ] ),
+    ( f"pkill -g 1 -f {_NONE}",            "resolved", [ [ "-g", "1", "-f", _NONE ] ] ),
+    ( f"pkill -s 1 -f {_NONE}",            "resolved", [ [ "-s", "1", "-f", _NONE ] ] ),
+    ( f"pkill -t pts/0 -f {_NONE}",        "resolved", [ [ "-t", "pts/0", "-f", _NONE ] ] ),
+    ( f"pkill -P 1234 {_NONE}",            "resolved", [ [ "-P", "1234", _NONE ] ] ),
+    ( f"pkill -P1234 -f {_NONE}",          "resolved", [ [ "-P", "1234", "-f", _NONE ] ] ),
+    ( f"pkill --parent=1234 -f {_NONE}",   "resolved", [ [ "-P", "1234", "-f", _NONE ] ] ),
+    ( f"pkill --uid 0 --full {_NONE}",     "resolved", [ [ "-U", "0", "-f", _NONE ] ] ),
+    ( f"pkill -fx {_NONE}",                "resolved", [ [ "-f", "-x", _NONE ] ] ),
+    ( f"pkill -9 -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -9f {_NONE}",                "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -KILL -f {_NONE}",           "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -SIGTERM -f {_NONE}",        "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill --signal TERM -f {_NONE}",   "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill --signal=9 -f {_NONE}",      "resolved", [ [ "-f", _NONE ] ] ),
+    ( f"pkill -f {_NONE}\\ more",          "resolved", [ [ "-f", f"{_NONE} more" ] ] ),
+    ( f'pkill -f "{_NONE} more"',          "resolved", [ [ "-f", f"{_NONE} more" ] ] ),
+    # killall: names are exact comm matches, one probe per name
+    ( f"killall -q {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -e {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -v -w -i -l {_NONE}",      "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -y 5m {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -o 5m {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -Z ctx {_NONE}",           "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -g {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -s TERM {_NONE}",          "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -TERM {_NONE}",            "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -9 {_NONE}",               "resolved", [ [ "-x", _NONE ] ] ),
+    ( f"killall -u 0 {_NONE}",             "resolved", [ [ "-x", "-u", "0", _NONE ] ] ),
+    ( f"killall -I {_NONE}",               "resolved", [ [ "-x", "-i", _NONE ] ] ),
+    ( f"killall -r {_NONE}.*",             "resolved", [ [ f"{_NONE}.*" ] ] ),
+    ( f"killall {_NONE}-a {_NONE}-b",      "resolved", [ [ "-x", f"{_NONE}-a" ], [ "-x", f"{_NONE}-b" ] ] ),
+    # what cannot become a valid selector is refused, with the remedy
+    ( "pkill -f ${VAR_" + uuid.uuid4().hex[ :6 ] + "}", "refused", None ),
+    ( f"pkill -f `echo {_NONE}`",          "refused", None ),
+    ( f"pkill -f 'a b' {_NONE}",           "refused", None ),
+    ( f"pkill -f {_NONE} second",          "refused", None ),
+    ( f"pkill --nosuchoption {_NONE}",     "refused", None ),
+    # scoped to the shell's own children, or nothing to select on: no probe at all
+    ( f"pkill -P $$ -f {_NONE}",           "allowed", [] ),
+    ( "pkill",                             "allowed", [] ),
+    ( "pkill -9",                          "allowed", [] ),
+    ( "killall",                           "allowed", [] ),
+]
+
+
+@pytest.mark.parametrize( "command, outcome, selectors", _OPTION_TABLE, ids=[ row[ 0 ].replace( _NONE, "NONE" ) for row in _OPTION_TABLE ] )
+def test_every_option_form_is_resolved_refused_or_allowed_on_purpose( command, outcome, selectors, worktree ):
+    spy    = _Spy()
+    reason = _run_real( command, worktree, spy )
+    if outcome == "refused":
+        assert reason is not None
+        assert "rejected" in reason
+        assert "LUPIN_ALLOW_UNSCOPED_KILL=1" in reason
+        assert "/proc/<pid>/comm" in reason
+        return
+    assert reason is None
+    assert spy.selectors == selectors
+
+
+def test_the_refusal_comes_after_the_own_children_skip( worktree ):
+    spy = _Spy()
+    assert _run_real( "pkill -P $$ -f ${VAR}", worktree, spy ) is None
+    assert spy.selectors == []
+
+
+def test_a_probe_the_selector_was_rejected_by_raises_for_the_guard_to_refuse( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_HOOK_LOG_DIR", str( tmp_path ) )
+    monkeypatch.setattr( kill_guard.subprocess, "run", lambda *a, **k: _Completed( 2 ) )
+    with pytest.raises( kill_guard._SelectorRejected ) as caught:
+        kill_guard._default_pgrep_probe( [ "-f", "a", "b" ] )
+    assert caught.value.selector == [ "-f", "a", "b" ]
+    assert caught.value.exit_code == 2
+
+
+def test_a_rejected_selector_is_refused_on_the_claude_only_path_too( ):
+    """No cwd in the payload: the legacy path must refuse as well."""
+    def reject( selector ):
+        raise kill_guard._SelectorRejected( selector, 2 )
+    reason = kill_deny_reason(
+        "Bash", { "command": "pkill -f a b" }, enabled=True, comm_reader=_comm(), pgrep_probe=reject,
+    )
+    assert reason is not None
+    assert "rejected" in reason
+
+
+def test_a_rejection_in_a_later_sweep_is_still_refused( worktree ):
+    def probe( selector ):
+        if selector == [ "-f", "bad" ]:
+            raise kill_guard._SelectorRejected( selector, 2 )
+        return []
+    reason = kill_deny_reason(
+        "Bash", { "command": "pkill -f good; pkill -f bad" }, enabled=True, comm_reader=_comm(),
+        pgrep_probe=probe, cwd=worktree, proc=FakeProc(), caller_pid=CALLER,
+    )
+    assert reason is not None
+    assert "rejected" in reason
+
+
+def test_pkill_s_selects_a_session_and_killall_s_is_a_signal():
+    assert kill_guard._sweep_selector( " -s 1 -f x" ) == [ "-s", "1", "-f", "x" ]
+    assert kill_guard._sweep_selectors( "killall", " -s TERM x" ) == [ [ "-x", "x" ] ]
+
+
+@pytest.mark.parametrize( "args, expected", [
+    ( " -V",                        [] ),
+    ( " --help",                    [] ),
+    ( " -f --",                     [ [ "-f" ] ] ),
+    ( " -f -- -weird-pattern",      [ [ "-f", "--", "-weird-pattern" ] ] ),
+    ( " --delimiter , x",           [ [ "x" ] ] ),
+    ( " --ns 1 --nslist pid x",     [ [ "--ns", "1", "--nslist", "pid", "x" ] ] ),
+    ( " --ns=1 x",                  [ [ "--ns", "1", "x" ] ] ),
+    ( " -fq 1 y",                   [ [ "-f", "y" ] ] ),
+] )
+def test_unusual_pkill_argument_shapes( args, expected ):
+    assert kill_guard._sweep_selectors( "pkill", args ) == expected
+
+
+@pytest.mark.parametrize( "args, expected", [
+    ( " -V",                    [] ),
+    ( " --user=bob x",          [ [ "-x", "-u", "bob", "x" ] ] ),
+    ( " --regexp x y",          [ [ "x" ], [ "y" ] ] ),
+    ( " -eq x",                 [ [ "-x", "x" ] ] ),
+    ( " -- -x",                 [ [ "-x", "-x" ] ] ),
+    ( " --signal=TERM x",       [ [ "-x", "x" ] ] ),
+    ( " --older-than 5m x",     [ [ "-x", "x" ] ] ),
+    ( " --bogus x",             [ [ "-x", "x" ] ] ),
+    ( " --ignore-case x",       [ [ "-x", "-i", "x" ] ] ),
+    ( " -ubob x",               [ [ "-x", "-u", "bob", "x" ] ] ),
+    ( " -rI x",                 [ [ "-i", "x" ] ] ),
+] )
+def test_unusual_killall_argument_shapes( args, expected ):
+    assert kill_guard._sweep_selectors( "killall", args ) == expected
+
+
+# --- the sleeper's life no longer depends on a clock the box can stall -------
+
+def test_driven_the_sleeper_outlives_a_slow_test_and_ends_on_the_stop_file( worktree, elsewhere ):
+    token = "kgprobe-" + uuid.uuid4().hex
+    pid   = _spawn_orphan( elsewhere, token )
+    try:
+        time.sleep( 1.5 )                                   # longer than any scheduling hiccup a test sees
+        assert os.path.exists( f"/proc/{pid}" )
+        assert _real_guard( token, worktree ) is not None   # still there to be found
+    finally:
+        _stop( pid, token )
+    assert not os.path.exists( f"/proc/{pid}" ) or open( f"/proc/{pid}/stat" ).read().split( ")" )[ -1 ].split()[ 0 ] == "Z"
+
+
+# --- driven: selecting by parent, user, group, session, pidfile, exact name --
+
+def _stat_field( pid, index ):
+    with open( f"/proc/{pid}/stat" ) as handle:
+        return handle.read().rsplit( ")", 1 )[ 1 ].split()[ index ]
+
+
+def _denied_for( command, worktree, pid ):
+    reason = kill_deny_reason(
+        "Bash", { "command": command }, enabled=True, cwd=worktree, caller_pid=os.getpid(),
+    )
+    assert reason is not None, command
+    assert str( pid ) in reason, command
+    return reason
+
+
+def test_driven_selecting_by_parent_user_group_session_and_pidfile_still_finds_the_foreign_process(
+    worktree, elsewhere, tmp_path
+):
+    token = "kgprobe-" + uuid.uuid4().hex
+    pid   = _spawn_orphan( elsewhere, token )
+    try:
+        ppid    = _stat_field( pid, 1 )       # state is field 0, ppid is field 1
+        pgrp    = _stat_field( pid, 2 )
+        session = _stat_field( pid, 3 )
+        pidfile = tmp_path / "kg.pid"
+        pidfile.write_text( f"{pid}\n" )
+        for option in (
+            f"-P {ppid}", f"-U {os.getuid()}", f"-u {os.geteuid()}", f"-G {os.getgid()}",
+            f"-g {pgrp}", f"-s {session}", f"-F {pidfile}",
+        ):
+            _denied_for( f"pkill {option} -f {token} 2>/dev/null || true", worktree, pid )
+        # the control for each selecting option: same option, a pattern that matches nothing
+        control = "kgprobe-" + uuid.uuid4().hex
+        for option in ( f"-P {ppid}", f"-U {os.getuid()}", f"-G {os.getgid()}", f"-g {pgrp}", f"-s {session}" ):
+            assert kill_deny_reason(
+                "Bash", { "command": f"pkill {option} -f {control}" }, enabled=True,
+                cwd=worktree, caller_pid=os.getpid(),
+            ) is None
+    finally:
+        _stop( pid, token )
+
+
+def _spawn_named( cwd, name, token, tmp_path ):
+    """A detached sleeper whose comm is `name`, a symlink to this interpreter."""
+    link = tmp_path / name
+    if not link.exists():
+        link.symlink_to( sys.executable )
+    stop = os.path.join( tempfile.gettempdir(), token + ".stop" )
+    code = _SLEEPER.format( token=token, stop=stop )
+    out  = subprocess.run(
+        [ sys.executable, "-c", _SPAWN_DETACHED_AS, str( link ), cwd, code ],
+        capture_output=True, text=True, timeout=20, check=True,
+    )
+    return int( out.stdout.strip() )
+
+
+def test_driven_killall_matches_the_exact_comm_and_not_a_longer_sibling( worktree, elsewhere, tmp_path ):
+    base    = "kgq" + uuid.uuid4().hex[ :8 ]
+    token_a = "kgprobe-" + uuid.uuid4().hex
+    token_b = "kgprobe-" + uuid.uuid4().hex
+    sibling = _spawn_named( elsewhere, base + "xy", token_a, tmp_path )
+    try:
+        assert open( f"/proc/{sibling}/comm" ).read().strip() == base + "xy"
+        # only the longer sibling runs: `killall <base>` would signal nothing, so it must be allowed
+        assert kill_deny_reason(
+            "Bash", { "command": f"killall -q {base}" }, enabled=True, cwd=worktree, caller_pid=os.getpid(),
+        ) is None
+        exact = _spawn_named( elsewhere, base, token_b, tmp_path )
+        try:
+            _denied_for( f"killall -q {base} 2>/dev/null", worktree, exact )
+        finally:
+            _stop( exact, token_b )
+    finally:
+        _stop( sibling, token_a )

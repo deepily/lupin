@@ -601,7 +601,7 @@ def test_a_quoted_pattern_with_spaces_stays_one_token():
     ( " -9 -f claude",            [ "-f", "claude" ] ),
     ( " -KILL -f claude",         [ "-f", "claude" ] ),
     ( " -SIGTERM -f claude",      [ "-f", "claude" ] ),
-    ( " -s TERM -f claude",       [ "-f", "claude" ] ),
+    ( " -s 1 -f claude",          [ "-s", "1", "-f", "claude" ] ),   # pkill: -s is a session id
     ( " --signal TERM -f claude", [ "-f", "claude" ] ),
     ( " --signal=9 -f claude",    [ "-f", "claude" ] ),
 ] )

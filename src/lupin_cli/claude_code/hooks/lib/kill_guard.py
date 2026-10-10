@@ -43,6 +43,7 @@ did not survive a hurry.
 import os
 import re
 import shlex
+import signal
 import subprocess
 from typing import List, Optional, Tuple
 
@@ -91,8 +92,23 @@ _WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|setsid|ion
 _TIMEOUT_SPAN = r"timeout(?:\s+(?:-[sk]\s+\w+|-\S+))*\s+\d+(?:\.\d*)?[smhd]?(?=\s)"
 _PREFIXES = rf"(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WRAPPERS}\b))*"
 
-# A signal flag on a kill verb: `-9`, `-KILL`, `-SIGTERM`. Not a selector.
-_SIGNAL_FLAG_RE = re.compile( r"-\d+|-(?:SIG)?[A-Z]+" )
+# A signal given as an option: `-9`, `-KILL`, `-SIGTERM`. The names come from the
+# platform's own table, so `-P`, `-U` and `-G` stay options that select processes.
+_SIGNAL_NAMES = frozenset(
+    name[ 3: ] for name in signal.Signals.__members__ if name.startswith( "SIG" )
+) | { "RTMIN", "RTMAX" }
+_SIGNAL_FLAG_RE = re.compile( r"-(?:\d+|(?:SIG)?[A-Z][A-Z0-9]*)" )
+
+
+def _is_signal_option( token: str ) -> bool:
+    """True iff the token is a signal given as an option: `-9`, `-KILL`, `-SIGHUP`."""
+    if not _SIGNAL_FLAG_RE.fullmatch( token ):
+        return False
+    body = token[ 1: ]
+    if body.isdigit():
+        return True
+    return ( body[ 3: ] if body.startswith( "SIG" ) else body ) in _SIGNAL_NAMES
+
 
 # What /proc/<pid>/comm reads for a Claude Code CLI process.
 CLAUDE_COMM = "claude"
@@ -158,15 +174,16 @@ _FOR_SUBST_RE = re.compile( r"\bfor\s+(?P<var>\w+)\s+in\s+(?:\$\(|`)" )
 # 2026-08-24 while reviewing this guard, together with SHAPE D below.
 # An argument is a run of quoted spans and unquoted characters that end the command.
 # A quoted span may hold `|`, `;`, `&`, `)` or a backtick: those are data inside it.
-# A lone quote with no partner falls through to the plain character class.
-_ARG_CHAR = r"""(?:"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
+# A backslash takes the next character (`foo\ bar`). A lone quote with no partner falls
+# through to the plain character class.
+_ARG_CHAR = r"""(?:\\.|"[^"]*"|'[^']*'|[^\s;&|)`\n])"""
 _PATTERN_SWEEP_RE = re.compile(
-    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?:pkill|killall)\b(?P<args>(?:\s+{_ARG_CHAR}+)*)"
+    rf"(?:^|[;&|(`{{]|\n|\bdo\b){_PREFIXES}\s*(?P<verb>pkill|killall)\b(?P<args>(?:\s+{_ARG_CHAR}+)*)"
 )
 
 # One raw (still quoted) argument, and the two redirection shapes. A redirection is
 # the shell's, and pkill never sees it: `2>/dev/null`, `>/dev/null`, `2>&1`, `< in`.
-_RAW_ARG_RE        = re.compile( r"""(?:"[^"]*"|'[^']*'|[^\s"'])+""" )
+_RAW_ARG_RE        = re.compile( r"""(?:\\.|"[^"]*"|'[^']*'|[^\s"'])+""" )
 _REDIRECT_ATTACHED = re.compile( r"(?:\d*|&)(?:>>?|<)&?\S+" )
 _REDIRECT_BARE     = re.compile( r"(?:\d*|&)(?:>>?|<)&?" )
 
@@ -252,52 +269,228 @@ def _drop_redirections( raw_tokens: List[ str ] ) -> List[ str ]:
     return kept
 
 
-def _sweep_selector( args: str ) -> List[ str ]:
-    """
-    The `pgrep` selector equivalent to a `pkill`/`killall` argument list.
+# Options of pkill (procps-ng) mapped to the pgrep spelling. Selecting options pass
+# through; options that only change output or signalling are dropped.
+_PKILL_VALUED   = frozenset( "gGOPstuUFr" )      # selecting options that take a value
+_PKILL_DROP_VAL = frozenset( "dq" )              # delimiter and queue value: not selectors
+_PKILL_DROP     = frozenset( "celawVh" )         # output, signalling, help
+_PKILL_LONG     = {
+    "parent": "P", "pgroup": "g", "group": "G", "session": "s", "terminal": "t",
+    "euid": "u", "uid": "U", "pidfile": "F", "runstates": "r", "older": "O",
+    "full": "f", "exact": "x", "ignore-case": "i", "newest": "n", "oldest": "o",
+    "inverse": "v", "logpidfile": "L",
+    "count": "c", "echo": "e", "list-name": "l", "list-full": "a", "lightweight": "w",
+    "version": "V", "help": "h", "delimiter": "d", "queue": "q",
+}
+_PKILL_LONG_PLAIN = frozenset( ( "ns", "nslist" ) )   # long-only, valued, kept as given
 
-    Requires:
-        - args is the text following the pkill/killall verb
+# Options of killall (psmisc). Names are matched exactly against the command name.
+_KILLALL_VALUED   = frozenset( "suyoZn" )
+_KILLALL_DROP     = frozenset( "egilqvwV" )
+_KILLALL_LONG     = {
+    "signal": "s", "user": "u", "younger-than": "y", "older-than": "o", "context": "Z",
+    "ns": "n", "exact": "e", "process-group": "g", "interactive": "i", "list": "l",
+    "quiet": "q", "verbose": "v", "wait": "w", "version": "V",
+    "ignore-case": "I", "regexp": "r",
+}
+
+
+def _split_args( args: str ) -> List[ str ]:
+    """
+    The words of a sweep's argument text, shell-aware, with redirections removed.
 
     Ensures:
-        - signal flags are dropped — `-9`, `-KILL`, `-TERM`, `-s TERM`,
-          `--signal=9`, `--signal 9` — because pgrep rejects them
-        - `--signal`'s and `-s`'s separate value is dropped with it
-        - shell redirections (`2>/dev/null`, `> out`, `2>&1`) are dropped: pkill
-          never receives them, and pgrep rejects a second pattern
-        - every other token is kept in order, so the selector matches exactly
-          what the sweep would have matched
-        - the split is SHELL-AWARE, so a quoted pattern containing spaces stays
-          one token — `pkill -f "pytest src/tests/unit"` selects on the whole
-          phrase, exactly as the shell would have handed it to pkill
-        - unbalanced quotes fall back to a whitespace split rather than giving up
+        - a quoted span or a backslash-escaped character stays inside one word
+        - redirections are dropped; unbalanced quotes fall back to a whitespace split
     """
-    # shlex, NOT split() — `pkill -f "pytest src/tests/unit"` is ONE pattern with
-    # spaces in it. Splitting on whitespace hands pgrep three patterns, pgrep
-    # refuses more than one, the probe comes back empty, and the guard allows the
-    # exact command that killed three seats. Caught by replaying real traffic.
     try:
         shlex.split( args )
-        tokens = []
+        words = []
         for raw in _drop_redirections( _RAW_ARG_RE.findall( args ) ):
-            tokens.extend( shlex.split( raw ) )
+            words.extend( shlex.split( raw ) )
+        return words
     except ValueError:
-        tokens = args.split()   # unbalanced quotes — fall back rather than refuse to look
-    kept = []
-    skip = False
-    for token in tokens:
-        if skip:
-            skip = False
+        return args.split()
+
+
+def _pkill_selector( words: List[ str ] ) -> List[ str ]:
+    """
+    The pgrep selector equivalent to a pkill argument list.
+
+    Ensures:
+        - a signal option (`-9`, `-KILL`, `--signal X`) is dropped
+        - `-P`, `-U`, `-G`, `-u`, `-g`, `-s`, `-t`, `-F`, `-r`, `-O` keep their value, attached or separate
+        - output-only options (`-e -l -a -c -w`) and `-q`/`-d` with their values are dropped
+        - a word no table knows is kept, so pgrep decides and the guard refuses what it rejects
+        - after `--` every word is a pattern
+    """
+    kept  = []
+    index = 0
+    while index < len( words ):
+        word  = words[ index ]
+        index += 1
+        if word == "--":
+            if words[ index: ]:
+                kept.append( "--" )
+                kept.extend( words[ index: ] )
+            break
+        if word.startswith( "--" ):
+            name, equals, value = word[ 2: ].partition( "=" )
+            if name == "signal":
+                if not equals and index < len( words ):
+                    index += 1
+                continue
+            if name in _PKILL_LONG_PLAIN:
+                if not equals and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                kept.extend( [ f"--{name}", value ] )
+                continue
+            short = _PKILL_LONG.get( name )
+            if short is None:
+                kept.append( word )
+                continue
+            if short in _PKILL_DROP:
+                continue
+            if short in _PKILL_DROP_VAL or short in _PKILL_VALUED:
+                if not equals and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                if short in _PKILL_VALUED:
+                    kept.extend( [ f"-{short}", value ] )
+                continue
+            kept.append( f"-{short}" )
             continue
-        if token in ( "--signal", "-s" ):
-            skip = True
+        if word.startswith( "-" ) and len( word ) > 1:
+            if _is_signal_option( word ):
+                continue
+            cluster = word[ 1: ].lstrip( "0123456789" )          # `-9f`: a signal, then flags
+            position = 0
+            while position < len( cluster ):
+                char      = cluster[ position ]
+                position += 1
+                if char in _PKILL_VALUED or char in _PKILL_DROP_VAL:
+                    value = cluster[ position: ]
+                    if not value and index < len( words ):
+                        value  = words[ index ]
+                        index += 1
+                    if char in _PKILL_VALUED:
+                        kept.extend( [ f"-{char}", value ] )
+                    break
+                if char in _PKILL_DROP:
+                    continue
+                kept.append( f"-{char}" )
             continue
-        if token.startswith( "--signal=" ):
-            continue
-        if _SIGNAL_FLAG_RE.fullmatch( token ):
-            continue
-        kept.append( token )
+        kept.append( word )
     return kept
+
+
+def _killall_selectors( words: List[ str ] ) -> List[ List[ str ] ]:
+    """
+    One pgrep selector per name in a killall argument list.
+
+    Ensures:
+        - a name is an exact command-name match (`-x`), unless `-r` makes it a regexp
+        - `-I` adds `-i`; `-u USER` is kept; signal, age, context, namespace and
+          output options are dropped with their values
+        - a killall with no name gives no selector
+    """
+    exact   = True
+    ignore  = False
+    user    = None
+    names   = []
+    index   = 0
+    options_done = False
+    while index < len( words ):
+        word  = words[ index ]
+        index += 1
+        if options_done or not word.startswith( "-" ) or word == "-":
+            names.append( word )
+            continue
+        if word == "--":
+            options_done = True
+            continue
+        if word.startswith( "--" ):
+            name, equals, value = word[ 2: ].partition( "=" )
+            short = _KILLALL_LONG.get( name )
+            if short is None:
+                continue
+            if short in _KILLALL_VALUED and not equals and index < len( words ):
+                value  = words[ index ]
+                index += 1
+            if short == "u":
+                user = value
+            elif short == "I":
+                ignore = True
+            elif short == "r":
+                exact = False
+            continue
+        if _is_signal_option( word ):
+            continue
+        cluster  = word[ 1: ]
+        position = 0
+        while position < len( cluster ):
+            char      = cluster[ position ]
+            position += 1
+            if char in _KILLALL_VALUED:
+                value = cluster[ position: ]
+                if not value and index < len( words ):
+                    value  = words[ index ]
+                    index += 1
+                if char == "u":
+                    user = value
+                break
+            if char == "I":
+                ignore = True
+            elif char == "r":
+                exact = False
+    selectors = []
+    for name in names:
+        selector = []
+        if exact:
+            selector.append( "-x" )
+        if ignore:
+            selector.append( "-i" )
+        if user:
+            selector.extend( [ "-u", user ] )
+        selector.append( name )
+        selectors.append( selector )
+    return selectors
+
+
+def _sweep_selectors( verb: str, args: str ) -> List[ List[ str ] ]:
+    """
+    The pgrep selectors equivalent to a `pkill`/`killall` argument list.
+
+    Requires:
+        - verb is `pkill` or `killall`; args is the text following the verb
+
+    Ensures:
+        - returns [] when nothing selects (a bare verb, only a signal), so the
+          guard has nothing to probe
+        - a pkill gives at most one selector; a killall gives one per name
+        - the split is shell-aware and redirection-free (see `_split_args`)
+    """
+    words = _split_args( args )
+    if verb == "killall":
+        return _killall_selectors( words )
+    selector = _pkill_selector( words )
+    return [ selector ] if selector else []
+
+
+def _sweep_selector( args: str, verb: str = "pkill" ) -> List[ str ]:
+    """The first selector of `_sweep_selectors`, or [] when there is none."""
+    selectors = _sweep_selectors( verb, args )
+    return selectors[ 0 ] if selectors else []
+
+
+class _SelectorRejected( Exception ):
+    """pgrep rejected the guard's selector, so the sweep's reach cannot be named."""
+
+    def __init__( self, selector, exit_code ):
+        super().__init__( f"pgrep rejected {selector!r} (exit {exit_code})" )
+        self.selector  = list( selector )
+        self.exit_code = exit_code
 
 
 def _log_probe_failure( selector: List[ str ], reason: str, exit_code: Optional[ int ] ) -> None:
@@ -332,7 +525,9 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
     Ensures:
         - returns the matching PIDs as strings, or [] when pgrep matches nothing
         - exit 1 is "no match" and is silent
-        - exit 2 or more, a timeout, or a pgrep that cannot run returns [] and writes
+        - exit 2 (a usage error: the selector is not one pgrep accepts) writes one log
+          line and raises `_SelectorRejected`, so the caller refuses the sweep
+        - exit 3 or more, a timeout, or a pgrep that cannot run returns [] and writes
           one log line: a probe that cannot answer must not manufacture a refusal,
           and must not pass for "no match" without a trace
     """
@@ -348,13 +543,16 @@ def _default_pgrep_probe( selector: List[ str ] ) -> List[ str ]:
     except ( OSError, subprocess.SubprocessError ) as error:
         _log_probe_failure( selector, f"pgrep could not run: {error}", None )
         return []
-    if result.returncode >= 2:
-        _log_probe_failure( selector, "pgrep rejected the selector", result.returncode )
+    if result.returncode == 2:
+        _log_probe_failure( selector, "pgrep rejected the selector", 2 )
+        raise _SelectorRejected( selector, 2 )
+    if result.returncode >= 3:
+        _log_probe_failure( selector, "pgrep failed", result.returncode )
         return []
     return [ line.strip() for line in result.stdout.split( "\n" ) if line.strip().isdigit() ]
 
 
-def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str ]:
+def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "pkill" ) -> List[ str ]:
     """
     The live `claude` PIDs a `pkill`/`killall` pattern currently matches.
 
@@ -373,10 +571,10 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader ) -> List[ str
           check and the command running is not covered. That race is accepted;
           it is far narrower than the risk, and no PreToolUse check can close it
     """
-    selector = _sweep_selector( args )
-    if not selector:
-        return []
-    return [ pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM ]
+    hits = []
+    for selector in _sweep_selectors( verb, args ):
+        hits.extend( pid for pid in pgrep_probe( selector ) if comm_reader( pid ) == CLAUDE_COMM )
+    return hits
 
 
 # 🔴 CLOSING THE BYPASS CLOSED THE DOCUMENTED HATCH WITH IT, and this repairs that.
@@ -597,7 +795,7 @@ def _sweep_seat_hits( command: str, pgrep_probe, comm_reader ) -> List[ str ]:
         args = sweep.group( "args" )
         if not args.strip() or _OWN_CHILDREN_RE.search( args ):
             continue
-        hits = _seats_a_sweep_would_hit( args, pgrep_probe, comm_reader )
+        hits = _seats_a_sweep_would_hit( args, pgrep_probe, comm_reader, sweep.group( "verb" ) )
         if hits:
             return hits
     return []
@@ -769,10 +967,9 @@ def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Owne
         args = sweep.group( "args" )
         if not args.strip() or _OWN_CHILDREN_RE.search( args ):
             continue
-        selector = _sweep_selector( args )
-        if not selector:
-            continue
-        pids   = pgrep_probe( selector )
+        pids = []
+        for selector in _sweep_selectors( sweep.group( "verb" ), args ):
+            pids.extend( pid for pid in pgrep_probe( selector ) if pid not in pids )
         claude = [ pid for pid in pids if comm_reader( pid ) == CLAUDE_COMM ]
         if claude:
             return claude, []
@@ -784,6 +981,26 @@ def _sweep_hits_with_owner( command: str, pgrep_probe, comm_reader, owner: _Owne
         if foreign:
             return [], foreign
     return [], []
+
+
+def _rejected_deny_reason( rejected: "_SelectorRejected" ) -> str:
+    """Compose the deny text for a sweep whose selector pgrep rejected."""
+    shown = " ".join( shlex.quote( word ) for word in rejected.selector )
+    return (
+        "This `pkill`/`killall` could not be checked: pgrep rejected the selector the guard "
+        f"built from it (`pgrep {shown}`, exit {rejected.exit_code}). A selector pgrep cannot "
+        "read is a command whose reach the guard cannot name, and a seat's unit tier has "
+        "been stopped by exactly such a sweep (row 7479a389).\n"
+        "Usual causes: a variable or backtick in the pattern, two patterns, or an option "
+        "pgrep does not take.\n"
+        "USE INSTEAD:\n"
+        "  · kill YOUR OWN children — `pkill -P $$ -f <pattern>`, or "
+        "`pgrep -P $$ -f <pattern> | xargs -r kill`;\n"
+        "  · read first, then kill by a PID you have checked: `cat /proc/<pid>/comm` and "
+        "`readlink /proc/<pid>/cwd` must show a process that is yours.\n"
+        "If you have read the PIDs and confirmed none is another seat's, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
 
 
 def _foreign_deny_reason( foreign: list ) -> str:
@@ -906,12 +1123,15 @@ def kill_deny_reason(
         owner       = None
         if _PATTERN_SWEEP_RE.search( command ):
             owner = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
-        if owner is not None:
-            sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
-            if foreign:
-                return _foreign_deny_reason( foreign )
-        else:
-            sweep_hits = _sweep_seat_hits( command, prober, reader )
+        try:
+            if owner is not None:
+                sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
+                if foreign:
+                    return _foreign_deny_reason( foreign )
+            else:
+                sweep_hits = _sweep_seat_hits( command, prober, reader )
+        except _SelectorRejected as rejected:
+            return _rejected_deny_reason( rejected )
         if sweep_hits:
             return _deny_reason_for( sweep_hits )
         if _sweeps_unscoped( command ):
