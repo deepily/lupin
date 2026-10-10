@@ -300,14 +300,14 @@ def _main( environ, spend, skeleton=lambda: LAUNCH_TEXT ):
 
 def test_the_launcher_spends_the_credit_and_lets_the_re_spin_launch():
     spent = []
-    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s: spent.append( ( m, s ) ) or True )
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: spent.append( ( m, s ) ) or True )
     assert code == fca.EXIT_ADMITTED
     assert spent == [ ( "mgr-1", "tiffany" ) ]
     assert calls == [ "cc-a" ]
 
 
 def test_the_launcher_refuses_when_the_credit_cannot_be_spent():
-    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s: False )
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: False )
     assert code == fca.EXIT_REFUSED
     assert LAUNCH_TEXT in err
     assert calls == []
@@ -315,26 +315,26 @@ def test_the_launcher_refuses_when_the_credit_cannot_be_spent():
 
 def test_the_launcher_refuses_without_a_credit_and_never_tries_to_spend():
     spent = []
-    code, err, calls = _main( {}, lambda m, s: spent.append( 1 ) or True )
+    code, err, calls = _main( {}, lambda m, s, n=None: spent.append( 1 ) or True )
     assert code == fca.EXIT_REFUSED
     assert spent == []
 
 
 def test_the_launcher_refuses_a_malformed_credit_value():
-    code, err, calls = _main( { rc.CREDIT_ENV: "garbage" }, lambda m, s: True )
+    code, err, calls = _main( { rc.CREDIT_ENV: "garbage" }, lambda m, s, n=None: True )
     assert code == fca.EXIT_REFUSED
 
 
 def test_the_launcher_does_not_touch_the_credit_when_the_switch_is_off():
     spent = []
-    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s: spent.append( 1 ) or True,
+    code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, lambda m, s, n=None: spent.append( 1 ) or True,
                               skeleton=lambda: None )
     assert code == fca.EXIT_ADMITTED
     assert spent == []
 
 
 def test_a_credit_spend_that_raises_refuses_the_launch():
-    def boom( manager, slug ):
+    def boom( manager, slug, session_name=None ):
         raise OSError( "folder gone" )
     code, err, calls = _main( { rc.CREDIT_ENV: "mgr-1:tiffany" }, boom )
     assert code == fca.EXIT_REFUSED
@@ -461,3 +461,96 @@ def test_an_already_gone_seat_still_keeps_its_rows_through_a_re_spin( tmp_path, 
     gone = lambda argv, env=None: SimpleNamespace( returncode=1 )
     mgr, result = _reap_with( tmp_path, gone, [ "Tiffany" ] )
     assert result[ "retained_owner_personas" ] == [ "tiffany" ]
+
+
+# ── a launch that fails after the credit was taken gives it back ─────────────
+
+def test_a_claimed_credit_is_unspendable_until_it_is_restored( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is None
+    assert rc.restore( "cc-new-1", now=NOW ) is True
+    assert rc.find( "mgr-1", "tiffany", now=NOW ) is not None
+    assert rc.spend( "mgr-1", "tiffany", now=NOW ) is True
+
+
+def test_a_restored_credit_keeps_its_original_clock( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    late = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS + 1 )
+    assert rc.restore( "cc-new-1", now=late ) is False
+    assert rc.find( "mgr-1", "tiffany", now=late ) is None
+
+
+def test_restoring_a_name_nothing_claimed_is_false( folder ):
+    assert rc.restore( "cc-never-claimed", now=NOW ) is False
+    assert rc.restore( "../x", now=NOW ) is False
+
+
+def test_a_claim_never_overwrites_a_newer_credit( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    newer = NOW + datetime.timedelta( seconds=30 )
+    rc.mint( "mgr-1", [ "tiffany" ], now=newer )
+    assert rc.restore( "cc-new-1", now=newer ) is False
+    record = rc.find( "mgr-1", "tiffany", now=newer )
+    assert record[ "minted_ts" ] == newer.timestamp()
+
+
+def test_a_second_restore_is_false( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    assert rc.restore( "cc-new-1", now=NOW ) is True
+    assert rc.restore( "cc-new-1", now=NOW ) is False
+
+
+def test_a_spend_with_an_unsafe_session_name_still_spends_once( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="a/b" ) is True
+    assert rc.spend( "mgr-1", "tiffany", now=NOW, session_name="a/b" ) is False
+
+
+def test_old_claims_are_swept_when_the_next_credit_is_minted( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=NOW )
+    rc.spend( "mgr-1", "tiffany", now=NOW, session_name="cc-new-1" )
+    later = NOW + datetime.timedelta( seconds=rc.CREDIT_TTL_SECONDS * 3 )
+    rc.mint( "mgr-2", [ "cheech" ], now=later )
+    assert [ n for n in os.listdir( folder ) if n.startswith( rc.CLAIM_PREFIX ) ] == []
+
+
+def test_the_launcher_gives_the_credit_back_when_the_session_never_starts( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    err  = _Capture()
+    base = dict( admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+                 skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+                 environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    code = fca.main( [ "--session-name", "cc-new-1", "--headless" ], **base )
+    assert code == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    code = fca.main( [ "--session-name", "cc-new-1", "--release" ], release_fn=lambda n, d: None, **base )
+    assert code == fca.EXIT_ADMITTED
+    assert rc.find( "mgr-1", "tiffany" ) is not None
+
+
+def test_a_launch_that_started_keeps_the_credit_spent( folder ):
+    rc.mint( "mgr-1", [ "tiffany" ], now=datetime.datetime.now( datetime.timezone.utc ) )
+    err  = _Capture()
+    fca.main( [ "--session-name", "cc-new-1", "--headless" ],
+              admit_fn=lambda name, **kw: { "admitted": True }, dir_fn=lambda: "/tmp", stderr=err,
+              skeleton_fn=lambda: LAUNCH_TEXT, stdin_is_tty_fn=lambda: False,
+              environ={ rc.CREDIT_ENV: "mgr-1:tiffany" } )
+    assert rc.find( "mgr-1", "tiffany" ) is None
+    assert rc.restore( "cc-other-2" ) is False
+
+
+def test_a_restore_that_fails_never_breaks_the_release( folder ):
+    err = _Capture()
+    def boom( session_name ):
+        raise OSError( "folder gone" )
+    code = fca.main( [ "--session-name", "cc-new-1", "--release" ], release_fn=lambda n, d: None,
+                     dir_fn=lambda: "/tmp", stderr=err, credit_restore_fn=boom )
+    assert code == fca.EXIT_ADMITTED
+
+
+def test_the_credit_is_not_tied_to_the_session_name_the_launcher_is_given( folder ):
+    assert "not tied to the session name" in " ".join( ( rc.__doc__ or "" ).split() )

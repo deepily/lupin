@@ -182,3 +182,22 @@ def test_the_old_flip_on_with_skeleton_crew_off_reports_the_file_as_source( swit
                               headers={ "Authorization": "Bearer t" } )
     assert response.json()[ "source" ] == "file"
     assert pm.read_poke_mute()[ "muted" ] is True
+
+
+# ── the hook leaves the poke on when the switch cannot be asked ──────────────
+
+def test_a_switch_module_that_cannot_be_imported_leaves_the_poke_on( settings_file, switch, monkeypatch ):
+    settings_file( { "enabled": True } )
+    switch( "true" )
+    monkeypatch.setitem( sys.modules, "lupin_mcp.skeleton_crew", None )
+    loaded = hs.load_heartbeat_settings()
+    assert loaded[ "poke_output_enabled" ] is True
+
+
+def test_a_switch_check_that_raises_leaves_the_poke_on( settings_file, switch, monkeypatch ):
+    settings_file( { "enabled": True } )
+    switch( "true" )
+    def boom():
+        raise RuntimeError( "cannot read" )
+    monkeypatch.setattr( sc, "is_on_quietly", boom )
+    assert hs.load_heartbeat_settings()[ "poke_output_enabled" ] is True

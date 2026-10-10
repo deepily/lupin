@@ -325,3 +325,25 @@ def test_a_broadcast_that_fails_never_fails_the_flip( commons, capsys ):
 def test_the_queue_is_resolved_from_the_app_when_none_is_given( commons ):
     asyncio.run( arbiter._announce_flip( True, "rick" ) )
     assert commons.posted[ 0 ][ 2 ] == "queue-from-main"
+
+
+# ── the order of the two writes, and the file's mode ─────────────────────────
+
+def test_the_attribution_record_is_written_before_the_configuration_file( ini, state_dir, no_settings, announced, monkeypatch ):
+    def refuse( *args, **kwargs ):
+        raise OSError( "disk full" )
+    monkeypatch.setattr( io, "write_bool_to_disk", refuse )
+    response = _client().put( PUT_PATH, json={ "on": True } )
+    assert response.status_code == 500
+    record = sc.read_state_file()
+    assert record is not None and record[ "on" ] is True
+    state = _client().get( GET_PATH ).json()[ "skeleton_crew" ]
+    assert state[ "on" ] is False
+    assert state[ "set_by" ] == "unknown (file edited)"
+
+
+def test_a_flip_leaves_the_configuration_file_readable_by_everyone( ini, state_dir, no_settings, announced ):
+    import stat
+    ini.chmod( 0o600 )
+    _client().put( PUT_PATH, json={ "on": True } )
+    assert stat.S_IMODE( ini.stat().st_mode ) == 0o644
