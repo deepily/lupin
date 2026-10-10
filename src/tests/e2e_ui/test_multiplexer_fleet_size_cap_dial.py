@@ -143,3 +143,107 @@ def test_fleet_size_cap_dial_save_repaints_the_servers_answer( logged_in_page ):
 
 def test_fleet_size_cap_dial_refused_save_snaps_back( logged_in_page ):
     drive_refused_save_snaps_back( logged_in_page )
+
+
+# ── The skeleton crew switch (row 6f72dc83), inside the same cluster as the dial ─────────────
+
+CREW_ROUTE   = "**/api/arbiter/skeleton-crew"
+TOGGLE       = '[data-testid="multiplexer-skeleton-crew-toggle"]'
+CREW_STATE   = '[data-testid="multiplexer-skeleton-crew-state"]'
+CREW_WARNING = '[data-testid="multiplexer-skeleton-crew-warning"]'
+CONTROLS     = '[data-testid="multiplexer-fleet-size-cap-controls"]'
+CREW_REFUSAL = "Only an administrator may change the skeleton crew switch."
+
+
+def _crew_body( on, mute=False ):
+    return { "on": on, "since": "2026-10-10T13:20:00-04:00", "set_by": "rick", "settings_mute_while_off": mute }
+
+
+def _route_crew( page, put_status=200, put_body=None, start_on=False, mute=False ):
+    """
+    Route the cap GET with a `skeleton_crew` object and the skeleton crew PUT.
+
+    Ensures:
+        - returns a dict whose "puts" list collects each PUT's parsed JSON body and whose
+          "on" holds the state the stub would persist
+        - the held state moves only when a PUT answers 200, and the GET always answers it
+    """
+    seen = { "puts": [ ], "on": start_on }
+
+    def _cap( route ):
+        body = dict( _cap_body( START_CAP ), skeleton_crew=_crew_body( seen[ "on" ], mute ) )
+        route.fulfill( status=200, content_type="application/json", body=json.dumps( body ) )
+
+    def _crew( route ):
+        sent = json.loads( route.request.post_data or "{}" )
+        seen[ "puts" ].append( sent )
+        if put_status == 200:
+            seen[ "on" ] = sent[ "on" ]
+            body = dict( _cap_body( START_CAP ), skeleton_crew=_crew_body( seen[ "on" ], mute ) )
+        else:
+            body = put_body
+        route.fulfill( status=put_status, content_type="application/json", body=json.dumps( body ) )
+
+    page.route( CAP_ROUTE, _cap )
+    page.route( CREW_ROUTE, _crew )
+    page.route( FLEET_ROUTE, lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps( EMPTY_FLEET ) ) )
+    return seen
+
+
+def test_skeleton_crew_switch_is_visible_beside_the_dial_with_its_state_in_text( logged_in_page ):
+    page = logged_in_page
+    _route_crew( page )
+    _open_multiplexer( page )
+    _dial_painted_at_start( page )
+
+    expect( page.locator( f"{CONTROLS} {TOGGLE}" ) ).to_be_visible( timeout=PAINT_MS )
+    expect( page.locator( CREW_STATE ) ).to_have_text( "Skeleton crew: OFF" )
+    expect( page.locator( TOGGLE ) ).not_to_be_checked()
+    expect( page.locator( CREW_WARNING ) ).to_be_hidden()
+
+
+def test_skeleton_crew_switch_flips_and_survives_a_reload( logged_in_page ):
+    page = logged_in_page
+    seen = _route_crew( page )
+    _open_multiplexer( page )
+    _dial_painted_at_start( page )
+
+    page.locator( TOGGLE ).click()
+
+    expect( page.locator( CREW_STATE ) ).to_have_text( "Skeleton crew: ON", timeout=PAINT_MS )
+    expect( page.locator( TOGGLE ) ).to_be_checked()
+    expect( page.locator( TOGGLE ) ).to_be_enabled()
+    assert seen[ "puts" ] == [ { "on": True } ], f"one write, with the requested state: {seen[ 'puts' ]}"
+
+    page.reload()
+    page.wait_for_load_state( "networkidle" )
+    expect( page.locator( CREW_STATE ) ).to_have_text( "Skeleton crew: ON", timeout=PAINT_MS )
+    expect( page.locator( TOGGLE ) ).to_be_checked()
+
+
+def test_skeleton_crew_switch_shows_the_servers_refusal_and_snaps_back( logged_in_page ):
+    page   = logged_in_page
+    errors = [ ]
+    page.on( "console", lambda m: errors.append( m.text ) if m.type == "error" else None )
+    seen = _route_crew( page, put_status=403, put_body={ "detail": CREW_REFUSAL } )
+    _open_multiplexer( page )
+    _dial_painted_at_start( page )
+
+    page.locator( TOGGLE ).click()
+
+    expect( page.locator( TOGGLE ) ).not_to_be_checked( timeout=PAINT_MS )
+    expect( page.locator( CREW_STATE ) ).to_have_text( "Skeleton crew: OFF" )
+    expect( page.locator( TOGGLE ) ).to_be_enabled()
+    assert seen[ "puts" ] == [ { "on": True } ], f"the switch should write exactly once: {seen[ 'puts' ]}"
+    assert any( CREW_REFUSAL in e for e in errors ), f"the server's detail must be reported; console errors: {errors}"
+
+
+def test_skeleton_crew_warning_line_shows_only_for_a_settings_mute_while_off( logged_in_page ):
+    page = logged_in_page
+    _route_crew( page, mute=True )
+    _open_multiplexer( page )
+    _dial_painted_at_start( page )
+
+    expect( page.locator( CREW_WARNING ) ).to_be_visible( timeout=PAINT_MS )
+    expect( page.locator( CREW_WARNING ) ).to_contain_text( "settings.json" )

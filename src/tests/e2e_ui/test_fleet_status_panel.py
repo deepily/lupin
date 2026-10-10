@@ -277,3 +277,114 @@ class TestFleetStatusVisual:
         # named correctly (plugin only auto-appends .png when name is None). Repo
         # convention: test_multiplexer_phase6c_section_d_visual.py:161.
         assert_snapshot( container, name="fleet-status-populated.png", snap_y=True )
+
+
+# ── The skeleton crew switch in the legacy cap cluster (row 6f72dc83) ────────────────────────
+
+_CREW_REFUSAL = "Only an administrator may change the skeleton crew switch."
+
+
+def _crew_payload( on, mute=False ):
+    return {
+        "cap": 5, "ceiling": 10, "live": { "total": 3, "managers": 1, "workers": 2 },
+        "skeleton_crew": { "on": on, "since": "2026-10-10T13:20:00-04:00", "set_by": "rick",
+                           "settings_mute_while_off": mute },
+    }
+
+
+def _route_crew( page, *, put_status=200, put_body=None, start_on=False, mute=False ):
+    """
+    Stub the cap GET (with a `skeleton_crew` object) and the skeleton crew PUT.
+
+    Returns a dict: "puts" collects each PUT body, "on" holds the state the stub persists
+    (it moves only on a 200). Register it ahead of _open_panel, which navigates.
+    """
+    seen = { "puts": [ ], "on": start_on }
+
+    def _cap( route ):
+        route.fulfill( status=200, content_type="application/json",
+                       body=json.dumps( _crew_payload( seen[ "on" ], mute ) ) )
+
+    def _put( route ):
+        sent = json.loads( route.request.post_data or "{}" )
+        seen[ "puts" ].append( sent )
+        if put_status == 200: seen[ "on" ] = sent[ "on" ]
+        body = _crew_payload( seen[ "on" ], mute ) if put_status == 200 else put_body
+        route.fulfill( status=put_status, content_type="application/json", body=json.dumps( body ) )
+
+    page.route( "**/api/arbiter/fleet-size-cap", _cap )
+    page.route( "**/api/arbiter/skeleton-crew", _put )
+    return seen
+
+
+def _reveal_fleet_section( page ):
+    """Open the Fleet Status accordion when it is not already showing."""
+    if not page.locator( "#section-fleet-status" ).is_visible():
+        page.get_by_test_id( "fleet-status-toolbar-btn" ).click()
+
+
+class TestSkeletonCrewSwitch:
+    """The switch sits inside #fleet-size-cap-controls beside the dial."""
+
+    def test_visible_beside_the_dial_with_its_state_in_text( self, logged_in_page ):
+        page = logged_in_page
+        _route_crew( page )
+        _open_panel( page, _composite( _POPULATED_SESSIONS ) )
+        _reveal_fleet_section( page )
+
+        cluster = page.locator( "#fleet-size-cap-controls" )
+        assert cluster.locator( "#fleet-size-cap" ).count() == 1, "the dial is in the cluster"
+        toggle = cluster.locator( "#skeleton-crew-toggle" )
+        assert toggle.is_visible(), "the switch is visible beside the dial"
+        assert page.locator( "#skeleton-crew-state" ).text_content() == "Skeleton crew: OFF"
+        assert not toggle.is_checked()
+        assert page.locator( "#skeleton-crew-warning" ).is_hidden()
+
+    def test_flips_and_survives_a_reload( self, logged_in_page ):
+        page = logged_in_page
+        seen = _route_crew( page )
+        _open_panel( page, _composite( _POPULATED_SESSIONS ) )
+        _reveal_fleet_section( page )
+
+        page.locator( "#skeleton-crew-toggle" ).click()
+        page.wait_for_function(
+            "() => document.getElementById( 'skeleton-crew-state' ).textContent === 'Skeleton crew: ON'",
+            timeout=10000 )
+        assert page.locator( "#skeleton-crew-toggle" ).is_checked()
+        assert page.locator( "#skeleton-crew-toggle" ).is_enabled()
+        assert seen[ "puts" ] == [ { "on": True } ], f"one write, with the requested state: {seen[ 'puts' ]}"
+
+        page.reload()
+        page.wait_for_load_state( "networkidle" )
+        page.evaluate( "async () => { await window.notificationsUI.refreshFleetStatus(); }" )
+        page.wait_for_function(
+            "() => document.getElementById( 'skeleton-crew-state' ).textContent === 'Skeleton crew: ON'",
+            timeout=10000 )
+        assert page.locator( "#skeleton-crew-toggle" ).is_checked()
+
+    def test_refusal_is_reported_and_the_switch_snaps_back( self, logged_in_page ):
+        page   = logged_in_page
+        errors = [ ]
+        page.on( "console", lambda m: errors.append( m.text ) if m.type == "error" else None )
+        seen = _route_crew( page, put_status=403, put_body={ "detail": _CREW_REFUSAL } )
+        _open_panel( page, _composite( _POPULATED_SESSIONS ) )
+        _reveal_fleet_section( page )
+
+        page.locator( "#skeleton-crew-toggle" ).click()
+        page.wait_for_function(
+            "() => !document.getElementById( 'skeleton-crew-toggle' ).checked"
+            " && !document.getElementById( 'skeleton-crew-toggle' ).disabled",
+            timeout=10000 )
+        assert page.locator( "#skeleton-crew-state" ).text_content() == "Skeleton crew: OFF"
+        assert seen[ "puts" ] == [ { "on": True } ], f"exactly one write: {seen[ 'puts' ]}"
+        assert any( _CREW_REFUSAL in e for e in errors ), f"the server's detail must be reported: {errors}"
+
+    def test_warning_line_shows_for_a_settings_mute_while_off( self, logged_in_page ):
+        page = logged_in_page
+        _route_crew( page, mute=True )
+        _open_panel( page, _composite( _POPULATED_SESSIONS ) )
+        _reveal_fleet_section( page )
+
+        warning = page.locator( "#skeleton-crew-warning" )
+        assert warning.is_visible()
+        assert "settings.json" in warning.text_content()
