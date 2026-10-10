@@ -77,11 +77,29 @@ def test_the_report_reads_every_prefix_and_pairs_the_two_questions( setup, capsy
     assert "old: n run: 5 of 100" in out and "pages: n run: 5 of 100" in out and "paired on_shortlist" in out
 
 
-def test_the_report_of_a_prefix_with_no_results_says_none_ran_and_does_not_fail( setup, capsys ):
+def test_the_report_of_a_prefix_with_no_result_file_is_refused_and_names_it( setup, capsys ):
+    """Once pinned as "none ran, no failure"; that hid a misspelt prefix."""
     assert run.cli( prefixed( setup, "canary" ) ) == 0
     capsys.readouterr()
-    assert run.cli( setup.args( "report", extra=[ "--questions", "old,pages", "--prefix", "e2e,pg" ] ) ) == 0
-    assert "pages: n run: 0 of 100" in capsys.readouterr().out
+    assert run.cli( setup.args( "report", extra=[ "--questions", "old,pages", "--prefix", "e2e,pgg" ] ) ) == 2
+    err = capsys.readouterr().err
+    assert "pgg" in err and "no result file" in err
+
+
+def test_the_report_of_a_prefix_with_only_its_canary_still_reads_it( setup, capsys ):
+    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "pages" ] ) ) == 0
+    capsys.readouterr()
+    assert run.cli( setup.args( "report", extra=[ "--questions", "pages", "--prefix", "pg" ] ) ) == 0
+    assert "pages: n run: 5 of 100" in capsys.readouterr().out
+
+
+def test_an_estimate_above_the_room_left_is_refused_before_the_first_send( setup, capsys ):
+    room = 952_380_952
+    assert run.cli( prefixed( setup, "canary", [ "--estimate-tokens", str( room + 1 ) ] ) ) == 2
+    err = capsys.readouterr().err
+    assert str( room + 1 ) in err and str( room ) in err and "room" in err
+    assert not results( setup ).exists()                                                           # nothing was opened or sent
+    assert run.cli( prefixed( setup, "canary", [ "--estimate-tokens", str( room ) ] ) ) == 0         # the boundary: an estimate equal to the room is allowed
 
 
 def test_the_default_report_still_reads_the_first_measurement_only( setup, capsys ):

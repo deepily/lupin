@@ -195,10 +195,16 @@ def test_the_canary_asks_five_members_with_both_questions_and_reports_what_was_r
 
 
 def test_the_projection_is_held_against_the_smaller_of_one_and_a_half_times_the_estimate_and_the_ledger_remainder( tmp_path ):
-    scratch = Env( tmp_path, limit=200000 )
+    room    = run.ESTIMATE_TOKENS + run.ESTIMATE_TOKENS // 4                      # the estimate fits, 1.5 times it does not
+    scratch = Env( tmp_path, limit=room )
     report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5 )
-    assert report[ "allowance_tokens" ] == min( int( 1.5 * run.ESTIMATE_TOKENS ), 200000 - report[ "tokens" ] )
-    assert "projection_over_allowance" in report[ "tripped" ]
+    assert report[ "allowance_tokens" ] == room - report[ "tokens" ] < int( 1.5 * run.ESTIMATE_TOKENS )
+
+
+def test_an_estimate_larger_than_the_room_is_refused_before_anything_is_opened( tmp_path ):
+    scratch = Env( tmp_path, limit=run.ESTIMATE_TOKENS - 1 )
+    with pytest.raises( s1.DriverRefused, match="room left" ): run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5 )
+    assert not ( scratch.env().results_dir ).exists()
 
 
 def test_a_canary_with_an_incomplete_search_is_tripped_and_cannot_be_approved( tmp_path ):

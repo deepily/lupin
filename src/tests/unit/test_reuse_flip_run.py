@@ -260,3 +260,9 @@ def test_the_repeat_check_reads_complete_records_only_and_accepts_a_run_with_non
     frun.check_repeats( runs, 3 )
     frun.check_repeats( runs[ :2 ], 9 )
     frun.check_repeats( [], 9 )
+
+
+def test_the_flip_canary_refuses_an_estimate_above_the_room_left_before_any_send( setup, capsys ):
+    room = rl.ACCOUNT_LIMIT_TOKENS
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--estimate-tokens", str( room + 1 ) ] ) ) == 2
+    assert "room left" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()

@@ -199,6 +199,8 @@ def run_canary( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
 
     Requires:
         - spec is { prefix, members, estimate, canary_members }: the run names, the members the full run covers, its token estimate and the canary's size
+    Raises:
+        - DriverRefused, before anything is opened or sent, when the estimate is more than the room left on the account
     Ensures:
         - writes the run file and the canary file, with `approved` empty, and returns the canary report
         - the report holds the ledger total read before the first send, tokens, requests, unasked, 429 and 529 counts, wall time,
@@ -207,6 +209,9 @@ def run_canary( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
         - tripped names each crossing: projection_over_allowance, incomplete, stopped
     """
     name = f"{spec[ 'prefix' ]}-canary"
+    limit, total = env.ledger.snapshot()
+    if spec[ "estimate" ] > limit - total:
+        raise s1.DriverRefused( f"the estimate of {spec[ 'estimate' ]} tokens is more than the {limit - total} tokens of room left on the account, so the run could not finish" )
     run  = run_searches( env, name, items[ :spec[ "canary_members" ] ], twins, ceiling_tokens, kind="canary" )
     limit, total = env.ledger.snapshot()
     tokens = run[ "totals" ][ "spent_tokens" ]
@@ -462,9 +467,11 @@ def main( argv=None ):
         print( run_line( run_full( env, items, twins, args.ceiling, spec=spec ) ) )
     else:
         searches = []
-        for name in [ f"{p}-{part}" for p in prefixes for part in ( "canary", "run" ) ]:
-            path = env.results_dir / f"{name}.json"
-            if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
+        for p in prefixes:
+            found = [ env.results_dir / f"{p}-{part}.json" for part in ( "canary", "run" ) ]
+            if not any( path.exists() for path in found ): raise s1.DriverRefused( f"prefix {p!r} has no result file ({p}-canary.json or {p}-run.json); is it spelt right?" )
+            for path in found:
+                if path.exists(): searches += json.loads( path.read_text( encoding="utf-8" ) )[ "searches" ]
         print( "\n".join( report_lines( searches, names ) ) )
     return 0
 
