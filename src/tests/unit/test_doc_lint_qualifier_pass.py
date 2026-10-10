@@ -44,9 +44,9 @@ def claims_over( old, *quotes ):
 
 # ---- loose_qualifiers --------------------------------------------------------------------------
 
-def test_the_ten_words_are_the_ones_the_prompt_names():
+def test_the_ten_words_are_the_ones_the_code_uses_and_this_arms_prompt_no_longer_names_them():
     assert ce.QUALIFIER_PHRASES == ( "only", "never", "always", "until", "unless", "rather than", "at most", "at least", "no longer", "without" )
-    for phrase in ce.QUALIFIER_PHRASES: assert phrase in ce.SYSTEM_PROMPT
+    assert "state the limit as one extra claim" not in ce.SYSTEM_PROMPT and "only, never, always, until" not in ce.SYSTEM_PROMPT
 
 
 def test_with_no_claims_every_occurrence_is_loose_in_text_order():
