@@ -6,19 +6,23 @@ cannot: prose rules 3 to 7, the length caps by page kind and the runbook section
 It also checks whether relative links and Design paths resolve.
 """
 
+import os
 import re
 import sys
 
 from .cli import run_linter
 from .links import design_path_findings, markdown_link_findings
 from .marker_counts import FRONTMATTER, HTML_COMMENT, WORD_REGEX, count_markers, rates_per_thousand
-from .text_rules import Finding, lint_text
+from .text_rules import Finding, defined_labels, defined_steps, lint_text
 
 REFERENCE_MAX_WORDS = 1500
 CAPABILITY_MAX_LINES = 40
 REFERENCE_SKIP      = ( "src/docs/fastapi/", "src/docs/wiki/", "src/docs/decisions/", "src/docs/doctrine/", "src/docs/auth/" )
 RUNBOOK_SECTIONS    = ( "prerequisites", "steps", "verify", "rollback" )
 HEADING_REGEX       = re.compile( r"^#{1,6}\s+(.+?)\s*$", re.MULTILINE )
+BARE_LABEL_MESSAGE   = re.compile( r"^bare reference '(.*)'$" )
+BARE_SECTION_MESSAGE = re.compile( "^section reference '\u00a7(.*)' has no path$" )
+NUMBERED_HEADING     = re.compile( r"^#{1,6}[ \t]+(\d+(?:\.\d+)*)\.?(?:[ \t]|$)", re.MULTILINE )
 INDENTED_FENCE      = re.compile( r"^[ \t]*(```|~~~).*?^[ \t]*\1[^\n]*$", re.DOTALL | re.MULTILINE )
 
 
@@ -86,6 +90,81 @@ def template_findings( path, source, prose ):
     return findings
 
 
+def _read_text( full ):
+    """
+    Read one markdown file as text.
+
+    Requires:
+        - full is the path of a readable file
+
+    Ensures:
+        - returns the file's text, decoded as UTF-8
+
+    Raises:
+        - OSError if the file cannot be read
+    """
+    with open( full, encoding="utf-8" ) as handle: return handle.read()
+
+
+def sibling_paths( path, root ):
+    """
+    List the other markdown files of the split page that path belongs to.
+
+    Requires:
+        - path is the repo-relative path of a page
+        - root is the repo working tree, or None
+
+    Ensures:
+        - a split page is an index at foo.md and the parts directly inside the folder foo beside it
+        - returns the index and every part except path itself, sorted, as repo-relative paths
+        - returns an empty list when root is None, when the folder or the index is missing, or when path is neither
+        - a folder nested inside foo is not read
+
+    Raises:
+        - nothing
+    """
+    if root is None: return []
+    folder = path[ : -len( ".md" ) ] if path.endswith( ".md" ) else None
+    if folder is None or not os.path.isdir( os.path.join( root, folder ) ) or not os.path.isfile( os.path.join( root, folder + ".md" ) ):
+        folder = os.path.dirname( path )
+        if not folder or not os.path.isdir( os.path.join( root, folder ) ) or not os.path.isfile( os.path.join( root, folder + ".md" ) ): return []
+    group = [ folder + ".md" ] + [ os.path.join( folder, name ) for name in os.listdir( os.path.join( root, folder ) ) if name.endswith( ".md" ) and os.path.isfile( os.path.join( root, folder, name ) ) ]
+    return sorted( member for member in group if member != path )
+
+
+def sibling_resolved( findings, prose, siblings ):
+    """
+    Drop the bare-ref findings that another part of the same split page resolves.
+
+    Requires:
+        - findings is a list of Finding for one page
+        - prose is that page's text with code blanked
+        - siblings is the blanked text of the other parts, joined, or an empty string
+
+    Ensures:
+        - a Phase or case label that the page or a sibling defines is no longer a finding
+        - a section mark is no longer a finding when the page or a sibling has a heading with that number
+        - with no siblings the findings come back unchanged, so a lone page keeps its old behaviour
+        - every other finding, and a label or mark that nothing defines, stays
+
+    Raises:
+        - nothing
+    """
+    if not siblings: return findings
+    group    = prose + "\n" + siblings
+    labels   = defined_labels( group )
+    steps    = defined_steps( group )
+    numbers  = set( NUMBERED_HEADING.findall( group ) )
+    kept     = []
+    for finding in findings:
+        label   = BARE_LABEL_MESSAGE.match( finding.message ) if finding.rule == "bare-ref" else None
+        section = BARE_SECTION_MESSAGE.match( finding.message ) if finding.rule == "bare-ref" else None
+        if label is not None and ( label.group( 1 ) in labels or label.group( 1 ).lower() in steps ): continue
+        if section is not None and section.group( 1 ) in numbers: continue
+        kept.append( finding )
+    return kept
+
+
 def lint_source( path, source, root=None, stats=None ):
     """
     Lint one markdown page.
@@ -106,6 +185,7 @@ def lint_source( path, source, root=None, stats=None ):
     prose    = blank_non_prose( source )
     findings = lint_text( prose, path, 1, structure=False, markdown=True )
     findings += template_findings( path, source, prose )
+    findings = sibling_resolved( findings, prose, "\n".join( blank_non_prose( _read_text( os.path.join( root, name ) ) ) for name in sibling_paths( path, root ) ) )
     if root is not None:
         findings += markdown_link_findings( prose, path, root )
         findings += design_path_findings( prose, path, 1, root, stats[ "not_checked" ] if stats is not None and "not_checked" in stats else None )
