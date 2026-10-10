@@ -67,7 +67,7 @@ gates and, if all pass, dispatches a `TestFixExpediterJob` to `jobs_todo_queue`.
 
 ## 2. How TFE Differs from BFE
 
-BFE and TFE share the same Phase 3 (Fix) engine via the [shared `FixExecutor`](shared-fix-primitives-reference.md#5-fixexecutor--polymorphic-codertester-loop).
+BFE and TFE share the same Phase 3 (Fix) engine via the [shared `FixExecutor`](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#5-fixexecutor--polymorphic-codertester-loop).
 But they differ on every other axis:
 
 | Aspect | BFE | TFE |
@@ -242,7 +242,7 @@ but preserves finer-grained control for high-risk fix batches.
 **Goal**: apply each selected fix through the shared `FixExecutor`.
 
 This is where TFE plugs into the shared Coder+Tester engine. See
-[Shared Primitives Reference §5](shared-fix-primitives-reference.md#5-fixexecutor--polymorphic-codertester-loop).
+[Shared Primitives Reference §5](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#5-fixexecutor--polymorphic-codertester-loop).
 TFE's `run_phase3_fix()` iterates the selected fixes and, for each one, constructs
 a `FixExecutor(prompt_builder_key="tfe", ...)` and calls `execute_fix()`.
 
@@ -273,7 +273,7 @@ path (synthetic commits) without real code changes.
 **Goal**: commit the fixes as one branch with N commits and one PR.
 
 Delegates to `shared.GitStrategist.commit_and_pr_multi()` — see
-[Shared Primitives Reference §4](shared-fix-primitives-reference.md#4-gitstrategist--trust-aware-git-operations).
+[Shared Primitives Reference §4](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#4-gitstrategist--trust-aware-git-operations).
 TFE's `run_phase5_git()` builds the `(cluster_id, title, files, commit_message)`
 tuples and hands them to the strategist.
 

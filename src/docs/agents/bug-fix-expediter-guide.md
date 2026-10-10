@@ -142,7 +142,7 @@ the user to confirm the diagnosis before proceeding to proposal. Gated by
 
 **Plan document**: `PlanWriter.write_plan()` persists the diagnosis + proposed fixes
 to `io/swe-team/plans/{user_email}/YYYY.MM.DD-{slug}-plan.md`. The document structure
-is described in the [Shared Primitives Reference](shared-fix-primitives-reference.md#3-planwriter--markdown-plan-docs).
+is described in the [Shared Primitives Reference](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#3-planwriter--markdown-plan-docs).
 
 **Voice gate**: `_voice_gate_proposal()` presents the fix list to the user via
 cosa-voice `present_choices()`. User selects exactly one fix (or rejects all). In
@@ -155,7 +155,7 @@ high confidence the `_auto_select_fix()` helper may auto-select.
 retry with feedback if verification fails.
 
 This is where the **shared `FixExecutor`** takes over (see
-[Shared Primitives Reference §5](shared-fix-primitives-reference.md#5-fixexecutor--polymorphic-codertester-loop)).
+[Shared Primitives Reference §5](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#5-fixexecutor--polymorphic-codertester-loop)).
 The BFE orchestrator's `run_fix()` is a thin shim that constructs a `FixExecutor`
 with `prompt_builder_key="bfe"` and delegates.
 
@@ -191,7 +191,7 @@ Engineering category.
 (trust levels 1 and 2) and `branch_and_pr` (level 3 and above).
 
 **Git ops**: delegated to `shared.GitStrategist.commit_and_pr_single()` (see
-[Shared Primitives Reference §4](shared-fix-primitives-reference.md#4-gitstrategist--trust-aware-git-operations)).
+[Shared Primitives Reference §4](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#4-gitstrategist--trust-aware-git-operations)).
 BFE's orchestrator builds the commit message and PR body; the strategist
 handles the actual git/gh calls.
 
@@ -286,7 +286,7 @@ not E2E) leave overrides unset → use INI defaults.
 
 ## 5. Trust-to-Git Mapping
 
-Shared with TFE — see [Shared Primitives Reference §4](shared-fix-primitives-reference.md#4-gitstrategist--trust-aware-git-operations)
+Shared with TFE — see [Shared Primitives Reference §4](shared-fix-primitives-reference/01-planwriter-gitstrategist-fixexecutor.md#4-gitstrategist--trust-aware-git-operations)
 for the canonical table. In summary:
 
 | Trust Level | `trust_mode` value | Git Strategy | Produces |
