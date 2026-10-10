@@ -92,6 +92,10 @@ _TRUE_VALUES = ( "1", "true", "on", "yes" )
 # a command start of its own, so no prefix may cross one: a run of newlines would be re-scanned
 # from each of them, and the guard went quadratic on it (measured: 8000 newlines took 15 s).
 _WS = r"(?:[ \t]|\\\n)"
+# One quoted span or one escaped character: part of a shell word, so a space inside it does not end the word.
+_QUOTED_OR_ESCAPED = r"""\\.|"[^"]*"|'[^']*'"""
+# The value of an assignment (`FOO="a b"`, `FOO=a\ b`): a shell word that ends at a separator.
+_ASSIGN_VALUE = r"""(?:""" + _QUOTED_OR_ESCAPED + r"""|[^\s;&|"'\\])*"""
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt)"
 # A wrapper may carry options, each with at most one value: `nice -n 5`, `sudo -u root`,
 # `env -i`, `ionice -c3`. A value is never a wrapper, a verb or an assignment, so every
@@ -99,19 +103,30 @@ _WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsi
 # of fifty nested wrappers took more than ten seconds before this was pinned.
 _WRAPPER_VALUE    = (
     r"(?!(?:[\w./+-]*/)?(?:" + _WRAPPERS[ 3: -1 ] + r"|pkill|killall|kill)\b)"
-    r"(?![A-Za-z_][A-Za-z0-9_]*=)[^\s;&|()`-][^\s;&|()`]*"
+    r"(?![A-Za-z_][A-Za-z0-9_]*=)(?:" + _QUOTED_OR_ESCAPED + r"|[^\s;&|()`\"'\\-])(?:" + _QUOTED_OR_ESCAPED + r"|[^\s;&|()`\"'\\])*"
 )
 _WRAPPER_OPERANDS = r"(?:" + _WS + r"+-[^\s;&|()`]+(?:" + _WS + r"+" + _WRAPPER_VALUE + r")?)*"
 # `timeout` takes a duration (and options) before the command it wraps, so it is
 # not a bare word like the others: `timeout 5 pkill ...`, `timeout -s KILL 5 pkill ...`.
 _TIMEOUT_SPAN = (
-    r"timeout(?:" + _WS + r"+(?:-[sk]" + _WS + r"+\w+|-\S+))*" + _WS + r"+\d+(?:\.\d*)?[smhd]?(?=\s)"
+    r"timeout(?:" + _WS + r"+(?:-[sk]" + _WS + r"+\w+|-\S+))*" + _WS + r"""+["']?\d+(?:\.\d*)?[smhd]?["']?(?=\s)"""
 )
 # A command word is judged by its basename: `/usr/bin/pkill`, `\pkill`, `"pkill"` all name pkill.
 _WORD_PRE  = r"""\\?["']?(?:[\w./+~-]*/)?"""
 _WORD_POST = r"""["']?(?![\w./-])"""
 
-_PREFIXES = rf"(?:{_WS}*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}))*"
+# `env 'A=b' cmd`: env takes the assignment as one quoted word, so it can only follow `env`.
+_ENV_QUOTED_ASSIGN = (
+    rf"{_WORD_PRE}env{_WORD_POST}{_WRAPPER_OPERANDS}"
+    rf"""(?:{_WS}+(?:"[A-Za-z_][A-Za-z0-9_]*=[^"]*"|'[A-Za-z_][A-Za-z0-9_]*=[^']*'))+"""
+)
+# One link of a prefix chain: an assignment, `timeout N`, or a transparent wrapper with its options.
+_PREFIX_ELEMENT = (
+    rf"[A-Za-z_][A-Za-z0-9_]*={_ASSIGN_VALUE}(?=[\s;&|]|$)"
+    rf"|{_TIMEOUT_SPAN}|{_ENV_QUOTED_ASSIGN}"
+    rf"|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}"
+)
+_PREFIXES = rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*"
 
 # Where a command can start: a line, a separator, a group, a keyword, a negation or a case arm.
 _CMD_START = r"(?:^|[;&|(`{)]|\n|(?<![^\s;&|(`{])!|\b(?:do|then|else|elif|if|while|until)\b)"
@@ -671,7 +686,7 @@ def _seats_a_sweep_would_hit( args: str, pgrep_probe, comm_reader, verb: str = "
 # expensive way and carries the same carve-out; this is copied from there deliberately.
 _INLINE_FLAG_RE = re.compile(
     rf"{_CMD_START}"
-    rf"(?:{_WS}*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|]*(?=[\s;&|]|$)|{_TIMEOUT_SPAN}|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}))*?"
+    rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*?"
     rf"{_WS}*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
 

@@ -1168,6 +1168,68 @@ def test_a_word_named_pkill_that_is_not_a_command_is_not_a_sweep( command, workt
     assert _guard( command, [ 700 ], proc, worktree ) is None
 
 
+# ---------------------------------------------------------------------------
+# A prefix value is read the way a shell word is: quoted spans and escapes belong to it
+# ---------------------------------------------------------------------------
+
+_QUOTED_PREFIX_FORMS = [
+    'FOO="a b" pkill -f TOK',
+    "FOO='a b' pkill -f TOK",
+    r"FOO=a\ b pkill -f TOK",
+    'A="a b" B=c sudo pkill -f TOK',
+    'env A="a b" pkill -f TOK',
+    "env 'A=b' pkill -f TOK",
+    'timeout "5" pkill -f TOK',
+    # forms that were refused before and must stay refused
+    "FOO=x pkill -f TOK",
+    'sudo -u "root" pkill -f TOK',
+    'nice -n "5" pkill -f TOK',
+    # the same words, a little further in
+    'sudo -u "a b" pkill -f TOK',
+    'env -u "A B" pkill -f TOK',
+    'FOO="a  b" BAR=\'c d\' env X="e f" nice -n "5" pkill -f TOK',
+    'timeout -s KILL "5" pkill -f TOK',
+    "FOO=\"a b\" /usr/bin/pkill -f TOK",
+]
+
+
+@pytest.mark.parametrize( "command", _QUOTED_PREFIX_FORMS )
+def test_a_quoted_or_escaped_prefix_value_does_not_hide_a_sweep( command, worktree, elsewhere ):
+    proc   = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    reason = _guard( command, [ 700 ], proc, worktree )
+    assert reason is not None
+    assert "700" in reason
+
+
+@pytest.mark.parametrize( "command", [
+    'FOO="a pkill -f TOK b" ls',
+    "echo FOO=\"a b\" pkill -f TOK",
+    'FOO="a b" ls pkill',
+    "# FOO='it's' pkill -f TOK",
+])
+def test_a_quoted_prefix_value_that_holds_the_words_is_not_a_sweep( command, worktree, elsewhere ):
+    proc = FakeProc( ppids={ 700: 1 }, cwds={ 700: elsewhere } )
+    assert _guard( command, [ 700 ], proc, worktree ) is None
+
+
+def _real_guard_command( command, tree ):
+    return kill_deny_reason( "Bash", { "command": command }, enabled=True, cwd=tree, caller_pid=os.getpid() )
+
+
+@pytest.mark.parametrize( "template", [ 'FOO="a b" pkill -f "{}"', 'env A="a b" pkill -f "{}"' ] )
+def test_driven_a_real_process_behind_a_quoted_prefix_is_refused_and_a_control_is_not( template, worktree, elsewhere ):
+    token   = "kgprobe-" + uuid.uuid4().hex
+    control = "kgprobe-" + uuid.uuid4().hex
+    pid     = _spawn_orphan( elsewhere, token )
+    try:
+        reason = _real_guard_command( template.format( token ), worktree )
+        assert reason is not None
+        assert str( pid ) in reason
+        assert _real_guard_command( template.format( control ), worktree ) is None
+    finally:
+        _stop( pid, token )
+
+
 @pytest.mark.parametrize( "command", [
     "/bin/kill 4242", r"\kill 4242", "sudo -n kill 4242", "if true; then kill 4242; fi", "! kill 4242",
 ] )
@@ -1330,6 +1392,11 @@ _LINEAR_SHAPES = {
     "listings in quotes"   : lambda size: "echo 'a; pgrep x; " * ( size // 16 ),
     "for loops"            : lambda size: "for p in $(pgrep x); do echo $p; " * ( size // 34 ),
     "nested wrappers"      : lambda size: "sudo -n nice -n 5 env -i " * ( size // 24 ) + "ls",
+    "quoted assignments"   : lambda size: 'FOO="a b" ' * ( size // 10 ) + "pkill -f x",
+    "env quoted values"    : lambda size: 'env A="a b" ' * ( size // 12 ) + "pkill -f x",
+    "escaped assignments"  : lambda size: r"FOO=a\ b " * ( size // 9 ) + "pkill -f x",
+    "quoted wrapper values": lambda size: 'sudo -u "a b" ' * ( size // 14 ) + "pkill -f x",
+    "unclosed quote run"   : lambda size: 'FOO="a ' * ( size // 7 ),
 }
 
 
