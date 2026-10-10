@@ -198,7 +198,7 @@ def read_int_from_disk( path: str, key: str ) -> Optional[ int ]:
         return None
 
 
-def _replace_value_line( path: str, key: str, value_text: str ) -> None:
+def _replace_value_line( path: str, key: str, value_text: str, insert_after: Optional[ str ] = None ) -> None:
     """
     Replace the value on the one line that defines `key`, atomically, under the write lock.
 
@@ -206,8 +206,11 @@ def _replace_value_line( path: str, key: str, value_text: str ) -> None:
         - path names a writable configuration file
         - key is defined in it exactly once
         - value_text is the text to put after the equals sign
+        - insert_after is a key defined exactly once, or None
 
     Ensures:
+        - when the key is absent and insert_after is given, the line is added after that
+          key's line, aligned to the same column
         - the defining line keeps its key and its column alignment
         - every other byte in the file is unchanged
         - the replacement is a temp file in the same folder moved in with os.replace
@@ -219,15 +222,26 @@ def _replace_value_line( path: str, key: str, value_text: str ) -> None:
         - OSError when the lock or the replacement fails
     """
     with config_backup.write_lock():
-        definition = locate_key( path, key )          # refuses before touching anything
+        try:
+            definition = locate_key( path, key )      # refuses before touching anything
+        except KeyNotFound:
+            if insert_after is None:
+                raise
+            definition = None
 
         with open( path, "r", encoding="utf-8" ) as handle:
             content = handle.read()
         lines = content.split( "\n" )
 
-        match   = _key_pattern( key ).match( lines[ definition.index ] )
-        padding = match.group( 1 )                    # preserve the column alignment
-        lines[ definition.index ] = f"{key}{padding}= {value_text}"
+        if definition is not None:
+            match   = _key_pattern( key ).match( lines[ definition.index ] )
+            padding = match.group( 1 )                # preserve the column alignment
+            lines[ definition.index ] = f"{key}{padding}= {value_text}"
+        else:
+            anchor  = locate_key( path, insert_after )
+            column  = lines[ anchor.index ].index( "=" )
+            padding = " " * max( 1, column - len( key ) )
+            lines.insert( anchor.index + 1, f"{key}{padding}= {value_text}" )
 
         directory = os.path.dirname( os.path.abspath( path ) ) or "."
         handle_fd, temp_path = tempfile.mkstemp( dir=directory, prefix=".fleet-cap-", suffix=".ini" )
@@ -275,7 +289,7 @@ def write_int_to_disk( path: str, key: str, value: int ) -> int:
     return persisted
 
 
-def write_bool_to_disk( path: str, key: str, value: bool ) -> bool:
+def write_bool_to_disk( path: str, key: str, value: bool, insert_after: Optional[ str ] = None ) -> bool:
     """
     Replace the key's value with true or false in place, and return what the file now says.
 
@@ -283,14 +297,17 @@ def write_bool_to_disk( path: str, key: str, value: bool ) -> bool:
         - path names a writable INI file
         - key is defined in it exactly once
         - value is a bool
+        - insert_after is a key defined exactly once, or None
 
     Ensures:
         - writes the text true or false and nothing else
+        - adds the line after insert_after's line when the key is absent and insert_after is
+          given, and refuses an absent key when it is not
         - the replacement is atomic and taken under the write lock
         - returns the value re-read from the file, never the argument
         - raises KeyNotFound or KeyDefinedTwice without writing anything
     """
-    _replace_value_line( path, key, "true" if value else "false" )
+    _replace_value_line( path, key, "true" if value else "false", insert_after=insert_after )
     raw = read_value_from_disk( path, key )
     if raw is None:
         raise KeyNotFound(
