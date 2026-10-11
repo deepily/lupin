@@ -16,6 +16,52 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-10 day to evening (Cheech 🌿 `e281ef6f`; crew Krishna · Rio · Clayton · Arnold · "extra 1" · Rachel · John · "extra 2") — skeleton crew toggle, extractor A2 landed with its gate held, plan 1 phases 5 and 6 side by side
+
+### Rick's rulings (an answered card, a broadcast or his own words; none a timeout default; times from my record)
+
+- **About 11:50, card**: extractor A2, "Test on Dart first". Jev runs, his words: "Don't worry run what you think we should run and then I'll go ahead and fund it more Please stop being penny wise and pound foolish Just get your work done I'll add more credit as we need it Run both flips".
+- **12:35:06**: he typed the Jev ledger limit raise himself (1,428,571,428 tokens) and answered the limit card "Yes, raise it".
+- **About 12:47, card**: extractor A2, "Land, hold the gate". A2 is on the branch; the gate run of 175 (row `3740dd5b`) stays unopened.
+- **Skeleton crew toggle** (his words are on row `6f72dc83`): one toggle does both jobs and the poke control is hidden; one-for-one re-spins are allowed while it is on; no special backup for the config file.
+- **15:05, card**: the fleet cap PUT is admin only; row `6f72dc83` closes on web (merged and its port 8000 tiers green), mobile is its own row `5da989df`; a bounded Claude Code job is not a spawn.
+- **14:57, through María**: rows `6932d766` and `c995fc52` closed by her; the four W rows (`732c5031`, `cf20a5f9`, `7cb74fa4`, `9e929349`) need his own login to drop.
+- **About 18:14, by voice, then "yes" at 18:21**: plan 1 has taken too long; admit its step rows and run phases 5 and 6 side by side starting tonight.
+- **18:34**: the `CLAUDE.md` template (my record holds the time and not his words).
+- **18:47, "yes"**: I approve the in-force list of R&D documents in his place. Row `657cb0c2` closed with a note: "in force" means a live file cites the document, not that its rules are true today.
+- **About 19:16, in answer to the Phase 5 gate card, not a choice**: he rejects the premise that the old docstrings are the standard a rewrite must preserve, and asked for a rethink with Tiffany and six ways forward.
+- **About 19:33, in answer to the ledger rule card, not a choice**: he asked how the R&D questions connect to plan 1 and for an explainer.
+- **About 19:44, broadcast `b16f176c`**: last call 20:00, end of session ritual 20:20, a push and a backup from Tiffany and from me, lights out 20:30. Row `79c6659f`.
+
+### Not ruled, waiting on Rick
+
+- **The Phase 5 gate**: how a rewritten page is checked. Document `io/write-ups/2026.10.10-docs-checking-rethink-six-ways-forward.md`; my recommendation is lint plus truth against the code as the gate, a replay of stored lookups as the measure, a blind tournament as the audit. Until he rules: no fidelity run, no change to the plan's gate text.
+- **The ledger rule, row `752cb59d`**: should a "new" R&D document stop holding another out of history (frees 135 to 137 of 401). Explainer `io/write-ups/2026.10.10-why-rnd-folders-are-part-of-plan-1.md`.
+- **The vote rule for the claim judge on Dart**: five pairs get different votes on an unchanged claim (Krishna's reading). Not asked yet.
+- **The three docstrings in `cc_memory_watch.py`**: a deployed copy must match byte for byte, so landing them needs the installer run and a service restart, or a change to the parity test. Not asked yet.
+- One ask after 10:00 EDT on 2026-10-11 carries the first two; the others go on the same walkthrough.
+
+### My rulings, which Rick may overturn
+
+- **N8**: code injected into the launcher can restore a re-spin credit mid-launch; documented, not fixed.
+- **Phase 5 step 2 population**: the seven dated post-games and explainers are dated records, not reference pages.
+- **Pins on a capability page are a point-in-time gate**: a pin says the page was read against the code at that sha, and is re-read before it is re-stamped.
+- **Decision-record method**: each rule carries its source sentence, the tree file and symbol it was checked against, and the later documents that changed it; a rule not checked against the code is marked so. Every batch is reviewed by a second seat that opens the code.
+- **A job id is not page content**: it goes in the commit message.
+- **`INDEX.md`**: the hold on it was lifted; it rides build 1010l.
+- **Mobile stays in the Phase 6 gate**: Tiffany's crew builds the mobile ledger under her own row; taking mobile out would be Rick's call.
+- **The cause of the teardown red in job `ts-d0cd5b6a` is recorded as unproven** (row `048c397f`).
+
+### Open, carried forward
+
+- **P0 row `6f72dc83`**: closes on a green `ts-b920571c` (e2e_a and integration on `989a72bb7`); amend the row once, then close with commit `92a662e4d` and that test run.
+- **Build 1010l landed at closing as `be3caaec0`** (ten commits replayed onto `989a72bb7`). Rows `58d2b583`, `cba9386c`, `08a87b82`, `623c743b`, `2119b009` close with that commit; if my memento says they are still open, close them first thing.
+- **Reviewed and pinned under `refs/keep/2026.10.10-closing/`, for the next build**: `krishna-page-pairs`, `krishna-cap-path`, `krishna-row048c397f-series`, `arnold-census`, `arnold-records-15-6-10`, `extra1-docstrings-b1-fix`, `extra1-docstrings-b2a`, `rio-records-six`, `clayton-pages`. `clayton-records-1-2-3` was reviewed FIX on each record (every rule holds, one statement each is off): three fixes owed, order `io/tmp/2026.10.10-extra-2-review-clayton-records-1-2-3.md`.
+- **Decision records**: seven sources not started (7, 8, 9, 11, 13, 14, 16).
+- **Row `ff6a6af6`**: the read rule names four classes and the ledger uses five.
+- **Row `049b5b41`**: the near-duplicate comparison found 1 of 36 hand-found groups; John's labels v2 are owed before any precision figure is recorded.
+- **Not filed**: a seat that boots with no persona cannot re-spin itself and cannot be proven at reap; two findings from Clayton's records (the ledger's reason for the TFE source is wrong; the arbiter on port 8001 retires a "no standalone HTTP" rule).
+
 ## 📚 DECISIONS LOG 2026-10-09 evening to 10-10 evening (Mr. Radio 🦉 `4afec3b4`, Claude Code sessions `e675ba48`, `6827207a`, `7ab9bdde`, `c3b461b9`; crew Tiberius · Arnold · Chloé · Extra 2 · John, then Clayton · Chloé) — podcast button, identity refusals, the permanent `.env` keys, the kill guard
 
 ### Rick's rulings (an answered card, a broadcast or his own words; none a timeout default; times from my record)
