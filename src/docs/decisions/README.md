@@ -23,3 +23,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [API key authentication for the notification routes](2025.11.10-notification-api-key-authentication.md) | `src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md` |
 | [Whisper and the two encoders live in a separate model server](2026.05.16-model-server-carveout.md) | `src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md` |
 | [A doc checker for TypeScript and JavaScript comments](2026.10.06-ts-js-doc-checker.md) | `src/rnd/v0.2.2/2026.10.06-ts-js-doc-checker-design.md` |
+| [The CJ Flow v2 go/no-go criteria and the queue, argument and new-agent designs](2026.08.14-cj-flow-v2-go-no-go-and-phases-2-3.md) | `src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phases-2-3-and-evaluation.md` |
