@@ -9750,8 +9750,8 @@
                 "tags": [
                     "arbiter"
                 ],
-                "summary": "Set the fleet-size cap \u2014 writes through to configuration and persists",
-                "description": "Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Auth: X-API-Key or Bearer JWT \u2014 the same guard as the GET.",
+                "summary": "Admin: set the fleet-size cap \u2014 writes through to configuration and persists",
+                "description": "Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Admin login only: an API-key caller is refused with 403 and nothing changes. The GET stays open to an API key or a JWT.",
                 "operationId": "put_fleet_size_cap_api_arbiter_fleet_size_cap_put",
                 "parameters": [
                     {
@@ -9793,6 +9793,80 @@
                         "application/json": {
                             "schema": {
                                 "$ref": "#/components/schemas/FleetSizeCapIn"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/arbiter/skeleton-crew": {
+            "put": {
+                "tags": [
+                    "arbiter"
+                ],
+                "summary": "Admin: turn skeleton crew on or off",
+                "description": "Body { on: bool }. Writes `cc session skeleton crew enabled` to the configuration file, tells the live sessions, and returns the same body as GET /api/arbiter/fleet-size-cap, re-read from the file. Admin login only: an API-key caller is refused with 403 and nothing changes.",
+                "operationId": "put_skeleton_crew_api_arbiter_skeleton_crew_put",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SkeletonCrewIn"
                             }
                         }
                     }
@@ -15797,6 +15871,22 @@
                     "enabled"
                 ],
                 "title": "SimilarityConfirmationRequest"
+            },
+            "SkeletonCrewIn": {
+                "properties": {
+                    "on": {
+                        "type": "boolean",
+                        "title": "On",
+                        "description": "True turns skeleton crew on, false turns it off."
+                    }
+                },
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                    "on"
+                ],
+                "title": "SkeletonCrewIn",
+                "description": "Body for PUT /api/arbiter/skeleton-crew.\n\n`on` is a bare JSON boolean. Any other field, and any other type, is a 422."
             },
             "SnapshotDetailResponse": {
                 "properties": {

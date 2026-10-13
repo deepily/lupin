@@ -3634,9 +3634,9 @@ Read-only. Returns { cap, ceiling } computed AT CALL TIME from the configuration
  |
 ## PUT `/api/arbiter/fleet-size-cap`
 
-> **Set the fleet-size cap — writes through to configuration and persists**
+> **Admin: set the fleet-size cap — writes through to configuration and persists**
 
-Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Auth: X-API-Key or Bearer JWT — the same guard as the GET.
+Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Admin login only: an API-key caller is refused with 403 and nothing changes. The GET stays open to an API key or a JWT.
 
 
 
@@ -3651,6 +3651,33 @@ Writes `cc session fleet size cap` to the configuration FILE and returns what it
 ### 📦 Request Body 
 
 [FleetSizeCapIn](#fleetsizecapin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PUT `/api/arbiter/skeleton-crew`
+
+> **Admin: turn skeleton crew on or off**
+
+Body { on: bool }. Writes `cc session skeleton crew enabled` to the configuration file, tells the live sessions, and returns the same body as GET /api/arbiter/fleet-size-cap, re-read from the file. Admin login only: an API-key caller is refused with 403 and nothing changes.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[SkeletonCrewIn](#skeletoncrewin)
 
 ### ✅ Responses
 
@@ -5917,6 +5944,19 @@ Response model for similar snapshots endpoint.
 | enabled | boolean |  |
 
 
+## SkeletonCrewIn
+
+
+Body for PUT /api/arbiter/skeleton-crew.
+
+`on` is a bare JSON boolean. Any other field, and any other type, is a 422.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| on | boolean | True turns skeleton crew on, false turns it off. |
+
+
 ## SnapshotDetailResponse
 
 
@@ -6462,4 +6502,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.09 20:13:40 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.12 20:55:55 by `src/scripts/generate-api-docs.sh`_
