@@ -204,7 +204,7 @@ services:
       # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
       # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
       # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
-      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # for the string `## PR merge requirements`. The first was FAILING with
       # FileNotFoundError in the venue where the merge pyramid runs; the second
       # had been taught to SKIP on the file's absence, which is the same
       # blindness wearing a green.
@@ -490,7 +490,7 @@ services:
       # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
       # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
       # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
-      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # for the string `## PR merge requirements`. The first was FAILING with
       # FileNotFoundError in the venue where the merge pyramid runs; the second
       # had been taught to SKIP on the file's absence, which is the same
       # blindness wearing a green.

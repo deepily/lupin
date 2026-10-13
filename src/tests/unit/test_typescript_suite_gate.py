@@ -193,7 +193,7 @@ def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
     """
     CLAUDE.md's merge pyramid and the code's suite list must name the same suites.
 
-    THE FAILURE THIS PREVENTS, measured 2026-08-25: CLAUDE.md § PR MERGE REQUIREMENTS
+    THE FAILURE THIS PREVENTS, measured 2026-08-25: CLAUDE.md § PR merge requirements
     listed six steps and omitted BOTH `typescript` and `smoke`, while
     ALL_SUITE_COMPONENTS and run-all-tests.sh's SUITES=(...) both carried seven
     suites. A reader following the documented pyramid merged without ever running
@@ -222,7 +222,7 @@ def test_claude_md_merge_pyramid_agrees_with_all_suite_components():
     assert marker is not None, (
         "CLAUDE.md carries no `<!-- merge-pyramid-suites: ... -->` marker — the merge "
         "pyramid became unparseable, so this drift check cannot run. Restore the marker "
-        "immediately above § PR MERGE REQUIREMENTS' order sentence."
+        "immediately above § PR merge requirements' order sentence."
     )
     documented = marker.group( 1 ).split()
 
@@ -300,7 +300,7 @@ def test_claude_md_numbered_gate_table_carries_every_suite():
     against the very failure it had just re-created one level up.
 
     Requires:
-        - CLAUDE.md carries a `| # | gate | venue |` table under § PR MERGE REQUIREMENTS
+        - CLAUDE.md carries a `| # | gate | venue |` table under § PR merge requirements
 
     Ensures:
         - the table's numbering is contiguous from 1, with no gaps or repeats
@@ -314,7 +314,7 @@ def test_claude_md_numbered_gate_table_carries_every_suite():
     assert header != -1, (
         "CLAUDE.md carries no `| # | gate | venue |` table — the numbered merge pyramid "
         "became unparseable, so this drift check cannot run. It lives under "
-        "§ PR MERGE REQUIREMENTS, beneath the merge-pyramid-suites marker."
+        "§ PR merge requirements, beneath the merge-pyramid-suites marker."
     )
 
     rows = []

@@ -22,7 +22,7 @@
 # Widening the check while fixing that row found the fallback in FOUR runners, not one:
 #     src/tests/run-cosa-tests.sh          the row's own target
 #     src/tests/run-smoke-tests.sh         TestSuiteJob's "smoke" test type
-#     src/scripts/run-serial-bridge-guard.sh   a NAMED step in § PR MERGE REQUIREMENTS
+#     src/scripts/run-serial-bridge-guard.sh   a NAMED step in § PR merge requirements
 #     src/tests/run-pytest-direct.sh       worse — bare python3 unconditionally, never
 #                                          even trying a venv (its header's "delegates to
 #                                          python3 -m pytest" is about module-vs-file
@@ -102,7 +102,7 @@ resolve_venv_pytest() {
 #     if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
 #
 # That second line is the c98bce3f fallback wearing a variable name. It was in
-# run-integration-tests.sh — THE FINAL MERGE GATE per CLAUDE.md § PR MERGE REQUIREMENTS —
+# run-integration-tests.sh — THE FINAL MERGE GATE per CLAUDE.md § PR merge requirements —
 # and in run-e2e-ui-tests.sh and run-presentation-regression.sh. Those runners also use the
 # interpreter for non-pytest work (preflight_test_db.py, inline `-c` probes), so they need a
 # python rather than a pytest; the refusal rule is the same either way.

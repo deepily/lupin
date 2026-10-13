@@ -188,11 +188,11 @@ class TestTheTwoTiersFireOnTheRightInput:
 def test_the_merge_checklist_names_the_serial_runner():
     """
     🔴 The gate is the checklist line, not the script + docstring. Deleting the
-    CLAUDE.md § PR MERGE REQUIREMENTS row that names run-serial-bridge-guard.sh
+    CLAUDE.md § PR merge requirements row that names run-serial-bridge-guard.sh
     must break a test — otherwise the whole-dir guard becomes a script nobody runs.
     """
     # Precondition: repo-root CLAUDE.md must be readable. This doc-guard reads the
-    # PR MERGE REQUIREMENTS section, so it needs the full working tree — a host
+    # PR merge requirements section, so it needs the full working tree — a host
     # checkout, a git worktree, or a CI clone. The file-bind test container does NOT
     # mount CLAUDE.md (pytest.ini is mounted, CLAUDE.md is not), so the guard runs in
     # every checkout venue but is skipped here. Mounting CLAUDE.md into the container
@@ -200,11 +200,13 @@ def test_the_merge_checklist_names_the_serial_runner():
     if not CLAUDE_MD.exists():
         pytest.skip( f"repo-root CLAUDE.md not present at {CLAUDE_MD} — needs a full working-tree checkout (host / git worktree / CI); the file-bind test container does not mount it" )
     md = CLAUDE_MD.read_text()
-    marker = "## PR MERGE REQUIREMENTS"
-    assert marker in md, "PR MERGE REQUIREMENTS section is gone"
+    # The heading must sit on a line of its own. CLAUDE.md also quotes the heading text inside a
+    # note, so a plain substring search would still pass with the real heading gone.
+    marker = "\n## PR merge requirements\n"
+    assert md.count( marker ) == 1, f"expected exactly one line '## PR merge requirements' in CLAUDE.md, found {md.count( marker )}"
     section = md.split( marker, 1 )[ 1 ].split( "\n## ", 1 )[ 0 ]
     assert SERIAL_RUNNER in section, (
-        f"CLAUDE.md § PR MERGE REQUIREMENTS no longer names {SERIAL_RUNNER} — the serial "
+        f"CLAUDE.md § PR merge requirements no longer names {SERIAL_RUNNER} — the serial "
         "bridge-guard gate is now unguarded prose. Nobody will run it, and the whole-dir "
         "hazard check (row e2ae4102 → 8ccc20ab) is silently gone."
     )

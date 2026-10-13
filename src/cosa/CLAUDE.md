@@ -1,7 +1,6 @@
 # CoSA development guide
 
-> Rules for work under `src/cosa/`. The root `CLAUDE.md` governs git, testing and merging; this file adds only what is specific to CoSA.
-> The text this file carried before the 2026-10-10 rewrite is kept in `src/docs/doctrine/claude-md-receipts-archive.md` under "Moved out of src/cosa/CLAUDE.md on 2026-10-10".
+> Rules for work under `src/cosa/`. The root `CLAUDE.md` governs git, testing and merging; this file adds only what is specific to CoSA. The earlier text of this file is kept in `src/docs/doctrine/claude-md-receipts-archive.md` under "Moved out of src/cosa/CLAUDE.md on 2026-10-10".
 
 ## Standing rules
 

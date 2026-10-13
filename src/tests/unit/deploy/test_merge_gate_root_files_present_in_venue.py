@@ -7,7 +7,7 @@ WHAT WENT WRONG, AND WHY NOTHING CAUGHT IT
     `tracked-dirty=129 deleted=127 ... root=/var/lupin`. 127 tracked files did
     not exist in the container. Among them CLAUDE.md, which two merge-gate tests
     read: test_typescript_suite_gate.py parses the `merge-pyramid-suites` marker
-    out of it, test_bridge_dir_guard.py looks for `## PR MERGE REQUIREMENTS`.
+    out of it, test_bridge_dir_guard.py looks for `## PR merge requirements`.
     The first went red with FileNotFoundError. The second had been taught to
     SKIP when the file is missing — the same blindness, wearing a green.
 
