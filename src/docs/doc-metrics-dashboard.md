@@ -10,6 +10,7 @@ Kind `package` means the directory holds an `__init__.py`, and kind `loose` mean
 Each cell reads before, then after. After is the tree this page was last written from.
 Tokens are the words `marker_counts` counts in the docstrings.
 The six marker columns are rates per 1,000 tokens.
+A rate reads `inf` when a side has markers and no tokens.
 A row marked `new` had no swept file at the before commit, so the check compares nothing for it.
 The last row, `total`, sums every swept file on each side. It is shown and not compared.
 
@@ -30,7 +31,8 @@ PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base 
 PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard check --base 456422492f308a60dafa36325102229947c44147
 ```
 
-The check measures the tree again and does not read the numbers on this page.
+The check measures the tree again, and a rise is never judged from this page.
+The rows below are compared with a fresh render, and a difference is reported as stale numbers.
 A marker has risen when its rate is higher and its raw count is higher too.
 The check exits 0 when no compared value rose and the rows below are the rows of the tree. It exits 1 when one rose.
 It exits 2 when it could not check. It exits 3 when a row is missing below or this page names another before commit.
@@ -91,7 +93,7 @@ src/cosa/orchestration/claude_code               | package | 3 -> 3     | 1146 -
 src/cosa/repo                                    | package | 7 -> 8     | 4663 -> 4432     | 12.4 -> 1.4  | 26.8 -> 0.0 | 0.0 -> 0.0   | 1.9 -> 0.0 | 1.5 -> 0.0 | 0.2 -> 0.0      | ok
 src/cosa/repo/branch_analyzer                    | package | 9 -> 9     | 3260 -> 3195     | 0.0 -> 0.0   | 0.6 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/directory_analyzer                 | package | 6 -> 6     | 2080 -> 2034     | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
-src/cosa/repo/doc_lint                           | package | - -> 53    | - -> 48853       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/doc_lint                           | package | - -> 53    | - -> 48951       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/repo/git_loc_delta                      | package | 10 -> 10   | 4023 -> 3944     | 9.2 -> 2.8   | 12.9 -> 0.0 | 0.0 -> 0.0   | 1.0 -> 0.0 | 1.5 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/symindex                           | package | - -> 18    | - -> 6231        | - -> 0.2     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/research                                | package | 1 -> 1     | 11 -> 11         | 90.9 -> 90.9 | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
@@ -132,5 +134,5 @@ src/scripts/dm-experiment                        | loose   | 2 -> 2     | 2385 -
 src/scripts/lib                                  | loose   | 1 -> 3     | 792 -> 1590      | 7.6 -> 0.6   | 77.0 -> 0.0 | 0.0 -> 0.0   | 2.5 -> 0.0 | 2.5 -> 0.0 | 1.3 -> 0.0      | ok
 src/scripts/loc-analysis                         | loose   | 3 -> 3     | 184 -> 366       | 10.9 -> 5.5  | 16.3 -> 0.0 | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/scripts/presentation-gate-silence-proof      | loose   | 1 -> 1     | 893 -> 844       | 15.7 -> 0.0  | 61.6 -> 0.0 | 1.1 -> 0.0   | 4.5 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | ok
-total                                            | -       | 730 -> 891 | 477587 -> 601358 | 9.5 -> 1.7   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
+total                                            | -       | 730 -> 891 | 477587 -> 601456 | 9.5 -> 1.7   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
 ```
