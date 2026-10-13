@@ -26,3 +26,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [The CJ Flow v2 go/no-go criteria and the queue, argument and new-agent designs](2026.08.14-cj-flow-v2-go-no-go-and-phases-2-3.md) | `src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phases-2-3-and-evaluation.md` |
 | [The Claude Code transcript console and its live stream](2026.09.27-cc-transcript-console-live-stream.md) | `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` |
 | [Commons push mode, retired, and the LLM fallback for persona matching](2026.05.09-commons-phase3-push-mode-and-llm-fallback.md) | `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` |
+| [Two v2 doors, ask and submit, in front of the job queue](2026.08.20-v2-ask-and-submit-one-front-door.md) | `src/rnd/v0.2.0/2026.08.20-brain-integration-cascade-review-plan.md` |
