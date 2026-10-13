@@ -1,0 +1,7 @@
+bad.md:3 MD001/heading-increment Heading levels should only increment by one level at a time [Expected: h2; Actual: h3]
+bad.md:5:6 MD037/no-space-in-emphasis Spaces inside emphasis markers [Context: "** b"]
+bad.md:5:11 MD037/no-space-in-emphasis Spaces inside emphasis markers [Context: "d **"]
+bad.md:5:31 MD042/no-empty-links No empty links [Context: "[link](<>)"]
+bad.md:5:32 MD059/descriptive-link-text Link text should be descriptive [Context: "[link]"]
+bad.md:7 MD040/fenced-code-language Fenced code blocks should have a language specified [Context: "```"]
+bad.md:11:17 MD047/single-trailing-newline Files should end with a single newline character

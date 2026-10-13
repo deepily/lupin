@@ -150,6 +150,32 @@ def test_run_markdownlint_parses_lines_with_and_without_columns( monkeypatch, tm
     assert tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0 ) ) == ( [], [] )
 
 
+MDL_FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "unit", "fixtures", "doc_lint" )
+
+
+def _mdl_fixture( name ):
+    with open( os.path.join( MDL_FIXTURES, name ), encoding="utf-8" ) as f: return f.read()
+
+
+def test_run_markdownlint_parses_the_captured_output_of_the_pinned_tool( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    captured = _mdl_fixture( "markdownlint-cli2-0.18.1-stderr.txt" )
+    assert " error " not in captured and " warning " not in captured        # the real tool prints neither word
+    findings, warnings = tr.run_markdownlint( "/r", [ "bad.md" ], _fake( 1, "", captured ) )
+    assert warnings == []
+    assert [ ( f.line, f.rule ) for f in findings ] == [
+        ( 3, "markdownlint:MD001/heading-increment" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ),
+        ( 5, "markdownlint:MD042/no-empty-links" ), ( 5, "markdownlint:MD059/descriptive-link-text" ), ( 7, "markdownlint:MD040/fenced-code-language" ),
+        ( 11, "markdownlint:MD047/single-trailing-newline" ) ]
+
+
+def test_run_markdownlint_refuses_to_pass_when_the_tool_reports_findings_and_none_are_read( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 1, "", "a.md(3,1) MD040 a format this reader does not know\n" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "reported findings (exit 1) but none could be read" in warnings[ 0 ]
+
+
 def test_run_markdownlint_warns_loudly_when_missing_and_when_the_tool_fails( no_tools, monkeypatch, tmp_path ):
     findings, warnings = tr.run_markdownlint( str( no_tools ), [ "a.md" ] )
     assert findings == [] and "markdownlint-cli2 not found, SKIPPED" in warnings[ 0 ]
