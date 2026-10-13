@@ -176,6 +176,44 @@ def test_run_markdownlint_refuses_to_pass_when_the_tool_reports_findings_and_non
     assert "reported findings (exit 1) but none could be read" in warnings[ 0 ]
 
 
+def test_run_markdownlint_refuses_a_name_the_tool_read_as_a_glob_and_did_not_lint( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    dropped = _mdl_fixture( "markdownlint-cli2-0.18.1-glob-name-stdout.txt" )
+    assert "Linting: 0 file(s)" in dropped                                  # captured: exit 0, nothing linted, nothing on stderr
+    findings, warnings = tr.run_markdownlint( "/r", [ "a(1).md" ], _fake( 0, dropped, "" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "linted 0 of 1 file(s)" in warnings[ 0 ]
+
+
+def test_run_markdownlint_accepts_a_run_that_linted_every_file_it_was_given( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    plain = _mdl_fixture( "markdownlint-cli2-0.18.1-plain-name-stdout.txt" )
+    assert "Linting: 1 file(s)" in plain
+    findings, warnings = tr.run_markdownlint( "/r", [ "plain.md" ], _fake( 1, plain, _mdl_fixture( "markdownlint-cli2-0.18.1-plain-name-stderr.txt" ) ) )
+    assert warnings == [] and [ f.line for f in findings ] == [ 3 ]
+
+
+def test_run_markdownlint_refuses_when_the_tool_prints_no_count_of_files_linted( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, "", "" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "printed no count of files linted" in warnings[ 0 ]
+
+
+def test_real_markdownlint_lints_or_refuses_every_name_it_is_given_when_installed( tmp_path ):
+    tool = tr.find_tool( cu.get_project_root(), [ "node_modules/.bin/markdownlint-cli2" ], "markdownlint-cli2", "LUPIN_MARKDOWNLINT" )
+    if tool is None: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
+    shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
+    page = "# T\n\n```\ncode\n```\n"
+    outcomes = {}
+    for name in ( "plain.md", "a(1).md", "c\\d.md", "#h.md", "!i.md", "b{x}.md" ):
+        ( tmp_path / name ).write_text( page, encoding="utf-8" )
+        findings, warnings = tr.run_markdownlint( str( tmp_path ), [ name ] )
+        outcomes[ name ] = ( len( findings ), [ isinstance( w, tr.Unchecked ) for w in warnings ] )
+    for name, ( found, held ) in outcomes.items(): assert found == 1 or held == [ True ], f"{name!r} was neither linted nor refused: {outcomes[ name ]}"
+    assert outcomes[ "plain.md" ] == ( 1, [] )
+
+
 def test_run_markdownlint_warns_loudly_when_missing_and_when_the_tool_fails( no_tools, monkeypatch, tmp_path ):
     findings, warnings = tr.run_markdownlint( str( no_tools ), [ "a.md" ] )
     assert findings == [] and "markdownlint-cli2 not found, SKIPPED" in warnings[ 0 ]
