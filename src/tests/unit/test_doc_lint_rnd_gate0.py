@@ -271,6 +271,10 @@ def _entry( **citers ):
     ( "src/cosa/history.md",                     "archive" ),
     ( ".claude-session.md",                      "archive" ),
     ( "src/cosa/.claude-session.md",             "archive" ),
+    ( "src/docs/decisions/2026.10.06-x.md",      "decision" ),
+    ( "src/docs/decisions/README.md",            "decision" ),
+    ( "src/docs/decisions.md",                   "live" ),
+    ( "src/docs/wiki/decisions/x.md",            "live" ),
     ( "src/rnd/README.md",                       "index" ),
     ( "src/cosa/rnd/README.md",                  "index" ),
     ( "src/rnd/v0.1.7/x/README.md",              "rnd" ),
@@ -296,6 +300,27 @@ def test_a_history_archive_citer_alone_does_not_hold_a_doc():
     assert final[ A ][ "class" ] == "history"
     assert final[ A ][ "holding_citers" ] == []
     assert final[ A ][ "free_citers" ] == [ ".claude-session.md", "history/2026-08-history.md", "src/cosa/history.md" ]
+
+
+def test_a_decision_record_alone_does_not_hold_a_doc():
+    gate  = { A: _entry( live_path_citers=[ "src/docs/decisions/2026.10.06-x.md" ] ) }
+    final = rnd_gate0.resolve( gate, { A: "history" } )
+    assert final[ A ][ "class" ] == "history"
+    assert final[ A ][ "holding_citers" ] == []
+    assert final[ A ][ "free_citers" ] == [ "src/docs/decisions/2026.10.06-x.md" ]
+
+
+def test_a_decision_record_beside_a_live_citer_leaves_the_live_citer_holding():
+    gate  = { A: _entry( live_path_citers=[ "src/docs/decisions/2026.10.06-x.md", "src/docs/guide.md" ] ) }
+    final = rnd_gate0.resolve( gate, { A: "history" } )
+    assert final[ A ][ "class" ] == "new"
+    assert final[ A ][ "holding_citers" ] == [ "src/docs/guide.md" ]
+    assert final[ A ][ "free_citers" ] == [ "src/docs/decisions/2026.10.06-x.md" ]
+
+
+def test_the_description_names_a_decision_record_among_the_citers_that_pass():
+    gate = { A: _entry( live_path_citers=[ "src/docs/decisions/2026.10.06-x.md" ] ) }
+    assert rnd_gate0.describe( rnd_gate0.resolve( gate, { A: "history" } )[ A ] ) == "holds 0; passes 1 (decision 1)"
 
 
 def test_an_index_readme_alone_does_not_hold_a_doc():
@@ -408,10 +433,12 @@ def test_the_precedent_check_names_every_doc_that_came_out_history():
     assert rnd_gate0.precedent_violations( final, [ C, B, A, "src/rnd/not-in-census.md" ] ) == [ A, C ]
 
 
-def test_the_ruling_note_names_both_rulings_and_who_made_each():
+def test_the_ruling_note_names_the_three_rulings_and_who_made_each():
     assert "manager's ruling of 2026-10-09" in rnd_gate0.RULING_NOTE
     assert "Rick ruled on 2026-10-12" in rnd_gate0.RULING_NOTE
     assert "only while its own class is in force" in rnd_gate0.RULING_NOTE
+    assert "Rick ruled on 2026-10-13" in rnd_gate0.RULING_NOTE
+    assert "a decision record under src/docs/decisions/ never holds" in rnd_gate0.RULING_NOTE
 
 
 def test_the_cli_resolves_a_proposed_class_file_into_final_classes( tmp_path, capsys ):
