@@ -14,7 +14,7 @@ import sys
 from collections import namedtuple
 
 from . import docstring_lint
-from .cli import shown, split_names
+from .cli import line_text, shown, split_lines, split_names
 from .swept_scope import is_swept
 from .text_rules import Finding
 from .waivers import waiver_state
@@ -56,14 +56,15 @@ def file_count( path, source, root=None ):
     Ensures:
         - returns a FileCount of the count, the unwaived findings and the waivers honoured
         - a file that does not parse counts as one finding, and its waivers are not read
+        - the waiver is read from the line the parser numbers, so a bare carriage return ends a line
 
     Raises:
         - nothing
     """
     findings = docstring_lint.lint_source( path, source, root )
     if findings and findings[ 0 ].rule == "parse-error": return FileCount( 1, findings[ : 1 ], 0 )
-    lines = source.split( "\n" )
-    kept  = [ f for f in findings if waiver_state( f, lines[ f.line - 1 ] ) != "honoured" ]
+    lines = split_lines( source )
+    kept  = [ f for f in findings if waiver_state( f, line_text( lines, f.line ) ) != "honoured" ]
     return FileCount( len( kept ), kept, len( findings ) - len( kept ) )
 
 
@@ -186,13 +187,14 @@ def rule_files( root ):
     Ensures:
         - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list, the chain script and the extractor script
         - the set comes from git at run time, so a new file in the package is covered the day it is added
+        - a name that is not UTF-8 keeps its bytes
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
     res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z", "--", *RULE_PATHS ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    return sorted( p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p )
+    return sorted( split_names( res.stdout ) )
 
 
 def differing_rule_files( root ):
@@ -213,7 +215,7 @@ def differing_rule_files( root ):
     compared = rule_files( root )
     res      = subprocess.run( [ "git", "-C", str( root ), "diff", "--name-only", "-z", "--", *RULE_PATHS ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git diff failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    return len( compared ), sorted( p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p )
+    return len( compared ), sorted( split_names( res.stdout ) )
 
 
 def table_text( files, stamp ):

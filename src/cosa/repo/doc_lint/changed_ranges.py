@@ -13,6 +13,8 @@ import subprocess
 HUNK_HEADER   = re.compile( r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@" )
 DIFF_PREFIX   = "diff --git "
 FILE_PREFIX   = "+++ "
+# The header lines that name the new path of a file git paired with an older one. Neither carries the b/ prefix.
+MOVE_PREFIXES = ( "rename to ", "copy to " )
 OCTAL_BYTE    = re.compile( r"[0-7]{3}" )
 # The one-letter escapes git writes inside a quoted file name, each with the byte it stands for.
 QUOTE_ESCAPES = { "a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92 }
@@ -70,6 +72,7 @@ def parse_diff_ranges( diff_text ):
     Ensures:
         - returns { path: [ ( first, last ), ... ] } with 1-based inclusive new-file lines
         - a line starting with +++ names a file only between a diff --git line and that file's first hunk
+        - a rename to or copy to line in the same place names the new path, so a file moved without an edit has its entry, with no range
         - after the first hunk such a line is content, an added line that starts with two plus signs, and names nothing
         - a pure deletion hunk adds no range, and the file still has its entry
         - a deleted file, whose header reads +++ /dev/null, adds no entry
@@ -87,6 +90,10 @@ def parse_diff_ranges( diff_text ):
             name    = unquote_path( raw[ len( FILE_PREFIX ) : ] )
             current = name[ 2 : ] if name.startswith( "b/" ) else None
             if current is not None: ranges.setdefault( current, [] )
+            continue
+        if in_header and raw.startswith( MOVE_PREFIXES ):
+            current = unquote_path( raw[ len( next( p for p in MOVE_PREFIXES if raw.startswith( p ) ) ) : ] )
+            ranges.setdefault( current, [] )
             continue
         m = HUNK_HEADER.match( raw )
         if m: in_header = False
@@ -111,12 +118,13 @@ def changed_line_ranges( repo_root, base, cached=False, against=None ):
         - returns the dict from parse_diff_ranges
         - the diff is anchored at repo_root, so the caller's directory does not matter
         - git is told to quote file names and to write the a/ and b/ prefixes, whatever the user's settings say
+        - git is told to pair renames and no copies, whatever the user's settings say, so a copy is always a new file with every line touched
         - a byte of content that is not UTF-8 is replaced, since only the headers are read
 
     Raises:
         - RuntimeError naming the git error when the diff command fails
     """
-    cmd = [ "git", "-C", str( repo_root ), "-c", "core.quotePath=true", "diff", "-U0", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/" ]
+    cmd = [ "git", "-C", str( repo_root ), "-c", "core.quotePath=true", "diff", "-U0", "-M", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/" ]
     cmd += ( [ "--cached" ] + ( [ against ] if against is not None else [] ) ) if cached else [ base ]
     cmd += [ "--", ":/" ]
     res = subprocess.run( cmd, capture_output=True, text=True, encoding="utf-8", errors="replace" )
@@ -150,7 +158,7 @@ def filter_findings( findings, ranges_by_path ):
 
     Ensures:
         - a finding on a file with no entry is dropped
-        - a page-level finding (PAGE_LEVEL_RULES) is kept when the file has an entry, so a hunk that only deletes lines counts
+        - a page-level finding (PAGE_LEVEL_RULES) is kept when the file has an entry, so a hunk that only deletes lines counts, and so does a move without an edit
         - order is preserved
 
     Raises:

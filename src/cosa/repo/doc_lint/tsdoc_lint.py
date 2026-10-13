@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 from .changed_ranges import changed_line_ranges, filter_findings
-from .cli import build_parser, split_names
+from .cli import build_parser, shown, split_names
 from .links import design_path_findings
 from .rule_lists import DOCSTRING_MAX_LINES
 from .text_rules import Finding, emphasis_findings, history_findings, lint_text, rhetoric_findings, summary_findings
@@ -316,9 +316,12 @@ def run_extractor( repo_root, files, source_root=None ):
         - returns { path: [ record, ... ] } with a key for every file asked for, in extractor order
         - files go to Node in batches of CHUNK_SIZE, one process per batch, never one per file
         - an empty list starts no process
+        - every file asked for comes back with its file record, or the run is refused
 
     Raises:
         - RuntimeError when Node cannot start, exits non-zero, or prints a line that is not JSON
+        - RuntimeError naming each file that came back without a file record, since such a file was not read
+        - Node reads a name as UTF-8 text, so a name that is not UTF-8 is such a file
     """
     by_file = { path: [] for path in files }
     script  = os.path.join( str( repo_root ), EXTRACTOR_REL )
@@ -336,6 +339,8 @@ def run_extractor( repo_root, files, source_root=None ):
             except json.JSONDecodeError as err:
                 raise RuntimeError( f"extractor printed a line that is not JSON: {raw[ : 80 ]!r}" ) from err
             by_file.setdefault( record[ "file" ], [] ).append( record )
+    unread = [ path for path in files if not any( record[ "kind" ] == "file" for record in by_file[ path ] ) ]
+    if unread: raise RuntimeError( f"extractor returned no file record for {len( unread )} of {len( files )} files, so they were NOT checked: {', '.join( shown( path ) for path in unread[ : 5 ] )}" )
     return by_file
 
 

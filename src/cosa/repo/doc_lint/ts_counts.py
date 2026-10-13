@@ -16,7 +16,7 @@ import sys
 import tempfile
 
 from . import counts, tsdoc_lint
-from .cli import shown
+from .cli import SCRIPT_BREAKS, SURROGATE, crosses_as_text, line_text, shown, split_lines
 from .waivers import waiver_state
 from .word_list import configure_root
 
@@ -55,6 +55,8 @@ def extract( root, texts ):
     Ensures:
         - returns the extractor records grouped by path, as tsdoc_lint.run_extractor does
         - the texts are written to a scratch tree and read from there, so a staged text is judged, not the disk copy
+        - a path whose name is not UTF-8 is written under a stand-in name (see scratch_names), since Node cannot be given such a name
+        - its records come back under the path that was asked for, so its comments are counted like any other file's
         - the scratch tree is removed afterwards, also when the extractor fails
         - no texts start no process
 
@@ -63,14 +65,45 @@ def extract( root, texts ):
     """
     if not texts: return {}
     scratch = tempfile.mkdtemp( prefix="ts-counts-" )
+    names   = scratch_names( texts )
     try:
         for path, text in texts.items():
-            full = os.path.join( scratch, path )
+            full = os.path.join( scratch, names[ path ] )
             os.makedirs( os.path.dirname( full ), exist_ok=True )
             with open( full, "w", encoding="utf-8" ) as handle: handle.write( text )
-        return tsdoc_lint.run_extractor( root, list( texts ), source_root=scratch )
+        by_name = tsdoc_lint.run_extractor( root, [ names[ path ] for path in texts ], source_root=scratch )
+        return { path: by_name[ names[ path ] ] for path in texts }
     finally:
         shutil.rmtree( scratch, ignore_errors=True )
+
+
+def scratch_names( paths ):
+    """
+    Give each path the name its text is written under in the scratch tree.
+
+    Requires:
+        - paths is an iterable of repo-relative paths
+
+    Ensures:
+        - returns { path: name }; a path whose name is UTF-8 keeps it
+        - any other path gets a stand-in: each byte that is not UTF-8 becomes an underscore, and a number goes before the suffix
+        - the number is the first that makes the stand-in differ from every path given and every stand-in made, so no two texts share a file
+        - the stand-in keeps the folder and the suffix, which is what tells the extractor the kind of file
+
+    Raises:
+        - nothing
+    """
+    paths = list( paths )
+    names = { path: path for path in paths if crosses_as_text( path ) }
+    taken = set( paths )
+    for path in paths:
+        if path in names: continue
+        stem, suffix = os.path.splitext( SURROGATE.sub( "_", path ) )
+        number       = 0
+        while f"{stem}.{number}{suffix}" in taken: number += 1
+        names[ path ] = f"{stem}.{number}{suffix}"
+        taken.add( names[ path ] )
+    return names
 
 
 def count_records( path, records, source, root=None ):
@@ -86,13 +119,14 @@ def count_records( path, records, source, root=None ):
     Ensures:
         - returns a counts.FileCount of the count, the unwaived findings and the waivers honoured
         - a file that does not parse adds one parse-error finding, and its comments are still counted
+        - the waiver is read from the line the compiler numbers, so a carriage return or a line separator ends a line
 
     Raises:
         - nothing
     """
     findings = tsdoc_lint.lint_comments( path, records, root )
-    lines    = source.split( "\n" )
-    kept     = [ f for f in findings if waiver_state( f, lines[ f.line - 1 ] ) != "honoured" ]
+    lines    = split_lines( source, SCRIPT_BREAKS )
+    kept     = [ f for f in findings if waiver_state( f, line_text( lines, f.line ) ) != "honoured" ]
     return counts.FileCount( len( kept ), kept, len( findings ) - len( kept ) )
 
 

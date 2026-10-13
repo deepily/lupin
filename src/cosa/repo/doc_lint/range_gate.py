@@ -8,7 +8,11 @@ stages exactly what the commit changed, and runs the gate of that tree.
 The hook runs the gate with --blocking. A commit made before the hook did so was never held to that.
 The replay therefore passes --blocking only for a commit whose parent descends from the blocking epoch.
 The epoch is one sha recorded in EPOCH_PATH. With none recorded, every commit is replayed in warn mode.
-The epoch is read from the head of the range, and the working copy of the file must record the same value.
+A range is judged under the value its base records, and its head must record the same one.
+When the base records none, the value comes from the head. The working copy of the file must record that value too.
+
+A merge commit is replayed with its other parents written to MERGE_HEAD, so the gate applies its merged-line rule.
+A concluded cherry-pick leaves no record of the commit it picked, so it is replayed as an ordinary commit.
 """
 
 import argparse
@@ -36,7 +40,7 @@ class RangeRefused( Exception ):
     A range the checker will not judge at all.
 
     Requires:
-        - the message names the reason and, for a merge, the commit
+        - the message names the reason
 
     Ensures:
         - carries the reason as text, for the report and for the exit code 2
@@ -63,9 +67,25 @@ def git( root, *args ):
     Raises:
         - RuntimeError naming the command and its error text when git exits non-zero
     """
+    return git_bytes( root, *args ).decode( "utf-8", "replace" )
+
+
+def git_bytes( root, *args ):
+    """
+    Run one git command in a working tree and return its output as bytes.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns the command's standard output undecoded, so a file name in it keeps every byte
+
+    Raises:
+        - RuntimeError naming the command and its error text when git exits non-zero
+    """
     res = subprocess.run( [ "git", "-C", root ] + list( args ), capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git {' '.join( args )} failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    return res.stdout.decode( "utf-8", "replace" )
+    return res.stdout
 
 
 def list_commits( root, base, head ):
@@ -77,7 +97,7 @@ def list_commits( root, base, head ):
 
     Ensures:
         - returns full shas in the order a lander would apply them
-        - a merge commit is listed like any other; check_range refuses a range that holds one
+        - a merge commit is listed like any other, and so are the commits its other parents bring into the range
 
     Raises:
         - RuntimeError when git cannot list the range
@@ -96,11 +116,12 @@ def changes( root, sha ):
         - returns tuples ( status, path, old_path ), status being A, C, M, D or R
         - old_path is the source of a rename and None for every other status
         - a merge commit is judged against its first parent
+        - a path is decoded as the file system decodes a name, so one that is not UTF-8 can be handed back to git
 
     Raises:
         - RuntimeError when sha has no parent or git fails
     """
-    tokens = git( root, "diff", "-M", "--name-status", "-z", f"{sha}^1", sha ).split( "\0" )
+    tokens = [ os.fsdecode( token ) for token in git_bytes( root, "diff", "-M", "--name-status", "-z", f"{sha}^1", sha ).split( b"\0" ) ]
     found, i = [], 0
     while i < len( tokens ) and tokens[ i ]:
         status = tokens[ i ][ 0 ]
@@ -215,28 +236,56 @@ def require_commit( root, epoch ):
     return epoch
 
 
-def resolve_blocking_epoch( root, head ):
+def committed_epoch_text( root, commit ):
+    """
+    Read the epoch file as one commit holds it.
+
+    Requires:
+        - root is a git working tree; commit names a commit
+
+    Ensures:
+        - returns the text of EPOCH_PATH in that commit's tree, or None when the tree has no such file
+
+    Raises:
+        - nothing
+    """
+    res = subprocess.run( [ "git", "-C", root, "show", f"{commit}:{EPOCH_PATH}" ], capture_output=True )
+    return res.stdout.decode( "utf-8", "replace" ) if res.returncode == 0 else None
+
+
+def resolve_blocking_epoch( root, base, head ):
     """
     Settle which blocking epoch a range is judged against.
 
     Requires:
-        - root is the working tree the check runs in; head names the last commit of the range
+        - root is the working tree the check runs in; base and head name the two ends of the range
 
     Ensures:
         - returns ( epoch, from_head ), epoch being a commit sha or None when no value is recorded
+        - when base's tree records a value, the range is judged under it, and head's tree must record the same value
+        - so a range cannot lift its own blocking by moving, emptying, deleting or rewriting the file in its head
+        - when base's tree records no value, which is the range that lands the epoch, head's value is used
         - when head's tree holds EPOCH_PATH, its value is the epoch and from_head is True
         - then the working copy under root must record the same value, an absent file counting as no value
-        - when head's tree has no such file, the range predates it: the working copy's value is used and from_head is False
+        - when head's tree has no such file and base records no value, the range predates it: the working copy's value is used and from_head is False
 
     Raises:
+        - RangeRefused naming both values when base records a value and head records another, no value or no file
         - RangeRefused naming both values when head and the working copy disagree, so an emptied or deleted working copy cannot lift blocking
-        - RangeRefused when either value is malformed, or the epoch is a sha that require_commit refuses
+        - RangeRefused when a value is malformed, or the epoch is a sha that require_commit refuses
     """
-    res     = subprocess.run( [ "git", "-C", root, "show", f"{head}:{EPOCH_PATH}" ], capture_output=True )
+    base_text = committed_epoch_text( root, base )
+    head_text = committed_epoch_text( root, head )
+    at_base   = parse_blocking_epoch( base_text ) if base_text is not None else None
+    if at_base is not None:
+        at_head = parse_blocking_epoch( head_text ) if head_text is not None else None
+        if at_head != at_base:
+            have = at_head or ( "no file" if head_text is None else "no value" )
+            raise RangeRefused( f"the blocking epoch differs: the base of the range records {at_base} in {EPOCH_PATH}, the head of the range records {have}; a range is judged under the value its base records and cannot change it; no commit was judged" )
     text    = working_epoch_text( root )
     working = parse_blocking_epoch( text ) if text is not None else None
-    if res.returncode != 0: return ( require_commit( root, working ) if working is not None else None ), False
-    recorded = parse_blocking_epoch( res.stdout.decode( "utf-8", "replace" ) )
+    if head_text is None: return ( require_commit( root, working ) if working is not None else None ), False
+    recorded = parse_blocking_epoch( head_text )
     if recorded != working:
         have = working or ( "no file" if text is None else "no value" )
         raise RangeRefused( f"the blocking epoch differs: the head of the range records {recorded or 'no value'}, the working copy of {EPOCH_PATH} records {have}; no commit was judged" )
@@ -277,6 +326,39 @@ def is_held( root, epoch, sha ):
         - RuntimeError naming the git command when git cannot compare the two commits
     """
     return epoch is not None and descends( root, epoch, f"{sha}^1" )
+
+
+def other_parents( root, sha ):
+    """
+    List the parents of a commit after its first.
+
+    Requires:
+        - root is a git working tree; sha names a commit
+
+    Ensures:
+        - returns the full shas of the second and later parents, in order
+        - returns [] for a commit with one parent or none, which is every commit that is not a merge
+
+    Raises:
+        - RuntimeError when git cannot read the commit
+    """
+    return git( root, "rev-list", "--parents", "-n", "1", sha ).split()[ 2 : ]
+
+
+def incoming_path( worktree ):
+    """
+    Name the file in which git records the commits a merge is bringing in.
+
+    Requires:
+        - worktree is a git working tree, the main one or a linked one
+
+    Ensures:
+        - returns the absolute path of MERGE_HEAD in that working tree's own git directory
+
+    Raises:
+        - RuntimeError when git cannot name the path
+    """
+    return os.fsdecode( git_bytes( worktree, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD" ) ).strip( "\n" )
 
 
 def run_gate( worktree, blocking=False, python=None ):
@@ -353,26 +435,37 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, apart=False 
         - exit 1 under blocking is unchecked and carries OLD_GATE_HINT, since a gate.py that predates blocking exits 1 on a finding
         - an unchecked result keeps every line of a git error and ends with the worktree path and the time
         - the worktree is left holding the staged commit, to be reset by the next call
+        - a merge commit is staged against its first parent, and its other parents are written to the worktree's MERGE_HEAD while the gate runs
+        - so the gate lets off a finding on a line that came in unchanged with the second parent, as the hook did when the merge was concluded
+        - a merge carries a line that names that parent; the MERGE_HEAD file is removed before the call returns
+        - a commit made by a cherry-pick has one parent and is judged like any other, since git keeps no record of what it picked
 
     Raises:
         - nothing
     """
-    subject, blocking = "", False
+    subject, blocking, marker = "", False, None
     try:
         subject  = git( root, "log", "-1", "--format=%s", sha ).strip()
         found    = changes( root, sha )
+        merged   = other_parents( root, sha )
         blocking = not apart and is_held( root, epoch, sha )
         git( worktree, "checkout", "-q", "-f", "--detach", f"{sha}^1" )
         git( worktree, "clean", "-fdq" )
         stage( worktree, sha, found )
+        if merged:
+            marker = incoming_path( worktree )
+            with open( marker, "w", encoding="utf-8" ) as handle: handle.write( "".join( f"{parent}\n" for parent in merged ) )
         code, output = runner( worktree, blocking )
-    except RuntimeError as error:
+    except ( RuntimeError, OSError ) as error:
         return Result( sha, subject, "unchecked", None, str( error ).splitlines() + where( worktree ), blocking )
+    finally:
+        if marker is not None and os.path.exists( marker ): os.remove( marker )
     why   = "" if epoch is None else f"the blocking epoch {epoch[ :9 ]} is not an ancestor of the head of this range" if apart else f"predates the blocking epoch {epoch[ :9 ]}"
-    older = [] if blocking or epoch is None else [ f"{why}: judged in warn mode, findings on its staged lines were not enforced" ]
+    notes = [] if blocking or epoch is None else [ f"{why}: judged in warn mode, findings on its staged lines were not enforced" ]
+    notes = ( [ f"merge commit: judged with {merged[ 0 ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced" ] if merged else [] ) + notes
     if code == GATE_REFUSED:
-        return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] + older, blocking )
-    if code == 0: return Result( sha, subject, "passed", code, older, blocking )
+        return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] + notes, blocking )
+    if code == 0: return Result( sha, subject, "passed", code, notes, blocking )
     hint = [ OLD_GATE_HINT ] if blocking and code == 1 else []
     return Result( sha, subject, "unchecked", code, output.splitlines()[ -3: ] + hint + where( worktree ), blocking )
 
@@ -389,14 +482,14 @@ def check_range( root, base, head, worktree, runner=run_gate, epoch=None ):
         - returns one Result per commit, oldest first
         - a commit that cannot be judged does not stop the commits after it
 
+        - a merge commit is judged like the rest, under the merged-line rule (see check_commit)
+
     Raises:
-        - RangeRefused when the range holds no commit, or holds a merge commit, which is named
+        - RangeRefused when the range holds no commit
         - RuntimeError when the range cannot be listed, or the epoch cannot be compared with head
     """
     commits = list_commits( root, base, head )
     if not commits: raise RangeRefused( f"range {base}..{head} holds 0 commits, nothing was checked" )
-    merges = git( root, "rev-list", "--merges", f"{base}..{head}" ).split()
-    if merges: raise RangeRefused( f"range {base}..{head} holds a merge commit, {merges[ 0 ]}: a lander applies a merge differently, so no commit was judged" )
     apart = epoch is not None and not descends( root, epoch, head )
     return [ check_commit( root, worktree, sha, runner, epoch, apart ) for sha in commits ]
 
@@ -543,8 +636,10 @@ def main( argv=None, out=None, runner=run_gate ):
         - makes a detached worktree under the main checkout's .claude/worktrees, from a linked worktree too, and removes it on every path
         - prints the report and writes it to --out when given
         - returns 0 when every commit passes, 1 when any is refused and 2 when any could not be judged
-        - returns 2 and prints the reason when the range is empty or holds a merge commit
-        - returns 2 and prints the reason when the blocking epoch is malformed, names no commit, or differs between --head and the working copy of --repo-root, and judges no commit
+        - returns 2 and prints the reason when the range is empty
+        - returns 2 and prints the reason when the blocking epoch is malformed or names no commit, and judges no commit
+        - the same when --base records an epoch and --head records another, none or no file, or when --head and the working copy of --repo-root differ
+        - a merge commit in the range is judged under the merged-line rule, with its other parents as the incoming commit
         - a commit is replayed with --blocking only when its parent descends from that epoch; the report names the epoch
         - a termination signal removes the worktree before the process ends
         - the holder folder is named range-gate-PID-suffix from the moment it exists, so a sweep never takes a live run's
@@ -570,7 +665,7 @@ def main( argv=None, out=None, runner=run_gate ):
     try:
         git( args.repo_root, "worktree", "add", "--detach", work, args.head )
         try:
-            epoch, from_head = resolve_blocking_epoch( args.repo_root, args.head )
+            epoch, from_head = resolve_blocking_epoch( args.repo_root, args.base, args.head )
             results          = check_range( args.repo_root, args.base, args.head, work, runner, epoch )
         except RangeRefused as reason:
             out.write( f"{reason}\n" )

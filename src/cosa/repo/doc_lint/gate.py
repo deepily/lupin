@@ -5,10 +5,13 @@ Lints the staged lines of Python and markdown files with ruff, markdownlint-cli2
 doc_lint rules and prints the findings to stderr. It exits 0 on its own crash.
 The hook is shared by every worktree, and a crashing gate must not block every seat.
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
+A staged gitlink, which is a submodule entry, holds no text and is named as not checked.
+A markdown file whose name markdownlint-cli2 cannot be given is refused when that tool is installed.
 
 With --blocking, which the commit hook passes, a finding on a staged line refuses the commit.
 Three kinds of finding are printed and let through instead. One is a finding in a file is_warn_only names.
 One is a page-level finding (PAGE_LEVEL_RULES) that the last commit's copy of the page already had, no worse.
+A page moved to another path is compared with the copy at its old path, whether or not the move also edits it.
 One is a finding on a line that came in unchanged with the commit a merge or a cherry-pick is concluding.
 Four more refusals apply with or without --blocking. Every refusal exits REFUSAL_EXIT.
 
@@ -49,10 +52,10 @@ from collections import namedtuple
 
 from . import counts, ts_counts, tsdoc_lint
 from .changed_ranges import PAGE_LEVEL_RULES, changed_line_ranges, filter_findings
-from .cli import SURROGATE, in_scope, shown, split_names
+from .cli import SURROGATE, in_scope, line_text, shown, split_lines, split_names
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
 from .swept_scope import is_swept
-from .tool_runners import run_markdownlint, run_ruff
+from .tool_runners import markdownlint_unnamed, run_markdownlint, run_ruff
 from .waivers import waiver_state
 from .word_list import configure_root
 
@@ -70,6 +73,10 @@ MERGED_MARK        = " (warn mode, commit allowed: this line came in with the me
 # The files git keeps in its directory while a merge or a cherry-pick waits to be concluded. A revert is not among them.
 INCOMING_HEADS     = ( "MERGE_HEAD", "CHERRY_PICK_HEAD" )
 FULL_SHA           = re.compile( r"[0-9a-f]{40,64}" )
+# A carriage return that no line feed follows. Python's parser ends a line there and git does not.
+BARE_RETURN        = re.compile( "\r(?!\n)" )
+# The mode git records for a submodule entry. Such an entry names a commit of another repository and holds no text.
+GITLINK_MODE       = "160000"
 NUMBER             = re.compile( r"\d+" )
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
@@ -206,6 +213,8 @@ def incoming_commit( root ):
         - sha is the first line of the first INCOMING_HEADS file found in this working tree's own git directory, when it names a commit
         - sha is None when no such file exists, which is every ordinary commit
         - a file that names no commit in the repository is ignored, and warnings then holds one loud line that says so
+        - a file that cannot be read is ignored the same way, with a line that names the error
+        - an ignored file lets no finding off, so every finding is enforced
         - a revert in progress is not looked at
 
     Raises:
@@ -216,7 +225,11 @@ def incoming_commit( root ):
         res  = subprocess.run( [ "git", "-C", root, "rev-parse", "--path-format=absolute", "--git-path", name ], capture_output=True )
         path = os.fsdecode( res.stdout ).strip( "\n" )
         if not os.path.isfile( path ): continue
-        with open( path, encoding="utf-8", errors="replace" ) as handle: sha = handle.read().split( "\n" )[ 0 ].strip()
+        try:
+            with open( path, encoding="utf-8", errors="replace" ) as handle: sha = handle.read().split( "\n" )[ 0 ].strip()
+        except OSError as err:
+            warnings.append( f"[doc-lint] WARNING: {name} could not be read ({type( err ).__name__}), so it was ignored and every finding is enforced" )
+            continue
         if FULL_SHA.fullmatch( sha ) and subprocess.run( [ "git", "-C", root, "cat-file", "-e", f"{sha}^{{commit}}" ], capture_output=True ).returncode == 0:
             return sha, warnings
         warnings.append( f"[doc-lint] WARNING: {name} names no commit in this repository, so it was ignored and every finding is enforced" )
@@ -245,33 +258,53 @@ def merged_in( root, findings, incoming ):
     return [ f for f in findings if id( f ) not in theirs ]
 
 
-def staged_changes( root ):
+def staged_entries( root ):
     """
-    List the staged additions, copies, modifications and renames.
+    List the staged changes that leave a path in the index, with the gitlinks apart.
 
     Requires:
         - root is a git working tree
 
     Ensures:
-        - returns ( names, renamed_from ), names being the new path of every change in git's order
+        - the changes are additions, copies, modifications, renames and type changes
+        - returns ( names, renamed_from, gitlinks ), names being the new path of every change that is not a gitlink, in git's order
         - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
+        - gitlinks holds the new path of every change whose staged entry is a submodule entry, which has no text to read
+        - a type change is listed, so a link replaced by a file is read and a file replaced by a gitlink is named
+        - names are read apart at the NUL byte and decoded as the file system decodes them
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--name-status", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--raw", "-z", "--diff-filter=ACMRT", "--", ":/" ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    tokens = [ os.fsdecode( token ) for token in res.stdout.split( b"\0" ) ]
-    names, renamed_from, i = [], {}, 0
+    tokens = res.stdout.split( b"\0" )
+    names, renamed_from, gitlinks, i = [], {}, [], 0
     while i < len( tokens ) and tokens[ i ]:
-        status = tokens[ i ]
-        if status[ 0 ] == "R":
-            old, new, i = tokens[ i + 1 ], tokens[ i + 2 ], i + 3
+        fields = tokens[ i ].decode( "ascii" ).split( " " )
+        if fields[ 4 ][ 0 ] == "R":
+            old, new, i = os.fsdecode( tokens[ i + 1 ] ), os.fsdecode( tokens[ i + 2 ] ), i + 3
             renamed_from[ new ] = old
         else:
-            new, i = tokens[ i + 1 ], i + 2
-        names.append( new )
-    return names, renamed_from
+            new, i = os.fsdecode( tokens[ i + 1 ] ), i + 2
+        ( gitlinks if fields[ 1 ] == GITLINK_MODE else names ).append( new )
+    return names, renamed_from, gitlinks
+
+
+def staged_changes( root ):
+    """
+    List the staged changes the gate reads as files.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( names, renamed_from ) as staged_entries gives them, so no gitlink is among the names
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    return staged_entries( root )[ : 2 ]
 
 
 def staged_counted( root ):
@@ -421,7 +454,7 @@ def rule_divergence( compared, differing, judged ):
     """
     if not judged or not differing: return None
     return (
-        f"[doc-lint] REFUSED: rule file {', '.join( differing )} is not the same staged and in the working tree, so the findings were counted "
+        f"[doc-lint] REFUSED: rule file {', '.join( shown( d ) for d in differing )} is not the same staged and in the working tree, so the findings were counted "
         f"under rules that are not the ones being committed; stage the edit with git add, or restore the file with git checkout, then commit again "
         f"({len( differing )} of {compared} rule files differ)"
     )
@@ -641,13 +674,12 @@ def staged_paths( root ):
         - returns repo-relative posix paths that are in_scope
         - the listing is anchored at root, so the caller's directory does not matter
         - names are read apart at the NUL byte, so a name git would quote is listed as it is
+        - a gitlink is not among them, since it has no text
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
-    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    return [ p for p in split_names( res.stdout ) if in_scope( p ) ]
+    return [ p for p in staged_entries( root )[ 0 ] if in_scope( p ) ]
 
 
 def staged_source( root, path ):
@@ -744,6 +776,12 @@ def collect( root ):
         - a swept file that is not UTF-8 is refused the same way, counted in tally["undecodable"]; any other file that is not UTF-8 is skipped with a warning
         - tally is the denominator: files, docstrings, findings, waivers, unparsed
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
+        - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
+        - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
+        - a waiver is read from the line the parser numbers, so a file with bare carriage returns is judged and never crashes the gate
+        - git does not end a line at a bare carriage return, so its line numbers for such a Python file are not the parser's
+        - every line of such a file counts as touched when the commit touches any of it
+        - a page moved without an edit keeps its page-level findings, since the diff reader gives a move its entry
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
 
     Raises:
@@ -751,6 +789,7 @@ def collect( root ):
     """
     configure_root( root )
     paths    = staged_paths( root )
+    gitlinks = [ p for p in staged_entries( root )[ 2 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     ranges   = changed_line_ranges( root, None, cached=True )
     findings = []
     py_sources = {}
@@ -758,7 +797,7 @@ def collect( root ):
     tally      = { "files": 0, "docstrings": 0, "findings": 0, "waivers": 0, "unparsed": 0, "undecodable": 0 }
     waived     = []
     refusals   = []
-    warnings   = []
+    warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
     skipped    = []
     decode_out = []
     for path in paths:
@@ -774,16 +813,18 @@ def collect( root ):
                 warnings.append( f"[doc-lint] WARNING: {shown( path )} is not UTF-8, it was NOT checked" )
             continue
         if path.endswith( ".py" ):
+            if ranges.get( path ) and BARE_RETURN.search( source ): ranges[ path ] = [ ( 1, len( split_lines( source ) ) ) ]
             py_sources[ path ] = source
             doc_findings = docstring_lint.lint_source( path, source, root )
             findings += doc_findings + comment_lint.lint_source( path, source, root )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
-            else: waived += [ f for f in doc_findings if waiver_state( f, ( source.split( "\n" ) + [ "" ] * f.line )[ f.line - 1 ] ) == "honoured" ]
+            else: waived += [ f for f in doc_findings if waiver_state( f, line_text( split_lines( source ), f.line ) ) == "honoured" ]
         elif path.endswith( ".md" ):
             findings += md_lint.lint_source( path, source, root )
     py, md   = [ p for p in paths if p.endswith( ".py" ) and p not in skipped ], [ p for p in paths if p.endswith( ".md" ) and p not in skipped ]
     ruff_findings, ruff_warnings = run_ruff( root, py, sources=py_sources )
     md_findings, md_warnings     = run_markdownlint( root, md )
+    decode_out += [ f"[doc-lint] REFUSED {shown( p )}: the file name is not UTF-8 or holds a line break, so markdownlint-cli2 cannot be given it and its markdown structure was NOT checked; fix: rename the file; this cannot be waived" for p in markdownlint_unnamed( root, md ) ]
     findings += ruff_findings + md_findings
     refusals = [ f for f in findings if in_blocking_package( f.path, BLOCKING_PACKAGES ) and is_mechanical( f ) ]
     lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
@@ -797,7 +838,7 @@ def collect( root ):
         lines_out.append( diverged )
         swept = []
     for path, source, doc_findings in swept:
-        lines = source.split( "\n" )
+        lines = split_lines( source )
         tally[ "files" ] += 1
         if doc_findings and doc_findings[ 0 ].rule == "parse-error":
             tally[ "unparsed" ] += 1
@@ -807,13 +848,13 @@ def collect( root ):
         tally[ "docstrings" ] += len( docstring_lint.extract_docstrings( source ) )
         tally[ "findings" ]   += len( doc_findings )
         for f in doc_findings:
-            state = waiver_state( f, lines[ f.line - 1 ] )
+            state = waiver_state( f, line_text( lines, f.line ) )
             if state == "honoured":
                 tally[ "waivers" ] += 1
                 waived.append( f )
             elif id( f ) not in { id( r ) for r in refusals }:
                 refusals.append( f )
-                lines_out.append( swept_refusal_line( f, lines[ f.line - 1 ], state ) )
+                lines_out.append( swept_refusal_line( f, line_text( lines, f.line ), state ) )
     if diverged:
         tally[ "counted" ]    = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "diverged" }
         tally[ "ts_counted" ] = dict( tally[ "counted" ] )

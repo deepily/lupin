@@ -18,6 +18,9 @@ from .word_list import configure_root
 
 SKIP_SEGMENTS = frozenset( { "tests", ".venv", "node_modules", "site-packages", "__pycache__", "rnd" } )
 SURROGATE     = re.compile( "[\ud800-\udfff]" )
+# What ends a line. Python's parser counts these three. The TypeScript compiler counts two more.
+PYTHON_BREAKS = re.compile( "\r\n|\r|\n" )
+SCRIPT_BREAKS = re.compile( "\r\n|[\r\n\u2028\u2029]" )
 
 
 def split_names( raw ):
@@ -35,6 +38,58 @@ def split_names( raw ):
         - nothing
     """
     return [ os.fsdecode( name ) for name in raw.split( b"\0" ) if name ]
+
+
+def crosses_as_text( name ):
+    """
+    Say whether a file name survives being handed to a tool that reads names as UTF-8 text.
+
+    Requires:
+        - name is a str as split_names gives it
+
+    Ensures:
+        - False when the name holds a byte that is not UTF-8, which Python keeps as a stand-in character
+        - True for every other name
+        - a tool written for Node or in Rust replaces such a byte, so it opens another file or names another file in its output
+
+    Raises:
+        - nothing
+    """
+    return SURROGATE.search( name ) is None
+
+
+def split_lines( source, breaks=PYTHON_BREAKS ):
+    """
+    Split a source text into lines the way its parser numbers them.
+
+    Requires:
+        - source is a str; breaks is PYTHON_BREAKS for Python text and SCRIPT_BREAKS for TypeScript or JavaScript text
+
+    Ensures:
+        - returns the lines without their line ends, so line n of the parser is item n - 1
+        - a bare carriage return ends a line, as it does for the parser that gave a finding its line number
+
+    Raises:
+        - nothing
+    """
+    return breaks.split( source )
+
+
+def line_text( lines, number ):
+    """
+    Return the text of one numbered line.
+
+    Requires:
+        - lines is the list split_lines gives; number is a 1-based line number
+
+    Ensures:
+        - returns the line, or an empty string for a number the text does not reach
+        - so a line number from a parser that counts lines another way waives nothing and crashes nothing
+
+    Raises:
+        - nothing
+    """
+    return lines[ number - 1 ] if 0 < number <= len( lines ) else ""
 
 
 def shown( text ):
