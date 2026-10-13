@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.doc_lint import gate, tool_runners as tr, word_list
+from cosa.repo.doc_lint import changed_ranges as cr, cli, counts, gate, md_lint, tool_runners as tr, tsdoc_lint, word_list
 from cosa.repo.doc_lint.text_rules import Finding
 
 WORDS = [ "not", "never", "the" ]
@@ -281,7 +281,7 @@ def _blocking( repo ):
 
 
 def test_the_warn_only_paths_are_exactly_the_root_history_and_todo_files():
-    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md" )
+    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md" ) and gate.WARN_ONLY_PREFIXES == ()
     for path in gate.WARN_ONLY_PATHS: assert gate.is_warn_only( path )
     for path in ( "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "" ): assert not gate.is_warn_only( path )
 
@@ -347,6 +347,209 @@ def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is
     lines = err.getvalue().split( "\n" )
     assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] docs/p.md:1: {CAPS}" in lines
     assert "[doc-lint] 2 findings on staged lines (warn mode, commit allowed)" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert not [ ln for ln in lines if "findings in history.md or TODO.md" in ln ]            # that summary belongs to --blocking
+
+
+def test_an_empty_prefix_tuple_excepts_nothing( monkeypatch ):
+    monkeypatch.setattr( gate, "WARN_ONLY_PATHS", () )
+    for path in ( "history.md", "TODO.md", "history/2026-01.md", "docs/p.md", "" ): assert not gate.is_warn_only( path )
+
+
+def test_a_prefix_entry_excepts_the_files_under_that_folder_and_no_sibling_that_starts_with_the_same_letters( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "history/", ) )
+    for path in ( "history/2026-01.md", "history/deep/er.md", "history.md", "TODO.md" ): assert gate.is_warn_only( path )
+    for path in ( "history-old/x.md", "historyx.md", "src/history/x.md", "history", "docs/history/x.md" ): assert not gate.is_warn_only( path )
+    _stage( repo, { "history/2026-01.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] history/2026-01.md:1: {CAPS}{WARN_MARK}" in lines
+    assert "[doc-lint] 1 findings in history.md or TODO.md or history/ (warn mode, commit allowed)" in lines
+    _stage( repo, { "history-old/x.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED history-old/x.md:1: {CAPS}" in lines
+
+
+# ---- file names git quotes ---------------------------------------------------------------------
+
+ODD_NAMES = [ "docs/caf\u00e9.md", "docs/two words.md", 'docs/a"quote.md', "docs/tab\there.md", "docs/back\\slash.md" ]
+
+
+@pytest.mark.parametrize( "name", ODD_NAMES )
+def test_blocking_lints_and_names_a_file_whose_name_git_would_quote( repo, monkeypatch, name ):
+    _no_external( monkeypatch )
+    _stage( repo, { name: SEEDED } )
+    assert gate.staged_paths( str( repo ) ) == [ name ]
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {name}:1: {CAPS}" in lines and REFUSE_1 in lines
+
+
+def test_a_python_file_with_a_quoted_name_is_linted_too( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/caf\u00e9 one.py": "x = 1  # This is NOT fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/caf\u00e9 one.py:1: {CAPS}" in lines
+
+
+def test_the_diff_reader_unquotes_file_names_and_drops_the_tab_git_puts_after_a_name_with_a_space():
+    diff = ( '+++ "b/docs/caf\\303\\251.md"\n@@ -0,0 +1 @@\n'
+             "+++ b/docs/two words.md\t\n@@ -0,0 +1,2 @@\n"
+             '+++ "b/docs/a\\"q\\\\b\\tc\\nd.md"\n@@ -3 +3 @@\n'
+             "+++ /dev/null\n@@ -1 +0,0 @@\n"
+             '+++ "/dev/null"\n@@ -1 +0,0 @@\n'
+             "+++ b/plain.md\n@@ -1 +1 @@\n" )
+    assert cr.parse_diff_ranges( diff ) == { "docs/caf\u00e9.md": [ ( 1, 1 ) ], "docs/two words.md": [ ( 1, 2 ) ], 'docs/a"q\\b\tc\nd.md': [ ( 3, 3 ) ], "plain.md": [ ( 1, 1 ) ] }
+    assert cr.unquote_path( '"a\\141\\142"' ) == "aab" and cr.unquote_path( "plain" ) == "plain" and cr.unquote_path( '"' ) == '"'
+
+
+def test_the_real_diff_of_a_file_with_a_quoted_name_gives_its_touched_lines( repo ):
+    for name in ODD_NAMES:
+        _stage( repo, { name: "one\ntwo\n" } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { name: [ ( 1, 2 ) ] for name in ODD_NAMES }
+
+
+def test_the_tracked_file_listings_read_names_git_would_quote( repo ):
+    _stage( repo, { "docs/caf\u00e9.md": "x\n", "src/tests/caf\u00e9 t.py": "x = 1\n", "src/web/caf\u00e9 a.ts": "x\n", "src/pkg/caf\u00e9.py": "x = 1\n" } )
+    assert cli.tracked_files( str( repo ), ( ".md", ) ) == [ "docs/caf\u00e9.md" ] and cli.tracked_files( str( repo ), ( ".py", ) ) == [ "src/pkg/caf\u00e9.py" ]
+    assert counts.counted_paths( str( repo ) ) == [ "src/tests/caf\u00e9 t.py" ]
+    assert tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\u00e9 a.ts" ]
+
+
+# ---- page-level findings that predate the commit -----------------------------------------------
+
+CAP_PAGE      = "src/docs/wiki/capabilities/x.md"
+PREDATES_MARK = " (warn mode, commit allowed: this condition predates the commit)"
+
+
+def _page( count, changed=() ):
+    return "# Page\n" + "".join( f"Line {n} is {'still ' if n in changed else ''}fine.\n" for n in range( 2, count + 1 ) )
+
+
+def _cap( count ):
+    return f"capability-length: capability page of {count} lines, limit 40"
+
+
+def _base( repo, files ):
+    _stage( repo, files )
+    _git( repo, "commit", "-q", "-m", "base" )
+
+
+def test_the_page_level_rules_are_the_one_category_the_filter_and_the_gate_share():
+    assert gate.PAGE_LEVEL_RULES is cr.PAGE_LEVEL_RULES and "capability-length" in cr.PAGE_LEVEL_RULES and "caps" not in cr.PAGE_LEVEL_RULES
+
+
+def test_a_page_condition_is_the_rule_and_the_message_without_its_numbers_and_the_first_number():
+    assert gate.page_condition( Finding( "p", 1, "capability-length", "capability page of 41 lines, limit 40" ) ) == ( ( "capability-length", "capability page of # lines, limit #" ), 41 )
+    assert gate.page_condition( Finding( "p", 1, "runbook-template", "runbook has no steps section" ) ) == ( ( "runbook-template", "runbook has no steps section" ), None )
+
+
+def test_a_one_line_edit_to_a_page_that_was_already_over_its_limit_is_allowed_with_the_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( repo, { CAP_PAGE: _page( 41 ) } )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines
+    assert "[doc-lint] 1 page-level findings predate this commit (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "before,after,changed", [ ( 40, 41, () ), ( 41, 42, () ), ( 41, 45, ( 3, ) ) ] )
+def test_an_edit_that_puts_a_page_over_its_limit_or_makes_an_over_limit_page_longer_is_refused( repo, monkeypatch, before, after, changed ):
+    _no_external( monkeypatch )
+    _base( repo, { CAP_PAGE: _page( before ) } )
+    _stage( repo, { CAP_PAGE: _page( after, changed ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( after )}" in lines and REFUSE_1 in lines
+    assert not [ ln for ln in lines if "predate" in ln ]
+
+
+def test_an_edit_that_shrinks_an_over_limit_page_is_allowed_while_it_is_still_over( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( repo, { CAP_PAGE: _page( 44 ) } )
+    _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] {CAP_PAGE}:1: {_cap( 42 )}{PREDATES_MARK}" in lines
+
+
+def test_a_new_over_limit_page_is_refused_with_and_without_an_earlier_commit( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { CAP_PAGE: _page( 41 ) } )
+    rc, lines = _blocking( repo )                                                              # no commit at all yet
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
+    _git( repo, "reset", "-q" )
+    _base( repo, { "docs/other.md": "clean\n" } )
+    _stage( repo, { CAP_PAGE: _page( 41 ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
+
+
+def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( repo, { "src/docs/wiki/capabilities/old.md": _page( 41 ) } )
+    _git( repo, "mv", "src/docs/wiki/capabilities/old.md", CAP_PAGE )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines
+    _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 42 )}" in lines
+
+
+def test_a_reference_page_over_its_word_limit_follows_the_same_rule( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( md_lint, "REFERENCE_MAX_WORDS", 6 )
+    _base( repo, { "src/docs/big.md": "one two three four\nfive six seven eight\n" } )
+    _stage( repo, { "src/docs/big.md": "one two three four\nfive six seven nine\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and f"[doc-lint] src/docs/big.md:1: reference-length: reference page of 8 words, limit 6{PREDATES_MARK}" in lines
+    _stage( repo, { "src/docs/big.md": "one two three four\nfive six seven nine ten\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and "[doc-lint] REFUSED src/docs/big.md:1: reference-length: reference page of 9 words, limit 6" in lines
+
+
+RUNBOOK      = "docs/ops-runbook.md"
+RUNBOOK_FULL = "# Ops\n\n## Prerequisites\n\nOne.\n\n## Steps\n\nTwo.\n\n## Verify\n\nThree.\n\n## Rollback\n\nFour.\n"
+
+
+def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n\nOne more line.\n" } )
+    rc, lines = _blocking( repo )
+    marked = [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ]
+    assert rc == 0 and marked == [ f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS ]
+    assert len( marked ) == 4 and "[doc-lint] 4 page-level findings predate this commit (warn mode, commit allowed)" in lines
+    _stage( repo, { RUNBOOK: "# Ops\n\n## Steps\n\nSome text.\n" } )
+    _git( repo, "commit", "-q", "-m", "one section" )
+    _stage( repo, { RUNBOOK: "# Ops\n\n## Procedure\n\nSome text.\n" } )                     # the steps heading is gone
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: runbook has no steps section" ]
+    assert "[doc-lint] 3 page-level findings predate this commit (warn mode, commit allowed)" in lines and REFUSE_1 in lines
+
+
+def test_a_new_runbook_without_its_sections_is_refused_and_a_complete_one_passes( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and len( [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: " ) ] ) == 4
+    _stage( repo, { RUNBOOK: RUNBOOK_FULL } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+def test_a_predating_page_finding_is_marked_without_blocking_and_a_warn_only_file_keeps_its_own_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "src/docs/wiki/capabilities/w/", ) )
+    _base( repo, { CAP_PAGE: _page( 41 ), "src/docs/wiki/capabilities/w/y.md": _page( 41 ) } )
+    _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ), "src/docs/wiki/capabilities/w/y.md": _page( 41, changed=( 5, ) ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    lines = err.getvalue().split( "\n" )
+    assert f"[doc-lint] {CAP_PAGE}:1: {_cap( 41 )}{PREDATES_MARK}" in lines and f"[doc-lint] src/docs/wiki/capabilities/w/y.md:1: {_cap( 41 )}{WARN_MARK}" in lines
+    assert not [ ln for ln in lines if "page-level findings predate" in ln ]                     # that summary belongs to --blocking
 
 
 def test_gate_prints_every_missing_tool_warning_and_includes_tool_findings( repo, monkeypatch ):
@@ -497,7 +700,7 @@ def test_the_real_gate_in_a_listed_package_makes_the_real_chain_refuse_the_commi
     assert source.count( "BLOCKING_PACKAGES = ()" ) == 1                   # the copy gets the one listed package, nothing else changes
     gate_file.write_text( source.replace( "BLOCKING_PACKAGES = ()", 'BLOCKING_PACKAGES = ( "src/lupin_mcp/pkg/", )' ), encoding="utf-8" )
     _stage( repo, { "src/lupin_mcp/pkg/a.py": _doc( "Added on 2026-01-02 for the parser." ) } )
-    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( repo )
     assert res.returncode == 1
     assert "[doc-lint] REFUSED src/lupin_mcp/pkg/a.py:5: dated-banner" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
 
@@ -523,9 +726,22 @@ def _install_real_doc_lint( repo ):
     for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo" ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
 
 
+def _tool_stubs( folder ):
+    """Write stand-ins for ruff and markdownlint-cli2 that report nothing."""
+    folder.mkdir( exist_ok=True )
+    for name in ( "ruff", "markdownlint-cli2" ):
+        ( folder / name ).write_text( "#!/bin/sh\nexit 0\n", encoding="utf-8" )
+        os.chmod( folder / name, 0o755 )
+    return { "LUPIN_RUFF": str( folder / "ruff" ), "LUPIN_MARKDOWNLINT": str( folder / "markdownlint-cli2" ) }
+
+
 def _run_chain( repo, env_extra=None ):
-    env = { **os.environ, "PLANNING_IS_PROMPTING_ROOT": "", **( env_extra or {} ) }
+    env = { **os.environ, "PLANNING_IS_PROMPTING_ROOT": "", **_tool_stubs( repo.parent / f"{repo.name}-tools" ), **( env_extra or {} ) }
     return subprocess.run( [ "bash", CHAIN ], cwd=repo, capture_output=True, text=True, env=env )
+
+
+def _chain_allowed( code ):
+    return f"[pre-commit-chain] doc-lint gate exited {code} without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase."
 
 
 CHAIN_REFUSE = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each REFUSED line above, stage the fix with git add and commit again"
@@ -534,7 +750,7 @@ CHAIN_REFUSE = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each RE
 def test_the_chain_runs_the_gate_blocking_and_refuses_a_finding_on_a_staged_line( repo ):
     _install_real_doc_lint( repo )
     _stage( repo, { "docs/p.md": "This is NOT fine.\n" } )
-    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( repo )
     assert res.returncode == 1
     assert "[doc-lint] REFUSED docs/p.md:1: caps: ALL-CAPS word NOT" in res.stderr.split( "\n" ) and CHAIN_REFUSE in res.stderr.split( "\n" )
     assert "commit allowed" not in res.stderr and "ALLOWED" not in res.stderr
@@ -543,7 +759,7 @@ def test_the_chain_runs_the_gate_blocking_and_refuses_a_finding_on_a_staged_line
 def test_the_chain_allows_a_finding_in_the_root_history_file_and_prints_the_warn_marking( repo ):
     _install_real_doc_lint( repo )
     _stage( repo, { "history.md": "This is NOT fine.\n" } )
-    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( repo )
     assert res.returncode == 0
     assert "[doc-lint] history.md:1: caps: ALL-CAPS word NOT (warn mode, commit allowed)" in res.stderr.split( "\n" )
     assert "REFUSED" not in res.stderr and "[pre-commit-chain] doc-lint" not in res.stderr
@@ -556,18 +772,36 @@ def test_the_chain_allows_the_commit_when_the_gate_process_itself_fails( repo ):
     ( pkg / "gate.py" ).write_text( "raise SystemExit( 7 )\n", encoding="utf-8" )
     res = _run_chain( repo )
     assert res.returncode == 0
-    assert "[pre-commit-chain] doc-lint gate CRASHED (exit 7), commit ALLOWED and NOT CHECKED against the documentation standard" in res.stderr.split( "\n" )
-    assert "REFUSED" not in res.stderr
+    assert _chain_allowed( 7 ) in res.stderr.split( "\n" )
+    assert "REFUSED" not in res.stderr and "CRASHED" not in res.stderr
 
 
-def test_the_chain_refuses_only_on_the_refusal_exit_and_allows_exit_one( repo ):
+def _exiting_gate( repo, code ):
     pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
     pkg.mkdir( parents=True )
     for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
-    ( pkg / "gate.py" ).write_text( "raise SystemExit( 1 )\n", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( f"import os\nos._exit( {code} )\n", encoding="utf-8" )
+
+
+@pytest.mark.parametrize( "code", [ 1, 2, 4, 7, 127, 130, 137, 143, 255 ] )
+def test_the_chain_refuses_only_on_the_refusal_exit_and_allows_exit_one( repo, code ):
+    _exiting_gate( repo, code )
     res = _run_chain( repo )
     assert res.returncode == 0
-    assert "[pre-commit-chain] doc-lint gate CRASHED (exit 1), commit ALLOWED and NOT CHECKED against the documentation standard" in res.stderr.split( "\n" )
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[pre-commit-chain] doc-lint" ) ] == [ _chain_allowed( code ) ]
+
+
+def test_exit_three_is_the_only_gate_exit_that_refuses_the_commit( repo ):
+    _exiting_gate( repo, 3 )
+    res = _run_chain( repo )
+    assert res.returncode == 1
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[pre-commit-chain] doc-lint" ) ] == [ CHAIN_REFUSE ]
+
+
+def test_a_gate_that_exits_zero_makes_the_chain_say_nothing_and_allow_the_commit( repo ):
+    _exiting_gate( repo, 0 )
+    res = _run_chain( repo )
+    assert res.returncode == 0 and "[pre-commit-chain] doc-lint" not in res.stderr
 
 
 def test_the_chain_passes_the_blocking_flag_to_the_gate( repo ):
@@ -777,7 +1011,7 @@ def test_a_crash_still_allows_the_commit_with_the_loud_line_even_for_a_swept_fil
 def test_the_real_chain_refuses_a_seeded_swept_commit_and_names_the_waiver( repo ):
     _install_real_doc_lint( repo )
     _stage( repo, { "src/pkg/a.py": SWEPT_CAPS } )
-    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( repo )
     assert res.returncode == 1
     assert "[doc-lint] REFUSED src/pkg/a.py:5: caps" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
 
@@ -1138,11 +1372,11 @@ def test_the_real_chain_refuses_a_counted_file_that_rises_and_allows_one_that_do
     _table( stamped, { "src/tests/t.py": 1 } )
     _git( stamped, "commit", "-q", "--no-verify", "-m", "base" )
     _stage( stamped, { "src/tests/t.py": TWO } )
-    res = _run_chain( stamped, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( stamped )
     assert res.returncode == 1
     assert "[doc-lint] REFUSED src/tests/t.py: 2 findings, the count table allows 1 (+1)" in res.stderr and "doc-lint gate REFUSED the commit" in res.stderr
     _stage( stamped, { "src/tests/t.py": ONE + "\nx = 1\n" } )
-    res = _run_chain( stamped, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( stamped )
     assert res.returncode == 0 and "counted scope: 1 files checked, 1 at or below their count" in res.stderr
 
 
@@ -1407,7 +1641,7 @@ def test_the_real_chain_refuses_a_commit_when_a_tracked_rule_file_is_edited_and_
     scope = repo / "src/cosa/repo/doc_lint/swept_scope.py"
     scope.write_text( scope.read_text( encoding="utf-8" ) + "\n# an edit that is not staged\n", encoding="utf-8" )
     _stage( repo, { "src/pkg/swept.py": SWEPT_CAPS } )
-    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    res = _run_chain( repo )
     assert res.returncode == 1 and "rule file src/cosa/repo/doc_lint/swept_scope.py is not the same staged and in the working tree" in res.stderr
 
 
