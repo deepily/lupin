@@ -160,7 +160,7 @@ def build_expeditor_test_job( args, user_id, user_email, bearer_token, debug=Tru
     Requires:
         - args is a MockJobArgs with voice_command set
         - bearer_token is the caller's JWT, or None (then the expeditor's notifications go
-          out unauthenticated — the degraded case, never another user's credential)
+          out unauthenticated, which is the degraded case and never another user's credential)
 
     Ensures:
         - returns the dry-run job with `submit_details = { "config": {…} }` carrying
