@@ -381,7 +381,7 @@ def test_blocking_lints_and_names_a_file_whose_name_git_would_quote( repo, monke
     assert gate.staged_paths( str( repo ) ) == [ name ]
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT
-    assert f"[doc-lint] REFUSED {name}:1: {CAPS}" in lines and REFUSE_1 in lines
+    assert f"[doc-lint] REFUSED {name.replace( chr( 9 ), chr( 92 ) + 't' )}:1: {CAPS}" in lines and REFUSE_1 in lines
 
 
 def test_a_python_file_with_a_quoted_name_is_linted_too( repo, monkeypatch ):
@@ -392,12 +392,12 @@ def test_a_python_file_with_a_quoted_name_is_linted_too( repo, monkeypatch ):
 
 
 def test_the_diff_reader_unquotes_file_names_and_drops_the_tab_git_puts_after_a_name_with_a_space():
-    diff = ( '+++ "b/docs/caf\\303\\251.md"\n@@ -0,0 +1 @@\n'
-             "+++ b/docs/two words.md\t\n@@ -0,0 +1,2 @@\n"
-             '+++ "b/docs/a\\"q\\\\b\\tc\\nd.md"\n@@ -3 +3 @@\n'
-             "+++ /dev/null\n@@ -1 +0,0 @@\n"
-             '+++ "/dev/null"\n@@ -1 +0,0 @@\n'
-             "+++ b/plain.md\n@@ -1 +1 @@\n" )
+    diff = ( 'diff --git x\n+++ "b/docs/caf\\303\\251.md"\n@@ -0,0 +1 @@\n'
+             "diff --git x\n+++ b/docs/two words.md\t\n@@ -0,0 +1,2 @@\n"
+             'diff --git x\n+++ "b/docs/a\\"q\\\\b\\tc\\nd.md"\n@@ -3 +3 @@\n'
+             "diff --git x\n+++ /dev/null\n@@ -1 +0,0 @@\n"
+             'diff --git x\n+++ "/dev/null"\n@@ -1 +0,0 @@\n'
+             "diff --git x\n+++ b/plain.md\n@@ -1 +1 @@\n" )
     assert cr.parse_diff_ranges( diff ) == { "docs/caf\u00e9.md": [ ( 1, 1 ) ], "docs/two words.md": [ ( 1, 2 ) ], 'docs/a"q\\b\tc\nd.md': [ ( 3, 3 ) ], "plain.md": [ ( 1, 1 ) ] }
     assert cr.unquote_path( '"a\\141\\142"' ) == "aab" and cr.unquote_path( "plain" ) == "plain" and cr.unquote_path( '"' ) == '"'
 
@@ -413,6 +413,232 @@ def test_the_tracked_file_listings_read_names_git_would_quote( repo ):
     assert cli.tracked_files( str( repo ), ( ".md", ) ) == [ "docs/caf\u00e9.md" ] and cli.tracked_files( str( repo ), ( ".py", ) ) == [ "src/pkg/caf\u00e9.py" ]
     assert counts.counted_paths( str( repo ) ) == [ "src/tests/caf\u00e9 t.py" ]
     assert tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\u00e9 a.ts" ]
+
+
+# ---- a content line that looks like a file header ----------------------------------------------
+
+LOOKALIKES = [ '++ "a\\"', '++ "\\9"', '++ "C:\\path"', '++ "\\777"', '++ "' ]
+
+
+@pytest.mark.parametrize( "line", LOOKALIKES )
+def test_an_added_line_that_looks_like_a_quoted_header_does_not_crash_the_gate( repo, monkeypatch, line ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": f"# P\n\n{line}\n", "src/pkg/a.py": _doc( "This is NOT fine." ) } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    assert "GATE CRASHED" not in err.getvalue() and "[doc-lint] 1 refusals, commit REFUSED" in err.getvalue().split( "\n" )
+
+
+@pytest.mark.parametrize( "text", [ '"a\\"', '"\\9"', '"C:\\path"', '"\\777"', '"\\"', '"\\', '"\\1"' ] )
+def test_unquote_path_returns_what_it_cannot_decode_unchanged_and_never_raises( text ):
+    assert cr.unquote_path( text ) == text
+    assert cr.unquote_path( text + "\t" ) == text + "\t"
+
+
+def _ten( changes ):
+    return "".join( changes.get( n, f"Line {n} is fine." ) + "\n" for n in range( 1, 11 ) )
+
+
+@pytest.mark.parametrize( "lookalike", [ "++ something", "++ b/docs/other.md", '++ "b/docs/other.md"', "++ /dev/null" ] )
+def test_a_finding_in_a_hunk_after_a_line_that_looks_like_a_header_is_still_refused( repo, monkeypatch, lookalike ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": _ten( {} ), "docs/other.md": _ten( {} ) } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "docs/p.md": _ten( { 2: lookalike, 9: "This is NOT fine." } ) } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { "docs/p.md": [ ( 2, 2 ), ( 9, 9 ) ] }
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:9: {CAPS}" in lines and REFUSE_1 in lines
+
+
+def test_a_python_statement_that_looks_like_a_header_does_not_hide_a_comment_finding_below_it( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    plain = "".join( f"x{n} = {n}\n" for n in range( 1, 11 ) )
+    _stage( repo, { "src/lupin_mcp/c.py": plain } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage( repo, { "src/lupin_mcp/c.py": plain.replace( "x2 = 2\n", "++ x1\n" ).replace( "x9 = 9\n", "x9 = 9  # This is NOT fine.\n" ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/c.py:9: {CAPS}" in lines
+
+
+def test_the_diff_reader_reads_a_header_only_between_the_diff_line_and_the_first_hunk():
+    diff = ( "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n@@ -1 +1 @@\n-old\n+++ b/z.md\n@@ -5 +5,2 @@\n+x\n+++ /dev/null\n@@ -9 +9 @@\n"
+             "diff --git a/b.md b/b.md\n--- a/b.md\n+++ b/b.md\n@@ -3 +3 @@\n" )
+    assert cr.parse_diff_ranges( diff ) == { "a.md": [ ( 1, 1 ), ( 5, 6 ), ( 9, 9 ) ], "b.md": [ ( 3, 3 ) ] }
+    assert cr.parse_diff_ranges( "+++ b/stray.md\n@@ -1 +1 @@\n" ) == {}                        # no diff line, so no file
+
+
+# ---- a file name that is not UTF-8, or holds a control character --------------------------------
+
+LATIN_NAME = "docs/caf\udce9.md"                                                              # the byte 0xE9, as Python reads a name from the file system
+LATIN_SHOWN = "docs/caf\\xe9.md"
+
+
+def test_a_clean_file_whose_name_is_not_utf8_does_not_crash_the_gate( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { LATIN_NAME: "clean\n", "src/pkg/a.py": _doc( "This is NOT fine." ) } )
+    assert os.fsencode( LATIN_NAME ) == b"docs/caf\xe9.md" and gate.staged_paths( str( repo ) ) == [ LATIN_NAME, "src/pkg/a.py" ]
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    assert "GATE CRASHED" not in err.getvalue() and "[doc-lint] 1 refusals, commit REFUSED" in err.getvalue().split( "\n" )
+
+
+def test_a_finding_in_a_file_whose_name_is_not_utf8_is_refused_and_named_readably_on_a_strict_stream( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { LATIN_NAME: SEEDED } )
+    raw = io.BytesIO()
+    err = io.TextIOWrapper( raw, encoding="utf-8", errors="strict" )
+    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    err.flush()
+    assert f"[doc-lint] REFUSED {LATIN_SHOWN}:1: {CAPS}" in raw.getvalue().decode( "utf-8" ).split( "\n" )
+
+
+def test_a_file_name_with_a_newline_is_printed_on_one_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/new\nline.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/new\\nline.md:1: {CAPS}" in lines
+
+
+def test_shown_makes_a_name_printable_and_leaves_plain_text_alone():
+    assert cli.shown( LATIN_NAME ) == LATIN_SHOWN and cli.shown( "a\tb\nc" ) == "a\\tb\\nc"
+    assert cli.shown( "docs/caf\u00e9 two.md" ) == "docs/caf\u00e9 two.md" and cli.shown( 'a"b\\c' ) == 'a"b\\c'
+
+
+def test_the_listings_and_the_diff_reader_keep_a_name_that_is_not_utf8( repo ):
+    _stage( repo, { LATIN_NAME: "one\ntwo\n", "src/tests/caf\udce9.py": "x = 1\n", "src/web/caf\udce9.ts": "x\n", "src/pkg/caf\udce9.py": "x = 1\n" } )
+    assert cli.tracked_files( str( repo ), ( ".md", ) ) == [ LATIN_NAME ] and cli.tracked_files( str( repo ), ( ".py", ) ) == [ "src/pkg/caf\udce9.py" ]
+    assert counts.counted_paths( str( repo ) ) == [ "src/tests/caf\udce9.py" ] and tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\udce9.ts" ]
+    assert cr.changed_line_ranges( str( repo ), None, cached=True )[ LATIN_NAME ] == [ ( 1, 2 ) ]
+    assert gate.staged_changes( str( repo ) )[ 0 ] == [ LATIN_NAME, "src/pkg/caf\udce9.py", "src/tests/caf\udce9.py", "src/web/caf\udce9.ts" ]
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "rm", "-q", "--cached", LATIN_NAME )
+    assert gate.staged_deleted( str( repo ) ) == [ LATIN_NAME ]
+
+
+def test_the_diff_is_asked_for_with_quoted_names_whatever_the_users_setting( repo ):
+    _git( repo, "config", "core.quotePath", "false" )
+    _stage( repo, { LATIN_NAME: "one\n", "docs/caf\u00e9.md": "one\n" } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { LATIN_NAME: [ ( 1, 1 ) ], "docs/caf\u00e9.md": [ ( 1, 1 ) ] }
+
+
+# ---- a comment finding beside a waived docstring finding ----------------------------------------
+
+SAME_LINE = 'def f():\n    """Return NOT it."""  # This is NOT fine. doc-lint: waive caps -- quoting a log line\n'
+
+
+@pytest.mark.parametrize( "rel,waivers", [ ( "src/lupin_mcp/d.py", 0 ), ( "src/pkg/d.py", 1 ) ] )
+def test_a_waived_docstring_finding_does_not_take_the_comment_finding_on_its_line_with_it( repo, monkeypatch, rel, waivers ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SAME_LINE } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {rel}:2: {CAPS}" ] and REFUSE_1 in lines
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] swept scope: " ) and f" {waivers} waivers honoured" in ln ]
+    _stage( repo, { rel: 'def f():\n    """Return NOT it."""  # doc-lint: waive caps -- quoting a log line\n' } )         # no comment finding now
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+# ---- concluding a merge or a cherry-pick --------------------------------------------------------
+
+MERGED_MARK = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
+
+
+def _conflicted( repo, how, resolution ):
+    """Leave repo in a resolved merge or cherry-pick whose other side brings a finding."""
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    _git( repo, "checkout", "-q", "-b", "side" )
+    _stage( repo, { "docs/a.md": "# A\n\nThe side text.\n", "docs/legacy.md": SEEDED } )
+    _git( repo, "commit", "-q", "-m", "side" )
+    _git( repo, "checkout", "-q", "main" )
+    _stage( repo, { "docs/a.md": "# A\n\nThe main text.\n" } )
+    _git( repo, "commit", "-q", "-m", "main" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", how, "side" ], capture_output=True, text=True )
+    assert res.returncode != 0 and "onflict" in res.stdout + res.stderr
+    _stage( repo, { "docs/a.md": resolution } )
+
+
+@pytest.mark.parametrize( "how,head", [ ( "merge", "MERGE_HEAD" ), ( "cherry-pick", "CHERRY_PICK_HEAD" ) ] )
+def test_a_finding_that_came_in_with_the_merged_or_picked_commit_is_allowed_with_its_own_marking( repo, monkeypatch, how, head ):
+    _no_external( monkeypatch )
+    _conflicted( repo, how, "# A\n\nThe merged text.\n" )
+    assert os.path.exists( repo / ".git" / head )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] 1 findings came in with the merged or picked commit (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+
+
+@pytest.mark.parametrize( "how", [ "merge", "cherry-pick" ] )
+def test_a_finding_the_resolution_itself_adds_is_refused( repo, monkeypatch, how ):
+    _no_external( monkeypatch )
+    _conflicted( repo, how, "# A\n\nThe merged text is NOT fine.\n" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/a.md:3: {CAPS}" ]
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines and REFUSE_1 in lines
+
+
+def test_a_line_changed_while_resolving_in_a_file_from_the_other_side_is_enforced( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _conflicted( repo, "merge", "# A\n\nThe merged text.\n" )
+    _stage( repo, { "docs/legacy.md": SEEDED + "This is NEVER fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ "[doc-lint] REFUSED docs/legacy.md:2: caps: ALL-CAPS word NEVER" ]
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in lines
+
+
+def test_the_marking_shows_without_blocking_and_its_summary_does_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _conflicted( repo, "merge", "# A\n\nThe merged text.\n" )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in err.getvalue().split( "\n" ) and "findings came in with" not in err.getvalue()
+
+
+def test_a_revert_in_progress_gets_no_such_treatment( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "clean\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / ".git" / "REVERT_HEAD" ).write_text( _git( repo, "rev-parse", "HEAD" ), encoding="utf-8" )
+    _stage( repo, { "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+
+
+@pytest.mark.parametrize( "head,content", [ ( "MERGE_HEAD", "0123456789abcdef0123456789abcdef01234567\n" ), ( "CHERRY_PICK_HEAD", "not a sha\n" ), ( "MERGE_HEAD", "" ) ] )
+def test_a_stale_merge_head_is_ignored_with_a_loud_line_and_every_finding_is_enforced( repo, monkeypatch, head, content ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "clean\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / ".git" / head ).write_text( content, encoding="utf-8" )
+    _stage( repo, { "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+    assert f"[doc-lint] WARNING: {head} names no commit in this repository, so it was ignored and every finding is enforced" in lines
+    assert not [ ln for ln in lines if "GATE CRASHED" in ln ]
+
+
+def test_the_merge_rule_reads_the_git_dir_of_a_linked_worktree( repo, monkeypatch, tmp_path ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    linked = tmp_path / "linked"
+    _git( repo, "worktree", "add", "-q", "-b", "side", str( linked ) )
+    _stage( linked, { "docs/legacy.md": SEEDED } )
+    _git( linked, "commit", "-q", "-m", "side" )
+    side = _git( linked, "rev-parse", "HEAD" ).strip()
+    _git( linked, "checkout", "-q", "--detach", "main" )
+    _git( linked, "merge", "-q", "--no-commit", "--no-ff", side )
+    assert not os.path.exists( repo / ".git" / "MERGE_HEAD" ) and gate.incoming_commit( str( linked ) ) == ( side, [] )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( linked ), "--blocking" ], err ) == 0
+    assert f"[doc-lint] docs/legacy.md:1: {CAPS}{MERGED_MARK}" in err.getvalue().split( "\n" )
+    assert gate.incoming_commit( str( repo ) ) == ( None, [] )
 
 
 # ---- which line-level findings a marker waives -------------------------------------------------
@@ -521,6 +747,40 @@ def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from
     _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 42 )}" in lines
+
+
+@pytest.mark.parametrize( "old,new,expected", [
+    ( "docs/x.md",   CAP_PAGE,              [ f"[doc-lint] REFUSED {CAP_PAGE}:1: " + "capability-length: capability page of 45 lines, limit 40" ] ),
+    ( "docs/ops.md", "docs/ops-runbook.md", sorted( f"[doc-lint] REFUSED docs/ops-runbook.md:1: runbook-template: runbook has no {s} section" for s in md_lint.RUNBOOK_SECTIONS ) ),
+] )
+def test_a_page_moved_to_a_path_that_brings_a_limit_is_refused_since_the_commit_created_the_condition( repo, monkeypatch, old, new, expected ):
+    _no_external( monkeypatch )
+    _page_base( repo, { old: _page( 45 ) } )
+    _git( repo, "mv", old, new )
+    _stage( repo, { new: _page( 45, changed=( 5, ) ) } )
+    assert gate.staged_changes( str( repo ) )[ 1 ] == { new: old }
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and sorted( ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ) == expected
+    assert not [ ln for ln in lines if "predate" in ln ]
+
+
+def test_a_commit_that_only_deletes_a_runbook_section_is_refused_for_that_section( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { RUNBOOK: RUNBOOK_FULL } )
+    _stage( repo, { RUNBOOK: RUNBOOK_FULL.replace( "\n## Rollback\n\nFour.\n", "" ) } )
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { RUNBOOK: [] }             # a hunk, and no added line
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: runbook has no rollback section" ]
+
+
+def test_a_commit_that_only_deletes_an_unrelated_line_from_a_broken_runbook_is_allowed_with_the_marking( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n\nMore text.\n", "docs/p.md": "one\nThis is NOT fine.\nthree\n" } )
+    _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n", "docs/p.md": "one\nThis is NOT fine.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and len( [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ] ) == 4
+    assert not [ ln for ln in lines if CAPS in ln ]                                                 # a line-level finding still needs a touched line
 
 
 def test_a_reference_page_over_its_word_limit_follows_the_same_rule( repo, monkeypatch ):
@@ -1342,6 +1602,7 @@ def test_a_table_cut_under_other_rules_refuses_a_commit_that_stages_a_counted_fi
     _stage( stamped, { "src/tests/t.py": CLEAN } )
     rc, text = _gate( stamped )
     assert rc == 3 and "REFUSED: the count table was cut under other rules (stamp oldstamp, now " in text and "table stale" in text
+    assert "if this tree holds only part of a landed rule change, take the landed table by merging or rebasing instead" in text
     assert 'regenerate it with: LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write and stage the table with the rule change' in text
     _git( stamped, "reset", "-q", "--hard" )
     _stage( stamped, { "history.md": "A note.\n", "src/pkg/other.py": CLEAN } )     # no counted file staged

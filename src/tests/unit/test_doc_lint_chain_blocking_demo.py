@@ -323,3 +323,91 @@ def test_an_edit_that_removes_a_section_from_a_runbook_stops_a_real_commit_for_t
     assert res.returncode == 1
     assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED {RUNBOOK}:1: runbook-template: runbook has no steps section" ]
     assert "[doc-lint] 3 page-level findings predate this commit (warn mode, commit allowed)" in res.stderr.split( "\n" ) and _commit_count( scratch ) == 1
+
+
+# ---- names that are not UTF-8, and lines that look like a header ---------------------------------
+
+def test_a_seeded_finding_in_a_file_whose_name_is_not_utf8_stops_a_real_commit_and_is_named_readably( scratch ):
+    _stage( scratch, { "docs/caf\udce9.md": SEEDED } )
+    res = _commit( scratch )
+    assert res.returncode == 1
+    assert f"[doc-lint] REFUSED docs/caf\\xe9.md:3: {CAPS}" in res.stderr.split( "\n" ) and "GATE CRASHED" not in res.stderr
+    assert CHAIN_REFUSE in res.stderr.split( "\n" ) and _commit_count( scratch ) == 0
+
+
+@pytest.mark.parametrize( "page", [ '# Page\n\n++ "a\\"\n', "# Page\n\n" + "\udce9".join( [ "clean", "text\n" ] ) ] )
+def test_a_page_the_diff_reader_or_the_decoder_cannot_read_does_not_let_a_swept_finding_through( scratch, page ):
+    full = scratch / "docs" / "p.md"
+    full.parent.mkdir( parents=True )
+    full.write_bytes( os.fsencode( page ) )
+    _git( scratch, "add", "-f", "docs/p.md" )
+    _stage( scratch, { "src/pkg/a.py": DOCSTRING_PY } )
+    res = _commit( scratch )
+    assert res.returncode == 1
+    assert "GATE CRASHED" not in res.stderr and "[doc-lint] 1 refusals, commit REFUSED" in res.stderr.split( "\n" ) and _commit_count( scratch ) == 0
+
+
+# ---- concluding a merge or a cherry-pick --------------------------------------------------------
+
+MERGED_MARK = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
+BASE_A      = "# A\n\nThe base text.\n"
+SIDE_A      = "# A\n\nThe side text.\n"
+MAIN_A      = "# A\n\nThe main text.\n"
+CLEAN_A     = "# A\n\nThe merged text.\n"
+SEEDED_A    = "# A\n\nThe merged text is NOT fine.\n"
+
+
+@pytest.fixture
+def merging( scratch, tmp_path, monkeypatch ):
+    """Give the scratch repository two conflicting branches and a core.hooksPath hook."""
+    monkeypatch.setenv( "GIT_EDITOR", "true" )
+    os.remove( scratch / ".git" / "hooks" / "pre-commit" )
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    shutil.copy( CHAIN, hooks / "pre-commit" )
+    os.chmod( hooks / "pre-commit", 0o755 )
+    _git( scratch, "config", "core.hooksPath", str( hooks ) )
+    _baseline( scratch, { "docs/a.md": BASE_A } )
+    _git( scratch, "branch", "-M", "main" )
+    _git( scratch, "checkout", "-q", "-b", "side" )
+    _baseline( scratch, { "docs/a.md": SIDE_A, "docs/legacy.md": SEEDED } )
+    _git( scratch, "checkout", "-q", "main" )
+    _baseline( scratch, { "docs/a.md": MAIN_A } )
+    return scratch
+
+
+def _start( root, how ):
+    """Start a merge or a cherry-pick of the side branch and check that it stopped."""
+    res = _git( root, how, "side", check=False )
+    assert res.returncode != 0 and "onflict" in res.stdout + res.stderr and _commit_count( root ) == 3
+
+
+@pytest.mark.parametrize( "how,conclude", [ ( "merge", [ "commit", "-q", "--no-edit" ] ), ( "merge", [ "merge", "--continue" ] ), ( "cherry-pick", [ "cherry-pick", "--continue" ] ) ] )
+def test_concluding_a_conflicted_merge_or_pick_commits_a_finding_that_came_from_the_other_side( merging, how, conclude ):
+    _start( merging, how )
+    _stage( merging, { "docs/a.md": CLEAN_A } )
+    res = _git( merging, *conclude, check=False )
+    assert res.returncode == 0, res.stderr
+    assert f"[doc-lint] docs/legacy.md:3: {CAPS}{MERGED_MARK}" in res.stderr.split( "\n" ) and "REFUSED" not in res.stderr
+    assert "[doc-lint] 1 findings came in with the merged or picked commit (warn mode, commit allowed)" in res.stderr.split( "\n" )
+    assert _commit_count( merging ) == 4 and _committed_paths( merging ) == [ "docs/a.md", "docs/legacy.md" ]
+
+
+@pytest.mark.parametrize( "how,conclude", [ ( "merge", [ "commit", "-q", "--no-edit" ] ), ( "merge", [ "merge", "--continue" ] ), ( "cherry-pick", [ "cherry-pick", "--continue" ] ) ] )
+def test_concluding_a_conflicted_merge_or_pick_is_refused_for_a_finding_the_resolution_adds( merging, how, conclude ):
+    _start( merging, how )
+    _stage( merging, { "docs/a.md": SEEDED_A } )
+    res = _git( merging, *conclude, check=False )
+    assert res.returncode != 0
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/a.md:3: {CAPS}" ]
+    assert f"[doc-lint] docs/legacy.md:3: {CAPS}{MERGED_MARK}" in res.stderr.split( "\n" ) and CHAIN_REFUSE in res.stderr.split( "\n" )
+    assert _commit_count( merging ) == 3
+
+
+def test_an_ordinary_commit_through_the_hooks_path_is_judged_as_before( merging ):
+    _stage( merging, { "docs/p.md": SEEDED } )
+    res = _commit( merging )
+    assert res.returncode == 1 and f"[doc-lint] REFUSED docs/p.md:3: {CAPS}" in res.stderr.split( "\n" ) and MERGED_MARK not in res.stderr
+    _stage( merging, { "docs/p.md": CLEAN } )
+    res = _commit( merging )
+    assert res.returncode == 0 and CLEAN_LINE in res.stderr.split( "\n" ) and _commit_count( merging ) == 4

@@ -56,9 +56,9 @@ def _commit( root, files ):
 # ---- changed_ranges --------------------------------------------------------------------------
 
 def test_parse_diff_ranges_reads_added_lines_skips_deletions_and_deleted_files():
-    diff = ( "+++ b/a.py\n@@ -1,0 +2,3 @@\n@@ -9 +11 @@\n@@ -20,2 +22,0 @@\n"
-             "+++ /dev/null\n@@ -1,4 +0,0 @@\n"
-             "+++ b/b.md\n@@ -5 +5,2 @@\n" )
+    diff = ( "diff --git a/a.py b/a.py\n+++ b/a.py\n@@ -1,0 +2,3 @@\n@@ -9 +11 @@\n@@ -20,2 +22,0 @@\n"
+             "diff --git a/gone.py b/gone.py\n+++ /dev/null\n@@ -1,4 +0,0 @@\n"
+             "diff --git a/b.md b/b.md\n+++ b/b.md\n@@ -5 +5,2 @@\n" )
     assert cr.parse_diff_ranges( diff ) == { "a.py": [ ( 2, 4 ), ( 11, 11 ) ], "b.md": [ ( 5, 6 ) ] }
 
 
@@ -73,7 +73,7 @@ def test_page_level_findings_survive_the_filter_when_the_file_was_touched_anywhe
     ranges   = { "a.md": [ ( 50, 50 ) ], "b.md": [] }
     findings = [ Finding( "a.md", 1, "reference-length", "m" ), Finding( "a.md", 1, "caps", "m" ), Finding( "b.md", 1, "reference-length", "m" ),
                  Finding( "c.md", 1, "capability-length", "m" ), Finding( "a.md", 50, "caps", "m" ) ]
-    assert [ ( f.path, f.rule ) for f in cr.filter_findings( findings, ranges ) ] == [ ( "a.md", "reference-length" ), ( "a.md", "caps" ) ]
+    assert [ ( f.path, f.rule ) for f in cr.filter_findings( findings, ranges ) ] == [ ( "a.md", "reference-length" ), ( "b.md", "reference-length" ), ( "a.md", "caps" ) ]
 
 
 def test_changed_line_ranges_reads_a_real_git_diff_against_a_base_and_against_the_index( repo ):

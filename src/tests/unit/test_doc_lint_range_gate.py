@@ -381,6 +381,7 @@ DOC_LINT  = os.path.join( cu.get_project_root(), "src", "cosa", "repo", "doc_lin
 OLD_GATE  = os.path.join( cu.get_project_root(), "src", "tests", "unit", "fixtures", "doc-lint-gate-at-59c155252.py.txt" )
 SEEDED    = "# Page\n\nThis is NOT fine.\n"
 EPOCH_SHA = "0123456789abcdef0123456789abcdef01234567"
+FROM_WORK = " (read from the working copy: the head of the range has no epoch file)"
 
 
 def test_the_committed_epoch_file_is_readable_and_holds_at_most_one_full_sha():
@@ -474,6 +475,8 @@ def test_run_gate_passes_the_blocking_flag_only_when_asked( tmp_path ):
 def test_the_report_names_the_epoch_and_counts_the_commits_held_to_it():
     results = [ range_gate.Result( "a" * 40, "one", "passed", 0, [ "note" ] ), range_gate.Result( "b" * 40, "two", "refused", 3, [ "why" ], True ) ]
     assert range_gate.epoch_line( None, results ) == "blocking epoch: none recorded in src/conf/doc-gate-blocking-epoch.txt, every commit was judged in warn mode"
+    assert range_gate.epoch_line( None, results, False ) == range_gate.epoch_line( None, results ) + FROM_WORK
+    assert range_gate.epoch_line( "e" * 40, results, False ) == range_gate.epoch_line( "e" * 40, results ) + FROM_WORK
     line = range_gate.epoch_line( "e" * 40, results )
     assert line == "blocking epoch eeeeeeeee: 1 commits held to blocking, 1 judged in warn mode"
     assert range_gate.report( "b", "h", results, line ).splitlines() == [
@@ -530,7 +533,7 @@ def test_the_real_gate_refuses_the_seeded_commit_after_the_epoch_and_passes_the_
     assert lines[ 2 : 4 ] == [ f"passed    {gated[ 'epoch' ][ :9 ]} gate=0 the commit that made the gate block", note ]
     assert lines[ 4 ] == f"refused   {gated[ 'newer' ][ :9 ]} gate=3 a finding made after the epoch"
     assert "    [doc-lint] REFUSED docs/newer.md:3: caps: ALL-CAPS word NOT" in lines
-    assert lines[ -2 : ] == [ f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 2 judged in warn mode", f"range {gated[ 'base' ]}..{gated[ 'newer' ]}: 3 commits, 2 passed, 1 refused, 0 unchecked" ]
+    assert lines[ -2 : ] == [ f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 2 judged in warn mode{FROM_WORK}", f"range {gated[ 'base' ]}..{gated[ 'newer' ]}: 3 commits, 2 passed, 1 refused, 0 unchecked" ]
 
 
 @pytest.mark.parametrize( "text", [ None, "", "# the lander records the sha here\n" ] )
@@ -538,7 +541,7 @@ def test_an_absent_or_empty_epoch_holds_no_commit_to_blocking( gated, text ):
     if text is not None: _write( gated[ "root" ], range_gate.EPOCH_PATH, text )
     code, lines = _range( gated )
     assert code == 0
-    assert lines[ -2 : ] == [ "blocking epoch: none recorded in src/conf/doc-gate-blocking-epoch.txt, every commit was judged in warn mode", f"range {gated[ 'base' ]}..{gated[ 'newer' ]}: 3 commits, 3 passed, 0 refused, 0 unchecked" ]
+    assert lines[ -2 : ] == [ f"blocking epoch: none recorded in src/conf/doc-gate-blocking-epoch.txt, every commit was judged in warn mode{FROM_WORK}", f"range {gated[ 'base' ]}..{gated[ 'newer' ]}: 3 commits, 3 passed, 0 refused, 0 unchecked" ]
     assert not [ ln for ln in lines if "REFUSED" in ln or "predates" in ln ]
 
 
@@ -565,3 +568,76 @@ def test_a_tree_whose_gate_predates_blocking_is_unchecked_when_the_epoch_is_too_
     assert range_gate.main( args, out=stream ) == 2
     lines = stream.getvalue().splitlines()
     assert lines[ 0 ] == f"unchecked {last[ :9 ]} gate=1 a finding judged by the older gate" and f"    {range_gate.OLD_GATE_HINT}" in lines
+
+
+# ---- the epoch of the range's head, and what an epoch may name ----------------------------------
+
+def _record( gated, value ):
+    """Commit the epoch file on top of the gated repository, so the head of the range tracks it."""
+    _write( gated[ "root" ], range_gate.EPOCH_PATH, f"# recorded at landing\n{value}\n" if value else "# nothing recorded\n" )
+    gated[ "record" ] = _commit( gated[ "root" ], "records the blocking epoch" )
+    _write( gated[ "root" ], "docs/last.md", SEEDED )
+    gated[ "newer" ] = _commit( gated[ "root" ], "a finding made after the record" )
+
+
+def test_a_head_and_a_working_copy_that_record_the_same_epoch_judge_the_range_under_it( gated ):
+    _record( gated, gated[ "epoch" ] )
+    code, lines = _range( gated, base="epoch" )
+    assert code == 1
+    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 3 commits held to blocking, 0 judged in warn mode" and FROM_WORK not in lines[ -2 ]
+    assert [ ln.split()[ 0 ] for ln in lines if ln[ :1 ] != " " ][ :3 ] == [ "refused", "passed", "refused" ]
+
+
+@pytest.mark.parametrize( "working,shown", [ ( "# emptied\n", "no value" ), ( None, "no file" ), ( "OTHER", "OTHER" ) ] )
+def test_a_working_copy_that_disagrees_with_the_head_of_the_range_judges_nothing( gated, working, shown ):
+    _record( gated, gated[ "epoch" ] )
+    path = os.path.join( gated[ "root" ], range_gate.EPOCH_PATH )
+    if working is None: os.remove( path )
+    else: _write( gated[ "root" ], range_gate.EPOCH_PATH, working.replace( "OTHER", gated[ "older" ] ) )
+    code, lines = _range( gated, base="epoch" )
+    assert code == range_gate.EXIT_UNCHECKED
+    assert lines == [ f"the blocking epoch differs: the head of the range records {gated[ 'epoch' ]}, the working copy of src/conf/doc-gate-blocking-epoch.txt records {shown.replace( 'OTHER', gated[ 'older' ] )}; no commit was judged" ]
+
+
+def test_a_head_that_records_no_value_disagrees_with_a_working_copy_that_records_one( gated ):
+    _record( gated, None )
+    _write( gated[ "root" ], range_gate.EPOCH_PATH, gated[ "epoch" ] + "\n" )
+    code, lines = _range( gated, base="epoch" )
+    assert code == range_gate.EXIT_UNCHECKED and len( lines ) == 1 and f"the head of the range records no value, the working copy of src/conf/doc-gate-blocking-epoch.txt records {gated[ 'epoch' ]}" in lines[ 0 ]
+
+
+def test_a_malformed_epoch_at_the_head_of_the_range_judges_nothing( gated ):
+    _record( gated, "0123456" )
+    code, lines = _range( gated, base="epoch" )
+    assert code == range_gate.EXIT_UNCHECKED and len( lines ) == 1 and "malformed" in lines[ 0 ]
+
+
+def _object( root, kind ):
+    if kind == "tree": return _git( root, "rev-parse", "HEAD^{tree}" )
+    if kind == "blob": return _git( root, "rev-parse", "HEAD:docs/clean.md" )
+    _git( root, "tag", "-a", "-m", "an annotated tag", "v1", "HEAD" )
+    return _git( root, "rev-parse", "v1" )
+
+
+@pytest.mark.parametrize( "kind", [ "tree", "blob", "tag" ] )
+def test_an_epoch_that_names_an_object_which_is_not_a_commit_is_refused( gated, kind ):
+    sha = _object( gated[ "root" ], kind )
+    assert re.fullmatch( r"[0-9a-f]{40}", sha ) and _git( gated[ "root" ], "cat-file", "-t", sha ) == kind
+    _write( gated[ "root" ], range_gate.EPOCH_PATH, sha + "\n" )
+    with pytest.raises( range_gate.RangeRefused, match=f"names no commit in this repository.*it is a {kind}" ): range_gate.read_blocking_epoch( gated[ "root" ] )
+    code, lines = _range( gated )
+    assert code == range_gate.EXIT_UNCHECKED and len( lines ) == 1 and "names no commit" in lines[ 0 ]
+
+
+def test_an_epoch_on_a_branch_the_range_never_took_holds_nobody_and_says_it_is_not_an_ancestor( gated ):
+    root = gated[ "root" ]
+    _git( root, "checkout", "-q", "-b", "apart", gated[ "base" ] )
+    _write( root, "docs/apart.md", "# Page\n\nThis is fine.\n" )
+    apart = _commit( root, "a commit on a branch the range never took" )
+    _git( root, "checkout", "-q", "main" )
+    _write( root, range_gate.EPOCH_PATH, apart + "\n" )
+    assert range_gate.descends( root, gated[ "base" ], apart ) and not range_gate.descends( root, apart, gated[ "newer" ] )
+    code, lines = _range( gated )
+    note = f"    the blocking epoch {apart[ :9 ]} is not an ancestor of the head of this range: judged in warn mode, findings on its staged lines were not enforced"
+    assert code == 0 and lines.count( note ) == 3 and not [ ln for ln in lines if "predates" in ln ]
+    assert lines[ -2 ] == f"blocking epoch {apart[ :9 ]}: 0 commits held to blocking, 3 judged in warn mode{FROM_WORK}"
