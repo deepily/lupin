@@ -4,6 +4,7 @@ The commit gate at its edges: moved pages, odd file names, odd line ends, gitlin
 Every test builds a small real git repository in a temporary directory and runs the real gate on it.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -47,7 +48,7 @@ def _stage( repo, files ):
         full = repo / rel
         full.parent.mkdir( parents=True, exist_ok=True )
         full.write_text( text, encoding="utf-8" )
-    _git( repo, "add", "-f", *files )
+    _git( repo, "add", "-f", "--", *files )
 
 
 def _stage_bytes( repo, rel, data ):
@@ -171,7 +172,7 @@ def test_ruff_findings_keep_the_path_that_was_asked_for_when_ruff_prints_another
         return type( "Done", (), { "returncode": 1, "stdout": json.dumps( printed ), "stderr": "" } )()
     findings, warnings = tr.run_ruff( "/r", [ asked ], fake, sources={ asked: BAD_LAYOUT } )
     assert warnings == [] and [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( asked, 2, "ruff:D205" ) ]
-    assert calls[ 0 ][ -3: ] == [ "--stdin-filename", asked, "-" ]
+    assert calls[ 0 ][ -2: ] == [ f"--stdin-filename={asked}", "-" ]
 
 
 def test_ruff_without_sources_is_not_given_a_name_it_cannot_read_back_and_says_so( monkeypatch, tmp_path ):
@@ -182,7 +183,7 @@ def test_ruff_without_sources_is_not_given_a_name_it_cannot_read_back_and_says_s
         printed = [ { "filename": "/r/src/other.py", "code": "D205", "message": "m", "location": { "row": 2, "column": 1 } } ]
         return type( "Done", (), { "returncode": 1, "stdout": json.dumps( printed ), "stderr": "" } )()
     findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/caf\udce9.py" ], fake )
-    assert calls[ 0 ][ -1: ] == [ "src/a.py" ] and "src/caf\udce9.py" not in calls[ 0 ]
+    assert calls[ 0 ][ -2: ] == [ "--", "src/a.py" ] and "src/caf\udce9.py" not in calls[ 0 ]
     assert warnings == [
         "[doc-lint] WARNING: src/caf\\xe9.py has a file name that is not UTF-8 or holds a line break, so ruff cannot be given it and it was NOT checked by ruff",
         "[doc-lint] WARNING: ruff placed a finding in src/other.py, a file it was not asked about, so that finding is NOT attached to any staged file",
@@ -213,7 +214,7 @@ def _markdownlint_stub( tmp_path, monkeypatch ):
     return log
 
 
-@pytest.mark.parametrize( "name,printed", [ ( LATIN_MD, "docs/caf\\xe9.md" ), ( "docs/new\nline.md", "docs/new\\nline.md" ) ] )
+@pytest.mark.parametrize( "name,printed", [ ( LATIN_MD, "docs/caf\\xe9.md" ), ( "docs/new\nline.md", "docs/new\\nline.md" ), ( "docs/new\rline.md", "docs/new\\rline.md" ) ] )
 def test_a_clean_markdown_file_that_markdownlint_cannot_be_given_is_refused_and_named( repo, monkeypatch, tmp_path, name, printed ):
     monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [], [] ) )
     log = _markdownlint_stub( tmp_path, monkeypatch )
@@ -222,7 +223,7 @@ def test_a_clean_markdown_file_that_markdownlint_cannot_be_given_is_refused_and_
     assert rc == gate.REFUSAL_EXIT and "[doc-lint] 1 refusals, commit REFUSED" in lines
     assert _refused( lines ) == [ f"[doc-lint] REFUSED {printed}: the file name is not UTF-8 or holds a line break, so markdownlint-cli2 cannot be given it and its markdown structure was NOT checked; fix: rename the file; this cannot be waived" ]
     assert f"[doc-lint] WARNING: {printed} has a file name that is not UTF-8 or holds a line break, so markdownlint-cli2 cannot be given it and it was NOT checked by markdownlint-cli2" in lines
-    assert log.read_bytes().split( b"\0" ) == [ b"--no-globs", b"docs/ok.md", b"" ]            # the other file was still checked
+    assert log.read_bytes().split( b"\0" ) == [ b"--no-globs", b"--", b"docs/ok.md", b"" ]            # the other file was still checked
 
 
 def test_a_markdown_name_that_cannot_be_given_refuses_nothing_when_markdownlint_is_not_installed( repo, monkeypatch ):
@@ -274,10 +275,26 @@ def test_a_script_file_whose_name_is_not_utf8_is_counted_like_one_with_a_plain_n
     assert [ f.path for f in got[ "src/zzcaf\udce9.ts" ].findings ] == [ "src/zzcaf\udce9.ts" ]
 
 
-def test_the_stand_in_names_keep_the_folder_and_the_suffix_and_never_collide():
-    names = ts_counts.scratch_names( [ "src/a.ts", "src/caf\udce9.ts", "src/caf_.0.ts", "src/caf\udcea.ts", "d\udce9/x.min.js" ] )
-    assert names == { "src/a.ts": "src/a.ts", "src/caf_.0.ts": "src/caf_.0.ts", "src/caf\udce9.ts": "src/caf_.1.ts", "src/caf\udcea.ts": "src/caf_.2.ts", "d\udce9/x.min.js": "d_/x.min.0.js" }
-    assert len( set( names.values() ) ) == len( names ) and all( cli.crosses_as_text( name ) for name in names.values() )
+def _stand_in( path ):
+    return ".git/" + hashlib.sha256( os.fsencode( path ) ).hexdigest() + os.path.splitext( path )[ 1 ]
+
+
+def test_a_stand_in_name_is_a_digest_of_the_path_bytes_in_a_folder_no_real_path_sits_in():
+    odd   = [ "src/caf\udce9.ts", "src/caf\udcea.ts", "d\udce9/x.min.js", "--x.ts", "-dir/y.mjs", "a" * 250 + "\udcff.ts", "src/notes/d\udcff.ts/y.ts" ]
+    plain = [ "src/a.ts", "src/caf_.0.ts", "src/-b.ts", "src/notes/d_.ts" ]
+    names = ts_counts.scratch_names( plain + odd )
+    assert names == { **{ path: path for path in plain }, **{ path: _stand_in( path ) for path in odd } }
+    assert len( set( names.values() ) ) == len( names ) and all( cli.crosses_as_text( name ) and not name.startswith( "-" ) for name in names.values() )
+    assert sorted( len( names[ path ] ) for path in odd ) == [ 72, 72, 72, 72, 72, 72, 73 ]      # the folder, 64 hex digits and the suffix, whatever the path's length
+
+
+def test_git_tracks_no_path_inside_the_stand_in_folder( repo ):
+    blob = subprocess.run( [ "git", "-C", str( repo ), "hash-object", "-w", "--stdin" ], input=b"x", capture_output=True ).stdout.decode().strip()
+    for path in ( f"{ts_counts.STAND_IN_FOLDER}/x.ts", f"src/{ts_counts.STAND_IN_FOLDER}/x.ts" ):
+        res = subprocess.run( [ "git", "-C", str( repo ), "update-index", "--add", "--cacheinfo", f"100644,{blob},{path}" ], capture_output=True, text=True )
+        assert res.returncode != 0 and "Invalid path" in res.stderr
+    _git( repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},src/x.ts" )                # the control: the same command adds a plain path
+    assert _git( repo, "ls-files" ) == "src/x.ts\n"
 
 
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
@@ -448,3 +465,198 @@ def test_two_equal_docstring_findings_on_one_line_of_a_swept_file_are_two_refusa
     assert rc == gate.REFUSAL_EXIT and "[doc-lint] 2 refusals, commit REFUSED" in lines
     assert [ ln.split( "; " )[ 0 ] for ln in _refused( lines ) ] == [ f"[doc-lint] REFUSED src/pkg/a.py:5: {CAPS}" ] * 2
     assert "[doc-lint] swept scope: 1 files checked, 1 docstrings checked, 2 findings, 0 waivers honoured, 0 unparsed, 0 undecodable" in lines
+
+
+# ---- stand-in names that clash or overflow ------------------------------------------------------
+
+def _ts_table( repo ):
+    """Commit an empty script count table cut under the repository's own stamp."""
+    for rel in ts_counts.STAMP_FILES:
+        if not ( repo / rel ).exists(): _stage( repo, { rel: f"stamp file {rel}\n" } )
+    _stage( repo, { ts_counts.TABLE_PATH: counts.table_text( {}, ts_counts.rules_stamp( str( repo ) ) ) } )
+    _git( repo, "commit", "-q", "--no-verify", "-m", "base" )
+
+
+def _over( lines ):
+    mark = ": 1 findings, the count table allows 0"
+    return sorted( ln.split( mark )[ 0 ] for ln in lines if mark in ln )
+
+
+def _crashed( lines ):
+    return [ ln for ln in lines if "GATE CRASHED" in ln ]
+
+
+@pytest.mark.parametrize( "odd,printed", [
+    ( "src/notes/d\udcff.ts/y.ts",       "src/notes/d\\xff.ts/y.ts" ),                              # its old stand-in needed a folder where src/notes/d_.ts is a file
+    ( "src/" + "a" * 250 + "\udcff.ts", "src/" + "a" * 250 + "\\xff.ts" ),                          # its old stand-in was two bytes longer than a file name may be
+] )
+def test_a_script_name_that_is_not_utf8_is_counted_whatever_real_path_or_length_it_comes_with( repo, monkeypatch, odd, printed ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( tsdoc_lint, "run_extractor", _lossy_node )
+    _ts_table( repo )
+    _stage( repo, { "src/notes/d_.ts": TS_ONE, odd: TS_ONE, "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == []
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+    assert _over( lines ) == sorted( [ f"[doc-lint] REFUSED {printed}", "[doc-lint] REFUSED src/notes/d_.ts" ] )
+
+
+# ---- a bare carriage return in a merge resolution and inside a changed line -----------------------
+
+MERGE_PY      = "src/lupin_mcp/m.py"
+CR_RESOLUTION = b'def f():\n    """Return it."""\n    return 4\rdef g():\r    """Return one.\r    More text here."""\r    return 1\n'
+BARE_NOTE     = f"[doc-lint] {MERGE_PY} holds a bare carriage return, so git does not number its lines as the parser does: no finding in it is let off as merged in"
+RUFF_RULES    = [ "ruff:D205:", "ruff:D209:", "ruff:D213:" ]
+
+
+def _real_ruff_only( repo, monkeypatch ):
+    if tr.find_tool( cu.get_project_root(), tr.RUFF_RELATIVE, "ruff", "LUPIN_RUFF" ) is None: pytest.skip( "ruff is not installed in this environment" )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [], [] ) )
+    monkeypatch.setattr( gate, "markdownlint_unnamed", lambda root, paths: [] )
+    shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), repo / "pyproject.toml" )
+
+
+@pytest.mark.parametrize( "merging", [ False, True ] )
+def test_a_merge_lets_off_no_finding_in_a_file_that_holds_a_bare_carriage_return( repo, monkeypatch, merging ):
+    _real_ruff_only( repo, monkeypatch )
+    body = 'def f():\n    """Return it."""\n    return {}\n'
+    _commit( repo, { MERGE_PY: body.format( 0 ) } )
+    if merging:
+        _git( repo, "checkout", "-q", "-b", "side" )
+        _commit( repo, { MERGE_PY: body.format( 2 ) }, "side" )
+        _git( repo, "checkout", "-q", "-" )
+        _commit( repo, { MERGE_PY: body.format( 1 ) }, "ours" )
+        res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "side" ], capture_output=True, text=True )
+        assert res.returncode != 0 and ( repo / ".git" / "MERGE_HEAD" ).exists()
+    _stage_bytes( repo, MERGE_PY, CR_RESOLUTION )
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == [] and not [ ln for ln in lines if "came in with" in ln ]
+    assert rc == gate.REFUSAL_EXIT and [ ln.split( " ", 4 )[ 3 ] for ln in _refused( lines ) if " ruff:" in ln ] == RUFF_RULES
+    assert ( BARE_NOTE in lines ) == merging
+
+
+def test_a_merge_still_lets_off_the_findings_of_a_file_without_a_bare_carriage_return( repo, monkeypatch ):
+    _real_ruff_only( repo, monkeypatch )
+    body = 'def f():\n    """Return it."""\n    return {}\n'
+    late = 'def g():\n    """Return one.\n    More text here."""\n    return 1\n'
+    _commit( repo, { MERGE_PY: body.format( 0 ) } )
+    _git( repo, "checkout", "-q", "-b", "side" )
+    _commit( repo, { MERGE_PY: body.format( 2 ) + late }, "side" )
+    _git( repo, "checkout", "-q", "-" )
+    _commit( repo, { MERGE_PY: body.format( 1 ) }, "ours" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "side" ], capture_output=True, text=True )
+    assert res.returncode != 0 and ( repo / ".git" / "MERGE_HEAD" ).exists()
+    _stage( repo, { MERGE_PY: body.format( 4 ) + late } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and _refused( lines ) == [] and BARE_NOTE not in lines
+    assert len( [ ln for ln in lines if " ruff:" in ln and ln.endswith( gate.MERGED_MARK ) ] ) == len( RUFF_RULES )
+
+
+@pytest.mark.parametrize( "second", [ "A plain line.", "text\rdiff --git a/x b/x", "text\r+++ b/docs/other.md", "text\r@@ -1 +40,3 @@" ] )
+def test_a_carriage_return_inside_a_changed_line_ends_no_line_of_the_diff( repo, monkeypatch, second ):
+    _no_external( monkeypatch )
+    page = [ f"Line {n} is fine." for n in range( 1, 13 ) ]
+    _commit( repo, { "docs/p.md": "\n".join( page ) + "\n" } )
+    page[ 1 ], page[ 9 ] = second, "This is NOT fine."
+    _stage_bytes( repo, "docs/p.md", ( "\n".join( page ) + "\n" ).encode( "utf-8" ) )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and _refused( lines ) == [ f"[doc-lint] REFUSED docs/p.md:10: {CAPS}" ]
+    assert cr.changed_line_ranges( str( repo ), None, cached=True ) == { "docs/p.md": [ ( 2, 2 ), ( 10, 10 ) ] }
+
+
+def test_a_failed_diff_names_the_git_error_as_text( tmp_path ):
+    with pytest.raises( RuntimeError, match="^git diff failed: .*(cannot change to|No such file)" ): cr.changed_line_ranges( str( tmp_path / "nowhere" ), None, cached=True )
+
+
+# ---- a staged file git treats as binary ----------------------------------------------------------
+
+def _binary_line( rel, word="REFUSED" ):
+    return f"[doc-lint] {word}: {rel} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known"
+
+
+def test_a_staged_page_that_git_treats_as_binary_is_refused_in_blocking_mode_and_named( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    nul = _page( 101 ).replace( "Line 50 is fine.", "Line 50 is\0 fine." )
+    _stage( repo, { CAP_PAGE: nul, "docs/tests/skipped.md": nul, "docs/ok.md": "A clean page.\n" } )
+    _stage_bytes( repo, "docs/logo.png", b"\x89PNG\0\0" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if "binary" in ln ] == [ _binary_line( CAP_PAGE ) ]
+    assert gate.staged_binary( str( repo ) ) == [ "docs/logo.png", "docs/tests/skipped.md", CAP_PAGE ]
+    assert "[doc-lint] 1 checks could not be made, commit REFUSED: each is a REFUSED line above that says what was not checked" in lines
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0                                    # warn mode names it and lets the commit through
+    assert [ ln for ln in err.getvalue().split( "\n" ) if "binary" in ln ] == [ _binary_line( CAP_PAGE, "WARNING" ) ]
+
+
+def test_the_same_page_without_the_nul_byte_is_refused_for_its_length( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { CAP_PAGE: _page( 101 ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and not [ ln for ln in lines if "binary" in ln ]
+    assert _refused( lines ) == [ f"[doc-lint] REFUSED {CAP_PAGE}:1: capability-length: capability page of 101 lines, limit 40" ]
+
+
+def test_a_page_that_becomes_binary_as_it_moves_is_named_by_its_new_path_and_a_deleted_one_is_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _commit( repo, { "docs/old.md": _page( 30 ), "docs/gone.md": "A page\0.\n" } )
+    _git( repo, "mv", "docs/old.md", "docs/new.md" )
+    _git( repo, "rm", "-q", "docs/gone.md" )
+    _stage( repo, { "docs/new.md": _page( 30 ) + "One more\0 line.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if "binary" in ln ] == [ _binary_line( "docs/new.md" ) ]
+    assert gate.staged_binary( str( repo ) ) == [ "docs/new.md" ]
+
+
+def test_the_binary_listing_names_the_git_error_when_it_fails( tmp_path ):
+    with pytest.raises( RuntimeError, match="^git diff --cached failed: " ): gate.staged_binary( str( tmp_path / "nowhere" ) )
+
+
+# ---- a file name that starts with a dash, and a tool that fails on what it was given -----------
+
+def test_ruff_is_given_a_name_that_starts_with_a_dash_as_a_name_and_never_as_an_option( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    calls = []
+    def fake( cmd, **kwargs ):
+        calls.append( cmd )
+        return type( "Done", (), { "returncode": 0, "stdout": "[]", "stderr": "" } )()
+    assert tr.run_ruff( "/r", [ "--x.py" ], fake, sources={ "--x.py": "x = 1\n" } ) == ( [], [] )
+    assert tr.run_ruff( "/r", [ "--x.py", "a.py" ], fake ) == ( [], [] )
+    assert [ call[ 7 : ] for call in calls ] == [ [ "--stdin-filename=--x.py", "-" ], [ "--", "--x.py", "a.py" ] ]
+
+
+def test_the_real_ruff_judges_a_file_whose_name_starts_with_two_dashes_and_the_file_beside_it( repo, monkeypatch ):
+    _real_ruff_only( repo, monkeypatch )
+    _stage( repo, { "--x.py": BAD_LAYOUT, "src/lupin_mcp/plain.py": BAD_LAYOUT } )
+    rc, lines = _blocking( repo )
+    assert not [ ln for ln in lines if "ruff failed" in ln ]
+    assert rc == gate.REFUSAL_EXIT and [ ln.split( ":2: ruff:D205" )[ 0 ] for ln in _refused( lines ) if "ruff:D205" in ln ] == [ "[doc-lint] REFUSED --x.py", "[doc-lint] REFUSED src/lupin_mcp/plain.py" ]
+
+
+@pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+def test_the_real_extractor_counts_a_staged_file_whose_name_starts_with_two_dashes( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    monkeypatch.setattr( tsdoc_lint, "EXTRACTOR_REL", os.path.join( cu.get_project_root(), "src/scripts/ts_doc_extract.mjs" ) )
+    _ts_table( repo )
+    _stage( repo, { "--x.ts": "/**\n * This is NOT fine.\n */\nexport const x = 1;\n", "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == []
+    assert rc == gate.REFUSAL_EXIT and _over( lines ) == [ "[doc-lint] REFUSED --x.ts" ] and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+
+
+@pytest.mark.parametrize( "tool,var,rel,text", [
+    ( "ruff",              "LUPIN_RUFF",         "src/lupin_mcp/a.py", "x = 1\n" ),
+    ( "markdownlint-cli2", "LUPIN_MARKDOWNLINT", "docs/a.md",          "A clean page.\n" ),
+] )
+def test_a_tool_that_fails_on_the_files_it_was_given_refuses_the_commit_in_blocking_mode( repo, monkeypatch, tmp_path, tool, var, rel, text ):
+    stub = tmp_path / tool
+    stub.write_text( "#!/bin/sh\necho 'unexpected argument' >&2\nexit 2\n", encoding="utf-8" )
+    os.chmod( stub, 0o755 )
+    monkeypatch.setenv( var, str( stub ) )
+    _stage( repo, { rel: text } )
+    said = f"{tool} failed (exit 2), SKIPPED: unexpected argument"
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED: {said}" in lines and f"[doc-lint] WARNING: {said}" not in lines
+    assert "[doc-lint] 1 checks could not be made, commit REFUSED: each is a REFUSED line above that says what was not checked" in lines
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0                                    # warn mode says so and lets the commit through
+    assert f"[doc-lint] WARNING: {said}" in err.getvalue().split( "\n" ) and "REFUSED" not in err.getvalue()

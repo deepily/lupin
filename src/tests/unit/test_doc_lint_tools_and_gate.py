@@ -120,7 +120,7 @@ def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatc
     fake = _fake( 1, one )
     findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/b.py" ], fake, sources={ "src/a.py": "A TEXT", "src/b.py": "B TEXT" } )
     assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/b.py", 4 ) ]         # the path asked for, not the name ruff printed
-    assert [ ( c[ 0 ][ -3: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename", "src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename", "src/b.py", "-" ], "B TEXT" ) ]
+    assert [ ( c[ 0 ][ -2: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename=src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename=src/b.py", "-" ], "B TEXT" ) ]
     failing = tr.run_ruff( "/r", [ "src/a.py" ], _fake( 2, "", "boom" ), sources={ "src/a.py": "x" } )
     assert failing[ 0 ] == [] and "SKIPPED: boom" in failing[ 1 ][ 0 ]
 
@@ -146,7 +146,7 @@ def test_run_markdownlint_parses_lines_with_and_without_columns( monkeypatch, tm
     fake = _fake( 1, "", MDL_OUT )
     findings, warnings = tr.run_markdownlint( "/r", [ "a.md", "b.md" ], fake )
     assert warnings == [] and [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "a.md", 12, "markdownlint:MD040/fenced-code-language" ), ( "b.md", 3, "markdownlint:MD051/link-fragments" ) ]
-    assert fake.calls[ 0 ][ 0 ][ 1 : ] == [ "--no-globs", "a.md", "b.md" ]
+    assert fake.calls[ 0 ][ 0 ][ 1 : ] == [ "--no-globs", "--", "a.md", "b.md" ]
     assert tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0 ) ) == ( [], [] )
 
 
