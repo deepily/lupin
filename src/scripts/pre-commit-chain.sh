@@ -60,8 +60,9 @@ fi
 
 # ---- gate 3: documentation standard, blocking (docstrings, comments and markdown) ------------------
 # The gate runs with --blocking. A finding on a line the commit touches refuses the commit, whichever linter
-# reports it, in Python and markdown alike. Two files are the exception: the root history.md and TODO.md stay
-# in warn mode, so their findings are printed and the commit goes through (gate.WARN_ONLY_PATHS, exact paths).
+# reports it, in Python and markdown alike. Five record locations are the exception: the root history.md,
+# TODO.md and bug-fix-queue.md, and the root folders history/ and todo-history/. They stay in warn mode, so
+# their findings are printed and the commit goes through (gate.WARN_ONLY_PATHS and gate.WARN_ONLY_PREFIXES).
 # A page-level finding (a page over its length limit, a runbook without a section) refuses only when this commit
 # created the condition or made it worse; one the last commit already had is printed and let through.
 # The older refusals stand beside it. A staged Python file in the swept scope (swept_scope.is_swept) holding any
