@@ -48,6 +48,7 @@ EXPECTED = {
     "gate.incoming_commit:open#0"                         : ( SAID, CRASH ),
     "gate.incoming_commit:subprocess.run#0"               : ( CRASH, CRASH ),
     "gate.incoming_commit:subprocess.run#1"               : ( CRASH, CRASH ),
+    "gate.staged_binary:subprocess.run#0"                 : ( CRASH, CRASH ),
     "gate.staged_bytes:open#0"                            : ( CRASH, CRASH ),
     "gate.staged_bytes:subprocess.run#0"                  : ( CRASH, CRASH ),
     "gate.staged_deleted:subprocess.run#0"                : ( CRASH, CRASH ),
@@ -201,10 +202,10 @@ def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
 
 def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     sites = [ site for site, _path, _first, _last in _sites() ]
-    assert len( sites ) == len( set( sites ) ) == 32 and sorted( sites ) == sorted( EXPECTED )
+    assert len( sites ) == len( set( sites ) ) == 33 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert sum( 1 for row in EXPECTED.values() if row != OFF ) == 22 and sum( 1 for row in EXPECTED.values() if row == OFF ) == 10
+    assert sum( 1 for row in EXPECTED.values() if row != OFF ) == 23 and sum( 1 for row in EXPECTED.values() if row == OFF ) == 10
 
 
 def test_every_place_on_the_gates_path_answers_an_oserror_and_a_decode_error_as_its_row_says( scenarios, monkeypatch ):

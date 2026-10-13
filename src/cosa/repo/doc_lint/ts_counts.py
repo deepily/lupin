@@ -10,13 +10,14 @@ rules stamp differ.
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
 import tempfile
 
 from . import counts, tsdoc_lint
-from .cli import SCRIPT_BREAKS, SURROGATE, crosses_as_text, line_text, shown, split_lines
+from .cli import SCRIPT_BREAKS, crosses_as_text, line_text, shown, split_lines
 from .waivers import waiver_state
 from .word_list import configure_root
 
@@ -25,6 +26,8 @@ STAMP_FILES      = counts.STAMP_FILES + ( "src/cosa/repo/doc_lint/tsdoc_lint.py"
 EXIT_TIGHT       = counts.EXIT_TIGHT
 EXIT_MISMATCH    = counts.EXIT_MISMATCH
 EXIT_NOT_CHECKED = counts.EXIT_NOT_CHECKED
+# The scratch folder the stand-in names sit in. Git tracks no path with this component, so no real path sits there.
+STAND_IN_FOLDER  = ".git"
 
 
 def counted_paths( root ):
@@ -55,7 +58,7 @@ def extract( root, texts ):
     Ensures:
         - returns the extractor records grouped by path, as tsdoc_lint.run_extractor does
         - the texts are written to a scratch tree and read from there, so a staged text is judged, not the disk copy
-        - a path whose name is not UTF-8 is written under a stand-in name (see scratch_names), since Node cannot be given such a name
+        - a path Node cannot be given by name is written under a stand-in name (see scratch_names)
         - its records come back under the path that was asked for, so its comments are counted like any other file's
         - the scratch tree is removed afterwards, also when the extractor fails
         - no texts start no process
@@ -85,25 +88,17 @@ def scratch_names( paths ):
         - paths is an iterable of repo-relative paths
 
     Ensures:
-        - returns { path: name }; a path whose name is UTF-8 keeps it
-        - any other path gets a stand-in: each byte that is not UTF-8 becomes an underscore, and a number goes before the suffix
-        - the number is the first that makes the stand-in differ from every path given and every stand-in made, so no two texts share a file
-        - the stand-in keeps the folder and the suffix, which is what tells the extractor the kind of file
+        - returns { path: name }; a path whose name is UTF-8 and does not start with a dash keeps it
+        - any other path gets a stand-in, since Node reads a name as UTF-8 and the extractor reads a leading dash as an option
+        - the stand-in is STAND_IN_FOLDER, the SHA-256 hex digest of the path's bytes and the suffix, so its length does not grow with the path
+        - no real path sits in STAND_IN_FOLDER, so a stand-in takes the place of no file and of no folder
+        - the stand-in keeps the suffix, which is what tells the extractor the kind of file
 
     Raises:
         - nothing
     """
-    paths = list( paths )
-    names = { path: path for path in paths if crosses_as_text( path ) }
-    taken = set( paths )
-    for path in paths:
-        if path in names: continue
-        stem, suffix = os.path.splitext( SURROGATE.sub( "_", path ) )
-        number       = 0
-        while f"{stem}.{number}{suffix}" in taken: number += 1
-        names[ path ] = f"{stem}.{number}{suffix}"
-        taken.add( names[ path ] )
-    return names
+    def stand_in( path ): return f"{STAND_IN_FOLDER}/{hashlib.sha256( os.fsencode( path ) ).hexdigest()}{os.path.splitext( path )[ 1 ]}"
+    return { path: path if crosses_as_text( path ) and not path.startswith( "-" ) else stand_in( path ) for path in paths }
 
 
 def count_records( path, records, source, root=None ):

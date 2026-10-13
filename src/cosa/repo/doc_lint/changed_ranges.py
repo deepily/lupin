@@ -120,6 +120,7 @@ def changed_line_ranges( repo_root, base, cached=False, against=None ):
         - git is told to quote file names and to write the a/ and b/ prefixes, whatever the user's settings say
         - git is told to pair renames and no copies, whatever the user's settings say, so a copy is always a new file with every line touched
         - a byte of content that is not UTF-8 is replaced, since only the headers are read
+        - the output is read as bytes and split at the line feed alone, so a carriage return inside a changed line ends no line
 
     Raises:
         - RuntimeError naming the git error when the diff command fails
@@ -127,9 +128,9 @@ def changed_line_ranges( repo_root, base, cached=False, against=None ):
     cmd = [ "git", "-C", str( repo_root ), "-c", "core.quotePath=true", "diff", "-U0", "-M", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/" ]
     cmd += ( [ "--cached" ] + ( [ against ] if against is not None else [] ) ) if cached else [ base ]
     cmd += [ "--", ":/" ]
-    res = subprocess.run( cmd, capture_output=True, text=True, encoding="utf-8", errors="replace" )
-    if res.returncode != 0: raise RuntimeError( f"git diff failed: {res.stderr.strip()}" )
-    return parse_diff_ranges( res.stdout )
+    res = subprocess.run( cmd, capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return parse_diff_ranges( res.stdout.decode( "utf-8", "replace" ) )
 
 
 def in_ranges( line, ranges ):

@@ -22,6 +22,10 @@ DART_DOC_CODES    = frozenset( { "public_member_api_docs", "slash_for_doc_commen
                                  "unintended_html_in_doc_comment", "comment_references" } )
 
 
+class Unchecked( str ):
+    """A warning that a check of staged files could not be made. The blocking gate refuses on it."""
+
+
 def find_tool( root, relative_candidates, name, env_var ):
     """
     Locate an external tool.
@@ -74,7 +78,8 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
     Ensures:
         - returns ( findings, warnings ); findings carry the rule as ruff:<code>
         - a missing ruff yields one warning and no findings
-        - an exit status other than 0 or 1 yields one warning carrying ruff's stderr
+        - an exit status other than 0 or 1 yields one Unchecked warning carrying ruff's stderr, and no findings
+        - a file name follows the option's equals sign or a -- separator, so one that starts with a dash is read as a name
         - with sources, each run checks one file, and its findings carry the path that was asked for, not the name ruff printed
         - so a file name that is not UTF-8, which ruff prints with a replacement character, keeps its findings
         - without sources, such a name is not handed to ruff, and one warning per file says it was not checked
@@ -88,13 +93,13 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
     if tool is None: return [], [ missing_tool_warning( "ruff", "docstring layout rules (D205, D213 and the rest)" ) ]
     listed   = [ p for p in paths if crosses_as_text( p ) ]
     warnings = [] if sources is not None else [ unnamed_warning( "ruff", p ) for p in paths if p not in listed ]
-    jobs     = [ ( p, [ "--stdin-filename", p, "-" ], sources[ p ] ) for p in paths ] if sources is not None else [ ( None, listed, None ) ] if listed else []
+    jobs     = [ ( p, [ f"--stdin-filename={p}", "-" ], sources[ p ] ) for p in paths ] if sources is not None else [ ( None, [ "--", *listed ], None ) ] if listed else []
     findings = []
     for asked, extra, stdin in jobs:
         kwargs = {} if stdin is None else { "input": stdin }
         res = runner( [ tool, "check", "--config", os.path.join( root, "pyproject.toml" ), "--output-format", "json", "--no-cache", *extra ],
                       capture_output=True, text=True, encoding="utf-8", cwd=root, **kwargs )
-        if res.returncode not in ( 0, 1 ): return [], [ f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ]
+        if res.returncode not in ( 0, 1 ): return [], [ Unchecked( f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ) ]
         for item in json.loads( res.stdout or "[]" ):
             rel = asked if asked is not None else os.path.relpath( os.path.join( root, item[ "filename" ] ), root )
             if rel not in paths: warnings.append( f"[doc-lint] WARNING: ruff placed a finding in {shown( rel )}, a file it was not asked about, so that finding is NOT attached to any staged file" )
@@ -154,7 +159,8 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
         - returns ( findings, warnings ); findings carry the rule as markdownlint:<id>
         - no paths yields nothing, without looking for the tool
         - a missing tool yields one warning and no findings
-        - an exit status other than 0 or 1 yields one warning carrying the tool's stderr
+        - an exit status other than 0 or 1 yields one Unchecked warning carrying the tool's stderr
+        - the file names follow a -- separator, so one that starts with a dash is read as a name
         - a file markdownlint_unnamed lists is not handed to the tool, and one warning per file says it was not checked
         - a finding the tool places in a file that was not asked for yields one warning that names it
 
@@ -167,8 +173,8 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
     listed   = [ p for p in paths if _line_safe( p ) ]
     warnings = [ unnamed_warning( "markdownlint-cli2", p ) for p in paths if p not in listed ]
     if not listed: return [], warnings
-    res = runner( [ tool, "--no-globs", *listed ], capture_output=True, text=True, encoding="utf-8", cwd=root )
-    if res.returncode not in ( 0, 1 ): return [], warnings + [ f"[doc-lint] WARNING: markdownlint-cli2 failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ]
+    res = runner( [ tool, "--no-globs", "--", *listed ], capture_output=True, text=True, encoding="utf-8", cwd=root )
+    if res.returncode not in ( 0, 1 ): return [], warnings + [ Unchecked( f"[doc-lint] WARNING: markdownlint-cli2 failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ) ]
     findings = []
     for line in ( res.stdout + "\n" + res.stderr ).split( "\n" ):
         m = MARKDOWNLINT_LINE.match( line.strip() )

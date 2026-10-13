@@ -7,6 +7,7 @@ The hook is shared by every worktree, and a crashing gate must not block every s
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 A staged gitlink, which is a submodule entry, holds no text and is named as not checked.
 A markdown file whose name markdownlint-cli2 cannot be given is refused when that tool is installed.
+With --blocking, a staged Python or markdown file git treats as binary refuses the commit, and so does a linter that fails on its files.
 
 With --blocking, which the commit hook passes, a finding on a staged line refuses the commit.
 Three kinds of finding are printed and let through instead. One is a finding in a file is_warn_only names.
@@ -55,7 +56,7 @@ from .changed_ranges import PAGE_LEVEL_RULES, changed_line_ranges, filter_findin
 from .cli import SURROGATE, in_scope, line_text, shown, split_lines, split_names
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
 from .swept_scope import is_swept
-from .tool_runners import markdownlint_unnamed, run_markdownlint, run_ruff
+from .tool_runners import Unchecked, markdownlint_unnamed, run_markdownlint, run_ruff
 from .waivers import waiver_state
 from .word_list import configure_root
 
@@ -289,6 +290,26 @@ def staged_entries( root ):
             new, i = os.fsdecode( tokens[ i + 1 ] ), i + 2
         ( gitlinks if fields[ 1 ] == GITLINK_MODE else names ).append( new )
     return names, renamed_from, gitlinks
+
+
+def staged_binary( root ):
+    """
+    List the staged files whose change git treats as binary.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns the new path of every addition, modification and type change for which git counts no lines, in git's order
+        - the verdict is git's own, the one that makes its diff carry no line numbers for the file
+        - a rename is read as an addition, so a moved file is named by its new path
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "--no-renames", "--numstat", "-z", "--diff-filter=ACMRT", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return [ os.fsdecode( entry[ 4 : ] ) for entry in res.stdout.split( b"\0" ) if entry.startswith( b"-\t-\t" ) ]
 
 
 def staged_changes( root ):
@@ -778,6 +799,7 @@ def collect( root ):
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
+        - a staged Python or markdown file that staged_binary lists adds one Unchecked warning, since the diff gives no touched line for it
         - a waiver is read from the line the parser numbers, so a file with bare carriage returns is judged and never crashes the gate
         - git does not end a line at a bare carriage return, so its line numbers for such a Python file are not the parser's
         - every line of such a file counts as touched when the commit touches any of it
@@ -798,6 +820,8 @@ def collect( root ):
     waived     = []
     refusals   = []
     warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
+    binary     = set( staged_binary( root ) )
+    warnings  += [ Unchecked( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
     decode_out = []
     for path in paths:
@@ -884,6 +908,8 @@ def main( argv=None, err=None ):
         - a finding in a file is_warn_only names is printed with WARN_ONLY_MARK and never refuses the commit
         - a page-level finding that predating returns is printed with PREDATES_MARK and never refuses the commit
         - while a merge or a cherry-pick waits to be concluded, a finding merged_in returns is printed with MERGED_MARK and never refuses the commit
+        - a Python file with a bare carriage return is let off nothing as merged in, since git's line numbers for it are not the parser's; one line says so
+        - with --blocking, returns REFUSAL_EXIT when a warning is an Unchecked, and prints that warning as a refused line
         - a file name is printed through shown, so no name breaks a line or a strict output stream
         - otherwise returns 0; the gate itself never returns 1
         - prints the swept-scope denominator on every run that does not crash
@@ -905,13 +931,16 @@ def main( argv=None, err=None ):
         earlier                             = predating( root, findings, staged_changes( root )[ 1 ] )
         incoming, merge_warnings            = incoming_commit( root )
         merged                              = merged_in( root, findings, incoming )
+        bare                                = sorted( { f.path for f in merged if f.path.endswith( ".py" ) and BARE_RETURN.search( staged_source( root, f.path ) ) } )
     except Exception as exc:
         say( f"[doc-lint] GATE CRASHED, commit allowed: {type( exc ).__name__}: {exc}" )
         say( traceback.format_exc().rstrip( "\n" ) )
         return 0
-    for warning in warnings + merge_warnings: say( warning )
+    held      = [ w for w in warnings if args.blocking and isinstance( w, Unchecked ) ]
+    for warning in warnings + merge_warnings: say( warning.replace( "WARNING:", "REFUSED:", 1 ) if warning in held else warning )
+    for path in bare: say( f"[doc-lint] {shown( path )} holds a bare carriage return, so git does not number its lines as the parser does: no finding in it is let off as merged in" )
     warn_only = [ f for f in findings if is_warn_only( f.path ) ]
-    merged    = [ f for f in merged if f not in warn_only ]
+    merged    = [ f for f in merged if f not in warn_only and f.path not in bare ]
     earlier   = [ f for f in earlier if f not in warn_only and f not in merged ]
     blocked   = [ f for f in findings if args.blocking and f not in warn_only and f not in merged and f not in earlier ]
     for f in findings:
@@ -929,7 +958,8 @@ def main( argv=None, err=None ):
     if args.blocking and earlier: say( f"[doc-lint] {len( earlier )} page-level findings predate this commit{WARN_ONLY_MARK}" )
     if refusals: say( f"[doc-lint] {len( refusals )} refusals, commit REFUSED" )
     if blocked: say( f"[doc-lint] {len( blocked )} findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again" )
-    if refusals or blocked: return REFUSAL_EXIT
+    if held: say( f"[doc-lint] {len( held )} checks could not be made, commit REFUSED: each is a REFUSED line above that says what was not checked" )
+    if refusals or blocked or held: return REFUSAL_EXIT
     remaining, mode = ( 0, "blocking" ) if args.blocking else ( len( findings ), "warn mode, commit allowed" )
     say( f"[doc-lint] {remaining} findings on staged lines ({mode})" )
     return 0
