@@ -21,3 +21,4 @@ File names are `YYYY.MM.DD-slug.md`, dated by the source document.
 | [TFE-to-CC, a parallel Claude Code engine for the first and third TFE phases](2026.04.19-tfe-to-cc-parallel-claude-code-engine.md) | `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md` |
 | [The heartbeat arbiter, a fleet-level observer of the hook's events](2026.06.04-heartbeat-arbiter-v2-design.md) | `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md` |
 | [API key authentication for the notification routes](2025.11.10-notification-api-key-authentication.md) | `src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md` |
+| [Whisper and the two encoders live in a separate model server](2026.05.16-model-server-carveout.md) | `src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md` |
