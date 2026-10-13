@@ -46,6 +46,7 @@ import subprocess
 from typing import Iterable, List, Optional, Tuple
 
 from lupin_cli.claude_code.hooks.lib.stash_guard import (
+    _NOT_A_BLANK_LINE,
     _PREFIXES,
     _PROGRAM,
     _NESTED_SHELL_RE,
@@ -122,6 +123,7 @@ _HOOKSPATH_ENV_RE = re.compile(
 _GIT_CONFIG_RE = re.compile(
     rf"""
     (?:^|[;&|(){{}}\n])
+    {_NOT_A_BLANK_LINE}
     {_PREFIXES}
     \s*
     {_PROGRAM}\b

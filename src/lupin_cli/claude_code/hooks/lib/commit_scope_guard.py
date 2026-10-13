@@ -128,6 +128,12 @@ GIT_TIMEOUT_SECONDS = 5
 # program however it is spelled. Same shape as stash_guard's, deliberately —
 # but see the threat-model note above for why this one is not exhaustive.
 _COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
+# A command start that is followed by a blank rest-of-line is skipped: the newline that ends
+# that line is a command start too, and the match from there covers the same command. Without
+# this, a run of N newlines is re-scanned from each of them (4000 newlines cost about 0.6 s per
+# regex). The match found is the same one, starting at the last newline of the run instead of
+# the first. `[^\S\n]` is any whitespace except a newline.
+_NOT_A_BLANK_LINE = r"(?![^\S\n]*\n)"
 _WRAPPERS         = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf)"
 # 🔴 AN EMPTY ENV ASSIGNMENT USED TO WALK STRAIGHT PAST THIS (found 2026-08-31 by
 # a merge_head_guard test, measured in BOTH guards). The `\b` sat AFTER the whole
@@ -151,6 +157,7 @@ _PROGRAM          = r"(?:[\w./~+-]*/)?git"
 _GIT_COMMIT_RE = re.compile(
     rf"""
     {_COMMAND_POSITION}
+    {_NOT_A_BLANK_LINE}
     {_PREFIXES}
     \s*
     {_PROGRAM}\b

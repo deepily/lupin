@@ -26,7 +26,7 @@ import re
 import subprocess
 from typing import Optional
 
-from lupin_cli.claude_code.hooks.lib.commit_scope_guard import git_commit_match
+from lupin_cli.claude_code.hooks.lib.commit_scope_guard import _NOT_A_BLANK_LINE, git_commit_match
 
 
 BASH_TOOL_NAMES = ( "Bash", )
@@ -85,7 +85,7 @@ _DASH_C_RE = re.compile( r"-C\s+(?P<path>[^\s;&|]+)" )
 #
 # `cd` in COMMAND POSITION only, so a `cd` inside an argument is not read as one.
 _CD_RE = re.compile(
-    r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b)\s*cd\s+(?P<path>[^\s;&|]+)"
+    r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b)" + _NOT_A_BLANK_LINE + r"\s*cd\s+(?P<path>[^\s;&|]+)"
 )
 
 

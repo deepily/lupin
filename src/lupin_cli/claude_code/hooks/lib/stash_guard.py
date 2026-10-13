@@ -97,6 +97,13 @@ READONLY_SUBCOMMANDS = frozenset( { "list", "show" } )
 # caught by the open paren. Adding it back means re-measuring the friction.
 _COMMAND_POSITION = r"(?:^|[;&|(){}\n]|\bthen\b|\bdo\b|\belse\b|\belif\b)"
 
+# A command start that is followed by a blank rest-of-line is skipped: the newline that ends
+# that line is a command start too, and the match from there covers the same command. Without
+# this, a run of N newlines is re-scanned from each of them (4000 newlines cost about 0.6 s per
+# regex). The match found is the same one, starting at the last newline of the run instead of
+# the first. `[^\S\n]` is any whitespace except a newline.
+_NOT_A_BLANK_LINE = r"(?![^\S\n]*\n)"
+
 # Things that sit between the command slot and the program while still running
 # it: environment assignments (FOO=bar) and transparent wrappers.
 _WRAPPERS = r"(?:env|command|builtin|exec|sudo|nohup|time|nice|stdbuf|xargs)"
@@ -125,6 +132,7 @@ _PROGRAM  = r"(?:[\w./~+-]*/)?git"
 _GIT_STASH_RE = re.compile(
     rf"""
     {_COMMAND_POSITION}
+    {_NOT_A_BLANK_LINE}
     {_PREFIXES}
     \s*
     {_PROGRAM}\b                 # the program, however it is spelled
