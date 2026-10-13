@@ -57,7 +57,7 @@ To run a job later, submit through `/api/v2/submit` with the command `agent rout
 ### Session start
 - The first thing you do in a session is read the global Claude configuration file and follow its instructions.
 - Read `history.md` and the implementation document named at its top; older context is in `history/YYYY-MM-history.md`.
-- Do not read the sub-repo histories (`src/lupin-plugin-firefox/history.md`, `../lupin-mobile/history.md`). `src/cosa/history.md` is an ordinary in-tree doc and may be read.
+- Do not read the sub-repo histories (`src/lupin-plugin-firefox/history.md`, `../lupin-mobile/history.md`).
 - This repo's SHORT_PROJECT_PREFIX is `[LUPIN]`.
 - `src/cosa/` is a regular in-tree directory of this repository, not a separate repo or submodule. It keeps its own `README.md` and `CLAUDE.md`.
 
