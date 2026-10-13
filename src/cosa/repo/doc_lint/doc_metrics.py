@@ -45,6 +45,9 @@ EXIT_PAGE_STALE    = 3
 EXIT_NUMBERS_STALE = 4
 MODULE_COMMAND     = "PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard"
 BEFORE_LINE        = "- Before: commit `{}`"
+ORDER_LINE         = "WARNING {}: the rows on the page are those of the tree, in another order or repeated; regenerate with: {}"
+# The rate of a side that has markers and no tokens.
+INFINITE           = float( "inf" )
 NUMBERS_LINE       = "WARNING {}: the numbers on the page are stale, {} of its rows differ from the tree; regenerate with: {}"
 
 
@@ -299,21 +302,22 @@ def dashboard_rows( paths ):
 
 def metric_value( metrics, name ):
     """
-    Return one compared value of a measured side as an exact fraction.
+    Return one compared value of a measured side, exactly.
 
     Requires:
         - metrics carries tokens and counts; name is "tokens" or a MARKER_COLUMNS name
 
     Ensures:
         - "tokens" gives the token count
-        - a marker name gives its raw count divided by the tokens, not the rounded display rate
-        - a side with no tokens has every marker rate 0, as rates_per_thousand shows it
+        - a marker name gives its raw count divided by the tokens as a fraction, not the rounded display rate
+        - a side with no tokens has rate 0 when it has no such marker, and an infinite rate when it has one
 
     Raises:
         - nothing
     """
     if name == "tokens": return Fraction( metrics[ "tokens" ] )
-    return Fraction( metrics[ "counts" ][ name ], metrics[ "tokens" ] ) if metrics[ "tokens" ] else Fraction( 0 )
+    if metrics[ "tokens" ]: return Fraction( metrics[ "counts" ][ name ], metrics[ "tokens" ] )
+    return INFINITE if metrics[ "counts" ][ name ] else Fraction( 0 )
 
 
 def has_risen( before, after, name ):
@@ -324,15 +328,18 @@ def has_risen( before, after, name ):
         - both are files_metrics results; name is "tokens" or a MARKER_COLUMNS name
 
     Ensures:
-        - a marker has risen only when its exact rate is higher and its raw count is higher too
-        - so the same markers in fewer words is no rise, and neither is one more marker in many more words
         - the token count has no second number, so it has risen whenever it is higher
+        - a marker has risen only when its raw count is higher and its exact rate is higher too
+        - so the same markers in fewer words is no rise, and neither is one more marker in many more words
+        - a higher count with an infinite rate after is a rise, even when the rate before was infinite too
 
     Raises:
         - nothing
     """
-    if metric_value( after, name ) <= metric_value( before, name ): return False
-    return name == "tokens" or after[ "counts" ][ name ] > before[ "counts" ][ name ]
+    was, now = metric_value( before, name ), metric_value( after, name )
+    if name == "tokens": return now > was
+    if after[ "counts" ][ name ] <= before[ "counts" ][ name ]: return False
+    return now > was or now == INFINITE
 
 
 def risen( before, after ):
@@ -417,6 +424,23 @@ def build_dashboard( root, base, head=None ):
     }
 
 
+def shown_rate( metrics, name ):
+    """
+    Return the rate of one marker as the page shows it.
+
+    Requires:
+        - metrics is a files_metrics result; name is a MARKER_COLUMNS name
+
+    Ensures:
+        - returns the one-decimal rate per 1,000 tokens
+        - returns "inf" for a side that has the marker and no tokens
+
+    Raises:
+        - nothing
+    """
+    return "inf" if metric_value( metrics, name ) == INFINITE else metrics[ "rates" ][ name ]
+
+
 def _shown( metrics ):
     """
     List the display values of one side of a row.
@@ -425,13 +449,13 @@ def _shown( metrics ):
         - metrics is a files_metrics result, or None for a row with no before
 
     Ensures:
-        - returns files, tokens and the six one-decimal rates, or a dash for each when metrics is None
+        - returns files, tokens and the six rates as shown_rate gives them, or a dash for each when metrics is None
 
     Raises:
         - nothing
     """
     if metrics is None: return [ "-" ] * ( 2 + len( MARKER_COLUMNS ) )
-    return [ metrics[ "files" ], metrics[ "tokens" ], *( metrics[ "rates" ][ c ] for c in MARKER_COLUMNS ) ]
+    return [ metrics[ "files" ], metrics[ "tokens" ], *( shown_rate( metrics, c ) for c in MARKER_COLUMNS ) ]
 
 
 def dashboard_table( board ):
@@ -491,6 +515,7 @@ def render_dashboard( board ):
         "Each cell reads before, then after. After is the tree this page was last written from.",
         "Tokens are the words `marker_counts` counts in the docstrings.",
         "The six marker columns are rates per 1,000 tokens.",
+        "A rate reads `inf` when a side has markers and no tokens.",
         "A row marked `new` had no swept file at the before commit, so the check compares nothing for it.",
         "The last row, `total`, sums every swept file on each side. It is shown and not compared.",
         "",
@@ -511,7 +536,8 @@ def render_dashboard( board ):
         f"{MODULE_COMMAND} check --base {board[ 'base' ]}",
         "```",
         "",
-        "The check measures the tree again and does not read the numbers on this page.",
+        "The check measures the tree again, and a rise is never judged from this page.",
+        "The rows below are compared with a fresh render, and a difference is reported as stale numbers.",
         "A marker has risen when its rate is higher and its raw count is higher too.",
         "The check exits 0 when no compared value rose and the rows below are the rows of the tree. It exits 1 when one rose.",
         "It exits 2 when it could not check. It exits 3 when a row is missing below or this page names another before commit.",
@@ -575,7 +601,7 @@ def rise_line( row, name ):
     """
     before, after = row[ "before" ], row[ "after" ]
     if name == "tokens": return f"ROSE {row[ 'package' ]}: tokens {before[ 'tokens' ]} -> {after[ 'tokens' ]}"
-    return f"ROSE {row[ 'package' ]}: {name} {before[ 'counts' ][ name ]}/{before[ 'tokens' ]} -> {after[ 'counts' ][ name ]}/{after[ 'tokens' ]} per token ({before[ 'rates' ][ name ]} -> {after[ 'rates' ][ name ]} per 1,000)"
+    return f"ROSE {row[ 'package' ]}: {name} {before[ 'counts' ][ name ]}/{before[ 'tokens' ]} -> {after[ 'counts' ][ name ]}/{after[ 'tokens' ]} per token ({shown_rate( before, name )} -> {shown_rate( after, name )} per 1,000)"
 
 
 def check_dashboard( root, base, page ):
@@ -591,8 +617,8 @@ def check_dashboard( root, base, page ):
         - the tree is measured again; a rise is judged from that measurement and never from the page
         - EXIT_ROSE when a compared value of any row has risen, each one printed with its raw counts
         - EXIT_PAGE_STALE when no value rose and a row of the tree has no line on the page, each one named, or the Before line does not name the base commit
-        - EXIT_NUMBERS_STALE when neither holds and the rows block of the page is not byte for byte the fresh one
-        - whenever the rows block differs, one line starting with "WARNING" counts the rows that differ and gives the write command
+        - EXIT_NUMBERS_STALE when neither holds and the rows block of the page is not byte for byte the fresh one; rows in another order, or a row printed twice, count
+        - whenever the rows block differs, one line starting with "WARNING" gives the write command; it counts the rows that differ, or says the rows are in another order or repeated when none does
         - EXIT_OK otherwise
 
     Raises:
@@ -605,10 +631,12 @@ def check_dashboard( root, base, page ):
 
     missing    = [ r[ "package" ] for r in board[ "rows" ] if r[ "package" ] not in names ]
     stale_base = BEFORE_LINE.format( board[ "base" ] ) not in text.split( "\n" )
-    page_rows  = set( rows_block( text ).split( "\n" ) )
-    fresh_rows = set( rows_block( render_dashboard( board ) ).split( "\n" ) )
+    on_page    = rows_block( text )
+    fresh      = rows_block( render_dashboard( board ) )
+    page_rows  = set( on_page.split( "\n" ) )
+    fresh_rows = set( fresh.split( "\n" ) )
     differ     = max( len( fresh_rows - page_rows ), len( page_rows - fresh_rows ) )
-    stale_rows = differ > 0 or page_rows != fresh_rows
+    stale_rows = on_page != fresh
     rose       = [ r for r in board[ "rows" ] if r[ "rose" ] ]
     rises      = [ rise_line( r, name ) for r in rose for name in r[ "rose" ] ]
     fresh      = sum( 1 for r in board[ "rows" ] if r[ "status" ] == "new" )
@@ -616,13 +644,13 @@ def check_dashboard( root, base, page ):
     lines      = [ f"doc-metrics dashboard: {len( board[ 'rows' ] )} rows checked against base {board[ 'base' ]}, {fresh} new, {len( rose )} rose, {len( missing )} not on the page; compared: {', '.join( COMPARED_METRICS )}" ]
     lines     += rises
     lines     += [ f"MISSING {name}: no row on {page}; regenerate with: {regen}" for name in missing ]
-    if stale_rows: lines.append( NUMBERS_LINE.format( page, differ, regen ) )
+    if stale_rows: lines.append( NUMBERS_LINE.format( page, differ, regen ) if differ else ORDER_LINE.format( page, regen ) )
     if stale_base: lines.append( f"STALE {page}: the page does not name base {board[ 'base' ]}; regenerate with: {regen}" )
     if rose or missing or stale_base:
         lines.append( f"DASHBOARD CHECK FAILED: {len( rises )} values rose in {len( rose )} rows; the page {'does not match' if stale_rows or stale_base else 'matches'} the tree." )
         return ( EXIT_ROSE if rose else EXIT_PAGE_STALE ), lines
     if stale_rows:
-        return EXIT_NUMBERS_STALE, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose; the numbers on the page are stale." ]
+        return EXIT_NUMBERS_STALE, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose; the rows on the page are stale." ]
     return EXIT_OK, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose and the page matches the tree." ]
 
 
