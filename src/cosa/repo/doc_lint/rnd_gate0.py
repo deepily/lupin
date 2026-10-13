@@ -17,7 +17,8 @@ because they name docs as examples. None of them is a decision to keep.
 
 The second half of the module applies the manager's ruling on the word "live". A citer holds a doc
 out of history only when its category says so. `resolve` settles the classes over passes, because an
-R&D citer holds a doc only while its own class is in force or new.
+R&D citer holds a doc only while its own class is in force. A decision record never holds. It is
+the extract of the doc it cites, so its citation says where a ruling came from.
 """
 
 import argparse
@@ -39,6 +40,8 @@ NON_CITING = frozenset( {
 
 ARCHIVE_PREFIXES = ( "history/", "todo-history/", "src/cosa/history/", "src/cosa/history.md" )
 
+DECISION_PREFIX = "src/docs/decisions/"
+
 HOLDING_RND_CLASSES = frozenset( { "in force" } )
 
 INDEX_PATHS = ( "src/rnd/README.md", "src/cosa/rnd/README.md" )
@@ -48,7 +51,9 @@ RULING_NOTE = (
     "'live'. A code, test, CLAUDE.md, src/docs, TODO.md or .claude citer holds. History archives, "
     "session manifests and the two root index READMEs never hold; an initiative-folder README holds "
     "like any R&D citer. Rick ruled on 2026-10-12 that an R&D citer holds only while its own class is in force: "
-    "a doc that is itself held as new holds nothing. An R&D citer with no proposed class still holds."
+    "a doc that is itself held as new holds nothing. An R&D citer with no proposed class still holds. "
+    "Rick ruled on 2026-10-13 that a decision record under src/docs/decisions/ never holds: the record "
+    "is the extract, and the doc it cites goes to history."
 )
 
 _KEYS    = ( "live_path_citers", "live_name_citers", "live_stem_citers",
@@ -199,13 +204,15 @@ def citer_kind( path ):
         - returns "archive" for history/, todo-history/, src/cosa/history/, a history.md and a .claude-session.md
         - returns "index" for the two root indexes src/rnd/README.md and src/cosa/rnd/README.md
         - returns "rnd" for any other file under an R&D root, an initiative-folder README included
-        - returns "live" for everything else: code, tests, CLAUDE.md, src/docs, TODO.md and .claude files
+        - returns "decision" for every file under src/docs/decisions/, its README included
+        - returns "live" for everything else: code, tests, CLAUDE.md, the rest of src/docs, TODO.md and .claude files
 
     Raises:
         - nothing
     """
     if path.startswith( ARCHIVE_PREFIXES ) or path == "history.md" or path.endswith( ".claude-session.md" ): return "archive"
     if is_rnd( path ): return "index" if path in INDEX_PATHS else "rnd"
+    if path.startswith( DECISION_PREFIX ): return "decision"
     return "live"
 
 
@@ -234,7 +241,7 @@ def _holds( citer, classes, unswept ):
         - unswept is the set of gate docs that came with no proposed class
 
     Ensures:
-        - a live citer holds, an archive or index citer does not
+        - a live citer holds; an archive, index or decision citer does not
         - an R&D citer holds when its class is in force
         - an R&D citer outside the gate, or in it with no proposed class, holds
         - an R&D citer that is new because a citer holds it does not hold
