@@ -11,7 +11,7 @@ The primary parser extracts that block. A defensive fallback parser does
 best-effort markdown-regex recovery when the fenced block is missing or
 malformed.
 
-Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
+Design: src/docs/decisions/2026.04.19-tfe-to-cc-parallel-claude-code-engine.md
 """
 
 import json

@@ -3,7 +3,7 @@ Abstract base class for commons topic watchers.
 
 A hybrid base class using the template-method pattern.
 
-Design: src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md
+Design: src/docs/decisions/2026.05.09-commons-phase3-push-mode-and-llm-fallback.md
 
 `CommonsTopicWatcher` owns the lifecycle scaffolding shared by all watcher
 subclasses that tail a commons topic and dispatch on matches:

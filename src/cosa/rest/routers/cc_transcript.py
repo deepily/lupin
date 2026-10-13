@@ -2,7 +2,7 @@
 """
 CC transcript console, the REST half: the backlog door and the watchable-seat roster.
 
-Design: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`.
+Design: `src/docs/decisions/2026.09.27-cc-transcript-console-live-stream.md`.
 
 Endpoints:
     - GET /api/cc-transcript/{cc_session_id} — backlog and gap repair, three directions

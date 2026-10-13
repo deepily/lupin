@@ -20,7 +20,7 @@ The last record is the current state. The list is scanned for repeated cap_reach
 
 Pure and never raises.
 
-Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (arbiter fleet view).
+Design: src/docs/decisions/2026.06.04-heartbeat-arbiter-v2-design.md (arbiter fleet view).
 """
 import datetime
 

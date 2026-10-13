@@ -8,7 +8,7 @@ Covers the first-class columns added for notification-native AI<->AI messaging
   - NotificationFifoQueue.push_notification forwards all five to the item.
   - NotificationRepository.create_notification forwards all five to self.create.
 
-Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+Design: src/docs/decisions/2026.06.15-notification-native-ai-to-ai-messaging.md
 
 Zero external dependencies — InputAndOutputTable and the DB session are mocked.
 """

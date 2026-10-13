@@ -15,7 +15,7 @@ Fix: skip _release_voice_persona when payload["reason"] in {"clear", "compact"}.
 Always release on actual termination ("logout", "prompt_input_exit",
 "other", or missing reason for legacy compat).
 
-Design: src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0
+Design: src/docs/decisions/2026.05.02-voice-persona-clear-preservation.md
 """
 
 import sys

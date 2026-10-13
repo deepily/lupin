@@ -7,7 +7,7 @@ block gets every rule. A line run, block or trailing comment gets the reduced se
 applies to Python comments. The first line run of a file, its header, also gets the summary rule.
 Stdlib only apart from the doc_lint modules.
 
-Design: src/rnd/v0.2.2/2026.10.06-ts-js-doc-checker-design.md
+Design: src/docs/decisions/2026.10.06-ts-js-doc-checker.md
 """
 
 import json

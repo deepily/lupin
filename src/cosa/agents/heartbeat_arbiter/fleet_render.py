@@ -16,7 +16,7 @@ The verdict label (`LIVE`, `quiet Nm`, `stale Nm`, `offline`) rides over the age
 
 Pure and never raises.
 
-Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (direct-state fleet render).
+Design: src/docs/decisions/2026.06.04-heartbeat-arbiter-v2-design.md (direct-state fleet render).
 """
 import datetime
 

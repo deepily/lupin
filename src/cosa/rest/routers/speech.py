@@ -45,7 +45,7 @@ def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
     `transcribe()` carries identical OOM-retry semantics and adds the model-server
     HTTP-proxy alternative.
 
-    Design: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    Design: src/docs/decisions/2026.05.16-model-server-carveout.md
     """
     try:
         return whisper_pipeline( path, **kwargs )
@@ -268,7 +268,7 @@ def get_speech_provider() -> SpeechToTextProvider:
     behavior before the model-server carve-out. It stays that way until the lifespan switch
     lands and the compute container is bounced with `LUPIN_MODEL_SERVER_URL` injected.
 
-    Design: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    Design: src/docs/decisions/2026.05.16-model-server-carveout.md
     """
     import lupin_app.main as main_module
     return SpeechToTextProvider(

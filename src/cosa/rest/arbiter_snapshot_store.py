@@ -6,7 +6,7 @@ A thread-safe singleton holds the latest fleet snapshot the Heartbeat Arbiter
 produces, so `:7999` can serve it from a distance. It works like
 `RunningFifoQueue.get_pool_status()`, which backs `GET /api/queue/pool-status`.
 
-Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md
+Design: src/docs/decisions/2026.06.04-heartbeat-arbiter-v2-design.md
 
 Two write paths converge here:
     - **in-pool arbiter** (runs inside the :7999 process) updates this singleton

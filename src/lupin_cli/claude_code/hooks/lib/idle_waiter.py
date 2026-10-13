@@ -8,7 +8,7 @@ fires the "Anything else?" ask via the shared helper. On "no"/timeout,
 spawns a successor at the next backoff index (capped at the schedule's
 last entry).
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/docs/decisions/2026.04.29-idle-aware-stop-hook.md
 
 Invocation:
     python -m lupin_cli.claude_code.hooks.lib.idle_waiter --session-id <session-id> --cc-pid <claude-code-pid> --backoff-index <int>

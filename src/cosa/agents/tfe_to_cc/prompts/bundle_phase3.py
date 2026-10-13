@@ -7,7 +7,7 @@ Builds a coordinator prompt for Claude Code that:
 - Collects subagent results
 - Emits a single structured `tfe-result` fenced JSON block at end-of-run
 
-Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
+Design: src/docs/decisions/2026.04.19-tfe-to-cc-parallel-claude-code-engine.md
 Smoke:  src/rnd/v0.1.6/2026.04.10-test-fix-expediter/21-tfe-to-cc-phase3-live-test.md (execution log)
 """
 

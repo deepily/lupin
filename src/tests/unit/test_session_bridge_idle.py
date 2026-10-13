@@ -8,7 +8,7 @@ Covers:
     - clear_idle_waiter_pid: returns prior PID + clears it
     - kill_idle_waiter: dead-PID guard, no-waiter case, real-PID case
 
-Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+Design: src/docs/decisions/2026.04.29-idle-aware-stop-hook.md
 """
 
 import json

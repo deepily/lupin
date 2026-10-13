@@ -10,7 +10,7 @@ breaks one itself.
 Pure and never raises. The consumer passes the fleet_view (from
 fleet_data_model.build_fleet_view) and acts on the graph.
 
-Design: src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md (arbiter design, cycle detection).
+Design: src/docs/decisions/2026.06.04-heartbeat-arbiter-v2-design.md (arbiter design, cycle detection).
 
 Store corroboration: the `holding_on: peer:X` edges are self-reported and view-derived. A fresh,
 progressing sequencing wait (one session awaiting another's merge and build) reports a ring that

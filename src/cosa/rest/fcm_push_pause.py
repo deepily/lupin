@@ -1,7 +1,7 @@
 """
 Global mobile-push pause — an in-memory override of `fcm wake push enabled`.
 
-Design: src/rnd/v0.2.1/2026.09.29-mobile-push-kill-switch-design.md
+Design: src/docs/decisions/2026.09.29-mobile-push-global-pause.md
 
 The ConfigurationManager is a process-wide singleton and `set_config()` changes memory only,
 never the INI file. So a pause sets the key False in memory and optionally arms a timer that

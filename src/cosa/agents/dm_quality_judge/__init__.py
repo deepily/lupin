@@ -1,7 +1,7 @@
 """
 DM Quality Judge: grades a peer-DM body for brevity, directness and tone.
 
-Design: src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/2026.07.31-dm-verbosity-reduction-phase1-2-plan.md
+Design: src/docs/decisions/2026.07.31-dm-verbosity-reduction-judge.md
 
 This work is the second phase of the DM Verbosity Reduction plan.
 

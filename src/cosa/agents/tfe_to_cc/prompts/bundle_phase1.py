@@ -6,7 +6,7 @@ to diagnose the root causes of failing pytest-test clusters. The clusters
 come from the clustering step. Claude Code emits a structured
 `tfe-diagnosis` JSON block at end-of-run.
 
-Design: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md
+Design: src/docs/decisions/2026.04.19-tfe-to-cc-parallel-claude-code-engine.md
 Live test: src/rnd/v0.1.6/2026.04.10-test-fix-expediter/20-tfe-to-cc-phase1-live-test.md
 """
 

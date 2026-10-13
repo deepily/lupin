@@ -3729,7 +3729,7 @@ def _commons_ask_async_dispatch(
 # processes it directly (~204 tokens) with zero `commons_read` re-fetch, vs the
 # commons claim-check path's ~3,700 tokens/received DM. `commons_send_to` /
 # `commons_ask_async` are deprecated in favor of this.
-# Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+# Design: src/docs/decisions/2026.06.15-notification-native-ai-to-ai-messaging.md
 # ============================================================================
 
 def _dm_send_impl(

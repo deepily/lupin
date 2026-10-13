@@ -7,7 +7,7 @@ the file's fixed scaffolding plus one `<command>` line per `speakable` command i
 registry. The paired test (`test_v2_router_prompt_generator.py`) pins the on-disk file to
 what this emits. That turns the drift guard from a detector into a preventer.
 
-Design: `src/rnd/v0.2.0/2026.08.16-generate-router-prompt-and-corpus-from-registry.md`.
+Design: `src/docs/decisions/2026.08.16-router-prompt-and-corpus-from-registry.md`.
 
 Two invariants hold, so a future editor does not quietly break them:
 

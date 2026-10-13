@@ -1749,7 +1749,7 @@
          * Per-Session Voice Persona Badge
          * (2026-04-28 — sender card header chip showing
          *  the voice this CC session was assigned at SessionStart)
-         * Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+         * Design: src/docs/decisions/2026.04.28-per-session-voice-personas.md
          * ======================================== */
 
         .persona-badge {

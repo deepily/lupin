@@ -22,7 +22,7 @@ Endpoints:
 This is orthogonal to speakerphone mode. A session can have a persona regardless of
 speakerphone_on state. Solo mode's displacement scan does not touch the voice_persona field.
 
-Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+Design: src/docs/decisions/2026.04.28-per-session-voice-personas.md
 """
 
 import asyncio

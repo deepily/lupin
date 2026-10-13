@@ -2330,7 +2330,7 @@ def main():
     # bridge stays without a persona; the speech router falls back to Sam,
     # exactly today's behavior. No SessionStart blocking.
     #
-    # Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+    # Design: src/docs/decisions/2026.04.28-per-session-voice-personas.md
     # Give-up record for Phase 7. None means "no failure to report" — either
     # allocation succeeded or it was never attempted (persona carried forward).
     voice_persona_failure = None

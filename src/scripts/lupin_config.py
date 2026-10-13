@@ -5,7 +5,7 @@ Lupin CLI Configuration Management Utility.
 Manages multi-environment configuration for Lupin CLI tools.
 Handles config file creation, environment management, and connectivity testing.
 
-Design: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
+Design: src/docs/decisions/2025.11.10-notification-api-key-authentication.md
 
 Example:
     lupin-config init                           # Initialize config file
