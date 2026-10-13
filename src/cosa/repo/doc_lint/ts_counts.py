@@ -16,6 +16,7 @@ import sys
 import tempfile
 
 from . import counts, tsdoc_lint
+from .cli import shown
 from .waivers import waiver_state
 from .word_list import configure_root
 
@@ -214,7 +215,7 @@ def main( argv=None, out=None ):
         out.write( f"not checked: {type( err ).__name__}: {err}\n" )
         return EXIT_NOT_CHECKED
     problems = counts.check_table( table, found, stamp )
-    for line in problems: out.write( line + "\n" )
+    for line in problems: out.write( shown( line ) + "\n" )
     out.write( f"{walked} counted files walked, {len( problems )} problems\n" )
     return EXIT_MISMATCH if problems else EXIT_TIGHT
 

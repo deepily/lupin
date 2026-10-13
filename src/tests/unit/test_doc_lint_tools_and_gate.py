@@ -429,7 +429,7 @@ def test_an_added_line_that_looks_like_a_quoted_header_does_not_crash_the_gate( 
     assert "GATE CRASHED" not in err.getvalue() and "[doc-lint] 1 refusals, commit REFUSED" in err.getvalue().split( "\n" )
 
 
-@pytest.mark.parametrize( "text", [ '"a\\"', '"\\9"', '"C:\\path"', '"\\777"', '"\\"', '"\\', '"\\1"' ] )
+@pytest.mark.parametrize( "text", [ '"a\\"', '"\\9"', '"C:\\path"', '"\\777"', '"\\"', '"\\1"', '"\\12"', '"\\400"' ] )
 def test_unquote_path_returns_what_it_cannot_decode_unchanged_and_never_raises( text ):
     assert cr.unquote_path( text ) == text
     assert cr.unquote_path( text + "\t" ) == text + "\t"
@@ -629,6 +629,8 @@ def test_the_merge_rule_reads_the_git_dir_of_a_linked_worktree( repo, monkeypatc
     _git( repo, "branch", "-M", "main" )
     linked = tmp_path / "linked"
     _git( repo, "worktree", "add", "-q", "-b", "side", str( linked ) )
+    ( linked / "src" / "conf" ).mkdir( parents=True )
+    shutil.copy( repo / "src" / "conf" / "dm-tutor-lowercase-words.txt", linked / "src" / "conf" / "dm-tutor-lowercase-words.txt" )
     _stage( linked, { "docs/legacy.md": SEEDED } )
     _git( linked, "commit", "-q", "-m", "side" )
     side = _git( linked, "rev-parse", "HEAD" ).strip()
@@ -756,6 +758,7 @@ def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from
 def test_a_page_moved_to_a_path_that_brings_a_limit_is_refused_since_the_commit_created_the_condition( repo, monkeypatch, old, new, expected ):
     _no_external( monkeypatch )
     _page_base( repo, { old: _page( 45 ) } )
+    ( repo / new ).parent.mkdir( parents=True, exist_ok=True )
     _git( repo, "mv", old, new )
     _stage( repo, { new: _page( 45, changed=( 5, ) ) } )
     assert gate.staged_changes( str( repo ) )[ 1 ] == { new: old }

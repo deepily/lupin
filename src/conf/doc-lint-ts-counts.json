@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "b5bcd98fc4e0d550",
+  "rules_stamp": "2cbacdc80aec6dc8",
   "files": {
     "src/cosa/repo/symindex/ts_extract.js": 2,
     "src/lupin_app/static/html/admin/js/admin-snapshots.js": 6,

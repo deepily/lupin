@@ -13,6 +13,7 @@ import argparse
 import sys
 
 from . import docstring_lint
+from .cli import shown
 from .swept_scope import swept_files
 from .text_rules import Finding
 from .word_list import configure_root
@@ -76,8 +77,8 @@ def report( result, out ):
     """
     findings = result[ "findings" ]
     failed   = len( { f.path for f in findings } )
-    for f in findings: out.write( f"    {f.path}:{f.line}: {f.rule}: {f.message}\n" )
-    for path, line, design in result[ "not_checked" ]: out.write( f"    not checked: {path}:{line}: Design path {design!r} is outside the tree\n" )
+    for f in findings: out.write( f"    {shown( f.path )}:{f.line}: {f.rule}: {f.message}\n" )
+    for path, line, design in result[ "not_checked" ]: out.write( f"    not checked: {shown( path )}:{line}: Design path {design!r} is outside the tree\n" )
     out.write( f"Design paths not checked: {len( result[ 'not_checked' ] )}\n" )
     out.write( f"Docstrings checked: {result[ 'docstrings' ]}\n" )
     out.write( f"Total Tests: {result[ 'files' ]}\n" )

@@ -7,6 +7,8 @@ the files, applies the three modes (--report, --changed, --strict) and prints th
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 
@@ -15,6 +17,46 @@ from .text_rules import Finding
 from .word_list import configure_root
 
 SKIP_SEGMENTS = frozenset( { "tests", ".venv", "node_modules", "site-packages", "__pycache__", "rnd" } )
+SURROGATE     = re.compile( "[\ud800-\udfff]" )
+
+
+def split_names( raw ):
+    """
+    Read the file names of a git listing made with -z.
+
+    Requires:
+        - raw is the bytes git wrote, one name after another, each ended by a NUL byte
+
+    Ensures:
+        - returns the names in git's order, each decoded as the file system decodes a name
+        - a name that is not UTF-8 keeps its bytes, so it can be handed back to git or opened
+
+    Raises:
+        - nothing
+    """
+    return [ os.fsdecode( name ) for name in raw.split( b"\0" ) if name ]
+
+
+def shown( text ):
+    """
+    Make a file name, or a line that holds one, safe to print on one line.
+
+    Requires:
+        - text is a str, which may hold the stand-ins Python uses for bytes that are not UTF-8
+
+    Ensures:
+        - a byte that is not UTF-8 is written as a backslash, an x and two hex digits
+        - a control character, a newline or a tab among them, is written as its backslash escape
+        - every other character is kept, so a name of printable characters comes back unchanged
+        - the result can be written to a strict UTF-8 stream
+
+    Raises:
+        - nothing
+    """
+    def one( ch ):
+        if 0xDC80 <= ord( ch ) <= 0xDCFF: return f"\\x{ord( ch ) - 0xDC00:02x}"
+        return ch if ch.isprintable() else ch.encode( "unicode_escape" ).decode( "ascii" )
+    return "".join( one( ch ) for ch in text )
 
 
 def in_scope( path ):
@@ -53,9 +95,9 @@ def tracked_files( repo_root, suffixes ):
     Raises:
         - RuntimeError naming the git error when ls-files fails
     """
-    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "-z", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
-    if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.strip()}" )
-    return sorted( p for p in res.stdout.split( "\0" ) if p.endswith( suffixes ) and in_scope( p ) )
+    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "-z", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return sorted( p for p in split_names( res.stdout ) if p.endswith( suffixes ) and in_scope( p ) )
 
 
 def build_parser( description ):
@@ -119,7 +161,7 @@ def run_linter( description, suffixes, lint_source, argv, out=None, footer=None 
         json.dump( [ f._asdict() for f in findings ], out, indent=2 )
         out.write( "\n" )
     else:
-        for f in findings: out.write( f"{f.path}:{f.line}: {f.rule}: {f.message}\n" )
+        for f in findings: out.write( f"{shown( f.path )}:{f.line}: {f.rule}: {f.message}\n" )
         out.write( f"{len( findings )} findings in {len( paths )} files\n" )
         if footer is not None: out.write( footer() )
     return 1 if args.strict and findings else 0

@@ -14,6 +14,7 @@ import sys
 from collections import namedtuple
 
 from . import docstring_lint
+from .cli import shown, split_names
 from .swept_scope import is_swept
 from .text_rules import Finding
 from .waivers import waiver_state
@@ -97,9 +98,9 @@ def counted_paths( root ):
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
-    if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.strip()}" )
-    return sorted( p for p in res.stdout.split( "\0" ) if p.endswith( ".py" ) and not is_swept( p ) )
+    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return sorted( p for p in split_names( res.stdout ) if p.endswith( ".py" ) and not is_swept( p ) )
 
 
 def _read_disk( root ):
@@ -364,7 +365,7 @@ def main( argv=None, out=None ):
         out.write( f"not checked: {type( err ).__name__}: {err}\n" )
         return EXIT_NOT_CHECKED
     problems = check_table( table, counts, stamp )
-    for line in problems: out.write( line + "\n" )
+    for line in problems: out.write( shown( line ) + "\n" )
     out.write( f"{walked} counted files walked, {len( problems )} problems\n" )
     return EXIT_MISMATCH if problems else EXIT_TIGHT
 
