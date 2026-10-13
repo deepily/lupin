@@ -8,6 +8,20 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.13 day - Session 44c062fb (Mr. Radio 🦉, manager, skeleton crew, no seats; three bounded reviewer jobs) | Both browser clients send and check the utterance id; row 281a7608 closed
+
+- **Landed on the working branch by me**, fast-forwards, not pushed: `66edf7d4d`, `e67848d74`, `cacfa82ab`, `82c43138c`, `fe0a806a8` (last at 11:22 EDT). The legacy page and the multiplexer each send an `utterance_id` with a speech request and drop a complete or error frame that names another utterance.
+- **Legacy page design** (`notifications.js`): a list of live ids, a set of requests not yet answered, and one held ending frame per live id. A failed request gives its id back; a held frame is acted on once. The multiplexer id no longer ends on half of a surrogate pair.
+- **Reviews**: three read-only reviewer jobs, each on the code. The first two found real bugs (two overlapping failures restored a dead id; a held complete frame was lost when the second request failed); the third found a held error overwritten by a complete frame and a wrong-text cache write. All fixed with a test each.
+- **Tiers at `fe0a806a8`**, run `ts-876315cd` on port 8000: TypeScript 6,059 passed, 0 failed, 1 todo, coverage 100%; e2e half A 471 passed, 1 skipped; half B 525 passed, 2 skipped. Integration was Cheech's run, 479 passed at `59c155252` and `5136dbf4e`. The unit and cosa tiers were not run by me today.
+- **Rick's word today**: "yes" to finishing row `281a7608`, and he admitted the row. Tiffany was told by message; she committed the note in lupin-mobile and filed the phone side as held row `b6f7f302`.
+- **Stop poke**: confirmed off at 10:51 EDT by reading the loader; the cause is the skeleton crew switch. The arbiter's manager poke is a separate path and fired on me at 14:36 and 15:35 EDT.
+- **Slip of mine**: I reported "nothing owed" from the in-progress and queued passes. Rick's row `3a2f726b` (the R&D cleanup, parked for one week) came off its park at 10:15 EDT and I did not see it until the 18:53 checkpoint.
+- **Open**: the test container's Claude login expired 2026-10-11 (blocks auto-fix jobs only). Every `notify` after the 12:24 EDT bounce of port 7999 answered "user not available". Three small nits are on row `281a7608`.
+- **Files**: `src/lupin_app/static/js/notifications.js`, `src/lupin_app/static/js/multiplexer/wireTtsPlayback.ts`, `src/lupin_app/static/html/notifications.html`, `src/tests/unit/notifications_js/a_late_audio_frame_for_another_utterance_is_ignored.test.ts`, `src/tests/unit/multiplexer/wire_tts_playback.test.ts`.
+
+---
+
 ### 2026.10.12 evening - Session 14f0a33b (Mr. Radio 🦉, manager, skeleton crew, no seats; two bounded reviewer jobs)
 
 - **Landed on the working branch by me**, all fast-forwards, not pushed: `7638ad9a3` and `016c27508` (row `87d19d27`: a speech request may carry `utterance_id`, echoed on every JSON frame of its stream); `ff1416bbf` (API docs regenerated, two red unit tests cleared); `e71d9d5da` and `f4b253c34` (row `2f5c2b80`: four git guard regexes linear on blank-line runs, whole hook 2.41 s to 0.07 s on 4000 newlines); `23e72b6aa` (TS/JS doc-lint count table stamp, no entry moved).

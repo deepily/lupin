@@ -16,6 +16,23 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-13 day (Mr. Radio 🦉 `44c062fb`, skeleton crew, no seats)
+
+- **Finish the browser utterance id work** (Rick, voice card, "yes"; he then admitted row `281a7608`). Done and closed at `fe0a806a8`.
+- **Mine, reversible**: the legacy page keeps a list of live ids and holds one ending frame per id, in place of the reviewer's "restore the previous id" fix, which two overlapping failures broke.
+
+### Waiting on Rick
+
+- [ ] Row `3a2f726b` (R&D cleanup, P0): the one-week park ended 2026-10-13 10:15 EDT. His condition for picking it up, the branch committed, pushed and merged, has not happened. Park again or start.
+- [ ] Row `b6f7f302` (Tiffany, held): the phone side of the utterance id.
+- [ ] The test container login: `docker exec -it lupin-rest-test claude /login`.
+- [ ] Ten held rows on my board; the P3 ones are `a798d296`, `cc86889e`, `6afda7d8`.
+
+### Backlog from this session (no row)
+
+- [ ] Archive `history.md`: past the 17k warning line again with this entry; measure before quoting.
+- [ ] Legacy page nits, on row `281a7608`: a stop between two waiting requests can leave a held frame unacted; an ending frame with no id forgets a running stream (the current server sends none); the multiplexer passes on an item id that is already ill-formed.
+
 ## 📚 DECISIONS LOG 2026-10-12 evening (Cheech 🌿 `db0f87c2`, skeleton crew, no seats, bounded jobs only)
 
 - **The Phase 5 gate is lint** (Rick, card "Cheech: Phase 5 gate", a keypress, recorded on row `8fac4769` at 20:25 EDT by the store stamp): "Lint only, fix on contact". I had recommended checking each page against the code. The claim harness on whole pages (row `694849ee`) is dropped; the stale pins and the blind sample on row `4bbeeb39` no longer gate.
@@ -45,8 +62,8 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 ### Backlog from this session (no row; new rows were gated at 20:25 EDT, ratio 1.33)
 
 - [ ] Archive `history.md`: 17.7k tokens projected at 22:36 EDT on 2026-10-12 with this session's entry (warning line 17k, critical 19k). The archive card timed out, so the workflow's default, next session, applies.
-- [ ] Row `281a7608` is in the holding area and I could not request its admit: an admit must name a live ticket of mine to drop, and I had none.
-- [ ] After `48913c4b7` merges, the multiplexer bundle in the main tree's `src/lupin_app/static/dist/` must be rebuilt (`src/scripts/build-multiplexer.sh`) before `:7999` or `:8000` serves the change; then the TypeScript and E2E tiers on `:8000`.
+- [x] (done 2026-10-13) Row `281a7608` is in the holding area and I could not request its admit: an admit must name a live ticket of mine to drop, and I had none.
+- [x] (done 2026-10-13) After `48913c4b7` merges, the multiplexer bundle in the main tree's `src/lupin_app/static/dist/` must be rebuilt (`src/scripts/build-multiplexer.sh`) before `:7999` or `:8000` serves the change; then the TypeScript and E2E tiers on `:8000`.
 - [ ] The stash, commit and config guard regexes are still quadratic on hundreds of assignment-only lines (552 ms per regex at 2,000 lines). Accepted by Rick's ruling above; recorded so nobody re-finds it as new.
 
 ## 📚 DECISIONS LOG 2026-10-10 day to evening (Cheech 🌿 `e281ef6f`; crew Krishna · Rio · Clayton · Arnold · "extra 1" · Rachel · John · "extra 2") — skeleton crew toggle, extractor A2 landed with its gate held, plan 1 phases 5 and 6 side by side
