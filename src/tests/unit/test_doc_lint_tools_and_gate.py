@@ -2,7 +2,7 @@
 The external-tool runners, the commit gate, and the pre-commit chain wrapper.
 
 The gate's promises are checked here. A missing tool prints a loud line. A crash never blocks a commit.
-With --blocking, a finding on a staged line refuses the commit, except in the root history.md and TODO.md.
+With --blocking, a finding on a staged line refuses the commit, except in the six record locations.
 The chain tests run the real pre-commit-chain.sh in a scratch repository.
 """
 
@@ -267,11 +267,14 @@ def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatc
     assert "0 findings on staged lines (blocking)" in err.getvalue()
 
 
-# ---- blocking, and the two files it leaves in warn mode ---------------------------------------
+# ---- blocking, and the six record locations it leaves in warn mode ----------------------------
 
 SEEDED    = "This is NOT fine.\n"
 CAPS      = "caps: ALL-CAPS word NOT"
 WARN_MARK = " (warn mode, commit allowed)"
+WARN_SET  = "history.md or TODO.md or bug-fix-queue.md or src/cosa/history.md or history/ or todo-history/"
+RECORDS   = [ "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ALIKE     = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md" ]
 REFUSE_1  = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
 
 
@@ -281,25 +284,28 @@ def _blocking( repo ):
     return rc, err.getvalue().split( "\n" )
 
 
-def test_the_warn_only_paths_are_exactly_the_root_history_and_todo_files():
-    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md" ) and gate.WARN_ONLY_PREFIXES == ()
-    for path in gate.WARN_ONLY_PATHS: assert gate.is_warn_only( path )
-    for path in ( "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "" ): assert not gate.is_warn_only( path )
+def test_the_warn_only_set_is_exactly_four_record_files_and_two_record_folders():
+    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md" )
+    assert gate.WARN_ONLY_PREFIXES == ( "history/", "todo-history/" )
+    assert len( RECORDS ) == 6 and len( ALIKE ) == 8
+    for path in RECORDS: assert gate.is_warn_only( path ), path
+    for path in ALIKE: assert not gate.is_warn_only( path ), path
+    for path in ( "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "history", "todo-history", "" ): assert not gate.is_warn_only( path ), path
 
 
-@pytest.mark.parametrize( "rel", [ "history.md", "TODO.md" ] )
+@pytest.mark.parametrize( "rel", RECORDS )
 def test_blocking_prints_a_finding_in_a_warn_only_file_with_the_marking_and_allows_the_commit( repo, monkeypatch, rel ):
     _no_external( monkeypatch )
     _stage( repo, { rel: SEEDED } )
     rc, lines = _blocking( repo )
     assert rc == 0
     assert f"[doc-lint] {rel}:1: {CAPS}{WARN_MARK}" in lines
-    assert "[doc-lint] 1 findings in history.md or TODO.md (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert f"[doc-lint] 1 findings in {WARN_SET}{WARN_MARK}" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
     assert not [ ln for ln in lines if "REFUSED" in ln ]
 
 
-@pytest.mark.parametrize( "rel", [ "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "docs/TODO.md" ] )
-def test_blocking_refuses_a_finding_in_a_history_or_todo_file_that_is_not_at_the_root( repo, monkeypatch, rel ):
+@pytest.mark.parametrize( "rel", ALIKE + [ "docs/history.md", "docs/TODO.md" ] )
+def test_blocking_refuses_a_finding_in_a_file_that_only_looks_like_a_record_location( repo, monkeypatch, rel ):
     _no_external( monkeypatch )
     _stage( repo, { rel: SEEDED } )
     rc, lines = _blocking( repo )
@@ -316,7 +322,7 @@ def test_blocking_refuses_for_the_other_file_when_a_warn_only_file_also_holds_a_
     refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
     assert refused == [ f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" ]
     assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] TODO.md:1: {CAPS}{WARN_MARK}" in lines
-    assert "[doc-lint] 2 findings in history.md or TODO.md (warn mode, commit allowed)" in lines and REFUSE_1 in lines
+    assert f"[doc-lint] 2 findings in {WARN_SET}{WARN_MARK}" in lines and REFUSE_1 in lines
 
 
 def test_blocking_refuses_a_python_finding_on_a_touched_line_whichever_linter_reports_it( repo, monkeypatch ):
@@ -337,7 +343,7 @@ def test_blocking_counts_a_swept_refusal_and_a_finding_on_a_staged_line_each_on_
     assert rc == gate.REFUSAL_EXIT
     assert "[doc-lint] 1 refusals, commit REFUSED" in lines and REFUSE_1 in lines
     assert f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines
-    assert "[doc-lint] 1 findings in history.md or TODO.md (warn mode, commit allowed)" in lines
+    assert f"[doc-lint] 1 findings in {WARN_SET}{WARN_MARK}" in lines
 
 
 def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is_refused( repo, monkeypatch ):
@@ -353,11 +359,13 @@ def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is
 
 def test_an_empty_prefix_tuple_excepts_nothing( monkeypatch ):
     monkeypatch.setattr( gate, "WARN_ONLY_PATHS", () )
+    monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", () )
     for path in ( "history.md", "TODO.md", "history/2026-01.md", "docs/p.md", "" ): assert not gate.is_warn_only( path )
 
 
 def test_a_prefix_entry_excepts_the_files_under_that_folder_and_no_sibling_that_starts_with_the_same_letters( repo, monkeypatch ):
     _no_external( monkeypatch )
+    monkeypatch.setattr( gate, "WARN_ONLY_PATHS", ( "history.md", "TODO.md" ) )
     monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "history/", ) )
     for path in ( "history/2026-01.md", "history/deep/er.md", "history.md", "TODO.md" ): assert gate.is_warn_only( path )
     for path in ( "history-old/x.md", "historyx.md", "src/history/x.md", "history", "docs/history/x.md" ): assert not gate.is_warn_only( path )

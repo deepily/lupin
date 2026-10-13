@@ -10,6 +10,7 @@ Nothing is pushed and pytest deletes the directory.
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -30,7 +31,10 @@ CHAIN_REFUSE  = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each R
 CHAIN_ALLOW_1 = "[pre-commit-chain] doc-lint gate exited 1 without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase."
 GATE_CRASH    = "[doc-lint] GATE CRASHED, commit allowed: RuntimeError: injected linter crash"
 GATE_REFUSE   = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
-WARN_SUMMARY  = "[doc-lint] 1 findings in history.md or TODO.md (warn mode, commit allowed)"
+WARN_SET      = "history.md or TODO.md or bug-fix-queue.md or src/cosa/history.md or history/ or todo-history/"
+WARN_SUMMARY  = f"[doc-lint] 1 findings in {WARN_SET} (warn mode, commit allowed)"
+RECORDS       = [ "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ALIKE         = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md" ]
 CLEAN_LINE    = "[doc-lint] 0 findings on staged lines (blocking)"
 DOCSTRING_PY  = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
 COMMENT_PY    = "x = 1  # This is NOT fine.\n"
@@ -70,6 +74,13 @@ def _stage( root, files ):
 def _commit( root ):
     """Make a real commit attempt through the hook and return the finished process."""
     return _git( root, "commit", "-q", "-m", "a commit made by the demonstration", check=False )
+
+
+def _gate( root ):
+    """Run the gate module in root, as the chain does, and return the finished process."""
+    env = { **os.environ, "LUPIN_ROOT": str( root ), "PYTHONPATH": str( root / "src" ) }
+    cmd = [ sys.executable, "-m", "cosa.repo.doc_lint.gate", "--blocking", "--repo-root", str( root ) ]
+    return subprocess.run( cmd, capture_output=True, text=True, env=env, cwd=str( root ) )
 
 
 def _baseline( root, files ):
@@ -196,8 +207,28 @@ def test_an_older_gate_under_the_new_chain_commits_and_the_chain_says_the_findin
     assert _commit_count( scratch ) == 1 and _committed_paths( scratch ) == [ "docs/p.md" ]
 
 
-@pytest.mark.parametrize( "rel", [ "history.md", "TODO.md" ] )
-def test_a_seeded_finding_in_the_root_history_or_todo_file_is_committed_with_the_warn_marking( scratch, rel ):
+@pytest.mark.parametrize( "rel", RECORDS )
+def test_the_gate_entry_point_exits_zero_and_marks_a_finding_in_a_record_location( scratch, rel ):
+    _stage( scratch, { rel: SEEDED } )
+    res   = _gate( scratch )
+    lines = res.stderr.split( "\n" )
+    assert res.returncode == 0
+    assert f"[doc-lint] {rel}:3: {CAPS}{WARN_MARK}" in lines and WARN_SUMMARY in lines and CLEAN_LINE in lines
+    assert "REFUSED" not in res.stderr and "CRASHED" not in res.stderr
+
+
+@pytest.mark.parametrize( "rel", ALIKE )
+def test_the_gate_entry_point_exits_three_on_a_finding_in_a_look_alike_of_a_record_location( scratch, rel ):
+    _stage( scratch, { rel: SEEDED } )
+    res   = _gate( scratch )
+    lines = res.stderr.split( "\n" )
+    assert res.returncode == 3
+    assert f"[doc-lint] REFUSED {rel}:3: {CAPS}" in lines and GATE_REFUSE in lines
+    assert WARN_MARK not in res.stderr and "CRASHED" not in res.stderr
+
+
+@pytest.mark.parametrize( "rel", RECORDS )
+def test_a_seeded_finding_in_a_record_location_is_committed_with_the_warn_marking( scratch, rel ):
     _stage( scratch, { rel: SEEDED } )
     res = _commit( scratch )
     assert res.returncode == 0
@@ -206,8 +237,8 @@ def test_a_seeded_finding_in_the_root_history_or_todo_file_is_committed_with_the
     assert _commit_count( scratch ) == 1 and _committed_paths( scratch ) == [ rel ]
 
 
-@pytest.mark.parametrize( "rel", [ "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "docs/TODO.md" ] )
-def test_the_same_finding_in_another_history_or_todo_file_stops_a_real_commit( scratch, rel ):
+@pytest.mark.parametrize( "rel", ALIKE + [ "docs/history.md", "docs/TODO.md" ] )
+def test_the_same_finding_in_a_look_alike_of_a_record_location_stops_a_real_commit( scratch, rel ):
     _stage( scratch, { rel: SEEDED } )
     res = _commit( scratch )
     assert res.returncode == 1
