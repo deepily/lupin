@@ -31,18 +31,21 @@ from .sweep_packages import split_packages
 from .swept_scope import is_swept
 from .word_list import configure_root
 
-SUFFIXES         = ( ".py", ".dart" )
+SUFFIXES           = ( ".py", ".dart" )
 # The commit the documentation spec measured. The dashboard's before values are computed at it.
-BASE_SHA         = "456422492f308a60dafa36325102229947c44147"
-DASHBOARD_PATH   = "src/docs/doc-metrics-dashboard.md"
+BASE_SHA           = "456422492f308a60dafa36325102229947c44147"
+DASHBOARD_PATH     = "src/docs/doc-metrics-dashboard.md"
 # The values the dashboard check compares. To compare the token count as well, add "tokens" to this tuple.
-COMPARED_METRICS = MARKER_COLUMNS
-EXIT_OK          = 0
-EXIT_ROSE        = 1
-EXIT_NOT_CHECKED = 2
-EXIT_PAGE_STALE  = 3
-MODULE_COMMAND   = "PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard"
-BEFORE_LINE      = "- Before: commit `{}`"
+COMPARED_METRICS   = MARKER_COLUMNS
+EXIT_OK            = 0
+EXIT_ROSE          = 1
+EXIT_NOT_CHECKED   = 2
+EXIT_PAGE_STALE    = 3
+# Only the numbers on the page are stale. The merge gate reads this one as a pass with a warning.
+EXIT_NUMBERS_STALE = 4
+MODULE_COMMAND     = "PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard"
+BEFORE_LINE        = "- Before: commit `{}`"
+NUMBERS_LINE       = "WARNING {}: the numbers on the page are stale, {} of its rows differ from the tree; regenerate with: {}"
 
 
 def _git( root, *args ):
@@ -511,7 +514,8 @@ def render_dashboard( board ):
         "The check measures the tree again and does not read the numbers on this page.",
         "A marker has risen when its rate is higher and its raw count is higher too.",
         "The check exits 0 when no compared value rose and the rows below are the rows of the tree. It exits 1 when one rose.",
-        "It exits 2 when it could not check. It exits 3 when the rows below differ from the tree or this page names another before commit.",
+        "It exits 2 when it could not check. It exits 3 when a row is missing below or this page names another before commit.",
+        "It exits 4 when only the numbers below are stale. The merge gate passes on 4 and prints a warning.",
         "",
         "## Rows",
         "",
@@ -586,8 +590,9 @@ def check_dashboard( root, base, page ):
         - the last line is the verdict and starts with "DASHBOARD CHECK PASSED" or "DASHBOARD CHECK FAILED"
         - the tree is measured again; a rise is judged from that measurement and never from the page
         - EXIT_ROSE when a compared value of any row has risen, each one printed with its raw counts
-        - EXIT_PAGE_STALE when no value rose and the rows block of the page is not byte for byte the fresh one, or its Before line does not name the base commit
-        - a row of the tree with no line on the page is named on its own line
+        - EXIT_PAGE_STALE when no value rose and a row of the tree has no line on the page, each one named, or the Before line does not name the base commit
+        - EXIT_NUMBERS_STALE when neither holds and the rows block of the page is not byte for byte the fresh one
+        - whenever the rows block differs, one line starting with "WARNING" counts the rows that differ and gives the write command
         - EXIT_OK otherwise
 
     Raises:
@@ -600,7 +605,10 @@ def check_dashboard( root, base, page ):
 
     missing    = [ r[ "package" ] for r in board[ "rows" ] if r[ "package" ] not in names ]
     stale_base = BEFORE_LINE.format( board[ "base" ] ) not in text.split( "\n" )
-    stale_rows = rows_block( text ) != rows_block( render_dashboard( board ) )
+    page_rows  = set( rows_block( text ).split( "\n" ) )
+    fresh_rows = set( rows_block( render_dashboard( board ) ).split( "\n" ) )
+    differ     = max( len( fresh_rows - page_rows ), len( page_rows - fresh_rows ) )
+    stale_rows = differ > 0 or page_rows != fresh_rows
     rose       = [ r for r in board[ "rows" ] if r[ "rose" ] ]
     rises      = [ rise_line( r, name ) for r in rose for name in r[ "rose" ] ]
     fresh      = sum( 1 for r in board[ "rows" ] if r[ "status" ] == "new" )
@@ -608,13 +616,14 @@ def check_dashboard( root, base, page ):
     lines      = [ f"doc-metrics dashboard: {len( board[ 'rows' ] )} rows checked against base {board[ 'base' ]}, {fresh} new, {len( rose )} rose, {len( missing )} not on the page; compared: {', '.join( COMPARED_METRICS )}" ]
     lines     += rises
     lines     += [ f"MISSING {name}: no row on {page}; regenerate with: {regen}" for name in missing ]
-    if stale_rows: lines.append( f"STALE {page}: the rows on the page are not the rows of the tree; regenerate with: {regen}" )
+    if stale_rows: lines.append( NUMBERS_LINE.format( page, differ, regen ) )
     if stale_base: lines.append( f"STALE {page}: the page does not name base {board[ 'base' ]}; regenerate with: {regen}" )
-    if not rose and not stale_rows and not stale_base:
-        return EXIT_OK, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose and the page matches the tree." ]
-    lines.append( f"DASHBOARD CHECK FAILED: {len( rises )} values rose in {len( rose )} rows; the page {'does not match' if stale_rows or stale_base else 'matches'} the tree." )
-    if rose: return EXIT_ROSE, lines
-    return EXIT_PAGE_STALE, lines
+    if rose or missing or stale_base:
+        lines.append( f"DASHBOARD CHECK FAILED: {len( rises )} values rose in {len( rose )} rows; the page {'does not match' if stale_rows or stale_base else 'matches'} the tree." )
+        return ( EXIT_ROSE if rose else EXIT_PAGE_STALE ), lines
+    if stale_rows:
+        return EXIT_NUMBERS_STALE, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose; the numbers on the page are stale." ]
+    return EXIT_OK, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose and the page matches the tree." ]
 
 
 def dashboard_main( argv, out ):

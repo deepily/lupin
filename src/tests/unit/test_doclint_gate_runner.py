@@ -243,7 +243,7 @@ def test_a_before_commit_the_repo_does_not_hold_refuses( repo ):
     ( 'if __name__ == "__main__": raise ValueError( "boom" )\n', "REFUSING: the dashboard check exited 1 without a verdict line. Nothing was checked." ),
     ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK EXPLODED: no check ran" )\n    sys.exit( 3 )\n', "REFUSING: the dashboard check exited 3 without a verdict line. Nothing was checked." ),
     ( 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n', "REFUSING: the dashboard check exited 7, which is not a check result. Nothing was checked." ),
-    ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK PASSED: 1 rows, the numbers on the page are stale." )\n    sys.exit( 4 )\n', "REFUSING: the dashboard check exited 4 without its warning line. Nothing was checked." )
+    ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK FAILED: a verdict line with no warning line before it" )\n    sys.exit( 4 )\n', "REFUSING: the dashboard check exited 4 without its warning line. Nothing was checked." )
 ] )
 def test_a_dashboard_check_that_dies_is_refused_not_read_as_a_rise( repo, body, said ):
     _write( repo, "src/app/a.py", CLEAN )

@@ -356,7 +356,7 @@ def test_check_recomputes_from_the_tree_and_does_not_trust_the_page( repo ):
     assert "rose" not in _table( page )[ 5 ][ -1 ] and "250.0" not in " ".join( _table( page )[ 5 ] )
     rc, text = _dash( repo, "check" )
     assert rc == dm.EXIT_ROSE and "ROSE src/scripts: em_dash 0/4 -> 1/4" in text
-    assert f"WARNING {PAGE}: the numbers on the page are stale, 1 of its rows differ from the tree; regenerate with: " in text
+    assert f"WARNING {PAGE}: the numbers on the page are stale, 2 of its rows differ from the tree; regenerate with: " in text, "the second replace also changes the cell 250.0 -> 250.0 of src/app/sub"
     assert text.endswith( "DASHBOARD CHECK FAILED: 1 values rose in 1 rows; the page does not match the tree.\n" )
 
 
@@ -540,7 +540,7 @@ MUTANTS = [
     ( "return name == \"tokens\" or after[ \"counts\" ][ name ] > before[ \"counts\" ][ name ]", "return True", "test_fewer_tokens_with_the_same_marker_count_pass_the_check" ),
     ( "return name == \"tokens\" or after[ \"counts\" ][ name ] > before[ \"counts\" ][ name ]", "return name == \"tokens\" or after[ \"counts\" ][ name ] >= before[ \"counts\" ][ name ]", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
     ( "return [ name for name in COMPARED_METRICS if has_risen( before, after, name ) ]", "return [ name for name in MARKER_COLUMNS if has_risen( before, after, name ) ]", "test_more_tokens_fail_the_check_when_the_constant_also_names_tokens" ),
-    ( "COMPARED_METRICS = MARKER_COLUMNS", "COMPARED_METRICS = ( *MARKER_COLUMNS, \"tokens\" )", "test_more_tokens_alone_pass_the_check_under_the_marker_rates_setting" ),
+    ( "COMPARED_METRICS   = MARKER_COLUMNS", "COMPARED_METRICS   = ( *MARKER_COLUMNS, \"tokens\" )", "test_more_tokens_alone_pass_the_check_under_the_marker_rates_setting" ),
     ( "board  = build_dashboard( root, base )\n    names  = page_packages( text )", "board  = build_dashboard( root, base, \"HEAD\" )\n    names  = page_packages( text )", "test_check_exits_1_and_names_the_package_and_the_raw_counts_when_a_rate_rose" ),
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = []", "test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page" ),
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if not any( n.startswith( r[ \"package\" ] ) for n in names ) ]", "test_a_missing_row_is_matched_by_its_whole_name_and_not_by_a_prefix" ),
