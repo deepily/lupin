@@ -311,12 +311,29 @@ def test_an_initiative_folder_readme_holds_a_doc_like_any_other_rnd_citer():
     assert final[ A ][ "holding_citers" ] == [ "src/rnd/v0.1.7/x/README.md" ]
 
 
-@pytest.mark.parametrize( "citer_class", [ "in force", "new" ] )
-def test_an_rnd_citer_classed_in_force_or_new_holds_a_doc( citer_class ):
+def test_an_rnd_citer_classed_in_force_holds_a_doc():
     gate  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry() }
-    final = rnd_gate0.resolve( gate, { A: "history", B: citer_class } )
+    final = rnd_gate0.resolve( gate, { A: "history", B: "in force" } )
     assert final[ A ][ "class" ] == "new"
     assert final[ A ][ "holding_citers" ] == [ B ]
+
+
+def test_the_only_rnd_class_that_holds_is_in_force():
+    assert rnd_gate0.HOLDING_RND_CLASSES == frozenset( { "in force" } )
+
+
+def test_an_rnd_citer_that_is_itself_held_as_new_does_not_hold_a_doc():
+    gate  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry( live_path_citers=[ "src/docs/guide.md" ] ) }
+    final = rnd_gate0.resolve( gate, { A: "history", B: "history" } )
+    assert final[ B ][ "class" ] == "new"
+    assert final[ A ][ "class" ] == "history"
+    assert final[ A ][ "holding_citers" ] == [] and final[ A ][ "free_citers" ] == [ B ]
+
+
+def test_two_would_be_history_docs_that_cite_each_other_both_stay_history():
+    gate  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry( rnd_path_citers=[ A ] ) }
+    final = rnd_gate0.resolve( gate, { A: "history", B: "history" } )
+    assert [ final[ d ][ "class" ] for d in ( A, B ) ] == [ "history", "history" ]
 
 
 def test_an_rnd_citer_not_yet_classified_holds_a_doc():
@@ -343,10 +360,18 @@ def test_an_rnd_citer_classed_history_or_superseded_does_not_hold_a_doc( citer_c
     assert final[ A ][ "free_citers" ] == [ B ]
 
 
-def test_the_classes_settle_over_passes_until_nothing_changes():
+def test_a_live_citer_holds_only_the_doc_it_names_not_the_chain_behind_it():
     gate  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry( rnd_path_citers=[ C ] ), C: _entry( live_path_citers=[ "src/docs/guide.md" ] ) }
     final = rnd_gate0.resolve( gate, { A: "history", B: "history", C: "history" } )
-    assert [ final[ d ][ "class" ] for d in ( A, B, C ) ] == [ "new", "new", "new" ]
+    assert [ final[ d ][ "class" ] for d in ( A, B, C ) ] == [ "history", "history", "new" ]
+
+
+def test_the_result_does_not_depend_on_the_order_of_the_docs():
+    forward  = { A: _entry( rnd_path_citers=[ B ] ), B: _entry( live_path_citers=[ "src/docs/guide.md" ] ) }
+    backward = { B: forward[ B ], A: forward[ A ] }
+    proposed = { A: "history", B: "history" }
+    one, two = rnd_gate0.resolve( forward, proposed ), rnd_gate0.resolve( backward, proposed )
+    assert { d: one[ d ][ "class" ] for d in one } == { d: two[ d ][ "class" ] for d in two } == { A: "history", B: "new" }
 
 
 def test_a_chain_cited_only_by_history_docs_stays_history():
@@ -383,9 +408,10 @@ def test_the_precedent_check_names_every_doc_that_came_out_history():
     assert rnd_gate0.precedent_violations( final, [ C, B, A, "src/rnd/not-in-census.md" ] ) == [ A, C ]
 
 
-def test_the_ruling_note_marks_the_rule_as_the_managers_and_open_to_change():
-    assert "2026-10-09" in rnd_gate0.RULING_NOTE
-    assert "Rick may change it" in rnd_gate0.RULING_NOTE
+def test_the_ruling_note_names_both_rulings_and_who_made_each():
+    assert "manager's ruling of 2026-10-09" in rnd_gate0.RULING_NOTE
+    assert "Rick ruled on 2026-10-12" in rnd_gate0.RULING_NOTE
+    assert "only while its own class is in force" in rnd_gate0.RULING_NOTE
 
 
 def test_the_cli_resolves_a_proposed_class_file_into_final_classes( tmp_path, capsys ):
