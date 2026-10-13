@@ -5061,7 +5061,7 @@ class NotificationsUI {
      *
      * Ensures:
      *     - a frame naming another utterance reaches no handler; it is held when
-     *       that utterance is still live, and dropped otherwise
+     *       that utterance is still live and holds no frame yet, and dropped otherwise
      *     - any other frame reaches handleAudioComplete or handleTTSError, once
      *     - a handled frame that carries an id ends that utterance; one with no
      *       id ends every utterance not waiting for its reply
@@ -5069,7 +5069,9 @@ class NotificationsUI {
     receiveEndingFrame( envelope ) {
         if ( this.namesAnotherUtterance( envelope ) ) {
             this.log( `[AUDIO WS] Ignoring ${envelope.type} for another utterance: ${envelope.utterance_id}` );
-            if ( this.liveUtteranceIds.includes( envelope.utterance_id ) ) this.heldEndingFrames.set( envelope.utterance_id, envelope );
+            // The first ending frame of a stream is the one that counts: the server sends an error, then a complete.
+            const holdIt = this.liveUtteranceIds.includes( envelope.utterance_id ) && !this.heldEndingFrames.has( envelope.utterance_id );
+            if ( holdIt ) this.heldEndingFrames.set( envelope.utterance_id, envelope );
             return;
         }
         if ( typeof envelope.utterance_id === "string" ) {
@@ -5109,13 +5111,18 @@ class NotificationsUI {
      * Ensures:
      *     - minted is no longer live and no longer waiting for a reply
      *     - the expected id is the newest id still live, or null when none is
-     *     - an ending frame held for the id now expected is acted on
+     *     - an ending frame held for the id now expected is acted on, and its
+     *       audio is not cached
      */
     abandonUtteranceId( minted ) {
         this.requestAnswered( minted );
         this.keepLiveUtteranceIds( ( id ) => id !== minted );
         const held = this.heldEndingFrames.get( this.expectedUtteranceId );
-        if ( held ) this.receiveEndingFrame( held );
+        if ( held ) {
+            // The text on hand is the failed request's, so the older stream's audio must not be cached under it.
+            this.currentTTSText = null;
+            this.receiveEndingFrame( held );
+        }
     }
 
     /**

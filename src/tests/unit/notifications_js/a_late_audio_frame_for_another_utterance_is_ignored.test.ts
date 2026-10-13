@@ -548,3 +548,39 @@ test("an id-less frame does not forget a request still waiting for its reply", a
   assert.equal( ui.expectedUtteranceId, idA );
   held[ 0 ]!.ok(); await a;
 });
+
+test("the server's error then complete for a held stream: the error is the one acted on", async () => {
+  const ui = newUI();
+  await ui.playInstantTTS( "A" );
+  const idA  = ui.expectedUtteranceId;
+  const held = heldFetch();
+  const b = assert.rejects( ui.playInstantTTS( "B" ), /down/ ); await tick();
+  frame( ui, "tts_error", idA );
+  frame( ui, "audio_streaming_complete", idA );
+  held[ 0 ]!.fail( new Error( "down" ) ); await b;
+  assert.deepEqual( reached, [ `error ${ idA }` ] );
+});
+
+test("a held complete acted on after a failed reliable request does not cache audio under that request's text", async () => {
+  const ui = newRealUI();
+  const saved: string[] = [];
+  let   played = 0;
+  ui.audioCacheInitialized = true;
+  ui.audioCache            = {
+    saveToCache : async ( text: string ): Promise<void> => { saved.push( text ); },
+    getStats    : (): Record<string, unknown> => ( { stores: 0, hitRate: "0%" } ),
+  };
+  ui.playCollectedAudio = (): void => { played += 1; };
+  ui.currentTTSText = "text A";
+  await ui.playReliableTTS( "A" );
+  const idA  = ui.expectedUtteranceId;
+  const held = heldFetch();
+  ui.currentTTSText = "text B";
+  const b = assert.rejects( ui.playReliableTTS( "B" ), /down/ ); await tick();
+  ui.audioChunks = [ new Uint8Array( [ 1, 2, 3 ] ) ];
+  frame( ui, "audio_streaming_complete", idA );
+  held[ 0 ]!.fail( new Error( "down" ) ); await b; await tick();
+  assert.deepEqual( saved, [], "A's leftover audio was cached under B's text" );
+  assert.equal( played, 1, "the held frame did not reach the real handler" );
+  assert.deepEqual( reached, [ "indicator stopped" ] );
+});
