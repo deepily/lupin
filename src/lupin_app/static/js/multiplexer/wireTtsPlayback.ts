@@ -128,7 +128,8 @@ export function wireTtsPlayback(
     // first stream must not be taken for the second.
     requestCount += 1;
     // The server refuses an id over 255 characters, so a long item id is cut.
-    const utteranceId = `${ active.id_hash.slice( 0, 200 ) }:${ requestCount }`;
+    // A cut that lands inside a surrogate pair leaves half a character, so that half is dropped.
+    const utteranceId = `${ active.id_hash.slice( 0, 200 ).replace( /[\uD800-\uDBFF]$/, "" ) }:${ requestCount }`;
     const body: { text: string; session_id: string; utterance_id: string; voice_id?: string } = {
       text         : active.ttsText ?? "",
       session_id   : sessionId,

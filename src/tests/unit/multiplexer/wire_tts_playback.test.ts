@@ -407,6 +407,20 @@ test("utterance id: the id is one the server accepts: a non-empty string of at m
   assert.equal( utteranceIdOf( api.calls[ 1 ]! ), `${ "x".repeat( 200 ) }:2` );
 });
 
+test("utterance id: a cut that lands inside a surrogate pair drops the half character", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
+  // 199 one-unit characters, then a two-unit character: the cut at 200 falls between its halves.
+  q.setActive( item( "x".repeat( 199 ) + "\u{1F989}" + "tail" ) ); emitChange( bus, "split" );
+  // The same character one place earlier fits whole and is kept.
+  q.setActive( item( "x".repeat( 198 ) + "\u{1F989}" + "tail" ) ); emitChange( bus, "whole" );
+  assert.equal( utteranceIdOf( api.calls[ 0 ]! ), `${ "x".repeat( 199 ) }:1` );
+  assert.equal( utteranceIdOf( api.calls[ 1 ]! ), `${ "x".repeat( 198 ) }\u{1F989}:2` );
+  for ( const call of api.calls ) assert.equal( ( utteranceIdOf( call ) as string ).isWellFormed(), true );
+});
+
 test("utterance id: tts_request_started with its id is emitted before the request leaves", () => {
   const bus   = createEventBusForTesting();
   const q     = makeActiveReader();

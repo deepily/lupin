@@ -642,6 +642,7 @@ class NotificationsUI {
         // The utterance id of the newest speech request, echoed back on its frames.
         this.expectedUtteranceId = null;
         this.utteranceCounter    = 0;
+        this.utterancePrefix     = null;
         
         // Authentication
         this.currentUserEmail = null;
@@ -5015,12 +5016,37 @@ class NotificationsUI {
      *
      * Ensures:
      *     - returns a non-empty string, different from every id this page minted before
+     *     - the string carries a prefix drawn once per page load, so the ids of a
+     *       reloaded page do not repeat those of the page before it
      *     - this.expectedUtteranceId holds the same string
      */
     nextUtteranceId() {
+        // The audio session id outlives a reload and the counter does not.
+        if ( !this.utterancePrefix ) this.utterancePrefix = Math.random().toString( 36 ).slice( 2, 10 ) || "0";
         this.utteranceCounter    = ( this.utteranceCounter || 0 ) + 1;
-        this.expectedUtteranceId = `legacy:${this.utteranceCounter}`;
+        this.expectedUtteranceId = `legacy:${this.utterancePrefix}:${this.utteranceCounter}`;
         return this.expectedUtteranceId;
+    }
+
+    /**
+     * Take back the id of a speech request that failed, so the stream before it can still end.
+     *
+     * A request that fails starts no stream, so no frame will ever carry its id.
+     * Left as the expected id, it made the page drop the complete frame of the
+     * utterance still playing. The card kept pulsing and the queue stopped.
+     *
+     * Requires:
+     *     - minted is the id nextUtteranceId returned for the failed request, or
+     *       null when the request failed before one was minted
+     *     - previous is this.expectedUtteranceId as it was before that call
+     *
+     * Ensures:
+     *     - when the failed request's id is still the expected one, the expected
+     *       id is previous again
+     *     - when a later request has already replaced it, nothing changes
+     */
+    abandonUtteranceId( minted, previous ) {
+        if ( minted !== null && this.expectedUtteranceId === minted ) this.expectedUtteranceId = previous;
     }
 
     /**
@@ -5047,6 +5073,9 @@ class NotificationsUI {
         // Start pulsing indicator on notification card
         this.startTTSPlayingIndicator( this.currentNotificationId );
 
+        const previousUtteranceId = this.expectedUtteranceId || null;
+        let   mintedUtteranceId   = null;
+
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
@@ -5065,7 +5094,8 @@ class NotificationsUI {
             };
             if ( voiceId ) ttsBody.voice_id = voiceId;
             // Set before the fetch: the socket can deliver frames before the reply arrives.
-            ttsBody.utterance_id = this.nextUtteranceId();
+            mintedUtteranceId    = this.nextUtteranceId();
+            ttsBody.utterance_id = mintedUtteranceId;
             const response = await fetch( '/api/get-speech-elevenlabs', {
                 method: 'POST',
                 headers: {
@@ -5096,6 +5126,7 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Instant TTS request failed:", error );
+            this.abandonUtteranceId( mintedUtteranceId, previousUtteranceId );
             throw error;
         }
     }
@@ -5114,6 +5145,9 @@ class NotificationsUI {
         this.startTime = Date.now(); // Track timing for reliable mode
         this.metricsTTSStartTime = Date.now(); // Capture TTS start for TTFA metric
 
+        const previousUtteranceId = this.expectedUtteranceId || null;
+        let   mintedUtteranceId   = null;
+
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
@@ -5127,7 +5161,8 @@ class NotificationsUI {
             };
             if ( voiceId ) ttsBody.voice_id = voiceId;
             // Set before the fetch: the socket can deliver frames before the reply arrives.
-            ttsBody.utterance_id = this.nextUtteranceId();
+            mintedUtteranceId    = this.nextUtteranceId();
+            ttsBody.utterance_id = mintedUtteranceId;
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {
@@ -5154,6 +5189,7 @@ class NotificationsUI {
             
         } catch ( error ) {
             this.error( "Reliable TTS request failed:", error );
+            this.abandonUtteranceId( mintedUtteranceId, previousUtteranceId );
             throw error;
         }
     }

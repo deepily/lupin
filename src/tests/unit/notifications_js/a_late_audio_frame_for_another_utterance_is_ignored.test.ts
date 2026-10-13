@@ -7,8 +7,9 @@
 // complete or error frame whose id is not the one the newest request sent.
 //
 // The tests enter at handleAudioMessage, the socket's own door, and at the two functions
-// that send the request (playInstantTTS, playReliableTTS). The two handlers behind
-// the door are recorded, not run: the question here is which frames reach them.
+// that send the request (playInstantTTS, playReliableTTS). Most tests record the two
+// handlers behind the door, because the question is which frames reach them. The
+// cut-short tests and one failed-request test run the page's own handleAudioComplete.
 //
 // Run: npx tsx --test src/tests/unit/notifications_js/a_late_audio_frame_for_another_utterance_is_ignored.test.ts
 
@@ -39,6 +40,8 @@ interface Posted { url: string; body: Record<string, unknown> }
 
 type AudioUI = Record<string, unknown> & {
   expectedUtteranceId : string | null;
+  pcmStreamComplete?  : boolean;
+  ensureValidToken?   : () => Promise<void>;
   handleAudioMessage  : ( event: { data: string } ) => void;
   playInstantTTS      : ( text: string, voiceId?: string | null ) => Promise<void>;
   playReliableTTS     : ( text: string, voiceId?: string | null ) => Promise<void>;
@@ -179,10 +182,149 @@ test("before any request, a frame with an id is handled as before", () => {
   assert.deepEqual( reached, [ "complete legacy:1", "error legacy:1" ] );
 });
 
-test("control: the old defect, without ids on the frames, lets A's late frame through", async () => {
+// ---------------------------------------------------------------------------
+// The real handler behind the door: a cut-short, and its control
+// ---------------------------------------------------------------------------
+
+/** An instance whose handleAudioComplete is the page's own, with only its leaves recorded. */
+function newRealUI(): AudioUI {
   const ui = newUI();
+  delete ( ui as Record<string, unknown> ).handleAudioComplete;
+  ui.pcmStreamComplete        = false;
+  ui.stopTTSPlayingIndicator  = (): void => { reached.push( "indicator stopped" ); };
+  return ui;
+}
+
+test("B is not cut short: A's late complete frame leaves B's stream open in the real handler", async () => {
+  const ui = newRealUI();
+  await ui.playInstantTTS( "A" );
+  const idA = ui.expectedUtteranceId;
+  await ui.playInstantTTS( "B" );
+  frame( ui, "audio_streaming_complete", idA );
+  assert.equal( ui.pcmStreamComplete, false, "A's late frame marked B's stream complete" );
+  frame( ui, "audio_streaming_complete", ui.expectedUtteranceId );
+  assert.equal( ui.pcmStreamComplete, true, "B's own frame did not end B's stream" );
+});
+
+test("control: the same late frame without an id does cut B short in the real handler", async () => {
+  const ui = newRealUI();
   await ui.playInstantTTS( "A" );
   await ui.playInstantTTS( "B" );
   frame( ui, "audio_streaming_complete" );
-  assert.deepEqual( reached, [ "complete undefined" ] );
+  assert.equal( ui.pcmStreamComplete, true );
+});
+
+// ---------------------------------------------------------------------------
+// A request that fails gives its id back
+// ---------------------------------------------------------------------------
+
+type Reply = { ok: boolean; status: number; statusText: string; json: () => Promise<unknown> };
+
+function replyOnce( reply: Reply ): void {
+  const inner = ( globalThis as Record<string, unknown> ).fetch as ( url: string, init: { body: string } ) => Promise<unknown>;
+  let used = false;
+  ( globalThis as Record<string, unknown> ).fetch = async ( url: string, init: { body: string } ): Promise<unknown> => {
+    await inner( url, init );
+    if ( used ) return { ok: true, status: 200, statusText: "OK", json: async () => ( { status: "success" } ) };
+    used = true;
+    return reply;
+  };
+}
+
+const HTTP_500: Reply = { ok: false, status: 500, statusText: "Server Error", json: async () => ( {} ) };
+
+test("a failed instant request while A plays: A's complete frame still ends A in the real handler", async () => {
+  const ui = newRealUI();
+  await ui.playInstantTTS( "A" );
+  const idA = ui.expectedUtteranceId;
+  replyOnce( HTTP_500 );
+  await assert.rejects( ui.playInstantTTS( "B" ), /HTTP 500/ );
+  assert.equal( posted.length, 2, "the failed request did leave, with an id of its own" );
+  assert.notEqual( posted[ 1 ]!.body.utterance_id, idA );
+  assert.equal( ui.expectedUtteranceId, idA, "the failed request's id stayed the expected one" );
+  frame( ui, "audio_streaming_complete", idA );
+  assert.equal( ui.pcmStreamComplete, true, "A's own complete frame was dropped: the card would pulse forever" );
+});
+
+test("a failed reliable request gives its id back, for an HTTP error and for a not-success reply", async () => {
+  for ( const reply of [ HTTP_500, { ok: true, status: 200, statusText: "OK", json: async () => ( { status: "error", message: "no" } ) } ] ) {
+    const ui = newUI();
+    await ui.playInstantTTS( "A" );
+    const idA = ui.expectedUtteranceId;
+    replyOnce( reply );
+    await assert.rejects( ui.playReliableTTS( "B" ) );
+    assert.equal( ui.expectedUtteranceId, idA );
+    reached = [];
+    frame( ui, "audio_streaming_complete", idA );
+    assert.deepEqual( reached, [ `complete ${ idA }` ] );
+  }
+});
+
+test("the first request of a page fails: no id is expected afterwards, so frames pass as before", async () => {
+  const ui = newUI();
+  replyOnce( HTTP_500 );
+  await assert.rejects( ui.playInstantTTS( "A" ) );
+  assert.equal( ui.expectedUtteranceId, null );
+  frame( ui, "audio_streaming_complete", "anything" );
+  assert.deepEqual( reached, [ "complete anything" ] );
+});
+
+test("a request that fails before an id is minted leaves the expected id alone", async () => {
+  for ( const door of [ "playInstantTTS", "playReliableTTS" ] as const ) {
+    const ui = newUI();
+    posted = [];
+    await ui.playInstantTTS( "A" );
+    const idA = ui.expectedUtteranceId;
+    ui.ensureValidToken = async (): Promise<void> => { throw new Error( "no token" ); };
+    await assert.rejects( ui[ door ]( "B" ), /no token/ );
+    assert.equal( ui.expectedUtteranceId, idA );
+    assert.equal( posted.length, 1, "no request left" );
+  }
+});
+
+test("a request that fails after a later one started does not take the later one's id away", async () => {
+  const ui = newUI();
+  await ui.playInstantTTS( "A" );
+  let failB: ( reason: Error ) => void = (): void => {};
+  const plain = ( globalThis as Record<string, unknown> ).fetch as ( url: string, init: { body: string } ) => Promise<unknown>;
+  let calls = 0;
+  ( globalThis as Record<string, unknown> ).fetch = async ( url: string, init: { body: string } ): Promise<unknown> => {
+    calls += 1;
+    if ( calls > 1 ) return plain( url, init );
+    await plain( url, init );
+    return new Promise( ( _resolve, reject ) => { failB = reject; } );
+  };
+  const pendingB = ui.playInstantTTS( "B" );
+  await new Promise( ( r ) => setImmediate( r ) );
+  await ui.playInstantTTS( "C" );
+  const idC = ui.expectedUtteranceId;
+  failB( new Error( "network down" ) );
+  await assert.rejects( pendingB, /network down/ );
+  assert.equal( ui.expectedUtteranceId, idC );
+});
+
+// ---------------------------------------------------------------------------
+// The id carries a prefix drawn once per page load
+// ---------------------------------------------------------------------------
+
+test("two page loads mint different ids for the same count; one page keeps one prefix", () => {
+  const realRandom = Math.random;
+  try {
+    Math.random = (): number => 0.123456789;
+    const first = newUI();
+    const a1 = first.nextUtteranceId();
+    Math.random = (): number => 0.987654321;
+    const a2 = first.nextUtteranceId();
+    const second = newUI();
+    const b1 = second.nextUtteranceId();
+    const prefix = ( id: string ): string => id.split( ":" )[ 1 ]!;
+    assert.match( a1, /^legacy:[a-z0-9]{1,8}:1$/ );
+    assert.match( b1, /^legacy:[a-z0-9]{1,8}:1$/ );
+    assert.equal( prefix( a1 ), prefix( a2 ), "one page changed its prefix between requests" );
+    assert.notEqual( a1, b1, "a reloaded page repeated the id of the page before it" );
+    Math.random = (): number => 0;
+    assert.equal( newUI().nextUtteranceId(), "legacy:0:1", "a draw with no digits left an empty prefix" );
+  } finally {
+    Math.random = realRandom;
+  }
 });
