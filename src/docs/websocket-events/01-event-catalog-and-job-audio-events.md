@@ -133,7 +133,7 @@ Job completion notification with TTS audio.
 
 ### The utterance id on a speech stream
 
-A speech request (`POST /api/get-speech` or `POST /api/get-speech-elevenlabs`) may carry `utterance_id`: a string of 1 to 255 characters that the client picks. The key may be left out or sent as `null`. Any other value is refused with HTTP 400 and no stream starts.
+A speech request (`POST /api/get-speech` or `POST /api/get-speech-elevenlabs`) may carry `utterance_id`: a string of 1 to 255 characters that the client picks, encodable as UTF-8. The key may be left out or sent as `null`. Any other value is refused with HTTP 400 and no stream starts.
 
 When the request carried an id, the server echoes it unchanged:
 

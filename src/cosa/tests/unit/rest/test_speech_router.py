@@ -1295,8 +1295,6 @@ class TestWebsocketPcmTtsEndpoint( unittest.IsolatedAsyncioTestCase ):
             await websocket_pcm_tts_endpoint( websocket=ws, model_id="m", voice_id="v" )
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 # ── utterance id: request field and its echo on stream frames (row 87d19d27) ────
@@ -1327,6 +1325,15 @@ class TestReadUtteranceId( unittest.TestCase ):
         with self.assertRaises( HTTPException ) as c:
             speech.read_utterance_id( { "utterance_id": "" } )
         self.assertEqual( c.exception.status_code, 400 )
+
+    def test_a_lone_surrogate_is_400( self ):
+        # json.loads accepts "\\ud800"; no JSON reply or frame can then carry it.
+        lone = json.loads( '"utt-\\ud800"' )
+        with self.assertRaises( UnicodeEncodeError ): lone.encode( "utf-8" )
+        with self.assertRaises( HTTPException ) as c:
+            speech.read_utterance_id( { "utterance_id": lone } )
+        self.assertEqual( c.exception.status_code, 400 )
+        self.assertIn( "UTF-8", c.exception.detail )
 
     def test_a_non_string_is_400( self ):
         for bad in ( 7, 0, False, [ "utt" ], { "id": "utt" } ):
@@ -1361,10 +1368,12 @@ class TestSpeechDoorsPassTheUtteranceIdOn( unittest.IsolatedAsyncioTestCase ):
         ws = MagicMock(); ws.is_connected.return_value = True; ws.active_connections = { }
         main = MagicMock(); main.app_debug = False; main.app_verbose = False
         streamer = MagicMock( return_value="CORO" )
+        self.streamer = streamer
+        self.tasks    = { }
         with _patch_fastapi_main( main ), \
              patch( f"{P}.{streamer_name}", new=streamer ), \
-             patch.object( speech.asyncio, "create_task", return_value="TASK" ):
-            resp = await door( request=req, ws_manager=ws, active_tasks={ }, current_user_id="u1", **extra )
+             patch.object( speech.asyncio, "create_task", return_value="TASK" ) as self.create_task:
+            resp = await door( request=req, ws_manager=ws, active_tasks=self.tasks, current_user_id="u1", **extra )
         return resp, streamer
 
     async def test_a_given_id_reaches_the_streamer_and_the_reply( self ):
@@ -1386,13 +1395,24 @@ class TestSpeechDoorsPassTheUtteranceIdOn( unittest.IsolatedAsyncioTestCase ):
     async def test_a_bad_id_is_400_and_no_stream_starts( self ):
         for streamer_name, door, extra in self.DOORS:
             with self.subTest( door=door.__name__ ):
-                with patch( f"{P}.{streamer_name}", new=MagicMock() ) as never:
+                for bad in ( 12, "", json.loads( '"\\ud800"' ) ):
                     with self.assertRaises( HTTPException ) as c:
                         await self._call( streamer_name, door, extra,
-                                          { "session_id": "s", "text": "hi", "utterance_id": 12 } )
-                    never.assert_not_called()
-                self.assertEqual( c.exception.status_code, 400 )
-                self.assertIn( "utterance_id", c.exception.detail )
+                                          { "session_id": "s", "text": "hi", "utterance_id": bad } )
+                    self.assertEqual( c.exception.status_code, 400 )
+                    self.assertIn( "utterance_id", c.exception.detail )
+                    self.streamer.assert_not_called()
+                    self.create_task.assert_not_called()
+                    self.assertEqual( self.tasks, { } )
+
+    async def test_control_a_good_id_does_start_a_stream( self ):
+        # The three "nothing started" checks above can see a start: here they all move.
+        for streamer_name, door, extra in self.DOORS:
+            with self.subTest( door=door.__name__ ):
+                await self._call( streamer_name, door, extra, { "session_id": "s", "text": "hi", "utterance_id": "ok" } )
+                self.streamer.assert_called_once()
+                self.create_task.assert_called_once()
+                self.assertEqual( self.tasks, { "s": "TASK" } )
 
 
 class TestHybridFramesCarryTheUtteranceId( unittest.IsolatedAsyncioTestCase ):
@@ -1485,3 +1505,7 @@ class TestElevenlabsFramesCarryTheUtteranceId( unittest.IsolatedAsyncioTestCase 
         sent = await self._run( [ json.dumps( { "error": "quota_exceeded" } ) ], utterance_id=None )
         self.assertEqual( len( sent ), 4 )
         for frame in sent: self.assertNotIn( "utterance_id", frame )
+
+
+if __name__ == "__main__":
+    unittest.main()

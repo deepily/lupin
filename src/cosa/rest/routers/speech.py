@@ -197,6 +197,7 @@ def read_utterance_id( request_data ):
     Ensures:
         - returns None when the key is absent or null
         - returns the id unchanged when it is a string of 1 to 255 characters
+        - a returned id can be encoded as UTF-8, so it can be echoed in JSON
 
     Raises:
         - HTTPException with 400 status for any other value
@@ -204,8 +205,15 @@ def read_utterance_id( request_data ):
     utterance_id = request_data.get( "utterance_id" )
     if utterance_id is None: return None
 
+    detail = f"utterance_id must be a non-empty string of at most {UTTERANCE_ID_MAX_LENGTH} characters"
     if not isinstance( utterance_id, str ) or not utterance_id or len( utterance_id ) > UTTERANCE_ID_MAX_LENGTH:
-        raise HTTPException( status_code=400, detail=f"utterance_id must be a non-empty string of at most {UTTERANCE_ID_MAX_LENGTH} characters" )
+        raise HTTPException( status_code=400, detail=detail )
+
+    # A lone surrogate is a valid Python str that no JSON reply or frame can carry.
+    try:
+        utterance_id.encode( "utf-8" )
+    except UnicodeEncodeError:
+        raise HTTPException( status_code=400, detail=f"{detail}, encodable as UTF-8" )
 
     return utterance_id
 
