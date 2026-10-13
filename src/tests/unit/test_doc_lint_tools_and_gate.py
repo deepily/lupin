@@ -119,7 +119,7 @@ def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatc
     one = json.dumps( [ { "filename": "src/a.py", "code": "D205", "message": "m", "location": { "row": 4, "column": 1 } } ] )
     fake = _fake( 1, one )
     findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/b.py" ], fake, sources={ "src/a.py": "A TEXT", "src/b.py": "B TEXT" } )
-    assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/a.py", 4 ) ]
+    assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/b.py", 4 ) ]         # the path asked for, not the name ruff printed
     assert [ ( c[ 0 ][ -3: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename", "src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename", "src/b.py", "-" ], "B TEXT" ) ]
     failing = tr.run_ruff( "/r", [ "src/a.py" ], _fake( 2, "", "boom" ), sources={ "src/a.py": "x" } )
     assert failing[ 0 ] == [] and "SKIPPED: boom" in failing[ 1 ][ 0 ]
@@ -205,6 +205,7 @@ def _stage( repo, files ):
 def _no_external( monkeypatch ):
     monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [], [] ) )
     monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths, sources=None: ( [], [] ) )
+    monkeypatch.setattr( gate, "markdownlint_unnamed", lambda root, paths: [], raising=False )      # the tool is not installed for these tests
 
 
 def test_staged_paths_lists_added_and_modified_files_in_scope_only( repo ):

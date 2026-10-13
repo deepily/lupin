@@ -421,15 +421,28 @@ def test_run_extractor_reads_the_files_from_another_root_but_runs_the_script_of_
 def test_run_extractor_groups_records_by_file_and_skips_blank_lines( monkeypatch, tmp_path ):
     lines = "\n".join( [ json.dumps( _file_record() | { "file": "a.ts" } ), "", json.dumps( _comment( "x", file="a.ts" ) ), json.dumps( _comment( "y", file="other.ts" ) ) ] )
     calls = _fake_run( monkeypatch, _done( lines ) )
-    found = tsdoc_lint.run_extractor( tmp_path, [ "a.ts", "b.ts" ] )
-    assert [ r[ "kind" ] for r in found[ "a.ts" ] ] == [ "file", "jsdoc" ]
-    assert found[ "b.ts" ] == [] and [ r[ "text" ] for r in found[ "other.ts" ] ] == [ "y" ]
-    assert calls == [ [ "node", os.path.join( str( tmp_path ), "src/scripts/ts_doc_extract.mjs" ), "--repo-root", str( tmp_path ), "a.ts", "b.ts" ] ]
+    found = tsdoc_lint.run_extractor( tmp_path, [ "a.ts" ] )
+    assert [ r[ "kind" ] for r in found[ "a.ts" ] ] == [ "file", "jsdoc" ] and [ r[ "text" ] for r in found[ "other.ts" ] ] == [ "y" ]
+    assert calls == [ [ "node", os.path.join( str( tmp_path ), "src/scripts/ts_doc_extract.mjs" ), "--repo-root", str( tmp_path ), "a.ts" ] ]
+
+
+def test_run_extractor_refuses_a_run_that_leaves_a_file_without_its_file_record( monkeypatch, tmp_path ):
+    lines = "\n".join( [ json.dumps( _file_record() | { "file": "a.ts" } ), json.dumps( _comment( "y", file="b.ts" ) ) ] )
+    _fake_run( monkeypatch, _done( lines ) )
+    with pytest.raises( RuntimeError, match=r"no file record for 2 of 3 files, so they were NOT checked: b\.ts, c\.ts$" ):
+        tsdoc_lint.run_extractor( tmp_path, [ "a.ts", "b.ts", "c.ts" ] )                       # b.ts has a comment and no file record; c.ts has nothing
+
+
+def test_run_extractor_refuses_a_name_node_read_as_another_name( monkeypatch, tmp_path ):
+    asked = "src/caf\udce9.ts"                                                                 # the byte 0xE9; Node reads it as U+FFFD and opens another file
+    _fake_run( monkeypatch, _done( json.dumps( _file_record( [ { "line": 0, "message": "cannot extract: ENOENT" } ] ) | { "file": "src/caf\ufffd.ts" } ) ) )
+    with pytest.raises( RuntimeError, match=r"no file record for 1 of 1 files, so they were NOT checked: src/caf\\xe9\.ts$" ):
+        tsdoc_lint.run_extractor( tmp_path, [ asked ] )
 
 
 def test_run_extractor_sends_files_in_batches_never_one_process_per_file( monkeypatch, tmp_path ):
     files = [ f"f{i}.ts" for i in range( 450 ) ]
-    calls = _fake_run( monkeypatch, _done() )
+    calls = _fake_run( monkeypatch, lambda cmd: _done( "\n".join( json.dumps( _file_record() | { "file": name } ) for name in cmd[ 4 : ] ) ) )
     found = tsdoc_lint.run_extractor( tmp_path, files )
     assert [ len( c ) - 4 for c in calls ] == [ 200, 200, 50 ]
     assert list( found ) == files
@@ -508,7 +521,7 @@ def test_main_defaults_to_stdout_and_to_sys_argv( repo, monkeypatch, capsys ):
 
 def test_running_the_module_as_a_script_exits_with_main_status( repo, monkeypatch ):
     _commit( repo, { "src/a.ts": "x\n" } )
-    _fake_run( monkeypatch, _done( json.dumps( _file_record() ) ) )
+    _fake_run( monkeypatch, _done( json.dumps( _file_record() | { "file": "src/a.ts" } ) ) )
     monkeypatch.setattr( sys, "argv", [ "tsdoc_lint", "--repo-root", str( repo ), "src/a.ts" ] )
     with warnings.catch_warnings():
         warnings.simplefilter( "ignore", RuntimeWarning )

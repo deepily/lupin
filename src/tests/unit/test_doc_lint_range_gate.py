@@ -250,18 +250,78 @@ def _folder( repo ):
     return path
 
 
-def test_a_range_holding_a_merge_is_refused_whole_and_the_merge_is_named( repo, tmp_path ):
+def _incoming_runner():
+    """Give a stand-in gate that records what MERGE_HEAD holds in the worktree while it runs."""
+    seen = []
+    def runner( worktree, blocking=False ):
+        marker = _git( worktree, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD" )
+        if os.path.exists( marker ):
+            with open( marker, encoding="utf-8" ) as handle: seen.append( handle.read() )
+        else: seen.append( None )
+        return 0, ""
+    runner.seen = seen
+    return runner
+
+
+def test_a_merge_in_a_range_is_replayed_with_its_other_parent_as_the_incoming_commit( repo, tmp_path ):
+    merge   = _merge_range( repo )
+    root    = repo[ "root" ]
+    side    = _git( root, "rev-parse", "side2" )
+    work    = _worktree( repo, tmp_path )
+    runner  = _incoming_runner()
+    commits = range_gate.list_commits( root, repo[ "base" ], merge )
+    results = range_gate.check_range( root, repo[ "base" ], merge, work, runner )
+    assert len( commits ) == 4 and [ r.verdict for r in results ] == [ "passed" ] * 4 and range_gate.other_parents( root, merge ) == [ side ]
+    assert runner.seen == [ f"{side}\n" if sha == merge else None for sha in commits ]             # only the merge has an incoming commit
+    assert results[ commits.index( merge ) ].lines == [ f"merge commit: judged with {side[ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced" ]
+    assert [ r.lines for r in results if r.sha != merge ] == [ [] ] * 3
+    assert not os.path.exists( range_gate.incoming_path( work ) )                                  # nothing is left for the next replay
+
+
+def test_the_incoming_commit_file_is_removed_when_the_gate_cannot_be_run( repo, tmp_path ):
     merge = _merge_range( repo )
-    with pytest.raises( range_gate.RangeRefused, match=merge ): range_gate.check_range( repo[ "root" ], repo[ "base" ], merge, _worktree( repo, tmp_path ), _runner_for( [] ) )
+    work  = _worktree( repo, tmp_path )
+    def broken( worktree, blocking=False ): raise RuntimeError( "the gate could not start" )
+    result = range_gate.check_commit( repo[ "root" ], work, merge, broken )
+    assert result.verdict == "unchecked" and result.lines[ 0 ] == "the gate could not start" and not os.path.exists( range_gate.incoming_path( work ) )
 
 
-def test_main_exits_two_for_a_merge_and_runs_no_check_and_leaves_no_folder( repo ):
+def test_an_octopus_merge_records_every_other_parent_in_order( repo, tmp_path ):
+    root = repo[ "root" ]
+    for name in ( "left", "right" ):
+        _git( root, "checkout", "-q", "-b", name, repo[ "base" ] )
+        _write( root, f"{name}.py", "side = 1\n" )
+        _commit( root, f"{name} work" )
+    _git( root, "checkout", "-q", "main" )
+    _git( root, "merge", "-q", "--no-ff", "-m", "merge both", "left", "right" )
+    merge  = _git( root, "rev-parse", "HEAD" )
+    runner = _incoming_runner()
+    assert range_gate.check_commit( root, _worktree( repo, tmp_path ), merge, runner ).verdict == "passed"
+    assert runner.seen == [ f"{_git( root, 'rev-parse', 'left' )}\n{_git( root, 'rev-parse', 'right' )}\n" ]
+
+
+def test_main_judges_a_range_that_holds_a_merge_and_leaves_no_folder( repo ):
     merge  = _merge_range( repo )
     folder = _folder( repo )
     stream = io.StringIO()
-    runner = _runner_for( [] )
+    runner = _incoming_runner()
     code   = range_gate.main( [ "--base", repo[ "base" ], "--head", merge, "--repo-root", repo[ "root" ] ], out=stream, runner=runner )
-    assert code == 2 and merge in stream.getvalue() and runner.seen == [] and os.listdir( folder ) == []
+    assert code == 0 and len( runner.seen ) == 4 and os.listdir( folder ) == []
+    assert stream.getvalue().splitlines()[ -1 ] == f"range {repo[ 'base' ]}..{merge}: 4 commits, 4 passed, 0 refused, 0 unchecked"
+
+
+def test_a_commit_that_adds_a_file_whose_name_is_not_utf8_is_staged_and_judged( repo, tmp_path ):
+    root = repo[ "root" ]
+    name = "caf\udce9.py"                                                                        # the byte 0xE9, as Python reads a name from the file system
+    with open( os.path.join( root, name ), "w", encoding="utf-8" ) as handle: handle.write( "x = 1\n" )
+    odd = _commit( root, "adds a name that is not UTF-8" )
+    os.rename( os.path.join( root, name ), os.path.join( root, "moved\udce9.py" ) )
+    moved = _commit( root, "moves it" )
+    assert range_gate.changes( root, odd ) == [ ( "A", name, None ) ] and range_gate.changes( root, moved ) == [ ( "R", "moved\udce9.py", name ) ]
+    work = _worktree( repo, tmp_path )
+    for sha in ( odd, moved ):
+        assert range_gate.check_commit( root, work, sha, _runner_for( [ ( 0, "" ) ] ) ).verdict == "passed"
+        assert _git( work, "write-tree" ) == _git( root, "rev-parse", f"{sha}^{{tree}}" )
 
 
 def test_an_empty_range_exits_two_and_says_nothing_was_checked( repo ):
@@ -341,13 +401,14 @@ def test_the_sweep_prunes_the_registration_of_a_holder_whose_tree_is_already_gon
     assert "range-gate" not in _git( repo[ "root" ], "worktree", "list" )
 
 
-def test_the_refusal_of_a_merge_range_names_the_merge_and_not_only_the_head( repo, tmp_path ):
+def test_a_commit_after_a_merge_is_judged_with_no_incoming_commit( repo, tmp_path ):
     merge = _merge_range( repo )
     _write( repo[ "root" ], "later.py", "later = 1\n" )
     head = _commit( repo[ "root" ], "after the merge" )
-    assert head != merge
-    with pytest.raises( range_gate.RangeRefused ) as raised: range_gate.check_range( repo[ "root" ], repo[ "base" ], head, _worktree( repo, tmp_path ), _runner_for( [] ) )
-    assert f"merge commit, {merge}" in str( raised.value )
+    assert head != merge and range_gate.other_parents( repo[ "root" ], head ) == []
+    runner  = _incoming_runner()
+    results = range_gate.check_range( repo[ "root" ], merge, head, _worktree( repo, tmp_path ), runner )
+    assert [ ( r.sha, r.verdict, r.lines ) for r in results ] == [ ( head, "passed", [] ) ] and runner.seen == [ None ]
 
 
 def test_the_sweep_prunes_a_registration_whose_whole_holder_folder_is_gone( repo ):
@@ -641,3 +702,99 @@ def test_an_epoch_on_a_branch_the_range_never_took_holds_nobody_and_says_it_is_n
     note = f"    the blocking epoch {apart[ :9 ]} is not an ancestor of the head of this range: judged in warn mode, findings on its staged lines were not enforced"
     assert code == 0 and lines.count( note ) == 3 and not [ ln for ln in lines if "predates" in ln ]
     assert lines[ -2 ] == f"blocking epoch {apart[ :9 ]}: 0 commits held to blocking, 3 judged in warn mode{FROM_WORK}"
+
+
+# ---- a merge, and a cherry-pick, replayed by the real gate ----------------------------------------
+
+def _side_with_a_finding( gated ):
+    """Commit a page with a finding on a branch that forks before the epoch; return to main."""
+    root = gated[ "root" ]
+    _git( root, "checkout", "-q", "-b", "side", gated[ "base" ] )
+    _write( root, "docs/legacy.md", SEEDED )
+    gated[ "side" ] = _commit( root, "a finding made on a branch that forked before the epoch" )
+    _git( root, "checkout", "-q", "main" )
+
+
+def _judge( gated, base, head ):
+    _write( gated[ "root" ], range_gate.EPOCH_PATH, f"# recorded at landing\n{gated[ 'epoch' ]}\n" )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", base, "--head", head, "--repo-root", gated[ "root" ] ], out=stream )
+    return code, stream.getvalue().splitlines()
+
+
+def test_the_real_gate_passes_a_merge_whose_finding_came_in_unchanged_with_the_merged_commit( gated ):
+    _side_with_a_finding( gated )
+    root = gated[ "root" ]
+    _git( root, "merge", "-q", "--no-ff", "-m", "merge side", "side" )
+    merge = _git( root, "rev-parse", "HEAD" )
+    code, lines = _judge( gated, gated[ "newer" ], merge )
+    note = f"    merge commit: judged with {gated[ 'side' ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced"
+    assert code == 0 and lines[ -4 : -2 ] == [ f"passed    {merge[ :9 ]} gate=0 merge side", note ]
+    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 1 judged in warn mode{FROM_WORK}"
+    assert lines[ -1 ].endswith( ": 2 commits, 2 passed, 0 refused, 0 unchecked" ) and not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+def test_the_real_gate_refuses_a_merge_for_a_finding_the_merge_itself_adds( gated ):
+    _side_with_a_finding( gated )
+    root = gated[ "root" ]
+    _git( root, "merge", "-q", "--no-ff", "--no-commit", "side" )
+    _write( root, "docs/own.md", SEEDED )
+    merge = _commit( root, "merge side and add a page" )
+    assert range_gate.other_parents( root, merge ) == [ gated[ "side" ] ]
+    code, lines = _judge( gated, gated[ "newer" ], merge )
+    assert code == 1 and [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/own.md:3: caps: ALL-CAPS word NOT" ]
+    assert f"refused   {merge[ :9 ]} gate=3 merge side and add a page" in lines
+
+
+def test_a_concluded_cherry_pick_leaves_no_record_so_its_finding_is_refused_on_replay( gated ):
+    _side_with_a_finding( gated )
+    root = gated[ "root" ]
+    _git( root, "cherry-pick", gated[ "side" ] )
+    pick = _git( root, "rev-parse", "HEAD" )
+    assert range_gate.other_parents( root, pick ) == [] and pick != gated[ "side" ]
+    code, lines = _judge( gated, gated[ "newer" ], pick )
+    assert code == 1 and [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/legacy.md:3: caps: ALL-CAPS word NOT" ]
+    assert not [ ln for ln in lines if "incoming commit" in ln ]
+
+
+# ---- a range may not change the epoch it is judged under ------------------------------------------
+
+def _change_the_epoch_file( gated, how ):
+    """Commit a change to the epoch file above a base that records the epoch."""
+    root = gated[ "root" ]
+    path = os.path.join( root, range_gate.EPOCH_PATH )
+    if how == "moved": _git( root, "mv", range_gate.EPOCH_PATH, "src/conf/elsewhere.txt" )
+    elif how == "deleted": os.remove( path )
+    elif how == "emptied": _write( root, range_gate.EPOCH_PATH, "# nothing recorded\n" )
+    else: _write( root, range_gate.EPOCH_PATH, gated[ "older" ] + "\n" )
+    return _commit( root, f"the epoch file is {how}" )
+
+
+@pytest.mark.parametrize( "how,shown", [ ( "moved", "no file" ), ( "deleted", "no file" ), ( "emptied", "no value" ), ( "rewritten", "OLDER" ) ] )
+def test_a_range_whose_head_changes_the_epoch_its_base_records_judges_nothing( gated, how, shown ):
+    _record( gated, gated[ "epoch" ] )
+    head   = _change_the_epoch_file( gated, how )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", gated[ "record" ], "--head", head, "--repo-root", gated[ "root" ] ], out=stream )
+    assert code == range_gate.EXIT_UNCHECKED
+    assert stream.getvalue().splitlines() == [
+        f"the blocking epoch differs: the base of the range records {gated[ 'epoch' ]} in src/conf/doc-gate-blocking-epoch.txt, the head of the range records {shown.replace( 'OLDER', gated[ 'older' ] )}; "
+        "a range is judged under the value its base records and cannot change it; no commit was judged"
+    ]
+    assert os.listdir( os.path.join( gated[ "root" ], ".claude", "worktrees" ) ) == []
+
+
+def test_a_range_whose_base_and_head_record_the_same_epoch_is_judged_under_it( gated ):
+    _record( gated, gated[ "epoch" ] )
+    code, lines = _range( gated, base="record" )
+    assert code == 1 and lines[ 0 ] == f"refused   {gated[ 'newer' ][ :9 ]} gate=3 a finding made after the record"
+    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 0 judged in warn mode"
+    assert range_gate.resolve_blocking_epoch( gated[ "root" ], gated[ "record" ], gated[ "newer" ] ) == ( gated[ "epoch" ], True )
+
+
+def test_the_range_that_lands_the_epoch_is_judged_under_the_value_its_head_records( gated ):
+    _record( gated, gated[ "epoch" ] )
+    root = gated[ "root" ]
+    assert range_gate.committed_epoch_text( root, gated[ "epoch" ] ) is None and gated[ "epoch" ] in range_gate.committed_epoch_text( root, gated[ "record" ] )
+    assert range_gate.resolve_blocking_epoch( root, gated[ "epoch" ], gated[ "newer" ] ) == ( gated[ "epoch" ], True )
+    assert range_gate.resolve_blocking_epoch( root, gated[ "base" ], gated[ "epoch" ] ) == ( gated[ "epoch" ], False )      # neither end records it: the working copy does
