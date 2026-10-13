@@ -2,7 +2,7 @@
 The external-tool runners, the commit gate, and the pre-commit chain wrapper.
 
 The gate's promises are checked here. A missing tool prints a loud line. A crash never blocks a commit.
-With --blocking, a finding on a staged line refuses the commit, except in the six record locations.
+With --blocking, a finding on a staged line refuses the commit, except in the five record locations.
 The chain tests run the real pre-commit-chain.sh in a scratch repository.
 """
 
@@ -267,14 +267,14 @@ def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatc
     assert "0 findings on staged lines (blocking)" in err.getvalue()
 
 
-# ---- blocking, and the six record locations it leaves in warn mode ----------------------------
+# ---- blocking, and the five record locations it leaves in warn mode ---------------------------
 
 SEEDED    = "This is NOT fine.\n"
 CAPS      = "caps: ALL-CAPS word NOT"
 WARN_MARK = " (warn mode, commit allowed)"
-WARN_SET  = "history.md or TODO.md or bug-fix-queue.md or src/cosa/history.md or history/ or todo-history/"
-RECORDS   = [ "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
-ALIKE     = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md" ]
+WARN_SET  = "history.md or TODO.md or bug-fix-queue.md or history/ or todo-history/"
+RECORDS   = [ "history.md", "TODO.md", "bug-fix-queue.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ALIKE     = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md", "src/cosa/history.md" ]
 REFUSE_1  = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
 
 
@@ -284,10 +284,10 @@ def _blocking( repo ):
     return rc, err.getvalue().split( "\n" )
 
 
-def test_the_warn_only_set_is_exactly_four_record_files_and_two_record_folders():
-    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md" )
+def test_the_warn_only_set_is_exactly_three_record_files_and_two_record_folders():
+    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md" )
     assert gate.WARN_ONLY_PREFIXES == ( "history/", "todo-history/" )
-    assert len( RECORDS ) == 6 and len( ALIKE ) == 8
+    assert len( RECORDS ) == 5 and len( ALIKE ) == 9
     for path in RECORDS: assert gate.is_warn_only( path ), path
     for path in ALIKE: assert not gate.is_warn_only( path ), path
     for path in ( "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "history", "todo-history", "" ): assert not gate.is_warn_only( path ), path

@@ -31,10 +31,10 @@ CHAIN_REFUSE  = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each R
 CHAIN_ALLOW_1 = "[pre-commit-chain] doc-lint gate exited 1 without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase."
 GATE_CRASH    = "[doc-lint] GATE CRASHED, commit allowed: RuntimeError: injected linter crash"
 GATE_REFUSE   = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
-WARN_SET      = "history.md or TODO.md or bug-fix-queue.md or src/cosa/history.md or history/ or todo-history/"
+WARN_SET      = "history.md or TODO.md or bug-fix-queue.md or history/ or todo-history/"
 WARN_SUMMARY  = f"[doc-lint] 1 findings in {WARN_SET} (warn mode, commit allowed)"
-RECORDS       = [ "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
-ALIKE         = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md" ]
+RECORDS       = [ "history.md", "TODO.md", "bug-fix-queue.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ALIKE         = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md", "src/cosa/history.md" ]
 CLEAN_LINE    = "[doc-lint] 0 findings on staged lines (blocking)"
 DOCSTRING_PY  = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
 COMMENT_PY    = "x = 1  # This is NOT fine.\n"
