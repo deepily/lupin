@@ -30,7 +30,7 @@ If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the com
 
 Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed, N undecodable`. A swept file that does not parse is refused and counted as unparsed. A swept file that is not UTF-8 is refused and counted as undecodable. No waiver covers either. A leading byte-order mark is ignored. Any other file that is not UTF-8 is skipped with a warning.
 
-A staged gitlink, which is a submodule entry, holds no text. The gate prints that it was not checked. A file whose name is not UTF-8 is still checked by the gate's own rules, by ruff and by the TypeScript count. Markdownlint cannot be given such a name, or one with a line break. When it is installed, the gate refuses that file. Rename it. In a Python file whose lines end in a bare carriage return, every line counts as touched.
+A staged gitlink, which is a submodule entry, holds no text. The gate prints that it was not checked. A file whose name is not UTF-8 is still checked by the gate's own rules, by ruff and by the TypeScript count. Markdownlint cannot be given such a name, or one with a line break. When it is installed, the gate refuses that file. Rename it. In a Python file whose lines end in a bare carriage return, every line counts as touched. If that refuses a merge, convert line endings while resolving or fix the findings.
 
 ## Waiving a finding
 

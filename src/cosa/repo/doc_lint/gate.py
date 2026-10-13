@@ -259,16 +259,19 @@ def merged_in( root, findings, incoming ):
     return [ f for f in findings if id( f ) not in theirs ]
 
 
-def staged_entries( root ):
+def staged_entries( root, against=None ):
     """
     List the staged changes that leave a path in the index, with the gitlinks apart.
 
     Requires:
         - root is a git working tree
+        - against is a commit to compare the index with in place of HEAD, or None
 
     Ensures:
         - the changes are additions, copies, modifications, renames and type changes
-        - returns ( names, renamed_from, gitlinks ), names being the new path of every change that is not a gitlink, in git's order
+        - returns ( names, renamed_from, gitlinks, changed ), names being the new path of every change that is not a gitlink, in git's order
+        - changed is the set of new paths whose staged blob id is not the old side's, so a move or a change of mode alone is not in it
+        - the old side of a rename is the path it came from; with against no rename is followed, so the old side is that commit's same path
         - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
         - gitlinks holds the new path of every change whose staged entry is a submodule entry, which has no text to read
         - a type change is listed, so a link replaced by a file is read and a file replaced by a gitlink is named
@@ -277,10 +280,11 @@ def staged_entries( root ):
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "-M", "--raw", "-z", "--diff-filter=ACMRT", "--", ":/" ], capture_output=True )
+    compared = [ "-M" ] if against is None else [ "--no-renames", against ]
+    res      = subprocess.run( [ "git", "-C", root, "diff", "--cached", *compared, "--raw", "-z", "--no-abbrev", "--diff-filter=ACMRT", "--", ":/" ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
     tokens = res.stdout.split( b"\0" )
-    names, renamed_from, gitlinks, i = [], {}, [], 0
+    names, renamed_from, gitlinks, changed, i = [], {}, [], set(), 0
     while i < len( tokens ) and tokens[ i ]:
         fields = tokens[ i ].decode( "ascii" ).split( " " )
         if fields[ 4 ][ 0 ] == "R":
@@ -289,7 +293,8 @@ def staged_entries( root ):
         else:
             new, i = os.fsdecode( tokens[ i + 1 ] ), i + 2
         ( gitlinks if fields[ 1 ] == GITLINK_MODE else names ).append( new )
-    return names, renamed_from, gitlinks
+        if fields[ 2 ] != fields[ 3 ]: changed.add( new )
+    return names, renamed_from, gitlinks, changed
 
 
 def staged_binary( root ):
@@ -799,7 +804,10 @@ def collect( root ):
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
-        - a staged Python or markdown file that staged_binary lists adds one Unchecked warning, since the diff gives no touched line for it
+        - a staged Python or markdown file that staged_binary lists adds one warning, since the diff gives no touched line for it
+        - that warning is an Unchecked when the commit adds the file or changes its content, and is_warn_only does not name it
+        - it is a plain warning when the staged blob is the one HEAD holds, at the path the file was renamed from if it was renamed
+        - while a merge or a cherry-pick waits to be concluded, it is also plain when the staged blob is the incoming commit's at that path
         - a waiver is read from the line the parser numbers, so a file with bare carriage returns is judged and never crashes the gate
         - git does not end a line at a bare carriage return, so its line numbers for such a Python file are not the parser's
         - every line of such a file counts as touched when the commit touches any of it
@@ -821,7 +829,9 @@ def collect( root ):
     refusals   = []
     warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
     binary     = set( staged_binary( root ) )
-    warnings  += [ Unchecked( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
+    incoming   = incoming_commit( root )[ 0 ]
+    created    = staged_entries( root )[ 3 ] & ( staged_entries( root, incoming )[ 3 ] if incoming else set( paths ) )
+    warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
     decode_out = []
     for path in paths:
