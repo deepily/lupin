@@ -9,6 +9,7 @@ lookahead, `_NOT_A_BLANK_LINE`, after the command start. Three things are held h
   3. the whole PreToolUse hook is linear on a command of 4000 blank lines.
 """
 
+import random
 import re
 import signal
 import time
@@ -87,7 +88,7 @@ def test_each_regex_is_linear_on_a_whitespace_run( name, shape ):
     regex = REGEXES[ name ]
     build = WHITESPACE_SHAPES[ shape ]
     small = min( _seconds( lambda: list( regex.finditer( build( 8000 ) ) ) ) for _ in range( 3 ) )
-    large = _seconds( lambda: list( regex.finditer( build( 32000 ) ) ) )
+    large = min( _seconds( lambda: list( regex.finditer( build( 32000 ) ) ) ) for _ in range( 3 ) )
     assert large / max( small, 0.002 ) < 9, f"{name} on {shape}: {small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x"
 
 
@@ -177,6 +178,86 @@ def test_the_guards_decide_the_same_on_commands_that_cross_blank_lines():
         assert stash_guard.stash_deny_reason( "Bash", { "command": lead + "git status" }, env={ } ) is None, repr( lead )
         assert commit_scope_guard.git_commit_match( lead + "git commit -m x" ) is not None, repr( lead )
         assert commit_scope_guard.git_commit_match( lead + "git log" ) is None, repr( lead )
+
+
+# ---------------------------------------------------------------------------
+# The text before a commit ends where it ended before the fix
+# ---------------------------------------------------------------------------
+
+_START_ALPHABET = (
+    "\n", "\n", " ", "\t", "\r", "\f", "\v", "\x1c", "\x85", "\xa0", "\u2003", ";", "&", "|", "(", ")", "{", "}",
+    "git", " commit", "cd", " m", "FOO=1", "then", "do", "else", "elif", "x", "-C", "\\", "'", '"',
+)
+_START_TAILS = ( "", "\ngit commit", " \n\n git commit -m x", "then\ngit commit", ";\n\n\ngit commit", "(\n \ngit commit" )
+
+
+def test_git_commit_start_is_where_the_match_started_without_the_lookahead():
+    """
+    The merge guard reads the text before the commit, so that text must end where it did.
+
+    A seeded random run plus the hand corpus. For every command with a commit, the start
+    this function gives equals the start of the same regex with the lookahead removed.
+    """
+    before   = _without_lookahead( commit_scope_guard._GIT_COMMIT_RE )
+    rng      = random.Random( 7 )
+    commands = _corpus() + [
+        "".join( rng.choice( _START_ALPHABET ) for _ in range( rng.randint( 1, 14 ) ) ) + rng.choice( _START_TAILS )
+        for _ in range( 40000 )
+    ]
+    matched = moved = 0
+    for command in commands:
+        blanked  = commit_scope_guard._blank_quoted_spans( command )
+        expected = before.search( blanked )
+        match    = commit_scope_guard.git_commit_match( command )
+        assert ( match is None ) == ( expected is None ), repr( command )
+        if match is None: continue
+        matched += 1
+        moved   += match.start() != expected.start()
+        assert commit_scope_guard.git_commit_start( command, match ) == expected.start(), repr( command )
+    # The comparison saw both kinds: matches whose start moved, and matches whose start did not.
+    assert moved > 1000, moved
+    assert matched - moved > 1000, matched - moved
+
+
+@pytest.mark.parametrize( "command", [
+    "cd m && cd then\ngit commit -m x",
+    "cd m; cd do\ngit commit -m x",
+    "cd m\ncd then\ngit commit -m x",
+    "cd m && cd else \n\n git commit -m x",
+    "cd m && cd (\n\ngit commit -m x",
+    "cd m ;\n\n\ngit commit -m x",
+    "cd m\n\n\n\ngit commit -m x",
+] )
+def test_the_merge_guard_still_finds_the_tree_a_commit_lands_in( command, tmp_path ):
+    """
+    A start token that ends a line is not text before the commit.
+
+    Before the fix each of these read `cd m` as the last `cd`, so the merge state of `m`
+    governed the commit. Reading the token as a `cd` argument names a directory that does
+    not exist, and the guard then falls back to the session's own tree.
+    """
+    ( tmp_path / "m" ).mkdir()
+    match = commit_scope_guard.git_commit_match( command )
+    assert match is not None
+    assert merge_head_guard._target_directory( command, match, cwd=str( tmp_path ) ) == str( tmp_path / "m" )
+
+
+def test_control_a_cd_into_a_missing_directory_falls_back_to_the_session_tree( tmp_path ):
+    """The test above can see the defect: a wrong last `cd` gives the cwd, not `m`."""
+    ( tmp_path / "m" ).mkdir()
+    command = "cd m && cd nowhere\ngit commit -m x"
+    match   = commit_scope_guard.git_commit_match( command )
+    assert merge_head_guard._target_directory( command, match, cwd=str( tmp_path ) ) == str( tmp_path )
+
+
+def test_git_commit_start_is_linear_on_a_blank_run():
+    def run( size ):
+        command = "cd m ;" + "\n" * size + "git commit -m x"
+        match   = commit_scope_guard.git_commit_match( command )
+        assert commit_scope_guard.git_commit_start( command, match ) == 5
+    small = min( _seconds( lambda: run( 8000 ) ) for _ in range( 3 ) )
+    large = min( _seconds( lambda: run( 32000 ) ) for _ in range( 3 ) )
+    assert large / max( small, 0.002 ) < 9, f"{small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x"
 
 
 # ---------------------------------------------------------------------------

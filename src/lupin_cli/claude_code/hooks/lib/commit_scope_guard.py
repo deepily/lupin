@@ -249,6 +249,39 @@ def git_commit_match( command: str ):
     return _mentions_git_commit( command )
 
 
+# A command start with nothing but whitespace between it and the end of the searched span.
+_START_BEFORE_BLANK_RUN_RE = re.compile( _COMMAND_POSITION + r"\s*\Z" )
+# The longest command start is a four-letter keyword, and its `\b` reads one character more.
+_LONGEST_START = 5
+
+
+def git_commit_start( command: str, match ) -> int:
+    """
+    Where the text before a `git commit` ends: at the start of the blank run before it.
+
+    `_NOT_A_BLANK_LINE` makes the match start at the last newline of a run of blank lines.
+    A caller that reads the text before the commit must stop where that run begins.
+    The token that opens the run (a `;`, a `then`) is not part of what came before.
+
+    Requires:
+        - command is the str that match came from
+        - match is a git_commit_match result for it, not None
+
+    Ensures:
+        - returns match.start() when the match does not start at a newline
+        - otherwise returns the start of the leftmost command start that has only
+          whitespace between it and that newline
+        - the result is never greater than match.start()
+        - costs time in proportion to the length of the blank run
+    """
+    last = match.start()
+    text = _blank_quoted_spans( command )
+    if text[ last:last + 1 ] != "\n": return last
+
+    run_start = len( text[ :last ].rstrip() )
+    return _START_BEFORE_BLANK_RUN_RE.search( text, max( 0, run_start - _LONGEST_START ), last + 1 ).start()
+
+
 _HEREDOC_RE = re.compile( r"<<(?P<dash>-?)\s*(?P<q>['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=q)" )
 
 

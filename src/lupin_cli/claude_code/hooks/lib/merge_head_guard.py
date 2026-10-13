@@ -26,7 +26,7 @@ import re
 import subprocess
 from typing import Optional
 
-from lupin_cli.claude_code.hooks.lib.commit_scope_guard import _NOT_A_BLANK_LINE, git_commit_match
+from lupin_cli.claude_code.hooks.lib.commit_scope_guard import _NOT_A_BLANK_LINE, git_commit_match, git_commit_start
 
 
 BASH_TOOL_NAMES = ( "Bash", )
@@ -155,7 +155,7 @@ def _target_directory( command, match, cwd=None ):
     base  = cwd or os.getcwd()
     parts = []
 
-    for found in _CD_RE.finditer( command[ :match.start() ] ):
+    for found in _CD_RE.finditer( command[ :git_commit_start( command, match ) ] ):
         path = found.group( "path" )
         if path != "-":                       # `cd -` is the previous directory, unknowable here
             parts = [ os.path.expanduser( path ) ]
