@@ -601,12 +601,16 @@ def test_the_marking_shows_without_blocking_and_its_summary_does_not( repo, monk
 
 def test_a_revert_in_progress_gets_no_such_treatment( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _stage( repo, { "docs/a.md": "clean\n" } )
-    _git( repo, "commit", "-q", "-m", "base" )
-    ( repo / ".git" / "REVERT_HEAD" ).write_text( _git( repo, "rev-parse", "HEAD" ), encoding="utf-8" )
-    _stage( repo, { "docs/p.md": SEEDED } )
+    _stage( repo, { "docs/a.md": "clean\n", "docs/p.md": SEEDED } )
+    _git( repo, "commit", "-q", "-m", "holds the page" )
+    held = _git( repo, "rev-parse", "HEAD" )
+    _git( repo, "rm", "-q", "docs/p.md" )
+    _git( repo, "commit", "-q", "-m", "drops the page" )
+    ( repo / ".git" / "REVERT_HEAD" ).write_text( held, encoding="utf-8" )
+    _stage( repo, { "docs/p.md": SEEDED } )                                                    # the same page that commit holds
+    assert gate.incoming_commit( str( repo ) ) == ( None, [] )
     rc, lines = _blocking( repo )
-    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and not [ ln for ln in lines if "came in with" in ln ]
 
 
 @pytest.mark.parametrize( "head,content", [ ( "MERGE_HEAD", "0123456789abcdef0123456789abcdef01234567\n" ), ( "CHERRY_PICK_HEAD", "not a sha\n" ), ( "MERGE_HEAD", "" ) ] )
