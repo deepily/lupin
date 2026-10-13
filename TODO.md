@@ -16,6 +16,38 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-12 evening (Cheech 🌿 `db0f87c2`, skeleton crew, no seats, bounded jobs only)
+
+- **The Phase 5 gate is lint** (Rick, card "Cheech: Phase 5 gate", a keypress, recorded on row `8fac4769` at 20:25 EDT by the store stamp): "Lint only, fix on contact". I had recommended checking each page against the code. The claim harness on whole pages (row `694849ee`) is dropped; the stale pins and the blind sample on row `4bbeeb39` no longer gate.
+- **The ledger rule changes** (Rick, card on the ledger rule, a keypress, row `752cb59d`): "Yes, change the rule". A document cited only by a new R&D document no longer counts as held. I had recommended reading a sample first. The ledger moved 134 documents to history; nobody has read them.
+- **No lint finding is waived because a test pins the text** (Rick, card "Cheech: Phase 5 gate, CLAUDE.md", typed, recorded on row `9827dda3` at 22:10:59 EDT). I had recommended fixing 67 of the 131 findings in `CLAUDE.md` and waiving the 64 in the merge section. His answer: "In your recommendation that we fix 67 and waive the merge section are you proposing that we let Lint findings pass because it breaks a test? Did I understand that correctly? Because that sure as fuck should not be happening anywhere The test gets updated to reflect the reality of better code actually passes its lint tests!" All 133 are fixed in `d295ec37e`, which is not landed.
+- **A gate is a direct ask** (Rick, by voice, time not read off a clock): he asked what I am supposed to do when my last words are "I still need your 2 rulings". I then sent the two cards above.
+- **Last call** (Rick, broadcast `67300d33`, row `effd93ec`): last call 22:35, the session-end ritual at 22:45, lights out 23:00, for Mr. Radio and me. No push and no backup were named.
+- **Mine, Rick may overturn**: an R&D document not yet swept still holds what it cites. Six dated explainers and post-games stay out of the Phase 5 population (336 findings), as ruled on 10-10. The row id `2f18ad99` leaves the merge section of `CLAUDE.md`, because the linter flags a bare id even in backticks. `src/tests/data/docstring_census_v022.json` keeps its line about the old heading; it is a dated record and nothing reads it.
+- **Open, not decided**: whether a decision record counts as a live citer that holds an R&D document out of history. Eleven ledger rows are held only that way.
+
+### Backlog from this session (Cheech; new rows were refused by the ticket gate at ratio 1.32)
+
+- Land `d295ec37e` first: rebase onto the branch head, run unit and cosa, fast-forward.
+- Archive `history.md`: 17.1k tokens with tonight's entry (measured 22:33 EDT), past the 17k warning line. Deferred at closing because lights out was 23:00.
+- The lupin-mobile half of both exit gates: lint over its instruction file, README and 32 commands (Phase 5), and a ledger for its R&D folder (Phase 6, row `ff6a6af6`). No mobile seat was live.
+- Five findings held on row `ca204c66` because the gate refused new rows: three transcript-server defects, the commons log switch that any non-empty value turns on, and the queue caching a submit past the flow's write guard.
+- `test_typescript_suite_gate.py` checks suite names by substring, so "smoke" is satisfied by "docker_smoke" (second reader's finding, not fixed).
+- The worktree `cheech-records-1012b` gained a `node_modules` link at 20:48:09 EDT during a unit run; I did not make it and did not find what did.
+
+## 📚 DECISIONS LOG 2026-10-12 evening (Mr. Radio 🦉 `14f0a33b`, skeleton crew, no seats)
+
+- **Audio chunks stay bare** (Rick, card answered about 22:02 EDT, row `87d19d27`): "Leave chunks bare (Recommended)". A client ties audio to an utterance by the `utterance_id` on the status frame before it. Cancelling the older stream and framing each chunk are not being built.
+- **The guards stay as they are** (Rick, yes/no card at about 22:12 EDT, row `2f5c2b80`): the blank-line fix stays; the "prefix stops at a newline" change is dropped. His question, "Did that really happen?", was answered by the hook logs: no logged text since 2026-06-06 has 20 or more setting-only lines in a row.
+- **Both browser clients use the id, and Tiffany is told** (Rick, card comment then yes at about 22:13 EDT, row `281a7608`, held): "both browser clients along with let Tiffany know". The note is in lupin-mobile `TODO.md`; the browser change is commit `48913c4b7`, unmerged.
+- **Mine, reversible**: the API docs were regenerated from the live `:7999` server (`ff1416bbf`) after checking each changed entry against `src/cosa/rest/routers/arbiter.py`. The TS/JS count table stamp was refreshed (`23e72b6aa`) because every staged TypeScript or JavaScript file was being refused; no entry moved.
+
+### Backlog from this session (no row; new rows were gated at 20:25 EDT, ratio 1.33)
+
+- [ ] Row `281a7608` is in the holding area and I could not request its admit: an admit must name a live ticket of mine to drop, and I had none.
+- [ ] After `48913c4b7` merges, the multiplexer bundle in the main tree's `src/lupin_app/static/dist/` must be rebuilt (`src/scripts/build-multiplexer.sh`) before `:7999` or `:8000` serves the change; then the TypeScript and E2E tiers on `:8000`.
+- [ ] The stash, commit and config guard regexes are still quadratic on hundreds of assignment-only lines (552 ms per regex at 2,000 lines). Accepted by Rick's ruling above; recorded so nobody re-finds it as new.
+
 ## 📚 DECISIONS LOG 2026-10-10 day to evening (Cheech 🌿 `e281ef6f`; crew Krishna · Rio · Clayton · Arnold · "extra 1" · Rachel · John · "extra 2") — skeleton crew toggle, extractor A2 landed with its gate held, plan 1 phases 5 and 6 side by side
 
 ### Rick's rulings (an answered card, a broadcast or his own words; none a timeout default; times from my record)
