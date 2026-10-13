@@ -425,7 +425,7 @@ def test_a_staged_gitlink_named_like_a_page_is_said_to_be_not_checked( repo, mon
     _no_external( monkeypatch )
     _commit( repo, { "docs/a.md": "clean\n" } )
     for rel in ( "z.md", "src/pkg/z.py", "src/tests/z.py", "src/web/z.ts", "vendor/lib" ): _gitlink( repo, rel )
-    names, renamed_from, gitlinks = gate.staged_entries( str( repo ) )
+    names, renamed_from, gitlinks = gate.staged_entries( str( repo ) )[ : 3 ]
     assert ( names, renamed_from, gitlinks ) == ( [], {}, [ "src/pkg/z.py", "src/tests/z.py", "src/web/z.ts", "vendor/lib", "z.md" ] )
     assert gate.staged_paths( str( repo ) ) == [] and gate.staged_counted( str( repo ) )[ 0 ] == [] and gate.staged_ts_counted( str( repo ) )[ 0 ] == []
     rc, lines = _blocking( repo )
@@ -609,6 +609,93 @@ def test_a_page_that_becomes_binary_as_it_moves_is_named_by_its_new_path_and_a_d
 
 def test_the_binary_listing_names_the_git_error_when_it_fails( tmp_path ):
     with pytest.raises( RuntimeError, match="^git diff --cached failed: " ): gate.staged_binary( str( tmp_path / "nowhere" ) )
+
+
+def test_a_staged_python_file_that_git_treats_as_binary_is_refused_in_blocking_mode_and_named( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": 'X = "a\0b"\n', "src/pkg/b.py": "X = 1\n" } )
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == [] and gate.staged_binary( str( repo ) ) == [ "src/pkg/a.py" ]
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if "binary" in ln ] == [ _binary_line( "src/pkg/a.py" ) ]
+
+
+# ---- a binary file in a warn-only path, and one whose content the commit did not make ------------
+
+BINARY = "A page\0 number {}.\n"
+HELD   = "[doc-lint] 1 checks could not be made, commit REFUSED: each is a REFUSED line above that says what was not checked"
+
+
+def _binary_said( repo ):
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == [] and ( HELD in lines ) == ( rc == gate.REFUSAL_EXIT )
+    return rc, [ ln for ln in lines if "binary" in ln ]
+
+
+def _merge_bringing( repo, ours, theirs ):
+    """Leave a merge of the branch side waiting, with its one conflict resolved and staged."""
+    _commit( repo, { "docs/ok.md": "Base text.\n", **ours } )
+    _git( repo, "checkout", "-q", "-b", "side" )
+    _commit( repo, { "docs/ok.md": "Side text.\n", **theirs }, "side" )
+    _git( repo, "checkout", "-q", "-" )
+    _commit( repo, { "docs/ok.md": "Our text.\n" }, "ours" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "side" ], capture_output=True, text=True )
+    assert res.returncode != 0 and ( repo / ".git" / "MERGE_HEAD" ).exists()
+    _stage( repo, { "docs/ok.md": "Resolved text.\n" } )
+
+
+@pytest.mark.parametrize( "rel", [ "history.md", "TODO.md" ] )
+def test_a_binary_warn_only_file_is_named_in_a_warning_and_the_same_name_in_a_folder_is_refused( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    assert gate.is_warn_only( rel ) and not gate.is_warn_only( f"docs/{rel}" )
+    _commit( repo, { rel: "A note.\n" } )
+    _stage( repo, { rel: "\0A note.\n" } )
+    assert gate.staged_binary( str( repo ) ) == [ rel ]
+    assert _binary_said( repo ) == ( 0, [ _binary_line( rel, "WARNING" ) ] )
+    _stage( repo, { f"docs/{rel}": "\0A note.\n" } )
+    rc, said = _binary_said( repo )
+    assert rc == gate.REFUSAL_EXIT and sorted( said ) == [ _binary_line( f"docs/{rel}" ), _binary_line( rel, "WARNING" ) ]
+
+
+@pytest.mark.parametrize( "how,new", [ ( "mode", "docs/b.md" ), ( "move", "docs/c.md" ) ] )
+def test_a_committed_binary_page_is_refused_only_when_the_commit_changes_its_content( repo, monkeypatch, how, new ):
+    _no_external( monkeypatch )
+    _commit( repo, { "docs/b.md": BINARY.format( 1 ) } )
+    if how == "mode": _git( repo, "update-index", "--chmod=+x", "docs/b.md" )
+    else: _git( repo, "mv", "docs/b.md", "docs/c.md" )
+    assert gate.staged_binary( str( repo ) ) == [ new ] and gate.staged_entries( str( repo ) )[ 3 ] == set()
+    assert _binary_said( repo ) == ( 0, [ _binary_line( new, "WARNING" ) ] )
+    _stage( repo, { new: BINARY.format( 2 ) } )
+    assert gate.staged_binary( str( repo ) ) == [ new ] and gate.staged_entries( str( repo ) )[ 3 ] == { new }
+    assert _binary_said( repo ) == ( gate.REFUSAL_EXIT, [ _binary_line( new ) ] )
+
+
+@pytest.mark.parametrize( "ours", [ {}, { "docs/b.md": BINARY.format( 0 ) } ] )
+def test_a_merge_that_brings_in_a_binary_page_as_the_other_side_has_it_is_allowed_with_a_warning( repo, monkeypatch, ours ):
+    _no_external( monkeypatch )
+    _merge_bringing( repo, ours, { "docs/b.md": BINARY.format( 1 ) } )
+    incoming = _git( repo, "rev-parse", "MERGE_HEAD" ).strip()
+    assert gate.staged_entries( str( repo ) )[ 3 ] == { "docs/b.md", "docs/ok.md" } and gate.staged_entries( str( repo ), incoming )[ 3 ] == { "docs/ok.md" }
+    assert _binary_said( repo ) == ( 0, [ _binary_line( "docs/b.md", "WARNING" ) ] )
+    _stage( repo, { "docs/b.md": BINARY.format( 3 ) } )                                             # a resolution that is neither side's copy
+    assert gate.staged_entries( str( repo ), incoming )[ 3 ] == { "docs/b.md", "docs/ok.md" }
+    assert _binary_said( repo ) == ( gate.REFUSAL_EXIT, [ _binary_line( "docs/b.md" ) ] )
+
+
+def test_a_merge_that_moves_the_incoming_binary_page_is_refused_since_the_other_side_has_it_at_another_path( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _merge_bringing( repo, {}, { "docs/b.md": BINARY.format( 1 ) } )
+    _git( repo, "mv", "docs/b.md", "docs/c.md" )
+    assert gate.staged_entries( str( repo ), _git( repo, "rev-parse", "MERGE_HEAD" ).strip() )[ 3 ] == { "docs/c.md", "docs/ok.md" }
+    assert _binary_said( repo ) == ( gate.REFUSAL_EXIT, [ _binary_line( "docs/c.md" ) ] )
+
+
+def test_a_merge_lets_off_the_finding_of_a_page_that_holds_a_bare_carriage_return( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _merge_bringing( repo, {}, { "docs/cr.md": SEEDED + "A line\rwith a bare return in it.\n" } )
+    assert gate.BARE_RETURN.search( gate.staged_source( str( repo ), "docs/cr.md" ) )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and _refused( lines ) == [] and f"[doc-lint] docs/cr.md:1: {CAPS}{gate.MERGED_MARK}" in lines
+    assert not [ ln for ln in lines if "bare carriage return" in ln ]
 
 
 # ---- a file name that starts with a dash, and a tool that fails on what it was given -----------
