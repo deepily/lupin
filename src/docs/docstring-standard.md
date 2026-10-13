@@ -24,7 +24,7 @@ The range gate (`range_gate.py`) replays the commits of a range under these rule
 
 The range gate replays a merge commit with its other parents as the incoming commit. A line that came in unchanged with the merged commit is not enforced, as at the hook. A concluded cherry-pick is different. Git keeps no record of the commit it picked, so the replay cannot recognise it. It is replayed as an ordinary commit, and a finding the hook let through as picked is refused on replay. Fix the line, or land the commit by a merge.
 
-Two files stay in warn mode: the `history.md` and `TODO.md` at the repository root. Their findings print with `(warn mode, commit allowed)` and the commit goes through. A `history.md` or `TODO.md` in any other folder is held like every other page.
+Six record locations stay in warn mode: the root `history.md`, `TODO.md`, `bug-fix-queue.md`, `history/` and `todo-history/`, and `src/cosa/history.md`. Their findings print with `(warn mode, commit allowed)`. The same name elsewhere is held like any page.
 
 If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. The gate may also end with an exit other than 0 or 3. The chain then prints `doc-lint gate exited N without a refusal verdict, commit ALLOWED` and the commit goes through. That covers a gate that cannot start, a killed gate, and a tree whose `gate.py` predates blocking and exits 1 on a finding. Findings printed above that line were not enforced; rebase such a tree.
 

@@ -63,11 +63,13 @@ from .word_list import configure_root
 # Repo-relative directory prefixes, each ending in a slash, for example "src/cosa/agents/".
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
-# The files --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths, so any other history.md
-# or TODO.md is held like every other page. WARN_ONLY_PREFIXES holds folders, each ending in a slash, and is empty.
-# Task-store row id=486cc499 gives the two files their own rule set and ends the exception.
-WARN_ONLY_PATHS    = ( "history.md", "TODO.md" )
-WARN_ONLY_PREFIXES = ()
+# The record locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
+# A file of the same name in any other folder is held like every other page.
+# WARN_ONLY_PREFIXES holds folders, each ending in a slash and matched from the repo root.
+# So src/cosa/history/ is not among them, and neither is a history/ folder below the root.
+# Task-store row id=486cc499 gives the root history.md and TODO.md their own rule set and ends their exception.
+WARN_ONLY_PATHS    = ( "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md" )
+WARN_ONLY_PREFIXES = ( "history/", "todo-history/" )
 WARN_ONLY_MARK     = " (warn mode, commit allowed)"
 PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the commit)"
 MERGED_MARK        = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
@@ -143,8 +145,9 @@ def is_warn_only( path ):
 
     Ensures:
         - True when path equals an entry of WARN_ONLY_PATHS, or starts with an entry of WARN_ONLY_PREFIXES
-        - a file of the same name in any folder below the root is False
+        - a file named like a listed path, at any other path, is False
         - a folder whose name only starts with the letters of a listed folder is False, since an entry ends in a slash
+        - a folder of a listed name below the root is False, since a prefix is matched from the start of the path
 
     Raises:
         - nothing
