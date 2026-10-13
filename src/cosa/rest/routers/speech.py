@@ -185,6 +185,45 @@ def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_fina
 
 
 # Global dependencies (temporary access via main module)
+UTTERANCE_ID_MAX_LENGTH = 255
+
+def read_utterance_id( request_data ):
+    """
+    Read the optional client-supplied utterance id from a speech request body.
+
+    Requires:
+        - request_data is a dict
+
+    Ensures:
+        - returns None when the key is absent or null
+        - returns the id unchanged when it is a string of 1 to 255 characters
+
+    Raises:
+        - HTTPException with 400 status for any other value
+    """
+    utterance_id = request_data.get( "utterance_id" )
+    if utterance_id is None: return None
+
+    if not isinstance( utterance_id, str ) or not utterance_id or len( utterance_id ) > UTTERANCE_ID_MAX_LENGTH:
+        raise HTTPException( status_code=400, detail=f"utterance_id must be a non-empty string of at most {UTTERANCE_ID_MAX_LENGTH} characters" )
+
+    return utterance_id
+
+def stream_frame( payload, utterance_id ):
+    """
+    Stamp one speech stream frame with the utterance it belongs to.
+
+    Requires:
+        - payload is a dict about to be sent on the audio socket
+        - utterance_id is a string, or None when the request carried no id
+
+    Ensures:
+        - returns payload, with "utterance_id" set when an id was given
+        - leaves payload without the key when utterance_id is None
+    """
+    if utterance_id is not None: payload[ "utterance_id" ] = utterance_id
+    return payload
+
 def get_whisper_pipeline():
     """
     Dependency to get the Whisper pipeline from the main module.
@@ -617,6 +656,7 @@ async def get_tts_audio(
         
         session_id = request_data.get("session_id")
         msg = request_data.get("text")
+        utterance_id = read_utterance_id( request_data )
 
         if app_debug and app_verbose: print(f"[TTS-DEBUG] Extracted - session_id: '{session_id}', text: '{msg}'")
 
@@ -662,15 +702,15 @@ async def get_tts_audio(
         if app_debug and app_verbose: print(f"[TTS-SUCCESS] Starting TTS for session: {session_id}, msg: '{msg}'")
         
         # Start hybrid TTS streaming in background
-        task = asyncio.create_task(stream_tts_hybrid(session_id, msg, ws_manager))
+        task = asyncio.create_task(stream_tts_hybrid(session_id, msg, ws_manager, utterance_id))
         active_tasks[session_id] = task
-        
+
         # Return immediate status response
-        return JSONResponse({
+        return JSONResponse( stream_frame( {
             "status": "success",
             "message": "TTS generation started",
             "session_id": session_id
-        })
+        }, utterance_id ) )
         
     except HTTPException:
         raise
@@ -758,7 +798,8 @@ async def get_tts_audio_elevenlabs(
         speed = request_data.get("speed", 1.0)
         quality_profile = request_data.get("quality_profile", "balanced")
         debug_simulate_error = request_data.get("debug_simulate_error", False)
-        
+        utterance_id = read_utterance_id( request_data )
+
         # Validate required fields
         if not session_id or not msg:
             error_msg = f"Missing session_id or text - session_id: {session_id}, text: {msg}"
@@ -818,18 +859,19 @@ async def get_tts_audio_elevenlabs(
         # Start ElevenLabs TTS streaming in background
         task = asyncio.create_task(stream_tts_elevenlabs(
             session_id, msg, ws_manager, voice_id, model_id, stability, 
-            similarity_boost, style, use_speaker_boost, speed, quality_profile, config_mgr, debug_simulate_error
+            similarity_boost, style, use_speaker_boost, speed, quality_profile, config_mgr, debug_simulate_error,
+            utterance_id
         ))
         active_tasks[session_id] = task
-        
+
         # Return immediate status response
-        return JSONResponse({
+        return JSONResponse( stream_frame( {
             "status": "success",
             "message": "ElevenLabs TTS generation started",
             "session_id": session_id,
             "provider": "elevenlabs",
             "voice_id": voice_id
-        })
+        }, utterance_id ) )
         
     except HTTPException:
         raise
@@ -938,7 +980,7 @@ async def upload_and_transcribe_wav_file(
     finally:
         remove_audio_upload( temp_file )
 
-async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketManager):
+async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketManager, utterance_id: str = None):
     """
     Hybrid TTS streaming with OpenAI: Forward chunks immediately for low-latency playback.
     
@@ -957,14 +999,16 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
         - Sends completion signal with timing and chunk count statistics
         - Handles connection loss gracefully with appropriate cleanup
         - Provides error messages via WebSocket on failures
-        
+        - Every JSON frame of this stream carries utterance_id when one was given
+
     Raises:
         - None (handles all exceptions gracefully with error reporting)
-        
+
     Args:
         session_id: Session ID for active WebSocket connection
         msg: Text content to convert to speech
         ws_manager: WebSocket manager instance for connection handling
+        utterance_id: The client's id for this utterance, or None
     """
     websocket = ws_manager.active_connections.get(session_id)
     if not websocket:
@@ -981,11 +1025,11 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
         print(f"[TTS-HYBRID] Starting generation for: '{msg}'")
         
         # Send status update
-        await websocket.send_json({
+        await websocket.send_json( stream_frame( {
             "type": "audio_streaming_status",
             "text": "Generating and streaming audio...",
             "status": "loading"
-        })
+        }, utterance_id ) )
         
         # Stream from OpenAI directly to WebSocket - no buffering, no format logic
         try:
@@ -1012,31 +1056,31 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
                     chunk_count += 1
                 
                 # Send completion signal
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "audio_streaming_complete",
                     "text": f"Streaming complete ({chunk_count} chunks, {time.time() - start_time:.1f}s)",
                     "status": "success"
-                })
+                }, utterance_id ) )
                 
                 print(f"[TTS-HYBRID] ✓ Complete - {chunk_count} chunks in {time.time() - start_time:.2f}s")
                 
         except Exception as e:
             print(f"[TTS-HYBRID] OpenAI API error: {e}")
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "error",
                 "text": f"TTS generation failed: {str(e)}",
                 "status": "error"
-            })
+            }, utterance_id ) )
             
     except Exception as e:
         print(f"[TTS-HYBRID] General error: {e}")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L773-775)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error", 
                     "text": f"TTS error: {str(e)}",
                     "status": "error"
-                })
+                }, utterance_id ) )
             except:
                 pass  # Connection might be lost
 
@@ -1053,7 +1097,8 @@ async def stream_tts_elevenlabs(
     speed: float = 1.0,
     quality_profile: str = "balanced",
     config_mgr = None,
-    debug_simulate_error: bool = False
+    debug_simulate_error: bool = False,
+    utterance_id: str = None
 ):
     """
     Stream TTS through the ElevenLabs WebSocket with a low-latency configuration.
@@ -1076,6 +1121,7 @@ async def stream_tts_elevenlabs(
         - Handles ElevenLabs protocol messages (audio, isFinal, error)
         - Sends completion signal with timing and chunk count statistics
         - Gracefully handles connection failures and API errors
+        - Every JSON frame of this stream carries utterance_id when one was given
 
     Raises:
         - None (handles all exceptions gracefully with error reporting)
@@ -1087,6 +1133,7 @@ async def stream_tts_elevenlabs(
         voice_id: ElevenLabs voice ID (default: Rachel voice)
         stability: Voice stability setting for consistent output (0.0-1.0)
         similarity_boost: Voice similarity enhancement (0.0-1.0)
+        utterance_id: The client's id for this utterance, or None
     """
     websocket = ws_manager.active_connections.get(session_id)
     if not websocket:
@@ -1158,33 +1205,33 @@ Speed            : {speed:.2f}"""
             if app_debug and app_verbose: print(f"[TTS-ELEVENLABS-DEBUG] 🧪 Simulating quota_exceeded error for testing")
             
             # Send initial status
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_status",
                 "text": "Connecting to ElevenLabs...",
                 "status": "loading",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             # Small delay to simulate connection attempt
             await asyncio.sleep(0.5)
             
             # Simulate the quota_exceeded error
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "tts_error",
                 "text": "TTS service temporarily unavailable",
                 "status": "error",
                 "provider": "elevenlabs",
                 "details": "Please try again in a moment"
-            })
+            }, utterance_id ) )
             return
         
         # Send status update
-        await websocket.send_json({
+        await websocket.send_json( stream_frame( {
             "type": "audio_streaming_status",
             "text": "Connecting to ElevenLabs...",
             "status": "loading",
             "provider": "elevenlabs"
-        })
+        }, utterance_id ) )
         
         # ElevenLabs WebSocket streaming endpoint with dynamic model and PCM 24000 format
         # PCM 24000 enables smooth Web Audio API playback without MP3 decoding gaps
@@ -1229,12 +1276,12 @@ Speed            : {speed:.2f}"""
             await elevenlabs_ws.send(json.dumps({"text": ""}))
             
             # Update status
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_status",
                 "text": "Streaming audio from ElevenLabs...",
                 "status": "streaming",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             chunk_count = 0
             start_time = time.time()
@@ -1291,14 +1338,14 @@ Speed            : {speed:.2f}"""
                             error_code   = "auth_error"
                             user_message = "TTS authentication failed."
 
-                        await websocket.send_json( {
+                        await websocket.send_json( stream_frame( {
                             "type"       : "tts_error",
                             "text"       : user_message,
                             "error_code" : error_code,
                             "status"     : "error",
                             "provider"   : "elevenlabs",
                             "details"    : error_msg
-                        } )
+                        }, utterance_id ) )
 
                         # Break instead of raise to allow graceful completion
                         break
@@ -1309,12 +1356,12 @@ Speed            : {speed:.2f}"""
                     continue
                 
             # Send completion signal
-            await websocket.send_json({
+            await websocket.send_json( stream_frame( {
                 "type": "audio_streaming_complete",
                 "text": f"ElevenLabs streaming complete ({chunk_count} chunks, {time.time() - start_time:.1f}s)",
                 "status": "success",
                 "provider": "elevenlabs"
-            })
+            }, utterance_id ) )
             
             print(f"[TTS-ELEVENLABS] ✓ Complete - {chunk_count} chunks in {time.time() - start_time:.2f}s")
             
@@ -1322,12 +1369,12 @@ Speed            : {speed:.2f}"""
         print(f"[TTS-ELEVENLABS] ElevenLabs WebSocket connection closed")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error",
                     "text": "ElevenLabs connection closed",
                     "status": "error",
                     "provider": "elevenlabs"
-                })
+                }, utterance_id ) )
             except:
                 pass
                 
@@ -1335,12 +1382,12 @@ Speed            : {speed:.2f}"""
         print(f"[TTS-ELEVENLABS] Error: {e}")
         if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
-                await websocket.send_json({
+                await websocket.send_json( stream_frame( {
                     "type": "error",
                     "text": f"ElevenLabs TTS error: {str(e)}",
                     "status": "error",
                     "provider": "elevenlabs"
-                })
+                }, utterance_id ) )
             except:
                 pass  # Connection might be lost
 

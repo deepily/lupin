@@ -131,46 +131,79 @@ Job completion notification with TTS audio.
 }
 ```
 
+### The utterance id on a speech stream
+
+A speech request (`POST /api/get-speech` or `POST /api/get-speech-elevenlabs`) may carry `utterance_id`: a string of 1 to 255 characters that the client picks. The key may be left out or sent as `null`. Any other value is refused with HTTP 400 and no stream starts.
+
+When the request carried an id, the server echoes it unchanged:
+
+- in the HTTP reply to the request;
+- on every JSON frame that stream sends on the audio WebSocket: `audio_streaming_status`, `audio_streaming_complete`, `tts_error` and the stream's `error` frames.
+
+When the request carried no id, none of those has the key, so the frames are what they were before.
+
+Use it to tell which utterance a completion or an error belongs to. A completion from an abandoned stream can arrive after the client has started the next utterance. Two streams on one socket can also finish in either order. Compare the frame's `utterance_id` with the one the client is waiting on and ignore a frame that names another.
+
+**Audio chunks carry no id.** A chunk is a bare binary frame with no envelope. The first `audio_streaming_status` of a stream arrives before its first chunk and names the utterance. That is enough while one stream at a time is open on the socket. If two streams are open at once their chunks interleave on the socket, and nothing in a chunk says which stream sent it.
+
+The code is `read_utterance_id` and `stream_frame` in `src/cosa/rest/routers/speech.py`. The test that drives two overlapping streams through the assembled app is `src/tests/unit/test_overlapping_speech_streams_carry_their_own_utterance_id.py`.
+
 ### `audio_streaming_chunk`
 
-Individual audio chunk during progressive TTS streaming. Sent over the audio WebSocket (`/ws/audio/{session_id}`).
-
-**Payload**:
-```json
-{
-  "type": "audio_streaming_chunk",
-  "chunk_index": 3,
-  "data": "<base64-encoded-audio>",
-  "timestamp": "2026-03-20T10:30:00Z"
-}
-```
+An audio chunk during TTS streaming. The server sends it over the audio WebSocket (`/ws/audio/{session_id}`) as a **binary frame**: the bytes are the audio (MP3 from `/api/get-speech`, PCM 24000 from `/api/get-speech-elevenlabs`). There is no JSON envelope, so no `type` and no `utterance_id`. The name is a subscription name that clients list; no server code sends a JSON frame of this type.
 
 ### `audio_streaming_status`
 
-Audio WebSocket connection/streaming status updates. Also serves as the connection confirmation message for audio WebSocket connections.
+Audio WebSocket connection and streaming status updates. Also the confirmation message when an audio WebSocket connects; that one frame belongs to no utterance and never has `utterance_id`.
 
-**Payload**:
+**Payload** (a stream's status frame, for a request that carried `utterance_id`):
 ```json
 {
   "type": "audio_streaming_status",
-  "text": "Audio WebSocket connected for session wise penguin",
-  "status": "success",
-  "timestamp": "2026-03-20T10:30:00Z"
+  "text": "Streaming audio from ElevenLabs...",
+  "status": "streaming",
+  "provider": "elevenlabs",
+  "utterance_id": "utt-41"
 }
 ```
 
+`provider` is present on the ElevenLabs path only. `status` is `loading`, `streaming` or, on the connection confirmation, `success`.
+
 ### `audio_streaming_complete`
 
-Signals end of an audio stream. Client should finalize audio playback.
+Signals that the server has sent every chunk of one stream. Client should finalize audio playback of the utterance the frame names.
 
 **Payload**:
 ```json
 {
   "type": "audio_streaming_complete",
-  "session_id": "wise penguin",
-  "timestamp": "2026-03-20T10:30:00Z"
+  "text": "ElevenLabs streaming complete (12 chunks, 1.4s)",
+  "status": "success",
+  "provider": "elevenlabs",
+  "utterance_id": "utt-41"
 }
 ```
+
+`provider` is present on the ElevenLabs path only. On that path the frame also follows a `tts_error`, so a completion does not by itself mean audio was sent.
+
+### `tts_error`
+
+The ElevenLabs stream failed. Sent on the audio WebSocket by `/api/get-speech-elevenlabs` only. It is not in the `websocket available events` key.
+
+**Payload**:
+```json
+{
+  "type": "tts_error",
+  "text": "ElevenLabs quota exceeded. TTS unavailable until reset.",
+  "error_code": "quota_exceeded",
+  "status": "error",
+  "provider": "elevenlabs",
+  "details": "quota_exceeded: ...",
+  "utterance_id": "utt-41"
+}
+```
+
+`error_code` is `quota_exceeded`, `rate_limit`, `auth_error` or `unknown`. The simulated error (`debug_simulate_error` in the request) sends no `error_code`.
 
 **Note**: Audio WebSockets have a **fixed subscription set**: `audio_streaming_status`, `audio_streaming_complete`, `sys_ping`. This is hardcoded in the router, not client-configurable.
 

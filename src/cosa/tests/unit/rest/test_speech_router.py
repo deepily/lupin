@@ -1297,3 +1297,191 @@ class TestWebsocketPcmTtsEndpoint( unittest.IsolatedAsyncioTestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── utterance id: request field and its echo on stream frames (row 87d19d27) ────
+
+
+class TestReadUtteranceId( unittest.TestCase ):
+
+    def test_absent_key_is_none( self ):
+        self.assertIsNone( speech.read_utterance_id( { "text": "hi" } ) )
+
+    def test_null_is_none( self ):
+        self.assertIsNone( speech.read_utterance_id( { "utterance_id": None } ) )
+
+    def test_a_string_comes_back_unchanged( self ):
+        self.assertEqual( speech.read_utterance_id( { "utterance_id": " utt 7 " } ), " utt 7 " )
+
+    def test_the_longest_allowed_id_is_accepted( self ):
+        longest = "u" * speech.UTTERANCE_ID_MAX_LENGTH
+        self.assertEqual( speech.read_utterance_id( { "utterance_id": longest } ), longest )
+
+    def test_one_character_over_the_limit_is_400( self ):
+        with self.assertRaises( HTTPException ) as c:
+            speech.read_utterance_id( { "utterance_id": "u" * ( speech.UTTERANCE_ID_MAX_LENGTH + 1 ) } )
+        self.assertEqual( c.exception.status_code, 400 )
+        self.assertIn( "utterance_id", c.exception.detail )
+
+    def test_an_empty_string_is_400( self ):
+        with self.assertRaises( HTTPException ) as c:
+            speech.read_utterance_id( { "utterance_id": "" } )
+        self.assertEqual( c.exception.status_code, 400 )
+
+    def test_a_non_string_is_400( self ):
+        for bad in ( 7, 0, False, [ "utt" ], { "id": "utt" } ):
+            with self.subTest( bad=bad ):
+                with self.assertRaises( HTTPException ) as c:
+                    speech.read_utterance_id( { "utterance_id": bad } )
+                self.assertEqual( c.exception.status_code, 400 )
+
+
+class TestStreamFrame( unittest.TestCase ):
+
+    def test_an_id_is_stamped_on_the_frame( self ):
+        frame = speech.stream_frame( { "type": "audio_streaming_complete" }, "utt-1" )
+        self.assertEqual( frame, { "type": "audio_streaming_complete", "utterance_id": "utt-1" } )
+
+    def test_no_id_leaves_the_frame_as_it_was( self ):
+        frame = speech.stream_frame( { "type": "audio_streaming_complete" }, None )
+        self.assertEqual( frame, { "type": "audio_streaming_complete" } )
+
+
+class TestSpeechDoorsPassTheUtteranceIdOn( unittest.IsolatedAsyncioTestCase ):
+    """Both speech doors read the id, hand it to their streamer and echo it in the reply."""
+
+    DOORS = (
+        ( "stream_tts_hybrid",     get_tts_audio,            { } ),
+        ( "stream_tts_elevenlabs", get_tts_audio_elevenlabs, { "config_mgr": MagicMock() } ),
+    )
+
+    async def _call( self, streamer_name, door, extra, body ):
+        req = MagicMock(); req.json = AsyncMock( return_value=body )
+        req.client.host = "h"; req.headers = { }
+        ws = MagicMock(); ws.is_connected.return_value = True; ws.active_connections = { }
+        main = MagicMock(); main.app_debug = False; main.app_verbose = False
+        streamer = MagicMock( return_value="CORO" )
+        with _patch_fastapi_main( main ), \
+             patch( f"{P}.{streamer_name}", new=streamer ), \
+             patch.object( speech.asyncio, "create_task", return_value="TASK" ):
+            resp = await door( request=req, ws_manager=ws, active_tasks={ }, current_user_id="u1", **extra )
+        return resp, streamer
+
+    async def test_a_given_id_reaches_the_streamer_and_the_reply( self ):
+        for streamer_name, door, extra in self.DOORS:
+            with self.subTest( door=door.__name__ ):
+                resp, streamer = await self._call( streamer_name, door, extra,
+                                                   { "session_id": "s", "text": "hi", "utterance_id": "utt-9" } )
+                self.assertEqual( json.loads( resp.body )[ "utterance_id" ], "utt-9" )
+                streamer.assert_called_once()
+                self.assertEqual( streamer.call_args.args[ -1 ], "utt-9" )
+
+    async def test_no_id_gives_the_streamer_none_and_a_reply_without_the_key( self ):
+        for streamer_name, door, extra in self.DOORS:
+            with self.subTest( door=door.__name__ ):
+                resp, streamer = await self._call( streamer_name, door, extra, { "session_id": "s", "text": "hi" } )
+                self.assertNotIn( "utterance_id", json.loads( resp.body ) )
+                self.assertIsNone( streamer.call_args.args[ -1 ] )
+
+    async def test_a_bad_id_is_400_and_no_stream_starts( self ):
+        for streamer_name, door, extra in self.DOORS:
+            with self.subTest( door=door.__name__ ):
+                with patch( f"{P}.{streamer_name}", new=MagicMock() ) as never:
+                    with self.assertRaises( HTTPException ) as c:
+                        await self._call( streamer_name, door, extra,
+                                          { "session_id": "s", "text": "hi", "utterance_id": 12 } )
+                    never.assert_not_called()
+                self.assertEqual( c.exception.status_code, 400 )
+                self.assertIn( "utterance_id", c.exception.detail )
+
+
+class TestHybridFramesCarryTheUtteranceId( unittest.IsolatedAsyncioTestCase ):
+
+    def _wsm( self, ws ):
+        wsm = MagicMock(); wsm.active_connections = { "s": ws }; wsm.is_connected.return_value = True
+        return wsm
+
+    def _client( self, chunks=None, raises=None ):
+        client = MagicMock()
+        create = client.audio.speech.with_streaming_response.create
+        if raises is not None:
+            create.side_effect = raises
+        else:
+            response = MagicMock(); response.iter_bytes.return_value = chunks
+            create.return_value = _SyncCM( response )
+        return client
+
+    async def test_status_and_complete_carry_the_id( self ):
+        ws = _FakeClientWs()
+        with patch( f"{P}.OpenAI", return_value=self._client( chunks=[ b"a" ] ) ), \
+             patch.object( speech.du, "get_api_key", return_value="KEY" ):
+            await stream_tts_hybrid( "s", "hi", self._wsm( ws ), "utt-h" )
+        self.assertEqual( [ m[ "type" ] for m in ws.json_sent ], [ "audio_streaming_status", "audio_streaming_complete" ] )
+        self.assertEqual( [ m[ "utterance_id" ] for m in ws.json_sent ], [ "utt-h", "utt-h" ] )
+
+    async def test_the_provider_error_frame_carries_the_id( self ):
+        ws = _FakeClientWs()
+        with patch( f"{P}.OpenAI", return_value=self._client( raises=RuntimeError( "api down" ) ) ), \
+             patch.object( speech.du, "get_api_key", return_value="KEY" ):
+            await stream_tts_hybrid( "s", "hi", self._wsm( ws ), "utt-h" )
+        self.assertEqual( ws.json_sent[ -1 ][ "type" ], "error" )
+        self.assertEqual( ws.json_sent[ -1 ][ "utterance_id" ], "utt-h" )
+
+    async def test_the_general_error_frame_carries_the_id( self ):
+        ws = _FakeClientWs()
+        with patch.object( speech.du, "get_api_key", side_effect=RuntimeError( "no key" ) ):
+            await stream_tts_hybrid( "s", "hi", self._wsm( ws ), "utt-h" )
+        self.assertEqual( [ ( m[ "type" ], m[ "utterance_id" ] ) for m in ws.json_sent ], [ ( "error", "utt-h" ) ] )
+
+    async def test_without_an_id_no_frame_has_the_key( self ):
+        ws = _FakeClientWs()
+        with patch( f"{P}.OpenAI", return_value=self._client( chunks=[ b"a" ] ) ), \
+             patch.object( speech.du, "get_api_key", return_value="KEY" ):
+            await stream_tts_hybrid( "s", "hi", self._wsm( ws ) )
+        self.assertEqual( len( ws.json_sent ), 2 )
+        for frame in ws.json_sent: self.assertNotIn( "utterance_id", frame )
+
+
+class TestElevenlabsFramesCarryTheUtteranceId( unittest.IsolatedAsyncioTestCase ):
+
+    async def _run( self, messages=None, *, connect=None, utterance_id="utt-e", debug_simulate_error=False ):
+        ws  = _FakeClientWs()
+        wsm = MagicMock(); wsm.active_connections = { "s": ws }; wsm.is_connected.return_value = True
+        connect = connect or AsyncMock( return_value=_FakeElevenWs( messages or [ ] ) )
+        main = MagicMock(); main.app_debug = False; main.app_verbose = False
+        with _patch_fastapi_main( main ), \
+             patch.object( speech, "websockets", _fake_ws_module( connect ) ), \
+             patch.object( speech.du, "get_api_key", return_value="KEY" ), \
+             patch.object( speech.asyncio, "sleep", new=AsyncMock() ):
+            await stream_tts_elevenlabs( "s", "hi", wsm, voice_id="V", config_mgr=None,
+                                         debug_simulate_error=debug_simulate_error, utterance_id=utterance_id )
+        return ws.json_sent
+
+    def _assert_every_frame( self, sent, types, utterance_id="utt-e" ):
+        self.assertEqual( [ m[ "type" ] for m in sent ], types )
+        self.assertEqual( [ m[ "utterance_id" ] for m in sent ], [ utterance_id ] * len( types ) )
+
+    async def test_a_clean_stream( self ):
+        sent = await self._run( [ json.dumps( { "audio": _b64_audio() } ), json.dumps( { "isFinal": True } ) ] )
+        self._assert_every_frame( sent, [ "audio_streaming_status", "audio_streaming_status", "audio_streaming_complete" ] )
+
+    async def test_a_provider_error_then_the_trailing_complete( self ):
+        sent = await self._run( [ json.dumps( { "error": "quota_exceeded" } ) ] )
+        self._assert_every_frame( sent, [ "audio_streaming_status", "audio_streaming_status", "tts_error", "audio_streaming_complete" ] )
+
+    async def test_the_simulated_error( self ):
+        sent = await self._run( debug_simulate_error=True )
+        self._assert_every_frame( sent, [ "audio_streaming_status", "tts_error" ] )
+
+    async def test_the_provider_socket_closing( self ):
+        sent = await self._run( connect=AsyncMock( side_effect=_ConnClosed( "closed" ) ) )
+        self._assert_every_frame( sent, [ "audio_streaming_status", "error" ] )
+
+    async def test_any_other_failure( self ):
+        sent = await self._run( connect=AsyncMock( side_effect=RuntimeError( "kaboom" ) ) )
+        self._assert_every_frame( sent, [ "audio_streaming_status", "error" ] )
+
+    async def test_without_an_id_no_frame_has_the_key( self ):
+        sent = await self._run( [ json.dumps( { "error": "quota_exceeded" } ) ], utterance_id=None )
+        self.assertEqual( len( sent ), 4 )
+        for frame in sent: self.assertNotIn( "utterance_id", frame )
