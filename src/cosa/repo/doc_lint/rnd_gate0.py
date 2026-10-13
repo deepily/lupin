@@ -39,15 +39,16 @@ NON_CITING = frozenset( {
 
 ARCHIVE_PREFIXES = ( "history/", "todo-history/", "src/cosa/history/", "src/cosa/history.md" )
 
-HOLDING_RND_CLASSES = frozenset( { "in force", "new" } )
+HOLDING_RND_CLASSES = frozenset( { "in force" } )
 
 INDEX_PATHS = ( "src/rnd/README.md", "src/cosa/rnd/README.md" )
 
 RULING_NOTE = (
     "Which citers hold a doc out of history is a manager's ruling of 2026-10-09 on the plan's word "
-    "'live'. A code, test, CLAUDE.md, src/docs, TODO.md or .claude citer holds. An R&D citer holds "
-    "only while its own class is in force or new. History archives, session manifests and the "
-    "two root index READMEs never hold; an initiative-folder README holds like any R&D citer. Rick may change it."
+    "'live'. A code, test, CLAUDE.md, src/docs, TODO.md or .claude citer holds. History archives, "
+    "session manifests and the two root index READMEs never hold; an initiative-folder README holds "
+    "like any R&D citer. Rick ruled on 2026-10-12 that an R&D citer holds only while its own class is in force: "
+    "a doc that is itself held as new holds nothing. An R&D citer with no proposed class still holds."
 )
 
 _KEYS    = ( "live_path_citers", "live_name_citers", "live_stem_citers",
@@ -224,23 +225,26 @@ def _all_citers( entry ):
     return sorted( { citer for key in _KEYS for citer in entry[ key ] } )
 
 
-def _holds( citer, classes ):
+def _holds( citer, classes, unswept ):
     """
     Say whether one citer holds a doc out of history under the current classes.
 
     Requires:
-        - classes is { path: class }; a path it lacks is unclassified
+        - classes is { path: class } over the docs of the gate
+        - unswept is the set of gate docs that came with no proposed class
 
     Ensures:
         - a live citer holds, an archive or index citer does not
-        - an R&D citer holds when its class is in force or new, and an unclassified one counts as new
+        - an R&D citer holds when its class is in force
+        - an R&D citer outside the gate, or in it with no proposed class, holds
+        - an R&D citer that is new because a citer holds it does not hold
 
     Raises:
         - nothing
     """
     kind = citer_kind( citer )
     if kind == "live": return True
-    if kind == "rnd":  return classes.get( citer, "new" ) in HOLDING_RND_CLASSES
+    if kind == "rnd":  return citer not in classes or citer in unswept or classes[ citer ] in HOLDING_RND_CLASSES
     return False
 
 
@@ -256,7 +260,7 @@ def resolve( gate, proposed ):
         - returns { doc: { proposed, class, holding_citers, free_citers } }
         - an unclassified doc is class new
         - a doc proposed as history becomes new when any citer holds it
-        - the passes repeat until no class moves, so a doc held only by an R&D doc that was itself just held is held too
+        - a doc held this way holds nothing, so one pass settles every class and the order of the docs does not matter
         - a doc proposed as in force or superseded keeps that class
         - holding_citers and free_citers are sorted and split by the final classes
 
@@ -264,22 +268,18 @@ def resolve( gate, proposed ):
         - nothing
     """
     classes = { doc: proposed.get( doc, "new" ) for doc in gate }
-    moved   = True
-    while moved:
-        moved = False
-        for doc, entry in gate.items():
-            if classes[ doc ] != "history": continue
-            if any( _holds( citer, classes ) for citer in _all_citers( entry ) ):
-                classes[ doc ] = "new"
-                moved          = True
+    unswept = frozenset( doc for doc in gate if doc not in proposed )
+    held    = [ doc for doc, entry in gate.items()
+                if classes[ doc ] == "history" and any( _holds( citer, classes, unswept ) for citer in _all_citers( entry ) ) ]
+    for doc in held: classes[ doc ] = "new"
     result = {}
     for doc, entry in gate.items():
         citers = _all_citers( entry )
         result[ doc ] = {
             "proposed"       : proposed.get( doc, "new" ),
             "class"          : classes[ doc ],
-            "holding_citers" : [ c for c in citers if _holds( c, classes ) ],
-            "free_citers"    : [ c for c in citers if not _holds( c, classes ) ],
+            "holding_citers" : [ c for c in citers if _holds( c, classes, unswept ) ],
+            "free_citers"    : [ c for c in citers if not _holds( c, classes, unswept ) ],
         }
     return result
 
