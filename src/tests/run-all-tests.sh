@@ -80,7 +80,8 @@ declare -A SCRIPTS=(
     # "Total Tests: / Passed: / Failed:" whose unit is FILES, not tests.
     [stylelint]="src/tests/run-stylelint-gate.sh"
     # Every swept-scope Python file's docstrings under the documentation lint (row 2c48c717).
-    # Prints "Total Tests: / Passed: / Failed:" whose unit is files, and "Errors:" in findings.
+    # Its second step checks the metrics dashboard page. Prints "Total Tests: / Passed: / Failed:"
+    # whose unit is files plus one for that check, and "Errors:" in findings plus that check's lines.
     [doclint]="src/tests/run-doclint-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"

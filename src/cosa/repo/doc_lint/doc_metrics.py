@@ -313,22 +313,59 @@ def metric_value( metrics, name ):
     return Fraction( metrics[ "counts" ][ name ], metrics[ "tokens" ] ) if metrics[ "tokens" ] else Fraction( 0 )
 
 
+def has_risen( before, after, name ):
+    """
+    Say whether one compared value is higher after than before.
+
+    Requires:
+        - both are files_metrics results; name is "tokens" or a MARKER_COLUMNS name
+
+    Ensures:
+        - a marker has risen only when its exact rate is higher and its raw count is higher too
+        - so the same markers in fewer words is no rise, and neither is one more marker in many more words
+        - the token count has no second number, so it has risen whenever it is higher
+
+    Raises:
+        - nothing
+    """
+    if metric_value( after, name ) <= metric_value( before, name ): return False
+    return name == "tokens" or after[ "counts" ][ name ] > before[ "counts" ][ name ]
+
+
 def risen( before, after ):
     """
-    List the compared values that are higher after than before.
+    List the compared values that have risen from before to after.
 
     Requires:
         - both are files_metrics results
 
     Ensures:
-        - returns the names in COMPARED_METRICS whose after value is above its before value, in that order
+        - returns the names in COMPARED_METRICS for which has_risen is true, in that order
         - COMPARED_METRICS is read on each call
-        - an equal value is not a rise
 
     Raises:
         - nothing
     """
-    return [ name for name in COMPARED_METRICS if metric_value( after, name ) > metric_value( before, name ) ]
+    return [ name for name in COMPARED_METRICS if has_risen( before, after, name ) ]
+
+
+def sum_metrics( sides ):
+    """
+    Add several measured sides into one.
+
+    Requires:
+        - sides is a list of files_metrics results
+
+    Ensures:
+        - returns { files, tokens, counts, rates }; the rates come from the summed counts
+        - an empty list gives zeros
+
+    Raises:
+        - nothing
+    """
+    total = empty_counts()
+    for side in sides: add_counts( total, side[ "counts" ] )
+    return { "files": sum( side[ "files" ] for side in sides ), "tokens": total[ "words" ], "counts": total, "rates": rates_per_thousand( total ) }
 
 
 def build_dashboard( root, base, head=None ):
@@ -340,11 +377,12 @@ def build_dashboard( root, base, head=None ):
         - head is a revision, or None for the working tree
 
     Ensures:
-        - returns { base, head, head_is_tree, changed, files_before, files_after, rows }; base and head are full commit ids
+        - returns { base, head, head_is_tree, changed, files_before, files_after, rows, total }; base and head are full commit ids
         - with head None, head is the commit the tree is checked out at and changed counts the swept files that differ from it
         - rows are those of head, sorted by directory, each { package, kind, before, after, rose, status }
         - a directory with no swept file at base has before None and status "new", and nothing is compared for it
         - status is "rose" when risen names a value, otherwise "ok"
+        - total is { before, after }, the sums over every swept file at base and at head; a directory that is gone at head is in its before
 
     Raises:
         - RuntimeError from git when a revision does not resolve or a read fails
@@ -355,10 +393,11 @@ def build_dashboard( root, base, head=None ):
     old_paths = swept_at( root, base_sha )
     new_paths = swept_at( root, head )
     old, new  = dashboard_rows( old_paths ), dashboard_rows( new_paths )
+    befores   = { name: files_metrics( root, old[ name ][ "paths" ], base_sha ) for name in old }
     rows      = []
     for name in sorted( new ):
         row    = new[ name ]
-        before = files_metrics( root, old[ name ][ "paths" ], base_sha ) if name in old else None
+        before = befores.get( name )
         after  = files_metrics( root, row[ "paths" ], head )
         rose   = [] if before is None else risen( before, after )
         status = "new" if before is None else ( "rose" if rose else "ok" )
@@ -370,7 +409,8 @@ def build_dashboard( root, base, head=None ):
         "changed"      : len( changed ),
         "files_before" : len( old_paths ),
         "files_after"  : len( new_paths ),
-        "rows"         : rows
+        "rows"         : rows,
+        "total"        : { "before": sum_metrics( list( befores.values() ) ), "after": sum_metrics( [ r[ "after" ] for r in rows ] ) }
     }
 
 
@@ -399,8 +439,9 @@ def dashboard_table( board ):
         - board is the dict build_dashboard returns
 
     Ensures:
-        - returns a header line and one line per row, cells split by a bar and padded to one width per column
+        - returns a header line, one line per row and a last line named total, cells split by a bar and padded to one width per column
         - each value cell reads "before -> after"; the status cell names the values that rose
+        - the total line has a dash for its kind and its status, because it is not compared
 
     Raises:
         - nothing
@@ -410,6 +451,8 @@ def dashboard_table( board ):
         cells  = [ f"{b} -> {a}" for b, a in zip( _shown( row[ "before" ] ), _shown( row[ "after" ] ) ) ]
         status = "rose: " + ", ".join( row[ "rose" ] ) if row[ "rose" ] else row[ "status" ]
         grid.append( [ row[ "package" ], row[ "kind" ], *cells, status ] )
+    total = board[ "total" ]
+    grid.append( [ "total", "-", *( f"{b} -> {a}" for b, a in zip( _shown( total[ "before" ] ), _shown( total[ "after" ] ) ) ), "-" ] )
     widths = [ max( len( line[ i ] ) for line in grid ) for i in range( len( grid[ 0 ] ) ) ]
     return [ " | ".join( cell.ljust( width ) for cell, width in zip( line, widths ) ).rstrip() for line in grid ]
 
@@ -422,16 +465,16 @@ def render_dashboard( board ):
         - board is the dict build_dashboard returns
 
     Ensures:
-        - returns markdown that names both commits, the counts, the compared values and the two commands
+        - returns markdown that names the before commit, the counts, the compared values and the two commands
+        - the head commit and the count of changed files are not on the page, so two trees with the same swept docstrings give the same bytes
         - the rows sit in a fenced text block, so the page stays under the word limit for a reference page
-        - the same board always gives the same text; no clock is read
+        - no clock is read
 
     Raises:
         - nothing
     """
     rows     = board[ "rows" ]
     packages = sum( 1 for r in rows if r[ "kind" ] == "package" )
-    after    = f"working tree at commit `{board[ 'head' ]}`" if board[ "head_is_tree" ] else f"commit `{board[ 'head' ]}`"
     lines    = [
         "# Documentation metrics dashboard",
         "",
@@ -442,15 +485,15 @@ def render_dashboard( board ):
         "Every swept file is counted in exactly one row.",
         "Kind `package` means the directory holds an `__init__.py`, and kind `loose` means it does not.",
         "",
-        "Each cell reads before, then after. Tokens are the words `marker_counts` counts in the docstrings.",
+        "Each cell reads before, then after. After is the tree this page was last written from.",
+        "Tokens are the words `marker_counts` counts in the docstrings.",
         "The six marker columns are rates per 1,000 tokens.",
         "A row marked `new` had no swept file at the before commit, so the check compares nothing for it.",
+        "The last row, `total`, sums every swept file on each side. It is shown and not compared.",
         "",
         "## What was measured",
         "",
         BEFORE_LINE.format( board[ "base" ] ),
-        f"- After: {after}",
-        f"- Swept files changed since that commit: {board[ 'changed' ]}",
         f"- Rows: {len( rows )} ({packages} packages, {len( rows ) - packages} loose directories), {sum( 1 for r in rows if r[ 'status' ] == 'new' )} new",
         f"- Swept files: {board[ 'files_before' ]} before, {board[ 'files_after' ]} after",
         "- Compared by the check: " + ", ".join( f"`{name}`" for name in COMPARED_METRICS ),
@@ -466,8 +509,9 @@ def render_dashboard( board ):
         "```",
         "",
         "The check measures the tree again and does not read the numbers on this page.",
-        "It exits 0 when every row is here and no compared value rose. It exits 1 when one rose.",
-        "It exits 2 when it could not check. It exits 3 when this page lacks a row or names another before commit.",
+        "A marker has risen when its rate is higher and its raw count is higher too.",
+        "The check exits 0 when no compared value rose and the rows below are the rows of the tree. It exits 1 when one rose.",
+        "It exits 2 when it could not check. It exits 3 when the rows below differ from the tree or this page names another before commit.",
         "",
         "## Rows",
         "",
@@ -478,6 +522,22 @@ def render_dashboard( board ):
     return "\n".join( lines ) + "\n"
 
 
+def rows_block( text ):
+    """
+    Return the fenced text block of a dashboard page, the one that holds its rows.
+
+    Requires:
+        - text is the page's markdown
+
+    Ensures:
+        - returns what lies between the opening text fence and the next fence, or an empty string when there is none
+
+    Raises:
+        - nothing
+    """
+    return text.partition( "```text\n" )[ 2 ].partition( "```" )[ 0 ]
+
+
 def page_packages( text ):
     """
     List the row names on a dashboard page.
@@ -486,14 +546,13 @@ def page_packages( text ):
         - text is the page's markdown
 
     Ensures:
-        - returns the first cell of every line after the header in the fenced text block
+        - returns the first cell of every line of the rows block except the header and the last line, which is the total
         - a page with no such block gives an empty set
 
     Raises:
         - nothing
     """
-    block = text.partition( "```text\n" )[ 2 ].partition( "```" )[ 0 ]
-    return { line.split( "|" )[ 0 ].strip() for line in block.split( "\n" )[ 1: ] if line.strip() }
+    return { line.split( "|" )[ 0 ].strip() for line in rows_block( text ).split( "\n" )[ 1 : -2 ] }
 
 
 def rise_line( row, name ):
@@ -524,30 +583,38 @@ def check_dashboard( root, base, page ):
 
     Ensures:
         - returns ( exit code, lines to print ); the first line is the count of rows checked, new, risen and not on the page
-        - the tree is measured again; of the page only its row names and its before commit are read
-        - EXIT_ROSE when a compared value of any row is above its before, each one printed with its raw counts
-        - EXIT_PAGE_STALE when no value rose and the page lacks a row of the tree or its Before line does not name the base commit
+        - the last line is the verdict and starts with "DASHBOARD CHECK PASSED" or "DASHBOARD CHECK FAILED"
+        - the tree is measured again; a rise is judged from that measurement and never from the page
+        - EXIT_ROSE when a compared value of any row has risen, each one printed with its raw counts
+        - EXIT_PAGE_STALE when no value rose and the rows block of the page is not byte for byte the fresh one, or its Before line does not name the base commit
+        - a row of the tree with no line on the page is named on its own line
         - EXIT_OK otherwise
 
     Raises:
-        - OSError when the page cannot be read
+        - OSError or UnicodeDecodeError when the page cannot be read
         - RuntimeError from git when the base does not resolve or a read fails
     """
     with open( f"{root}/{page}", encoding="utf-8" ) as handle: text = handle.read()
     board  = build_dashboard( root, base )
     names  = page_packages( text )
 
-    missing = [ r[ "package" ] for r in board[ "rows" ] if r[ "package" ] not in names ]
-    stale   = BEFORE_LINE.format( board[ "base" ] ) not in text.split( "\n" )
-    rose    = [ r for r in board[ "rows" ] if r[ "rose" ] ]
-    fresh   = sum( 1 for r in board[ "rows" ] if r[ "status" ] == "new" )
-    regen   = f"{MODULE_COMMAND} write --base {board[ 'base' ]}"
-    lines   = [ f"doc-metrics dashboard: {len( board[ 'rows' ] )} rows checked against base {board[ 'base' ]}, {fresh} new, {len( rose )} rose, {len( missing )} not on the page; compared: {', '.join( COMPARED_METRICS )}" ]
-    lines  += [ rise_line( r, name ) for r in rose for name in r[ "rose" ] ]
-    lines  += [ f"MISSING {name}: no row on {page}; regenerate with: {regen}" for name in missing ]
-    if stale: lines.append( f"STALE {page}: the page does not name base {board[ 'base' ]}; regenerate with: {regen}" )
+    missing    = [ r[ "package" ] for r in board[ "rows" ] if r[ "package" ] not in names ]
+    stale_base = BEFORE_LINE.format( board[ "base" ] ) not in text.split( "\n" )
+    stale_rows = rows_block( text ) != rows_block( render_dashboard( board ) )
+    rose       = [ r for r in board[ "rows" ] if r[ "rose" ] ]
+    rises      = [ rise_line( r, name ) for r in rose for name in r[ "rose" ] ]
+    fresh      = sum( 1 for r in board[ "rows" ] if r[ "status" ] == "new" )
+    regen      = f"{MODULE_COMMAND} write --base {board[ 'base' ]}"
+    lines      = [ f"doc-metrics dashboard: {len( board[ 'rows' ] )} rows checked against base {board[ 'base' ]}, {fresh} new, {len( rose )} rose, {len( missing )} not on the page; compared: {', '.join( COMPARED_METRICS )}" ]
+    lines     += rises
+    lines     += [ f"MISSING {name}: no row on {page}; regenerate with: {regen}" for name in missing ]
+    if stale_rows: lines.append( f"STALE {page}: the rows on the page are not the rows of the tree; regenerate with: {regen}" )
+    if stale_base: lines.append( f"STALE {page}: the page does not name base {board[ 'base' ]}; regenerate with: {regen}" )
+    if not rose and not stale_rows and not stale_base:
+        return EXIT_OK, lines + [ f"DASHBOARD CHECK PASSED: {len( board[ 'rows' ] )} rows, no compared value rose and the page matches the tree." ]
+    lines.append( f"DASHBOARD CHECK FAILED: {len( rises )} values rose in {len( rose )} rows; the page {'does not match' if stale_rows or stale_base else 'matches'} the tree." )
     if rose: return EXIT_ROSE, lines
-    return ( EXIT_PAGE_STALE if missing or stale else EXIT_OK ), lines
+    return EXIT_PAGE_STALE, lines
 
 
 def dashboard_main( argv, out ):
@@ -559,8 +626,9 @@ def dashboard_main( argv, out ):
 
     Ensures:
         - write measures the tree, or --head, against --base and writes the page at --page under --repo-root
+        - write prints the head commit and the count of swept files that differ from it, which the page does not carry
         - check prints check_dashboard's lines and returns its code
-        - returns EXIT_NOT_CHECKED with one line naming the cause when git fails or the page cannot be read or written
+        - returns EXIT_NOT_CHECKED with one line naming the error and its type on any failure, so a crash is never read as a rise
         - --base defaults to BASE_SHA, read when called
 
     Raises:
@@ -584,10 +652,11 @@ def dashboard_main( argv, out ):
             return code
         board = build_dashboard( root, args.base, args.head )
         with open( f"{root}/{args.page}", "w", encoding="utf-8" ) as handle: handle.write( render_dashboard( board ) )
-    except ( RuntimeError, OSError ) as err:
-        out.write( f"doc-metrics dashboard: could not {args.action}: {err}\n" )
+    except Exception as err:
+        out.write( f"doc-metrics dashboard: could not {args.action}: {type( err ).__name__}: {err}\n" )
         return EXIT_NOT_CHECKED
-    out.write( f"doc-metrics dashboard: wrote {args.page}, {len( board[ 'rows' ] )} rows\n" )
+    after = "working tree at commit" if board[ "head_is_tree" ] else "commit"
+    out.write( f"doc-metrics dashboard: wrote {args.page}, {len( board[ 'rows' ] )} rows; after: {after} {board[ 'head' ]}, {board[ 'changed' ]} swept files changed since it\n" )
     return EXIT_OK
 
 

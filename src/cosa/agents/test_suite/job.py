@@ -56,7 +56,7 @@ SUITE_SCRIPTS = {
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
     "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
     "stylelint"      : "src/tests/run-stylelint-gate.sh", # every git-tracked .css file as a BLOCKING merge gate (row d3d4a18c, Rick's ruling 2026-09-18 21:06). Runs SECOND, right after typecheck: MEASURED 1.5s wall for 32 files (2026-09-18), static like typecheck, so a style-red branch also fails in seconds. Its summary counts FILES, not tests.
-    "doclint"        : "src/tests/run-doclint-gate.sh", # every swept-scope Python file's docstrings as a blocking merge gate (row 2c48c717, Rick's ruling). Runs third, after the two other static gates: measured 4.6s wall for 862 files. Its summary counts files, and its "Errors:" line counts findings.
+    "doclint"        : "src/tests/run-doclint-gate.sh", # every swept-scope Python file's docstrings as a blocking merge gate (row 2c48c717, Rick's ruling). Runs third, after the two other static gates: measured 4.6s wall for 862 files. Its second step is the metrics dashboard check. Its summary counts the swept files plus one for that check, and its "Errors:" line counts findings plus the lines that check printed.
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
                                                         # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
                                                         # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
@@ -2555,7 +2555,8 @@ class TestSuiteJob( AgenticJobBase ):
         # same three lines, and ITS UNIT IS FILES — "Failed: 1" is one red .css file, whatever
         # its error count. The extra "Errors: N" line it prints matches none of these regexes.
         # Its refusals exit 2 with no summary, so they too read NOT EXECUTED, never PASSED.
-        # "doclint" (row 2c48c717) prints the same three lines, and its unit is files too.
+        # "doclint" (row 2c48c717) prints the same three lines. Its unit is files, plus one for the
+        # dashboard check that is its second step. That check failing adds one to "Failed:".
         # Its refusals exit 2 or 3 with no summary, so they read not executed, never passed.
         if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck", "stylelint", "doclint", "docker_smoke" ):
             return None
