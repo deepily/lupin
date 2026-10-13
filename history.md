@@ -8,6 +8,19 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.10.12 evening - Session 14f0a33b (Mr. Radio 🦉, manager, skeleton crew, no seats; two bounded reviewer jobs)
+
+- **Landed on the working branch by me**, all fast-forwards, not pushed: `7638ad9a3` and `016c27508` (row `87d19d27`: a speech request may carry `utterance_id`, echoed on every JSON frame of its stream); `ff1416bbf` (API docs regenerated, two red unit tests cleared); `e71d9d5da` and `f4b253c34` (row `2f5c2b80`: four git guard regexes linear on blank-line runs, whole hook 2.41 s to 0.07 s on 4000 newlines); `23e72b6aa` (TS/JS doc-lint count table stamp, no entry moved).
+- **Tiers at `f4b253c34`** (my worktree, ended 21:53 EDT): unit 35,300 passed, 0 failed; cosa 9,614 passed. Not run: TypeScript, E2E, integration.
+- **Reviews**: each of the two rows had a read-only reviewer job. The guard review found one deny that had become an allow (`cd m && cd then`, newline, `git commit`); fixed by `git_commit_start`, 400,000-sample seeded run with zero differences.
+- **Rick's rulings** (in `TODO.md`): leave audio chunks bare; leave the guards as they are; both browser clients use the id.
+- **Built, committed, not merged**: `48913c4b7` in `.claude/worktrees/mr-radio-281a7608-browser-utterance-id` (row `281a7608`, held): the multiplexer and `notifications.js` send an id and drop a complete or error frame naming another utterance. 170 browser test files green one by one; typecheck passed. Its reviewer job found no blockers and one real bug on the legacy page (a failed second request leaves the playing card stuck); the list is on the row.
+- **Left for Tiffany**: a note at the top of "START HERE" in lupin-mobile `TODO.md`, uncommitted there.
+- **Slips of mine**: I stated the open decisions at the end of status lines instead of asking; Rick called it. I recommended a guard change for a 2,000-line input that the hook logs have never shown.
+- **Files**: `src/cosa/rest/routers/speech.py`, `src/lupin_cli/claude_code/hooks/lib/{stash,commit_scope,merge_head,branch_lock}_guard.py`, `src/docs/fastapi/api.{json,md}`, `src/docs/websocket-events/01-event-catalog-and-job-audio-events.md`, `src/conf/doc-lint-ts-counts.json`, three new test files.
+
+---
+
 ### 2026.10.12 evening - Session db0f87c2 (Cheech 🌿, manager; self re-spin at about 20:45 EDT; skeleton crew on, no seats, bounded jobs only) | The reviewed docs chain landed with all 16 decision records; the instruction files' lint fix is written and reviewed, not landed
 
 - **Landed on the working branch by me**: `982d30674`, 101 commits, fast-forward from `f4b253c34` at about 22:06 EDT (the store stamped the first row close at 22:06:39). It holds the 83 reviewed commits pinned on 10-10, Clayton's records 1 to 3 with their fixes, decision records 4 to 16, the 32 `Design:` lines repointed at the records, the ledger rule change with the ledger rewritten, and two unit fixes. Not pushed.

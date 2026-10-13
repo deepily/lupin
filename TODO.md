@@ -44,6 +44,7 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 
 ### Backlog from this session (no row; new rows were gated at 20:25 EDT, ratio 1.33)
 
+- [ ] Archive `history.md`: 17.7k tokens projected at 22:36 EDT on 2026-10-12 with this session's entry (warning line 17k, critical 19k). The archive card timed out, so the workflow's default, next session, applies.
 - [ ] Row `281a7608` is in the holding area and I could not request its admit: an admit must name a live ticket of mine to drop, and I had none.
 - [ ] After `48913c4b7` merges, the multiplexer bundle in the main tree's `src/lupin_app/static/dist/` must be rebuilt (`src/scripts/build-multiplexer.sh`) before `:7999` or `:8000` serves the change; then the TypeScript and E2E tiers on `:8000`.
 - [ ] The stash, commit and config guard regexes are still quadratic on hundreds of assignment-only lines (552 ms per regex at 2,000 lines). Accepted by Rick's ruling above; recorded so nobody re-finds it as new.
