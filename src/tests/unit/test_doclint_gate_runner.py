@@ -4,11 +4,15 @@ The runner script of the documentation lint gate, driven in a scratch git tree.
 The script is what the merge pyramid and the pre-push hook call. These tests pin its exit codes:
 0 clean, 1 a finding, 2 nothing checked, 3 no interpreter. A run that could not check must never
 print what a clean tree prints.
+
+Run on the whole tree, the script has a second step: the check of the metrics dashboard page.
+The summary then counts the swept files plus one for that check.
 """
 
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -20,6 +24,9 @@ RESOLVER     = os.path.join( PROJECT_ROOT, "src", "scripts", "lib", "resolve-ven
 WORD_LIST    = os.path.join( PROJECT_ROOT, "src", "conf", "dm-tutor-lowercase-words.txt" )
 VENV         = os.path.join( PROJECT_ROOT, ".venv" )
 CLEAN        = '"""\nAdd two numbers.\n"""\n'
+PAGE         = "src/docs/doc-metrics-dashboard.md"
+BASE         = ( "--dashboard-base", "HEAD" )
+STUB_CLEAN   = 'if __name__ == "__main__": print( "Total Tests: 1\\nPassed: 1\\nFailed: 0\\nErrors: 0\\nDOCLINT GATE PASSED: all 1 files clean." )\n'
 LOUD         = '"""\nThis module must NEVER change.\n"""\n'
 
 # No skip when this tree has no .venv: the resolver also accepts the container interpreter, and a
@@ -34,6 +41,20 @@ def _write( repo, rel, text ):
     path = repo / rel
     path.parent.mkdir( parents=True, exist_ok=True )
     path.write_text( text, encoding="utf-8" )
+
+
+def _write_page( repo ):
+    """Write the dashboard page of the tree, with the commit it is checked out at as its before."""
+    ( repo / "src" / "docs" ).mkdir( parents=True, exist_ok=True )
+    env  = dict( os.environ, PYTHONPATH=os.path.join( PROJECT_ROOT, "src" ), LUPIN_ROOT=PROJECT_ROOT )
+    done = subprocess.run( [ sys.executable, "-m", "cosa.repo.doc_lint.doc_metrics", "dashboard", "write", "--base", "HEAD", "--repo-root", str( repo ), "--words-root", str( repo ) ], capture_output=True, text=True, timeout=120, env=env )
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def _page( repo ):
+    """Commit what is staged, then write the dashboard page."""
+    _git( repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base" )
+    _write_page( repo )
 
 
 @pytest.fixture
@@ -68,24 +89,146 @@ def _stub_gate( repo, body ):
 def test_a_clean_tree_exits_zero_and_prints_the_file_count( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _git( repo, "add", "src/app" )
+    _page( repo )
 
-    code, text = _run( repo )
+    code, text = _run( repo, *BASE )
 
     assert code == 0
-    assert "Total Tests: 1\nPassed: 1\nFailed: 0\n" in text
-    assert "DOCLINT GATE PASSED: all 1 files clean." in text
+    assert "Docstring step, files checked: 1\nDocstring step, files clean: 1\nDocstring step, files with a finding: 0\nDocstring step, findings: 0\n" in text
+    assert "Docstring step passed: all 1 files clean." in text
+    assert "DASHBOARD CHECK PASSED: 1 rows, no compared value rose and the page matches the tree." in text
+    assert "Total Tests: 2\nPassed: 2\nFailed: 0\nErrors: 0\n" in text
+    assert text.count( "Total Tests:" ) == 1 and text.count( "Passed:" ) == 1 and text.count( "Failed:" ) == 1
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE PASSED: 1 files clean and the dashboard check passed."
 
 
 def test_one_planted_finding_exits_one_and_names_its_line( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _write( repo, "src/app/loud.py", LOUD )
     _git( repo, "add", "src/app" )
+    _page( repo )
 
-    code, text = _run( repo )
+    code, text = _run( repo, *BASE )
 
     assert code == 1
     assert "src/app/loud.py:2: caps: ALL-CAPS word NEVER" in text
-    assert "DOCLINT GATE FAILED: 1 findings in 1 of 2 files." in text
+    assert "Docstring step failed: 1 findings in 1 of 2 files." in text
+    assert "DASHBOARD CHECK PASSED: 1 rows" in text
+    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in text
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed."
+
+
+# The second step, the dashboard check. Its exit 1 (a value rose) and 3 (the page is stale) both fail
+# the gate with exit 1, because exit 3 of this script already means no interpreter. Its exit 2 (could
+# not check) is exit 2 here, with no summary block, so the job reads the run as not executed.
+
+def test_a_stale_dashboard_page_fails_the_gate_while_the_docstrings_are_clean( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+    page = ( repo / PAGE ).read_text( encoding="utf-8" )
+    assert page.count( "3 -> 3" ) == 2, "the one row and the total row both read 3 tokens"
+    ( repo / PAGE ).write_text( page.replace( "3 -> 3", "3 -> 4" ), encoding="utf-8" )
+
+    code, out, _ = _run_split( repo, *BASE )
+    parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
+
+    assert code == 1
+    assert "Docstring step passed: all 1 files clean." in out
+    assert f"STALE {PAGE}: the rows on the page are not the rows of the tree" in out
+    assert "Total Tests: 2\nPassed: 1\nFailed: 1\nErrors: 1\n" in out
+    assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 0 of 1 files hold a finding; the dashboard check failed."
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 1, 1 )
+
+
+def test_a_risen_marker_rate_fails_the_gate( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+    _write( repo, "src/app/a.py", LOUD )
+    _write_page( repo )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 1
+    assert "ROSE src/app: caps_words 0/3 -> 1/5 per token (0.0 -> 200.0 per 1,000)" in text
+    assert "DASHBOARD CHECK FAILED: 1 values rose in 1 rows; the page matches the tree." in text
+    assert "Total Tests: 2\nPassed: 0\nFailed: 2\nErrors: 2\n" in text
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 1 files hold a finding; the dashboard check failed."
+
+
+def test_a_missing_dashboard_page_refuses_and_prints_no_summary_block( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+    os.remove( repo / PAGE )
+
+    code, out, _ = _run_split( repo, *BASE )
+
+    assert code == 2
+    assert "doc-metrics dashboard: could not check: FileNotFoundError" in out
+    assert "REFUSING: the dashboard check could not check (exit 2). Nothing is summarised." in out
+    assert "Total Tests:" not in out and "PASSED" not in out and "Docstring step passed: all 1 files clean." in out
+    assert TestSuiteJob._parse_non_pytest_stdout( "doclint", out ) is None
+
+
+def test_a_before_commit_the_repo_does_not_hold_refuses( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+
+    code, text = _run( repo )
+
+    assert code == 2
+    assert "doc-metrics dashboard: could not check: RuntimeError: git rev-parse" in text
+    assert "REFUSING: the dashboard check could not check (exit 2). Nothing is summarised." in text
+    assert "Total Tests:" not in text and "PASSED" not in text
+
+
+@pytest.mark.parametrize( "body,said", [
+    ( 'if __name__ == "__main__": raise ValueError( "boom" )\n', "REFUSING: the dashboard check exited 1 without a verdict line. Nothing was checked." ),
+    ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK EXPLODED: no check ran" )\n    sys.exit( 3 )\n', "REFUSING: the dashboard check exited 3 without a verdict line. Nothing was checked." ),
+    ( 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n', "REFUSING: the dashboard check exited 7, which is not a check result. Nothing was checked." )
+] )
+def test_a_dashboard_check_that_dies_is_refused_not_read_as_a_rise( repo, body, said ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _stub_gate( repo, STUB_CLEAN )
+    _write( repo, "src/cosa/repo/doc_lint/doc_metrics.py", body )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 2
+    assert said in text
+    assert "Total Tests:" not in text and "PASSED" not in text
+
+
+def test_a_docstring_step_whose_counts_cannot_be_read_is_refused( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _stub_gate( repo, 'if __name__ == "__main__": print( "DOCLINT GATE PASSED: all 1 files clean." )\n' )
+    _write( repo, "src/cosa/repo/doc_lint/doc_metrics.py", 'if __name__ == "__main__": print( "DASHBOARD CHECK PASSED: 1 rows" )\n' )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 2
+    assert "REFUSING: the docstring step printed no counts to add to. Nothing is summarised." in text
+    assert "Total Tests:" not in text
+
+
+def test_the_dashboard_base_option_needs_a_revision( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+
+    code, text = _run( repo, "--dashboard-base" )
+
+    assert code == 2
+    assert "REFUSING: --dashboard-base needs a revision. Nothing was checked." in text
+    assert "PASSED" not in text
 
 
 def test_the_population_is_tracked_swept_files_only( repo ):
@@ -147,6 +290,9 @@ def test_tree_mode_lints_another_tree_with_this_trees_word_list( repo, tmp_path_
     assert "src/app/loud.py:2: caps: ALL-CAPS word NEVER" in text
     assert f"  tree   : {other}" in text
     assert "DOCLINT GATE FAILED: 1 findings in 1 of 1 files." in text
+    assert "Total Tests: 1\nPassed: 0\nFailed: 1\nErrors: 1\n" in text
+    assert "Dashboard check: not run with --tree; the whole-tree run of this script runs it." in text
+    assert "DASHBOARD CHECK" not in text and "doc-metrics dashboard" not in text
 
 
 @pytest.mark.parametrize( "args", [ ( "--tree", ), ( "--tree", "/no/such/directory" ) ] )
@@ -233,13 +379,14 @@ def test_the_job_reads_a_red_run_as_files_passed_and_failed( repo ):
     _write( repo, "src/app/b.py", CLEAN )
     _write( repo, "src/app/loud.py", LOUD )
     _git( repo, "add", "src/app" )
+    _page( repo )
 
-    code, out, _ = _run_split( repo )
+    code, out, _ = _run_split( repo, *BASE )
     parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
 
     assert code == 1
     assert parsed is not None, "the job does not parse the doclint runner's summary, so a red gate would read as not executed"
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 1 )
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 3, 1 ), "two clean files and the dashboard check passed; one file failed"
 
 
 def test_the_job_reads_a_clean_run_as_all_files_passed( repo ):
@@ -248,12 +395,13 @@ def test_the_job_reads_a_clean_run_as_all_files_passed( repo ):
     _write( repo, "src/app/a.py", CLEAN )
     _write( repo, "src/app/b.py", CLEAN )
     _git( repo, "add", "src/app" )
+    _page( repo )
 
-    code, out, _ = _run_split( repo )
+    code, out, _ = _run_split( repo, *BASE )
     parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
 
     assert code == 0
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 0 )
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 3, 0 ), "two clean files and the dashboard check"
 
 
 def test_the_job_reads_a_refused_run_as_nothing_parsed( repo ):
