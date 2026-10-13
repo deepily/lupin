@@ -58,27 +58,29 @@ else
     echo "[pre-commit-chain] SKIPPED rnd-guard — not found at $rnd_guard" >&2
 fi
 
-# ---- gate 3: documentation standard, warn mode except three refusals (docstrings and markdown) ----
-# Prints findings to stderr and lets the commit through, with three exceptions that exit 3. First, a staged
-# Python file in the swept scope (swept_scope.is_swept) holding ANY docstring-lint finding, on any line, is
-# refused; a finding is waived by a same-line "doc-lint: waive <rule> -- <reason>", and a waiver without
-# a reason waives nothing. Second, a staged Python file outside the swept scope whose finding count rises above
-# its entry in src/conf/doc-lint-counts.json (a new file starts at zero); a staged table may not raise an
-# entry, and a table cut under other rules refuses a commit that stages such a file. With no table the scope is
-# reported as not checked. Third, a mechanical history finding in a package listed in gate.BLOCKING_PACKAGES
-# (empty today). First of all, a rule file that differs between the index and the working tree refuses a commit
-# that stages a Python file or the table, since the findings would be counted under uncommitted rules.
-# Markdown, history.md and TODO.md stay in warn mode. Every run prints the denominator for both
-# scopes. The chain stops the commit on ANY non-zero gate exit, so this gate is wrapped: a crash, a missing
-# tool or an import error is reported loudly and then allowed. It does not read PLANNING_IS_PROMPTING_ROOT,
-# so it runs in every worktree.
+# ---- gate 3: documentation standard, blocking (docstrings, comments and markdown) ------------------
+# The gate runs with --blocking. A finding on a line the commit touches refuses the commit, whichever linter
+# reports it, in Python and markdown alike. Two files are the exception: the root history.md and TODO.md stay
+# in warn mode, so their findings are printed and the commit goes through (gate.WARN_ONLY_PATHS, exact paths).
+# The older refusals stand beside it. A staged Python file in the swept scope (swept_scope.is_swept) holding any
+# docstring-lint finding, on any line, is refused; a finding is waived by a same-line
+# "doc-lint: waive <rule> -- <reason>", and a waiver without a reason waives nothing. A staged Python,
+# TypeScript or JavaScript file outside the swept scope is refused when its finding count rises above its entry
+# in its count table; a staged table may not raise an entry, and a table cut under other rules refuses a commit
+# that stages such a file. A rule file that differs between the index and the working tree refuses a commit
+# that stages a judged file or a table. Every run prints the denominator for each scope.
+# Every refusal is exit 3, and only exit 3 stops the commit. Any other non-zero exit means the gate did not
+# finish: an import error, a missing interpreter, a crash the gate did not catch. That commit is allowed and a
+# loud line says it was not checked, because the hook is shared by every worktree and a broken gate must not
+# stop every seat. A crash the gate catches prints its own loud line and exits 0. The gate does not read
+# PLANNING_IS_PROMPTING_ROOT, so it runs in every worktree.
 doc_lint_rc=0
-LUPIN_ROOT="$repo_root" PYTHONPATH="$repo_root/src" python3 -m cosa.repo.doc_lint.gate --repo-root "$repo_root" || doc_lint_rc=$?
+LUPIN_ROOT="$repo_root" PYTHONPATH="$repo_root/src" python3 -m cosa.repo.doc_lint.gate --blocking --repo-root "$repo_root" || doc_lint_rc=$?
 if [ "$doc_lint_rc" -eq 3 ]; then
-    echo "[pre-commit-chain] doc-lint gate REFUSED the commit (see the REFUSED lines above; each names its fix and how to waive)" >&2
+    echo "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each REFUSED line above, stage the fix with git add and commit again" >&2
     exit 1
 elif [ "$doc_lint_rc" -ne 0 ]; then
-    echo "[pre-commit-chain] doc-lint gate exited $doc_lint_rc, commit allowed (warn mode)" >&2
+    echo "[pre-commit-chain] doc-lint gate CRASHED (exit $doc_lint_rc), commit ALLOWED and NOT CHECKED against the documentation standard" >&2
 fi
 
 exit 0

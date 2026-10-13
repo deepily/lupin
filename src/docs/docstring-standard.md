@@ -10,9 +10,11 @@ The rules are in code. `src/cosa/repo/doc_lint/text_rules.py` holds the text rul
 
 A staged Python file in the swept scope that holds one or more docstring-lint findings, on any line and from any rule, is refused. The gate exits 3 and the chain stops the commit. A refusal prints the file, the line, the rule, the text on that line, where the text belongs, and the waiver form.
 
-The swept scope is defined once, in `swept_scope.is_swept`. It is a `.py` path that `cli.in_scope` accepts. That excludes `tests/`, `rnd/`, vendored trees, `test_*` files and `conftest.py`. It also excludes `src/lupin_mcp/`. Python outside it is held to a count, below. Markdown, `history.md` and `TODO.md` stay in warn mode: findings on staged lines are printed and the commit goes through.
+The swept scope is defined once, in `swept_scope.is_swept`. It is a `.py` path that `cli.in_scope` accepts. That excludes `tests/`, `rnd/`, vendored trees, `test_*` files and `conftest.py`. It also excludes `src/lupin_mcp/`. Python outside it is held to a count, below.
 
-If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through.
+The chain runs the gate with `--blocking`. A finding on a line the commit touches is refused too, whichever linter reports it: docstrings, `#` comments, ruff, markdown and markdownlint. It prints as a `REFUSED` line and the gate exits 3. Fix the line, stage the fix and commit again. Two files stay in warn mode: the `history.md` and `TODO.md` at the repository root. Their findings print with `(warn mode, commit allowed)` and the commit goes through. A `history.md` or `TODO.md` in any other folder is held like every other page.
+
+If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. If the gate cannot start at all, the chain prints `doc-lint gate CRASHED (exit N), commit ALLOWED and NOT CHECKED` and the commit goes through.
 
 Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed, N undecodable`. A swept file that does not parse is refused and counted as unparsed. A swept file that is not UTF-8 is refused and counted as undecodable. No waiver covers either. A leading byte-order mark is ignored. Any other file that is not UTF-8 is skipped with a warning.
 
