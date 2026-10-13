@@ -1,8 +1,9 @@
 """
-The external-tool runners, the warn-mode gate, and the pre-commit chain wrapper.
+The external-tool runners, the commit gate, and the pre-commit chain wrapper.
 
-The gate's two promises are checked here: a missing tool prints a loud line, and a crash never
-blocks a commit. The chain test runs the real pre-commit-chain.sh in a scratch repository.
+The gate's promises are checked here. A missing tool prints a loud line. A crash never blocks a commit.
+With --blocking, a finding on a staged line refuses the commit, except in the root history.md and TODO.md.
+The chain tests run the real pre-commit-chain.sh in a scratch repository.
 """
 
 import io
@@ -231,7 +232,12 @@ def test_gate_reports_findings_on_staged_lines_only_and_reads_the_index_not_the_
     text = err.getvalue()
     assert "[doc-lint] src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in text and "[doc-lint] docs/p.md:1: caps: ALL-CAPS word NOT" in text
     assert "NEVER" not in text and "2 findings on staged lines (warn mode, commit allowed)" in text
-    assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], io.StringIO() ) == 1
+    err = io.StringIO()
+    assert gate.REFUSAL_EXIT == 3 and gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == gate.REFUSAL_EXIT
+    lines = err.getvalue().split( "\n" )
+    assert "[doc-lint] REFUSED src/lupin_mcp/a.py:5: caps: ALL-CAPS word NOT" in lines and "[doc-lint] REFUSED docs/p.md:1: caps: ALL-CAPS word NOT" in lines
+    assert "[doc-lint] 2 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again" in lines
+    assert "warn mode" not in err.getvalue() and "refusals, commit REFUSED" not in err.getvalue()
 
 
 def test_gate_lints_what_is_staged_even_when_the_disk_copy_was_cleaned_afterwards( repo, monkeypatch ):
@@ -258,6 +264,89 @@ def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatc
     err = io.StringIO()
     assert gate.main( [ "--repo-root", str( repo ), "--blocking" ], err ) == 0
     assert "0 findings on staged lines (blocking)" in err.getvalue()
+
+
+# ---- blocking, and the two files it leaves in warn mode ---------------------------------------
+
+SEEDED    = "This is NOT fine.\n"
+CAPS      = "caps: ALL-CAPS word NOT"
+WARN_MARK = " (warn mode, commit allowed)"
+REFUSE_1  = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
+
+
+def _blocking( repo ):
+    err = io.StringIO()
+    rc  = gate.main( [ "--repo-root", str( repo ), "--blocking" ], err )
+    return rc, err.getvalue().split( "\n" )
+
+
+def test_the_warn_only_paths_are_exactly_the_root_history_and_todo_files():
+    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md" )
+    for path in gate.WARN_ONLY_PATHS: assert gate.is_warn_only( path )
+    for path in ( "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "" ): assert not gate.is_warn_only( path )
+
+
+@pytest.mark.parametrize( "rel", [ "history.md", "TODO.md" ] )
+def test_blocking_prints_a_finding_in_a_warn_only_file_with_the_marking_and_allows_the_commit( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert f"[doc-lint] {rel}:1: {CAPS}{WARN_MARK}" in lines
+    assert "[doc-lint] 1 findings in history.md or TODO.md (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "rel", [ "src/cosa/history.md", "src/cosa/TODO.md", "docs/history.md", "docs/TODO.md" ] )
+def test_blocking_refuses_a_finding_in_a_history_or_todo_file_that_is_not_at_the_root( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert f"[doc-lint] REFUSED {rel}:1: {CAPS}" in lines and REFUSE_1 in lines
+    assert not [ ln for ln in lines if "warn mode" in ln ]
+
+
+def test_blocking_refuses_for_the_other_file_when_a_warn_only_file_also_holds_a_finding( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "history.md": SEEDED, "TODO.md": SEEDED, "docs/p.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
+    assert refused == [ f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" ]
+    assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] TODO.md:1: {CAPS}{WARN_MARK}" in lines
+    assert "[doc-lint] 2 findings in history.md or TODO.md (warn mode, commit allowed)" in lines and REFUSE_1 in lines
+
+
+def test_blocking_refuses_a_python_finding_on_a_touched_line_whichever_linter_reports_it( repo, monkeypatch ):
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [ Finding( "src/pkg/a.py", 1, "ruff:D205", "m" ) ], [] ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [ Finding( "docs/p.md", 1, "markdownlint:MD040", "m" ) ], [] ) )
+    _stage( repo, { "src/pkg/a.py": "x = 1  # This is NOT fine.\n", "docs/p.md": "clean\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    refused = sorted( ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) )
+    assert refused == [ "[doc-lint] REFUSED docs/p.md:1: markdownlint:MD040: m", f"[doc-lint] REFUSED src/pkg/a.py:1: {CAPS}", "[doc-lint] REFUSED src/pkg/a.py:1: ruff:D205: m" ]
+    assert "[doc-lint] 3 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again" in lines
+
+
+def test_blocking_counts_a_swept_refusal_and_a_finding_on_a_staged_line_each_on_its_own_line( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine." ), "docs/p.md": SEEDED, "history.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert "[doc-lint] 1 refusals, commit REFUSED" in lines and REFUSE_1 in lines
+    assert f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines
+    assert "[doc-lint] 1 findings in history.md or TODO.md (warn mode, commit allowed)" in lines
+
+
+def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "history.md": SEEDED, "docs/p.md": SEEDED } )
+    err = io.StringIO()
+    assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
+    lines = err.getvalue().split( "\n" )
+    assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] docs/p.md:1: {CAPS}" in lines
+    assert "[doc-lint] 2 findings on staged lines (warn mode, commit allowed)" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
 
 
 def test_gate_prints_every_missing_tool_warning_and_includes_tool_findings( repo, monkeypatch ):
@@ -439,12 +528,25 @@ def _run_chain( repo, env_extra=None ):
     return subprocess.run( [ "bash", CHAIN ], cwd=repo, capture_output=True, text=True, env=env )
 
 
-def test_the_chain_runs_the_gate_in_warn_mode_and_still_exits_zero_with_findings( repo ):
+CHAIN_REFUSE = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each REFUSED line above, stage the fix with git add and commit again"
+
+
+def test_the_chain_runs_the_gate_blocking_and_refuses_a_finding_on_a_staged_line( repo ):
     _install_real_doc_lint( repo )
     _stage( repo, { "docs/p.md": "This is NOT fine.\n" } )
     res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
+    assert res.returncode == 1
+    assert "[doc-lint] REFUSED docs/p.md:1: caps: ALL-CAPS word NOT" in res.stderr.split( "\n" ) and CHAIN_REFUSE in res.stderr.split( "\n" )
+    assert "commit allowed" not in res.stderr and "ALLOWED" not in res.stderr
+
+
+def test_the_chain_allows_a_finding_in_the_root_history_file_and_prints_the_warn_marking( repo ):
+    _install_real_doc_lint( repo )
+    _stage( repo, { "history.md": "This is NOT fine.\n" } )
+    res = _run_chain( repo, { "LUPIN_RUFF": "", "LUPIN_MARKDOWNLINT": "" } )
     assert res.returncode == 0
-    assert "[doc-lint] docs/p.md:1: caps: ALL-CAPS word NOT" in res.stderr and "commit allowed" in res.stderr
+    assert "[doc-lint] history.md:1: caps: ALL-CAPS word NOT (warn mode, commit allowed)" in res.stderr.split( "\n" )
+    assert "REFUSED" not in res.stderr and "[pre-commit-chain] doc-lint" not in res.stderr
 
 
 def test_the_chain_allows_the_commit_when_the_gate_process_itself_fails( repo ):
@@ -454,7 +556,28 @@ def test_the_chain_allows_the_commit_when_the_gate_process_itself_fails( repo ):
     ( pkg / "gate.py" ).write_text( "raise SystemExit( 7 )\n", encoding="utf-8" )
     res = _run_chain( repo )
     assert res.returncode == 0
-    assert "doc-lint gate exited 7, commit allowed (warn mode)" in res.stderr
+    assert "[pre-commit-chain] doc-lint gate CRASHED (exit 7), commit ALLOWED and NOT CHECKED against the documentation standard" in res.stderr.split( "\n" )
+    assert "REFUSED" not in res.stderr
+
+
+def test_the_chain_refuses_only_on_the_refusal_exit_and_allows_exit_one( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "raise SystemExit( 1 )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert "[pre-commit-chain] doc-lint gate CRASHED (exit 1), commit ALLOWED and NOT CHECKED against the documentation standard" in res.stderr.split( "\n" )
+
+
+def test_the_chain_passes_the_blocking_flag_to_the_gate( repo ):
+    pkg = repo / "src" / "cosa" / "repo" / "doc_lint"
+    pkg.mkdir( parents=True )
+    for d in ( repo / "src" / "cosa", repo / "src" / "cosa" / "repo", pkg ): ( d / "__init__.py" ).write_text( "", encoding="utf-8" )
+    ( pkg / "gate.py" ).write_text( "import sys\nprint( 'ARGV', sys.argv[ 1: ], file=sys.stderr )\n", encoding="utf-8" )
+    res = _run_chain( repo )
+    assert res.returncode == 0
+    assert f"ARGV ['--blocking', '--repo-root', '{os.path.realpath( repo )}']" in res.stderr.split( "\n" )
 
 
 def test_the_chain_gate_does_not_depend_on_planning_is_prompting_root( repo ):
