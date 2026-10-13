@@ -11,7 +11,7 @@ import subprocess
 
 import pytest
 
-from cosa.repo.doc_lint import doc_metrics as dm, marker_counts as mc, word_list
+from cosa.repo.doc_lint import doc_metrics as dm, marker_counts as mc, md_lint, word_list
 
 WORDS = [ "never", "very", "the", "must" ]
 
@@ -224,6 +224,28 @@ def test_a_side_with_no_tokens_has_rate_zero_so_markers_after_it_are_a_rise():
     assert dm.risen( _side( 0 ), _side( 0 ) ) == []
 
 
+def test_a_side_with_markers_and_no_tokens_has_an_infinite_rate():
+    assert dm.metric_value( _side( 0, em_dash=9 ), "em_dash" ) == float( "inf" ) and dm.metric_value( _side( 0 ), "em_dash" ) == 0
+    assert dm.risen( _side( 100, em_dash=3 ), _side( 0, em_dash=9 ) ) == [ "em_dash" ]
+    assert dm.risen( _side( 0, em_dash=1 ), _side( 0, em_dash=9 ) ) == [ "em_dash" ]
+    assert dm.risen( _side( 0, em_dash=9 ), _side( 0, em_dash=9 ) ) == [], "the count is the same"
+    assert dm.risen( _side( 0, em_dash=9 ), _side( 100, em_dash=3 ) ) == []
+    assert dm.risen( _side( 0, em_dash=9 ), _side( 5, em_dash=10 ) ) == [], "one more marker, and the rate came down from infinite"
+    assert dm.risen( _side( 0 ), _side( 0 ) ) == []
+    assert dm.risen( _side( 0 ), _side( 10, em_dash=2 ) ) == [ "em_dash" ]
+
+
+def test_a_docstring_of_markers_alone_is_a_rise_and_the_page_shows_inf( repo ):
+    _put( repo, { "src/scripts/run.py": '"""\u2014 \u2014 \u2014 \u2014"""\n' } )
+    _dash( repo, "write" )
+    text = _page( repo )
+    assert _table( text )[ 5 ] == [ "src/scripts", "loose", "1 -> 1", "4 -> 0", "0.0 -> inf", "0.0 -> 0.0", "0.0 -> 0.0", "0.0 -> 0.0", "0.0 -> 0.0", "0.0 -> 0.0", "rose: em_dash" ]
+    assert "A rate reads `inf` when a side has markers and no tokens.\n" in text
+    assert md_lint.lint_source( PAGE, text, None ) == []
+    rc, said = _dash( repo, "check" )
+    assert rc == dm.EXIT_ROSE and "ROSE src/scripts: em_dash 0/4 -> 4/0 per token (0.0 -> inf per 1,000)\n" in said
+
+
 def test_token_count_is_left_out_by_default_and_compared_when_the_constant_names_it( monkeypatch ):
     before, after = _side( 10 ), _side( 11 )
     assert dm.risen( before, after ) == []
@@ -268,6 +290,15 @@ def test_the_page_prints_the_before_commit_the_counts_and_the_commands( repo ):
     assert "- Rows where a compared value rose: 0\n" in text
     assert f"python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base {base}\n" in text
     assert f"python3 -m cosa.repo.doc_lint.doc_metrics dashboard check --base {base}\n" in text
+
+
+def test_the_page_says_what_the_check_reads_from_it( repo ):
+    _dash( repo, "write" )
+    text = _page( repo )
+    assert "The check measures the tree again, and a rise is never judged from this page.\n" in text
+    assert "The rows below are compared with a fresh render, and a difference is reported as stale numbers.\n" in text
+    assert "does not read the numbers on this page" not in text
+    assert md_lint.lint_source( PAGE, text, None ) == []
 
 
 def test_the_page_names_no_head_commit_and_no_count_of_changed_files( repo ):
@@ -408,7 +439,7 @@ def test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_t
     assert rc == dm.EXIT_NUMBERS_STALE == 4 and "0 rose, 0 not on the page" in text
     assert f"WARNING {PAGE}: the numbers on the page are stale, 1 of its rows differ from the tree; regenerate with: PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base {base}\n" in text
     assert text.count( "WARNING" ) == 1 and "STALE " not in text and "MISSING" not in text and "FAILED" not in text
-    assert text.endswith( "DASHBOARD CHECK PASSED: 5 rows, no compared value rose; the numbers on the page are stale.\n" )
+    assert text.endswith( "DASHBOARD CHECK PASSED: 5 rows, no compared value rose; the rows on the page are stale.\n" )
 
 
 def test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again( repo ):
@@ -427,6 +458,38 @@ def test_a_line_added_to_the_rows_of_the_page_is_stale_numbers_too( repo ):
     ( repo / PAGE ).write_text( page.replace( "```text\n", "```text\nan extra line\n" ), encoding="utf-8" )
     rc, text = _dash( repo, "check" )
     assert rc == dm.EXIT_NUMBERS_STALE and "1 of its rows differ from the tree" in text
+
+
+def _row_lines( repo ):
+    lines = _page( repo ).split( "\n" )
+    first = [ n for n, line in enumerate( lines ) if line.startswith( "src/app " ) ]
+    assert len( first ) == 1 and lines[ first[ 0 ] + 1 ].startswith( "src/app/sub " )
+    return lines, first[ 0 ]
+
+
+def test_two_rows_in_another_order_are_stale_numbers( repo ):
+    _dash( repo, "write" )
+    lines, n = _row_lines( repo )
+    lines[ n ], lines[ n + 1 ] = lines[ n + 1 ], lines[ n ]
+    ( repo / PAGE ).write_text( "\n".join( lines ), encoding="utf-8" )
+    assert dm.page_packages( _page( repo ) ) == { ".", "src/app", "src/app/sub", "src/fresh", "src/scripts" }
+    rc, text = _dash( repo, "check" )
+    base = _git( repo, "rev-parse", "base" )
+    assert rc == dm.EXIT_NUMBERS_STALE
+    assert f"WARNING {PAGE}: the rows on the page are those of the tree, in another order or repeated; regenerate with: PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base {base}\n" in text
+    assert text.count( "WARNING" ) == 1 and "differ from the tree" not in text and "matches the tree" not in text
+    assert text.endswith( "DASHBOARD CHECK PASSED: 5 rows, no compared value rose; the rows on the page are stale.\n" )
+
+
+def test_a_row_printed_twice_is_stale_numbers( repo ):
+    _dash( repo, "write" )
+    lines, n = _row_lines( repo )
+    lines.insert( n, lines[ n ] )
+    ( repo / PAGE ).write_text( "\n".join( lines ), encoding="utf-8" )
+    rc, text = _dash( repo, "check" )
+    assert rc == dm.EXIT_NUMBERS_STALE
+    assert f"WARNING {PAGE}: the rows on the page are those of the tree, in another order or repeated; regenerate with: " in text
+    assert text.count( "WARNING" ) == 1 and "matches the tree" not in text
 
 
 def test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page( repo ):
@@ -481,6 +544,20 @@ def test_check_exits_2_and_not_1_when_the_page_is_not_utf8( repo ):
     assert text.startswith( "doc-metrics dashboard: could not check: UnicodeDecodeError: " ) and text.count( "\n" ) == 1
 
 
+def test_an_error_of_any_type_exits_2_and_is_named( repo, monkeypatch ):
+    _dash( repo, "write" )
+
+    def broken( root, base, head=None ):
+        raise KeyError( "no such column" )
+
+    monkeypatch.setattr( dm, "build_dashboard", broken )
+    assert not issubclass( KeyError, ( RuntimeError, OSError, ValueError ) )
+    rc, text = _dash( repo, "check" )
+    assert rc == dm.EXIT_NOT_CHECKED and text == "doc-metrics dashboard: could not check: KeyError: 'no such column'\n"
+    rc, text = _dash( repo, "write" )
+    assert rc == dm.EXIT_NOT_CHECKED and text == "doc-metrics dashboard: could not write: KeyError: 'no such column'\n"
+
+
 def test_check_and_write_exit_2_when_the_base_does_not_resolve( repo ):
     _dash( repo, "write" )
     rc, text = _dash( repo, "check", base="nope" )
@@ -533,20 +610,27 @@ MUTANTS = [
     ( "after  = files_metrics( root, row[ \"paths\" ], head )", "after  = package_metrics( root, name, head )", "test_the_parent_row_is_measured_without_its_subpackage_before_and_after" ),
     ( "rose   = [] if before is None else risen( before, after )", "rose   = risen( before or files_metrics( root, [], base_sha ), after )", "test_a_package_with_no_before_is_marked_new_and_is_not_a_failure" ),
     ( "\"before\": sum_metrics( list( befores.values() ) )", "\"before\": sum_metrics( [ r[ \"before\" ] for r in rows if r[ \"before\" ] ] )", "test_the_total_before_counts_a_directory_that_is_gone_at_head" ),
-    ( "if metric_value( after, name ) <= metric_value( before, name ): return False", "if metric_value( after, name ) < metric_value( before, name ): return False", "test_a_higher_marker_count_is_not_a_rise_when_the_rate_fell_or_held" ),
-    ( "if metric_value( after, name ) <= metric_value( before, name ): return False", "if False: return False", "test_a_higher_marker_count_is_not_a_rise_when_the_rate_fell_or_held" ),
-    ( "if metric_value( after, name ) <= metric_value( before, name ): return False", "if name != \"tokens\" and rates_per_thousand( after[ \"counts\" ] )[ name ] <= rates_per_thousand( before[ \"counts\" ] )[ name ]: return False", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
-    ( "return name == \"tokens\" or after[ \"counts\" ][ name ] > before[ \"counts\" ][ name ]", "return True", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
-    ( "return name == \"tokens\" or after[ \"counts\" ][ name ] > before[ \"counts\" ][ name ]", "return True", "test_fewer_tokens_with_the_same_marker_count_pass_the_check" ),
-    ( "return name == \"tokens\" or after[ \"counts\" ][ name ] > before[ \"counts\" ][ name ]", "return name == \"tokens\" or after[ \"counts\" ][ name ] >= before[ \"counts\" ][ name ]", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
+    ( "if after[ \"counts\" ][ name ] <= before[ \"counts\" ][ name ]: return False", "if after[ \"counts\" ][ name ] < before[ \"counts\" ][ name ]: return False", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
+    ( "if after[ \"counts\" ][ name ] <= before[ \"counts\" ][ name ]: return False", "if False: return False", "test_fewer_tokens_with_the_same_marker_count_pass_the_check" ),
+    ( "return now > was or now == INFINITE", "return True", "test_a_higher_marker_count_is_not_a_rise_when_the_rate_fell_or_held" ),
+    ( "return now > was or now == INFINITE", "return now >= was or now == INFINITE", "test_a_higher_marker_count_is_not_a_rise_when_the_rate_fell_or_held" ),
+    ( "return now > was or now == INFINITE", "return now > was", "test_a_side_with_markers_and_no_tokens_has_an_infinite_rate" ),
+    ( "return now > was or now == INFINITE", "return rates_per_thousand( after[ \"counts\" ] )[ name ] > rates_per_thousand( before[ \"counts\" ] )[ name ] or now == INFINITE", "test_risen_is_exact_where_the_one_decimal_display_would_hide_a_rise" ),
+    ( "return INFINITE if metrics[ \"counts\" ][ name ] else Fraction( 0 )", "return Fraction( 0 )", "test_a_side_with_markers_and_no_tokens_has_an_infinite_rate" ),
+    ( "return INFINITE if metrics[ \"counts\" ][ name ] else Fraction( 0 )", "return Fraction( 0 )", "test_a_docstring_of_markers_alone_is_a_rise_and_the_page_shows_inf" ),
+    ( "if name == \"tokens\": return now > was", "if name == \"tokens\": return now >= was", "test_token_count_is_left_out_by_default_and_compared_when_the_constant_names_it" ),
     ( "return [ name for name in COMPARED_METRICS if has_risen( before, after, name ) ]", "return [ name for name in MARKER_COLUMNS if has_risen( before, after, name ) ]", "test_more_tokens_fail_the_check_when_the_constant_also_names_tokens" ),
     ( "COMPARED_METRICS   = MARKER_COLUMNS", "COMPARED_METRICS   = ( *MARKER_COLUMNS, \"tokens\" )", "test_more_tokens_alone_pass_the_check_under_the_marker_rates_setting" ),
     ( "board  = build_dashboard( root, base )\n    names  = page_packages( text )", "board  = build_dashboard( root, base, \"HEAD\" )\n    names  = page_packages( text )", "test_check_exits_1_and_names_the_package_and_the_raw_counts_when_a_rate_rose" ),
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = []", "test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page" ),
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if not any( n.startswith( r[ \"package\" ] ) for n in names ) ]", "test_a_missing_row_is_matched_by_its_whole_name_and_not_by_a_prefix" ),
     ( "stale_base = BEFORE_LINE.format( board[ \"base\" ] ) not in text.split( \"\\n\" )", "stale_base = False", "test_check_exits_3_when_the_page_was_written_against_another_base" ),
-    ( "stale_rows = differ > 0 or page_rows != fresh_rows", "stale_rows = False", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
-    ( "stale_rows = differ > 0 or page_rows != fresh_rows", "stale_rows = False", "test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again" ),
+    ( "stale_rows = on_page != fresh", "stale_rows = False", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
+    ( "stale_rows = on_page != fresh", "stale_rows = False", "test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again" ),
+    ( "stale_rows = on_page != fresh", "stale_rows = differ > 0", "test_two_rows_in_another_order_are_stale_numbers" ),
+    ( "stale_rows = on_page != fresh", "stale_rows = page_rows != fresh_rows", "test_a_row_printed_twice_is_stale_numbers" ),
+    ( "if differ else ORDER_LINE.format( page, regen ) )", "if True else ORDER_LINE.format( page, regen ) )", "test_two_rows_in_another_order_are_stale_numbers" ),
+    ( "except Exception as err:", "except ( RuntimeError, OSError, ValueError ) as err:", "test_an_error_of_any_type_exits_2_and_is_named" ),
     ( "return EXIT_NUMBERS_STALE, lines + [", "return EXIT_PAGE_STALE, lines + [", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
     ( "return EXIT_NUMBERS_STALE, lines + [", "return EXIT_OK, lines + [", "test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again" ),
     ( "if stale_rows: lines.append( NUMBERS_LINE.format(", "if False: lines.append( NUMBERS_LINE.format(", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
@@ -586,5 +670,5 @@ def test_each_dashboard_mutant_reddens_its_named_test( monkeypatch, repo, old, n
     _git( repo, "reset", "-q", "--hard", "HEAD" )
     _git( repo, "clean", "-qfdx" )
     monkeypatch.setitem( this, "dm", _mutant_module( old, new ) )
-    with pytest.raises( ( AssertionError, UnicodeDecodeError, SystemExit ) ):  # two mutants leave by an uncaught error, not by a failed assert
+    with pytest.raises( ( AssertionError, UnicodeDecodeError, KeyError, SystemExit ) ):  # three mutants leave by an uncaught error, not by a failed assert
         this[ named_test ]( **kwargs() )
