@@ -643,6 +643,8 @@ class NotificationsUI {
         this.expectedUtteranceId = null;
         this.utteranceCounter    = 0;
         this.utterancePrefix     = null;
+        this.liveUtteranceIds    = [];
+        this.pendingUtteranceIds = new Set();
         
         // Authentication
         this.currentUserEmail = null;
@@ -3657,6 +3659,7 @@ class NotificationsUI {
                         this.log( `[AUDIO WS] Ignoring audio_streaming_complete for another utterance: ${envelope.utterance_id}` );
                         break;
                     }
+                    if ( typeof envelope.utterance_id === "string" ) this.settleUtteranceId( envelope.utterance_id );
                     this.handleAudioComplete( envelope );
                     break;
 
@@ -3670,6 +3673,7 @@ class NotificationsUI {
                         this.log( `[AUDIO WS] Ignoring tts_error for another utterance: ${envelope.utterance_id}` );
                         break;
                     }
+                    if ( typeof envelope.utterance_id === "string" ) this.settleUtteranceId( envelope.utterance_id );
                     this.handleTTSError( envelope );
                     break;
 
@@ -5005,7 +5009,7 @@ class NotificationsUI {
     }
     
     /**
-     * Mint the utterance id for one speech request and remember it as the one expected.
+     * Mint the utterance id for one speech request and make it the one expected.
      *
      * The server echoes `utterance_id` on that stream's status, complete and error
      * frames (speech.py `stream_frame`). It does not cancel a stream the page has
@@ -5019,17 +5023,47 @@ class NotificationsUI {
      *     - the string carries a prefix drawn once per page load, so the ids of a
      *       reloaded page do not repeat those of the page before it
      *     - this.expectedUtteranceId holds the same string
+     *     - the id is marked as waiting for its reply until requestAnswered or
+     *       abandonUtteranceId is called with it
      */
     nextUtteranceId() {
         // The audio session id outlives a reload and the counter does not.
         if ( !this.utterancePrefix ) this.utterancePrefix = Math.random().toString( 36 ).slice( 2, 10 ) || "0";
-        this.utteranceCounter    = ( this.utteranceCounter || 0 ) + 1;
-        this.expectedUtteranceId = `legacy:${this.utterancePrefix}:${this.utteranceCounter}`;
-        return this.expectedUtteranceId;
+        this.utteranceCounter = ( this.utteranceCounter || 0 ) + 1;
+        const id = `legacy:${this.utterancePrefix}:${this.utteranceCounter}`;
+        this.liveUtteranceIds    = ( this.liveUtteranceIds || [] ).concat( [ id ] );
+        this.pendingUtteranceIds = new Set( this.pendingUtteranceIds || [] ).add( id );
+        this.expectedUtteranceId = id;
+        return id;
     }
 
     /**
-     * Take back the id of a speech request that failed, so the stream before it can still end.
+     * Keep only the live ids the test passes, and expect the newest one left.
+     *
+     * The live ids are those that may still send a frame the page needs, oldest
+     * first. An id leaves when its request fails, its stream ends, or audio is stopped.
+     *
+     * Ensures:
+     *     - this.liveUtteranceIds holds the ids for which keep returned true, in order
+     *     - this.expectedUtteranceId is the last of them, or null when none is left
+     */
+    keepLiveUtteranceIds( keep ) {
+        this.liveUtteranceIds    = ( this.liveUtteranceIds || [] ).filter( keep );
+        this.expectedUtteranceId = this.liveUtteranceIds.length > 0 ? this.liveUtteranceIds[ this.liveUtteranceIds.length - 1 ] : null;
+    }
+
+    /**
+     * Record that the server accepted a speech request, so its stream is running.
+     *
+     * Ensures:
+     *     - the id no longer counts as waiting for its reply
+     */
+    requestAnswered( id ) {
+        if ( this.pendingUtteranceIds ) this.pendingUtteranceIds.delete( id );
+    }
+
+    /**
+     * Forget the id of a speech request that failed, so an earlier stream can still end.
      *
      * A request that fails starts no stream, so no frame will ever carry its id.
      * Left as the expected id, it made the page drop the complete frame of the
@@ -5038,31 +5072,58 @@ class NotificationsUI {
      * Requires:
      *     - minted is the id nextUtteranceId returned for the failed request, or
      *       null when the request failed before one was minted
-     *     - previous is this.expectedUtteranceId as it was before that call
      *
      * Ensures:
-     *     - when the failed request's id is still the expected one, the expected
-     *       id is previous again
-     *     - when a later request has already replaced it, nothing changes
+     *     - minted is no longer live and no longer waiting for a reply
+     *     - the expected id is the newest id still live, or null when none is
      */
-    abandonUtteranceId( minted, previous ) {
-        if ( minted !== null && this.expectedUtteranceId === minted ) this.expectedUtteranceId = previous;
+    abandonUtteranceId( minted ) {
+        this.requestAnswered( minted );
+        this.keepLiveUtteranceIds( ( id ) => id !== minted );
     }
 
     /**
-     * Does this audio frame belong to a different utterance than the one last requested?
+     * Forget an utterance whose stream has ended, and every utterance older than it.
+     *
+     * Ensures:
+     *     - neither ended nor any id minted before it is live
+     *     - a second complete or error frame for the same stream is dropped
+     */
+    settleUtteranceId( ended ) {
+        const at = ( this.liveUtteranceIds || [] ).indexOf( ended );
+        this.keepLiveUtteranceIds( ( _id, index ) => index > at );
+    }
+
+    /**
+     * Forget every utterance whose stream was running when the audio was stopped.
+     *
+     * The server keeps sending a stopped stream's frames. A request still waiting
+     * for its reply is kept: it was made for audio that is yet to start.
+     *
+     * Ensures:
+     *     - only ids still waiting for their reply stay live
+     */
+    forgetStoppedUtterances() {
+        const pending = this.pendingUtteranceIds || new Set();
+        this.keepLiveUtteranceIds( ( id ) => pending.has( id ) );
+    }
+
+    /**
+     * Does this audio frame belong to a different utterance than the one expected?
      *
      * Requires:
      *     - envelope is a parsed audio WebSocket frame
      *
      * Ensures:
-     *     - returns true only when an id is expected, the frame carries a string
-     *       utterance_id, and the two differ
+     *     - returns true only when this page has minted an id, the frame carries a
+     *       string utterance_id, and that id is not the expected one
+     *     - with no id expected, a frame that carries an id names a stream that
+     *       failed, ended or was stopped, so it returns true
      *     - returns false for a frame with no id (a server without the echo, or a
      *       request that sent none), so such a frame is handled as it always was
      */
     namesAnotherUtterance( envelope ) {
-        if ( !this.expectedUtteranceId ) return false;
+        if ( !this.utteranceCounter ) return false;
         if ( typeof envelope.utterance_id !== "string" ) return false;
         return envelope.utterance_id !== this.expectedUtteranceId;
     }
@@ -5073,8 +5134,7 @@ class NotificationsUI {
         // Start pulsing indicator on notification card
         this.startTTSPlayingIndicator( this.currentNotificationId );
 
-        const previousUtteranceId = this.expectedUtteranceId || null;
-        let   mintedUtteranceId   = null;
+        let mintedUtteranceId = null;
 
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
@@ -5112,6 +5172,7 @@ class NotificationsUI {
             
             const result = await response.json();
             this.log( "Instant TTS request successful:", result );
+            this.requestAnswered( mintedUtteranceId );
 
             // Audio chunks will be received via WebSocket
             this.currentTTSMode = this.TTS_MODE_INSTANT;
@@ -5126,7 +5187,7 @@ class NotificationsUI {
 
         } catch ( error ) {
             this.error( "Instant TTS request failed:", error );
-            this.abandonUtteranceId( mintedUtteranceId, previousUtteranceId );
+            this.abandonUtteranceId( mintedUtteranceId );
             throw error;
         }
     }
@@ -5145,8 +5206,7 @@ class NotificationsUI {
         this.startTime = Date.now(); // Track timing for reliable mode
         this.metricsTTSStartTime = Date.now(); // Capture TTS start for TTFA metric
 
-        const previousUtteranceId = this.expectedUtteranceId || null;
-        let   mintedUtteranceId   = null;
+        let mintedUtteranceId = null;
 
         try {
             // Ensure token is valid before API call (auto-refresh if expired)
@@ -5186,10 +5246,11 @@ class NotificationsUI {
             }
 
             // Audio chunks will be received via WebSocket and played by handleAudioComplete()
-            
+            this.requestAnswered( mintedUtteranceId );
+
         } catch ( error ) {
             this.error( "Reliable TTS request failed:", error );
-            this.abandonUtteranceId( mintedUtteranceId, previousUtteranceId );
+            this.abandonUtteranceId( mintedUtteranceId );
             throw error;
         }
     }
@@ -5839,6 +5900,7 @@ class NotificationsUI {
         this.nextScheduledTime = null;
         this.isPlaying = false;
         this.currentTTSMode = null;  // Prevent incoming WebSocket chunks from being played
+        this.forgetStoppedUtterances();
         this.audioChunks = [];
         this.processedChunks = 0;
         

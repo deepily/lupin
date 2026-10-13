@@ -42,6 +42,7 @@ type AudioUI = Record<string, unknown> & {
   expectedUtteranceId : string | null;
   pcmStreamComplete?  : boolean;
   ensureValidToken?   : () => Promise<void>;
+  stopTTSPlayingIndicator? : () => void;
   handleAudioMessage  : ( event: { data: string } ) => void;
   playInstantTTS      : ( text: string, voiceId?: string | null ) => Promise<void>;
   playReliableTTS     : ( text: string, voiceId?: string | null ) => Promise<void>;
@@ -76,13 +77,18 @@ function frame( ui: AudioUI, type: string, utteranceId?: unknown ): void {
   ui.handleAudioMessage( { data: JSON.stringify( envelope ) } );
 }
 
-beforeEach( () => {
-  reached = [];
-  posted  = [];
+/** Put back the fetch every test starts with: it records the request and answers success. */
+function plainFetch(): void {
   ( globalThis as Record<string, unknown> ).fetch = async ( url: string, init: { body: string } ): Promise<unknown> => {
     posted.push( { url, body: JSON.parse( init.body ) as Record<string, unknown> } );
     return { ok: true, status: 200, statusText: "OK", json: async () => ( { status: "success" } ) };
   };
+}
+
+beforeEach( () => {
+  reached = [];
+  posted  = [];
+  plainFetch();
 } );
 
 // ---------------------------------------------------------------------------
@@ -260,13 +266,115 @@ test("a failed reliable request gives its id back, for an HTTP error and for a n
   }
 });
 
-test("the first request of a page fails: no id is expected afterwards, so frames pass as before", async () => {
+test("the first request of a page fails: no id is expected, a frame naming a stream is dropped, a bare one passes", async () => {
   const ui = newUI();
   replyOnce( HTTP_500 );
   await assert.rejects( ui.playInstantTTS( "A" ) );
+  const idA = posted[ 0 ]!.body.utterance_id;
   assert.equal( ui.expectedUtteranceId, null );
-  frame( ui, "audio_streaming_complete", "anything" );
-  assert.deepEqual( reached, [ "complete anything" ] );
+  frame( ui, "audio_streaming_complete", idA );
+  frame( ui, "tts_error", "some other stream" );
+  assert.deepEqual( reached, [] );
+  frame( ui, "audio_streaming_complete" );
+  assert.deepEqual( reached, [ "complete undefined" ] );
+});
+
+test("a network failure, not only an HTTP error, gives the id back", async () => {
+  for ( const door of [ "playInstantTTS", "playReliableTTS" ] as const ) {
+    plainFetch();
+    const ui = newUI();
+    await ui.playInstantTTS( "A" );
+    const idA = ui.expectedUtteranceId;
+    ( globalThis as Record<string, unknown> ).fetch = async (): Promise<unknown> => { throw new Error( "network down" ); };
+    await assert.rejects( ui[ door ]( "B" ), /network down/ );
+    assert.equal( ui.expectedUtteranceId, idA, door );
+    assert.equal( ( ui.pendingUtteranceIds as Set<string> ).size, 0, `${ door }: a failed request is still counted as waiting` );
+  }
+});
+
+/** A fetch whose replies the test settles by hand, in any order. */
+function heldFetch(): Array<{ ok: () => void; fail: ( reason: Error ) => void }> {
+  const held: Array<{ ok: () => void; fail: ( reason: Error ) => void }> = [];
+  ( globalThis as Record<string, unknown> ).fetch = ( _url: string, init: { body: string } ): Promise<unknown> => {
+    posted.push( { url: _url, body: JSON.parse( init.body ) as Record<string, unknown> } );
+    return new Promise( ( resolve, reject ) => {
+      held.push( {
+        ok   : (): void => resolve( { ok: true, status: 200, statusText: "OK", json: async () => ( { status: "success" } ) } ),
+        fail : reject,
+      } );
+    } );
+  };
+  return held;
+}
+
+const tick = (): Promise<void> => new Promise( ( r ) => setImmediate( r ) );
+
+test("two requests fail while A plays, in either order: A's complete frame still ends A", async () => {
+  for ( const order of [ [ 0, 1 ], [ 1, 0 ] ] ) {
+    plainFetch();
+    const ui = newRealUI();
+    await ui.playInstantTTS( "A" );
+    const idA  = ui.expectedUtteranceId;
+    const held = heldFetch();
+    const b = assert.rejects( ui.playInstantTTS( "B" ), /down/ ); await tick();
+    const c = assert.rejects( ui.playInstantTTS( "C" ), /down/ ); await tick();
+    assert.equal( held.length, 2 );
+    for ( const which of order ) { held[ which ]!.fail( new Error( "down" ) ); await tick(); }
+    await b; await c;
+    assert.equal( ui.expectedUtteranceId, idA, `order ${ JSON.stringify( order ) }: a dead id stayed expected` );
+    frame( ui, "audio_streaming_complete", idA );
+    assert.equal( ui.pcmStreamComplete, true, `order ${ JSON.stringify( order ) }` );
+  }
+});
+
+test("A is stopped, then B fails: A's late frames do not play A's leftovers or raise its error", async () => {
+  for ( const door of [ "playInstantTTS", "playReliableTTS" ] as const ) {
+    const ui = newUI();
+    ui.stopTTSPlayingIndicator = (): void => {};
+    await ui.playInstantTTS( "A" );
+    const idA = ui.expectedUtteranceId;
+    ( ui as unknown as { stopAudio: () => void } ).stopAudio();
+    assert.equal( ui.expectedUtteranceId, null, "a stopped stream stayed expected" );
+    replyOnce( HTTP_500 );
+    await assert.rejects( ui[ door ]( "B" ) );
+    assert.equal( ui.expectedUtteranceId, null, door );
+    frame( ui, "audio_streaming_complete", idA );
+    frame( ui, "tts_error", idA );
+    assert.deepEqual( reached, [], door );
+  }
+});
+
+test("a stop while a request waits for its reply keeps that request's id expected", async () => {
+  const ui = newUI();
+  ui.stopTTSPlayingIndicator = (): void => {};
+  await ui.playInstantTTS( "A" );
+  const held = heldFetch();
+  const b = ui.playInstantTTS( "B" ); await tick();
+  const idB = ui.expectedUtteranceId;
+  ( ui as unknown as { stopAudio: () => void } ).stopAudio();
+  assert.equal( ui.expectedUtteranceId, idB );
+  held[ 0 ]!.ok(); await b;
+  frame( ui, "audio_streaming_complete", idB );
+  assert.deepEqual( reached, [ `complete ${ idB }` ] );
+  ( ui as unknown as { stopAudio: () => void } ).stopAudio();
+  assert.equal( ui.expectedUtteranceId, null, "an answered request survived a later stop" );
+});
+
+test("a stream's second ending frame is dropped, and the utterances before it are forgotten", async () => {
+  const ui = newUI();
+  await ui.playInstantTTS( "A" );
+  const idA = ui.expectedUtteranceId;
+  await ui.playInstantTTS( "B" );
+  const idB = ui.expectedUtteranceId;
+  frame( ui, "audio_streaming_complete", idB );
+  frame( ui, "tts_error", idB );
+  frame( ui, "audio_streaming_complete", idA );
+  assert.deepEqual( reached, [ `complete ${ idB }` ] );
+  assert.equal( ui.expectedUtteranceId, null );
+  await ui.playInstantTTS( "C" );
+  replyOnce( HTTP_500 );
+  await assert.rejects( ui.playInstantTTS( "D" ) );
+  assert.equal( ui.expectedUtteranceId, posted[ 2 ]!.body.utterance_id, "a failure after C restored something other than C" );
 });
 
 test("a request that fails before an id is minted leaves the expected id alone", async () => {
@@ -326,5 +434,19 @@ test("two page loads mint different ids for the same count; one page keeps one p
     assert.equal( newUI().nextUtteranceId(), "legacy:0:1", "a draw with no digits left an empty prefix" );
   } finally {
     Math.random = realRandom;
+  }
+});
+
+test("an answered request, from either door, is forgotten by the next stop", async () => {
+  for ( const door of [ "playInstantTTS", "playReliableTTS" ] as const ) {
+    const ui = newUI();
+    ui.stopTTSPlayingIndicator = (): void => {};
+    await ui[ door ]( "A" );
+    const idA = ui.expectedUtteranceId;
+    assert.notEqual( idA, null );
+    ( ui as unknown as { stopAudio: () => void } ).stopAudio();
+    assert.equal( ui.expectedUtteranceId, null, door );
+    frame( ui, "audio_streaming_complete", idA );
+    assert.deepEqual( reached, [], door );
   }
 });
