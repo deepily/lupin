@@ -64,11 +64,11 @@ from .word_list import configure_root
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
 # The record locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
-# A file of the same name in any other folder is held like every other page.
+# A file of the same name in any other folder, src/cosa/history.md among them, is held like every other page.
 # WARN_ONLY_PREFIXES holds folders, each ending in a slash and matched from the repo root.
 # So src/cosa/history/ is not among them, and neither is a history/ folder below the root.
 # Task-store row id=486cc499 gives the root history.md and TODO.md their own rule set and ends their exception.
-WARN_ONLY_PATHS    = ( "history.md", "TODO.md", "bug-fix-queue.md", "src/cosa/history.md" )
+WARN_ONLY_PATHS    = ( "history.md", "TODO.md", "bug-fix-queue.md" )
 WARN_ONLY_PREFIXES = ( "history/", "todo-history/" )
 WARN_ONLY_MARK     = " (warn mode, commit allowed)"
 PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the commit)"
