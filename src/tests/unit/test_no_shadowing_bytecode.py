@@ -33,6 +33,7 @@ because 1093 was implausible. The inverse defect — a comparison that never dif
 import os
 import subprocess
 import sys
+import time
 
 from pathlib import Path
 
@@ -79,9 +80,12 @@ MIN_ASSESSABLE = 200
 
 def _manufacture_shadowed_source( tmp_path ):
     """
-    Build a source file that a valid-looking `.pyc` shadows: compile one text, replace it with a
-    DIFFERENT text of the SAME length, then force the source's mtime onto the pyc's whole second.
-    `touch`-equivalent rather than a sleep, so it is deterministic rather than a timing gamble.
+    Build a source file that a valid-looking `.pyc` shadows.
+
+    Compile one text, then replace it with another text of the same length. Then set the source's
+    mtime back to the one the `.pyc` header records. CPython compares that value, so the result
+    does not depend on both writes falling in one second. The mtime of the `.pyc` file itself is
+    a second later whenever they did not, and must not be used.
     """
     src = tmp_path / "shadowed.py"
     src.write_text( 'VALUE = "dead"\n', encoding="utf-8" )
@@ -92,9 +96,36 @@ def _manufacture_shadowed_source( tmp_path ):
 
     pycs = bytecode_files_for( src )
     assert pycs, "no .pyc was produced — this probe cannot manufacture the condition it needs"
-    stat = pycs[ 0 ].stat()
-    os.utime( src, ( stat.st_atime, stat.st_mtime ) )
+    header = pycs[ 0 ].read_bytes()[ : 16 ]
+    assert header[ 4 : 8 ] == b"\0\0\0\0", "the compile wrote a hash-based .pyc, which records no source mtime to shadow with"
+    recorded = int.from_bytes( header[ 8 : 12 ], "little" )
+    os.utime( src, ( recorded, recorded ) )
     return src
+
+
+def test_the_manufactured_shadow_does_not_depend_on_both_writes_sharing_a_second( tmp_path, monkeypatch ):
+    """
+    Hold the compile until the clock leaves the second the source was written in.
+
+    A loaded box produces that case by chance, and the fixture once built nothing to detect in it.
+
+    Ensures:
+        - the source and the pyc file carry different whole-second mtimes before the fixture's fix-up
+        - the manufactured source is still reported as shadowed
+    """
+    real_run = subprocess.run
+    seconds  = {}
+
+    def held_run( *args, **kwargs ):
+        seconds[ "source" ] = int( ( tmp_path / "shadowed.py" ).stat().st_mtime )
+        time.sleep( 1.05 - ( time.time() % 1.0 ) )
+        return real_run( *args, **kwargs )
+
+    monkeypatch.setattr( subprocess, "run", held_run )
+    src = _manufacture_shadowed_source( tmp_path )
+
+    assert int( bytecode_files_for( src )[ 0 ].stat().st_mtime ) > seconds[ "source" ]
+    assert src in find_shadowing_bytecode( [ tmp_path ] ).shadowed
 
 
 def test_the_detector_actually_sees_a_shadowing_pyc( tmp_path ):
