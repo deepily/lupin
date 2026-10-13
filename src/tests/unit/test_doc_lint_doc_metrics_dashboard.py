@@ -96,7 +96,7 @@ def _row( board, name ):
 def test_the_base_commit_and_the_page_path_are_named_once():
     assert dm.BASE_SHA == "456422492f308a60dafa36325102229947c44147"
     assert dm.DASHBOARD_PATH == "src/docs/doc-metrics-dashboard.md"
-    assert ( dm.EXIT_OK, dm.EXIT_ROSE, dm.EXIT_NOT_CHECKED, dm.EXIT_PAGE_STALE ) == ( 0, 1, 2, 3 )
+    assert ( dm.EXIT_OK, dm.EXIT_ROSE, dm.EXIT_NOT_CHECKED, dm.EXIT_PAGE_STALE, dm.EXIT_NUMBERS_STALE ) == ( 0, 1, 2, 3, 4 )
 
 
 def test_the_check_compares_the_six_marker_rates_and_not_the_token_count():
@@ -344,7 +344,7 @@ def test_check_exits_1_and_names_the_package_and_the_raw_counts_when_a_rate_rose
     rc, text = _dash( repo, "check" )
     assert rc == dm.EXIT_ROSE == 1 and ", 1 rose, 0 not on the page" in text
     assert "ROSE src/scripts: em_dash 0/4 -> 1/4 per token (0.0 -> 250.0 per 1,000)\n" in text
-    assert text.count( "ROSE" ) == 1 and "MISSING" not in text and "STALE" not in text
+    assert text.count( "ROSE" ) == 1 and "MISSING" not in text and "STALE" not in text and "WARNING" not in text
     assert text.endswith( "DASHBOARD CHECK FAILED: 1 values rose in 1 rows; the page matches the tree.\n" )
 
 
@@ -356,6 +356,7 @@ def test_check_recomputes_from_the_tree_and_does_not_trust_the_page( repo ):
     assert "rose" not in _table( page )[ 5 ][ -1 ] and "250.0" not in " ".join( _table( page )[ 5 ] )
     rc, text = _dash( repo, "check" )
     assert rc == dm.EXIT_ROSE and "ROSE src/scripts: em_dash 0/4 -> 1/4" in text
+    assert f"WARNING {PAGE}: the numbers on the page are stale, 1 of its rows differ from the tree; regenerate with: " in text
     assert text.endswith( "DASHBOARD CHECK FAILED: 1 values rose in 1 rows; the page does not match the tree.\n" )
 
 
@@ -397,24 +398,35 @@ def test_the_total_is_not_a_compared_row( repo ):
     assert rc == dm.EXIT_OK and "5 rows checked" in text and "ROSE" not in text
 
 
-def test_check_exits_3_when_a_value_on_the_page_is_not_the_trees( repo ):
+def test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees( repo ):
     _dash( repo, "write" )
     page = _page( repo )
+    base = _git( repo, "rev-parse", "base" )
     assert page.count( "7 -> 4" ) == 1
     ( repo / PAGE ).write_text( page.replace( "7 -> 4", "7 -> 5" ), encoding="utf-8" )
     rc, text = _dash( repo, "check" )
-    assert rc == dm.EXIT_PAGE_STALE == 3 and "0 rose, 0 not on the page" in text
-    assert f"STALE {PAGE}: the rows on the page are not the rows of the tree; regenerate with: " in text and text.count( "STALE" ) == 1
-    assert text.endswith( "DASHBOARD CHECK FAILED: 0 values rose in 0 rows; the page does not match the tree.\n" )
+    assert rc == dm.EXIT_NUMBERS_STALE == 4 and "0 rose, 0 not on the page" in text
+    assert f"WARNING {PAGE}: the numbers on the page are stale, 1 of its rows differ from the tree; regenerate with: PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base {base}\n" in text
+    assert text.count( "WARNING" ) == 1 and "STALE " not in text and "MISSING" not in text and "FAILED" not in text
+    assert text.endswith( "DASHBOARD CHECK PASSED: 5 rows, no compared value rose; the numbers on the page are stale.\n" )
 
 
-def test_check_exits_3_when_a_docstring_changed_and_the_page_was_not_written_again( repo ):
+def test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again( repo ):
     _dash( repo, "write" )
     _put( repo, { "src/scripts/run.py": '"""Run the job."""\n' } )
     rc, text = _dash( repo, "check" )
-    assert rc == dm.EXIT_PAGE_STALE and "the rows on the page are not the rows of the tree" in text
+    assert rc == dm.EXIT_NUMBERS_STALE and "the numbers on the page are stale, 2 of its rows differ from the tree" in text, "the row of src/scripts and the total row"
     _dash( repo, "write" )
-    assert _dash( repo, "check" )[ 0 ] == dm.EXIT_OK
+    rc, text = _dash( repo, "check" )
+    assert rc == dm.EXIT_OK and "WARNING" not in text
+
+
+def test_a_line_added_to_the_rows_of_the_page_is_stale_numbers_too( repo ):
+    _dash( repo, "write" )
+    page = _page( repo )
+    ( repo / PAGE ).write_text( page.replace( "```text\n", "```text\nan extra line\n" ), encoding="utf-8" )
+    rc, text = _dash( repo, "check" )
+    assert rc == dm.EXIT_NUMBERS_STALE and "1 of its rows differ from the tree" in text
 
 
 def test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page( repo ):
@@ -435,8 +447,9 @@ def test_a_missing_row_is_matched_by_its_whole_name_and_not_by_a_prefix( repo ):
     assert len( gone ) == 1 and len( [ line for line in lines if line.startswith( "src/app/sub " ) ] ) == 1
     ( repo / PAGE ).write_text( "\n".join( line for line in lines if line != gone[ 0 ] ), encoding="utf-8" )
     rc, text = _dash( repo, "check" )
-    assert rc == dm.EXIT_PAGE_STALE and f"MISSING src/app: no row on {PAGE}; " in text
+    assert rc == dm.EXIT_PAGE_STALE == 3 and f"MISSING src/app: no row on {PAGE}; " in text
     assert text.count( "MISSING" ) == 1 and "1 not on the page" in text
+    assert text.endswith( "DASHBOARD CHECK FAILED: 0 values rose in 0 rows; the page does not match the tree.\n" )
 
 
 def test_check_exits_3_when_the_page_was_written_against_another_base( repo ):
@@ -532,9 +545,15 @@ MUTANTS = [
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = []", "test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page" ),
     ( "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing    = [ r[ \"package\" ] for r in board[ \"rows\" ] if not any( n.startswith( r[ \"package\" ] ) for n in names ) ]", "test_a_missing_row_is_matched_by_its_whole_name_and_not_by_a_prefix" ),
     ( "stale_base = BEFORE_LINE.format( board[ \"base\" ] ) not in text.split( \"\\n\" )", "stale_base = False", "test_check_exits_3_when_the_page_was_written_against_another_base" ),
-    ( "stale_rows = rows_block( text ) != rows_block( render_dashboard( board ) )", "stale_rows = False", "test_check_exits_3_when_a_value_on_the_page_is_not_the_trees" ),
-    ( "if rose: return EXIT_ROSE, lines", "if rose and not missing: return EXIT_ROSE, lines", "test_a_rise_outranks_a_missing_row_and_both_are_printed" ),
-    ( "if rose: return EXIT_ROSE, lines", "if rose and not stale_rows: return EXIT_ROSE, lines", "test_check_recomputes_from_the_tree_and_does_not_trust_the_page" ),
+    ( "stale_rows = differ > 0 or page_rows != fresh_rows", "stale_rows = False", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
+    ( "stale_rows = differ > 0 or page_rows != fresh_rows", "stale_rows = False", "test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again" ),
+    ( "return EXIT_NUMBERS_STALE, lines + [", "return EXIT_PAGE_STALE, lines + [", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
+    ( "return EXIT_NUMBERS_STALE, lines + [", "return EXIT_OK, lines + [", "test_check_exits_4_when_a_docstring_changed_and_the_page_was_not_written_again" ),
+    ( "if stale_rows: lines.append( NUMBERS_LINE.format(", "if False: lines.append( NUMBERS_LINE.format(", "test_check_exits_4_with_a_warning_line_when_a_value_on_the_page_is_not_the_trees" ),
+    ( "differ     = max( len( fresh_rows - page_rows ), len( page_rows - fresh_rows ) )", "differ     = len( fresh_rows - page_rows )", "test_a_line_added_to_the_rows_of_the_page_is_stale_numbers_too" ),
+    ( "if rose or missing or stale_base:", "if rose or stale_base:", "test_a_missing_row_is_matched_by_its_whole_name_and_not_by_a_prefix" ),
+    ( "return ( EXIT_ROSE if rose else EXIT_PAGE_STALE ), lines", "return ( EXIT_ROSE if rose and not missing else EXIT_PAGE_STALE ), lines", "test_a_rise_outranks_a_missing_row_and_both_are_printed" ),
+    ( "return ( EXIT_ROSE if rose else EXIT_PAGE_STALE ), lines", "return ( EXIT_ROSE if rose and not stale_rows else EXIT_PAGE_STALE ), lines", "test_check_recomputes_from_the_tree_and_does_not_trust_the_page" ),
     ( "board = build_dashboard( root, args.base, args.head )", "board = build_dashboard( root, args.base )", "test_write_with_a_head_revision_measures_that_commit_and_not_the_tree" ),
     ( "except Exception as err:", "except ( RuntimeError, OSError ) as err:", "test_check_exits_2_and_not_1_when_the_page_is_not_utf8" ),
     ( "if argv[ : 1 ] == [ \"dashboard\" ]: return dashboard_main( argv[ 1: ], out )", "if \"dashboard\" in argv: return dashboard_main( argv[ 1: ], out )", "test_the_word_dashboard_after_the_first_argument_is_a_package_of_the_old_command" ),

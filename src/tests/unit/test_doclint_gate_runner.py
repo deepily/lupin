@@ -118,26 +118,76 @@ def test_one_planted_finding_exits_one_and_names_its_line( repo ):
     assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed."
 
 
-# The second step, the dashboard check. Its exit 1 (a value rose) and 3 (the page is stale) both fail
-# the gate with exit 1, because exit 3 of this script already means no interpreter. Its exit 2 (could
-# not check) is exit 2 here, with no summary block, so the job reads the run as not executed.
+# The second step, the dashboard check. Its exit 1 (a value rose) and 3 (a row is missing, or the page
+# names another before commit) both fail the gate with exit 1, because exit 3 of this script already
+# means no interpreter. Its exit 4 (only the numbers on the page are stale) passes the gate with a
+# warning line. Its exit 2 (could not check) is exit 2 here, with no summary block, so the job reads
+# the run as not executed.
 
-def test_a_stale_dashboard_page_fails_the_gate_while_the_docstrings_are_clean( repo ):
+def _stale_numbers( repo ):
+    page = ( repo / PAGE ).read_text( encoding="utf-8" )
+    assert page.count( "3 -> 3" ) == 2, "the one row and the total row both read 3 tokens"
+    ( repo / PAGE ).write_text( page.replace( "3 -> 3", "3 -> 4" ), encoding="utf-8" )
+    sha = subprocess.run( [ "git", "rev-parse", "HEAD" ], cwd=repo, check=True, capture_output=True, text=True ).stdout.strip()
+    return f"PYTHONPATH=src python3 -m cosa.repo.doc_lint.doc_metrics dashboard write --base {sha}"
+
+
+def test_stale_numbers_on_the_dashboard_page_pass_the_gate_with_a_warning( repo ):
     from cosa.agents.test_suite.job import TestSuiteJob
 
     _write( repo, "src/app/a.py", CLEAN )
     _git( repo, "add", "src/app" )
     _page( repo )
+    command = _stale_numbers( repo )
+
+    code, out, _ = _run_split( repo, *BASE )
+    parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
+    warning      = f"WARNING {PAGE}: the numbers on the page are stale, 2 of its rows differ from the tree; regenerate with: {command}\n"
+
+    assert code == 0
+    assert out.count( warning ) == 1 and out.count( "WARNING " ) == 1
+    assert out.index( warning ) < out.index( "Total Tests:" )
+    assert "REFUSING" not in out and "could not check" not in out
+    assert "Total Tests: 2\nPassed: 2\nFailed: 0\nErrors: 0\n" in out
+    assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == f"DOCLINT GATE PASSED: 1 files clean; dashboard numbers are stale, regenerate with: {command}"
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 0 )
+
+
+def test_stale_numbers_beside_a_docstring_finding_fail_the_gate_and_keep_the_warning( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _write( repo, "src/app/loud.py", LOUD )
+    _git( repo, "add", "src/app" )
+    _page( repo )
     page = ( repo / PAGE ).read_text( encoding="utf-8" )
-    assert page.count( "3 -> 3" ) == 2, "the one row and the total row both read 3 tokens"
-    ( repo / PAGE ).write_text( page.replace( "3 -> 3", "3 -> 4" ), encoding="utf-8" )
+    assert page.count( "8 -> 8" ) == 2
+    ( repo / PAGE ).write_text( page.replace( "8 -> 8", "8 -> 9" ), encoding="utf-8" )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 1
+    assert text.count( "WARNING " ) == 1
+    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in text
+    last = text.rstrip( "\n" ).split( "\n" )[ -1 ]
+    assert last.startswith( "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed; dashboard numbers are stale, regenerate with: PYTHONPATH=src python3 " )
+
+
+def test_a_row_missing_from_the_dashboard_page_fails_the_gate_while_the_docstrings_are_clean( repo ):
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+    lines = ( repo / PAGE ).read_text( encoding="utf-8" ).split( "\n" )
+    gone  = [ line for line in lines if line.split( "|" )[ 0 ].strip() == "src/app" ]
+    assert len( gone ) == 1
+    ( repo / PAGE ).write_text( "\n".join( line for line in lines if line != gone[ 0 ] ), encoding="utf-8" )
 
     code, out, _ = _run_split( repo, *BASE )
     parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
 
     assert code == 1
     assert "Docstring step passed: all 1 files clean." in out
-    assert f"STALE {PAGE}: the rows on the page are not the rows of the tree" in out
+    assert f"MISSING src/app: no row on {PAGE}" in out
     assert "Total Tests: 2\nPassed: 1\nFailed: 1\nErrors: 1\n" in out
     assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 0 of 1 files hold a finding; the dashboard check failed."
     assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 1, 1 )
@@ -192,7 +242,8 @@ def test_a_before_commit_the_repo_does_not_hold_refuses( repo ):
 @pytest.mark.parametrize( "body,said", [
     ( 'if __name__ == "__main__": raise ValueError( "boom" )\n', "REFUSING: the dashboard check exited 1 without a verdict line. Nothing was checked." ),
     ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK EXPLODED: no check ran" )\n    sys.exit( 3 )\n', "REFUSING: the dashboard check exited 3 without a verdict line. Nothing was checked." ),
-    ( 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n', "REFUSING: the dashboard check exited 7, which is not a check result. Nothing was checked." )
+    ( 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n', "REFUSING: the dashboard check exited 7, which is not a check result. Nothing was checked." ),
+    ( 'import sys\nif __name__ == "__main__":\n    print( "DASHBOARD CHECK PASSED: 1 rows, the numbers on the page are stale." )\n    sys.exit( 4 )\n', "REFUSING: the dashboard check exited 4 without its warning line. Nothing was checked." )
 ] )
 def test_a_dashboard_check_that_dies_is_refused_not_read_as_a_rise( repo, body, said ):
     _write( repo, "src/app/a.py", CLEAN )
