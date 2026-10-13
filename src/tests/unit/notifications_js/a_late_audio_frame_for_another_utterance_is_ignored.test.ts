@@ -100,7 +100,7 @@ test("the instant request sends an utterance_id and remembers it as the one expe
   await ui.playInstantTTS( "hello" );
   assert.equal( posted.length, 1 );
   assert.equal( posted[ 0 ]!.url, "/api/get-speech-elevenlabs" );
-  assert.equal( typeof posted[ 0 ]!.body.utterance_id, "string" );
+  assert.match( String( posted[ 0 ]!.body.utterance_id ), /^legacy:[a-z0-9]{1,8}:1$/ );
   assert.equal( posted[ 0 ]!.body.utterance_id, ui.expectedUtteranceId );
   assert.deepEqual( Object.keys( posted[ 0 ]!.body ).sort(), [ "session_id", "text", "utterance_id" ] );
 });
@@ -449,4 +449,102 @@ test("an answered request, from either door, is forgotten by the next stop", asy
     frame( ui, "audio_streaming_complete", idA );
     assert.deepEqual( reached, [], door );
   }
+});
+
+// ---------------------------------------------------------------------------
+// An ending frame for an older, still-live utterance is held, not lost
+// ---------------------------------------------------------------------------
+
+test("A's complete frame arrives while B waits for its reply, then B fails: A still ends, once", async () => {
+  for ( const type of [ "audio_streaming_complete", "tts_error" ] ) {
+    plainFetch();
+    reached = [];
+    const ui = newUI();
+    await ui.playInstantTTS( "A" );
+    const idA  = ui.expectedUtteranceId;
+    const held = heldFetch();
+    const b = assert.rejects( ui.playInstantTTS( "B" ), /down/ ); await tick();
+    frame( ui, type, idA );
+    assert.deepEqual( reached, [], "A's frame was acted on while B was the newest request" );
+    held[ 0 ]!.fail( new Error( "down" ) ); await b;
+    const word = type === "tts_error" ? "error" : "complete";
+    assert.deepEqual( reached, [ `${ word } ${ idA }` ], `${ type }: A never ended after B failed` );
+    assert.equal( ui.expectedUtteranceId, null );
+    frame( ui, type, idA );
+    assert.deepEqual( reached, [ `${ word } ${ idA }` ], "the held frame was acted on twice" );
+  }
+});
+
+test("the same held frame through the real handler ends A's stream", async () => {
+  const ui = newRealUI();
+  await ui.playInstantTTS( "A" );
+  const idA  = ui.expectedUtteranceId;
+  const held = heldFetch();
+  const b = assert.rejects( ui.playInstantTTS( "B" ), /down/ ); await tick();
+  frame( ui, "audio_streaming_complete", idA );
+  assert.equal( ui.pcmStreamComplete, false );
+  held[ 0 ]!.fail( new Error( "down" ) ); await b;
+  assert.equal( ui.pcmStreamComplete, true, "the card would pulse forever" );
+});
+
+test("a held frame is never acted on when the newer request succeeds", async () => {
+  const ui = newUI();
+  await ui.playInstantTTS( "A" );
+  const idA  = ui.expectedUtteranceId;
+  const held = heldFetch();
+  const b = ui.playInstantTTS( "B" ); await tick();
+  const idB = ui.expectedUtteranceId;
+  frame( ui, "audio_streaming_complete", idA );
+  held[ 0 ]!.ok(); await b;
+  frame( ui, "audio_streaming_complete", idB );
+  assert.deepEqual( reached, [ `complete ${ idB }` ] );
+  assert.equal( ( ui.heldEndingFrames as Map<string, unknown> ).size, 0, "a frame stayed held after its utterance was forgotten" );
+  plainFetch();
+  replyOnce( HTTP_500 );
+  await assert.rejects( ui.playInstantTTS( "C" ) );
+  assert.deepEqual( reached, [ `complete ${ idB }` ], "A's old frame came back after a later failure" );
+});
+
+test("a frame for an utterance that is no longer live is dropped, not held", async () => {
+  const ui = newUI();
+  ui.stopTTSPlayingIndicator = (): void => {};
+  await ui.playInstantTTS( "A" );
+  const idA = ui.expectedUtteranceId;
+  ( ui as unknown as { stopAudio: () => void } ).stopAudio();
+  await ui.playInstantTTS( "B" );
+  frame( ui, "audio_streaming_complete", idA );
+  frame( ui, "tts_error", "a stream this page never asked for" );
+  assert.equal( ( ui.heldEndingFrames as Map<string, unknown> ).size, 0 );
+  assert.deepEqual( reached, [] );
+});
+
+test("an accepted tts_error ends its utterance: a second frame for it is dropped", async () => {
+  const ui = newUI();
+  await ui.playInstantTTS( "A" );
+  const idA = ui.expectedUtteranceId;
+  frame( ui, "tts_error", idA );
+  frame( ui, "tts_error", idA );
+  frame( ui, "audio_streaming_complete", idA );
+  assert.deepEqual( reached, [ `error ${ idA }` ] );
+});
+
+test("against a server that echoes no id, the list of live ids does not grow", async () => {
+  const ui = newUI();
+  for ( let i = 0; i < 50; i += 1 ) {
+    await ui.playInstantTTS( `say ${ i }` );
+    frame( ui, i % 2 === 0 ? "audio_streaming_complete" : "tts_error" );
+  }
+  assert.equal( reached.length, 50, "an id-less frame was not handled" );
+  assert.equal( ( ui.liveUtteranceIds as string[] ).length, 0 );
+  assert.equal( ( ui.pendingUtteranceIds as Set<string> ).size, 0 );
+});
+
+test("an id-less frame does not forget a request still waiting for its reply", async () => {
+  const ui = newUI();
+  const held = heldFetch();
+  const a = ui.playInstantTTS( "A" ); await tick();
+  const idA = ui.expectedUtteranceId;
+  frame( ui, "audio_streaming_complete" );
+  assert.equal( ui.expectedUtteranceId, idA );
+  held[ 0 ]!.ok(); await a;
 });

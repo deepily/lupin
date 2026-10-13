@@ -645,6 +645,7 @@ class NotificationsUI {
         this.utterancePrefix     = null;
         this.liveUtteranceIds    = [];
         this.pendingUtteranceIds = new Set();
+        this.heldEndingFrames    = new Map();
         
         // Authentication
         this.currentUserEmail = null;
@@ -3655,12 +3656,7 @@ class NotificationsUI {
                     break;
                     
                 case "audio_streaming_complete":
-                    if ( this.namesAnotherUtterance( envelope ) ) {
-                        this.log( `[AUDIO WS] Ignoring audio_streaming_complete for another utterance: ${envelope.utterance_id}` );
-                        break;
-                    }
-                    if ( typeof envelope.utterance_id === "string" ) this.settleUtteranceId( envelope.utterance_id );
-                    this.handleAudioComplete( envelope );
+                    this.receiveEndingFrame( envelope );
                     break;
 
                 case "audio_streaming_chunk":
@@ -3669,12 +3665,7 @@ class NotificationsUI {
                     break;
 
                 case "tts_error":
-                    if ( this.namesAnotherUtterance( envelope ) ) {
-                        this.log( `[AUDIO WS] Ignoring tts_error for another utterance: ${envelope.utterance_id}` );
-                        break;
-                    }
-                    if ( typeof envelope.utterance_id === "string" ) this.settleUtteranceId( envelope.utterance_id );
-                    this.handleTTSError( envelope );
+                    this.receiveEndingFrame( envelope );
                     break;
 
                 case "sys_ping":
@@ -5033,6 +5024,7 @@ class NotificationsUI {
         const id = `legacy:${this.utterancePrefix}:${this.utteranceCounter}`;
         this.liveUtteranceIds    = ( this.liveUtteranceIds || [] ).concat( [ id ] );
         this.pendingUtteranceIds = new Set( this.pendingUtteranceIds || [] ).add( id );
+        this.heldEndingFrames    = this.heldEndingFrames || new Map();
         this.expectedUtteranceId = id;
         return id;
     }
@@ -5050,6 +5042,47 @@ class NotificationsUI {
     keepLiveUtteranceIds( keep ) {
         this.liveUtteranceIds    = ( this.liveUtteranceIds || [] ).filter( keep );
         this.expectedUtteranceId = this.liveUtteranceIds.length > 0 ? this.liveUtteranceIds[ this.liveUtteranceIds.length - 1 ] : null;
+        const held = new Map();
+        for ( const [ id, frame ] of ( this.heldEndingFrames || [] ) ) {
+            if ( this.liveUtteranceIds.includes( id ) ) held.set( id, frame );
+        }
+        this.heldEndingFrames = held;
+    }
+
+    /**
+     * Take one complete or error frame from the audio socket and act on it or set it aside.
+     *
+     * A frame for a live utterance that is not the newest is held, not thrown away.
+     * The newer request may still fail, and then this frame is the only ending
+     * the older utterance will ever get.
+     *
+     * Requires:
+     *     - envelope.type is "audio_streaming_complete" or "tts_error"
+     *
+     * Ensures:
+     *     - a frame naming another utterance reaches no handler; it is held when
+     *       that utterance is still live, and dropped otherwise
+     *     - any other frame reaches handleAudioComplete or handleTTSError, once
+     *     - a handled frame that carries an id ends that utterance; one with no
+     *       id ends every utterance not waiting for its reply
+     */
+    receiveEndingFrame( envelope ) {
+        if ( this.namesAnotherUtterance( envelope ) ) {
+            this.log( `[AUDIO WS] Ignoring ${envelope.type} for another utterance: ${envelope.utterance_id}` );
+            if ( this.liveUtteranceIds.includes( envelope.utterance_id ) ) this.heldEndingFrames.set( envelope.utterance_id, envelope );
+            return;
+        }
+        if ( typeof envelope.utterance_id === "string" ) {
+            this.settleUtteranceId( envelope.utterance_id );
+        } else {
+            // A server without the echo names nothing, so no id would ever leave the list.
+            this.forgetStoppedUtterances();
+        }
+        if ( envelope.type === "tts_error" ) {
+            this.handleTTSError( envelope );
+        } else {
+            this.handleAudioComplete( envelope );
+        }
     }
 
     /**
@@ -5076,17 +5109,23 @@ class NotificationsUI {
      * Ensures:
      *     - minted is no longer live and no longer waiting for a reply
      *     - the expected id is the newest id still live, or null when none is
+     *     - an ending frame held for the id now expected is acted on
      */
     abandonUtteranceId( minted ) {
         this.requestAnswered( minted );
         this.keepLiveUtteranceIds( ( id ) => id !== minted );
+        const held = this.heldEndingFrames.get( this.expectedUtteranceId );
+        if ( held ) this.receiveEndingFrame( held );
     }
 
     /**
      * Forget an utterance whose stream has ended, and every utterance older than it.
      *
+     * Requires:
+     *     - ended is the expected id, so it is the newest live one
+     *
      * Ensures:
-     *     - neither ended nor any id minted before it is live
+     *     - no id is live, so the expected id is null
      *     - a second complete or error frame for the same stream is dropped
      */
     settleUtteranceId( ended ) {
