@@ -17,7 +17,7 @@ from .text_rules import Finding
 
 RUFF_RELATIVE     = [ ".venv/bin/ruff" ]
 MARKDOWNLINT_REL  = [ "node_modules/.bin/markdownlint-cli2" ]
-MARKDOWNLINT_LINE = re.compile( r"^(.+?):(\d+)(?::\d+)? (?:error|warning) (MD\d+/[\w-]+) (.*)$" )
+MARKDOWNLINT_LINE = re.compile( r"^(.+?):(\d+)(?::\d+)? (?:(?:error|warning) )?(MD\d+/[\w-]+) (.*)$" )
 DART_DOC_CODES    = frozenset( { "public_member_api_docs", "slash_for_doc_comments", "dangling_library_doc_comments",
                                  "unintended_html_in_doc_comment", "comment_references" } )
 
@@ -163,6 +163,8 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
         - the file names follow a -- separator, so one that starts with a dash is read as a name
         - a file markdownlint_unnamed lists is not handed to the tool, and one warning per file says it was not checked
         - a finding the tool places in a file that was not asked for yields one warning that names it
+        - the word error or warning before the rule is optional, since the pinned 0.18.1 prints neither
+        - exit status 1 with no finding read yields one Unchecked warning, so a changed output format cannot pass silently
 
     Raises:
         - nothing
@@ -181,6 +183,8 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
         if not m: continue
         if m.group( 1 ) not in listed: warnings.append( f"[doc-lint] WARNING: markdownlint-cli2 placed a finding in {shown( m.group( 1 ) )}, a file it was not asked about, so that finding is NOT attached to any staged file" )
         findings.append( Finding( m.group( 1 ), int( m.group( 2 ) ), f"markdownlint:{m.group( 3 )}", m.group( 4 ) ) )
+    if res.returncode == 1 and not findings:
+        warnings.append( Unchecked( f"[doc-lint] WARNING: markdownlint-cli2 reported findings (exit 1) but none could be read, so the markdown structure was NOT checked: {res.stderr.strip()[ :200 ]}" ) )
     return findings, warnings
 
 
