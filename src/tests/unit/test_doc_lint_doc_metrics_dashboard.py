@@ -409,7 +409,7 @@ MUTANTS = [
     ( "COMPARED_METRICS = MARKER_COLUMNS", "COMPARED_METRICS = ( *MARKER_COLUMNS, \"tokens\" )", "test_more_tokens_alone_pass_the_check_under_the_marker_rates_setting" ),
     ( "board  = build_dashboard( root, base )\n    names  = page_packages( text )", "board  = build_dashboard( root, base, \"HEAD\" )\n    names  = page_packages( text )", "test_check_exits_1_and_names_the_package_and_the_raw_counts_when_a_rate_rose" ),
     ( "missing = [ r[ \"package\" ] for r in board[ \"rows\" ] if r[ \"package\" ] not in names ]", "missing = []", "test_check_exits_3_when_a_tracked_package_has_no_row_on_the_page" ),
-    ( "stale   = board[ \"base\" ] not in text", "stale   = False", "test_check_exits_3_when_the_page_was_written_against_another_base" ),
+    ( "stale   = BEFORE_LINE.format( board[ \"base\" ] ) not in text.split( \"\\n\" )", "stale   = board[ \"base\" ] not in text", "test_check_exits_3_when_the_page_was_written_against_another_base" ),
     ( "if rose: return EXIT_ROSE, lines", "if rose and not missing: return EXIT_ROSE, lines", "test_a_rise_outranks_a_missing_row_and_both_are_printed" ),
     ( "if rose: return EXIT_ROSE, lines", "if rose: return EXIT_PAGE_STALE, lines", "test_check_recomputes_from_the_tree_and_does_not_trust_the_page" ),
     ( "board = build_dashboard( root, args.base, args.head )", "board = build_dashboard( root, args.base )", "test_write_with_a_head_revision_measures_that_commit_and_not_the_tree" ),
