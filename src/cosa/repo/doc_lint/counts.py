@@ -92,13 +92,14 @@ def counted_paths( root ):
     Ensures:
         - returns sorted repo-relative posix paths, each a .py file that is_swept rejects
         - the population comes from git, never from a disk walk
+        - names are read apart at the NUL byte, so a name git would quote is listed as it is
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
+    res = subprocess.run( [ "git", "-C", str( root ), "ls-files", "-z", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.strip()}" )
-    return sorted( p for p in res.stdout.split( "\n" ) if p.endswith( ".py" ) and not is_swept( p ) )
+    return sorted( p for p in res.stdout.split( "\0" ) if p.endswith( ".py" ) and not is_swept( p ) )
 
 
 def _read_disk( root ):

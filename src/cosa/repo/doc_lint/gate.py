@@ -7,7 +7,8 @@ The hook is shared by every worktree, and a crashing gate must not block every s
 A missing tool prints a loud warning. It does not read PLANNING_IS_PROMPTING_ROOT.
 
 With --blocking, which the commit hook passes, a finding on a staged line refuses the commit.
-The exception is a file in WARN_ONLY_PATHS: its findings are printed and the commit goes through.
+Two kinds of finding are printed and let through instead. One is a finding in a file is_warn_only names.
+The other is a page-level finding (PAGE_LEVEL_RULES) that the last commit's copy of the page already had, no worse.
 Four more refusals apply with or without --blocking. Every refusal exits REFUSAL_EXIT.
 
 1. The swept scope, defined once in swept_scope.is_swept. A staged Python file for which it is True is refused when its docstring
@@ -36,6 +37,7 @@ Without --blocking, every other finding on a staged line is printed and the comm
 
 import argparse
 import ast
+import re
 import subprocess
 import sys
 import traceback
@@ -44,7 +46,7 @@ from . import comment_lint, docstring_lint, md_lint
 from collections import namedtuple
 
 from . import counts, ts_counts, tsdoc_lint
-from .changed_ranges import changed_line_ranges, filter_findings
+from .changed_ranges import PAGE_LEVEL_RULES, changed_line_ranges, filter_findings
 from .cli import in_scope
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
 from .swept_scope import is_swept
@@ -55,10 +57,14 @@ from .word_list import configure_root
 # Repo-relative directory prefixes, each ending in a slash, for example "src/cosa/agents/".
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
-# The two files --blocking leaves in warn mode, as exact repo-relative paths. Any other history.md or TODO.md is held
-# like every other page. Task-store row id=486cc499 gives these two files their own rule set and ends the exception.
-WARN_ONLY_PATHS   = ( "history.md", "TODO.md" )
-WARN_ONLY_MARK    = " (warn mode, commit allowed)"
+# The files --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths, so any other history.md
+# or TODO.md is held like every other page. WARN_ONLY_PREFIXES holds folders, each ending in a slash, and is empty.
+# Task-store row id=486cc499 gives the two files their own rule set and ends the exception.
+WARN_ONLY_PATHS    = ( "history.md", "TODO.md" )
+WARN_ONLY_PREFIXES = ()
+WARN_ONLY_MARK     = " (warn mode, commit allowed)"
+PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the commit)"
+NUMBER             = re.compile( r"\d+" )
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
 TEXT_LIMIT       = 120
@@ -122,13 +128,62 @@ def is_warn_only( path ):
         - path is a posix repo-relative path
 
     Ensures:
-        - True when path equals an entry of WARN_ONLY_PATHS, False otherwise
+        - True when path equals an entry of WARN_ONLY_PATHS, or starts with an entry of WARN_ONLY_PREFIXES
         - a file of the same name in any folder below the root is False
+        - a folder whose name only starts with the letters of a listed folder is False, since an entry ends in a slash
 
     Raises:
         - nothing
     """
-    return path in WARN_ONLY_PATHS
+    return path in WARN_ONLY_PATHS or path.startswith( WARN_ONLY_PREFIXES )
+
+
+def page_condition( finding ):
+    """
+    Name the condition a page-level finding reports, apart from how large it is.
+
+    Requires:
+        - finding is a Finding whose rule is in PAGE_LEVEL_RULES
+
+    Ensures:
+        - returns ( key, measure )
+        - key is the rule and the message with each number replaced by #, so two sizes of one condition share a key
+        - measure is the first number in the message, or None when the message holds none
+
+    Raises:
+        - nothing
+    """
+    numbers = NUMBER.findall( finding.message )
+    return ( finding.rule, NUMBER.sub( "#", finding.message ) ), ( int( numbers[ 0 ] ) if numbers else None )
+
+
+def predating( root, findings, renamed_from ):
+    """
+    Pick the page-level findings whose condition the last commit's copy already had.
+
+    Requires:
+        - root is a git working tree
+        - findings are the findings on staged lines; renamed_from is the map staged_changes gives
+
+    Ensures:
+        - returns the findings in PAGE_LEVEL_RULES that HEAD's copy of the page also has, with a measure that did not rise
+        - a renamed page is compared with the path it was renamed from
+        - a page HEAD does not hold has no earlier condition, so none of its findings is returned
+        - HEAD's copy is linted under the path and the rules of this commit, so both sides are measured alike
+        - a finding outside PAGE_LEVEL_RULES is never returned
+
+    Raises:
+        - nothing
+    """
+    kept, before = [], {}
+    for f in findings:
+        if f.rule not in PAGE_LEVEL_RULES: continue
+        if f.path not in before:
+            text = head_table_text( root, renamed_from.get( f.path, f.path ) )
+            before[ f.path ] = dict( page_condition( h ) for h in md_lint.lint_source( f.path, text, root ) if h.rule in PAGE_LEVEL_RULES ) if text is not None else {}
+        key, measure = page_condition( f )
+        if key in before[ f.path ] and ( measure is None or measure <= before[ f.path ][ key ] ): kept.append( f )
+    return kept
 
 
 def staged_changes( root ):
@@ -221,14 +276,14 @@ def staged_bytes( root, path ):
 
 def head_table_text( root, table_path=counts.TABLE_PATH ):
     """
-    Read a count table as the last commit has it.
+    Read a count table, or any other file, as the last commit has it.
 
     Requires:
         - root is a git working tree
-        - table_path is the table's repo-relative path, the Python table by default
+        - table_path is the file's repo-relative path, the Python table by default
 
     Ensures:
-        - returns the text, or None when HEAD has no table or there is no HEAD yet
+        - returns the text, or None when HEAD has no such file or there is no HEAD yet
 
     Raises:
         - nothing
@@ -526,13 +581,14 @@ def staged_paths( root ):
     Ensures:
         - returns repo-relative posix paths that are in_scope
         - the listing is anchored at root, so the caller's directory does not matter
+        - names are read apart at the NUL byte, so a name git would quote is listed as it is
 
     Raises:
         - RuntimeError naming the git error when the listing fails
     """
-    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "--name-only", "--diff-filter=ACMR", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
-    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.strip()}" )
-    return [ p for p in res.stdout.split( "\n" ) if p and in_scope( p ) ]
+    res = subprocess.run( [ "git", "-C", root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--", ":/" ], capture_output=True )
+    if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    return [ p for p in res.stdout.decode( "utf-8", "replace" ).split( "\0" ) if p and in_scope( p ) ]
 
 
 def staged_source( root, path ):
@@ -621,6 +677,7 @@ def collect( root ):
     Ensures:
         - returns ( findings, warnings, refusal_lines, tally ); refusal_lines are the printable lines
         - findings are limited to lines the staged diff touched, minus anything already in refusals
+        - a docstring finding with an honoured waiver marker on its line is left out of findings, in a swept file and in any other Python file
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
@@ -661,6 +718,7 @@ def collect( root ):
             doc_findings = docstring_lint.lint_source( path, source, root )
             findings += doc_findings + comment_lint.lint_source( path, source, root )
             if is_swept( path ): swept.append( ( path, source, doc_findings ) )
+            else: waived += [ f for f in doc_findings if waiver_state( f, ( source.split( "\n" ) + [ "" ] * f.line )[ f.line - 1 ] ) == "honoured" ]
         elif path.endswith( ".md" ):
             findings += md_lint.lint_source( path, source, root )
     py, md   = [ p for p in paths if p.endswith( ".py" ) and p not in skipped ], [ p for p in paths if p.endswith( ".md" ) and p not in skipped ]
@@ -720,8 +778,9 @@ def main( argv=None, err=None ):
 
     Ensures:
         - returns REFUSAL_EXIT when collect reports a refusal, with or without --blocking
-        - with --blocking, returns REFUSAL_EXIT when a finding on a staged line sits outside WARN_ONLY_PATHS, and prints it as a refused line
-        - a finding in a WARN_ONLY_PATHS file is printed with WARN_ONLY_MARK and never refuses the commit
+        - with --blocking, returns REFUSAL_EXIT when a finding on a staged line is neither warn-only nor predating, and prints it as a refused line
+        - a finding in a file is_warn_only names is printed with WARN_ONLY_MARK and never refuses the commit
+        - a page-level finding that predating returns is printed with PREDATES_MARK and never refuses the commit
         - otherwise returns 0; the gate itself never returns 1
         - prints the swept-scope denominator on every run that does not crash
         - an internal error is printed as a loud line and the exit is 0, with or without --blocking
@@ -732,21 +791,23 @@ def main( argv=None, err=None ):
     """
     err    = err if err is not None else sys.stderr
     parser = argparse.ArgumentParser( description="Documentation-standard pre-commit gate (warn mode without --blocking)." )
-    parser.add_argument( "--blocking", action="store_true", help=f"exit {REFUSAL_EXIT} when a finding remains outside {' and '.join( WARN_ONLY_PATHS )}" )
+    parser.add_argument( "--blocking", action="store_true", help=f"exit {REFUSAL_EXIT} when a finding on a staged line is neither warn-only nor older than the commit" )
     parser.add_argument( "--repo-root", default=".", help="directory inside the working tree" )
     args = parser.parse_args( sys.argv[ 1: ] if argv is None else argv )
     try:
         root                                = git_toplevel( args.repo_root )
         findings, warnings, refusals, tally = collect( root )
+        earlier                             = predating( root, findings, staged_changes( root )[ 1 ] )
     except Exception as exc:
         err.write( f"[doc-lint] GATE CRASHED, commit allowed: {type( exc ).__name__}: {exc}\n" )
         err.write( traceback.format_exc() )
         return 0
     for warning in warnings: err.write( warning + "\n" )
     warn_only = [ f for f in findings if is_warn_only( f.path ) ]
-    blocked   = [ f for f in findings if args.blocking and not is_warn_only( f.path ) ]
+    earlier   = [ f for f in earlier if f not in warn_only ]
+    blocked   = [ f for f in findings if args.blocking and f not in warn_only and f not in earlier ]
     for f in findings:
-        tag, mark = ( "REFUSED ", "" ) if f in blocked else ( "", WARN_ONLY_MARK if f in warn_only else "" )
+        tag, mark = ( "REFUSED ", "" ) if f in blocked else ( "", WARN_ONLY_MARK if f in warn_only else PREDATES_MARK if f in earlier else "" )
         err.write( f"[doc-lint] {tag}{f.path}:{f.line}: {f.rule}: {f.message}{mark}\n" )
     for line in refusals: err.write( line + "\n" )
     err.write( f"[doc-lint] swept scope: {tally[ 'files' ]} files checked, {tally[ 'docstrings' ]} docstrings checked, {tally[ 'findings' ]} findings, {tally[ 'waivers' ]} waivers honoured, {tally[ 'unparsed' ]} unparsed, {tally[ 'undecodable' ]} undecodable\n" )
@@ -755,7 +816,8 @@ def main( argv=None, err=None ):
     err.write( f"[doc-lint] counted scope: {c[ 'files' ]} files checked, {c[ 'at_or_below' ]} at or below their count, {c[ 'over' ]} over, {c[ 'waivers' ]} waivers honoured, table {c[ 'table' ]}\n" )
     t = tally[ "ts_counted" ]
     err.write( f"[doc-lint] {TS_NAME} counted scope: {t[ 'files' ]} files checked, {t[ 'at_or_below' ]} at or below their count, {t[ 'over' ]} over, {t[ 'waivers' ]} waivers honoured, table {t[ 'table' ]}\n" )
-    if args.blocking and warn_only: err.write( f"[doc-lint] {len( warn_only )} findings in {' or '.join( WARN_ONLY_PATHS )}{WARN_ONLY_MARK}\n" )
+    if args.blocking and warn_only: err.write( f"[doc-lint] {len( warn_only )} findings in {' or '.join( WARN_ONLY_PATHS + WARN_ONLY_PREFIXES )}{WARN_ONLY_MARK}\n" )
+    if args.blocking and earlier: err.write( f"[doc-lint] {len( earlier )} page-level findings predate this commit{WARN_ONLY_MARK}\n" )
     if refusals: err.write( f"[doc-lint] {len( refusals )} refusals, commit REFUSED\n" )
     if blocked: err.write( f"[doc-lint] {len( blocked )} findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again\n" )
     if refusals or blocked: return REFUSAL_EXIT

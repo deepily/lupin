@@ -72,13 +72,14 @@ def tracked_files( repo_root ):
     Ensures:
         - returns sorted repo-relative posix paths that pass in_scope
         - the population comes from git, never from a disk walk
+        - names are read apart at the NUL byte, so a name git would quote is listed as it is
 
     Raises:
         - RuntimeError naming the git error when ls-files fails
     """
-    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
+    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "-z", "--", ":/" ], capture_output=True, text=True, encoding="utf-8" )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.strip()}" )
-    return sorted( p for p in res.stdout.split( "\n" ) if in_scope( p ) )
+    return sorted( p for p in res.stdout.split( "\0" ) if in_scope( p ) )
 
 
 def _balanced_end( text, start ):

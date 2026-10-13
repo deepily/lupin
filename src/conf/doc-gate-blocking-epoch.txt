@@ -1,0 +1,7 @@
+# The commit from which the range gate holds a commit to the blocking commit gate.
+# A commit whose parent descends from this commit, or is this commit, is replayed with --blocking.
+# An older commit is replayed in warn mode and reported as predating blocking.
+# No sha is recorded yet, so no commit is held to blocking. The lander records it:
+# after the commits that make the chain pass --blocking are on the working branch, add one line
+# below holding the full 40-character sha of the last of them as it stands on that branch.
+# One sha at most. A value that is not one full lower-case sha, or names no commit, stops the range gate.

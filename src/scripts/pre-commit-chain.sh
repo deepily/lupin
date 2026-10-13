@@ -62,6 +62,8 @@ fi
 # The gate runs with --blocking. A finding on a line the commit touches refuses the commit, whichever linter
 # reports it, in Python and markdown alike. Two files are the exception: the root history.md and TODO.md stay
 # in warn mode, so their findings are printed and the commit goes through (gate.WARN_ONLY_PATHS, exact paths).
+# A page-level finding (a page over its length limit, a runbook without a section) refuses only when this commit
+# created the condition or made it worse; one the last commit already had is printed and let through.
 # The older refusals stand beside it. A staged Python file in the swept scope (swept_scope.is_swept) holding any
 # docstring-lint finding, on any line, is refused; a finding is waived by a same-line
 # "doc-lint: waive <rule> -- <reason>", and a waiver without a reason waives nothing. A staged Python,
@@ -69,9 +71,10 @@ fi
 # in its count table; a staged table may not raise an entry, and a table cut under other rules refuses a commit
 # that stages such a file. A rule file that differs between the index and the working tree refuses a commit
 # that stages a judged file or a table. Every run prints the denominator for each scope.
-# Every refusal is exit 3, and only exit 3 stops the commit. Any other non-zero exit means the gate did not
-# finish: an import error, a missing interpreter, a crash the gate did not catch. That commit is allowed and a
-# loud line says it was not checked, because the hook is shared by every worktree and a broken gate must not
+# Every refusal is exit 3, and only exit 3 stops the commit. Any other non-zero exit carries no refusal
+# verdict. It may be an import error, a missing interpreter, a killed process, a bad argument, or a tree whose
+# gate.py predates blocking and exits 1 on a finding it printed. That commit is allowed and a loud line says
+# nothing was enforced, because the hook is shared by every worktree and a gate that gives no verdict must not
 # stop every seat. A crash the gate catches prints its own loud line and exits 0. The gate does not read
 # PLANNING_IS_PROMPTING_ROOT, so it runs in every worktree.
 doc_lint_rc=0
@@ -80,7 +83,7 @@ if [ "$doc_lint_rc" -eq 3 ]; then
     echo "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each REFUSED line above, stage the fix with git add and commit again" >&2
     exit 1
 elif [ "$doc_lint_rc" -ne 0 ]; then
-    echo "[pre-commit-chain] doc-lint gate CRASHED (exit $doc_lint_rc), commit ALLOWED and NOT CHECKED against the documentation standard" >&2
+    echo "[pre-commit-chain] doc-lint gate exited $doc_lint_rc without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase." >&2
 fi
 
 exit 0

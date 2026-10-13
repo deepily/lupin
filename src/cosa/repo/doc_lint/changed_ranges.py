@@ -9,11 +9,48 @@ when they sit on a line the diff touched.
 import re
 import subprocess
 
-HUNK_HEADER = re.compile( r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@" )
-FILE_HEADER = re.compile( r"^\+\+\+ b/(.+)$" )
+HUNK_HEADER   = re.compile( r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@" )
+FILE_PREFIX   = "+++ "
+# The one-letter escapes git writes inside a quoted file name, each with the byte it stands for.
+QUOTE_ESCAPES = { "a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92 }
 
 # A whole-page finding sits at line 1 whatever was edited, so it is kept whenever the file was touched.
 PAGE_LEVEL_RULES = frozenset( { "reference-length", "capability-length", "runbook-template" } )
+
+
+def unquote_path( raw ):
+    """
+    Turn a file name as a diff header writes it into the name itself.
+
+    Git puts a name in double quotes when it holds a quote, a backslash, a control character or,
+    by default, a byte above ASCII. It writes a tab after a name that holds a space.
+
+    Requires:
+        - raw is the text after the +++ and the space of a diff header line, as git wrote it
+
+    Ensures:
+        - a name in double quotes is returned without them, with each escape turned back into its byte
+        - an octal escape is one byte, and the bytes are read together as UTF-8
+        - one trailing tab is dropped first
+        - any other text is returned as it is
+
+    Raises:
+        - nothing
+    """
+    name = raw[ : -1 ] if raw.endswith( "\t" ) else raw
+    if len( name ) < 2 or not ( name.startswith( '"' ) and name.endswith( '"' ) ): return name
+    out, body, i = bytearray(), name[ 1 : -1 ], 0
+    while i < len( body ):
+        if body[ i ] != "\\":
+            out += body[ i ].encode( "utf-8" )
+            i   += 1
+        elif body[ i + 1 ] in QUOTE_ESCAPES:
+            out.append( QUOTE_ESCAPES[ body[ i + 1 ] ] )
+            i += 2
+        else:
+            out.append( int( body[ i + 1 : i + 4 ], 8 ) )
+            i += 4
+    return out.decode( "utf-8", "replace" )
 
 
 def parse_diff_ranges( diff_text ):
@@ -27,6 +64,7 @@ def parse_diff_ranges( diff_text ):
         - returns { path: [ ( first, last ), ... ] } with 1-based inclusive new-file lines
         - a pure deletion hunk adds no range
         - a deleted file, whose header reads +++ /dev/null, adds no entry
+        - a file name git wrote in quotes is keyed by the name itself, as unquote_path reads it
 
     Raises:
         - nothing
@@ -34,13 +72,10 @@ def parse_diff_ranges( diff_text ):
     ranges = {}
     current = None
     for raw in diff_text.split( "\n" ):
-        m = FILE_HEADER.match( raw )
-        if m:
-            current = m.group( 1 )
-            ranges.setdefault( current, [] )
-            continue
-        if raw.startswith( "+++ " ):
-            current = None
+        if raw.startswith( FILE_PREFIX ):
+            name    = unquote_path( raw[ len( FILE_PREFIX ) : ] )
+            current = name[ 2 : ] if name.startswith( "b/" ) else None
+            if current is not None: ranges.setdefault( current, [] )
             continue
         m = HUNK_HEADER.match( raw )
         if m and current is not None:

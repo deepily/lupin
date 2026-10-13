@@ -312,7 +312,7 @@ def test_a_line_added_to_a_runbook_that_already_lacked_its_sections_is_committed
     res    = _commit( scratch )
     marked = [ ln for ln in res.stderr.split( "\n" ) if ln.endswith( PREDATES_MARK ) ]
     assert res.returncode == 0
-    assert marked == [ f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS ]
+    assert sorted( marked ) == sorted( f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS )
     assert len( marked ) == 4 and "REFUSED" not in res.stderr and _commit_count( scratch ) == 2
 
 

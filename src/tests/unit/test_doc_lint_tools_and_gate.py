@@ -415,6 +415,32 @@ def test_the_tracked_file_listings_read_names_git_would_quote( repo ):
     assert tsdoc_lint.tracked_files( str( repo ) ) == [ "src/web/caf\u00e9 a.ts" ]
 
 
+# ---- which line-level findings a marker waives -------------------------------------------------
+
+WAIVER = " doc-lint: waive caps -- quoting a log line"
+
+
+def test_blocking_honours_the_waiver_marker_on_a_docstring_finding_outside_the_swept_scope( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine." + WAIVER ) } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines and not [ ln for ln in lines if "caps" in ln ]
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine. doc-lint: waive caps -- ok" ) } )                 # a reason needs a word of three letters
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/b.py:5: {CAPS}" in lines
+    _stage( repo, { "src/lupin_mcp/b.py": _doc( "This is NOT fine. doc-lint: waive iso-date -- another rule" ) } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED src/lupin_mcp/b.py:5: {CAPS}" in lines
+
+
+@pytest.mark.parametrize( "rel,text,line", [ ( "docs/p.md", "This is NOT fine." + WAIVER + "\n", 1 ), ( "src/lupin_mcp/c.py", "x = 1  # This is NOT fine." + WAIVER + "\n", 1 ) ] )
+def test_the_waiver_marker_does_not_waive_a_markdown_or_a_comment_finding( repo, monkeypatch, rel, text, line ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: text } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {rel}:{line}: {CAPS}" in lines
+
+
 # ---- page-level findings that predate the commit -----------------------------------------------
 
 CAP_PAGE      = "src/docs/wiki/capabilities/x.md"
@@ -429,7 +455,7 @@ def _cap( count ):
     return f"capability-length: capability page of {count} lines, limit 40"
 
 
-def _base( repo, files ):
+def _page_base( repo, files ):
     _stage( repo, files )
     _git( repo, "commit", "-q", "-m", "base" )
 
@@ -445,7 +471,7 @@ def test_a_page_condition_is_the_rule_and_the_message_without_its_numbers_and_th
 
 def test_a_one_line_edit_to_a_page_that_was_already_over_its_limit_is_allowed_with_the_marking( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _base( repo, { CAP_PAGE: _page( 41 ) } )
+    _page_base( repo, { CAP_PAGE: _page( 41 ) } )
     _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
     rc, lines = _blocking( repo )
     assert rc == 0
@@ -457,7 +483,7 @@ def test_a_one_line_edit_to_a_page_that_was_already_over_its_limit_is_allowed_wi
 @pytest.mark.parametrize( "before,after,changed", [ ( 40, 41, () ), ( 41, 42, () ), ( 41, 45, ( 3, ) ) ] )
 def test_an_edit_that_puts_a_page_over_its_limit_or_makes_an_over_limit_page_longer_is_refused( repo, monkeypatch, before, after, changed ):
     _no_external( monkeypatch )
-    _base( repo, { CAP_PAGE: _page( before ) } )
+    _page_base( repo, { CAP_PAGE: _page( before ) } )
     _stage( repo, { CAP_PAGE: _page( after, changed ) } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT
@@ -467,7 +493,7 @@ def test_an_edit_that_puts_a_page_over_its_limit_or_makes_an_over_limit_page_lon
 
 def test_an_edit_that_shrinks_an_over_limit_page_is_allowed_while_it_is_still_over( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _base( repo, { CAP_PAGE: _page( 44 ) } )
+    _page_base( repo, { CAP_PAGE: _page( 44 ) } )
     _stage( repo, { CAP_PAGE: _page( 42, changed=( 5, ) ) } )
     rc, lines = _blocking( repo )
     assert rc == 0 and f"[doc-lint] {CAP_PAGE}:1: {_cap( 42 )}{PREDATES_MARK}" in lines
@@ -479,7 +505,7 @@ def test_a_new_over_limit_page_is_refused_with_and_without_an_earlier_commit( re
     rc, lines = _blocking( repo )                                                              # no commit at all yet
     assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
     _git( repo, "reset", "-q" )
-    _base( repo, { "docs/other.md": "clean\n" } )
+    _page_base( repo, { "docs/other.md": "clean\n" } )
     _stage( repo, { CAP_PAGE: _page( 41 ) } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED {CAP_PAGE}:1: {_cap( 41 )}" in lines
@@ -487,7 +513,7 @@ def test_a_new_over_limit_page_is_refused_with_and_without_an_earlier_commit( re
 
 def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _base( repo, { "src/docs/wiki/capabilities/old.md": _page( 41 ) } )
+    _page_base( repo, { "src/docs/wiki/capabilities/old.md": _page( 41 ) } )
     _git( repo, "mv", "src/docs/wiki/capabilities/old.md", CAP_PAGE )
     _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ) } )
     rc, lines = _blocking( repo )
@@ -500,7 +526,7 @@ def test_a_renamed_over_limit_page_is_compared_with_the_page_it_was_renamed_from
 def test_a_reference_page_over_its_word_limit_follows_the_same_rule( repo, monkeypatch ):
     _no_external( monkeypatch )
     monkeypatch.setattr( md_lint, "REFERENCE_MAX_WORDS", 6 )
-    _base( repo, { "src/docs/big.md": "one two three four\nfive six seven eight\n" } )
+    _page_base( repo, { "src/docs/big.md": "one two three four\nfive six seven eight\n" } )
     _stage( repo, { "src/docs/big.md": "one two three four\nfive six seven nine\n" } )
     rc, lines = _blocking( repo )
     assert rc == 0 and f"[doc-lint] src/docs/big.md:1: reference-length: reference page of 8 words, limit 6{PREDATES_MARK}" in lines
@@ -515,11 +541,11 @@ RUNBOOK_FULL = "# Ops\n\n## Prerequisites\n\nOne.\n\n## Steps\n\nTwo.\n\n## Veri
 
 def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
+    _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )
     _stage( repo, { RUNBOOK: "# Ops\n\nSome text.\n\nOne more line.\n" } )
     rc, lines = _blocking( repo )
     marked = [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ]
-    assert rc == 0 and marked == [ f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS ]
+    assert rc == 0 and sorted( marked ) == sorted( f"[doc-lint] {RUNBOOK}:1: runbook-template: runbook has no {section} section{PREDATES_MARK}" for section in md_lint.RUNBOOK_SECTIONS )
     assert len( marked ) == 4 and "[doc-lint] 4 page-level findings predate this commit (warn mode, commit allowed)" in lines
     _stage( repo, { RUNBOOK: "# Ops\n\n## Steps\n\nSome text.\n" } )
     _git( repo, "commit", "-q", "-m", "one section" )
@@ -543,7 +569,7 @@ def test_a_new_runbook_without_its_sections_is_refused_and_a_complete_one_passes
 def test_a_predating_page_finding_is_marked_without_blocking_and_a_warn_only_file_keeps_its_own_marking( repo, monkeypatch ):
     _no_external( monkeypatch )
     monkeypatch.setattr( gate, "WARN_ONLY_PREFIXES", ( "src/docs/wiki/capabilities/w/", ) )
-    _base( repo, { CAP_PAGE: _page( 41 ), "src/docs/wiki/capabilities/w/y.md": _page( 41 ) } )
+    _page_base( repo, { CAP_PAGE: _page( 41 ), "src/docs/wiki/capabilities/w/y.md": _page( 41 ) } )
     _stage( repo, { CAP_PAGE: _page( 41, changed=( 5, ) ), "src/docs/wiki/capabilities/w/y.md": _page( 41, changed=( 5, ) ) } )
     err = io.StringIO()
     assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
