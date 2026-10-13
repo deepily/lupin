@@ -19,6 +19,7 @@ ALLOWED   = (
     "src/tests/helpers/template_database.py",
     "src/tests/smoke/test_db_roles_rollback_real_postgres.py",
     "src/tests/smoke/test_db_template_provisioning_real_postgres.py",
+    "src/tests/smoke/test_scratch_database_terminate_real_postgres.py",
     "src/tests/smoke/test_template_database_vector_real_postgres.py",
     "src/tests/unit/deploy/test_db_roles_drop_template.py",
     "src/tests/unit/test_template_database_helper.py",
