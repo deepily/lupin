@@ -955,11 +955,23 @@ export interface TtsRequestFailedPayload {
 }
 
 // tts_request_started payload (row 26bfde78). `idHash` is the item whose speech
-// was just requested. AudioStore does not read it — the watchdog is per-utterance
-// and TTS is strictly serial — but it is carried so a future pipelined TTS can
-// key a per-utterance token off it without changing the frame.
+// was just requested. AudioStore does not read it: the watchdog is per-utterance
+// and TTS is strictly serial.
+//
+// `utteranceId` is the id this request sent to the server as
+// `utterance_id`. The server echoes it on the stream's status, complete and error
+// frames, and AudioStore drops a complete or error frame that names another one.
+// It is unique per request, not per item: the same item can be requested twice.
+// Optional so an emitter that sends no id keeps the behaviour from before.
 export interface TtsRequestStartedPayload {
-  idHash : string;
+  idHash       : string;
+  utteranceId? : string;
+}
+
+// What AudioStore reads off an audio_streaming_complete or tts_error frame.
+// Absent when the request carried no id, or the server predates the echo.
+export interface UtteranceFramePayload {
+  utterance_id? : unknown;
 }
 
 // tts_job_request payload (parity B-1). The server frame minus `type`/`timestamp`,

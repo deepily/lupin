@@ -25,7 +25,7 @@ The browser records speech for transcription and plays server-made speech throug
 ## Speaking
 - A notification is queued for speech only at `high` or `urgent` priority. Job answers and Direct TTS text also queue, but job answers are dropped at a 0% slider.
 - `wireNotificationTtsIntent` applies the preview slider first, and `TtsQueueStore` then plays one item at a time, in arrival order.
-- `wireTtsPlayback` posts the active item's text once, to `/api/get-speech-elevenlabs` in `instant` mode or `/api/get-speech` in `reliable` mode. `instant` is the default.
+- `wireTtsPlayback` posts the active item's text once, to `/api/get-speech-elevenlabs` in `instant` mode or `/api/get-speech` in `reliable` mode. `instant` is the default. Each request carries a new `utterance_id`, and the server echoes it on that stream's status, complete and error messages. `AudioStore` ignores a complete or error message that names another utterance. The server does not cancel a stream the client has moved on from, so such late messages do arrive. The legacy page (`notifications.js`) does the same in `handleAudioMessage`. A message with no id is handled as before. Audio chunks carry no id.
 - Audio comes back as binary frames on the audio WebSocket. `AudioStore` decodes 16-bit mono PCM at 24 kHz and schedules each chunk right after the last.
 - An item ends when the stream-complete message has arrived and no chunk is still playing. A watchdog forces the end if no audio arrives within 30 seconds of the request. Once chunks are scheduled it allows the remaining audio plus 10 seconds, and a manual pause stops it.
 - Live speech is not cached. The queue keeps its waiting items across a page reload.

@@ -85,10 +85,12 @@ const TTS_ENDPOINTS: Readonly<Record<TtsMode, string>> = {
  *
  * Ensures:
  *   - each time the active item rolls to a NEW non-null id, POSTs
- *     { text, session_id } EXACTLY once — to /api/get-speech-elevenlabs in
+ *     { text, session_id, utterance_id } EXACTLY once — to /api/get-speech-elevenlabs in
  *     `instant` mode and /api/get-speech in `reliable`, the mode read at request
  *     time (parity B-1)
  *   - same-id re-emits do not re-request; a null active resets the guard
+ *   - utterance_id is new for every request, and tts_request_started carries the
+ *     same value as utteranceId, emitted before the request leaves
  *   - a failed POST degrades to silence, never a throw, and emits
  *     tts_request_failed{idHash} so the queue moves on (row 0b384107)
  *   - returns the bus unsubscriber (page-lifetime in boot; disposed in tests)
@@ -105,6 +107,7 @@ export function wireTtsPlayback(
   observer?  : TtsPlaybackRequestObserver,
 ): () => void {
   let lastRequestedId: string | null = null;
+  let requestCount = 0;
   return bus.on( "store_tts_queue_changed", () => {
     const active = ttsQueue.activeItem();
     if ( active === null ) {
@@ -120,9 +123,16 @@ export function wireTtsPlayback(
     // OMIT the key entirely when absent → server default voice (Sam), legacy's
     // null-voice_id case (notifications.js:4262-4293) — byte-identical to the
     // pre-766bb609 body, so a persona-less notification is unaffected.
-    const body: { text: string; session_id: string; voice_id?: string } = {
-      text       : active.ttsText ?? "",
-      session_id : sessionId,
+    // One utterance id per request. The item's id alone is not enough: the
+    // same item is requested again after a reset, and the late frames of its
+    // first stream must not be taken for the second.
+    requestCount += 1;
+    // The server refuses an id over 255 characters, so a long item id is cut.
+    const utteranceId = `${ active.id_hash.slice( 0, 200 ) }:${ requestCount }`;
+    const body: { text: string; session_id: string; utterance_id: string; voice_id?: string } = {
+      text         : active.ttsText ?? "",
+      session_id   : sessionId,
+      utterance_id : utteranceId,
     };
     if ( active.voice_id !== undefined ) body.voice_id = active.voice_id;
     // Row 0b384107 — a failed request is the end of that item, as legacy's playTTS
@@ -139,7 +149,7 @@ export function wireTtsPlayback(
     // (A-2 #2d), with nothing on screen and nothing in the console to say why.
     bus.emit<TtsRequestStartedPayload>( {
       type    : "tts_request_started",
-      payload : { idHash },
+      payload : { idHash, utteranceId },
       source  : "wireTtsPlayback",
       ts      : Date.now(),
     } );

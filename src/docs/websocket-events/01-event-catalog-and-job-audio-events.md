@@ -146,6 +146,8 @@ Use it to tell which utterance a completion or an error belongs to. A completion
 
 **Audio chunks carry no id.** A chunk is a bare binary frame with no envelope. The first `audio_streaming_status` of a stream arrives before its first chunk and names the utterance. That is enough while one stream at a time is open on the socket. If two streams are open at once their chunks interleave on the socket, and nothing in a chunk says which stream sent it.
 
+Both browser clients send an id with every speech request. Each drops a complete or error frame that names another utterance. In the multiplexer the code is `wireTtsPlayback.ts` and `AudioStore.ts`. In `notifications.js` it is `nextUtteranceId` and `namesAnotherUtterance`.
+
 The code is `read_utterance_id` and `stream_frame` in `src/cosa/rest/routers/speech.py`. The test that drives two overlapping streams through the assembled app is `src/tests/unit/test_overlapping_speech_streams_carry_their_own_utterance_id.py`.
 
 ### `audio_streaming_chunk`

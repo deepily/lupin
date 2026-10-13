@@ -639,6 +639,9 @@ class NotificationsUI {
         // Session management
         this.queueSessionId = null;
         this.audioSessionId = null;
+        // The utterance id of the newest speech request, echoed back on its frames.
+        this.expectedUtteranceId = null;
+        this.utteranceCounter    = 0;
         
         // Authentication
         this.currentUserEmail = null;
@@ -3649,6 +3652,10 @@ class NotificationsUI {
                     break;
                     
                 case "audio_streaming_complete":
+                    if ( this.namesAnotherUtterance( envelope ) ) {
+                        this.log( `[AUDIO WS] Ignoring audio_streaming_complete for another utterance: ${envelope.utterance_id}` );
+                        break;
+                    }
                     this.handleAudioComplete( envelope );
                     break;
 
@@ -3658,6 +3665,10 @@ class NotificationsUI {
                     break;
 
                 case "tts_error":
+                    if ( this.namesAnotherUtterance( envelope ) ) {
+                        this.log( `[AUDIO WS] Ignoring tts_error for another utterance: ${envelope.utterance_id}` );
+                        break;
+                    }
                     this.handleTTSError( envelope );
                     break;
 
@@ -4992,6 +5003,44 @@ class NotificationsUI {
         });
     }
     
+    /**
+     * Mint the utterance id for one speech request and remember it as the one expected.
+     *
+     * The server echoes `utterance_id` on that stream's status, complete and error
+     * frames (speech.py `stream_frame`). It does not cancel a stream the page has
+     * moved on from. A late frame of the old stream used to be read as the new one's.
+     *
+     * Requires:
+     *     - called once per speech request, before the request leaves
+     *
+     * Ensures:
+     *     - returns a non-empty string, different from every id this page minted before
+     *     - this.expectedUtteranceId holds the same string
+     */
+    nextUtteranceId() {
+        this.utteranceCounter    = ( this.utteranceCounter || 0 ) + 1;
+        this.expectedUtteranceId = `legacy:${this.utteranceCounter}`;
+        return this.expectedUtteranceId;
+    }
+
+    /**
+     * Does this audio frame belong to a different utterance than the one last requested?
+     *
+     * Requires:
+     *     - envelope is a parsed audio WebSocket frame
+     *
+     * Ensures:
+     *     - returns true only when an id is expected, the frame carries a string
+     *       utterance_id, and the two differ
+     *     - returns false for a frame with no id (a server without the echo, or a
+     *       request that sent none), so such a frame is handled as it always was
+     */
+    namesAnotherUtterance( envelope ) {
+        if ( !this.expectedUtteranceId ) return false;
+        if ( typeof envelope.utterance_id !== "string" ) return false;
+        return envelope.utterance_id !== this.expectedUtteranceId;
+    }
+
     async playInstantTTS( text, voiceId = null ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
 
@@ -5015,6 +5064,8 @@ class NotificationsUI {
                 session_id : this.audioSessionId  // Ensure session_id is included
             };
             if ( voiceId ) ttsBody.voice_id = voiceId;
+            // Set before the fetch: the socket can deliver frames before the reply arrives.
+            ttsBody.utterance_id = this.nextUtteranceId();
             const response = await fetch( '/api/get-speech-elevenlabs', {
                 method: 'POST',
                 headers: {
@@ -5075,6 +5126,8 @@ class NotificationsUI {
                 session_id : this.audioSessionId  // Add missing session_id
             };
             if ( voiceId ) ttsBody.voice_id = voiceId;
+            // Set before the fetch: the socket can deliver frames before the reply arrives.
+            ttsBody.utterance_id = this.nextUtteranceId();
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {

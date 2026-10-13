@@ -37,6 +37,8 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  TtsRequestStartedPayload,
+  UtteranceFramePayload,
   StoreTtsModeChangedPayload,
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
@@ -334,6 +336,11 @@ class AudioStoreImpl implements AudioStore {
   // NOT released per error: one decode failure emits two error changes, and a
   // blocked context emits one per chunk, so counting errors would skip items.
   private utteranceFailed  = false;
+  // The `utterance_id` the newest speech request sent, or null when
+  // it sent none. The server echoes it on that stream's complete and error
+  // frames. A stream the client gave up on keeps sending (nothing on the server
+  // cancels it), so its late complete frame used to end the next utterance.
+  private expectedUtteranceId: string | null = null;
 
   // The bound binary handler. Named via `function audioStoreBinaryHandler` so
   // `Function.name === "audioStoreBinaryHandler"` — AC9 verification reads
@@ -380,12 +387,20 @@ class AudioStoreImpl implements AudioStore {
     // P6-c — subscribe to the server end-of-utterance marker. The subscription
     // lives HERE (in AudioStore, not boot — F-Sam-B3) with the flag + handler it
     // drives, so the completion seam is self-contained + unit-testable.
-    this.bus.on("audio_streaming_complete", () => this.handleStreamComplete());
-    this.bus.on("tts_error", () => this.handleTtsError());
+    // A frame that names another utterance is not this one's end.
+    this.bus.on<UtteranceFramePayload>("audio_streaming_complete", (e) => {
+      if (!this.namesAnotherUtterance(e.payload)) this.handleStreamComplete();
+    });
+    this.bus.on<UtteranceFramePayload>("tts_error", (e) => {
+      if (!this.namesAnotherUtterance(e.payload)) this.handleTtsError();
+    });
     // Row 26bfde78 — arm the stall watchdog the moment speech is REQUESTED, not
     // when audio arrives: a stream that yields no chunk at all never reaches this
     // store by any other route.
-    this.bus.on("tts_request_started", () => this.armStall(TTS_STALL_FIRST_AUDIO_MS));
+    this.bus.on<TtsRequestStartedPayload>("tts_request_started", (e) => {
+      this.expectedUtteranceId = e.payload.utteranceId ?? null;
+      this.armStall(TTS_STALL_FIRST_AUDIO_MS);
+    });
 
     // Closure-captured instance so the named function expression keeps its
     // identifier — `.bind(this)` would yield `"bound audioStoreBinaryHandler"`,
@@ -646,6 +661,16 @@ class AudioStoreImpl implements AudioStore {
     const idx = this.activeSources.indexOf(source);
     if (idx !== -1) this.activeSources.splice(idx, 1);
     this.maybeComplete();
+  }
+
+  // Does this complete or error frame belong to a different
+  // utterance than the one last requested? Only a frame that carries an id, while
+  // an id is expected, can be told apart: a frame with no id (a request that sent
+  // none, or a server without the echo) is handled as it always was.
+  private namesAnotherUtterance(payload: UtteranceFramePayload): boolean {
+    if (this.expectedUtteranceId === null) return false;
+    if (typeof payload.utterance_id !== "string") return false;
+    return payload.utterance_id !== this.expectedUtteranceId;
   }
 
   // The server signalled all chunks sent (audio_streaming_complete). Set the

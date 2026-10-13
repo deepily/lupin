@@ -71,7 +71,7 @@ test("new active id (null→A): POSTs { text, session_id } exactly once to the e
   emitChange( bus, "A" );
   assert.equal( api.calls.length, 1 );
   assert.equal( api.calls[0]!.path, "/api/get-speech-elevenlabs" );
-  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, utterance_id: "A:1" } );
 });
 
 test("advance A→B: a new active id fires a second POST for B", () => {
@@ -82,7 +82,7 @@ test("advance A→B: a new active id fires a second POST for B", () => {
   q.setActive( item( "A" ) ); emitChange( bus, "A" );
   q.setActive( item( "B" ) ); emitChange( bus, "B" );
   assert.equal( api.calls.length, 2 );
-  assert.deepEqual( api.calls[1]!.body, { text: "say B", session_id: SESSION } );
+  assert.deepEqual( api.calls[1]!.body, { text: "say B", session_id: SESSION, utterance_id: "B:2" } );
 });
 
 test("same active id re-emit (pending churn while A still plays): does NOT re-request", () => {
@@ -124,7 +124,7 @@ test("undefined ttsText: POSTs text \"\" (nullish-coalesce guard)", () => {
   wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A", { ttsText: undefined } ) );
   emitChange( bus, "A" );
-  assert.deepEqual( api.calls[0]!.body, { text: "", session_id: SESSION } );
+  assert.deepEqual( api.calls[0]!.body, { text: "", session_id: SESSION, utterance_id: "A:1" } );
 });
 
 test("POST rejection is swallowed (fire-and-forget) — the event handler does not throw", async () => {
@@ -157,7 +157,7 @@ test("766bb609: an item carrying voice_id includes it in the POST body (persona 
   wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A", { voice_id: "vox-tiberius" } ) );
   emitChange( bus, "A" );
-  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, voice_id: "vox-tiberius" } );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, utterance_id: "A:1", voice_id: "vox-tiberius" } );
 });
 
 test("766bb609: an item WITHOUT voice_id OMITS the key entirely (byte-identical to legacy null-voice body)", () => {
@@ -167,7 +167,7 @@ test("766bb609: an item WITHOUT voice_id OMITS the key entirely (byte-identical 
   wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) );   // no voice_id
   emitChange( bus, "A" );
-  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, utterance_id: "A:1" } );
   // The key must be ABSENT (not present-with-undefined) so the request is
   // byte-identical to the pre-766bb609 body → server default voice.
   assert.equal( Object.prototype.hasOwnProperty.call( api.calls[0]!.body, "voice_id" ), false );
@@ -193,7 +193,7 @@ test("B-1: reliable mode POSTs the OpenAI batch door, with the same body", () =>
   emitChange( bus, "A" );
   assert.equal( api.calls.length, 1 );
   assert.equal( api.calls[0]!.path, "/api/get-speech" );
-  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, utterance_id: "A:1" } );
 });
 
 test("B-1: the mode is read at REQUEST time — a change between two items moves the door", () => {
@@ -345,7 +345,78 @@ test("tts_mode does NOT leak into the request body — it chooses the door, it i
   q.setActive( item( "A", { tts_mode: "reliable" } ) );
   emitChange( bus, "A" );
 
-  assert.deepEqual( api.calls[ 0 ]!.body, { text: "say A", session_id: SESSION },
+  assert.deepEqual( api.calls[ 0 ]!.body, { text: "say A", session_id: SESSION, utterance_id: "A:1" },
     "tts_mode reached the POST body — the server's contract is { text, session_id, voice_id? } " +
     "and the mode is expressed by WHICH endpoint is called" );
+});
+
+// ---------------------------------------------------------------------------
+// Every request carries its own utterance id
+// ---------------------------------------------------------------------------
+
+interface Started { idHash: string; utteranceId?: string; }
+
+function startedEvents( bus: ReturnType<typeof createEventBusForTesting> ): Started[] {
+  const seen: Started[] = [];
+  bus.on<Started>( "tts_request_started", ( e ) => { seen.push( e.payload ); } );
+  return seen;
+}
+
+function utteranceIdOf( call: PostCall ): unknown {
+  return ( call.body as { utterance_id?: unknown } ).utterance_id;
+}
+
+test("utterance id: the id in the POST body is the id on tts_request_started, for each request", () => {
+  const bus     = createEventBusForTesting();
+  const q       = makeActiveReader();
+  const api     = makePoster();
+  const started = startedEvents( bus );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
+  q.setActive( item( "A" ) ); emitChange( bus, "A" );
+  q.setActive( item( "B" ) ); emitChange( bus, "B" );
+  assert.equal( api.calls.length, 2 );
+  assert.deepEqual( started.map( ( s ) => s.utteranceId ), api.calls.map( utteranceIdOf ) );
+  assert.deepEqual( started.map( ( s ) => s.idHash ), [ "A", "B" ] );
+  assert.notEqual( utteranceIdOf( api.calls[ 0 ]! ), utteranceIdOf( api.calls[ 1 ]! ) );
+});
+
+test("utterance id: the same item requested again after a reset gets a new id", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
+  q.setActive( item( "A" ) ); emitChange( bus, "A" );
+  q.setActive( null );        emitChange( bus, null );
+  q.setActive( item( "A" ) ); emitChange( bus, "A" );
+  assert.deepEqual( api.calls.map( utteranceIdOf ), [ "A:1", "A:2" ] );
+});
+
+test("utterance id: the id is one the server accepts: a non-empty string of at most 255 characters", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
+  q.setActive( item( "A" ) ); emitChange( bus, "A" );
+  q.setActive( item( "x".repeat( 400 ) ) ); emitChange( bus, "long" );
+  for ( const call of api.calls ) {
+    const id = utteranceIdOf( call );
+    assert.equal( typeof id, "string" );
+    assert.ok( ( id as string ).length >= 1 && ( id as string ).length <= 255, `length ${ ( id as string ).length }` );
+  }
+  assert.equal( api.calls.length, 2 );
+  assert.equal( utteranceIdOf( api.calls[ 1 ]! ), `${ "x".repeat( 200 ) }:2` );
+});
+
+test("utterance id: tts_request_started with its id is emitted before the request leaves", () => {
+  const bus   = createEventBusForTesting();
+  const q     = makeActiveReader();
+  const order : string[] = [];
+  bus.on<Started>( "tts_request_started", ( e ) => { order.push( `started ${ e.payload.utteranceId }` ); } );
+  const poster = { post<T>( _path: string, body: unknown ): Promise<T> {
+    order.push( `post ${ ( body as { utterance_id: string } ).utterance_id }` );
+    return Promise.resolve( undefined as T );
+  } };
+  wireTtsPlayback( bus, q.reader, poster, SESSION, modeReader() );
+  q.setActive( item( "A" ) ); emitChange( bus, "A" );
+  assert.deepEqual( order, [ "started A:1", "post A:1" ] );
 });
