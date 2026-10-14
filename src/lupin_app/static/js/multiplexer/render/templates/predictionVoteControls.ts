@@ -20,6 +20,7 @@ import { html } from "../html";
 import { PREDICTION_VOTE_MIN_PCT } from "../../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../../shared/types";
 
+/** The callback the vote controls call with the direction of a click. */
 export interface PredictionVoteHandlers {
   onVote( dir: PredictionVoteDir ): void;
 }
@@ -42,6 +43,7 @@ export interface PredictionVoteIntegration {
   onVote( notificationId: string, dir: PredictionVoteDir ): void;
 }
 
+/** What the vote controls draw: notification id, confidence in percent and a cast vote. */
 export interface PredictionVoteOpts {
   notificationId : string;
   confidencePct  : number;

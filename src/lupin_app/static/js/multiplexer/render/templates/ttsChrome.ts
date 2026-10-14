@@ -64,6 +64,11 @@
 import { html } from "../html";
 import type { AudioPlaybackState } from "../../shared/types";
 
+/**
+ * The callbacks of the speech chrome: pause, resume, stop, skip and two optional ones.
+ *
+ * `onClearAll` and `onFocusResume` are optional. Without them the button is drawn but its click does nothing.
+ */
 export interface TtsChromeHandlers {
   onPause()    : void;   // the Pause ⏸️ button
   onResume()   : void;   // the Play ▶️ button (resumes paused audio)
@@ -82,6 +87,7 @@ export interface TtsChromeHandlers {
   onFocusResume?(): void;
 }
 
+/** What the speech chrome draws: state, queue counts, the current track and focus mode. */
 export interface TtsChromeOpts {
   state              : AudioPlaybackState;
   queueLength        : number;   // PENDING items (the `Queued: N` line, and the focus count)

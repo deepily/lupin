@@ -37,6 +37,7 @@ function td( className: string, text: string ): HTMLTableCellElement {
   return cell;
 }
 
+/** The callback the offline toggle calls when it is clicked. */
 export interface FleetOfflineToggleHandlers {
   onToggle(): void;
 }

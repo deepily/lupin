@@ -44,11 +44,14 @@
 // would have BROKEN the mouse user. The guard therefore carries an explicit
 // exception for `.toggle-button`, and a test holds both halves.
 
-// A control the caller wants in the header's right-hand actions slot (refresh,
-// clear-all, history-dropdown, updated-stamp, …). Appended in array order,
-// BEFORE the collapse chevron (which stays rightmost).
+/**
+ * A control placed in the right-hand actions slot of a section header.
+ *
+ * Controls are appended in array order, before the collapse chevron, which stays rightmost.
+ */
 export type SectionHeaderAction = HTMLElement;
 
+/** What a section header is built from: an icon, a title, a test id and the action controls. */
 export interface SectionHeaderOptions {
   /** Leading glyph (e.g. "🔔", "🛰️"), or "" for none (no glyph, no leading space). */
   icon    : string;
@@ -64,6 +67,7 @@ export interface SectionHeaderOptions {
   actions?: ReadonlyArray<SectionHeaderAction>;
 }
 
+/** Handles to a built section header, with calls that change its count chip and its title. */
 export interface SectionHeaderHandle {
   /** The `.section-header` element (a persistent sibling above the body). */
   header    : HTMLElement;

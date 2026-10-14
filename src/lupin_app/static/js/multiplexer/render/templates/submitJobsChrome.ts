@@ -27,6 +27,7 @@ export interface ScheduleEls {
   monopolize : HTMLInputElement | null;
 }
 
+/** Handles to the elements of the CC card. */
 export interface CcCardEls {
   card      : HTMLDivElement;
   header    : HTMLDivElement;
@@ -43,6 +44,7 @@ export interface CcCardEls {
   schedule  : ScheduleEls;
 }
 
+/** Handles to the elements of the research card. */
 export interface ResearchCardEls {
   card         : HTMLDivElement;
   header       : HTMLDivElement;
@@ -60,6 +62,7 @@ export interface ResearchCardEls {
   schedule     : ScheduleEls;
 }
 
+/** Handles to the elements of the test suite card. */
 export interface TestSuiteCardEls {
   card         : HTMLDivElement;
   header       : HTMLDivElement;
@@ -79,6 +82,7 @@ export interface TestSuiteCardEls {
   schedule     : ScheduleEls;
 }
 
+/** Handles to the elements of the TFE card, including the list of candidates. */
 export interface TfeCardEls {
   card       : HTMLDivElement;
   body       : HTMLDivElement;
@@ -89,6 +93,7 @@ export interface TfeCardEls {
   candidates : HTMLDivElement;
 }
 
+/** Handles to the whole submit pane: its collapsible body and the four cards. */
 export interface SubmitJobsChromeElements {
   /** The collapsible body — carries `.section-content` for the shared collapse rule. */
   body      : HTMLDivElement;

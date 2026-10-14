@@ -26,8 +26,11 @@ import { renderPredictionVoteControls } from "./predictionVoteControls";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { VoicePersona, PredictionHint } from "../../shared/types";
 
-// Legacy suppresses the badge when the sender id does not parse into a project
-// (:23301 — `project && project !== 'UNKNOWN'`).
+/**
+ * Build the `[PROJECT]` badge for a card, or null when the sender id names no project.
+ *
+ * The project is parsed from the sender id. A missing id or an `UNKNOWN` project gives null, as in the legacy client.
+ */
 export function projectBadge( senderId: string | undefined ): HTMLElement | null {
   if ( senderId === undefined ) return null;
   const project = projectFromSenderId( senderId );
@@ -60,6 +63,11 @@ export function projectBadge( senderId: string | undefined ): HTMLElement | null
 // Behaviour on absent is unchanged and is the ratified one: OMIT the badge, render the
 // card — same as senderCard.ts's F-Arnold-4 note ("the badge element is omitted entirely,
 // not rendered as empty/stub").
+/**
+ * Build the persona badge for a card: the icon and name on the persona's color.
+ *
+ * Returns null when the persona is null or undefined, because the server sends no persona as JSON null. A borrowed persona gets the `borrowed` class.
+ */
 export function personaBadge( persona: VoicePersona | null | undefined ): HTMLElement | null {
   if ( persona == null ) return null;
   const el = document.createElement( "span" );
@@ -75,11 +83,11 @@ export function personaBadge( persona: VoicePersona | null | undefined ): HTMLEl
   return el;
 }
 
-// Legacy gates the 📋 on a non-blank abstract (:23315 — `abstract.trim().length > 0`),
-// and stores the text on the element for the popup to read. The multiplexer's
-// ReadingPaneRenderer already delegates on `.abstract-indicator` and reads
-// `data-abstract` (ReadingPaneRenderer.ts:424), so this card joins that seam by
-// carrying the same class and attribute — no second handler.
+/**
+ * Build the 📋 button that opens a card's abstract, or null when the abstract is blank.
+ *
+ * The abstract text rides on the `data-abstract` attribute, which the reading pane reads when the button is clicked.
+ */
 export function abstractIndicator( abstract: string | undefined ): HTMLElement | null {
   if ( abstract === undefined || abstract.trim().length === 0 ) return null;
   const el = document.createElement( "span" );
@@ -92,9 +100,11 @@ export function abstractIndicator( abstract: string | undefined ): HTMLElement |
   return el;
 }
 
-// The inline block legacy caps at 200px in CSS (:23293-23295). Markdown-rendered,
-// through the multiplexer's DOMPurify-backed `renderMarkdown` — the same sanitiser
-// the notifications list uses, so an abstract cannot inject markup here either.
+/**
+ * Build the inline block that shows a card's abstract, or null when the abstract is blank.
+ *
+ * The abstract is rendered as markdown through the sanitizing renderer.
+ */
 export function abstractBlock( abstract: string | undefined ): HTMLElement | null {
   if ( abstract === undefined || abstract.trim().length === 0 ) return null;
   const el = document.createElement( "div" );
@@ -103,16 +113,11 @@ export function abstractBlock( abstract: string | undefined ): HTMLElement | nul
   return el;
 }
 
-// Legacy's `buildPredictionHintSection` (notifications.js:23581-23656). Two shapes:
-// a cold-start ghost box when the server sent no hint at all, and the warm box with
-// the predicted value, the strategy label and — above the vote gate — the thumbs
-// controls. The predicted value is rendered per response type, as legacy does
-// (:23597-23635): yes_no title-cases the string, everything else prints it.
-//
-// `vote` is optional and follows this file's own idiom for the card's other
-// integrations: boot supplies it, a storeless test omits it, and the controls then
-// simply do not mount rather than mounting dead — this card is being built under a
-// parity epic whose recurring defect is a painted control with no handler.
+/**
+ * Build the prediction hint box of a card. It is always returned.
+ *
+ * A missing hint gives a ghost box that reads "Learning, no prediction yet". Otherwise the box shows the predicted value, the strategy when there is one, and the vote controls when the confidence passes the vote gate. Without `vote` the controls still render and a click does nothing.
+ */
 export function predictionHintBox(
   item : { id_hash: string; response_type: string; prediction_hint?: PredictionHint | null },
   vote : PredictionVoteIntegration | undefined,

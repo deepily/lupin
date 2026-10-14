@@ -20,6 +20,7 @@
 // anchors and the E2E selectors both name them; testids are prefixed
 // `multiplexer-` as every other mux pane does.
 
+/** Handles to the elements of the question pane: select, input, buttons and outputs. */
 export interface QaChromeElements {
   /** The collapsible body — carries `.section-content` for the shared collapse rule. */
   body         : HTMLDivElement;

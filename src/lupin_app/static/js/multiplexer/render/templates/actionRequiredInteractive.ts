@@ -44,6 +44,7 @@ import type { ActionRequiredItem, ActionRequiredResponse, ActionRequiredStep } f
 /** multiple_choice stepper position — the store keeps it on the item (parity A-1c2). */
 export type MultipleChoiceStep = ActionRequiredStep;
 
+/** The callbacks an interactive card calls: submit, step position and the microphone. */
 export interface ActionRequiredInteractiveHandlers {
   onSubmit(response: ActionRequiredResponse): void;
   /** multiple_choice only: called after every Back, Next and Submit with the new position. */

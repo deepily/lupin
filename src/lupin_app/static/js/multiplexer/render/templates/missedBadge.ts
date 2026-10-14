@@ -13,11 +13,13 @@
 
 import { html } from "../html";
 
+/** The callback the badge calls when its reset button is clicked. */
 export interface MissedBadgeHandlers {
   /** Reset (soft-dismiss) click. */
   onReset(): void;
 }
 
+/** What the badge shows: the missed count, which must be above zero. */
 export interface MissedBadgeOpts {
   /** Missed count — caller guarantees > 0 (renderer hides at 0). */
   count : number;
