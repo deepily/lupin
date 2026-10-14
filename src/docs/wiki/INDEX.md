@@ -102,6 +102,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[speech-to-text-routing]] — how `SpeechToTextProvider` sends audio to in-process Whisper or to the model server, and the four routes that call it. `cosa.memory` (speech_to_text_provider), `cosa.rest.routers` (speech)
 - [[utils-config-secrets-and-vertex]] — three `cosa.utils` helpers: the API config loader, secret redaction for reports and logs, and the Vertex daily spend ceiling. No caller outside its tests uses the ceiling. `cosa.utils` (config_loader, secret_redaction, vertex_spend_ceiling)
 - [[gate-reachability]] — the census of test files that no gate runner can reach, and of reachable files that collect no test. `cosa.repo` (gate_reachability)
+- [[iterative-debugging-agent]] — the agent that asks an LLM to fix code that failed, runs the fix, and reports whether it worked. `cosa.agents` (iterative_debugging_agent), `cosa.agents.agent_base`
 
 ## Draft slugs folded into written pages
 
@@ -114,4 +115,4 @@ These names were in the first draft of this index. Each now has no page of its o
 - `long-running-generator-agents` is split into `deep-research`, `podcast-generation`, `presentation-generation`, `research-chained-pipelines` and `generator-sdk-clients`.
 - `web-client` is the six `web-client-*` pages. JavaScript and TypeScript docs are out of scope for plan 1 per Rick's ruling.
 - `docs-and-code-analysis-tools` is `doc-lint-gate`, `symbol-index` and `branch-and-directory-loc-analysis`. `cosa.repo.gate_reachability` is `gate-reachability`.
-- `simple-task-agents` is `small-agents-core` for seven agents. `iterative_debugging_agent`, `runtime_argument_expeditor` and `prediction_engine` have no page.
+- `simple-task-agents` is `small-agents-core` for seven agents. `iterative_debugging_agent` is `iterative-debugging-agent`. `runtime_argument_expeditor` and `prediction_engine` have no page.
