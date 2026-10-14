@@ -18,13 +18,13 @@ The prompt builders and reply parsers for running the test-fix expediter's diagn
 ## What it does
 - `build_diagnosis_bundle_prompt` builds one markdown prompt for all failing-test clusters. Claude Code may read, grep and glob, but not edit, run shell commands or block on a question.
 - Its reply must end in one `tfe-diagnosis` JSON block. Each cluster has `root_cause`, `error_category` (`code_bug`, `test_bug`, `fixture_bug` or `environment_bug`), `confidence` from 0 to 1, and optional `affected_components` and `notes`.
-- `build_fix_bundle_prompt` builds a coordinator prompt. It plans with `TodoWrite`, then dispatches one `Task` subagent per fix in an isolated worktree, using an embedded brief. It forbids `git push` and a full test run.
+- `build_fix_bundle_prompt` builds a coordinator prompt. It plans with `TodoWrite`, then dispatches one `Task` subagent per fix, all sharing one isolated worktree, using an embedded brief. It forbids `git push` and a full test run.
 - A fix commit reads `fix(tfe): C<n> <title>`. The reply ends in one `tfe-result` block with a `verdict` of `fixed`, `failed` or `unclear` per cluster.
 - Both builders raise `ValueError` on an empty list.
 
 ## Invariants
 - `parse_diagnosis_block` and `parse_result_block` never raise. They return `None` for no block, bad JSON or a missing `clusters` key.
-- `validate_*_payload` return `( ok, issues )`. A `fixed` cluster must carry `commit_sha`, which may be an explicit `null`.
+- `validate_*_payload` return `( ok, issues )`. A `fixed` cluster must carry `commit_sha` as a non-empty string; `null` is rejected.
 - `parse_result_from_git_log` is the fallback when the result block is lost. It reads `fix(tfe): C<n>` lines, newest first. A cluster with no commit is `unclear`, since missing and failed look alike.
 - `parse_diagnosis_fallback` scrapes `Cluster Cn` headings and returns a payload only when it recovers a root cause and a category for a cluster.
 

@@ -27,7 +27,7 @@ A test aid. It asks an LLM to break working generated code with one runtime-fata
 - `debug` and `verbose` both default to true in the constructor, so a bare call is noisy.
 
 ## How it is used
-- The INI key `debug inject bugs` is false in `[[Lupin: Baseline]]`. `v2_ask` (for `AskFlow`) and `TodoFifoQueue` read it and pass `inject_bugs` into each agent they build.
+- The INI key `debug inject bugs` is false in `[Lupin: Baseline]`. `v2_ask` (for `AskFlow`) and `TodoFifoQueue` read it and pass `inject_bugs` into each agent they build.
 - `AgentBase.run_code` hands the flag to `RunnableCode.run_code`, and takes it as an argument, so a test can turn it on for one call.
 - `cosa.agents.__init__` does not export the class. Import it from `cosa.agents.bug_injector`.
 - The prompt is `src/conf/prompts/agents/bug-injector.txt`. The model is the `llm spec key for agent router go to bug injector` setting.

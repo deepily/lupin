@@ -187,7 +187,7 @@ def validate_result_payload( payload: Optional[ dict ] ) -> tuple:
         - is_valid iff:
             - payload is a dict with 'clusters' key
             - every cluster has 'verdict' in valid set
-            - commit_sha present on verdict=='fixed' clusters (or explicitly null)
+            - commit_sha is a non-empty string on verdict=='fixed' clusters
             - pytest_passed is bool when present
     """
     issues: list = []
