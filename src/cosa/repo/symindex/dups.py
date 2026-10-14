@@ -93,13 +93,13 @@ def _functions( spec, paths, scanned, include_private=False ):
             if not isinstance( node, ast.ClassDef ): yield ".".join( x for x in ( mod, *parts ) if x ), node
 
 
-def _definitions( spec, paths, js_files, include_private, scanned, js_scanned, missing ):
+def _definitions( spec, paths, js_files, include_private, scanned, js_scanned, missing, js_skipped ):
     """
     Yield ( id, size, digest, shingles, language tag ) for each definition of both languages.
 
     Requires:
-        - scanned, js_scanned and missing are lists; they receive the Python files read, the script files read,
-          and the names of the tools a script pass needed and did not find
+        - scanned, js_scanned, missing and js_skipped are lists; they receive the Python files read, the script files read,
+          the names of the tools a script pass needed and did not find, and the script files the parser rejected
 
     Ensures:
         - the Python entries come first, then the script ones; a script id is "<file relative to the root>#<qualified name>"
@@ -114,6 +114,7 @@ def _definitions( spec, paths, js_files, include_private, scanned, js_scanned, m
         missing.append( e.what )
         return
     js_scanned.extend( res[ "scanned" ] )
+    js_skipped.extend( res[ "skipped" ] )
     for d in res[ "defs" ]:
         yield f"{d[ 'file' ]}#{d[ 'name' ]}", len( d[ "kinds" ] ), hashlib.sha1( ",".join( d[ "kinds" ] ).encode( "utf-8" ) ).hexdigest(), shingles_of( d[ "kinds" ] ), SCRIPT_LANG
 
@@ -130,6 +131,7 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
         - provenance names the languages the pass read (the module's language tuple, plus "javascript" and "typescript"
           for the script files that parsed) and files_scanned, the number of files that parsed; files that did not parse are
           in neither, so files_scanned can be below len( paths ) + len( js_files )
+        - provenance.files_skipped lists the script files, relative to the root, that the parser rejected and that took no part
         - provenance.missing_dependencies lists the tools a script pass needed and did not find; the report is then Python only
         - with include_private (the default) private and nested definitions take part
         - a definition id that repeats (a getter and its setter, an overload) is numbered: the second is "<id>~2", the third "<id>~3"
@@ -139,9 +141,9 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
           threshold whose normalised trees are not identical (candidates are pairs sharing a rare shingle), sorted by similarity then ids
         - only definitions with at least min_nodes AST nodes take part
     """
-    groups, sets, scanned, js_scanned, missing = collections.defaultdict( list ), {}, [], [], []
+    groups, sets, scanned, js_scanned, missing, js_skipped = collections.defaultdict( list ), {}, [], [], [], []
     ids = collections.Counter()
-    for fid, size, digest, shs, lang in _definitions( spec, paths, js_files, include_private, scanned, js_scanned, missing ):
+    for fid, size, digest, shs, lang in _definitions( spec, paths, js_files, include_private, scanned, js_scanned, missing, js_skipped ):
         ids[ fid ] += 1
         if ids[ fid ] > 1: fid = f"{fid}~{ids[ fid ]}"
         if size < min_nodes: continue
@@ -166,6 +168,6 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
     prov = { "index_root": str( spec.root ), "min_nodes": min_nodes, "threshold": threshold, "shingle": SHINGLE,
              "languages": list( LANGUAGES ) + [ n for n, here in ( ( "javascript", any( not f.endswith( TS_SUFFIXES ) for f in js_scanned ) ),
                                                                    ( "typescript", any( f.endswith( TS_SUFFIXES ) for f in js_scanned ) ) ) if here ],
-             "files_scanned": len( scanned ) + len( js_scanned ), "include_private": include_private, "missing_dependencies": missing,
+             "files_scanned": len( scanned ) + len( js_scanned ), "include_private": include_private, "files_skipped": js_skipped, "missing_dependencies": missing,
              "considered": len( sets ), "kind": "structural only: exact clones and near pass; not an evaluation set by itself" }
     return { "provenance": prov, "exact": exact, "near": near }

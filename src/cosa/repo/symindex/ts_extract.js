@@ -13,6 +13,12 @@ const req = JSON.parse( fs.readFileSync( 0, "utf8" ) );
 const ts  = require( req.typescript );
 
 
+// The one place a file's extension picks its parse mode. .tsx must be read as TSX, or its markup is a syntax error.
+function scriptKind( abs ) {
+    if ( abs.endsWith( ".tsx" ) ) return ts.ScriptKind.TSX;
+    return abs.endsWith( ".ts" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+}
+
 function firstDocLine( node, sf ) {
     const docs = ts.getJSDocCommentsAndTags( node ).filter( ts.isJSDoc );
     if ( docs.length === 0 ) return "";
@@ -81,8 +87,7 @@ function shapes( req ) {
     const defs = [], scanned = [], skipped = [];
     for ( const abs of req.files ) {
         const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
-        // .tsx must be read as TSX, or its markup is a syntax error and the whole file is skipped.
-        const kind = abs.endsWith( ".tsx" ) ? ts.ScriptKind.TSX : ( abs.endsWith( ".ts" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS );
+        const kind = scriptKind( abs );
         const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
         // A file the parser reported errors for is skipped whole, as the Python pass skips a file that does not parse.
         if ( sf.parseDiagnostics.length > 0 ) { skipped.push( rel ); continue; }
@@ -117,7 +122,7 @@ function emit( file, name, kind, sig, node, sf, docNode ) {
 
 for ( const abs of req.mode === "shapes" ? [] : req.files ) {
     const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
-    const kind = abs.endsWith( ".ts" ) || abs.endsWith( ".tsx" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+    const kind = scriptKind( abs );
     const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
     for ( const st of sf.statements ) {
         if ( ts.isFunctionDeclaration( st ) && st.name ) {

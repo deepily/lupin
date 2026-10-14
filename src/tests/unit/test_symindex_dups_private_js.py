@@ -243,6 +243,8 @@ def test_a_script_file_that_does_not_parse_is_skipped_and_not_counted( tmp_path 
     assert res[ "scanned" ] == [ "good.js" ] and res[ "skipped" ] == [ "bad.js" ]
     prov = dp.find_duplicates( spec, [], js_files=[ root / "good.js", root / "bad.js" ], min_nodes=5 )[ "provenance" ]
     assert prov[ "files_scanned" ] == 1 and prov[ "languages" ] == [ "python", "javascript" ]
+    assert prov[ "files_skipped" ] == [ "bad.js" ]                                      # named, not silently dropped
+    assert dp.find_duplicates( spec, [], js_files=[ root / "good.js" ], min_nodes=5 )[ "provenance" ][ "files_skipped" ] == []
     both = dp.find_duplicates( spec, [], js_files=[ root / "good.js", root / "t.ts" ], min_nodes=5 )
     assert both[ "provenance" ][ "languages" ] == [ "python", "javascript", "typescript" ]
 

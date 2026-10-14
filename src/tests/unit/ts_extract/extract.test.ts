@@ -154,6 +154,11 @@ test( "shapes: a function held in a private or protected class property is as pr
     assert.deepEqual( names( { public_only: true } ), [ "A.p" ] );
 } );
 
+test( "symbols: a .tsx file is read as TSX, as the shapes pass reads it", () => {
+    const out = run( { "v.tsx": "export const view = <T,>( n: T ) => <div>{ n }</div>;\n" } );
+    assert.deepEqual( out.map( ( r: any ) => r.name ), [ "view" ] );
+} );
+
 test( "shapes: a file the parser reports errors for is skipped, and listed apart from the scanned ones", () => {
     const out = run( { "good.js": "function a( x ) { return x; }\n", "bad.js": "function ( {{{ broken\n" }, { mode: "shapes" } );
     assert.deepEqual( out.scanned, [ "good.js" ] );
