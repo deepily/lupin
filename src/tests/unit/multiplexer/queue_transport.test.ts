@@ -715,10 +715,20 @@ test("a backoff draw of 0 arms a zero-delay timer: the transport leaves backoff 
     const bus  = createEventBusForTesting();
     const states: string[] = [];
     bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => states.push(e.payload.state));
+    // Wait on the transition itself, not on a wall-clock sleep: a zero-delay timer still waits for the
+    // event loop, and a busy loop (a full test run) can hold it past any fixed sleep. The guard only
+    // makes a transport that never reconnects fail loudly instead of hanging.
+    const reconnecting = new Promise<void>((resolve) => {
+      bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => { if (e.payload.state === "reconnecting") resolve(); });
+    });
     const t = createQueueTransport({ authManager: makeMockAuth("ignored", true), bus, baseUrl: "", WebSocketCtor: Ctor });
     t.start("wise_penguin");
     MockWebSocket.instances[0]!.fireOpen();
-    await new Promise((r) => setTimeout(r, 10));
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    const gaveUp = new Promise<never>((_, reject) => {
+      guard = setTimeout(() => reject(new Error(`no reconnecting within 5 s; saw ${states.join(",")}`)), 5000);
+    });
+    try { await Promise.race([reconnecting, gaveUp]); } finally { clearTimeout(guard); }
     assert.ok(states.includes("backoff"), `backoff was never entered; saw ${states.join(",")}`);
     assert.ok(states.indexOf("reconnecting") > states.indexOf("backoff"), `no reconnecting after backoff; saw ${states.join(",")}`);
     assert.ok(MockWebSocket.instances.length >= 2, "reconnecting opened a new socket");
