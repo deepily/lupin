@@ -54,21 +54,21 @@ PAGE_ROUTES    = ( "pages", "pages_then_full" )
 CAUGHT_BY      = "seeded-miss-e2e"
 PACK_SIZE      = 10
 NEED_PAGE      = "read the articles of an RSS feed"
-SYMBOL_PAGE    = "cosa.feeds.parse_feed"
+SYMBOL_PAGE    = "cosa.fetchers.parse_feed"
 NEED_FULL      = "list the episodes of a podcast"
-SYMBOL_FULL    = "cosa.feeds.episodes"
+SYMBOL_FULL    = "cosa.fetchers.pull"
 WRONG_PAGE     = "news-page"
-RIGHT_PAGE     = "feeds-page"
+RIGHT_PAGE     = "fetchers-page"
 WRONG_LINE     = "reading articles from any source, news or feed items. `cosa` (newsx)"
-TERSE_LINE     = "plumbing helpers. `cosa` (feeds)"
-REPAIRED_LINE  = "reading RSS feeds and returning their articles. `cosa` (feeds)"
+TERSE_LINE     = "thumbnail and image size helpers. `cosa` (fetchers)"
+REPAIRED_LINE  = "reading RSS feeds and returning their articles. `cosa` (fetchers)"
 FILES          = { "src/cosa/newsx.py"      : 'def read_articles( source ):\n    """Read articles from a news source."""\n    return []\n',
-                   "src/cosa/feeds.py"      : 'def parse_feed( url ):\n    """Parse an RSS feed into Article objects."""\n    return []\n\n\n'
-                                              'def episodes( url ):\n    """Return the items."""\n    return []\n',
+                   "src/cosa/fetchers.py"   : 'def parse_feed( url ):\n    """Parse an RSS feed into Article objects."""\n    return []\n\n\n'
+                                              'def pull( url ):\n    """Return the checksum of the payload."""\n    return []\n',
                    "src/lupin_mcp/tool.py"  : 'def serve():\n    """Serve the tools."""\n    return 1\n' }
-OLD_DOC        = '"""Return the items."""'
+OLD_DOC        = '"""Return the checksum of the payload."""'
 NEW_DOC        = '"""List the episodes of a podcast."""'
-PINS           = { WRONG_PAGE: "cosa.newsx.read_articles@aaaaaaaaaa", RIGHT_PAGE: "cosa.feeds.parse_feed@bbbbbbbbbb" }
+PINS           = { WRONG_PAGE: "cosa.newsx.read_articles@aaaaaaaaaa", RIGHT_PAGE: "cosa.fetchers.parse_feed@bbbbbbbbbb" }
 STOP_WORDS     = frozenset( ( "the", "and", "for", "its", "with", "that", "this", "from", "are", "was" ) )
 RELEVANT       = { "reuse": 0.95, "extend": 0.03, "unrelated": 0.02 }
 UNRELATED      = { "reuse": 0.02, "extend": 0.03, "unrelated": 0.95 }
@@ -239,7 +239,7 @@ def write_index( root, right_line ):
 
 def write_docstring( root ):
     """Ensures: rewrites the full-sweep symbol's first docstring line to hold the need's words."""
-    path = pathlib.Path( root ) / "src" / "cosa" / "feeds.py"
+    path = pathlib.Path( root ) / "src" / "cosa" / "fetchers.py"
     text = path.read_text( encoding="utf-8" )
     path.write_text( text.replace( OLD_DOC, NEW_DOC ), encoding="utf-8" )
 

@@ -87,7 +87,7 @@ def test_a_dry_run_on_the_stand_in_repairs_the_page_miss_and_the_full_sweep_miss
     assert full[ "route" ] == "full" and full[ "shortlist_before" ] == []
     assert full[ "repair" ][ "no_change" ][ "verdict" ] == "NO_INPUT_CHANGE" and full[ "repair" ][ "docstring" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5 }
     assert report[ "exported" ] == { sm.SYMBOL_PAGE: True, sm.SYMBOL_FULL: True }
-    assert sm.NEW_DOC in ( tmp_path / "w" / "sandbox" / "src" / "cosa" / "feeds.py" ).read_text()
+    assert sm.NEW_DOC in ( tmp_path / "w" / "sandbox" / "src" / "cosa" / "fetchers.py" ).read_text()
     lines = ( tmp_path / "w" / "misses.jsonl" ).read_text().splitlines()
     assert len( lines ) == 2 and json.loads( ( tmp_path / "w" / "report.json" ).read_text() )[ "ok" ] is True
     assert sm.REPAIRED_LINE in ( tmp_path / "w" / "sandbox" / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
@@ -255,3 +255,14 @@ def test_a_folder_exactly_at_the_limit_is_accepted_and_copied( tmp_path, monkeyp
     ( tmp_path / "data" ).mkdir()
     sm.seed_cache( folder, tmp_path / "data" )
     assert sorted( p.name for p in ( tmp_path / "data" / "jev-cache" ).iterdir() ) == [ "0.json", "1.json" ]
+
+
+def test_a_run_where_no_seeded_miss_occurs_exits_one_and_prints_fail( tmp_path, monkeypatch, capsys ):
+    """A model that finds both symbols leaves nothing to repair, so the run must fail."""
+    monkeypatch.setattr( sm, "StandInJev", EverythingRelevant )
+    code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
+    assert code == 1 and report[ "ok" ] is False and report[ "exported" ] == { }
+    assert "did not produce a page-route miss" in report[ "page" ][ "reason" ]
+    assert "did not produce a full-sweep miss" in report[ "full" ][ "reason" ]
+    assert sm.main( [ "--work", str( tmp_path / "w2" ) ] ) == 1
+    assert "overall FAIL" in capsys.readouterr().out
