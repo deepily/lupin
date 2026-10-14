@@ -259,10 +259,15 @@ def seed_cache( answers, data ):
 
     Raises:
         - RunRefused when it does not, or when it holds more than MAX_ANSWERS_BYTES
+        - the size is summed file by file and the walk stops at the first file that passes the limit
     """
     if not pathlib.Path( answers ).is_dir(): raise RunRefused( f"--answers {answers} is not a folder" )
-    size = sum( f.stat().st_size for f in pathlib.Path( answers ).rglob( "*" ) if f.is_file() )
-    if size > MAX_ANSWERS_BYTES: raise RunRefused( f"--answers {answers} holds {size} bytes, over the {MAX_ANSWERS_BYTES} byte limit; copy only the answers this run needs" )
+    size = 0
+    for f in pathlib.Path( answers ).rglob( "*" ):
+        if not f.is_file(): continue
+        size += f.stat().st_size
+        if size > MAX_ANSWERS_BYTES:
+            raise RunRefused( f"--answers {answers} holds over {MAX_ANSWERS_BYTES} bytes, over the {MAX_ANSWERS_BYTES} byte limit; copy only the answers this run needs" )
     shutil.copytree( answers, pathlib.Path( data ) / "jev-cache" )
 
 

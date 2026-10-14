@@ -230,3 +230,28 @@ def test_main_without_a_work_folder_uses_a_temporary_one( tmp_path, monkeypatch,
     monkeypatch.setattr( sm.tempfile, "mkdtemp", fake_mkdtemp )
     assert sm.main( [] ) == 0
     assert ( made / "report.json" ).is_file() and "report:" in capsys.readouterr().out
+
+
+def test_the_size_check_stops_reading_file_sizes_once_the_limit_is_passed( tmp_path, monkeypatch ):
+    folder = tmp_path / "many"
+    folder.mkdir()
+    for i in range( 50 ): ( folder / f"{i:02d}.json" ).write_bytes( b"x" * 100 )
+    monkeypatch.setattr( sm, "MAX_ANSWERS_BYTES", 250 )
+    real, reads = pathlib.Path.stat, []
+    def counting( self, *a, **k ):
+        reads.append( self.name )
+        return real( self, *a, **k )
+    monkeypatch.setattr( pathlib.Path, "stat", counting )
+    with pytest.raises( sm.RunRefused, match = "over the 250 byte limit" ): sm.seed_cache( folder, tmp_path / "data" )
+    files = { n for n in reads if n.endswith( ".json" ) }
+    assert len( files ) == 3 and len( reads ) <= 8                                    # 100, 200, 300: the third file passes 250; 50 files exist
+
+
+def test_a_folder_exactly_at_the_limit_is_accepted_and_copied( tmp_path, monkeypatch ):
+    folder = tmp_path / "exact"
+    folder.mkdir()
+    for i in range( 2 ): ( folder / f"{i}.json" ).write_bytes( b"x" * 100 )
+    monkeypatch.setattr( sm, "MAX_ANSWERS_BYTES", 200 )
+    ( tmp_path / "data" ).mkdir()
+    sm.seed_cache( folder, tmp_path / "data" )
+    assert sorted( p.name for p in ( tmp_path / "data" / "jev-cache" ).iterdir() ) == [ "0.json", "1.json" ]
