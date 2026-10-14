@@ -73,6 +73,7 @@ type WindowVerbs = NonNullable< Window[ "LUPIN_TASK_VERBS" ] >;
 
 /** The declaration says exactly what the module exports. Reddens on a type drift (ARM 2). */
 export const specsMatchesModule: Exact< WindowSpecs, ModuleSpecs > = true;
+/** Reddens when the window declaration of `LUPIN_TASK_VERBS` differs from the module. */
 export const verbsMatchesModule: Exact< WindowVerbs, ModuleVerbs > = true;
 
 /**
@@ -144,5 +145,7 @@ type ArgInterviewMembers = "isAnswerable" | "resumeBody" | "renderArgQuestion" |
 type WindowAgentSelect  = NonNullable< Window[ "LUPIN_AGENT_SELECT"  ] >;
 type WindowArgInterview = NonNullable< Window[ "LUPIN_ARG_INTERVIEW" ] >;
 
+/** Reddens when the members of `LUPIN_AGENT_SELECT` differ from the hand-written list above. */
 export const agentSelectSurfaceIsExactlyThese:  Exact< keyof WindowAgentSelect,  AgentSelectMembers  > = true;
+/** Reddens when the members of `LUPIN_ARG_INTERVIEW` differ from the hand-written list above. */
 export const argInterviewSurfaceIsExactlyThese: Exact< keyof WindowArgInterview, ArgInterviewMembers > = true;

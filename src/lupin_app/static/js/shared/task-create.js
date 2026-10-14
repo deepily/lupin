@@ -39,10 +39,13 @@ import {
 
 // No answer is not a no: a POST can time out AFTER the store saved the row, so the
 // card says so rather than inviting a retry that files the same ticket twice.
+/** The sentence shown when the POST got no answer at all, a timeout or a network error. */
 export const NEW_TICKET_NO_ANSWER_MESSAGE =
     "The store did not answer, so this ticket may already be saved. Search Find for its title before you try again.";
 
+/** The priorities the card accepts, P0 to P5. */
 export const NEW_TICKET_PRIORITIES = Object.freeze( [ "P0", "P1", "P2", "P3", "P4", "P5" ] );
+/** The ticket types the card accepts, sent as `item_class`. */
 export const NEW_TICKET_TYPES      = Object.freeze( [ "task", "bug", "decision" ] );
 
 /**
@@ -92,7 +95,9 @@ export const NEW_TICKET_DICTATED_FIELDS = Object.freeze( [ "title", "details" ] 
  */
 export const NEW_TICKET_CREATED_BY = "rick";
 
+/** The refusal shown, with no request sent, when the title is blank. */
 export const NEW_TICKET_TITLE_REQUIRED_MESSAGE = "A title is required.";
+/** The DOM id of the card's overlay element, which `closeNewTicketCard` looks up. */
 export const NEW_TICKET_OVERLAY_ID             = "new-ticket-overlay";
 
 /**

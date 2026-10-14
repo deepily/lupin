@@ -6,10 +6,14 @@
 // than keeping a second copy of the classifier — the drift `taskVerbs.ts` is the
 // standing receipt for.
 
+/** The fewest hex characters a pasted ticket id may have and still be searched as a prefix. */
 export declare const MIN_TASK_REF_PREFIX_LEN: number;
 
+/** The `kind` of a whole ticket id, a canonical UUID or 32 bare hex characters. */
 export declare const TASK_REF_FULL: "full";
+/** The `kind` of a partial ticket id of at least the minimum length. */
 export declare const TASK_REF_PREFIX: "prefix";
+/** The `kind` of text that is neither a whole id nor a long enough prefix. */
 export declare const TASK_REF_INVALID: "invalid";
 
 // What `classifyTaskRef` answers.
@@ -19,15 +23,22 @@ export declare const TASK_REF_INVALID: "invalid";
 // comment over a widened type leaves every caller to remember a null check. As
 // a union the checker narrows `value` to `string` the moment the invalid arm is
 // ruled out — so the invariant is enforced rather than described.
+/**
+ * What `classifyTaskRef` returns.
+ *
+ * A full or prefix kind carries its normalized value. The invalid kind carries null.
+ */
 export type TaskRefClassification =
     | { kind: "full" | "prefix"; value: string }
     | { kind: "invalid";         value: null };
 
+/** Say whether pasted text is a whole ticket id, a usable prefix, or neither; never throws. */
 export declare function classifyTaskRef( ref: unknown ): TaskRefClassification;
 
 /** `"/api/tasks/<normalized>"`, or null when the ref will not classify. */
 export declare function taskLookupPath( ref: unknown ): string | null;
 
+/** The sentence shown when a ticket reference will not classify, naming the minimum length. */
 export declare function taskRefRefusalMessage(): string;
 
 /** The one wording both clients use for a 401. See the .js for why it is shared. */
