@@ -364,7 +364,12 @@ export function createConnectionStateMachine(
   return new ConnectionStateMachineImpl(opts);
 }
 
-/** The bus events the machine emits: state change, reconnecting, and lifecycle. */
+/**
+ * The bus events the machine emits.
+ *
+ * `connection_state_change` fires on every move. `connection_reconnecting` fires just before a new socket opens.
+ * `connection_offline` fires on entering `offline`, and `connection_online` on leaving it.
+ */
 export type ConnectionEventOnBus =
   | LupinEvent<ConnectionStateChangePayload>
   | LupinEvent<ConnectionReconnectingPayload>

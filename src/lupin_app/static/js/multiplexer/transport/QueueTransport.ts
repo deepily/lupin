@@ -478,8 +478,8 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
 /**
  * The transport for `/ws/queue`.
  *
- * It adds only the endpoint path and the events to subscribe to: job state, notification queue,
- * task-store changes and the console transcript.
+ * It adds only the endpoint path and its subscribe list. The list covers job state, notifications, TTS requests, the clock tick,
+ * task-store changes and the console transcript, plus the handshake and ping events. The audio socket subscribes to a different list.
  */
 export class QueueTransportImpl extends BaseTransportImpl {
   protected readonly transportName    : string                  = "QueueTransport";
@@ -487,7 +487,11 @@ export class QueueTransportImpl extends BaseTransportImpl {
   protected readonly subscribedEvents : ReadonlyArray<string>   = QUEUE_SUBSCRIBED_EVENTS;
 }
 
-/** The options of a queue transport; they are the base transport options unchanged. */
+/**
+ * The options of a queue transport.
+ *
+ * `baseUrl` is the server origin. The socket opens at `<baseUrl>/ws/queue/<session id>`.
+ */
 export type QueueTransportOptions = BaseTransportOptions;
 
 /** Build a queue transport for `/ws/queue`; no socket opens until `start` is called. */

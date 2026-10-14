@@ -50,7 +50,11 @@ export interface AudioTransport extends Transport {
   start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void;
 }
 
-/** The options of an audio transport; they are the base transport options unchanged. */
+/**
+ * The options of an audio transport.
+ *
+ * `baseUrl` is the server origin. The socket opens at `<baseUrl>/ws/audio/<session id>`.
+ */
 export type AudioTransportOptions = BaseTransportOptions;
 
 /**
