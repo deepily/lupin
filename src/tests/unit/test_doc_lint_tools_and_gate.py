@@ -193,6 +193,46 @@ def test_run_markdownlint_accepts_a_run_that_linted_every_file_it_was_given( mon
     assert warnings == [] and [ f.line for f in findings ] == [ 3 ]
 
 
+GLOB_READ_NAMES = [ "{a,b}.md", "docs/@(x).md", "docs/+(x).md", "a*b.md", "docs/q?.md", "docs/[ab].md", "#x.md", "!x.md", "docs/a(b).md", "docs/a\\b.md" ]
+
+
+@pytest.mark.parametrize( "name", GLOB_READ_NAMES )
+def test_run_markdownlint_refuses_a_name_with_a_glob_character_without_handing_it_to_the_tool( monkeypatch, tmp_path, name ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    def never( cmd, **kwargs ): pytest.fail( "a name the tool reads as a glob was handed to it" )
+    findings, warnings = tr.run_markdownlint( "/r", [ name ], never )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert name in warnings[ 0 ] and "glob" in warnings[ 0 ]
+
+
+def test_run_markdownlint_hands_over_a_name_with_a_hash_or_bang_inside_the_path( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    fake = _fake( 0, "Linting: 2 file(s)\n" )
+    assert tr.run_markdownlint( "/r", [ "docs/#x.md", "docs/!y.md" ], fake ) == ( [], [] )
+    assert fake.calls[ 0 ][ 0 ][ 3: ] == [ "docs/#x.md", "docs/!y.md" ]
+
+
+def test_run_markdownlint_refuses_a_count_above_the_names_given( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
+    more = _mdl_fixture( "markdownlint-cli2-0.18.1-star-name-with-neighbour-stdout.txt" )
+    assert "Linting: 2 file(s)" in more                                         # captured: a*b.md given, its neighbour linted too
+    findings, warnings = tr.run_markdownlint( "/r", [ "plain.md" ], _fake( 1, more, "" ) )
+    assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
+    assert "linted 2 of 1 file(s)" in warnings[ 0 ]
+
+
+def test_real_markdownlint_does_not_pass_a_name_whose_pattern_matches_a_good_neighbour_when_installed( tmp_path ):
+    tool = tr.find_tool( cu.get_project_root(), [ "node_modules/.bin/markdownlint-cli2" ], "markdownlint-cli2", "LUPIN_MARKDOWNLINT" )
+    if tool is None: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
+    shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
+    bad, good = "# T\n\n```\ncode\n```\n", "# T\n"
+    for name, neighbour in ( ( "{a,b}.md", "a.md" ), ( "@(x).md", "x.md" ), ( "+(x).md", "xx.md" ) ):
+        ( tmp_path / name ).write_text( bad, encoding="utf-8" )
+        ( tmp_path / neighbour ).write_text( good, encoding="utf-8" )
+        findings, warnings = tr.run_markdownlint( str( tmp_path ), [ name ] )
+        assert findings == [] and [ isinstance( w, tr.Unchecked ) for w in warnings ] == [ True ], name
+
+
 def test_run_markdownlint_refuses_when_the_tool_prints_no_count_of_files_linted( monkeypatch, tmp_path ):
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
     findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, "", "" ) )
