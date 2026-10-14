@@ -180,7 +180,7 @@ def test_run_markdownlint_refuses_a_name_the_tool_read_as_a_glob_and_did_not_lin
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
     dropped = _mdl_fixture( "markdownlint-cli2-0.18.1-glob-name-stdout.txt" )
     assert "Linting: 0 file(s)" in dropped                                  # captured: exit 0, nothing linted, nothing on stderr
-    findings, warnings = tr.run_markdownlint( "/r", [ "a(1).md" ], _fake( 0, dropped, "" ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, dropped, "" ) )     # a name the predicate lets through, so the count is the backstop
     assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
     assert "linted 0 of 1 file(s)" in warnings[ 0 ]
 

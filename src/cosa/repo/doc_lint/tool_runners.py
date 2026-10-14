@@ -143,6 +143,11 @@ def markdownlint_unnamed( root, paths ):
     return [ p for p in paths if not _line_safe( p ) ]
 
 
+def _glob_read( name ):
+    """Say whether markdownlint-cli2 would read a file name as a glob pattern."""
+    return name.startswith( ( "#", "!" ) ) or any( c in name for c in "(){}\\*?[]" )
+
+
 def _line_safe( name ):
     """Say whether a tool that prints one finding per line can be given a file name."""
     return crosses_as_text( name ) and "\n" not in name and "\r" not in name
@@ -164,6 +169,7 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
         - the file names follow a -- separator, so one that starts with a dash is read as a name
         - a file markdownlint_unnamed lists is not handed to the tool, and one warning per file says it was not checked
         - a finding the tool places in a file that was not asked for yields one warning that names it
+        - a file whose name holds one of ( ) { } \\ * ? [ ] or starts with # or ! is not handed to the tool, and one Unchecked warning per file says it was not checked
         - the word error or warning before the rule is optional, since the pinned 0.18.1 prints neither
         - exit status 1 with no finding read yields one Unchecked warning, so a changed output format cannot pass silently
         - a count of files linted that differs from the files handed over, or no count at all, yields one Unchecked warning and no findings
@@ -176,6 +182,9 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
     if tool is None: return [], [ missing_tool_warning( "markdownlint-cli2", "markdown structure (headings, fences, tables, links)" ) ]
     listed   = [ p for p in paths if _line_safe( p ) ]
     warnings = [ unnamed_warning( "markdownlint-cli2", p ) for p in paths if p not in listed ]
+    globbed  = [ p for p in listed if _glob_read( p ) ]
+    warnings += [ Unchecked( f"[doc-lint] WARNING: {shown( p )} has a file name markdownlint-cli2 reads as a glob, so it was NOT handed to the tool and its markdown structure was NOT checked; fix: rename the file" ) for p in globbed ]
+    listed   = [ p for p in listed if p not in globbed ]
     if not listed: return [], warnings
     res = runner( [ tool, "--no-globs", "--", *listed ], capture_output=True, text=True, encoding="utf-8", cwd=root )
     if res.returncode not in ( 0, 1 ): return [], warnings + [ Unchecked( f"[doc-lint] WARNING: markdownlint-cli2 failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ) ]
