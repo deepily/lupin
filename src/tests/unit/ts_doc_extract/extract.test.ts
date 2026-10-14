@@ -13,6 +13,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
+/**
+ * The path of the extractor under test.
+ *
+ * `TS_DOC_EXTRACT_MODULE` replaces the default, `src/scripts/ts_doc_extract.mjs` under the working directory.
+ * The `before` hook imports it, and the command-line tests in this file spawn it.
+ */
 export const SCRIPT = path.resolve( process.env.TS_DOC_EXTRACT_MODULE ?? path.join( process.cwd(), "src/scripts/ts_doc_extract.mjs" ) );
 
 let mod: any;
