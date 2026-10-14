@@ -278,8 +278,8 @@ class CcTranscriptTailer:
     so it can drop registry entries but cannot await a stop. Without a self-check, a watcher
     removed on that path would leave this tailer polling a seat nobody is watching, with no error.
 
-    The grace period is about watchers, never about the seat, so `ended` needs its own producer
-    (see `mark_seat_ended`).
+    The grace period is about watchers, never about the seat, so `ended` needs its own producer.
+    None is wired yet: `mark_seat_ended` has no caller outside the tests.
     """
 
     def __init__( self, cc_session_id, emit, settings=None, bridge_reader=None,
@@ -521,7 +521,8 @@ class CcTranscriptTailer:
         Tell watchers the seat exited, not merely that it went quiet.
 
         The grace period tracks watchers, not the seat, so an exit would look like a quiet seat.
-        The signal is the SessionEnd hook, with a staleness fallback for a seat that dies silently.
+        Nothing calls this yet: no SessionEnd hook and no staleness check is wired to it,
+        so a watcher is never sent `ended` today.
 
         Ensures:
             - emits cc_transcript_state with state `ended`
