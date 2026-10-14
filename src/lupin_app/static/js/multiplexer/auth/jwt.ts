@@ -12,6 +12,11 @@
 // ONLY for reading non-authoritative client hints (display email, expiry hint).
 // The server remains the sole authority on token validity.
 
+/**
+ * The claims of an access token that this client reads.
+ *
+ * It names `exp` and `email`. Any other claim is typed as unknown.
+ */
 export interface JwtClaims {
   exp?   : number;   // expiry — seconds since epoch (RFC 7519)
   email? : string;   // Lupin access-token email claim
@@ -38,6 +43,11 @@ function decodeSegment( segment: string ): string | null {
 // Decode the claims payload (second segment) of a JWT. Returns null when the
 // token is not a well-formed three-segment JWT, the payload is not decodable,
 // or the payload is not a JSON object.
+/**
+ * Read the claims object from a JWT's payload segment, or return null if it is malformed.
+ *
+ * The signature is not verified, so the result is a hint only; the server decides validity.
+ */
 export function decodeJwtClaims( token: string ): JwtClaims | null {
   const segments = token.split( "." );
   if ( segments.length !== 3 ) return null;
@@ -54,6 +64,11 @@ export function decodeJwtClaims( token: string ): JwtClaims | null {
 }
 
 // Access-token expiry as ms-epoch, or null if absent/malformed.
+/**
+ * The token's `exp` claim in milliseconds since the epoch.
+ *
+ * Returns null when the claim is missing or the token is malformed.
+ */
 export function jwtExpiryMs( token: string ): number | null {
   const claims = decodeJwtClaims( token );
   if ( claims === null ) return null;
@@ -62,6 +77,7 @@ export function jwtExpiryMs( token: string ): number | null {
 }
 
 // Email claim, or null if absent/empty/malformed.
+/** The token's `email` claim, or null when it is missing, empty or the token is malformed. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function jwtEmail( token: string ): string | null {
   const claims = decodeJwtClaims( token );
@@ -74,6 +90,11 @@ export function jwtEmail( token: string ): string | null {
 // jwt_service.create_access_token always stamps roles (default ["user"]). Legacy
 // reads the same claim for its admin check (notifications.js: `payload.roles || []`,
 // then `includes( 'admin' )`). A client hint only — the server enforces every role.
+/**
+ * The string entries of the token's `roles` claim.
+ *
+ * Returns an empty list when the claim is missing or the token is malformed.
+ */
 export function jwtRoles( token: string ): string[] {
   const claims = decodeJwtClaims( token );
   if ( claims === null || !Array.isArray( claims.roles ) ) return [];
@@ -83,6 +104,11 @@ export function jwtRoles( token: string ): string[] {
 // Row 83c3ff74 — the `sub` claim (jwt_service stamps the user id there), or null if
 // absent/empty/malformed. The jobs pane names it to ask for an admin's OWN jobs; the
 // server authorizes that request, so this is a hint like the others.
+/**
+ * The token's `sub` claim, which holds the user id.
+ *
+ * Returns null when the claim is missing or empty, or the token is malformed.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function jwtSub( token: string ): string | null {
   const claims = decodeJwtClaims( token );

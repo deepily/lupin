@@ -15,6 +15,11 @@ import type { RefreshFailedPayload } from "../shared/types";
 
 // The minimal `window.location` surface the guard touches. `Location` satisfies
 // this structurally, so boot passes `window.location` directly.
+/**
+ * The part of `window.location` the guard uses.
+ *
+ * It reads `pathname` and writes `href`.
+ */
 export interface RedirectTarget {
   readonly pathname : string;
   href              : string;
@@ -22,10 +27,21 @@ export interface RedirectTarget {
 
 // Canonical login path. Exported so the NAV login-link href (templates/navBar.ts)
 // and logout() below single-source it instead of duplicating the literal.
+/**
+ * The login page path.
+ *
+ * The nav bar's login link and `logout` use it too, so it is written once.
+ */
 export const LOGIN_PATH = "/app/auth/login";
 
 // Returns true when a redirect was issued — the caller MUST halt boot. Returns
 // false (boot proceeds) when an access token is present.
+/**
+ * Send a visitor with no stored access token to the login page, then report whether it did.
+ *
+ * The login URL carries `?redirect=` with the current path. A `true` return means boot must stop.
+ * It checks only that a token is stored, not that it is unexpired.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function redirectToLoginIfUnauthenticated(
   storage : StorageService,
@@ -56,6 +72,13 @@ export function redirectToLoginIfUnauthenticated(
 // to pick it up (review of 65db061d, Tiffany 2026-09-15).
 //
 // Returns the unsubscribe closure.
+/**
+ * Send the user to login when a token refresh fails because the session is dead.
+ *
+ * Only a missing or rejected (401) refresh token counts. A timeout or a 5xx leaves the page alone.
+ * If another tab has stored a different refresh token, it reloads the page instead of clearing tokens.
+ * Returns the function that unsubscribes.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function bounceToLoginOnDeadSession(
   bus     : EventBus,
@@ -84,6 +107,11 @@ export function bounceToLoginOnDeadSession(
 // STILL LOGGED IN: authGuard / ApiClient / the WS transports all re-read the
 // persisted token. No `?redirect=` back-param — logout returns to a clean login.
 // `window.location` satisfies RedirectTarget structurally (boot passes it).
+/**
+ * Clear the stored tokens and go to the login page, with no `?redirect=`.
+ *
+ * It clears the persisted tokens, not just the in-memory token, because the other clients read the stored ones.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function logout( storage: StorageService, target: RedirectTarget ): void {
   storage.clearTokens();
