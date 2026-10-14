@@ -7,9 +7,15 @@ The wrong page is chosen and decides alone, so the right symbol is never asked.
 That is the seeded miss, and its receipt takes the page route.
 The run records the miss as a store row and rewrites the right page's index line.
 It replays the receipt five times before and five times after, each repeat its own draw.
-A second miss comes from a full-sweep receipt, which never reads the wiki.
+A second miss comes from a full-sweep receipt, which reads no wiki page, only the symbols' own docstrings.
 A rewrite that changes nothing must return `NO_INPUT_CHANGE`.
 Rewriting the missed symbol's first docstring line must reach `REPAIRED`.
+
+What this run does not prove:
+    The miss row is made by the script, not by a seat that was missed.
+    The rewrite is made by the script, not by the librarian.
+    The stand-in is deterministic, so five repeats show the plumbing and not the model's flip rate.
+    A live run shows the same plumbing against real answers, on a five-function sandbox.
 
 Modes:
     dry (default)  a stand-in Jev answers from word overlap.
@@ -66,6 +72,7 @@ PINS           = { WRONG_PAGE: "cosa.newsx.read_articles@aaaaaaaaaa", RIGHT_PAGE
 STOP_WORDS     = frozenset( ( "the", "and", "for", "its", "with", "that", "this", "from", "are", "was" ) )
 RELEVANT       = { "reuse": 0.95, "extend": 0.03, "unrelated": 0.02 }
 UNRELATED      = { "reuse": 0.02, "extend": 0.03, "unrelated": 0.95 }
+MAX_ANSWERS_BYTES = 256 * 1024 * 1024
 CANDIDATE_AT   = "the candidate "
 
 
@@ -251,9 +258,11 @@ def seed_cache( answers, data ):
         - answers is a folder that exists
 
     Raises:
-        - RunRefused when it does not
+        - RunRefused when it does not, or when it holds more than MAX_ANSWERS_BYTES
     """
     if not pathlib.Path( answers ).is_dir(): raise RunRefused( f"--answers {answers} is not a folder" )
+    size = sum( f.stat().st_size for f in pathlib.Path( answers ).rglob( "*" ) if f.is_file() )
+    if size > MAX_ANSWERS_BYTES: raise RunRefused( f"--answers {answers} holds {size} bytes, over the {MAX_ANSWERS_BYTES} byte limit; copy only the answers this run needs" )
     shutil.copytree( answers, pathlib.Path( data ) / "jev-cache" )
 
 
