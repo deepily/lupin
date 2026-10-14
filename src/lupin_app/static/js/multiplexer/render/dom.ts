@@ -60,7 +60,7 @@ export interface KeyedMergeOptions<T extends KeyedEntry> {
  *   - children whose `data-id-hash` is not in `entries`, or that have none, are removed
  *   - an element whose key is in both the old and the new list is reused, so focus and scroll state survive
  *   - an entry with no element is built by `create` and gets `data-id-hash` set when `create` left it off
- *   - parent's children afterwards are exactly the entries' elements, in `entries` order
+ *   - parent's children afterwards are the entries' elements, in `entries` order; a second child that carries a wanted key is left where it is
  *   - only elements that are out of position are moved, so an unchanged element is not detached
  */
 export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>): void {

@@ -29,7 +29,11 @@ import {
 } from "./templates/sectionToolbar";
 import { scrollRevealElement } from "./scrollReveal";
 
-/** The slice of the view-state store the toolbar uses: read, write and the hidden list. */
+/**
+ * The slice of the view-state store the toolbar uses.
+ *
+ * It is read and write of one section's visibility. It also declares the hidden list, which the toolbar does not call.
+ */
 export interface ViewStateStoreLike {
   isSectionVisible(sectionId: string): boolean;
   setSectionVisible(sectionId: string, visible: boolean): void;

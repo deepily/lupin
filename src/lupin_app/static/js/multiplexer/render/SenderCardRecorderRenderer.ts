@@ -43,7 +43,7 @@ import { insertTranscriptionText } from "./insertTranscriptionText";
 /**
  * The behavior of the voice input row on each sender card.
  *
- * The row holds the mic, send and conversation mode controls. The renderer clicks on rows that `senderCard.ts` already drew and builds no markup.
+ * The row holds the mic, send and conversation mode controls. The renderer wires clicks on rows that `senderCard.ts` already drew. The only markup it builds is the error line it adds to a row when recording or sending fails.
  */
 export interface SenderCardRecorderRenderer {
   mount( root: HTMLElement ): void;

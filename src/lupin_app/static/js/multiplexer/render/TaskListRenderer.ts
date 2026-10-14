@@ -115,7 +115,8 @@ export interface TaskListHoldingAreaLike {
 /**
  * The Task List pane: open tasks grouped by owner, with row editing.
  *
- * When there is no table it shows a sign-in banner, an unreachable indicator over the last known rows, or a no-open-tasks message.
+ * When there is no table it shows a sign-in banner, an unreachable indicator, or a no-open-tasks message.
+ * The unreachable indicator sits over the last known rows, or over "No tasks loaded yet.". A task looked up by id shows as a pinned row.
  */
 export interface TaskListRenderer {
   mount( root: HTMLElement ): void;

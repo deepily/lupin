@@ -41,6 +41,7 @@ import { bindPodcastLinks } from "./podcastLinks";
  * The slice of the reading pane store the renderer drives.
  *
  * It is the layout, split ratio, current entry, open and back state, and the calls that change them.
+ * It also carries the action-required, abstract and console state and the pane content.
  */
 export interface ReadingPaneStoreLike {
   getLayoutMode(): LayoutMode;
@@ -75,7 +76,11 @@ export interface ActionRequiredCountLike {
   list(): ReadonlyArray<ActionRequiredItemLike>;
 }
 
-/** The slice of the window the pane uses to open the bust-out page: `open`. */
+/**
+ * The slice of the window the pane uses to open a tab.
+ *
+ * It is `open`, called for the bust-out page, doc links and the console pop-out.
+ */
 export interface WindowLike {
   open(url?: string, target?: string, features?: string): WindowDocLike | null;
 }
@@ -91,7 +96,7 @@ export interface WindowDocLike {
 /**
  * The master-detail reading pane: chrome, content, splitter and layout toggle.
  *
- * `mount` takes the `.content-shell` root, which must hold the whole pane DOM.
+ * `mount` takes the `.content-shell` root and finds `.left-column` under it. The content pane, its buttons, the layout toggle and the doc-roots toggle are found by id on the document.
  */
 export interface ReadingPaneRenderer {
   /** Attach to the `.content-shell` root (must contain the full pane DOM). */

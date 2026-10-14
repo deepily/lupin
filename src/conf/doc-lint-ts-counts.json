@@ -69,7 +69,7 @@
     "src/lupin_app/static/js/multiplexer/render/abstractTooltip.ts": 9,
     "src/lupin_app/static/js/multiplexer/render/actionRequiredMic.ts": 3,
     "src/lupin_app/static/js/multiplexer/render/docLink.ts": 25,
-    "src/lupin_app/static/js/multiplexer/render/dom.ts": 10,
+    "src/lupin_app/static/js/multiplexer/render/dom.ts": 9,
     "src/lupin_app/static/js/multiplexer/render/epicBoardCollapse.ts": 33,
     "src/lupin_app/static/js/multiplexer/render/epicBoardModel.ts": 55,
     "src/lupin_app/static/js/multiplexer/render/filterSettingsReveal.ts": 18,

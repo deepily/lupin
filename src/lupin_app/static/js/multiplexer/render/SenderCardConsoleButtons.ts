@@ -43,6 +43,7 @@ export interface SenderCardConsoleAffordance {
  * The console button in each sender card's title bar.
  *
  * It watches the card container and paints again when cards change, so a card with a resolved seat has one button.
+ * It also paints again on the roster, transcript and reading pane store events.
  */
 export interface SenderCardConsoleButtons {
   mount( container: HTMLElement ): void;

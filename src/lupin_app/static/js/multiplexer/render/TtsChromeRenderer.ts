@@ -50,7 +50,7 @@ import {
 /**
  * The slice of the audio store the renderer uses.
  *
- * It is the playback state, the burst length and the pause, resume, stop and skip calls.
+ * It is the playback state and the pause, resume, stop and skip calls. It also declares the burst length, which the renderer does not call.
  */
 export interface AudioStoreLike {
   state(): AudioPlaybackState;
@@ -64,7 +64,7 @@ export interface AudioStoreLike {
 /**
  * The slice of the speech queue store the renderer uses.
  *
- * It is read queries plus remove, clear and focus resume. It has no `advance`, because the store advances itself when audio ends.
+ * It is read queries plus remove, clear and focus resume. It has no `advance`, because the store advances itself when audio ends. It also declares `current()`, which the renderer does not call.
  */
 export interface TtsQueueStoreLike {
   current(): string | null;
@@ -89,7 +89,7 @@ export interface TtsChromeRendererStores {
 /**
  * The speech pane chrome: pause or resume, stop, skip and the queue counts.
  *
- * It paints again on audio state changes and decoded chunks, at most once per animation frame.
+ * It paints again on audio state changes, decoded chunks and speech queue changes, at most once per animation frame.
  */
 export interface TtsChromeRenderer {
   /**

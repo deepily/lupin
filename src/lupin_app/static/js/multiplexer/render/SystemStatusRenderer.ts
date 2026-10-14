@@ -114,7 +114,7 @@ export const COPY_FEEDBACK_MS = 1_200;
 /**
  * The System Status pane: socket pills, auth, session codes, health line, config reload.
  *
- * The ↻ button runs one refresh pass over all of them.
+ * The ↻ button runs one refresh pass over the sockets, auth, sessions and health line. The config reload has its own button.
  */
 export interface SystemStatusRenderer {
   mount( root: HTMLElement ): void;
