@@ -16,9 +16,14 @@
  *   - a top-level declaration with the export keyword
  *   - a default export or an export equals assignment
  *   - a name in an export list with no module specifier, declared in the same file
+ *   - the declaration named on the right of a CommonJS assignment, found anywhere in the file
  *
  * A re-export from another module is counted in reexports and is not a symbol. So is a list entry
  * that names an import. The doc comment of such a name lives where it is declared.
+ *
+ * A CommonJS assignment is a write to module.exports, module.exports.name or exports.name. Its
+ * symbol is the declaration the right side names, documented by the block above that declaration.
+ * A right side that names no declaration of the file makes a symbol named by the assignment target.
  *
  * Declarations with one kind and one name merge into one symbol, so an overload set is one symbol.
  */
@@ -67,6 +72,29 @@ function declared( node ) {
 }
 
 /**
+ * Say whether an expression is a CommonJS export target.
+ */
+function isCommonjsTarget( left ) {
+    if ( ! ts.isPropertyAccessExpression( left ) ) return false;
+    const base = left.expression;
+    if ( ts.isIdentifier( base ) ) return base.text === "exports" || ( base.text === "module" && left.name.text === "exports" );
+    return ts.isPropertyAccessExpression( base ) && ts.isIdentifier( base.expression ) && base.expression.text === "module" && base.name.text === "exports";
+}
+
+/**
+ * Return every assignment to a CommonJS export target inside a node.
+ */
+function commonjsAssignments( node ) {
+    const found = [];
+    const walk  = ( child ) => {
+        if ( ts.isBinaryExpression( child ) && child.operatorToken.kind === ts.SyntaxKind.EqualsToken && isCommonjsTarget( child.left ) ) found.push( child );
+        ts.forEachChild( child, walk );
+    };
+    walk( node );
+    return found;
+}
+
+/**
  * Return the exported symbols of one parsed file with the pairing already decided.
  *
  * Requires:
@@ -78,10 +106,13 @@ function declared( node ) {
  *   - a statement is documented when a block sits between the end of the statement before it and its own first token
  *   - an export list entry is documented by the block above the list or by the local declaration it names
  *   - an export list entry that names no local declaration counts in reexports
+ *   - a CommonJS assignment adds one commonjs symbol, unless the name it exports already is a symbol
  */
 function exportsOf( sf, docs ) {
     const lineOf   = ( pos ) => sf.getLineAndCharacterOfPosition( pos ).line + 1;
     const local    = new Map();
+    const localAt  = new Map();
+    const assigned = [];
     const symbols  = new Map();
     let reexports  = 0;
     const documentedAt = ( node, prev ) => {
@@ -101,6 +132,7 @@ function exportsOf( sf, docs ) {
         const decl       = declared( node );
         if ( decl !== null ) {
             decl.names.forEach( ( name ) => local.set( name, ( local.get( name ) ?? false ) || documented ) );
+            decl.names.forEach( ( name ) => { if ( ! localAt.has( name ) ) localAt.set( name, node ); } );
             if ( isExported( node ) ) decl.names.forEach( ( name ) => add( decl.kind, name, node, documented ) );
         } else if ( ts.isExportAssignment( node ) ) {
             add( "assignment", node.isExportEquals ? "export=" : "default", node, documented );
@@ -109,11 +141,17 @@ function exportsOf( sf, docs ) {
         } else if ( ts.isExportDeclaration( node ) && node.exportClause !== undefined ) {
             node.exportClause.elements.forEach( ( spec ) => listed.push( { spec, node, documented } ) );
         }
+        commonjsAssignments( node ).forEach( ( expr ) => assigned.push( { expr, node, documented } ) );
     } );
     listed.forEach( ( { spec, node, documented } ) => {
         const target = ( spec.propertyName ?? spec.name ).text;
         if ( ! local.has( target ) ) reexports += 1;
         else add( "list", spec.name.text, node, documented || local.get( target ) );
+    } );
+    assigned.forEach( ( { expr, node, documented } ) => {
+        const name = ts.isIdentifier( expr.right ) && local.has( expr.right.text ) ? expr.right.text : null;
+        if ( name === null ) add( "commonjs", expr.left.getText( sf ), node, documented );
+        else if ( ! [ ...symbols.values() ].some( ( s ) => s.name === name ) ) add( "commonjs", name, localAt.get( name ), local.get( name ) );
     } );
     return { symbols: [ ...symbols.values() ].sort( ( a, b ) => a.line - b.line ), reexports };
 }

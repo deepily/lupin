@@ -120,7 +120,7 @@ def census( root, run=None ):
     Ensures:
         - returns a Census: found maps each path with an undocumented export to its count, missing to the symbols
         - walked, symbols and undocumented are totals, so a census over nothing says so
-        - reexports counts names that are not symbols of the file; unparsed counts files the compiler could not parse
+        - reexports counts names that are not symbols of the file; unparsed lists the files the compiler could not parse
 
     Raises:
         - RuntimeError from git or the extractor
@@ -136,7 +136,7 @@ def census( root, run=None ):
         symbols      = sum( len( by_file[ p ][ "symbols" ] ) for p in paths ),
         undocumented = sum( len( g ) for g in gaps.values() ),
         reexports    = sum( by_file[ p ][ "reexports" ] for p in paths ),
-        unparsed     = sum( 1 for p in paths if by_file[ p ][ "parse_errors" ] )
+        unparsed     = [ p for p in paths if by_file[ p ][ "parse_errors" ] ]
     )
 
 
@@ -195,7 +195,7 @@ def report( result ):
     lines += [ f"{n:>6}  {path}" for path, n in sorted( result.found.items(), key=lambda item: ( -item[ 1 ], item[ 0 ] ) ) ]
     lines += [ "", f"{result.undocumented} of {result.symbols} exported symbols have no doc comment, in {len( result.found )} of {result.walked} files" ]
     if result.reexports: lines.append( f"re-exports not counted: {result.reexports}" )
-    if result.unparsed: lines.append( f"files that did not parse: {result.unparsed}" )
+    if result.unparsed: lines.append( f"files that did not parse: {len( result.unparsed )} ({', '.join( shown( p ) for p in result.unparsed[ : 5 ] )})" )
     return "\n".join( lines ) + "\n"
 
 
@@ -208,10 +208,11 @@ def main( argv=None, out=None ):
         - out is a writable text stream, or None for sys.stdout
 
     Ensures:
-        - --list prints report() and returns EXIT_TIGHT
+        - --list prints report() and returns EXIT_TIGHT, with a line naming any file that did not parse
         - --write rewrites TABLE_PATH from a census and returns EXIT_TIGHT
         - --check returns EXIT_TIGHT when the table is exact and EXIT_MISMATCH when a count differs, which includes a rise
         - EXIT_NOT_CHECKED when the table cannot be read or the tree cannot be measured
+        - EXIT_NOT_CHECKED, naming the files, when a file did not parse, since a lost export would read as a fall
         - nothing here is wired into a gate
 
     Raises:
@@ -233,6 +234,7 @@ def main( argv=None, out=None ):
         if args.list:
             out.write( report( result ) )
             return EXIT_TIGHT
+        if result.unparsed: raise RuntimeError( f"{len( result.unparsed )} files did not parse, so their exports were not all read: {', '.join( shown( p ) for p in result.unparsed[ : 5 ] )}" )
         if args.write:
             with open( f"{root}/{TABLE_PATH}", "w", encoding="utf-8" ) as handle: handle.write( counts.table_text( result.found, stamp ) )
             out.write( f"wrote {len( result.found )} entries from {result.walked} counted files\n" )
