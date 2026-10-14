@@ -138,7 +138,7 @@
     "src/lupin_app/static/js/multiplexer/render/templates/ttsPreviewSlider.ts": 5,
     "src/lupin_app/static/js/multiplexer/render/time.ts": 12,
     "src/lupin_app/static/js/multiplexer/shared/EventBus.ts": 2,
-    "src/lupin_app/static/js/multiplexer/shared/StorageService.ts": 9,
+    "src/lupin_app/static/js/multiplexer/shared/StorageService.ts": 8,
     "src/lupin_app/static/js/multiplexer/shared/afterWriteRead.ts": 87,
     "src/lupin_app/static/js/multiplexer/shared/broadcast.ts": 9,
     "src/lupin_app/static/js/multiplexer/shared/debugSink.ts": 50,
