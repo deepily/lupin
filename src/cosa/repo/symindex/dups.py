@@ -17,6 +17,7 @@ SHINGLE          = 5
 SEEDS            = 12             # each definition is compared only with those sharing one of its rarest shingles
 DEFAULT_MIN_NODE = 40
 DEFAULT_THRESH   = 0.85
+LANGUAGES        = ( "python", )   # the only languages this pass reads: the dups command hands it .py files
 
 
 class _Norm( ast.NodeTransformer ):
@@ -58,18 +59,24 @@ def shingles( node ):
     return { hash( tuple( seq[ i:i + SHINGLE ] ) ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
 
 
-def _functions( spec, paths ):
+def _functions( spec, paths, scanned ):
     """
     Yield every public function and method in the given Python files.
 
+    Requires:
+        - scanned is a list
+
     Ensures:
         - yields ( id, node ) for every public function and method of the given files, ids as in the index
+        - appends to scanned each file that was read and parsed, once, before its definitions are yielded;
+          a file that does not parse is skipped and is not appended
     """
     for p in paths:
         try:
             tree = ast.parse( p.read_text( encoding="utf-8" ), str( p ) )
         except ( SyntaxError, UnicodeDecodeError ):
             continue
+        scanned.append( p )
         mod = module_name( spec, p )
         for parts, node, _ in _walk_scope( tree.body, [], False, False ):
             if not isinstance( node, ast.ClassDef ): yield ".".join( x for x in ( mod, *parts ) if x ), node
@@ -84,13 +91,15 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
         - 0 < threshold <= 1 and min_nodes >= 1
     Ensures:
         - returns { "provenance", "exact", "near" }
+        - provenance names the languages the pass read (the module's language tuple) and files_scanned, the number of files that
+          parsed; files that did not parse are in neither, so files_scanned can be below len( paths )
         - exact is a list of id lists (size >= 2), largest first
         - near is a list of { "ids": [a, b], "jaccard": float } for pairs at or above the
           threshold whose normalised trees are not identical (candidates are pairs sharing a rare shingle), sorted by similarity then ids
         - only definitions with at least min_nodes AST nodes take part
     """
-    groups, sets = collections.defaultdict( list ), {}
-    for fid, node in _functions( spec, paths ):
+    groups, sets, scanned = collections.defaultdict( list ), {}, []
+    for fid, node in _functions( spec, paths, scanned ):
         if sum( 1 for _ in ast.walk( node ) ) < min_nodes: continue
         key = hashlib.sha1( ast.dump( normalised( node ) ).encode( "utf-8" ) ).hexdigest()
         groups[ key ].append( fid )
@@ -111,5 +120,6 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
             if jac >= threshold: near.append( { "ids": [ fid, other ], "jaccard": round( jac, 4 ) } )
     near.sort( key=lambda d: ( -d[ "jaccard" ], d[ "ids" ] ) )
     prov = { "index_root": str( spec.root ), "min_nodes": min_nodes, "threshold": threshold, "shingle": SHINGLE,
+             "languages": list( LANGUAGES ), "files_scanned": len( scanned ),
              "considered": len( sets ), "kind": "structural only: exact clones and near pass; not an evaluation set by itself" }
     return { "provenance": prov, "exact": exact, "near": near }

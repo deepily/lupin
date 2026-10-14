@@ -104,6 +104,17 @@ def test_dups_skips_unparseable_files_and_handles_class_methods( tmp_path ):
     spec = sp.spec_for( root )
     rep = dp.find_duplicates( spec, [ root / "bad.py", root / "__init__.py" ], min_nodes=10 )
     assert rep[ "exact" ] == [ [ "K.m", "K.n" ] ]
+    assert rep[ "provenance" ][ "files_scanned" ] == 1                           # bad.py did not parse, so it was not scanned
+
+
+def test_provenance_names_the_languages_and_counts_the_files_it_read( tmp_path ):
+    spec, files = _clone_repo( tmp_path )
+    prov = dp.find_duplicates( spec, files, min_nodes=20, threshold=0.6 )[ "provenance" ]
+    assert prov[ "languages" ] == [ "python" ] and prov[ "files_scanned" ] == 1
+    empty = dp.find_duplicates( spec, [], min_nodes=20 )[ "provenance" ]
+    assert empty[ "files_scanned" ] == 0 and empty[ "languages" ] == [ "python" ]       # no files: the keys are still present, with zero
+    two = dp.find_duplicates( spec, files + files, min_nodes=20 )[ "provenance" ]
+    assert two[ "files_scanned" ] == 2                                                   # a count of files read, not of distinct paths
 
 
 def _gen( tmp_path, name, extra=None, edit=None ):
