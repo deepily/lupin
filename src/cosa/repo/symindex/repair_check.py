@@ -58,6 +58,8 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
         - `NOT_REPAIRED` means the symbol was still absent in every after-run
         - `NO_INPUT_CHANGE` means the first after-run saw the same index sha as the last before-run,
           so the rewrite changed nothing the replay reads; the other after-runs are not spent
+        - the guard is coarse: the index sha moves for an edit to any symbol the sweep reads,
+          so `NOT_REPAIRED` can follow an edit to some other symbol
         - the first after-run counts toward the after hits when the index sha changed
         - `CALL_FAILED` means a replay raised ReplayFailed; the counts are None for phases not reached
 
