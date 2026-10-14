@@ -22,7 +22,7 @@ from .waivers import waiver_state
 from .word_list import configure_root
 
 TABLE_PATH       = "src/conf/doc-lint-ts-counts.json"
-STAMP_FILES      = counts.STAMP_FILES + ( "src/cosa/repo/doc_lint/tsdoc_lint.py", "src/scripts/ts_doc_extract.mjs" )
+STAMP_FILES      = counts.STAMP_FILES + ( "src/cosa/repo/doc_lint/tsdoc_lint.py", "src/scripts/ts_doc_extract.mjs", "src/cosa/repo/symindex/ts_kind_names.cjs" )
 EXIT_TIGHT       = counts.EXIT_TIGHT
 EXIT_MISMATCH    = counts.EXIT_MISMATCH
 EXIT_NOT_CHECKED = counts.EXIT_NOT_CHECKED

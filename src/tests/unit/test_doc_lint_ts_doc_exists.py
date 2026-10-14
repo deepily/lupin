@@ -62,7 +62,12 @@ def test_the_table_is_its_own_file_beside_the_two_other_tables():
 def test_the_stamp_files_name_this_module_and_both_extractors_and_the_scope_decision():
     assert set( ts_doc_exists.STAMP_FILES ) == {
         "src/cosa/repo/doc_lint/ts_doc_exists.py", "src/cosa/repo/doc_lint/tsdoc_lint.py",
-        "src/scripts/ts_export_extract.mjs", "src/scripts/ts_doc_extract.mjs" }
+        "src/scripts/ts_export_extract.mjs", "src/scripts/ts_doc_extract.mjs", "src/cosa/repo/symindex/ts_kind_names.cjs" }
+
+
+def test_the_shared_kind_name_helper_is_a_stamp_file_and_a_rule_file_for_every_ts_table():
+    helper = "src/cosa/repo/symindex/ts_kind_names.cjs"
+    assert helper in ts_doc_exists.STAMP_FILES and helper in ts_counts.STAMP_FILES and helper in counts.RULE_PATHS
 
 
 def test_rules_stamp_moves_with_each_stamp_file( repo ):

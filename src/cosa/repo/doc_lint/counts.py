@@ -31,7 +31,7 @@ STAMP_FILES      = (
     "src/cosa/repo/doc_lint/waivers.py",
     "src/conf/dm-tutor-lowercase-words.txt",
 )
-RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs", "src/scripts/ts_export_extract.mjs" )
+RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs", "src/scripts/ts_export_extract.mjs", "src/cosa/repo/symindex/ts_kind_names.cjs" )
 EXIT_TIGHT       = 0
 EXIT_MISMATCH    = 1
 EXIT_NOT_CHECKED = 2
@@ -185,7 +185,7 @@ def rule_files( root ):
         - root is a git working tree
 
     Ensures:
-        - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list, the chain script and the extractor script
+        - returns the sorted paths git tracks under RULE_PATHS: every file in the doc_lint package, the word list, the chain script, the extractor scripts and the kind-name table they share
         - the set comes from git at run time, so a new file in the package is covered the day it is added
         - a name that is not UTF-8 keeps its bytes
 

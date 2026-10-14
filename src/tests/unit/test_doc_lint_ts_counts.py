@@ -72,8 +72,8 @@ def test_the_table_is_its_own_file_beside_the_python_table():
     assert ts_counts.TABLE_PATH == "src/conf/doc-lint-ts-counts.json" and ts_counts.TABLE_PATH != counts.TABLE_PATH
 
 
-def test_the_stamp_files_are_the_python_ones_plus_the_comment_linter_and_the_extractor():
-    assert set( ts_counts.STAMP_FILES ) == set( counts.STAMP_FILES ) | { "src/cosa/repo/doc_lint/tsdoc_lint.py", "src/scripts/ts_doc_extract.mjs" }
+def test_the_stamp_files_are_the_python_ones_plus_the_comment_linter_the_extractor_and_its_kind_name_table():
+    assert set( ts_counts.STAMP_FILES ) == set( counts.STAMP_FILES ) | { "src/cosa/repo/doc_lint/tsdoc_lint.py", "src/scripts/ts_doc_extract.mjs", "src/cosa/repo/symindex/ts_kind_names.cjs" }
 
 
 def test_the_extractor_script_is_a_rule_file_so_an_unstaged_edit_to_it_is_a_divergence():

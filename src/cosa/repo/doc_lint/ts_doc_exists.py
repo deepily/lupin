@@ -28,6 +28,7 @@ STAMP_FILES      = (
     "src/cosa/repo/doc_lint/tsdoc_lint.py",
     "src/scripts/ts_export_extract.mjs",
     "src/scripts/ts_doc_extract.mjs",
+    "src/cosa/repo/symindex/ts_kind_names.cjs",
 )
 EXTRACTOR_REL    = "src/scripts/ts_export_extract.mjs"
 # Folders that tsdoc_lint reads and this check does not: R&D notes and probes, and the built Flutter web bundle.
