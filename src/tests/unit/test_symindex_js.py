@@ -98,3 +98,15 @@ def test_compiler_failure_is_an_error_not_an_empty_index( tmp_path, monkeypatch 
     monkeypatch.setattr( ji, "EXTRACTOR", tmp_path / "missing.js" )
     with pytest.raises( RuntimeError, match="ts_extract.js failed" ):
         ji.extract_js( root, [ root / "web" / "app.ts" ] )
+
+
+TSX_VIEW = 'export function Comp( p: { n: number } ) {\n  return <div className="x">{ p.n }</div>;\n}\nexport const other = ( s: string ) => <b>{ s }</b>;\n'
+
+
+def test_a_tsx_file_is_pinned_from_a_markup_aware_parse( tmp_path ):
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "v.tsx" ).write_text( TSX_VIEW, encoding="utf-8" )
+    recs = ji.extract_js( root, [ root / "v.tsx" ] )
+    # The pins are those of the TSX parse. Read as plain TS the markup is garbled into other tokens
+    # and the pins are 00e71c5bfe and 439959156c, so this fails if the symbols pass stops reading .tsx as TSX.
+    assert { r[ "name" ]: r[ "pin" ] for r in recs } == { "Comp": "25d4c17a99", "other": "1ce7f8f44d" }
