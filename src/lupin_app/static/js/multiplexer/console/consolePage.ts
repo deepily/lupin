@@ -73,7 +73,8 @@ export interface ConsolePageDeps {
 /**
  * How booting the console page ended.
  *
- * It is an error shown on the page, a redirect to login, or watching a seat with the store and renderer that are running.
+ * `error` is a missing or malformed seat, shown on the page with nothing connected. `redirected` is the login guard sending the tab away.
+ * `watching` carries the live store and renderer and the queue session id this tab started on.
  */
 export type ConsolePageResult =
   | { status : "error";      error : string }
@@ -82,7 +83,11 @@ export type ConsolePageResult =
 
 /** The id of the element the transcript renderer mounts into. */
 export const CONSOLE_PAGE_MOUNT_ID = "session-transcript-mount";
-/** The id of the element that shows the page title. */
+/**
+ * The `<h1>` in console.html.
+ *
+ * Its text and `document.title` are both set to the seat title from the query.
+ */
 export const CONSOLE_PAGE_TITLE_ID = "console-page-title";
 /** The id of the element that shows a missing or malformed seat error. */
 export const CONSOLE_PAGE_ERROR_ID = "console-page-error";
