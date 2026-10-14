@@ -1,6 +1,6 @@
-# Capability index (draft for Rick's slug approval)
+# Capability index
 
-One line per capability: `[[slug]]`, what it covers, the packages it spans. A rewritten `Design:` line points at `wiki/capabilities/<slug>.md`. The pages do not exist yet; they are written after the package sweep.
+One line per capability: `[[slug]]`, what it covers, the packages it spans. A rewritten `Design:` line points at `wiki/capabilities/<slug>.md`. Every slug below has a page. The slugs were approved provisionally; the JavaScript and TypeScript revisit is still owed.
 
 Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 227 routes) and `python -m cosa.repo.symindex dups`. Package names are dotted import paths under `src/`.
 
@@ -9,11 +9,7 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[cj-flow-queue]] — the todo, running, done and dead queues, the agentic pool, the ghost-job sweeper and job persistence. `cosa.rest` (fifo_queue, todo_fifo_queue, running_fifo_queue, queue_consumer, queue_protocol, job_persistence, dead_queue_watchdog), `cosa.agents.agentic_job_base`
 - [[agent-llm-clients]] — the shared LLM client layer: model registry, client factory, completion and chat clients, token counting, prompt formatting, LLM exceptions. `cosa.agents` (llm_client, llm_client_factory, model_registry, base_llm_client, completion_client, token_counter, prompt_formatter, llm_exceptions)
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
-- [[long-running-generator-agents]] — deep research, podcast and presentation generation, and the two chained jobs; this is where the duplicate `api_client` and `cosa_interface` clusters live. `cosa.agents` (deep_research, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation)
-- [[fix-expediter-agents]] — the bug-fix and test-fix expediters, the shared fix primitives, the test suite runner and its scheduling. `cosa.agents` (bug_fix_expediter, test_fix_expediter, shared, test_suite, tfe_to_cc, bug_injector)
-- [[swe-crew-roles]] — the standing build crew: implementer, reviewer and tester seats and their charters. `cosa.agents.swe_team`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)
-- [[simple-task-agents]] — the small synchronous agents: math, calculator, calendar, date and time, weather, to-do list, receptionist, iterative debugging, runtime argument expeditor, prediction engine. `cosa.agents` (math_agent, calculator, calendaring_agent, date_and_time_agent, weather_agent, todo_list_agent, receptionist_agent, iterative_debugging_agent, runtime_argument_expeditor, prediction_engine)
 - [[dataframe-crud]] — CRUD over DataFrames, storage, schemas and the intent dispatcher. `cosa.crud_for_dataframes`
 
 ## Notifications, decisions and voice
@@ -21,8 +17,6 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[notification-delivery]] — creating, routing and expiring notifications and their types, rate limits and push. `lupin_cli.notifications`, `cosa.rest` (notification_fifo_queue, notify_rate_limiter, notification_expiry_sweeper, fcm_push_pause, fcm_wake_service), `cosa.rest.routers`
 - [[websocket-events]] — session-keyed WebSocket connections, subscriptions and event fan-out. `cosa.rest` (websocket_manager, routers), `lupin_app.main`
 - [[decision-proxy]] — trust-scored auto-answering of questions, ratification, and the notification proxy. `cosa.agents` (decision_proxy, notification_proxy, dm_quality_judge)
-- [[cosa-voice-mcp]] — the voice and commons MCP server: notify, ask and converse tools, commons, DMs, session info. `lupin_mcp` (cosa_voice_mcp, commons_*, notify_outbox, broadcast_handler, bridge_liveness_middleware)
-- [[code-reuse-tools]] — check_exists, fetch_similar, replay and read_capability, and the Jev client. `lupin_mcp` (reuse_tools, reuse_call_log_middleware), `cosa.repo.symindex`
 
 ## Fleet, heartbeat and the task store
 
@@ -33,7 +27,6 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 ## Auth, data and platform
 
 - [[auth-and-accounts]] — JWT, refresh tokens, API keys, users, passwords, email tokens, rate limits and audit. `cosa.rest` (auth, auth_middleware, auth_models, jwt_service, user_service, admin_service, refresh_token_service, password_service, email_*), `cosa.rest.db.repositories` (token and api-key repositories)
-- [[database-repositories]] — Postgres models and repository classes; this is where the `is_valid`, `cleanup_expired` and `mark_used` clusters live. `cosa.rest.db`, `cosa.rest.postgres_models`, `cosa.rest.sqlite_database`
 - [[solution-memory]] — solution snapshots, embeddings, canonical synonyms and snapshot managers. `cosa.memory`, `cosa.rest.db.repositories` (solution_snapshot, embedding_cache, question_embedding, canonical_synonym), `lupin_model_server`
 - [[rest-routers]] — the FastAPI routers and the v2 submit surface. `cosa.rest.routers`, `cosa.rest.v2`, `lupin_app` (main, bootstrap_helpers, asset_tokens, versioned_static)
 - [[configuration]] — INI configuration, the config cache registry and the doc-viewer manifest. `cosa.config`
@@ -41,13 +34,11 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 
 ## Quality tooling
 
-- [[docs-and-code-analysis-tools]] — the doc linters, the symbol index and wiki lint, LoC and branch analyzers. `cosa.repo` (doc_lint, symindex, branch_analyzer, directory_analyzer, git_loc_delta, gate_reachability)
 - [[test-and-eval-scripts]] — test harnesses, falsify, coverage and scan scripts, evaluation and probe scripts, migrations. `scripts`, `cosa.agents.test_harness`
 - [[model-training]] — PEFT training, XML prompt generation and validation, quantization. `cosa.training`, `cosa.research`
 
 ## Web client
 
-- [[web-client]] — the browser pages, queue UI, notifications UI and their JavaScript and TypeScript modules (2,052 indexed symbols). `src.lupin_app.static` (the slug exists so the symbols have a home). JS and TypeScript docs are out of scope for plan 1, per Rick's JS and TypeScript ruling.
 
 ## Written pages (added at assembly)
 
@@ -110,3 +101,16 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[model-server]] — the standalone FastAPI app that holds Whisper and two text encoders on one GPU, which compute containers call over HTTP. `lupin_model_server` (main)
 - [[speech-to-text-routing]] — how `SpeechToTextProvider` sends audio to in-process Whisper or to the model server, and the four routes that call it. `cosa.memory` (speech_to_text_provider), `cosa.rest.routers` (speech)
 - [[utils-config-secrets-and-vertex]] — three `cosa.utils` helpers: the API config loader, secret redaction for reports and logs, and the Vertex daily spend ceiling. No caller outside its tests uses the ceiling. `cosa.utils` (config_loader, secret_redaction, vertex_spend_ceiling)
+
+## Draft slugs folded into written pages
+
+These names were in the first draft of this index. Each now has no page of its own, because written pages cover it. No line here is a page id.
+
+- `code-reuse-tools` is `reuse-search-tools`, and `cosa-voice-mcp` is `cosa-voice-mcp-server`.
+- `database-repositories` is `db-repositories`, with `db-session-and-schema` for the engine and migrations.
+- `swe-crew-roles` is `swe-team-orchestrator`.
+- `fix-expediter-agents` is split into `fix-expediter-bfe`, `fix-expediter-tfe`, `fix-shared-primitives` and `scheduled-test-suite`.
+- `long-running-generator-agents` is split into `deep-research`, `podcast-generation`, `presentation-generation`, `research-chained-pipelines` and `generator-sdk-clients`.
+- `web-client` is the six `web-client-*` pages. JavaScript and TypeScript docs are out of scope for plan 1 per Rick's ruling.
+- `docs-and-code-analysis-tools` is `doc-lint-gate`, `symbol-index` and `branch-and-directory-loc-analysis`. `cosa.repo.gate_reachability` has no page.
+- `simple-task-agents` is `small-agents-core` for seven agents. `iterative_debugging_agent`, `runtime_argument_expeditor` and `prediction_engine` have no page.
