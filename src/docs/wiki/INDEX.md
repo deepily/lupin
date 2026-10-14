@@ -106,6 +106,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[runtime-argument-expeditor]] — finding the arguments a voice command left out, asking the user for them, and returning a complete args dict. `cosa.agents.runtime_argument_expeditor` (expeditor, agent_registry, cli_help)
 - [[prediction-engine]] — guessing how the user will answer a notification, showing the guess as a hint, and logging the real answer to measure accuracy. `cosa.agents.prediction_engine`
 - [[tfe-to-cc-prompt-bundles]] — the prompt builders and reply parsers for running the test-fix expediter's diagnose and fix steps on Claude Code. `cosa.agents.tfe_to_cc` (prompts)
+- [[bug-injector]] — a test aid: an LLM breaks working generated code with one fatal edit, so the auto-debug path has work. `cosa.agents` (bug_injector), `cosa.utils` (util_code_runner)
 
 ## Draft slugs folded into written pages
 
@@ -114,7 +115,8 @@ These names were in the first draft of this index. Each now has no page of its o
 - `code-reuse-tools` is `reuse-search-tools`, and `cosa-voice-mcp` is `cosa-voice-mcp-server`.
 - `database-repositories` is `db-repositories`, with `db-session-and-schema` for the engine and migrations.
 - `swe-crew-roles` is `swe-team-orchestrator`.
-- `fix-expediter-agents` is split into `fix-expediter-bfe`, `fix-expediter-tfe`, `fix-shared-primitives` and `scheduled-test-suite`. `tfe_to_cc` is `tfe-to-cc-prompt-bundles`.
+- `fix-expediter-agents` is split into `fix-expediter-bfe`, `fix-expediter-tfe`, `fix-shared-primitives` and `scheduled-test-suite`.
+- `tfe_to_cc` is `tfe-to-cc-prompt-bundles`, and `bug_injector` is `bug-injector`.
 - `long-running-generator-agents` is split into `deep-research`, `podcast-generation`, `presentation-generation`, `research-chained-pipelines` and `generator-sdk-clients`.
 - `web-client` is the six `web-client-*` pages. JavaScript and TypeScript docs are out of scope for plan 1 per Rick's ruling.
 - `docs-and-code-analysis-tools` is `doc-lint-gate`, `symbol-index` and `branch-and-directory-loc-analysis`. `cosa.repo.gate_reachability` is `gate-reachability`.
