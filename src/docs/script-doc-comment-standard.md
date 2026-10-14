@@ -5,9 +5,13 @@ This page holds the rules for doc comments in `.ts`, `.js` and `.mjs` files. The
 ## What is enforced today
 
 - A JSDoc block gets the text rules that a Python docstring gets. `src/cosa/repo/doc_lint/tsdoc_lint.py` applies them.
-- The limits are a summary of 90 characters and a sentence of 25 words.
-- A line or block comment gets a reduced set of those rules.
+- The limits are a summary of 90 characters, a sentence of 25 words and a block of 40 lines.
+- A `Design:` path inside the repo must name a file that exists.
+- A line or block comment gets a reduced set: the emphasis, tic and history rules. It has no sentence rule and no length rule, so a long line comment passes.
+- A line comment that starts with `global`, `exported` or `region` is refused.
 - The commit gate keeps a count of findings per file in `src/conf/doc-lint-ts-counts.json`. A count may fall and may not rise.
+- A count table whose rules stamp is stale refuses every commit that stages an in-scope file.
+- If the gate itself crashes, the commit is allowed and the gate prints `GATE CRASHED, commit allowed`.
 
 ## What is proposed, not yet enforced
 

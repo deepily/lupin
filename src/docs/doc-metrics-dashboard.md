@@ -18,7 +18,7 @@ The last row, `total`, sums every swept file on each side. It is shown and not c
 
 - Before: commit `456422492f308a60dafa36325102229947c44147`
 - Rows: 92 (79 packages, 13 loose directories), 4 new
-- Swept files: 730 before, 891 after
+- Swept files: 730 before, 893 after
 - Compared by the check: `em_dash`, `caps_words`, `section_refs`, `id_refs`, `tics`, `emphasis_glyphs`
 - Rows where a compared value rose: 0
 
@@ -93,7 +93,7 @@ src/cosa/orchestration/claude_code               | package | 3 -> 3     | 1146 -
 src/cosa/repo                                    | package | 7 -> 8     | 4663 -> 4432     | 12.4 -> 1.4  | 26.8 -> 0.0 | 0.0 -> 0.0   | 1.9 -> 0.0 | 1.5 -> 0.0 | 0.2 -> 0.0      | ok
 src/cosa/repo/branch_analyzer                    | package | 9 -> 9     | 3260 -> 3195     | 0.0 -> 0.0   | 0.6 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/directory_analyzer                 | package | 6 -> 6     | 2080 -> 2034     | 0.0 -> 0.0   | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
-src/cosa/repo/doc_lint                           | package | - -> 53    | - -> 53116       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
+src/cosa/repo/doc_lint                           | package | - -> 55    | - -> 55270       | - -> 0.0     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/repo/git_loc_delta                      | package | 10 -> 10   | 4023 -> 3944     | 9.2 -> 2.8   | 12.9 -> 0.0 | 0.0 -> 0.0   | 1.0 -> 0.0 | 1.5 -> 0.0 | 0.0 -> 0.0      | ok
 src/cosa/repo/symindex                           | package | - -> 18    | - -> 6231        | - -> 0.2     | - -> 0.0    | - -> 0.0     | - -> 0.0   | - -> 0.0   | - -> 0.0        | new
 src/cosa/research                                | package | 1 -> 1     | 11 -> 11         | 90.9 -> 90.9 | 0.0 -> 0.0  | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
@@ -134,5 +134,5 @@ src/scripts/dm-experiment                        | loose   | 2 -> 2     | 2385 -
 src/scripts/lib                                  | loose   | 1 -> 3     | 792 -> 1590      | 7.6 -> 0.6   | 77.0 -> 0.0 | 0.0 -> 0.0   | 2.5 -> 0.0 | 2.5 -> 0.0 | 1.3 -> 0.0      | ok
 src/scripts/loc-analysis                         | loose   | 3 -> 3     | 184 -> 366       | 10.9 -> 5.5  | 16.3 -> 0.0 | 0.0 -> 0.0   | 0.0 -> 0.0 | 0.0 -> 0.0 | 0.0 -> 0.0      | ok
 src/scripts/presentation-gate-silence-proof      | loose   | 1 -> 1     | 893 -> 844       | 15.7 -> 0.0  | 61.6 -> 0.0 | 1.1 -> 0.0   | 4.5 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | ok
-total                                            | -       | 730 -> 891 | 477587 -> 605621 | 9.5 -> 1.6   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
+total                                            | -       | 730 -> 893 | 477587 -> 607775 | 9.5 -> 1.6   | 27.0 -> 0.0 | 1.1 -> 0.0   | 1.1 -> 0.0 | 1.1 -> 0.0 | 1.1 -> 0.0      | -
 ```
