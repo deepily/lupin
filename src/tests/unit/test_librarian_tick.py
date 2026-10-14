@@ -511,3 +511,15 @@ def test_both_reads_include_parked_rows_so_a_parked_rollup_is_not_created_again(
 def test_the_shell_wrapper_header_lists_every_exit_code_the_tick_returns():
     header = ( pathlib.Path( __file__ ).resolve().parents[ 2 ] / "scripts" / "wiki-librarian-tick.sh" ).read_text().split( "set -uo" )[ 0 ]
     assert "3 switched off" in header
+
+
+def test_an_unreadable_configuration_file_is_logged_as_a_read_failure_not_as_a_false_switch( cron, tmp_path, monkeypatch ):
+    from lupin_mcp import fleet_cap_ini_io
+    def denied( path, key ): raise OSError( "permission denied" )
+    monkeypatch.setattr( fleet_cap_ini_io, "read_value_from_disk", denied )
+    code, _, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch )
+    assert code == lt.EXIT_DISABLED
+    log = ( tmp_path / "data" / "repo" / "reuse-review" / "librarian" / lt.LOG_NAME ).read_text()
+    assert "could not read" in log and "permission denied" in log and "is not true" not in log
+    errors = []
+    assert lt.read_enabled( reader=denied, errors=errors ) is False and errors == [ "permission denied" ]
