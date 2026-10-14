@@ -109,7 +109,8 @@ def test_refusals_come_before_anything_is_created( tmp_path, monkeypatch ):
     with pytest.raises( sm.RunRefused, match = "is not set" ): sm.run( tmp_path / "c", "live", ceiling=1000, ledger_path=tmp_path / "l" )
     monkeypatch.setattr( jt, "has_key", lambda: True )
     with pytest.raises( sm.RunRefused, match = "--answers is for a dry run" ): sm.run( tmp_path / "d", "live", answers=tmp_path, ceiling=1000, ledger_path=tmp_path / "l" )
-    with pytest.raises( sm.RunRefused, match = "--store live is for a live run" ): sm.run( tmp_path / "e", "dry", store_kind="live" )
+    for mode in ( "dry", "live" ):
+        with pytest.raises( sm.RunRefused, match = "synthetic rows" ): sm.run( tmp_path / f"e-{mode}", mode, store_kind="live", ceiling=1000, ledger_path=tmp_path / "l" )
     assert not ( tmp_path / "a" ).exists() and not ( tmp_path / "b" ).exists() and not ( tmp_path / "c" ).exists()
 
 
@@ -181,22 +182,10 @@ def test_a_live_run_goes_through_the_ledger_and_closes_its_run( tmp_path, monkey
 
     monkeypatch.setattr( jt, "has_key", lambda: True )
     monkeypatch.setattr( rt, "LiveJevTransport", Wrapped )
-    store = sm.FakeStore()
-    monkeypatch.setattr( sm, "_live_store", lambda: store )
-    code, report = sm.run( tmp_path / "live", "live", ceiling=5_000_000, ledger_path=ledger, store_kind="live", log=lambda line: None )
+    code, report = sm.run( tmp_path / "live", "live", ceiling=5_000_000, ledger_path=ledger, log=lambda line: None )
     assert code == 0 and report[ "mode" ] == "live" and report[ "calls" ] is None and stand.calls > 0
-    assert len( store.rows ) == 2
     held = rl.AccountLedger( ledger ).held_by_prefix( "seeded-miss-live" )
     assert held == 0 and '"kind": "end"' in ledger.read_text()          # closed at its spend (the stand-in sends no tokens), not held at the 5,000,000 ceiling
-
-
-def test_the_live_store_adapter_is_built_from_the_client_settings_and_key( monkeypatch ):
-    from lupin_cli.claude_code.hooks.lib import task_store_client, task_store_settings
-    from cosa.repo.symindex.librarian_tick import LiveStore
-    monkeypatch.setattr( task_store_client, "read_api_key", lambda: "key" )
-    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "x" } )
-    store = sm._live_store()
-    assert isinstance( store, LiveStore ) and store.api_key == "key"
 
 
 def test_the_summary_names_both_scenarios_and_the_verdict( tmp_path ):
