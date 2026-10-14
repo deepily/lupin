@@ -132,8 +132,8 @@ class MissedStoreImpl implements MissedStore {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /** Build the store. It takes the missed count from each `auth_success` event. */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createMissedStore( opts: MissedStoreOptions ): MissedStore {
   return new MissedStoreImpl( opts );
 }

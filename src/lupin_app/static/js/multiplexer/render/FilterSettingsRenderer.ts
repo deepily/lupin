@@ -269,8 +269,8 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
 /** Build the renderer. It paints nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
 export function createFilterSettingsRenderer(
   options: FilterSettingsRendererOptions,
 ): FilterSettingsRenderer {

@@ -143,8 +143,8 @@ class BroadcastStoreImpl implements BroadcastStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /** Build the store. It reads the saved card-open state from storage at once. */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createBroadcastStore( opts: BroadcastStoreOptions ): BroadcastStore {
   return new BroadcastStoreImpl( opts );
 }

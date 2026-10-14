@@ -438,12 +438,12 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
 /**
  * Build the renderer.
  *
  * It paints at `mount()`, which also restores a saved tally; a new broadcast is tallied from `track()`.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
 export function createBroadcastAckTallyRenderer(
   options: BroadcastAckTallyRendererOptions,
 ): BroadcastAckTallyRenderer {

@@ -423,8 +423,8 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /** Build the renderer. It paints nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFinishedTasksRenderer( opts: FinishedTasksRendererOptions ): FinishedTasksRenderer {
   return new FinishedTasksRendererImpl( opts );
 }

@@ -616,12 +616,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
 /**
  * Build the renderer.
  *
  * It throws when `store` is missing, and paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
 export function createNotificationsHeaderRenderer(
   opts: NotificationsHeaderRendererOptions,
 ): NotificationsHeaderRenderer {

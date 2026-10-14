@@ -115,12 +115,12 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createMissedBadgeRenderer(
   opts: MissedBadgeRendererOptions,
 ): MissedBadgeRenderer {

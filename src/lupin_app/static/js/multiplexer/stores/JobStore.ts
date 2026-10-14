@@ -517,12 +517,12 @@ class JobStoreImpl implements JobStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the store.
  *
  * It subscribes to the bus at once and fetches nothing until `hydrateHistory` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createJobStore(opts: JobStoreOptions): JobStore {
   return new JobStoreImpl(opts);
 }

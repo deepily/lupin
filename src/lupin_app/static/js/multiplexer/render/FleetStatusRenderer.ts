@@ -460,12 +460,12 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFleetStatusRenderer( opts: FleetStatusRendererOptions ): FleetStatusRenderer {
   return new FleetStatusRendererImpl( opts );
 }

@@ -522,8 +522,8 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 /** Build the renderer. It paints nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 export function createEpicBoardRenderer( opts: EpicBoardRendererOptions ): EpicBoardRenderer {
   return new EpicBoardRendererImpl( opts );
 }

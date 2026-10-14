@@ -396,8 +396,8 @@ function NOOP_MUTATION(): TaskMutation {
   return { restoreState: () => { /* nothing to revert */ }, done: Promise.resolve() };
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /** Build the store. It fetches nothing when it is built. */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTaskListStore( opts: TaskListStoreOptions ): TaskListStore {
   return new TaskListStoreImpl( opts );
 }

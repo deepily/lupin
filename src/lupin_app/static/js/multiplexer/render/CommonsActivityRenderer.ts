@@ -521,12 +521,12 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It throws when `stores.commons` is missing, and paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createCommonsActivityRenderer(opts: CommonsActivityRendererOptions): CommonsActivityRenderer {
   return new CommonsActivityRendererImpl(opts);
 }

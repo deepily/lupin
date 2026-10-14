@@ -184,8 +184,8 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 /** Build the panel renderer. It paints nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createDebugPanelRenderer( opts: DebugPanelRendererOptions = {} ): DebugPanelRenderer {
   return new DebugPanelRendererImpl( opts );
 }

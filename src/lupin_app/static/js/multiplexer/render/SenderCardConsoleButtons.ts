@@ -165,12 +165,12 @@ function setPressed( btn: HTMLElement, pressed: boolean ): void {
   if ( btn.getAttribute( "aria-pressed" ) !== value ) btn.setAttribute( "aria-pressed", value );
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 /**
  * Build the renderer.
  *
  * It watches and paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSenderCardConsoleButtons( opts: SenderCardConsoleButtonsOptions ): SenderCardConsoleButtons {
   return new SenderCardConsoleButtonsImpl( opts );
 }

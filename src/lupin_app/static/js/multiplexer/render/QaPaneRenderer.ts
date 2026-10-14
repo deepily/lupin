@@ -296,12 +296,12 @@ class QaPaneRendererImpl implements QaPaneRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createQaPaneRenderer( opts: QaPaneRendererOptions ): QaPaneRenderer {
   return new QaPaneRendererImpl( opts );
 }

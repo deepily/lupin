@@ -274,8 +274,8 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 /** Build the renderer. It paints nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createDirectTtsRenderer( opts: DirectTtsRendererOptions ): DirectTtsRenderer {
   return new DirectTtsRendererImpl( opts );
 }

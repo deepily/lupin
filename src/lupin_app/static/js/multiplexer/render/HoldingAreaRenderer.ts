@@ -1053,12 +1053,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — c8 reports ONE location for this "branch" (240:16-43, the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — c8 reports ONE location for this "branch" (240:16-43, the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
 export function createHoldingAreaRenderer( opts: HoldingAreaRendererOptions ): HoldingAreaRenderer {
   return new HoldingAreaRendererImpl( opts );
 }

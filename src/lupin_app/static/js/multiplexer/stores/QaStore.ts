@@ -604,12 +604,12 @@ function errorText( e: unknown ): string {
   return e instanceof Error ? e.message : String( e );
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the store.
  *
  * It listens for `tts_job_request` at once, to show and speak a finished job's answer.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createQaStore( opts: QaStoreOptions ): QaStore {
   return new QaStoreImpl( opts );
 }

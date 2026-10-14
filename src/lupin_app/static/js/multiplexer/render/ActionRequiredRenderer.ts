@@ -811,8 +811,8 @@ function cssEscape(value: string): string {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /** Build the renderer. It paints and subscribes to nothing until `mount()` is called. */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createActionRequiredRenderer(opts: ActionRequiredRendererOptions): ActionRequiredRenderer {
   return new ActionRequiredRendererImpl(opts);
 }

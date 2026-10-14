@@ -320,12 +320,12 @@ class TimeSavedRendererImpl implements TimeSavedRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 /**
  * Build the renderer.
  *
  * It fetches nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createTimeSavedRenderer( opts: TimeSavedRendererOptions ): TimeSavedRenderer {
   return new TimeSavedRendererImpl( opts );
 }

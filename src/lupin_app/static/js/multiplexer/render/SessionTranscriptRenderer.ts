@@ -374,12 +374,12 @@ function folded( label: string, text: string ): HTMLElement {
   return details;
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSessionTranscriptRenderer( opts: SessionTranscriptRendererOptions ): SessionTranscriptRenderer {
   return new SessionTranscriptRendererImpl( opts );
 }

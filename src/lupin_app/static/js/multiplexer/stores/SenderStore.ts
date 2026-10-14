@@ -534,12 +534,12 @@ class SenderStoreImpl implements SenderStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the store.
  *
  * It subscribes to the bus at once, and restores saved session names when a storage service is given.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSenderStore(opts: SenderStoreOptions): SenderStore {
   return new SenderStoreImpl(opts);
 }

@@ -57,9 +57,9 @@ export class ChainMutexLockManager implements LockManager {
 
   async request<T>(name: string, callback: () => Promise<T>): Promise<T> {
     const prev = this.tails.get(name) ?? Promise.resolve();
-    /* c8 ignore next 3 */
     // TS "definitely assigned" placeholder — the Promise constructor below
     // synchronously overwrites `release` before any caller can reach this body.
+    /* c8 ignore next */
     let release: () => void = () => { /* unreachable */ };
     const next = new Promise<void>((res) => {
       release = res;

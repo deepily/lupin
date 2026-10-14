@@ -174,12 +174,12 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
 /**
  * Build the runner.
  *
  * It runs again on the Retry event and when the history window or the filter changes.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
 export function createColdHistoryHydration(opts: ColdHistoryHydrationOptions): ColdHistoryHydration {
   return new ColdHistoryHydrationImpl(opts);
 }

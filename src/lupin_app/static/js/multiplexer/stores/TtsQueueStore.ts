@@ -610,12 +610,12 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the store.
  *
  * It restores a saved queue from storage and subscribes to the bus at once.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createTtsQueueStore(opts: TtsQueueStoreOptions): TtsQueueStore {
   return new TtsQueueStoreImpl(opts);
 }

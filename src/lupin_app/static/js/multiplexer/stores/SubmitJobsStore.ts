@@ -522,12 +522,12 @@ function errorText( e: unknown ): string {
   return e instanceof Error ? e.message : String( e );
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the store.
  *
  * It does nothing until a card submits, and `onCcSubmitted` runs only after a successful CC submit.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createSubmitJobsStore( opts: SubmitJobsStoreOptions ): SubmitJobsStore {
   return new SubmitJobsStoreImpl( opts );
 }

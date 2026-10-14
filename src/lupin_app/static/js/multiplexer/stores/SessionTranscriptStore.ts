@@ -462,12 +462,12 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 /**
  * Build the store.
  *
  * It subscribes to `auth_success` and the two transcript events at once, and watches no seat until `open()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSessionTranscriptStore( opts: SessionTranscriptStoreOptions ): SessionTranscriptStore {
   return new SessionTranscriptStoreImpl( opts );
 }

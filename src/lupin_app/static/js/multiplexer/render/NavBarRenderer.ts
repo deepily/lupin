@@ -130,12 +130,12 @@ class NavBarRendererImpl implements NavBarRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createNavBarRenderer( opts: NavBarRendererOptions ): NavBarRenderer {
   return new NavBarRendererImpl( opts );
 }

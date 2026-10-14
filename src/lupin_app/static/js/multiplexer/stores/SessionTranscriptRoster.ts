@@ -184,12 +184,12 @@ class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 /**
  * Build the roster.
  *
  * It re-reads on `auth_success` and when the strip adds or hydrates sessions.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
 export function createSessionTranscriptRoster( opts: SessionTranscriptRosterOptions ): SessionTranscriptRoster {
   return new SessionTranscriptRosterImpl( opts );
 }

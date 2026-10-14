@@ -684,12 +684,12 @@ function errorMessage( err: unknown ): string {
 // Factory
 // ---------------------------------------------------------------------------
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It throws when `store` is missing, and paints nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createBroadcastCardRenderer( opts: BroadcastCardRendererOptions ): BroadcastCardRenderer {
   return new BroadcastCardRendererImpl( opts );
 }

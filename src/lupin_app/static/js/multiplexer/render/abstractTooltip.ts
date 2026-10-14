@@ -147,12 +147,12 @@ class AbstractTooltipImpl implements AbstractTooltip {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the tooltip.
  *
  * It adds nothing to the page until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAbstractTooltip( deps: AbstractTooltipDeps ): AbstractTooltip {
   return new AbstractTooltipImpl( deps );
 }

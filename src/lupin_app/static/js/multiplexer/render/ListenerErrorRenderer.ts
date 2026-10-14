@@ -169,12 +169,12 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   }
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Build the renderer.
  *
  * It listens for nothing until `mount()` is called.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createListenerErrorRenderer(
   opts: ListenerErrorRendererOptions,
 ): ListenerErrorRenderer {
