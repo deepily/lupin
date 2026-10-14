@@ -113,6 +113,13 @@ interface ChunkInfo {
 // The tool
 // ===========================================================================
 
+/**
+ * Diagnostic controller that opens monitored WebSockets and watches the audio they carry.
+ *
+ * It counts connections, duplicate connections, chunks, audio elements and simultaneous
+ * playbacks, and writes each event to the page's console element. All browser access goes
+ * through the injected {@link DiagnosticDeps}.
+ */
 export class WebSocketDiagnosticTool {
     private readonly deps: DiagnosticDeps;
 
