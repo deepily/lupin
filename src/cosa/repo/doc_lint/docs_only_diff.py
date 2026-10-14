@@ -2,8 +2,8 @@
 Docs-only diff check: proves a documentation rewrite left the code unchanged.
 
 Python files pass when their ASTs are identical once docstrings are removed. Their directive
-comments (pragma, noqa, nosec, skipcq, type:, coding, shebang) must match too, each paired with
-the line of code it sits on. Dart files pass when every non-comment token is identical and their directive
+comments (pragma, noqa, nosec, skipcq, type:, coding, shebang) must match too. Each is paired
+with the line of code it sits on and its place among identical lines. Dart files pass when every non-comment token is identical and their directive
 comments (@dart, ignore, coverage) match. A failure names the first difference. Every other
 changed file type, a mode change and an untracked new file fail too, except markdown. Stdlib only.
 
@@ -19,8 +19,9 @@ What "docs-only" means here, and does not:
     - a comment that merely looks like a directive, such as "# type: the kind", also fails; that
       errs toward a failure
     - a Python directive is paired with the code on its line, or with the next line of code when
-      it stands alone, so moving `# noqa` to another line fails; editing the code that a
-      standalone directive points at also fails. Dart directives are compared as text only
+      it stands alone, and with which occurrence of that code text it is. Moving `# noqa` to
+      another line fails, even to an identical line. A docstring is not code, so rewording one
+      next to a shebang or a coding line passes. Dart directives are compared as text only
 """
 
 import argparse
@@ -84,13 +85,13 @@ def _directive_text( item ):
     Name one directive for a failure message.
 
     Requires:
-        - item is a comment str, or a ( code, comment ) pair from python_directives
+        - item is a comment str, or a ( code, nth, comment ) triple from python_directives
 
     Ensures:
         - returns the repr of the comment, followed by " on <code>" for a pair
     """
     if isinstance( item, str ): return repr( item )
-    code, comment = item
+    code, _, comment = item
     return f"{comment!r} on {code!r}"
 
 
@@ -99,7 +100,7 @@ def directive_difference( old, new ):
     Compare two ordered lists of directive comments.
 
     Requires:
-        - old and new are lists of str, or lists of ( code, comment ) pairs
+        - old and new are lists of str, or lists of ( code, nth, comment ) triples
 
     Ensures:
         - returns None when they are equal
@@ -111,7 +112,9 @@ def directive_difference( old, new ):
     """
     for a, b in zip( old, new ):
         if a == b: continue
-        if isinstance( a, tuple ) and a[ 1 ] == b[ 1 ]: return f"directive comment {a[ 1 ]!r} moved from {a[ 0 ]!r} to {b[ 0 ]!r}"
+        if isinstance( a, tuple ) and a[ 2 ] == b[ 2 ]:
+            if a[ 0 ] != b[ 0 ]: return f"directive comment {a[ 2 ]!r} moved from {a[ 0 ]!r} to {b[ 0 ]!r}"
+            return f"directive comment {a[ 2 ]!r} moved from occurrence {a[ 1 ]} to occurrence {b[ 1 ]} of {a[ 0 ]!r}"
         return f"directive comment {_directive_text( a )} became {_directive_text( b )}"
     if len( old ) == len( new ): return None
     longer = old if len( old ) > len( new ) else new
@@ -151,34 +154,64 @@ def first_difference( old, new, path="Module" ):
     return None
 
 
+def _docstring_rows( tree ):
+    """
+    Collect the line numbers a docstring occupies.
+
+    Requires:
+        - tree is a parsed module
+
+    Ensures:
+        - returns the set of lines of every module, class and function docstring
+    """
+    rows = set()
+    for node in ast.walk( tree ):
+        if not isinstance( node, ( ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef ) ): continue
+        first = node.body[ 0 ] if node.body else None
+        if isinstance( first, ast.Expr ) and isinstance( first.value, ast.Constant ) and isinstance( first.value.value, str ):
+            rows.update( range( first.lineno, first.end_lineno + 1 ) )
+    return rows
+
+
 def python_directives( source ):
     """
     List the directive comments of a Python source, in order, each with its code line.
 
     Requires:
-        - source is Python text that tokenizes
+        - source is Python text that tokenizes and parses
 
     Ensures:
-        - returns [ ( code, comment ) ] for each comment that PY_DIRECTIVE matches: pragma, noqa,
+        - returns [ ( code, nth, comment ) ] for each comment that PY_DIRECTIVE matches: pragma, noqa,
           nosec, skipcq, type:, fmt:, linter switches, a coding line and a shebang
         - comment is the stripped comment text
         - code is the stripped code before the comment on its line; for a comment on a line of
-          its own it is the next line that is neither blank nor a comment, or "" at end of file
+          its own it is the next line of code, or "" at end of file
+        - nth counts the lines with that same code text, this one included, so a directive moved
+          between identical lines changes it; it is 0 when there is no code line
+        - docstring lines and comment-only lines are not code, so rewording a docstring changes
+          neither field
         - a hash inside a string literal is not a comment
 
     Raises:
-        - tokenize.TokenError or SyntaxError when the source does not tokenize
+        - tokenize.TokenError or SyntaxError when the source does not tokenize or parse
     """
-    lines  = source.splitlines()
-    found  = []
-    for t in tokenize.generate_tokens( io.StringIO( source ).readline ):
-        if t.type != tokenize.COMMENT or not PY_DIRECTIVE.match( t.string.strip() ): continue
-        row, col = t.start
-        code     = lines[ row - 1 ][ : col ].strip()
-        if not code:
-            rest = ( l.strip() for l in lines[ row : ] )
-            code = next( ( l for l in rest if l and not l.startswith( "#" ) ), "" )
-        found.append( ( code, t.string.strip() ) )
+    docs     = _docstring_rows( ast.parse( source ) )
+    lines    = source.splitlines()
+    comments = [ ( t.start[ 0 ], t.start[ 1 ], t.string.strip() ) for t in tokenize.generate_tokens( io.StringIO( source ).readline ) if t.type == tokenize.COMMENT ]
+    cut      = { row : col for row, col, _ in comments }
+    code     = {}
+    seen     = {}
+    for row, line in enumerate( lines, 1 ):
+        text = line[ : cut.get( row, len( line ) ) ].strip()
+        if row in docs or not text: continue
+        seen[ text ] = seen.get( text, 0 ) + 1
+        code[ row ]  = ( text, seen[ text ] )
+    found = []
+    for row, _, comment in comments:
+        if not PY_DIRECTIVE.match( comment ): continue
+        at = row if row in code else next( ( r for r in sorted( code ) if r > row ), None )
+        text, nth = code[ at ] if at is not None else ( "", 0 )
+        found.append( ( text, nth, comment ) )
     return found
 
 

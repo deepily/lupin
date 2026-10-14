@@ -253,7 +253,7 @@ def test_python_directive_moved_to_other_code_fails():
     new = "a = f()\nb = g()  # noqa: E501\n"
     found = dod.python_difference( old, new )
     assert found is not None and "moved from 'a = f()' to 'b = g()'" in found
-    assert dod.python_directives( old ) == [ ( "a = f()", "# noqa: E501" ) ]
+    assert dod.python_directives( old ) == [ ( "a = f()", 1, "# noqa: E501" ) ]
     # the same pairing survives a docstring edit that shifts every line
     assert dod.python_difference( '"""one"""\nx = f()  # noqa\n', '"""one\ntwo"""\nx = f()  # noqa\n' ) is None
 
@@ -263,8 +263,31 @@ def test_python_standalone_directive_is_paired_with_the_next_code_line():
     new = "x = 1\n# fmt: off\ny = 2\n"
     found = dod.python_difference( old, new )
     assert found is not None and "moved from 'x = 1' to 'y = 2'" in found
-    assert dod.python_directives( "x = 1\n# fmt: off\n\n# note\ny = 2\n" ) == [ ( "y = 2", "# fmt: off" ) ]
-    assert dod.python_directives( "x = 1\n# fmt: on\n" ) == [ ( "", "# fmt: on" ) ]
+    assert dod.python_directives( "x = 1\n# fmt: off\n\n# note\ny = 2\n" ) == [ ( "y = 2", 1, "# fmt: off" ) ]
+    assert dod.python_directives( "x = 1\n# fmt: on\n" ) == [ ( "", 0, "# fmt: on" ) ]
+
+
+def test_python_header_directive_survives_a_reworded_module_docstring():
+    for header in ( "#!/usr/bin/env python3\n", "# -*- coding: latin-1 -*-\n", "# fmt: off\n" ):
+        old = header + '"""Old words."""\nimport os\n'
+        new = header + '"""Entirely new words\nover two lines."""\nimport os\n'
+        assert dod.python_difference( old, new ) is None, header
+    assert dod.python_directives( '#!/usr/bin/env python3\n"""Doc."""\nimport os\n' ) == [ ( "import os", 1, "#!/usr/bin/env python3" ) ]
+    moved = dod.python_difference( '#!/usr/bin/env python3\n"""Doc."""\nimport os\n', '"""Doc."""\n#!/usr/bin/env python3\nimport os\n' )
+    assert moved is None, "a directive moved across a docstring still points at the same code line"
+    assert "removed" in dod.python_difference( '#!/usr/bin/env python3\n"""Doc."""\nimport os\n', '"""Doc."""\nimport os\n' )
+    assert dod.python_directives( 'def f():  # noqa\n    """Doc."""\n    return 1\n' ) == [ ( "def f():", 1, "# noqa" ) ]
+    assert dod.python_directives( '"""Doc."""  # noqa\nx = 1\n' ) == [ ( "x = 1", 1, "# noqa" ) ]
+
+
+def test_python_directive_moved_between_identical_code_lines_fails():
+    old = "x = f()\nx = f()  # noqa\n"
+    new = "x = f()  # noqa\nx = f()\n"
+    found = dod.python_difference( old, new )
+    assert found is not None and "moved from occurrence 2 to occurrence 1 of 'x = f()'" in found
+    assert dod.python_directives( old ) == [ ( "x = f()", 2, "# noqa" ) ]
+    # a docstring edit between the two identical lines does not change which occurrence carries it
+    assert dod.python_difference( 'def g():\n    """a"""\n    x = f()\n    x = f()  # noqa\n', 'def g():\n    """b\n    c"""\n    x = f()\n    x = f()  # noqa\n' ) is None
 
 
 def test_python_nosec_directive_is_code():
@@ -352,9 +375,11 @@ MUTANTS = [
     ( "type( old ) is not type( new ) or repr( old ) != repr( new )", "old != new", "test_python_constant_type_change_is_code" ),
     ( "if paths is not None and not any( path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" ) for p in paths ): continue", "pass", "test_paths_limits_the_check_to_whole_directory_names" ),
     ( "path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" )", "path.startswith( p )", "test_paths_limits_the_check_to_whole_directory_names" ),
-    ( "or not PY_DIRECTIVE.match( t.string.strip() ): continue", "or True: continue", "test_python_directive_comments_are_code" ),
-    ( "found.append( ( code, t.string.strip() ) )", "found.append( ( \"\", t.string.strip() ) )", "test_python_directive_moved_to_other_code_fails" ),
-    ( "        if not code:\n            rest", "        if False:\n            rest", "test_python_standalone_directive_is_paired_with_the_next_code_line" ),
+    ( "if not PY_DIRECTIVE.match( comment ): continue", "pass", "test_python_directive_comments_are_code" ),
+    ( "found.append( ( text, nth, comment ) )", "found.append( ( \"\", nth, comment ) )", "test_python_directive_moved_to_other_code_fails" ),
+    ( "found.append( ( text, nth, comment ) )", "found.append( ( text, 0, comment ) )", "test_python_directive_moved_between_identical_code_lines_fails" ),
+    ( "at = row if row in code else next( ( r for r in sorted( code ) if r > row ), None )", "at = row if row in code else None", "test_python_standalone_directive_is_paired_with_the_next_code_line" ),
+    ( "if row in docs or not text: continue", "if not text: continue", "test_python_header_directive_survives_a_reworded_module_docstring" ),
     ( "nosec\\b|", "", "test_python_nosec_directive_is_code" ),
     ( "skipcq\\b|", "", "test_python_skipcq_directive_is_code" ),
     ( "Markdown is exempt wholesale", "Markdown is checked wholesale", "test_module_docstring_says_markdown_is_exempt_including_agent_files" ),
