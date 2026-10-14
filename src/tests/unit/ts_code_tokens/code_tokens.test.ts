@@ -54,11 +54,15 @@ test( "tokens: each token says whether a line break comes before it, a comment's
     assert.deepEqual( flags( "return\n1;\n" ), [ 0, 1, 0 ] );
     assert.deepEqual( flags( "return /* a\n b */ 1;\n" ), [ 0, 1, 0 ] );
     assert.deepEqual( flags( "return /* a b */ 1;\n" ), [ 0, 0, 0 ] );
+    assert.deepEqual( flags( "\n// lead\nreturn 1;\n" ), [ 0, 0, 0 ] );
+    assert.deepEqual( flags( "return\r1;\n" ), [ 0, 1, 0 ] );
+    assert.deepEqual( flags( "return\u20281;\n" ), [ 0, 1, 0 ] );
+    assert.deepEqual( flags( "return\u20291;\n" ), [ 0, 1, 0 ] );
 } );
 
 test( "marks: a directive comment is tied to the token that follows it, with its line position", () => {
     const marks = mod.describe( "let a;\n// @ts-ignore\nlet b = f( a );\nlet c; // eslint-disable-line x\nlet d;\n", "a.ts" ).marks;
-    assert.deepEqual( marks, [ [ 3, "L:// @ts-ignore" ], [ 15, "T:// eslint-disable-line x" ] ] );
+    assert.deepEqual( marks, [ [ 3, "L:// @ts-ignore" ], [ 14, "T:// eslint-disable-line x" ] ] );
 } );
 
 test( "marks: banner, pure and coverage comments count, and plain comments do not", () => {
@@ -70,7 +74,7 @@ test( "marks: banner, pure and coverage comments count, and plain comments do no
 test( "marks: bundler magic comments and a comment at the end of the file are kept", () => {
     const marks = mod.describe( "const m = import( /* webpackChunkName: \"a\" */ \"./a.js\" );\n// @ts-nocheck\n", "a.ts" ).marks;
     assert.deepEqual( marks.map( ( mark: any[] ) => mark[ 1 ] ), [ "T:/* webpackChunkName: \"a\" */", "L:// @ts-nocheck" ] );
-    assert.equal( marks[ 1 ][ 0 ], 11 );
+    assert.equal( marks[ 1 ][ 0 ], 8 );
 } );
 
 test( "marks: a documentation block is kept only for the words a tool reads", () => {

@@ -223,6 +223,11 @@ def test_check_diff_paths_limit_the_check_to_whole_directory_names( repo ):
     assert tdd.check_diff( repo, "HEAD", None, [ "nothing" ], _stub_run ) == []
 
 
+def test_check_diff_a_git_failure_is_named_not_swallowed( repo ):
+    with pytest.raises( RuntimeError, match="git diff --raw -z --no-renames no-such-rev failed" ):
+        tdd.check_diff( repo, "no-such-rev", None, None, _stub_run )
+
+
 def test_check_diff_compares_two_revisions( repo ):
     ( repo / "a.ts" ).write_text( "x = 1; // note\n", encoding="utf-8" )
     _git( repo, "commit", "-qam", "comment" )
@@ -239,6 +244,19 @@ def test_main_prints_a_line_per_file_and_returns_one_on_a_failure( repo, monkeyp
     out = io.StringIO()
     assert tdd.main( [ "--base", "HEAD", "--repo-root", str( repo ) ], out=out ) == 0
     assert "0 passed, 0 failed" in out.getvalue()
+
+
+def test_main_names_a_file_that_is_not_utf8_without_a_crash( repo, monkeypatch ):
+    import os
+    monkeypatch.setattr( tdd, "analyse", _stub_run )
+    raw = os.fsencode( str( repo ) ) + b"/caf\xff.ts"
+    with open( raw, "wb" ) as handle: handle.write( b"x = 1;\n" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-qm", "odd name" )
+    with open( raw, "wb" ) as handle: handle.write( b"x = 2;\n" )
+    out = io.StringIO()
+    assert tdd.main( [ "--base", "HEAD", "--repo-root", str( repo ) ], out=out ) == 1
+    assert "FAIL caf\\udcff.ts" in out.getvalue() or "caf" in out.getvalue()
 
 
 def test_main_writes_pass_lines_to_stdout_by_default( repo, monkeypatch, capsys ):
@@ -397,6 +415,13 @@ MUTANTS = [
     ( "if missing: raise RuntimeError", "if False: raise RuntimeError", "test_analyse_names_an_id_that_came_back_without_a_description" ),
     ( "if not items: return {}", "if False: return {}", "test_analyse_of_nothing_starts_no_process" ),
     ( "return 1 if failed else 0", "return 0", "test_main_prints_a_line_per_file_and_returns_one_on_a_failure" ),
+    ( "        if break_a != break_b: return", "        if False: return", "test_a_moved_line_break_is_named" ),
+    ( "    if res.returncode != 0: raise RuntimeError( f\"git {", "    if False: raise RuntimeError( f\"git {", "test_check_diff_a_git_failure_is_named_not_swallowed" ),
+    ( "    if old[ \"marks\" ] != new[ \"marks\" ]:", "    if False:", "test_a_moved_directive_comment_is_a_difference_even_when_its_text_is_kept" ),
+    ( "if path.endswith( SUFFIXES ) and ( old is NOT_UTF8 or new is NOT_UTF8 ):", "if False:", "test_check_diff_a_file_that_is_not_utf8_fails_without_a_crash" ),
+    ( "    except UnicodeDecodeError:\n        return NOT_UTF8", "    except UnicodeDecodeError:\n        return None", "test_check_diff_a_file_that_is_not_utf8_fails_without_a_crash" ),
+    ( "found[ os.fsdecode( path ) ] = ( modes[ 0 ][ 1: ].decode(), modes[ 1 ].decode() )", "found[ path.decode( \"utf-8\", \"replace\" ) ] = ( modes[ 0 ][ 1: ].decode(), modes[ 1 ].decode() )", "test_check_diff_a_file_name_that_is_not_utf8_is_judged_and_named" ),
+    ( "shown = path.encode( \"utf-8\", \"backslashreplace\" ).decode( \"utf-8\" )", "shown = path", "test_main_names_a_file_that_is_not_utf8_without_a_crash" ),
 ]
 
 
