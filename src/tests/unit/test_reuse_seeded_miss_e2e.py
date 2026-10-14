@@ -107,7 +107,7 @@ def test_an_answers_folder_over_the_size_limit_is_refused_before_it_is_copied( t
     big.mkdir( parents=True )
     ( big / "x.json" ).write_bytes( b"x" * 2048 )
     monkeypatch.setattr( sm, "MAX_ANSWERS_BYTES", 1024 )
-    with pytest.raises( sm.RunRefused, match = "over the 1024 byte limit" ): sm.run( tmp_path / "w", "dry", answers=tmp_path / "big" )
+    with pytest.raises( sm.RunRefused, match = "holds more than 1024 bytes; copy only" ): sm.run( tmp_path / "w", "dry", answers=tmp_path / "big" )
     assert not ( tmp_path / "w" / "data" ).exists()
 
 
@@ -242,7 +242,7 @@ def test_the_size_check_stops_reading_file_sizes_once_the_limit_is_passed( tmp_p
         reads.append( self.name )
         return real( self, *a, **k )
     monkeypatch.setattr( pathlib.Path, "stat", counting )
-    with pytest.raises( sm.RunRefused, match = "over the 250 byte limit" ): sm.seed_cache( folder, tmp_path / "data" )
+    with pytest.raises( sm.RunRefused, match = "holds more than 250 bytes; copy only" ): sm.seed_cache( folder, tmp_path / "data" )
     files = { n for n in reads if n.endswith( ".json" ) }
     assert len( files ) == 3 and len( reads ) <= 8                                    # 100, 200, 300: the third file passes 250; 50 files exist
 
