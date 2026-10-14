@@ -86,6 +86,11 @@ export type IconName = keyof typeof ICONS;
 // Nav items — data-driven so adding pages is a one-line change
 // ===========================================================================
 
+/**
+ * The nav bar's links in display order, each with its label, URL, icon and visibility flags.
+ *
+ * An item with `auth` shows only to a signed-in viewer, and one with `admin` only to an admin.
+ */
 export const NAV_ITEMS: readonly NavItem[] = [
     { label : "Home",          url : "/app",                       icon : "home",   auth : false, admin : false, testid : "nav-home-link"           },
     { label : "Notifications", url : "/app/notifications",         icon : "bell",   auth : true,  admin : false, testid : "nav-notifications-link"  },
@@ -102,10 +107,20 @@ export const NAV_ITEMS: readonly NavItem[] = [
 // Auth helpers — read the injected storage directly (no auth.js dependency)
 // ===========================================================================
 
+/**
+ * Read the stored access token.
+ *
+ * Returns the `lupin_access_token` value, or null when none is stored.
+ */
 export function getToken( storage: StorageLike ): string | null {
     return storage.getItem( "lupin_access_token" );
 }
 
+/**
+ * Read the stored `user_data` blob.
+ *
+ * Returns the parsed object, or null when it is absent or is not valid JSON.
+ */
 export function getUserData( storage: StorageLike ): UserData | null {
     try {
         const raw = storage.getItem( "user_data" );
@@ -115,6 +130,11 @@ export function getUserData( storage: StorageLike ): UserData | null {
     }
 }
 
+/**
+ * Say whether the stored access token is present, decodable and not yet expired.
+ *
+ * It reads the token's `exp` claim and does not ask the server. A token it cannot decode counts as not signed in.
+ */
 export function isAuthenticated( storage: StorageLike ): boolean {
     /**
      * 🔴 THIS WAS `!!getToken( storage )` — A PRESENCE CHECK ON A STRING (row ef16e88d).
@@ -154,11 +174,21 @@ export function isAuthenticated( storage: StorageLike ): boolean {
     return Date.now() < expiryMs;
 }
 
+/**
+ * Say whether the stored user has the admin role.
+ *
+ * Returns false when no user data is stored.
+ */
 export function isAdmin( storage: StorageLike ): boolean {
     const user = getUserData( storage );
     return user !== null && user.role === "admin";
 }
 
+/**
+ * Read the stored user's email address.
+ *
+ * Returns null when no user data is stored or it carries no email.
+ */
 export function getUserEmail( storage: StorageLike ): string | null {
     const user = getUserData( storage );
     return user ? ( user.email ?? null ) : null;
@@ -168,6 +198,11 @@ export function getUserEmail( storage: StorageLike ): string | null {
 // Active page detection
 // ===========================================================================
 
+/**
+ * Say whether a nav item's URL is the page the viewer is on.
+ *
+ * `/app` matches only `/app` and `/app/`. Every other URL matches by prefix, so a sub-page lights its parent.
+ */
 export function isActivePage( itemUrl: string, pathname: string ): boolean {
     // Exact match for /app (landing) — startsWith would wrongly light it up
     // on every /app/* sub-page.
@@ -182,6 +217,11 @@ export function isActivePage( itemUrl: string, pathname: string ): boolean {
 // State + visibility
 // ===========================================================================
 
+/**
+ * Gather what the nav bar needs to render into one state object.
+ *
+ * Returns the signed-in flag, the admin flag, the email and the current pathname.
+ */
 export function computeNavState( storage: StorageLike, pathname: string ): NavState {
     return {
         authenticated : isAuthenticated( storage ),
