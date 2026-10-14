@@ -75,15 +75,12 @@ interface JobRemovedPayload {
   timestamp ?: string;
 }
 
-// Loose ApiClient surface for hydrateHistory — JobStore only needs `get<T>`.
-// Production code passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface JobHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
 
-// W3 — parametrized history hydration (time-window select + load-more).
-// `hydrateHistory(api)` with no opts stays backward-compatible: the mount call
-// in JobsPaneRenderer is unchanged and gets the legacy 30-day virgin window.
+/** The options of a history load: window in days, page size, offset, append and user filter. */
 export interface HydrateHistoryOptions {
   // Time window in days. KEY ABSENT → legacy 30-day default (DEFAULT_HISTORY_
   // WINDOW_DAYS). KEY PRESENT but `undefined` → all-time (the `days` query param
@@ -121,6 +118,7 @@ const DEFAULT_HISTORY_PAGE_LIMIT  = 20;
 // Public interface (per design § JobStore)
 // ---------------------------------------------------------------------------
 
+/** The jobs of the page in named buckets, with the history load and its counts. */
 export interface JobStore {
   bucket(name: JobBucket): ReadonlyArray<Job>;
   getById(idHash: string): Job | undefined;
@@ -167,6 +165,7 @@ export interface JobStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createJobStore`: the bus and a clock for tests. */
 export interface JobStoreOptions {
   bus    : EventBus;
   nowFn? : () => number;
@@ -519,6 +518,7 @@ class JobStoreImpl implements JobStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a job store from its options. */
 export function createJobStore(opts: JobStoreOptions): JobStore {
   return new JobStoreImpl(opts);
 }

@@ -155,6 +155,7 @@ export interface QaTtsEnqueuer {
  */
 export type QaVoiceLookup = ( senderId: string | undefined ) => string | undefined;
 
+/** The state of the question pane: agent list, status line, response, interview and metrics. */
 export interface QaStore {
   /** The cached GET /api/v2/agents body, or null until it lands (or if it failed). */
   agentsPayload(): QaAgentsPayload | null;
@@ -206,6 +207,7 @@ export interface QaStore {
   dispose(): void;
 }
 
+/** Options for `createQaStore`: the bus, the API client, the session id and optional hooks. */
 export interface QaStoreOptions {
   bus       : EventBus;
   api       : QaApiClient;
@@ -231,7 +233,7 @@ const STATUS_RED  = "#dc3545";
 
 const AUTO_ROUTE_STATUS: QaModeStatus = { text: "Auto-routing enabled", color: STATUS_GREY };
 
-// Legacy's empty state, notifications.html:157 (`<div id="response-text">`).
+/** The text the response pane shows before any answer; the legacy client's empty state. */
 export const QA_EMPTY_RESPONSE = "No response yet...";
 
 class QaStoreImpl implements QaStore {
@@ -603,6 +605,7 @@ function errorText( e: unknown ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a question store from its options. */
 export function createQaStore( opts: QaStoreOptions ): QaStore {
   return new QaStoreImpl( opts );
 }

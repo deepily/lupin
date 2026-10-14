@@ -49,6 +49,7 @@ export interface TranscriptBlock {
   name?      : string;
 }
 
+/** A copy of the transcript state: the watched seat, the held blocks and the stream state. */
 export interface SessionTranscriptSnapshot {
   watchedCcSessionId : string | null;
   fileEpoch          : string | null;
@@ -68,6 +69,7 @@ export interface SessionTranscriptSnapshot {
   loadingEarlier     : boolean;
 }
 
+/** The transcript of one watched seat: open it, close it, page earlier and take a snapshot. */
 export interface SessionTranscriptStore {
   /** Watch a seat by its FULL stable id. Unwatches the previous seat first. */
   open( ccSessionId: string ): Promise<void>;
@@ -80,6 +82,7 @@ export interface SessionTranscriptStore {
   destroy(): void;
 }
 
+/** Options for `createSessionTranscriptStore`: bus, API client, send hook and size limits. */
 export interface SessionTranscriptStoreOptions {
   bus           : EventBus;
   api           : SessionTranscriptApiClient;
@@ -93,6 +96,7 @@ export interface SessionTranscriptStoreOptions {
 
 /** Plan §5's provisional default, pending Open sub-question 5. One constant, one change. */
 export const SESSION_TRANSCRIPT_RING_MAX_BYTES = 256 * 1024;
+/** The server path that reads a seat's transcript. */
 export const SESSION_TRANSCRIPT_ENDPOINT       = "/api/cc-transcript";
 /** One "load earlier" page — the same ~64 KB as ruling Q6's opening backlog. */
 export const SESSION_TRANSCRIPT_PAGE_BYTES     = 64 * 1024;
@@ -459,6 +463,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
+/** Build a transcript store from its options. */
 export function createSessionTranscriptStore( opts: SessionTranscriptStoreOptions ): SessionTranscriptStore {
   return new SessionTranscriptStoreImpl( opts );
 }

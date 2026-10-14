@@ -115,6 +115,7 @@ interface ServerVoicePersona {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The sender records, with the bulk hydrate that fills them from the boot snapshot. */
 export interface SenderStore {
   get(senderId: string): SenderRecord | undefined;
   list(): ReadonlyArray<SenderRecord>;
@@ -148,6 +149,7 @@ export interface SenderStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createSenderStore`: the bus, a clock for tests and an optional storage. */
 export interface SenderStoreOptions {
   bus      : EventBus;
   nowFn?   : () => number;
@@ -533,6 +535,7 @@ class SenderStoreImpl implements SenderStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a sender store from its options. */
 export function createSenderStore(opts: SenderStoreOptions): SenderStore {
   return new SenderStoreImpl(opts);
 }

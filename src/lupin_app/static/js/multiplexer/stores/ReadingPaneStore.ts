@@ -57,6 +57,7 @@ const AR_SPLIT_RATIO      = 0.5;      // forced 50/50 while AR owns the pane
 interface LayoutModeEnvelope { mode: LayoutMode }
 interface SplitRatioEnvelope { ratio: number }
 
+/** The reading pane's layout mode, divider ratio, content history and open state. */
 export interface ReadingPaneStore {
   /** Current layout mode (persisted). */
   getLayoutMode(): LayoutMode;
@@ -115,6 +116,7 @@ export interface ReadingPaneStore {
   showReading(): boolean;
 }
 
+/** Options for `createReadingPaneStore`: the bus and the storage service. */
 export interface ReadingPaneStoreOptions {
   bus     : EventBus;
   storage : StorageService;

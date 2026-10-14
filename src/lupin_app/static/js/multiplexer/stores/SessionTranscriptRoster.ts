@@ -19,6 +19,7 @@
 
 import type { EventBus } from "../shared/EventBus";
 
+/** The slice of the API client the roster needs: a `get` that returns the parsed body. */
 export interface SessionTranscriptRosterApiClient {
   get<T>( path: string ): Promise<T>;
 }
@@ -37,6 +38,7 @@ export interface TranscriptChipIdentity {
   personaName : string | null;
 }
 
+/** The roster of watchable seats, and the lookup from a chip to a seat's full session id. */
 export interface SessionTranscriptRoster {
   /** Re-read the roster. A non-admin never reads it — the endpoint would refuse anyway. */
   refresh(): Promise<void>;
@@ -47,6 +49,7 @@ export interface SessionTranscriptRoster {
   destroy(): void;
 }
 
+/** Options for `createSessionTranscriptRoster`: bus, API client, admin check and hooks. */
 export interface SessionTranscriptRosterOptions {
   bus       : EventBus;
   api       : SessionTranscriptRosterApiClient;
@@ -55,6 +58,7 @@ export interface SessionTranscriptRosterOptions {
   logFn?    : ( message: string ) => void;
 }
 
+/** The server path that lists the seats whose transcript can be watched. */
 export const SESSION_TRANSCRIPT_ROSTER_ENDPOINT = "/api/cc-transcript-roster";
 
 interface RosterBody {
@@ -181,6 +185,7 @@ class SessionTranscriptRosterImpl implements SessionTranscriptRoster {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
+/** Build a transcript roster from its options. */
 export function createSessionTranscriptRoster( opts: SessionTranscriptRosterOptions ): SessionTranscriptRoster {
   return new SessionTranscriptRosterImpl( opts );
 }

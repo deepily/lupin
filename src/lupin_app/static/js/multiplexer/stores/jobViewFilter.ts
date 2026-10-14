@@ -14,6 +14,7 @@
 
 import type { Job, NotificationFilterMode } from "../shared/types";
 
+/** Who is looking at the job list: the admin flag, the shared mode, the user id and email. */
 export interface JobViewer {
   isAdmin   : boolean;
   // The shared mode. Callers pass "own" for a non-admin, whatever is stored: legacy's switch is

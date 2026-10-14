@@ -19,14 +19,12 @@ import type {
   StorePredictionVoteChangedPayload,
 } from "../shared/types";
 
-// Narrowed ApiClient surface (Pass 2 F4 idiom). Production ApiClient satisfies
-// this structurally.
+/** The slice of the API client the store needs: a `post` that returns the body. */
 export interface PredictionVoteApiClient {
   post<T>( path: string, body: unknown ): Promise<T>;
 }
 
-// Hint context supplied by the renderer at paint time (the server does not
-// persist the hint, so the client echoes it back on vote).
+/** The hint context the renderer supplies at paint time, echoed back on a vote. */
 export interface PredictionVoteContext {
   question        : string;
   predicted_value : unknown;
@@ -34,13 +32,13 @@ export interface PredictionVoteContext {
   response_type   : string;
 }
 
-// Confidence gate (percent) — mirrors INI
-// "prediction hint vote min confidence threshold" = 0.50. Below this the
-// controls are not shown, so the user does not train on noise.
+/** The lowest confidence, in percent, at which the vote controls are shown. */
 export const PREDICTION_VOTE_MIN_PCT = 50;
 
+/** The path prefix of the prediction vote endpoint. */
 export const PREDICTION_VOTE_ENDPOINT_PREFIX = "/api/notify/prediction-vote/";
 
+/** The hint context of each notification and the vote cast on it, and the call that votes. */
 export interface PredictionVoteStore {
   /** Stash the hint context for a notification id (renderer paint-time call). */
   setContext( notificationId: string, ctx: PredictionVoteContext ): void;
@@ -56,6 +54,7 @@ export interface PredictionVoteStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createPredictionVoteStore`: the bus, the API client and a clock for tests. */
 export interface PredictionVoteStoreOptions {
   bus    : EventBus;
   api    : PredictionVoteApiClient;
@@ -125,6 +124,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a prediction vote store from its options. */
 export function createPredictionVoteStore(
   opts: PredictionVoteStoreOptions,
 ): PredictionVoteStore {

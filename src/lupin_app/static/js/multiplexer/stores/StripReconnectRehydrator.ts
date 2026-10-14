@@ -28,32 +28,25 @@ import type { ConnectionStateChangePayload, LupinEvent } from "../shared/types";
 import type { ServerSenderHydrationRecord } from "./SessionStripStore";
 import { SENDERS_VISIBLE_MIN_HOURS, sendersVisiblePath } from "./historyWindow";
 
-// The transport whose reconnect drives the focus-bar re-hydrate. The queue
-// socket carries the notification / persona domain the strip is sourced from;
-// the audio socket (AudioTransport) is irrelevant here, so its reconnects are
-// ignored — this is what keeps the re-hydrate once-per-reconnect-edge when both
-// sockets bounce together.
+/**
+ * The transport whose reconnect drives the strip re-hydrate.
+ *
+ * The queue socket carries the notification and persona domain the strip is sourced from. The audio socket's reconnects are ignored, so the re-hydrate runs once per reconnect edge.
+ */
 export const STRIP_REHYDRATE_TRANSPORT = "QueueTransport";
 
-// Minimal API surface — GET returning the senders-visible snapshot (the SAME
-// endpoint + record shape boot.ts hydrates the strip from). Narrowed idiom
-// (Pass 2 F4): the production ApiClient.get satisfies this.
+/** The slice of the API client the rehydrator needs: a `get` that returns the snapshot. */
 export interface StripRehydrateApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
-// The two stores boot fans the senders-visible snapshot out to (boot.ts:485-486).
-// The strip uses `reconcile()` (bug 0b2783ef, option 1) — additive upsert PLUS a
-// prune of snapshot-reported persona-less sessions, so a stale reaped card whose
-// live `session_reaped` was missed while the socket was down is cleared on
-// reconnect instead of surviving until a manual refresh. `senders` keeps its
-// additive `hydrate()`. Both remain idempotent upsert-merges; the prune is
-// confined to the strip's reconnect path (cold-boot `hydrate` stays additive).
+/** The two stores the snapshot fans out to: the strip, which reconciles, and the senders. */
 export interface StripRehydrateStores {
   sessionStrip : { reconcile( records: ReadonlyArray<ServerSenderHydrationRecord> ): void };
   senders      : { hydrate( records: ReadonlyArray<ServerSenderHydrationRecord> ): void };
 }
 
+/** Options for `createStripReconnectRehydrator`: bus, API client, stores and an email getter. */
 export interface StripReconnectRehydratorOptions {
   bus      : EventBus;
   api      : StripRehydrateApiClient;
@@ -63,6 +56,7 @@ export interface StripReconnectRehydratorOptions {
   getEmail : () => string | null;
 }
 
+/** A listener that reloads the strip from the senders-visible snapshot when the socket reconnects. */
 export interface StripReconnectRehydrator {
   /** Test/cleanup helper: detach the EventBus listener. */
   disposeForTesting(): void;
@@ -134,6 +128,7 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a strip reconnect rehydrator from its options. */
 export function createStripReconnectRehydrator( opts: StripReconnectRehydratorOptions ): StripReconnectRehydrator {
   return new StripReconnectRehydratorImpl( opts );
 }

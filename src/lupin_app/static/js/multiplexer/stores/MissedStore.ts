@@ -18,8 +18,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { LupinEvent, StoreMissedChangedPayload } from "../shared/types";
 
-// Narrowed ApiClient surface (Pass 2 F4 idiom — depend only on what we use).
-// The production ApiClient satisfies this structurally.
+/** The slice of the API client the store needs: a `post` that returns the body. */
 export interface MissedApiClient {
   post<T>( path: string, body: unknown ): Promise<T>;
 }
@@ -36,6 +35,7 @@ interface DismissResponse {
   undelivered_count? : unknown;
 }
 
+/** The server path that soft-dismisses the missed notifications. */
 export const DISMISS_ENDPOINT = "/api/notifications/undelivered/dismiss";
 
 /**
@@ -51,6 +51,7 @@ export function coerceCount( v: unknown ): number {
   return Math.floor( n );
 }
 
+/** The count of missed notifications and the reset that soft-dismisses them. */
 export interface MissedStore {
   count(): number;
   /**
@@ -63,6 +64,7 @@ export interface MissedStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createMissedStore`: the bus, the API client and a clock for tests. */
 export interface MissedStoreOptions {
   bus    : EventBus;
   api    : MissedApiClient;
@@ -131,6 +133,7 @@ class MissedStoreImpl implements MissedStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a missed-notification store from its options. */
 export function createMissedStore( opts: MissedStoreOptions ): MissedStore {
   return new MissedStoreImpl( opts );
 }

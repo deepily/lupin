@@ -79,6 +79,7 @@ const PERSIST_DEBOUNCE_MS    = 250;
 // localStorage key, shared with it like the history window.
 // It REPLACES the 2026-06-29 message-DIRECTION predicate, which hid every reply bubble
 // under the default "own" (parity doc C2, second cause). Nothing filters in the browser.
+/** The storage key of the Mine switch, shared with the legacy client. */
 export const FILTER_MODE_KEY = "notifications_filter_preference";
 const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
 
@@ -87,13 +88,12 @@ const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
 // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
 // ---------------------------------------------------------------------------
 
-// Loose ApiClient surface for hydrateHistory — this store only needs `get<T>`
-// (mirrors JobStore's JobHistoryApiClient). Production passes the canonical
-// ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface NotificationHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
 
+/** The inputs of a history load: the user's email, the hours to look back and the senders. */
 export interface HydrateHistoryOptions {
   userEmail      : string;
   // Hours to look back (historyWindow.effectiveHoursForQuery). null = "All
@@ -127,7 +127,7 @@ interface ServerHistoryRow {
 // Re-exported so existing importers keep working.
 export { DEFAULT_HISTORY_WINDOW_HOURS } from "./historyWindow";
 
-// P0 5ebd2aff — cold-load hydration lifecycle (see NotificationStore.historyHydrationState).
+/** The cold-load lifecycle of the history: idle, loading, done or failed. */
 export type HistoryHydrationState = "idle" | "loading" | "done" | "failed";
 
 // A rejection reason as a human-readable string (Error → message; anything else → String).
@@ -139,6 +139,7 @@ function describeRejection(reason: unknown): string {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The notifications the page shows: the active list, the history and the unread count. */
 export interface NotificationStore {
   /** Active notifications (not expired, not in history). */
   list(): ReadonlyArray<Notification>;
@@ -253,6 +254,7 @@ export interface NotificationStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createNotificationStore`: bus, storage, test hooks and the admin flag. */
 export interface NotificationStoreOptions {
   bus     : EventBus;
   storage : StorageService;
@@ -1055,6 +1057,7 @@ class NotificationStoreImpl implements NotificationStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a notification store from its options. */
 export function createNotificationStore(opts: NotificationStoreOptions): NotificationStore {
   return new NotificationStoreImpl(opts);
 }

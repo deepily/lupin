@@ -79,6 +79,7 @@ import { createQaStore, type QaStore } from "./QaStore";
 import { createSubmitJobsStore, type SubmitJobsStore, type SubmitJobsApiClient } from "./SubmitJobsStore";
 import { createTtsQueueStore } from "./TtsQueueStore";
 
+/** The set of stores that `createStores` builds, by name. */
 export interface StoreSet {
   notifications  : NotificationStore;
   senders        : SenderStore;
@@ -145,6 +146,7 @@ export interface StoreSet {
   ttsQueue       : TtsQueueStore;
 }
 
+/** Options for `createStores`: the bus, the storage service, the API client and store hooks. */
 export interface CreateStoresOptions {
   eventBus            : EventBus;
   // Row aa13fdd7 — the TTS preview fraction in force NOW, for TtsQueueStore's
