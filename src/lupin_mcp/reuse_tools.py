@@ -1330,8 +1330,8 @@ def replay_impl( rid, ctx, repeat=0 ):
           CACHE_MISSING, CACHE_CORRUPT
         - a read_capability receipt has no re-run: frozen and head are None
         - repeat is a whole number of 0 or more; 0 is the replay above, and a cached answer is read as before
-        - repeat n of 1 or more asks the HEAD run again under keys that hold n, so it is a new draw and is
-          cached under that key; the frozen re-run and the stored receipt are unchanged, and no receipt is written
+        - repeat n of 1 or more asks the HEAD run again under replay keys that hold n, a shape of their own that no
+          flip or stage-1 key equals, so it is a new draw and is cached under that key; the frozen re-run and the stored receipt are unchanged, and no receipt is written
         - a repeat of 1 or more on an unpacked context returns error REPEAT_NEEDS_PACKED_CONTEXT, and a repeat
           that is not a whole number of 0 or more returns error REPEAT_OUT_OF_RANGE, before anything is read
     """
@@ -1378,8 +1378,8 @@ def replay_impl( rid, ctx, repeat=0 ):
         if repeat:
             from lupin_mcp import reuse_flip                                                      # imported here: it imports this module
             head_ctx        = copy.copy( ctx )
-            head_ctx.sweeper = reuse_flip.repeat_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
-            if question == "provides": head_ctx.pair_sweeper = reuse_flip.repeat_pair_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
+            head_ctx.sweeper = reuse_flip.replay_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
+            if question == "provides": head_ctx.pair_sweeper = reuse_flip.replay_pair_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
         head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }

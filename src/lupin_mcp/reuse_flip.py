@@ -67,6 +67,50 @@ def repeat_pair_sweeper( size, workers, run_index, breaker=None ):
     return sweeper
 
 
+def replay_sweeper( size, workers, run_index, breaker=None ):
+    """
+    Build a packed sweeper for a replay repeat, keyed apart from the measurement arms.
+
+    Requires:
+        - size and workers are in range for sweep_packed
+        - run_index is a whole number of 1 or more
+    Ensures:
+        - returns a function with sweep's signature
+        - answers are cached under replay keys, so a replay repeat never reads a flip or stage-1 answer, nor the production answers
+        - the same run_index asked again is a cache hit and sends nothing
+    Raises:
+        - ValueError for a size, worker count or run_index out of range, before anything is sent
+    """
+    rp._check_sweep_args( size, workers, "replay", run_index )
+
+    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="replay", run_index=run_index, template=template, model=model,
+                                frozen=frozen, gaps=gaps, breaker=breaker )
+
+    return sweeper
+
+
+def replay_pair_sweeper( size, workers, run_index, breaker=None ):
+    """
+    Build a pair sweeper for a replay repeat, keyed apart from measurement.
+
+    Requires:
+        - size and workers are in range for sweep_packed; run_index is a whole number of 1 or more
+    Ensures:
+        - returns a function with sweep's signature that sweeps in the pair kind under replay keys
+        - a key of this sweeper never equals the production pair key, nor a measurement repeat's
+    Raises:
+        - ValueError for a size, worker count or run_index out of range, before anything is sent
+    """
+    rp._check_sweep_args( size, workers, "replay", run_index, "pair" )
+
+    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="replay", run_index=run_index, template=template, model=model,
+                                frozen=frozen, gaps=gaps, breaker=breaker, kind="pair" )
+
+    return sweeper
+
+
 def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route="full", question="choice" ):
     """
     Ask one need once, as repeat number run_index, with the member left out.

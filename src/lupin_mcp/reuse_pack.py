@@ -18,7 +18,7 @@ KEY_PREFIX      = "q_"
 WORKERS_MIN     = 4
 WORKERS_MAX     = 8
 WORKERS_DEFAULT = 6
-KEY_MODES       = ( "candidate", "stage1" )
+KEY_MODES       = ( "candidate", "stage1", "replay" )
 PAIR_FIELDS     = frozenset( ( "provides", "coverage", "score", "confidence", "probabilities" ) )
 KINDS           = ( "choice", "pair" )                        # the three-way Choice, or the Noul and Score question
 
@@ -93,6 +93,18 @@ def stage1_key( need, text, pack_size, run_index, template=rt.PROMPT_TEMPLATE, m
                                    "candidate": text, "pack_size": pack_size, "run_index": run_index } ) )
 
 
+def replay_key( need, text, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL ):
+    """
+    Key one candidate's answer in a replay repeat.
+
+    Ensures:
+        - the key holds the candidate key's fields and the repeat number under its own field name
+        - it never equals the candidate key, nor a measurement arm's key (which holds pack_size and run_index), nor another repeat's
+    """
+    return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need,
+                                   "candidate": text, "replay": run_index } ) )
+
+
 def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL ):
     """
     Key one candidate's answer wherever it was packed.
@@ -103,7 +115,7 @@ def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL )
     return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need, "candidate": text } ) )
 
 
-def pair_key( need, text, model=rt.JEV_MODEL, run_index=None ):
+def pair_key( need, text, model=rt.JEV_MODEL, run_index=None, replay=None ):
     """
     Key one candidate's two-question answer wherever it was packed.
 
@@ -111,10 +123,12 @@ def pair_key( need, text, model=rt.JEV_MODEL, run_index=None ):
         - the key holds the pair shape, model, the pair template's hash, need and candidate text, and no pack
         - it never equals the key of the three-way question for the same need and text
         - with a run_index the key also holds it, so a measurement repeat never reads another repeat's answer or the production answer
-        - without a run_index the key is the one it always was
+        - with replay the key holds the repeat number under its own field name, so it never equals a measurement repeat's key
+        - without a run_index or replay the key is the one it always was
     """
     record = { "shape": rpr.SHAPE, "model": model, "template": rpr.template_hash(), "need": need, "candidate": text }
     if run_index is not None: record[ "run_index" ] = run_index
+    if replay is not None: record[ "replay" ] = replay
     return rt.sha( rt.canonical( record ) )
 
 
@@ -256,7 +270,7 @@ def _check_sweep_args( size, workers, key_mode, run_index, kind="choice" ):
     if type( size ) is not int or size < 1: raise ValueError( f"size must be a positive integer, got {size!r}" )
     if type( workers ) is not int or not WORKERS_MIN <= workers <= WORKERS_MAX: raise ValueError( f"workers must be an integer from {WORKERS_MIN} to {WORKERS_MAX}, got {workers!r}" )
     if key_mode not in KEY_MODES: raise ValueError( f"key_mode must be one of {KEY_MODES}, got {key_mode!r}" )
-    if key_mode == "stage1" and ( type( run_index ) is not int or run_index < 1 ): raise ValueError( f"a stage1 sweep needs a run_index of 1 or more, got {run_index!r}" )
+    if key_mode in ( "stage1", "replay" ) and ( type( run_index ) is not int or run_index < 1 ): raise ValueError( f"a {key_mode} sweep needs a run_index of 1 or more, got {run_index!r}" )
 
 
 def _entry_response( fields, row ):
@@ -289,6 +303,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - workers is from WORKERS_MIN to WORKERS_MAX
         - key_mode "candidate" keys each answer by need and candidate text alone; "stage1" adds the pack size and
           the run index, so a measurement arm never reads another arm's answers or the production answers
+          "replay" keys by need, candidate text and the repeat number under its own field, so a replay repeat reads
+          neither a measurement arm's answers nor the production answers
         - when frozen, no transport is used and every answer must already be cached, except the ids in `gaps`
         - budget, when not passed, is ctx.run_budget when a driver set one, else the live transport's own; a stand-in transport has none of its own
         - kind "pair" asks the Noul and Score question; its key is the candidate key, or with key_mode "stage1" the candidate key plus
@@ -320,7 +336,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
 
     def key_of( rec ):
         text = rt.entry_text( rec )
-        if kind == "pair": return pair_key( need, text, model, run_index if key_mode == "stage1" else None )
+        if kind == "pair": return pair_key( need, text, model, run_index if key_mode == "stage1" else None, run_index if key_mode == "replay" else None )
+        if key_mode == "replay": return replay_key( need, text, run_index, template, model )
         return candidate_key( need, text, template, model ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model )
 
     state, misses = {}, []                                          # state maps an entry id to its answer, or to ( "failed" | "not_reached" )
