@@ -122,7 +122,12 @@ export interface NewTicketCardHandle {
 
 /** Turn the form's fields into the POST body, or return the reason they cannot be sent. */
 export declare function buildNewTicketPayload( fields: Record<string, unknown> ): NewTicketBuild;
-/** Read the server's `detail` from a response body or text as one string, or "" when none. */
+/**
+ * Read the server's `detail` from a response body or text as one string.
+ *
+ * A string `detail` comes back unchanged and an error list has its messages joined.
+ * Text that is not JSON comes back trimmed. Anything else gives "".
+ */
 export declare function detailFrom( bodyOrText: unknown ): string;
 /** Turn a create response's status and body into an outcome state and the sentence to show. */
 export declare function describeNewTicketResult( status: number, bodyOrText: unknown ): NewTicketOutcome;

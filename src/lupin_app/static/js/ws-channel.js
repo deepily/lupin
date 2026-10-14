@@ -21,7 +21,7 @@
 /**
  * The six connection states a channel can be in, as frozen string values.
  *
- * A channel starts in `DISCONNECTED` and stays in `OPEN_CIRCUIT` until `manualRetry()` is called.
+ * A channel starts in `DISCONNECTED`. It stays in `OPEN_CIRCUIT` until `manualRetry()` or `close()` is called.
  * Consumers compare against these values instead of writing the strings.
  */
 export const STATE = Object.freeze( {
