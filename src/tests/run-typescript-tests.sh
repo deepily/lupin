@@ -298,6 +298,7 @@ jstest_slice_exec timeout "$TS_TIMEOUT_SECS" npx c8 \
     --include='src/lupin_app/static/js/diagnostic/**/*.ts' \
     --include='src/scripts/ts_doc_extract.mjs' \
     --include='src/scripts/ts_export_extract.mjs' \
+    --include='src/cosa/repo/symindex/ts_extract.js' \
     --exclude='**/*.test.ts' \
     --exclude='**/boot.ts' \
     --exclude='**/types.ts' \

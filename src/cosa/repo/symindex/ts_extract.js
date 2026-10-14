@@ -73,7 +73,7 @@ function fnName( n, sf ) {
     if ( ts.isConstructorDeclaration( n ) ) return "constructor";
     if ( n.name ) return n.name.getText( sf );
     const p = n.parent;
-    if ( p && ( ts.isVariableDeclaration( p ) || ts.isPropertyAssignment( p ) || ts.isPropertyDeclaration( p ) ) && p.name ) return p.name.getText( sf );
+    if ( ts.isVariableDeclaration( p ) || ts.isPropertyAssignment( p ) || ts.isPropertyDeclaration( p ) ) return p.name.getText( sf );
     return null;
 }
 
