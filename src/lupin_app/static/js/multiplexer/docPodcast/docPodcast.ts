@@ -64,6 +64,12 @@ export interface DocPodcast {
   state : () => PodcastState;
 }
 
+/** The start endpoint's answer: a job id, or a refusal that may name a running job. */
+interface StartBody {
+  job_id? : string;
+  detail? : { job_id?: string; message?: string };
+}
+
 /** The browser window's two members this module reads. */
 export interface DocWindowLike {
   __docViewerAuthedFetch? : ( url: string, init: RequestInit ) => Promise<Response>;
@@ -128,14 +134,14 @@ export function createDocPodcast( deps: DocPodcastDeps ): DocPodcast {
     state = "posting";
     ( el( IDS.yes ) as HTMLButtonElement ).disabled = true;
     say( "Starting the podcast…" );
-    let outcome: { ok: boolean; status: number; body: any };
+    let outcome: { ok: boolean; status: number; body: StartBody | null };
     try {
       const response = await deps.authedFetch( START_URL, {
         method  : "POST",
         headers : { "Content-Type": "application/json" },
         body    : JSON.stringify( { path: deps.path } ),
       } );
-      outcome = { ok: response.ok, status: response.status, body: await readJson( response ) };
+      outcome = { ok: response.ok, status: response.status, body: ( await readJson( response ) ) as StartBody | null };
     } catch {
       outcome = { ok: false, status: 0, body: null };
     }
@@ -144,11 +150,11 @@ export function createDocPodcast( deps: DocPodcastDeps ): DocPodcast {
     if ( outcome.ok ) {
       state = "done";
       ( el( IDS.button ) as HTMLButtonElement ).disabled = true;
-      say( `Podcast queued: job ${outcome.body.job_id}`, true );
+      say( `Podcast queued: job ${outcome.body?.job_id}`, true );
     } else if ( outcome.status === 409 && outcome.body?.detail?.job_id ) {
       state = "done";
       ( el( IDS.button ) as HTMLButtonElement ).disabled = true;
-      say( `Already started: job ${outcome.body.detail.job_id}`, true );
+      say( `Already started: job ${outcome.body?.detail?.job_id}`, true );
     } else {
       state = "ready";
       say( outcome.status === 0 ? "Could not reach the server." : refusalText( outcome.status, outcome.body ) );
