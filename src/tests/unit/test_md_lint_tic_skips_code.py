@@ -64,3 +64,23 @@ def test_a_span_between_two_halves_of_a_word_does_not_join_them():
 def test_prose_after_a_double_backtick_span_is_still_refused():
     found = _tics( "Label ``genuinely-new`` is genuinely useful.\n" )
     assert [ f.line for f in found ] == [ 1 ] and len( found ) == 1
+
+
+def test_backtick_runs_of_different_lengths_do_not_pair_one_then_two():
+    assert len( _tics( "` genuinely ``\n" ) ) == 1
+
+
+def test_a_lone_backtick_after_a_closed_span_does_not_open_a_span():
+    assert len( _tics( "`x` genuinely `\n" ) ) == 1
+
+
+def test_two_then_one_do_not_pair():
+    assert len( _tics( "`` genuinely `\n" ) ) == 1
+
+
+def test_a_single_backtick_closes_the_span_it_opened_not_a_later_one():
+    assert len( _tics( "`a` genuinely `b`\n" ) ) == 1
+
+
+def test_a_stray_backtick_pair_is_read_from_its_single_backtick():
+    assert _tics( "a ``x` genuinely `y`\n" ) == []
