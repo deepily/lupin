@@ -1,6 +1,6 @@
 ---
 capability: xml-io-models
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.agents.io_models.utils.util_xml_pydantic.BaseXMLModel@887c5745e8
   - cosa.agents.io_models.utils.util_xml_pydantic.BaseXMLModel.from_xml@ca0234c9fa

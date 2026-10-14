@@ -1,6 +1,6 @@
 ---
 capability: web-client-task-board-panes
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.TaskListRenderer.TaskListRendererImpl@588e84c5c2
   - src.lupin_app.static.js.multiplexer.render.HoldingAreaRenderer.HoldingAreaRendererImpl@229b2b620f

@@ -1,6 +1,6 @@
 ---
 capability: scheduled-test-suite
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.agents.test_suite.job.TestSuiteJob@ff64d1ba50
   - cosa.agents.test_suite.job.TestSuiteJob.do_all@e22090c710

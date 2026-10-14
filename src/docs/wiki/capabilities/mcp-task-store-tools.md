@@ -1,6 +1,6 @@
 ---
 capability: mcp-task-store-tools
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - lupin_mcp.task_store_tools.task_store_request@ea2417cc5d
   - lupin_mcp.task_store_tools.task_transition_impl@ddb8c478ae

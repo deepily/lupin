@@ -1,6 +1,6 @@
 ---
 capability: deep-research-door
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.routers.deep_research.submit_research@0c97df1d19
   - cosa.rest.routers.deep_research.get_report@f4720e70da

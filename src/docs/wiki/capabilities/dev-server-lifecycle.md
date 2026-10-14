@@ -1,6 +1,6 @@
 ---
 capability: dev-server-lifecycle
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.venue_idle.decide@1e8a175b8c
   - cosa.rest.venue_idle.read_signals@a2e28b041f

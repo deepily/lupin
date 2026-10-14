@@ -1,6 +1,6 @@
 ---
 capability: agentic-job-contract
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.agents.agentic_job_base.AgenticJobBase@028ecca7ff
   - cosa.agents.agentic_job_base.AgenticJobBase.__init__@c9e3ac2365

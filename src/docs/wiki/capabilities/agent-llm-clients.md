@@ -1,6 +1,6 @@
 ---
 capability: agent-llm-clients
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.agents.llm_client_factory.LlmClientFactory@5d763bec1a
   - cosa.agents.llm_client_factory.LlmClientFactory.get_client@cf9b95d876

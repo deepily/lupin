@@ -1,6 +1,6 @@
 ---
 capability: solution-memory
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.memory.solution_snapshot.SolutionSnapshot@665a0d4e25
   - cosa.memory.snapshot_manager_interface.SolutionSnapshotManagerInterface@4420372f1f

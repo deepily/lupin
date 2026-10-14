@@ -1,8 +1,8 @@
 ---
 capability: symbol-index
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
-  - cosa.repo.symindex.__main__.main@6681909677
+  - cosa.repo.symindex.__main__.main@747477714d
   - cosa.repo.symindex.build.build@09e95fcde0
   - cosa.repo.symindex.build.is_fresh@000012c2c9
   - cosa.repo.symindex.build.ensure@2bd7e42472
@@ -35,6 +35,6 @@ pins:
 
 ## Failures and callers
 - `build` exits 3 when any tool is missing, such as node, TypeScript or the Dart analyzer, and the index is built without it. A Python or Dart file that will not parse is listed in `unparsed` and skipped.
-- If node itself fails, `build` crashes with a traceback. `fresh` exits 1 when stale. `dups` and `lint` exit 1 when they find something.
+- If node itself fails, `build` crashes with a traceback. `fresh` exits 1 when stale. `lint` exits 1 on a finding. `dups` reads Python and script files, private and nested ones included (`--public-only` drops them), and leaves out bodies under 25 nodes. `dups` exits 1 on a finding. With node or the compiler missing it reports Python only, names the tool in `provenance.missing_dependencies` and exits 3.
 - `reuse_tools.prepare` is the one runtime reader, through the MCP tools. It calls `ensure` and answers `INDEX_STALE` if that raises.
 - No INI key and no hook uses the index. The environment variables `LUPIN_REUSE_DATA_DIR` and `LUPIN_REUSE_OUT_DIR` move its folders for the reuse tools only. The CLI uses `--out`.

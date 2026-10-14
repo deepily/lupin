@@ -1,6 +1,6 @@
 ---
 capability: cc-hooks-heartbeat
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.heartbeat_decision.decide_heartbeat@0a25f3eecf
   - lupin_cli.claude_code.hooks.lib.heartbeat_hold.is_honored@7ea3872543

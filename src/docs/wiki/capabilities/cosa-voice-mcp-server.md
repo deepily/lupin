@@ -1,6 +1,6 @@
 ---
 capability: cosa-voice-mcp-server
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - lupin_mcp.cosa_voice_mcp.converse@e80eac9a7e
   - lupin_mcp.cosa_voice_mcp.ask_yes_no@9b3e0b6f3e

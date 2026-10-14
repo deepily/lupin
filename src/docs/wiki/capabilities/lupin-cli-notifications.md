@@ -1,6 +1,6 @@
 ---
 capability: lupin-cli-notifications
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - lupin_cli.notifications.notify_user_sync.notify_user_sync@a525efb30f
   - lupin_cli.notifications.notify_user_sync.HumanAskInTestError@c2a71f5afa

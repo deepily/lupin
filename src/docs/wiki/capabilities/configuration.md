@@ -1,6 +1,6 @@
 ---
 capability: configuration
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.config.configuration_manager.singleton@1206695711
   - cosa.config.configuration_manager.ConfigurationManager.__init__@06546422b1

@@ -1,6 +1,6 @@
 ---
 capability: session-transcript-console
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.cc_transcript_mapper.map_records@98ee5b4526
   - cosa.rest.cc_transcript_tailer.CcTranscriptTailer@d8e0b02bef

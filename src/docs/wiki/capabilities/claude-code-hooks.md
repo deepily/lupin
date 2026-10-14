@@ -1,6 +1,6 @@
 ---
 capability: claude-code-hooks
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.register_session.main@f7a90a1c55
   - lupin_cli.claude_code.hooks.stop.main@9c612736e2

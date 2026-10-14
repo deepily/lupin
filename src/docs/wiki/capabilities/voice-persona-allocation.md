@@ -1,6 +1,6 @@
 ---
 capability: voice-persona-allocation
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.voice_persona_helpers.load_persona_pool_from_config@3194ca9821
   - cosa.rest.voice_persona_helpers.pick_unallocated_persona@3a5cf8dba3

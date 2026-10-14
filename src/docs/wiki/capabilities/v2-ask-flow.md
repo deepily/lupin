@@ -1,6 +1,6 @@
 ---
 capability: v2-ask-flow
-pin_algorithm: py3.13.xf75af6/ts5.9.3
+pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.v2.flow.AskFlow.ask@57c5527ac0
   - cosa.rest.v2.flow.AskFlow.submit@76e1b6886f
