@@ -45,6 +45,11 @@ interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
 }
 
+/**
+ * Marks the pinned conversation-mode sender card and flashes it when the pin moves.
+ *
+ * It reads the sender store and writes data attributes that the stylesheet turns into the glow.
+ */
 export interface ConversationModePinRenderer {
   /** Attach to a root DOM node and start subscribing to store events. */
   mount( root: HTMLElement ): void;
@@ -54,6 +59,11 @@ export interface ConversationModePinRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createConversationModePinRenderer`.
+ *
+ * The bus and the sender store are required. The flash duration and timer hooks are for tests.
+ */
 export interface ConversationModePinRendererOptions {
   eventBus         : EventBus;
   stores           : { senders: SenderStoreLike };

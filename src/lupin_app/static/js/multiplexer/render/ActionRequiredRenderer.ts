@@ -73,6 +73,11 @@ import type { PredictionVoteIntegration } from "./templates/predictionVoteContro
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/**
+ * The slice of the action-required store the renderer uses.
+ *
+ * It is the list, respond, pause and step recording.
+ */
 export interface ActionRequiredStoreLike {
   /** Arrival order: the first item is the active card, the rest are queued. */
   list(): ReadonlyArray<ActionRequiredItem>;
@@ -84,14 +89,21 @@ export interface ActionRequiredStoreLike {
   recordStep(idHash: string, step: MultipleChoiceStep): void;
 }
 
-// Parity A-2 #2f — carbon copies of legacy's card header (`renderActionRequiredNotification`,
-// `updatePauseButtonUI`, `showGracePeriodMessage`). The "(P)" names the key A-2 #2h wires.
+/**
+ * The glyph on the pause button while the card runs.
+ *
+ * The button shows `AR_RESUME_GLYPH` while the card is paused.
+ */
 export const AR_PAUSE_GLYPH    = "\u23F8\uFE0F";
+/** The glyph the pause button shows while the card is paused. */
 export const AR_RESUME_GLYPH   = "\u25B6\uFE0F";
+/** The title of the pause button while the card runs. */
 export const AR_PAUSE_TITLE    = "Pause timer and audio (P)";
+/** The title of the pause button while the card is paused. */
 export const AR_RESUME_TITLE   = "Resume timer and audio (P)";
+/** The message shown under the card header while the card is paused. */
 export const AR_PAUSED_MESSAGE = "\u23F8\uFE0F Paused \u2013 5-minute grace period added";
-// Parity A-2 #2g — the ✕. "(Esc)" names the key A-2 #2h wires.
+/** The title of the ✕ button, which answers the card with its default. */
 export const AR_CANCEL_TITLE   = "Cancel and use default (Esc)";
 
 /**
@@ -106,10 +118,16 @@ export function arProgressPercent(remainingMs: number, timeoutMs: number): numbe
   return Math.min(100, Math.max(0, (remainingMs / timeoutMs) * 100));
 }
 
+/** The stores the renderer reads: only the action-required store. */
 export interface ActionRequiredRendererStores {
   actionRequired: ActionRequiredStoreLike;
 }
 
+/**
+ * The renderer of the action-required pane.
+ *
+ * `mount` claims the pane from the read-only list and `unmount` releases it.
+ */
 export interface ActionRequiredRenderer {
   /**
    * Mount onto `root`. Sets `root.dataset.phase6bOwner = "true"` BEFORE any
@@ -126,6 +144,11 @@ export interface ActionRequiredRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createActionRequiredRenderer`.
+ *
+ * The bus and the store are required. The section reveal, recorder, auth token and vote bridge are optional.
+ */
 export interface ActionRequiredRendererOptions {
   eventBus : EventBus;
   stores   : ActionRequiredRendererStores;
@@ -789,6 +812,7 @@ function cssEscape(value: string): string {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build the renderer. It paints and subscribes to nothing until `mount()` is called. */
 export function createActionRequiredRenderer(opts: ActionRequiredRendererOptions): ActionRequiredRenderer {
   return new ActionRequiredRendererImpl(opts);
 }

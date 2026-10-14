@@ -73,6 +73,11 @@ export const FINISHED_SENTINELS = Object.freeze( {
   partial    : "⚠️ Partial result — at least one status failed to load. The rows below are incomplete.",
 } );
 
+/**
+ * The slice of the finished-tasks store the renderer uses.
+ *
+ * It is the events, the measured statuses, the error, the window and refresh.
+ */
 export interface FinishedTasksStoreLike {
   eventsByStatus(): FinishedEventsByStatus;
   measuredStatuses(): ReadonlyArray<string>;
@@ -82,12 +87,22 @@ export interface FinishedTasksStoreLike {
   refresh(): Promise<void>;
 }
 
+/**
+ * The Finished Tasks pane.
+ *
+ * It shows a count chip, status pills, a window slider and the finished rows.
+ */
 export interface FinishedTasksRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createFinishedTasksRenderer`.
+ *
+ * The bus and the store are required. The clock, storage and view state are optional.
+ */
 export interface FinishedTasksRendererOptions {
   eventBus   : EventBus;
   store      : FinishedTasksStoreLike;
@@ -409,6 +424,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build the renderer. It paints nothing until `mount()` is called. */
 export function createFinishedTasksRenderer( opts: FinishedTasksRendererOptions ): FinishedTasksRenderer {
   return new FinishedTasksRendererImpl( opts );
 }

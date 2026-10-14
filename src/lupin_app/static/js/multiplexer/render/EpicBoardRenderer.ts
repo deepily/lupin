@@ -60,10 +60,17 @@ import {
  * a stale epic invites a decision about work that has already moved.
  */
 export const EPIC_BOARD_SIGNIN_MESSAGE = "🔒 Sign-in required.";
+/** The message shown when the shared task-list query script did not load. */
 export const EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE =
   "🧩 Task-list query did not load — /static/js/shared/task-list-query.js is missing or failed to parse. This is a deploy problem, not a store outage.";
+/** The message shown when the task store is unreachable, so the pane shows no rows. */
 export const EPIC_BOARD_UNREACHABLE_MESSAGE = "⚠️ Store unreachable — showing nothing rather than something stale.";
 
+/**
+ * The slice of the task list store the epic board uses.
+ *
+ * It is the composite, the two reads and the row writes.
+ */
 export interface EpicBoardTaskStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -74,6 +81,11 @@ export interface EpicBoardTaskStoreLike {
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
+/**
+ * The epic board pane, which groups the task list's rows by epic.
+ *
+ * It shares the task list's store and makes no fetch of its own.
+ */
 export interface EpicBoardRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -84,6 +96,7 @@ export interface EpicBoardRenderer {
   forceRenderForTesting(): void;
 }
 
+/** Options for `createEpicBoardRenderer`: the bus, the shared task store and optional hooks. */
 export interface EpicBoardRendererOptions {
   eventBus   : EventBus;
   /** The TASK LIST's store — shared on purpose; this pane never fetches. */
@@ -510,6 +523,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
+/** Build the renderer. It paints nothing until `mount()` is called. */
 export function createEpicBoardRenderer( opts: EpicBoardRendererOptions ): EpicBoardRenderer {
   return new EpicBoardRendererImpl( opts );
 }

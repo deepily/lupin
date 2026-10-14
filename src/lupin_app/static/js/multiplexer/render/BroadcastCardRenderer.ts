@@ -33,18 +33,26 @@ import { insertTranscriptionText } from "./insertTranscriptionText";
 import { renderBroadcastCard } from "./templates/broadcastCard";
 import type { BroadcastAckTallyRenderer } from "./BroadcastAckTallyRenderer";
 
-// Minimal recorder surface the renderer depends on (injectable for tests).
+/** The slice of the recording manager the card uses to dictate: start and stop a recording. */
 export interface BroadcastRecorderLike {
   startRecording( opts: RecordingManagerStartOptions ): Promise<void>;
   stopRecording( contextId: string ): Promise<void>;
 }
 
-// The ApiClient capabilities the card needs: the active-sessions GET (via the
-// store) + the broadcast POST. Narrow so tests stub only what they exercise.
+/**
+ * The API calls the card needs.
+ *
+ * They are the active-sessions read, which the store makes, and the broadcast post.
+ */
 export interface BroadcastCardApiClient extends BroadcastSessionsApiClient {
   broadcastToCcSessions( req: BroadcastRequest ): Promise<BroadcastResult>;
 }
 
+/**
+ * The renderer of the broadcast compose card.
+ *
+ * It wires the recipient chips, the dictation button and the confirm-then-send flow.
+ */
 export interface BroadcastCardRenderer {
   /** Build the card into `root` + wire behavior. Throws on a 2nd mount. */
   mount( root: HTMLElement ): void;
@@ -54,6 +62,7 @@ export interface BroadcastCardRenderer {
   forceRenderForTesting(): void;
 }
 
+/** Options for `createBroadcastCardRenderer`: the bus, the store, the API and optional hooks. */
 export interface BroadcastCardRendererOptions {
   eventBus      : EventBus;
   store         : BroadcastStore;
@@ -676,6 +685,11 @@ function errorMessage( err: unknown ): string {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It throws when `store` is missing, and paints nothing until `mount()` is called.
+ */
 export function createBroadcastCardRenderer( opts: BroadcastCardRendererOptions ): BroadcastCardRenderer {
   return new BroadcastCardRendererImpl( opts );
 }

@@ -57,8 +57,14 @@ const MODE_DISPLAY: Readonly<Record<NotificationFilterMode, string>> = {
 // than repeating the literal. Two copies of one id is the hand-list hazard this codebase
 // keeps paying for: B-0 renamed this pane and the cold-hidden set kept the old spelling,
 // which is how row cec9dd43 started.
+/** The DOM id of the Queue Filter Settings pane. Other modules use it to find the pane. */
 export const SECTION_ID = "filter-settings-pane";
 
+/**
+ * The admin-only Queue Filter Settings pane.
+ *
+ * It holds the view-mode switch and the line that names the mode in force.
+ */
 export interface FilterSettingsRenderer {
   /** Build the pane into `root` and subscribe. Throws on a 2nd mount. */
   mount( root: HTMLElement ): void;
@@ -71,6 +77,11 @@ export interface FilterSettingsRenderer {
   unmount(): void;
 }
 
+/**
+ * Options for `createFilterSettingsRenderer`.
+ *
+ * All four are required: the bus, the notification store, the view-state store and an admin check.
+ */
 export interface FilterSettingsRendererOptions {
   eventBus      : EventBus;
   store         : NotificationStore;
@@ -259,6 +270,7 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
+/** Build the renderer. It paints nothing until `mount()` is called. */
 export function createFilterSettingsRenderer(
   options: FilterSettingsRendererOptions,
 ): FilterSettingsRenderer {

@@ -72,6 +72,11 @@ interface TrackedEnvelope {
   ts           : number;
 }
 
+/**
+ * The panel that tallies which seats acknowledged a broadcast.
+ *
+ * `track` starts a tally and `dismiss` stops it.
+ */
 export interface BroadcastAckTallyRenderer {
   /** Build the tally into `root` and subscribe. Throws on a 2nd mount. */
   mount( root: HTMLElement ): void;
@@ -98,6 +103,11 @@ export interface BroadcastAckTallyRenderer {
   recipientsChanged( loaded?: boolean ): void;
 }
 
+/**
+ * Options for `createBroadcastAckTallyRenderer`.
+ *
+ * The bus, the ack store and the broadcast store are required. Timers, storage and the API are optional.
+ */
 export interface BroadcastAckTallyRendererOptions {
   eventBus        : EventBus;
   ackStore        : AckStore;
@@ -429,6 +439,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called, and tallies nothing until `track()` is called.
+ */
 export function createBroadcastAckTallyRenderer(
   options: BroadcastAckTallyRendererOptions,
 ): BroadcastAckTallyRenderer {

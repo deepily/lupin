@@ -47,8 +47,10 @@ type ResizeObserverCtorLike = new (cb: () => void) => ResizeObserverLike;
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/** The API client of the commons activity panel; it adds nothing to the history client. */
 export interface CommonsActivityApiClient extends CommonsHistoryApiClient {}
 
+/** The stores the panel reads: only the commons store. */
 export interface CommonsActivityRendererStores {
   commons : CommonsStore;
 }
@@ -72,6 +74,11 @@ export interface CommonsActivityRendererStores {
  */
 export const RECENT_ACTIVITY_ACCORDION_ID = "commons-recent-activity-body";
 
+/**
+ * Options for `createCommonsActivityRenderer`.
+ *
+ * The bus, the stores and the API are required. The timezone, frame hook and view state are optional.
+ */
 export interface CommonsActivityRendererOptions {
   eventBus     : EventBus;
   stores       : CommonsActivityRendererStores;
@@ -91,6 +98,11 @@ export interface CommonsActivityRendererOptions {
   viewState?   : AccordionCollapseStore;
 }
 
+/**
+ * The renderer of the commons Recent Activity panel.
+ *
+ * `mount` throws on a missing entries container or on a second call.
+ */
 export interface CommonsActivityRenderer {
   /** Attach to a root node. Throws on a missing entries container or a 2nd mount. */
   mount(root: HTMLElement): void;
@@ -510,6 +522,11 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It throws when `stores.commons` is missing, and paints nothing until `mount()` is called.
+ */
 export function createCommonsActivityRenderer(opts: CommonsActivityRendererOptions): CommonsActivityRenderer {
   return new CommonsActivityRendererImpl(opts);
 }

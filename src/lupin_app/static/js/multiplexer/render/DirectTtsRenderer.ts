@@ -66,6 +66,11 @@ export interface DirectTtsCache {
   checkCache( text: string ): Promise<Blob | null>;
 }
 
+/**
+ * The collaborators of the Direct TTS pane.
+ *
+ * They are the audio state, the cache, the two play paths and the log and error hooks.
+ */
 export interface DirectTtsRendererOptions {
   /** The page-wide audio state — the mode to speak in, and the halt (D3, D8). */
   audio        : DirectTtsAudioSurface;
@@ -83,6 +88,7 @@ export interface DirectTtsRendererOptions {
   errorFn      : ( message: string ) => void;
 }
 
+/** The Direct TTS Test pane, which speaks typed text and plays it from the cache when it can. */
 export interface DirectTtsRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -269,6 +275,7 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+/** Build the renderer. It paints nothing until `mount()` is called. */
 export function createDirectTtsRenderer( opts: DirectTtsRendererOptions ): DirectTtsRenderer {
   return new DirectTtsRendererImpl( opts );
 }

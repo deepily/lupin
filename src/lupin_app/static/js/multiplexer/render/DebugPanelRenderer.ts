@@ -46,11 +46,17 @@ export const DEBUG_LINE_CLASS = "debug-info";
  */
 export const DEBUG_SEEDED_CLASS = DEBUG_LINE_CLASS;
 
+/**
+ * The Debug Information panel: newest line first, capped at 20 lines, never opens itself.
+ *
+ * `mount` registers the panel as the debug sink and `unmount` clears it.
+ */
 export interface DebugPanelRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
 }
 
+/** Options for `createDebugPanelRenderer`: a clock for each line's timestamp. */
 export interface DebugPanelRendererOptions {
   /** Test injection — the clock for each line's timestamp. */
   nowDateFn? : () => Date;
@@ -179,6 +185,7 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+/** Build the panel renderer. It paints nothing until `mount()` is called. */
 export function createDebugPanelRenderer( opts: DebugPanelRendererOptions = {} ): DebugPanelRenderer {
   return new DebugPanelRendererImpl( opts );
 }
