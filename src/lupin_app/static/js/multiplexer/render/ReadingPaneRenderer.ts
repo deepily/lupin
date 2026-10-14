@@ -37,7 +37,11 @@ import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PRE
 import { buildConsolePageHref } from "../console/consolePageUrl";
 import { bindPodcastLinks } from "./podcastLinks";
 
-// Store surface this renderer drives (subset of ReadingPaneStore).
+/**
+ * The slice of the reading pane store the renderer drives.
+ *
+ * It is the layout, split ratio, current entry, open and back state, and the calls that change them.
+ */
 export interface ReadingPaneStoreLike {
   getLayoutMode(): LayoutMode;
   getSplitRatio(): number;
@@ -58,21 +62,24 @@ export interface ReadingPaneStoreLike {
   showReading(): boolean;
 }
 
-// WP5 lift/drain reads each item's `state` — ActionRequiredStore.list() retains
-// responded/expired/cancelled items in a TERMINAL state (it never removes
-// them), so a raw `.length` never drains. We filter to the still-blocking
-// states (pending / submitting / failed).
+/**
+ * The state of one action-required item.
+ *
+ * The store keeps finished items in a terminal state, so the pane counts only pending, submitting and failed ones.
+ */
 export interface ActionRequiredItemLike {
   state: string;
 }
+/** The slice of the action-required store the pane counts from: its list. */
 export interface ActionRequiredCountLike {
   list(): ReadonlyArray<ActionRequiredItemLike>;
 }
 
-// Minimal window surface for bust-out (dependency-injected for testing).
+/** The slice of the window the pane uses to open the bust-out page: `open`. */
 export interface WindowLike {
   open(url?: string, target?: string, features?: string): WindowDocLike | null;
 }
+/** The document of a window opened for bust-out: it can be opened, written and closed. */
 export interface WindowDocLike {
   document: {
     open(): void;
@@ -81,6 +88,11 @@ export interface WindowDocLike {
   };
 }
 
+/**
+ * The master-detail reading pane: chrome, content, splitter and layout toggle.
+ *
+ * `mount` takes the `.content-shell` root, which must hold the whole pane DOM.
+ */
 export interface ReadingPaneRenderer {
   /** Attach to the `.content-shell` root (must contain the full pane DOM). */
   mount( root: HTMLElement ): void;
@@ -90,6 +102,11 @@ export interface ReadingPaneRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createReadingPaneRenderer`.
+ *
+ * The bus and the two stores are required. Without `consoleSeat`, bust-out stays disabled while the console shows.
+ */
 export interface ReadingPaneRendererOptions {
   eventBus : EventBus;
   stores   : {
@@ -105,10 +122,11 @@ export interface ReadingPaneRendererOptions {
   consoleSeat? : () => string | null;
 }
 
-// Row 47759aa3 — the roots landing: /app/docs with NO ?path=. The doc viewer answers a
-// bare visit with the Roots panel expanded (Rick's ruling 2026-09-26, "A roots page, fully
-// open"), listing io/ plus every scope the LIVE /api/docs/scopes returns. No scope list
-// lives here, which is the whole point of bug 3d41fcba.
+/**
+ * The doc viewer's roots page: `/app/docs` with no `path` query.
+ *
+ * A bare visit lists every scope the live scope API returns.
+ */
 export const DOC_ROOTS_HREF = "/app/docs";
 const NAV_OFFSET_PX      = 100;   // nav strip height (legacy `:11140`)
 const TITLE_MAX          = 60;

@@ -29,24 +29,23 @@ import {
 } from "./templates/sectionToolbar";
 import { scrollRevealElement } from "./scrollReveal";
 
-// Minimal store surface this renderer needs (subset of ViewStateStore) — keeps
-// the unit test free to inject a fake.
-//
-// `hasSectionPreference` came OFF this surface on 2026-09-23 with the
-// cold-hidden default it served: with no cold default to override, "no
-// preference" and "persisted visible" want the same answer, and
-// `isSectionVisible` already gives it. The method remains on ViewStateStore
-// itself and now has no production caller.
+/** The slice of the view-state store the toolbar uses: read, write and the hidden list. */
 export interface ViewStateStoreLike {
   isSectionVisible(sectionId: string): boolean;
   setSectionVisible(sectionId: string, visible: boolean): void;
   getHiddenSectionIds(): string[];
 }
 
+/** The stores the toolbar uses: only the view-state store. */
 export interface SectionToolbarRendererStores {
   viewState : ViewStateStoreLike;
 }
 
+/**
+ * The section toolbar: one toggle button per section that shows or hides the section.
+ *
+ * `showSection` un-hides a section from code, saves the visibility and re-lights its button.
+ */
 export interface SectionToolbarRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -61,6 +60,11 @@ export interface SectionToolbarRenderer {
   showSection( sectionId: string ): void;
 }
 
+/**
+ * Options for `createSectionToolbarRenderer`.
+ *
+ * Only `stores` is required. The document and the toggle list are for tests.
+ */
 export interface SectionToolbarRendererOptions {
   stores : SectionToolbarRendererStores;
   // The document to query for section elements. Defaults to the ambient
@@ -250,6 +254,11 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSectionToolbarRenderer(
   opts: SectionToolbarRendererOptions,
 ): SectionToolbarRenderer {

@@ -41,15 +41,26 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
+/** The stores the submit pane uses: only the submit-jobs store. */
 export interface SubmitJobsPaneRendererStores {
   submitJobs : SubmitJobsStore;
 }
 
+/**
+ * The Submit Agentic Jobs pane: the CC, research, test suite and TFE cards.
+ *
+ * The first three are accordions that start collapsed. The TFE card has no toggle and is always open.
+ */
 export interface SubmitJobsPaneRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
 }
 
+/**
+ * Options for `createSubmitJobsPaneRenderer`.
+ *
+ * The bus and the stores are required. Without a mic handler the mic buttons do nothing. The alert hook is for tests.
+ */
 export interface SubmitJobsPaneRendererOptions {
   eventBus : EventBus;
   stores   : SubmitJobsPaneRendererStores;
@@ -409,6 +420,11 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSubmitJobsPaneRenderer(
   opts: SubmitJobsPaneRendererOptions,
 ): SubmitJobsPaneRenderer {

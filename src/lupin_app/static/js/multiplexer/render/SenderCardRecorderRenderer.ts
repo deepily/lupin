@@ -40,12 +40,22 @@ import type { StoreSendersChangedPayload } from "../shared/types";
 import { recordingManager } from "../audio/recordingManager";
 import { insertTranscriptionText } from "./insertTranscriptionText";
 
+/**
+ * The behavior of the voice input row on each sender card.
+ *
+ * The row holds the mic, send and conversation mode controls. The renderer clicks on rows that `senderCard.ts` already drew and builds no markup.
+ */
 export interface SenderCardRecorderRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSenderCardRecorderRenderer`.
+ *
+ * The bus and the current user's email are required. The auth token getter is optional.
+ */
 export interface SenderCardRecorderRendererOptions {
   eventBus         : EventBus;
   currentUserEmail : string;
@@ -402,6 +412,11 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSenderCardRecorderRenderer(
   opts: SenderCardRecorderRendererOptions,
 ): SenderCardRecorderRenderer {

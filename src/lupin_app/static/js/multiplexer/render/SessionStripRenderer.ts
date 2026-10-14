@@ -70,11 +70,24 @@ interface NotificationLookupLike {
 }
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
-// Row d04ff119 — legacy's keys, verbatim (notifications.js:214-215). The focus key
-// holds JSON `{"enabled":…,"focused_sender_id":…}`; the other "true" / "false".
+/**
+ * The storage key of the strip's focus state, shared with the legacy client.
+ *
+ * The value is JSON with `enabled` and `focused_sender_id`.
+ */
 export const FOCUS_STATE_KEY   = "notifications_cc_focus_state";
+/**
+ * The storage key of the hide-inactive toggle, shared with the legacy client.
+ *
+ * The value is the string `true` or `false`.
+ */
 export const HIDE_INACTIVE_KEY = "notifications_cc_hide_inactive_strip";
 
+/**
+ * The CC session strip: persona icons with a focus toggle and a hide-inactive toggle.
+ *
+ * `isCardFocusHidden` tells the list renderer whether focus hides a sender's card.
+ */
 export interface SessionStripRenderer {
   /** Attach to a root containing the four strip elements (see file header). */
   mount(root: HTMLElement): void;
@@ -90,6 +103,11 @@ export interface SessionStripRenderer {
   isCardFocusHidden(senderId: string | null): boolean;
 }
 
+/**
+ * Options for `createSessionStripRenderer`.
+ *
+ * The bus and the strip store are required. Without the notification lookup the unread badge never counts.
+ */
 export interface SessionStripRendererOptions {
   eventBus : EventBus;
   // `notifications` is optional so harnesses without it still mount; without it
@@ -542,6 +560,11 @@ function defaultStorage(): StorageLike | null {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSessionStripRenderer(opts: SessionStripRendererOptions): SessionStripRenderer {
   return new SessionStripRendererImpl(opts);
 }

@@ -97,7 +97,9 @@ export const SEEDED = Object.freeze( {
 
 /** The health line's four texts (S7), verbatim from notifications.js:1125-1160. */
 export const HEALTH_MONITORING = "Monitoring (90s interval)";
+/** The health line text after the renderer is unmounted. */
 export const HEALTH_STOPPED    = "Stopped";
+/** The health line text when the queue or the audio socket has failed. */
 export const HEALTH_CIRCUIT    = "Circuit open — click Retry-now";
 
 /** The Retry-now button's label, verbatim from the legacy banner's button. */
@@ -109,6 +111,11 @@ export const HEALTH_INTERVAL_MS = 90_000;
 /** How long the 📋 shows its checkmark before reverting (notifications.js:1607). */
 export const COPY_FEEDBACK_MS = 1_200;
 
+/**
+ * The System Status pane: socket pills, auth, session codes, health line, config reload.
+ *
+ * The ↻ button runs one refresh pass over all of them.
+ */
 export interface SystemStatusRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -116,6 +123,11 @@ export interface SystemStatusRenderer {
   refreshForTesting(): Promise<void>;
 }
 
+/**
+ * Options for `createSystemStatusRenderer`.
+ *
+ * The bus, auth, transports, session ids and the config reload call are required. The clock, clipboard and timer hooks are for tests.
+ */
 export interface SystemStatusRendererOptions {
   eventBus : EventBus;
   auth     : Pick<AuthManager, "getToken" | "getCurrentUserEmail" | "isCurrentUserAdmin">;
@@ -595,6 +607,11 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSystemStatusRenderer( opts: SystemStatusRendererOptions ): SystemStatusRenderer {
   return new SystemStatusRendererImpl( opts );
 }

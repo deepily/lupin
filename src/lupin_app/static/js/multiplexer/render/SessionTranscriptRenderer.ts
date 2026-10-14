@@ -32,6 +32,11 @@ import type { SessionTranscriptSnapshot, TranscriptBlock } from "../stores/Sessi
 import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 
+/**
+ * The slice of the transcript store the console uses.
+ *
+ * It is open, close, load earlier and the snapshot.
+ */
 export interface SessionTranscriptStoreLike {
   open( ccSessionId: string ): Promise<void>;
   close(): void;
@@ -39,6 +44,11 @@ export interface SessionTranscriptStoreLike {
   snapshot(): SessionTranscriptSnapshot;
 }
 
+/**
+ * The slice of the reading pane store the console uses.
+ *
+ * It is the pane content and the two calls that switch between the console and the reading stack.
+ */
 export interface ReadingPaneConsoleLike {
   getPaneContent(): PaneContent;
   showConsole( title: string ): boolean;
@@ -46,6 +56,11 @@ export interface ReadingPaneConsoleLike {
   showReading(): boolean;
 }
 
+/**
+ * The live console of one watched seat, painted inside the reading pane.
+ *
+ * Newest content is at the bottom. The list follows the live end until the reader scrolls up.
+ */
 export interface SessionTranscriptRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -67,6 +82,11 @@ export interface SessionTranscriptRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSessionTranscriptRenderer`.
+ *
+ * The bus, the transcript store and the reading pane store are required.
+ */
 export interface SessionTranscriptRendererOptions {
   eventBus : EventBus;
   stores   : {
@@ -262,6 +282,7 @@ export function describeState( snapshot: SessionTranscriptSnapshot ): string {
 const REFUSED_MESSAGES: ReadonlyMap<string, string> = new Map( [
   [ "not_found", "Session not found" ],
 ] );
+/** The status line for a refused watch whose reason is missing or unknown. */
 export const REFUSED_FALLBACK = "Watch refused";
 
 /**
@@ -322,6 +343,7 @@ function plain( text: string ): HTMLElement {
   return pre;
 }
 
+/** The label of a thinking block that came with no text. */
 export const UNRECORDED_THINKING_LABEL = "💭 thinking (not recorded)";
 
 function unrecordedThinking(): HTMLElement {
@@ -331,6 +353,7 @@ function unrecordedThinking(): HTMLElement {
   return label;
 }
 
+/** The label above the text of a thinking block that has text. */
 export const THINKING_LABEL = "💭 thinking";
 
 function inlineThinking( text: string ): HTMLElement {
@@ -352,6 +375,11 @@ function folded( label: string, text: string ): HTMLElement {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createSessionTranscriptRenderer( opts: SessionTranscriptRendererOptions ): SessionTranscriptRenderer {
   return new SessionTranscriptRendererImpl( opts );
 }

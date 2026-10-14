@@ -25,6 +25,11 @@
 
 import type { EventBus } from "../shared/EventBus";
 
+/**
+ * What the console buttons ask of the host.
+ *
+ * `resolve` names the seat for a card, `open` reports a click, and `showing` names the seat whose console is open.
+ */
 export interface SenderCardConsoleAffordance {
   /** The seat's FULL stable id, or null when this card offers no console. */
   resolve( senderId: string, personaName: string | null ): string | null;
@@ -34,6 +39,11 @@ export interface SenderCardConsoleAffordance {
   showing?(): string | null;
 }
 
+/**
+ * The console button in each sender card's title bar.
+ *
+ * It watches the card container and paints again when cards change, so a card with a resolved seat has one button.
+ */
 export interface SenderCardConsoleButtons {
   mount( container: HTMLElement ): void;
   unmount(): void;
@@ -41,6 +51,11 @@ export interface SenderCardConsoleButtons {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createSenderCardConsoleButtons`.
+ *
+ * The bus and the affordance are required. The observer constructor is for tests.
+ */
 export interface SenderCardConsoleButtonsOptions {
   eventBus    : EventBus;
   affordance  : SenderCardConsoleAffordance;
@@ -48,6 +63,7 @@ export interface SenderCardConsoleButtonsOptions {
   observerCtor? : typeof MutationObserver;
 }
 
+/** The class of the console button. A repaint uses it to find the buttons already drawn. */
 export const SENDER_CONSOLE_BUTTON_CLASS = "sender-console-btn";
 
 class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
@@ -149,6 +165,11 @@ function setPressed( btn: HTMLElement, pressed: boolean ): void {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.
+/**
+ * Build the renderer.
+ *
+ * It watches and paints nothing until `mount()` is called.
+ */
 export function createSenderCardConsoleButtons( opts: SenderCardConsoleButtonsOptions ): SenderCardConsoleButtons {
   return new SenderCardConsoleButtonsImpl( opts );
 }

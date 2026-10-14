@@ -52,7 +52,9 @@ export interface GlobalTimeSavedStats {
   top_solutions?: ReadonlyArray<TopSolution>;
 }
 
+/** The server path that returns the time-saved statistics. */
 export const TIME_SAVED_ENDPOINT        = "/api/stats/time-saved";
+/** The server path that returns the global time-saved statistics, read after the first. */
 export const TIME_SAVED_GLOBAL_ENDPOINT = "/api/stats/time-saved/global";
 
 /**
@@ -66,8 +68,14 @@ export const TIME_SAVED_PLACEHOLDER = "--";
 
 /** The leaderboard's two pre-row states (B10) — loading, then a measured empty. */
 export const TOP_SOLUTIONS_LOADING = "Loading...";
+/** The text the leaderboard shows when there are no replayed solutions. */
 export const TOP_SOLUTIONS_EMPTY   = "No replayed solutions yet";
 
+/**
+ * The Time Saved dashboard: four stat tiles and a leaderboard of top solutions.
+ *
+ * It fetches once at mount, and again only when the operator presses refresh.
+ */
 export interface TimeSavedRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -75,6 +83,11 @@ export interface TimeSavedRenderer {
   refreshForTesting(): Promise<void>;
 }
 
+/**
+ * Options for `createTimeSavedRenderer`.
+ *
+ * The API client is required. The log hook is for tests.
+ */
 export interface TimeSavedRendererOptions {
   api  : Pick<ApiClient, "get">;
   /** Test injection — where a failed read is reported. Defaults to the console. */
@@ -308,6 +321,11 @@ class TimeSavedRendererImpl implements TimeSavedRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
+/**
+ * Build the renderer.
+ *
+ * It fetches nothing until `mount()` is called.
+ */
 export function createTimeSavedRenderer( opts: TimeSavedRendererOptions ): TimeSavedRenderer {
   return new TimeSavedRendererImpl( opts );
 }

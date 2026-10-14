@@ -55,6 +55,11 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
+/**
+ * The slice of the task list store the renderer uses.
+ *
+ * It is the composite, two reads and the patch and transition writes. `refreshAfterWrite` is a read that begins after the caller's write.
+ */
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -76,12 +81,16 @@ export interface TaskListStoreLike {
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
-// The fleet store the owner-reassignment roster is sourced from (Phase 2 — the
-// SAME source the fleet-status card consumes). Only `composite()` is needed.
+/** The slice of the fleet store that supplies the owner roster: its composite. */
 export interface TaskListFleetLike {
   composite(): FleetComposite | null;
 }
 
+/**
+ * The stores the task list uses.
+ *
+ * The task list store is required. The fleet store fills the owner select. The holding area store lets the pane drop a note that repeats its header.
+ */
 export interface TaskListRendererStores {
   taskList : TaskListStoreLike;
   // Optional so read-only / legacy constructions still mount; when absent the
@@ -103,12 +112,22 @@ export interface TaskListHoldingAreaLike {
   composite(): TaskListComposite | null;
 }
 
+/**
+ * The Task List pane: open tasks grouped by owner, with row editing.
+ *
+ * When there is no table it shows a sign-in banner, an unreachable indicator over the last known rows, or a no-open-tasks message.
+ */
 export interface TaskListRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createTaskListRenderer`.
+ *
+ * The bus and the stores are required. The lookup, ticket post, request store and recorder hooks are optional.
+ */
 export interface TaskListRendererOptions {
   eventBus   : EventBus;
   stores     : TaskListRendererStores;
@@ -754,6 +773,11 @@ class TaskListRendererImpl implements TaskListRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createTaskListRenderer( opts: TaskListRendererOptions ): TaskListRenderer {
   return new TaskListRendererImpl( opts );
 }
