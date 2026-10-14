@@ -1,6 +1,6 @@
 ---
 capability: swe-team-orchestrator
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.swe_team.job.SweTeamJob@82140429b7
   - cosa.agents.swe_team.job.SweTeamJob.do_all@98c373ef75

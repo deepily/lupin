@@ -1,6 +1,6 @@
 ---
 capability: web-search-tools
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.tools.search_kagi.KagiSearch@eae03748e1
   - cosa.tools.search_kagi.KagiSearch.search_fastgpt@cee5e88ce4

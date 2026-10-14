@@ -1,6 +1,6 @@
 ---
 capability: shared-utilities
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.utils.util.get_project_root@ebedf9487b
   - cosa.utils.bounded_retry.retry_call@9fd1ae9583

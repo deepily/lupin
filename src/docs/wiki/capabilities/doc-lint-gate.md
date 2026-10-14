@@ -1,6 +1,6 @@
 ---
 capability: doc-lint-gate
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.repo.doc_lint.gate.main@85d8d6aeb8
   - cosa.repo.doc_lint.gate.collect@fc78335d8d

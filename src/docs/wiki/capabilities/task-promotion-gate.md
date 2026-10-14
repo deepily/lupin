@@ -1,6 +1,6 @@
 ---
 capability: task-promotion-gate
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.task_promotion_gate.approval_for_promotion@1eb657c43b
   - cosa.rest.task_promotion_gate.manager_refusal@02900f1468

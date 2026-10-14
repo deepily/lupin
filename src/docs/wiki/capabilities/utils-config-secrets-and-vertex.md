@@ -1,6 +1,6 @@
 ---
 capability: utils-config-secrets-and-vertex
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.utils.config_loader.get_api_config@f203b10f56
   - cosa.utils.config_loader.load_api_key@fa98e2e3d1

@@ -1,6 +1,6 @@
 ---
 capability: cc-session-bridge
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - lupin_cli.claude_code.hooks.lib.sessions_dir.sessions_dir@40d97ca400
   - lupin_cli.claude_code.hooks.lib.session_bridge.atomic_write_json@304ee933db

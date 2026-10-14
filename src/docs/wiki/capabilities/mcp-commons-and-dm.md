@@ -1,6 +1,6 @@
 ---
 capability: mcp-commons-and-dm
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - lupin_mcp.commons_store.CommonsStore@19c8089b56
   - lupin_mcp.commons_store.CommonsStore.post@b1c0fe5ff2

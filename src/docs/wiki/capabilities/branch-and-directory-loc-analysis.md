@@ -1,6 +1,6 @@
 ---
 capability: branch-and-directory-loc-analysis
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.repo.branch_analyzer.analyzer.BranchChangeAnalyzer@2a56d71cf4
   - cosa.repo.branch_analyzer.analyzer.BranchChangeAnalyzer.analyze@78c82fdf63

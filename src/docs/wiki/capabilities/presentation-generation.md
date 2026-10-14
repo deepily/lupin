@@ -1,6 +1,6 @@
 ---
 capability: presentation-generation
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.job.PresentationGeneratorJob@4b5a46a0ef
   - cosa.agents.presentation_generator.job.resolve_source_path@f8ce01e248

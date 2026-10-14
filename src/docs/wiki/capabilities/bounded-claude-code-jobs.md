@@ -1,6 +1,6 @@
 ---
 capability: bounded-claude-code-jobs
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.claude_code.job.ClaudeCodeJob@1b092e0e63
   - cosa.agents.claude_code.job.ClaudeCodeJob.do_all@24cbb970c0

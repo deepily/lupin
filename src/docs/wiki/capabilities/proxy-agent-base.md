@@ -1,6 +1,6 @@
 ---
 capability: proxy-agent-base
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.utils.proxy_agents.base_listener.BaseWebSocketListener@4e50b0aaba
   - cosa.agents.utils.proxy_agents.base_listener.BaseWebSocketListener.run@4b6bdc5716

@@ -1,6 +1,6 @@
 ---
 capability: auth-and-accounts
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.jwt_service.create_access_token@9802b174e8
   - cosa.rest.jwt_service.decode_and_validate_token@91d44cf713

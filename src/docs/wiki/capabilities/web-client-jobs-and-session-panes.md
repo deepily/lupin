@@ -1,6 +1,6 @@
 ---
 capability: web-client-jobs-and-session-panes
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.JobsPaneRenderer.createJobsPaneRenderer@a08bb5c22b
   - src.lupin_app.static.js.multiplexer.stores.jobViewFilter.isJobVisibleTo@8e1be83e5a

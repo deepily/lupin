@@ -1,6 +1,6 @@
 ---
 capability: bug-injector
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.bug_injector.BugInjector@670fd390e9
   - cosa.agents.bug_injector.BugInjector.run_prompt@6863e7a4d2

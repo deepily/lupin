@@ -1,6 +1,6 @@
 ---
 capability: web-client-notification-panes
-pin_algorithm: py3.13.x60338d/ts5.9.3
+pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.NotificationsListRenderer.NotificationsListRendererImpl@3c9f4e9b98
   - src.lupin_app.static.js.multiplexer.render.ActionRequiredRenderer.ActionRequiredRendererImpl@3c2970d261
