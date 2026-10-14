@@ -30,8 +30,10 @@ export interface EpicStoriesApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
+/** The server path that serves the epic titles and one-line stories. */
 export const EPIC_STORIES_ENDPOINT = "/api/epic-stories";
 
+/** The epic stories map, fetched once and never polled. */
 export interface EpicStoriesStore {
   /** The map, `{}` until a fetch resolves and `{}` forever if one fails. */
   stories(): EpicStories;
@@ -41,6 +43,7 @@ export interface EpicStoriesStore {
   hasAttempted(): boolean;
 }
 
+/** Options for `createEpicStoriesStore`: the API client, an endpoint and a log hook. */
 export interface EpicStoriesStoreOptions {
   api       : EpicStoriesApiClient;
   endpoint? : string;
@@ -98,6 +101,7 @@ class EpicStoriesStoreImpl implements EpicStoriesStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier) where a real conditional carries two.
+/** Build an epic stories store from its options. */
 export function createEpicStoriesStore( opts: EpicStoriesStoreOptions ): EpicStoriesStore {
   return new EpicStoriesStoreImpl( opts );
 }

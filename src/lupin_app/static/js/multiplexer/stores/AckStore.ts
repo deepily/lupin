@@ -41,7 +41,7 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-// One folded ack. `session_id` is the fold key when present.
+/** One acknowledgement of a broadcast, folded by session id when it has one. */
 export interface BroadcastAck {
   session_id    : string | null;
   persona_name  : string | null;
@@ -68,11 +68,16 @@ interface BroadcastAcksResponse {
   acks ?: ReadonlyArray<ServerAckRow>;
 }
 
-// Loose ApiClient surface — AckStore only needs `get<T>`.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface BroadcastAcksApiClient {
   get<T>( path: string ): Promise<T>;
 }
 
+/**
+ * The tally of which seats acknowledged each user broadcast.
+ *
+ * It folds live bus events and rows loaded from the server.
+ */
 export interface AckStore {
   /** The folded acks for one broadcast, one per acking session. Defensive copy. */
   acksFor( broadcastId: string ): ReadonlyArray<BroadcastAck>;
@@ -86,6 +91,7 @@ export interface AckStore {
   start(): () => void;
 }
 
+/** Options for `createAckStore`: the event bus that carries the live acknowledgement events. */
 export interface AckStoreOptions {
   bus : EventBus;
 }
@@ -197,6 +203,7 @@ class AckStoreImpl implements AckStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two (verified: locations=1), and the function itself is called by every test in ack_store.test.ts.
+/** Build an acknowledgement store on the given bus. */
 export function createAckStore( options: AckStoreOptions ): AckStore {
   return new AckStoreImpl( options );
 }

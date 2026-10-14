@@ -24,18 +24,18 @@ import type { ServerSenderHydrationRecord } from "./SessionStripStore";
 import type { HydrateHistoryOptions, NotificationHistoryApiClient } from "./NotificationStore";
 import { sendersVisiblePath } from "./historyWindow";
 
-// Long enough to outlast the measured 52.8 s with headroom; short enough that a
-// dead server still resolves to an honest "failed" instead of spinning forever.
+/** How long the cold-load request may take before it counts as failed, in milliseconds. */
 export const COLD_HYDRATION_TIMEOUT_MS = 120_000;
 
-// Emitted by NotificationsListRenderer's Retry button; this runner re-runs on it.
+/** The bus event the Retry button emits; the runner runs again when it arrives. */
 export const HISTORY_RETRY_EVENT = "notifications_history_retry_requested";
 
-// Narrowed ApiClient surface — production passes the canonical ApiClient.
+/** The slice of the API client the runner needs: a `get` that takes a timeout. */
 export interface ColdHydrationApiLike {
   get<T>(path: string, opts?: { timeoutMs?: number }): Promise<T>;
 }
 
+/** The stores the cold load fills: session strip, senders and notification history. */
 export interface ColdHydrationStores {
   sessionStrip  : { hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void };
   senders       : { hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void };
@@ -48,6 +48,7 @@ export interface ColdHydrationStores {
   };
 }
 
+/** Options for `createColdHistoryHydration`: bus, API client, stores and window getters. */
 export interface ColdHistoryHydrationOptions {
   bus               : EventBus;
   api               : ColdHydrationApiLike;
@@ -63,6 +64,7 @@ export interface ColdHistoryHydrationOptions {
   timeoutMs?        : number;   // test injection; production uses COLD_HYDRATION_TIMEOUT_MS
 }
 
+/** A runner that loads sender and history data when the page opens, and again on request. */
 export interface ColdHistoryHydration {
   /** Run (or re-run after a failure) the cold-load hydration. Never rejects. */
   run(): Promise<void>;
@@ -173,6 +175,7 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
+/** Build a cold-load history runner from its options. */
 export function createColdHistoryHydration(opts: ColdHistoryHydrationOptions): ColdHistoryHydration {
   return new ColdHistoryHydrationImpl(opts);
 }

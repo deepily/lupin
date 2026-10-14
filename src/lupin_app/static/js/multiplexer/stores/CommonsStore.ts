@@ -79,8 +79,7 @@ interface BroadcastHistoryResponse {
   disabled ?: boolean;
 }
 
-// Loose ApiClient surface for hydrate — CommonsStore only needs `get<T>`.
-// Production passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface CommonsHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
@@ -89,6 +88,7 @@ export interface CommonsHistoryApiClient {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The cache of commons activity entries with its filter, time window and disabled flag. */
 export interface CommonsStore {
   /** Raw cached entries, newest-first (unfiltered). */
   entries(): ReadonlyArray<CommonsActivityEntry>;
@@ -119,6 +119,7 @@ export interface CommonsStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createCommonsStore`: the bus, the storage service and a clock for tests. */
 export interface CommonsStoreOptions {
   bus     : EventBus;
   storage : StorageService;
@@ -352,6 +353,7 @@ class CommonsStoreImpl implements CommonsStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a commons store from its options. */
 export function createCommonsStore(opts: CommonsStoreOptions): CommonsStore {
   return new CommonsStoreImpl(opts);
 }

@@ -131,9 +131,12 @@ export function holdingRefusalMessage( err: unknown ): string {
   return String( e.status );
 }
 
+/** The server path that lists the tasks in the holding area. */
 export const HOLDING_AREA_ENDPOINT         = HOLDING_AREA_QUERY;
+/** How often the store polls the holding area, in milliseconds. */
 export const HOLDING_AREA_POLL_INTERVAL_MS = 60000;   // 60s, fleet parity
 
+/** The tasks waiting in the holding area, with the reads and the verbs that change them. */
 export interface HoldingAreaStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): TaskListComposite | null;
@@ -200,6 +203,7 @@ export interface HoldingAreaStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createHoldingAreaStore`: bus, API client, actor provider and timer hooks. */
 export interface HoldingAreaStoreOptions {
   bus              : EventBus;
   api              : HoldingAreaApiClient;
@@ -376,6 +380,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a holding area store from its options. */
 export function createHoldingAreaStore( opts: HoldingAreaStoreOptions ): HoldingAreaStore {
   return new HoldingAreaStoreImpl( opts );
 }

@@ -20,17 +20,23 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetComposite } from "../render/fleetModel";
 
-// Narrowed ApiClient surface (Pass 2 F4 idiom). The production ApiClient.get
-// throws ApiError (carrying `.status`) on non-2xx; we map that to the legacy
-// display-only sentinels rather than letting it propagate.
+/**
+ * The slice of the API client the store needs: a `get` and a `put`.
+ *
+ * The production client throws an error that carries the status on a non-success answer. The store maps that to display-only values instead of letting it propagate.
+ */
 export interface FleetApiClient {
   get<T>( path: string ): Promise<T>;
   put<T>( path: string, body: unknown ): Promise<T>;
 }
 
+/** The server path that returns the fleet state. */
 export const FLEET_STATE_ENDPOINT          = "/api/arbiter/fleet-state";
+/** The server path that reads and sets the fleet size cap. */
 export const FLEET_SIZE_CAP_ENDPOINT       = "/api/arbiter/fleet-size-cap";
+/** The server path that reads and sets the skeleton crew switch. */
 export const FLEET_SKELETON_CREW_ENDPOINT  = "/api/arbiter/skeleton-crew";
+/** How often the store polls the fleet state, in milliseconds. */
 export const FLEET_STATUS_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (D4)
 
 /** Who occupies the cap right now — every session counts, managers included. */
@@ -55,6 +61,11 @@ export interface FleetSkeletonCrew {
   settings_mute_while_off  : boolean | null;
 }
 
+/**
+ * The size cap as the server reports it.
+ *
+ * It holds the cap, its ceiling, the live counts and the skeleton crew switch.
+ */
 export interface FleetSizeCap {
   cap?     : number;
   ceiling? : number;
@@ -63,6 +74,7 @@ export interface FleetSizeCap {
   skeleton_crew? : FleetSkeletonCrew;
 }
 
+/** The fleet status: the last composite, the offline view flag, polling and the cap dial. */
 export interface FleetStatusStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): FleetComposite | null;
@@ -92,6 +104,7 @@ export interface FleetStatusStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createFleetStatusStore`: bus, API client, timer hooks and an error hook. */
 export interface FleetStatusStoreOptions {
   bus             : EventBus;
   api             : FleetApiClient;
@@ -309,6 +322,7 @@ function serverDetail( err: unknown, status: number ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a fleet status store from its options. */
 export function createFleetStatusStore( opts: FleetStatusStoreOptions ): FleetStatusStore {
   return new FleetStatusStoreImpl( opts );
 }

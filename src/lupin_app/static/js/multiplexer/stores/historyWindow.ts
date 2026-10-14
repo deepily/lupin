@@ -11,18 +11,19 @@
 //
 // Parity inventory: src/rnd/2026.09.10-mux-cc-notifications-accordion-parity.md
 
-// The legacy client's raw key (notifications.js:408), shared with it.
+/** The storage key of the picked history window. The legacy client uses the same key. */
 export const HISTORY_WINDOW_KEY = "notifications_history_window";
 
-// null → "All time" (no hours filter) · "today" → since local midnight · number → fixed hours.
+/** A history window: a number of hours, `"today"` for since local midnight, or null for all time. */
 export type HistoryWindow = number | "today" | null;
 
+/** One entry of the window picker: its label and the window it selects. */
 export interface HistoryWindowOption {
   label : string;
   hours : HistoryWindow;
 }
 
-// notifications.js:422-429 — labels, order and values verbatim.
+/** The picker entries in display order, with the labels and values of the legacy client. */
 export const HISTORY_WINDOW_OPTIONS: ReadonlyArray<HistoryWindowOption> = [
   { label: "Today",         hours: "today" },
   { label: "Last 24 hours", hours: 24 },
@@ -32,18 +33,14 @@ export const HISTORY_WINDOW_OPTIONS: ReadonlyArray<HistoryWindowOption> = [
   { label: "All time",      hours: null },
 ];
 
-// Legacy's virgin default — notifications.js:420 (`parseInt( storedWindow ) || 48`).
-// The 2026-06-11 ruling chose the same 48 h rolling window as a SILENT default
-// with no selector; Rick's 2026-09-10 ruling 1 restores the selector and keeps
-// 48 h as what a browser with no stored pick sees.
+/** The window, in hours, that a browser with no stored pick sees. */
 export const DEFAULT_HISTORY_WINDOW_HOURS = 48;
 
-// The senders-visible response fills the strip, the sender records, and the
-// list of senders whose history loads. The strip only has icons for senders
-// inside the window the server was asked for, while the history list applies
-// the picker's window itself, in the browser (NotificationStore.hydrateHistory).
-// So the fetch may be wider than the picker but never narrower than this, or
-// "Today" just after midnight (1 h) would empty the focus bar.
+/**
+ * The fewest hours the senders-visible fetch asks for.
+ *
+ * The strip has icons only for senders inside the fetched window, so a short pick such as the first hour after midnight must not empty it.
+ */
 export const SENDERS_VISIBLE_MIN_HOURS = 48;
 
 /**

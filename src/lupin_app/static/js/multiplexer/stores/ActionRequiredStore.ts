@@ -125,6 +125,7 @@ export function cancelResponseFor(item: Pick<ActionRequiredItem, "default" | "re
   return "[cancelled]";
 }
 
+/** The slice of the API client the store needs: a `post` that returns the body. */
 export interface ActionRequiredApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
 }
@@ -146,18 +147,23 @@ export interface ActionRequiredApiClient {
 //     (cosa_voice_mcp._parse_multiple_choice_response).
 // ---------------------------------------------------------------------------
 
+/** Turn a response into the server's string: a string as is, anything else as JSON. */
 export function toWireResponseValue(response: ActionRequiredResponse): string {
   return typeof response === "string" ? response : JSON.stringify(response);
 }
 
-// 360de81b — how long a finished ACTIVE card stays before it leaves (legacy notifications.js):
+/** How long a card answered here stays before it leaves, in milliseconds. */
 export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
+/** How long a card cancelled by another session's answer stays, in milliseconds. */
 export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
+/** How long a card that expired stays before it leaves, in milliseconds. */
 export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
 
-// The one transport whose state freezes and thaws a card's countdown. The countdown runs on the queue
-// socket's clock; the audio socket (AudioTransport) carries speech, and its drop or return says nothing
-// about whether a card can still be answered. Row 232df5c1.
+/**
+ * The one transport whose state freezes and thaws a card's countdown.
+ *
+ * The countdown runs on the queue socket's clock. The audio socket carries speech, and its drop or return says nothing about whether a card can still be answered.
+ */
 export const FREEZE_TRANSPORT = "QueueTransport";
 
 // ---------------------------------------------------------------------------
@@ -176,10 +182,15 @@ export const FREEZE_TRANSPORT = "QueueTransport";
 // `lupin.finishedTasks.shownStatuses` use a DOT, so a sweep over `StorageService.keys()` never
 // sees them.
 // ---------------------------------------------------------------------------
+/** The key the prompt queue is saved under in the storage service. */
 export const AR_STORAGE_KEY      = "operatorState";
+/** The schema version of the saved prompt queue. */
 export const AR_STORAGE_SCHEMA   = 1;
-// A saved expiry that passed more than this long ago is dropped at restore. The grace is on the
-// drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+/**
+ * How long after its expiry a saved prompt is still kept at restore, in milliseconds.
+ *
+ * The grace is on the drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+ */
 export const AR_RESTORE_GRACE_MS = 5000;
 
 interface PersistedActionRequired {
@@ -233,6 +244,7 @@ interface QueueUpdatePayload {
   notification?: ServerNotificationFields;
 }
 
+/** The fields of a server notification that the store reads to build a card. */
 export interface ServerNotificationFields {
   id_hash             ?: string;
   id                  ?: string;
@@ -267,6 +279,7 @@ interface ExpiredPayload {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The queue of cards that wait for an operator answer. The first card is the active one. */
 export interface ActionRequiredStore {
   /** Arrival order. The first item is the active card; the rest wait in the queue (360de81b). */
   list(): ReadonlyArray<ActionRequiredItem>;
@@ -319,6 +332,11 @@ export interface ActionRequiredStore {
   disposeForTesting(): void;
 }
 
+/**
+ * Options for `createActionRequiredStore`: bus, API client, test hooks and optional slots.
+ *
+ * The optional slots are the audio control, the storage service and the speech slot.
+ */
 export interface ActionRequiredStoreOptions {
   bus       : EventBus;
   api       : ActionRequiredApiClient;
@@ -952,6 +970,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build an action-required store from its options. */
 export function createActionRequiredStore(opts: ActionRequiredStoreOptions): ActionRequiredStore {
   return new ActionRequiredStoreImpl(opts);
 }

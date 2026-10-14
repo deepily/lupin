@@ -57,12 +57,17 @@ import { error as debugError } from "../shared/debugSink";
 // every scheduler method inside `c8` scope.
 // ---------------------------------------------------------------------------
 
+/** The states an audio context reports: suspended, running or closed. */
 export type AudioContextStateLike = "suspended" | "running" | "closed";
 
-// The destination node is an opaque connect() target — the scheduler never
-// reads members off it, only passes it to `source.connect(...)`.
+/** An opaque connect target. The scheduler only passes it to `source.connect`. */
 export type AudioDestinationNodeLike = object;
 
+/**
+ * The slice of an audio buffer source the scheduler uses.
+ *
+ * It has a buffer, an end callback, and connect, start and stop.
+ */
 export interface AudioBufferSourceLike {
   buffer  : AudioBufferLike | null;
   onended : ( () => void ) | null;
@@ -71,6 +76,11 @@ export interface AudioBufferSourceLike {
   stop(): void;
 }
 
+/**
+ * An audio context that can both decode and schedule playback.
+ *
+ * It adds the time, destination and state, source creation, suspend and resume.
+ */
 export interface SchedulableAudioContext extends AudioContextLike {
   readonly currentTime : number;
   readonly destination : AudioDestinationNodeLike;
@@ -163,6 +173,7 @@ const audioMachine = setup({
  */
 export type TtsMode = "instant" | "reliable";
 
+/** The page-wide audio store: playback state, speech mode and the playback controls. */
 export interface AudioStore {
   state(): AudioPlaybackState;
   /**
@@ -253,6 +264,7 @@ export const TTS_STALL_TAIL_SLACK_MS  = 10_000;
  *  notice. */
 export const TTS_STALL_FIRST_AUDIO_MS = 30_000;
 
+/** Options for `createAudioStore`: the bus, factories, sample rate and test hooks. */
 export interface AudioStoreOptions {
   bus                : EventBus;
   // Factory for the production AudioContext. Production code defaults to a
@@ -847,6 +859,7 @@ function defaultAudioContextFactory(): SchedulableAudioContext {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build an audio store from its options. */
 export function createAudioStore(opts: AudioStoreOptions): AudioStore {
   return new AudioStoreImpl(opts);
 }

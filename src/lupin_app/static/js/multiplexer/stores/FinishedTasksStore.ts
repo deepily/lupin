@@ -37,8 +37,14 @@ interface EventStreamResponse {
   count  : number;
 }
 
+/** The server path that lists task events. */
 export const FINISHED_TASKS_ENDPOINT = "/api/tasks/events";
 
+/**
+ * The finished-task events of every status, over a window of days.
+ *
+ * A status whose fetch failed is absent from the map, not empty.
+ */
 export interface FinishedTasksStore {
   /** Events keyed by status. A status whose fetch FAILED is ABSENT, not empty. */
   eventsByStatus(): FinishedEventsByStatus;
@@ -64,6 +70,7 @@ export interface FinishedTasksStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createFinishedTasksStore`: the bus, the API client and timer hooks for tests. */
 export interface FinishedTasksStoreOptions {
   bus              : EventBus;
   api              : FinishedTasksApiClient;
@@ -230,6 +237,7 @@ function describeFailure( err: unknown, status: string ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a finished-tasks store from its options. */
 export function createFinishedTasksStore( opts: FinishedTasksStoreOptions ): FinishedTasksStore {
   return new FinishedTasksStoreImpl( opts );
 }

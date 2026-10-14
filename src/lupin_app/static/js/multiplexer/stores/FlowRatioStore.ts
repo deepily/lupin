@@ -30,15 +30,20 @@ import {
   type ManagerPullState,
 } from "../render/flowRatioModel";
 
+/** The slice of the API client the store needs: `get`, `patch` and `delete`. */
 export interface FlowRatioApiClient {
   get<T>( path: string ): Promise<T>;
   patch<T>( path: string, body: unknown ): Promise<T>;
   delete<T>( path: string ): Promise<T>;
 }
 
+/** The server path that returns the flow ratio. */
 export const FLOW_RATIO_ENDPOINT          = "/api/tasks/flow-ratio";
+/** The server path that reads and changes the flow ratio settings. */
 export const FLOW_RATIO_SETTINGS_ENDPOINT = "/api/tasks/flow-ratio/settings";
+/** The server path that reads and changes the manager pull state. */
 export const MANAGER_PULL_ENDPOINT        = "/api/tasks/manager-pull";
+/** How often the store polls the flow ratio, in milliseconds. */
 export const FLOW_RATIO_POLL_INTERVAL_MS  = 60000;   // legacy's shared 60 s task-list tick
 
 /** A settings write: the threshold as a fraction, the window in hours, or both. */
@@ -47,6 +52,7 @@ export interface FlowRatioSettingsPatch {
   window_hours? : number;
 }
 
+/** The flow ratio, its settings and the manager pull state, with the writes that change them. */
 export interface FlowRatioStore {
   /** The last ratio payload, or null before a read / after a failed one. */
   ratio(): FlowRatioPayload | null;
@@ -66,6 +72,7 @@ export interface FlowRatioStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createFlowRatioStore`: bus, API client, timer hooks and an error hook. */
 export interface FlowRatioStoreOptions {
   bus              : EventBus;
   api              : FlowRatioApiClient;
@@ -237,6 +244,7 @@ class FlowRatioStoreImpl implements FlowRatioStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a flow ratio store from its options. */
 export function createFlowRatioStore( opts: FlowRatioStoreOptions ): FlowRatioStore {
   return new FlowRatioStoreImpl( opts );
 }

@@ -8,22 +8,26 @@
 
 import type { ServerNotificationFields } from "./ActionRequiredStore";
 
+/** The server path that lists the response cards still waiting for an answer. */
 export const AWAITING_RESPONSE_PATH = "/api/notifications/awaiting-response";
 
-// Narrowed ApiClient surface — production passes the canonical ApiClient.
+/** The slice of the API client the runner needs: a `get` that returns the parsed body. */
 export interface AwaitingResponseApiLike {
   get<T>(path: string): Promise<T>;
 }
 
+/** The stores the runner writes to: the action-required store, which adds the waiting cards. */
 export interface AwaitingResponseStores {
   actionRequired: { hydrateAwaiting(cards: ReadonlyArray<ServerNotificationFields>): number };
 }
 
+/** Options for `createAwaitingResponseHydration`: the API client and the stores. */
 export interface AwaitingResponseHydrationOptions {
   api    : AwaitingResponseApiLike;
   stores : AwaitingResponseStores;
 }
 
+/** A runner that loads the cards filed before the page opened and hands them to the store. */
 export interface AwaitingResponseHydration {
   /** Fetch the waiting cards and add them. Never rejects. */
   run(): Promise<number>;

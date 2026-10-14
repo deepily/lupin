@@ -36,10 +36,7 @@ const DEFAULT_CARD_OPEN      = true;   // legacy broadcast card is default-expan
 // Types
 // ---------------------------------------------------------------------------
 
-// One recipient chip's backing data — the subset of the active-sessions
-// projection the chip-row renders (server `project_session_response`:
-// session_id / persona_name / persona_icon / persona_color / last_seen_iso /
-// speakerphone_on). The store keeps only what the chips need.
+/** The data behind one recipient chip: a session id and its persona name, icon and color. */
 export interface BroadcastRecipient {
   session_id     : string;
   persona_name?  : string | null;
@@ -57,8 +54,7 @@ interface CardOpenEnvelope {
   open : boolean;
 }
 
-// Loose ApiClient surface for hydrate — BroadcastStore only needs `get<T>`.
-// Production passes the canonical ApiClient; tests pass a stub.
+/** The slice of the API client the store needs: a `get` that returns the parsed body. */
 export interface BroadcastSessionsApiClient {
   get<T>(path: string): Promise<T>;
 }
@@ -67,6 +63,7 @@ export interface BroadcastSessionsApiClient {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The cache of broadcast recipients and the saved open state of the broadcast card. */
 export interface BroadcastStore {
   /** Cached recipient list (defensive copy), in server order. */
   recipients(): ReadonlyArray<BroadcastRecipient>;
@@ -83,6 +80,7 @@ export interface BroadcastStore {
   hydrate( api: BroadcastSessionsApiClient ): Promise<void>;
 }
 
+/** Options for `createBroadcastStore`: the storage service that keeps the card state. */
 export interface BroadcastStoreOptions {
   storage : StorageService;
 }
@@ -146,6 +144,7 @@ class BroadcastStoreImpl implements BroadcastStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a broadcast store from its options. */
 export function createBroadcastStore( opts: BroadcastStoreOptions ): BroadcastStore {
   return new BroadcastStoreImpl( opts );
 }
