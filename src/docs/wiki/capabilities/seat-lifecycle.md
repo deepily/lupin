@@ -32,7 +32,7 @@ A seat is spawned under a fleet cap, writes a memento, then is re-spun or reaped
 - `memento_merge_claim` flags a negative merge claim that names a commit already in HEAD; claims with no commit id pass.
 
 ## Self re-spin
-- `perform_self_respin` asks for a go, then schedules a detached clear.
+- `perform_self_respin` aborts unless the seat has a tmux session and an `over_budget` context reading. It also needs no Last Call closing within an hour and a memento at its slot that verifies. It then asks for a go and schedules a detached clear.
 - `verify_memento_content` needs this cycle's nonce line, a fresh timestamp and a body above the substance floor.
 
 ## Reap

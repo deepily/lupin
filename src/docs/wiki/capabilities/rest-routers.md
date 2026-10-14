@@ -27,12 +27,12 @@ How the FastAPI app gets its routes: one module per router under `src/cosa/rest/
 ## Groups
 - Identity and admin: `auth`, `admin`; see [[auth-and-accounts]].
 - Server and pages: `system`, `mode`, `stats`, `multiplexer_config`, `pages`, `websocket_admin`; see [[system-admin-and-stats]].
-- Queues and jobs: `queues`, `jobs`, `peer`, `claude_code_queue`, `test_suite`, `mock_job`; see [[cj-flow-queue]].
+- Queues and jobs: `queues`, `jobs`, `peer`, `claude_code_queue`, `test_suite`, `mock_job`; see [[cj-flow-queue]]. `bug_fix_expediter` is a 410 tombstone; see [[fix-expediter-bfe]].
 - Ask and speech: `v2_ask`, `speech`, `embeddings`; see [[v2-ask-flow]].
-- Generators: `deep_research`, `podcast_generator`, `presentation_generator` and the two `deep_research_to_*` chains; see [[deep-research-door]].
+- Generators: `deep_research`, `podcast_generator`, `presentation_generator`, `podcast_proxy` (ask, then start) and the two `deep_research_to_*` chains; see [[deep-research-door]].
 - Fleet and messaging: `commons`, `dm`, `tasks`, `arbiter`, `heartbeat`, `speakerphone`, `voice_persona`, `swe_team`, `decision_proxy`; see [[commons-and-dm]] and [[task-store]].
 - Files: `docs_files` and `io_files` serve whitelisted files; see [[doc-viewer]].
-- Events: `websocket`, `notifications`; see [[websocket-events]].
+- Events: `websocket`, `notifications`, `fcm` (mobile wake tokens); see [[websocket-events]] and [[notification-delivery]]. `cc_transcript` is the transcript backlog door; see [[session-transcript-console]].
 
 ## Shared helpers
 - Modules starting with an underscore are helpers, not routers: `_scope_registry` (scope table, path resolution), `_pinned_open`, `_dir_listing`, `_retired_doors`.
