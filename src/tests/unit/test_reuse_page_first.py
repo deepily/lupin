@@ -105,7 +105,7 @@ def test_in_scope_matches_a_module_a_package_above_it_and_a_wildcard_but_not_a_s
     assert not rt.in_scope( "src/cosa/x.ts", [ "cosa" ] ) and not rt.in_scope( "src/cosa/rest/auth.py", [] )
 
 
-def test_page_candidates_keeps_only_pages_that_exist_have_a_live_pin_and_a_scope( env ):
+def test_page_candidates_keeps_only_pages_that_exist_and_have_a_live_pin( env ):
     root = env[ 0 ]
     lines = { "good": "fine. `cosa.feeds`", "nofile": "x. `cosa.mathx`", "nopins": "y. `cosa.mathx`", "dangling": "z. `cosa.mathx`",
               "noscope": "no package named", "leak": "mail me@example.com `cosa.feeds`" }
@@ -113,8 +113,45 @@ def test_page_candidates_keeps_only_pages_that_exist_have_a_live_pin_and_a_scope
               "leak": "cosa.mathx.add@bbbbbbbbbb" }
     write_wiki( root, lines, pins, pages=( "good", "nopins", "dangling", "noscope", "leak" ) )                     # "nofile" has no page file
     symbols = [ { "id": "cosa.feeds.parse_feed", "file": "src/cosa/feeds.py" }, { "id": "cosa.mathx.add", "file": "src/cosa/mathx.py" } ]
-    assert rt.page_candidates( root / "src" / "docs" / "wiki", symbols ) == [ { "slug": "good", "text": "fine. `cosa.feeds`", "scope": [ "cosa.feeds" ] } ]
+    assert rt.page_candidates( root / "src" / "docs" / "wiki", symbols ) == [
+        { "slug": "good", "text": "fine. `cosa.feeds`", "scope": [ "cosa.feeds" ] },
+        { "slug": "noscope", "text": "no package named", "scope": [ "src/cosa/mathx.py" ] } ]                # a line that names no package is scoped by its pins alone
     assert rt.page_candidates( root / "src" / "docs" / "nowiki", symbols ) == []
+
+
+def test_a_page_scope_is_its_index_line_plus_the_files_it_pins( env ):
+    root = env[ 0 ]
+    write_wiki( root, { "wide": "x. `cosa.feeds`" }, { "wide": "cosa.mathx.add@bbbbbbbbbb" }, pages=( "wide", ) )
+    symbols = [ { "id": "cosa.mathx.add", "file": "src/cosa/mathx.py" } ]
+    got = rt.page_candidates( root / "src" / "docs" / "wiki", symbols )
+    assert got == [ { "slug": "wide", "text": "x. `cosa.feeds`", "scope": [ "cosa.feeds", "src/cosa/mathx.py" ] } ]
+
+
+def test_a_pinned_typescript_file_is_named_by_its_path_and_a_sibling_is_not_in_scope( env ):
+    root = env[ 0 ]
+    ts = "src/lupin_app/static/js/panes/x.ts"
+    write_wiki( root, { "web": "panes. `cosa.feeds`" }, { "web": "lupin_app.panes.x.Pane@dddddddddd" }, pages=( "web", ) )
+    got = rt.page_candidates( root / "src" / "docs" / "wiki", [ { "id": "lupin_app.panes.x.Pane", "file": ts } ] )
+    assert got[ 0 ][ "scope" ] == [ "cosa.feeds", ts ]
+    assert rt.in_scope( ts, got[ 0 ][ "scope" ] ) and not rt.in_scope( "src/lupin_app/static/js/panes/y.ts", got[ 0 ][ "scope" ] )
+    assert rt.in_scope( "scripts/x.py", [ "scripts/x.py" ] ) and not rt.in_scope( "scripts/y.py", [ "scripts/x.py" ] )     # a path entry is the exact file
+
+
+def test_a_pinned_package_init_does_not_widen_scope_to_the_package( env ):
+    root = env[ 0 ]
+    write_wiki( root, { "pkg": "x. `cosa.feeds`" }, { "pkg": "cosa.mathx.Thing@eeeeeeeeee" }, pages=( "pkg", ) )
+    got = rt.page_candidates( root / "src" / "docs" / "wiki", [ { "id": "cosa.mathx.Thing", "file": "src/cosa/mathx/__init__.py" } ] )
+    assert rt.in_scope( "src/cosa/mathx/__init__.py", got[ 0 ][ "scope" ] ) and not rt.in_scope( "src/cosa/mathx/other.py", got[ 0 ][ "scope" ] )
+
+
+def test_a_chosen_page_covers_a_file_it_pins_that_its_line_does_not_name( env ):
+    write_wiki( env[ 0 ], { "feeds-page": FEEDS_LINE, "math-page": MATH_LINE }, { "feeds-page": "cosa.mathx.add@bbbbbbbbbb", "math-page": PINS[ "math-page" ] } )
+    need = "add two numbers [pin-scope]"
+    fake = PageFake( need, { FEEDS_PAGE: CHOSEN }, { MATHX_TEXT: HIT } )
+    r    = run( env, need, fake )
+    rec  = receipt_of( env, r )
+    assert r[ "verdict" ] == "REUSE" and rec[ "route" ] == "pages" and fake.unexpected == []
+    assert sorted( rec[ "pages" ][ "covered" ] ) == [ "cosa.feeds.parse_feed", "cosa.mathx.add" ]            # mathx.add is outside the feeds line, inside its pins
 
 
 def test_a_chosen_page_decides_when_its_scope_holds_an_entry_at_the_threshold( env ):
@@ -239,7 +276,7 @@ def test_a_chosen_page_that_covers_no_indexed_entry_adds_no_covered_stage( env )
     for text, ans in ( ( f"empty-page — {empty_line}", CHOSEN ), *( ( t, UNREL ) for t in ALL_TEXTS ) ):
         body = literal_body( need, text, *( ( PAGE_INSTR, PAGE_CRIT ) if text.startswith( "empty-page" ) else () ) )
         table.table[ key_of( body ) ] = ans
-    r   = run( env, need, table )
+    r   = run( env, need, table, exclude_prefixes=( "cosa.feeds", ) )                # the one pinned file is held back, so the page's scope holds no sendable entry
     rec = receipt_of( env, r )
     assert rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "chosen" ][ 0 ][ "slug" ] == "empty-page" and rec[ "pages" ][ "covered" ] == []
     assert [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "all" ]

@@ -762,7 +762,14 @@ def scope_of_line( text ):
 
 
 def in_scope( file, scope ):
-    """Ensures: True for a Python file whose module, or a package above it, matches a scope path."""
+    """
+    Say whether a file lies inside a page's scope.
+
+    Ensures:
+        - True when file is itself an entry of scope, whatever its language: a pinned file is named by its path
+        - else True for a Python file whose module, or a package above it, matches a dotted scope path
+    """
+    if file in scope: return True
     mod = module_of( file )
     if mod is None: return False
     parts = mod.split( "." )
@@ -777,24 +784,26 @@ def page_candidates( wiki_dir, symbols ):
         - symbols are the index's public symbol dicts, with id and file
     Ensures:
         - returns [ { slug, text, scope } ] in the order of the wiki index file: one per bullet line whose page exists
-          under capabilities/, pins at least one symbol the index holds, and names at least one package
-        - text is the line after its link; scope is scope_of_line() of that text
-        - pins only decide that a page can be asked about; a pin that names no indexed symbol is ignored
+          under capabilities/ and pins at least one symbol the index holds
+        - text is the line after its link; scope is scope_of_line() of that text plus the path of each pinned file the line does not already cover
+        - a line that names no package is scoped by its pins alone, so the web-client pages, whose files are TypeScript, are candidates
+        - a pin that names no indexed symbol is ignored
         - a line the egress screen would drop is left out
     """
-    wiki, indexed = pathlib.Path( wiki_dir ), { r[ "id" ] for r in symbols }
+    wiki, files = pathlib.Path( wiki_dir ), { r[ "id" ]: r[ "file" ] for r in symbols }
+    indexed     = set( files )
     toc = wiki / "INDEX.md"
     out = []
     for line in toc.read_text( encoding="utf-8" ).splitlines() if toc.exists() else []:
         m    = INDEX_LINE_RE.match( line )
         page = wiki / "capabilities" / f"{m.group( 1 )}.md" if m else None
         if page is None or not page.exists(): continue
-        front = wl.FRONT_RE.match( page.read_text( encoding="utf-8" ) )
-        pinned = any( sid in indexed for sid, _ in wl.PIN_RE.findall( front.group( 1 ) if front else "" ) )
+        front  = wl.FRONT_RE.match( page.read_text( encoding="utf-8" ) )
+        ids    = [ sid for sid, _ in wl.PIN_RE.findall( front.group( 1 ) if front else "" ) if sid in indexed ]
         text   = m.group( 2 ).strip()
         scope  = scope_of_line( text )
-        if pinned and scope and not c1_hits( { "id": m.group( 1 ), "sig": "", "doc": text } ):
-            out.append( { "slug": m.group( 1 ), "text": text, "scope": scope } )
+        if ids and not c1_hits( { "id": m.group( 1 ), "sig": "", "doc": text } ):
+            out.append( { "slug": m.group( 1 ), "text": text, "scope": sorted( set( scope ) | { files[ sid ] for sid in ids if not in_scope( files[ sid ], scope ) } ) } )
     return out
 
 
