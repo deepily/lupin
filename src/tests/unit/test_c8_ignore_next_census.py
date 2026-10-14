@@ -9,8 +9,9 @@ Requires:
     - git is on the path and the tree is a git checkout
 
 Ensures:
-    - every tracked TypeScript and JavaScript line holding a c8 ignore-next
-      comment is followed by a code line, with one named exception
+    - every tracked TypeScript and JavaScript line holding a c8 or v8
+      ignore-next comment, with or without a line count, is followed by
+      a code line, with one named exception
     - the exception is a comment on line 1 of a file, the file-header artifact
 """
 
@@ -21,7 +22,7 @@ import pytest
 
 import cosa.utils.util as cu
 
-IGNORE_NEXT = re.compile( r"/\*\s*c8 ignore next\b" )
+IGNORE_NEXT = re.compile( r"/\*\s*(?:c8|v8) ignore next\b" )
 SUFFIXES    = ( ".ts", ".js", ".mjs" )
 COMMENT     = ( "//", "/*", "*" )
 
@@ -76,6 +77,9 @@ def test_population_is_not_empty():
     ( [ "x", "/* c8 ignore next */ // why", "code();" ],                       [ ] ),
     ( [ "/* c8 ignore next */ // header", "// head", "code();" ],              [ ] ),
     ( [ "x", "/* c8 ignore next */" ],                                         [ 2 ] ),
+    ( [ "x", "/* c8 ignore next 3 */", "// note", "code();" ],                 [ 2 ] ),
+    ( [ "x", "/* v8 ignore next */", "/** doc */", "code();" ],                [ 2 ] ),
+    ( [ "x", "/* c8 ignore next 3 */", "code();", "more();", "end();" ],       [ ] ),
 ] )
 def test_detector_finds_planted_cases( text, expected ):
     assert stranded( text ) == expected

@@ -784,7 +784,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       ? hydration
       : (filterActive ? "filtered" : "empty");
     const existing = this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`);
-    /* c8 ignore next */ // defensive: idempotency check — empty-state is only painted from renderSenderSection's notifications.length === 0 branch which calls paintEmptyState exactly once before bailing out. Re-entry from a re-render with the same empty-state already painted is the case this guards against, but renderSenderSection's flow ensures the existing element is removed via removeEmptyState before re-paint in the non-empty branch.
     if (existing !== null && existing.getAttribute("data-empty-state") === state) return;
 
     if (state === "failed") {
