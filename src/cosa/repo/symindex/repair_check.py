@@ -70,7 +70,7 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     Raises:
         - ValueError when runs is not a positive int
     """
-    if not isinstance( runs, int ) or runs < 1: raise ValueError( f"runs must be a positive int, got {runs!r}" )
+    if not isinstance( runs, int ) or isinstance( runs, bool ) or runs < 1: raise ValueError( f"runs must be a positive int, got {runs!r}" )
     try:
         before = count_hits( replay, receipt_id, symbol, runs )
     except ReplayFailed:

@@ -42,11 +42,70 @@ def test_a_body_with_no_block_yields_an_empty_list():
     assert mr.parse_block( "just prose, ```python\nx = 1\n``` here" ) == []
 
 
-def test_collect_sorts_dedupes_and_lets_the_repaired_state_win():
+def at( ts, *misses ):
+    return { **row( *misses ), "updated_ts": ts }
+
+
+def test_collect_sorts_and_dedupes_a_pair_to_its_newest_state():
     fixed = { **MISS, "repaired": True }
     later = { **MISS, "receipt_id": "r-0", "symbol": "z" }
-    got   = mr.collect( [ row( MISS ), row( later ), row( fixed ), row( MISS ) ] )
+    got   = mr.collect( [ at( "2026-10-14T01:00", MISS ), at( "2026-10-14T01:00", later ), at( "2026-10-14T02:00", fixed ) ] )
     assert got == [ later, fixed ]
+
+
+def test_a_repair_that_was_re_broken_later_reads_as_not_repaired_in_either_list_order():
+    fixed  = at( "2026-10-14T01:00", { **MISS, "repaired": True } )
+    broken = at( "2026-10-14T02:00", { **MISS, "repaired": False } )
+    assert mr.collect( [ fixed, broken ] ) == [ MISS ] and mr.collect( [ broken, fixed ] ) == [ MISS ]
+
+
+def test_within_one_body_the_last_block_of_a_pair_wins():
+    fixed = { **MISS, "repaired": True }
+    assert mr.collect( [ row( fixed, MISS ) ] ) == [ MISS ]
+
+
+def test_a_block_saved_with_crlf_line_endings_is_read():
+    body = mr.render_block( MISS ).replace( "\n", "\r\n" )
+    assert "\r\n" in body and mr.parse_block( body ) == [ MISS ]
+
+
+def test_scan_blocks_names_every_block_it_could_not_use():
+    body = ( mr.render_block( MISS ) + "\n```json\n{\"receipt_id\": \"r\", \"symbol\": \"s\", \"caught_by\": \"c\", \"repaired\": true, \"extra\": 1}\n```\n"
+             "```json\n{oops\n```\n" )
+    found, skipped = mr.scan_blocks( body )
+    assert found == [ MISS ] and len( skipped ) == 2
+    assert skipped[ 0 ].startswith( "not a miss: needs exactly receipt_id" ) and skipped[ 1 ].startswith( "not JSON: " )
+
+
+def test_collect_with_skips_carries_the_row_title_of_each_skipped_block():
+    good, bad = row( MISS ), { "title": "broken row", "body": "```json\n[1]\n```" }
+    misses, skipped = mr.collect_with_skips( [ good, bad ] )
+    assert misses == [ MISS ] and [ s[ "title" ] for s in skipped ] == [ "broken row" ]
+
+
+def test_export_report_returns_the_skipped_blocks_beside_the_count( tmp_path ):
+    bad = { "title": "broken row", "body": "```json\n{x\n```" }
+    got = mr.export_report( [ row( MISS ), bad ], str( tmp_path / "m.jsonl" ) )
+    assert got.written == 1 and [ s[ "title" ] for s in got.skipped ] == [ "broken row" ]
+
+
+def test_an_empty_export_will_not_replace_a_populated_file( tmp_path ):
+    path = tmp_path / "m.jsonl"
+    path.write_text( "{}\n", encoding="utf-8" )
+    with pytest.raises( ValueError, match="refusing to replace a populated" ): mr.export_misses( [], str( path ) )
+    assert path.read_text( encoding="utf-8" ) == "{}\n"
+
+
+def test_an_empty_export_replaces_a_populated_file_when_allowed( tmp_path ):
+    path = tmp_path / "m.jsonl"
+    path.write_text( "{}\n", encoding="utf-8" )
+    assert mr.export_misses( [], str( path ), allow_empty=True ) == 0 and path.read_text( encoding="utf-8" ) == ""
+
+
+def test_the_exported_file_is_world_readable( tmp_path ):
+    path = tmp_path / "m.jsonl"
+    mr.export_misses( [ row( MISS ) ], str( path ) )
+    assert oct( os.stat( path ).st_mode & 0o777 ) == "0o644"
 
 
 def test_collect_accepts_a_row_whose_body_is_none():
@@ -87,3 +146,9 @@ def test_export_sorts_the_keys_of_a_hand_written_block( tmp_path ):
     path = tmp_path / "m.jsonl"
     mr.export_misses( [ { "title": "t", "body": body } ], str( path ) )
     assert path.read_text( encoding="utf-8" ) == '{"caught_by": "c", "receipt_id": "r", "repaired": true, "symbol": "s"}\n'
+
+
+def test_an_empty_export_may_replace_an_empty_file( tmp_path ):
+    path = tmp_path / "m.jsonl"
+    path.write_text( "", encoding="utf-8" )
+    assert mr.export_misses( [], str( path ) ) == 0

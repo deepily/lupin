@@ -85,8 +85,14 @@ def test_runs_is_configurable_and_the_receipt_id_reaches_the_replay():
     assert got.verdict == rc.REPAIRED and seen == [ "r-9" ] * 4
 
 
-@pytest.mark.parametrize( "bad", [ 0, -1, 2.5, "5", None ] )
+@pytest.mark.parametrize( "bad", [ 0, -1, 2.5, "5", None, True ] )
 def test_runs_must_be_a_positive_int( bad ):
     replay = Cached( [] )
     with pytest.raises( ValueError, match="positive int" ): rc.run_repair_check( replay, Rewrite(), "r", "s", runs=bad )
     assert replay.calls == 0
+
+
+def test_an_error_that_is_not_replay_failed_propagates_and_nothing_is_rewritten():
+    rewrite = Rewrite()
+    with pytest.raises( KeyError ): rc.run_repair_check( Cached( [ KeyError( "receipt" ) ] ), rewrite, "r", "s" )
+    assert rewrite.calls == 0
