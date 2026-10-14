@@ -7,6 +7,11 @@
 
 import type { AuthManager } from "../auth/AuthManager";
 
+/**
+ * What `createApiClient` is built from.
+ *
+ * It needs the base URL, the default timeout in milliseconds and the auth manager. `fetcher` replaces `fetch` in tests.
+ */
 export interface ApiClientOptions {
   baseUrl          : string;     // e.g. process.env.LUPIN_API_URL or window.location.origin
   defaultTimeoutMs : number;     // e.g. 10_000
@@ -15,6 +20,11 @@ export interface ApiClientOptions {
   fetcher?         : typeof fetch;
 }
 
+/**
+ * Per-call overrides for one request.
+ *
+ * A caller can pass an abort signal, a timeout, `noAuth` to skip the token (for login), and extra headers.
+ */
 export interface ApiCallOptions {
   signal?    : AbortSignal;      // user-supplied abort
   timeoutMs? : number;           // override defaultTimeoutMs for this call
@@ -46,6 +56,11 @@ export interface ApiCallOptions {
 // explicitly for legacy parity.
 // ---------------------------------------------------------------------------
 
+/**
+ * The body sent to broadcast a message to the caller's CC sessions.
+ *
+ * `require_ack` and `include_originator` are sent as true when omitted. Without a `broadcast_id` the server mints one.
+ */
 export interface BroadcastRequest {
   message             : string;
   require_ack?        : boolean;       // default true
@@ -56,12 +71,22 @@ export interface BroadcastRequest {
 // One `filtered_out` fanout-receipt entry (F3). `reason` ∈ {bridge_unreadable,
 // owner_mismatch, stale_bridge_mtime, bridge_vanished, originator_excluded};
 // the mtime gate adds age_seconds/threshold_seconds (kept open via index sig).
+/**
+ * A session the server left out of a broadcast, with its `reason`.
+ *
+ * The reasons include a stale bridge file and an excluded originator. Some carry extra fields, such as the age.
+ */
 export interface BroadcastFilteredOut {
   session_id  : string;
   reason      : string;
   [k: string] : unknown;
 }
 
+/**
+ * The server's answer to a broadcast.
+ *
+ * `recipients` counts the sessions it reached. `failed_recipients` and `filtered_out` list the ones it did not.
+ */
 export interface BroadcastResult {
   broadcast_id      : string;
   recipients        : number;                              // count of successful fanouts
@@ -79,6 +104,11 @@ export interface BroadcastResult {
 // renderer-side (F-Krishna-BD3 / F-Sam-BD3 / OSQ-B4.1).
 // ---------------------------------------------------------------------------
 
+/**
+ * The answer from acknowledging the proxy.
+ *
+ * It names the batch that was retired and the next batch that was opened.
+ */
 export interface ProxyAcknowledgeResult {
   status        : string;     // "success"
   retired_batch : string;     // pr-{8hex}-{N}
@@ -93,6 +123,12 @@ export interface BounceResult {
   timestamp  : string;
 }
 
+/**
+ * The authenticated JSON client the stores call.
+ *
+ * Each request adds the bearer token and a timeout. A 401 marks the token expired and throws `ApiError`.
+ * A 204 resolves to null, a JSON answer is parsed, and anything else comes back as text.
+ */
 export interface ApiClient {
   get<T>(path: string, opts?: ApiCallOptions): Promise<T>;
   post<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
@@ -107,6 +143,11 @@ export interface ApiClient {
   bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult>;
 }
 
+/**
+ * The error thrown when the server answers with a non-2xx status.
+ *
+ * It carries the `status` and the `url`. The message is the response text, or "unauthorized" for a 401.
+ */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -264,6 +305,11 @@ class ApiClientImpl implements ApiClient {
   }
 }
 
+/**
+ * Build the API client for one base URL and auth manager.
+ *
+ * A trailing slash on the base URL is dropped, and a path that starts with http is used as given.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   return new ApiClientImpl(opts);
