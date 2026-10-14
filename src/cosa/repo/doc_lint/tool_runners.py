@@ -17,6 +17,7 @@ from .text_rules import Finding
 
 RUFF_RELATIVE     = [ ".venv/bin/ruff" ]
 MARKDOWNLINT_REL  = [ "node_modules/.bin/markdownlint-cli2" ]
+MARKDOWNLINT_COUNT = re.compile( r"^Linting: (\d+) file\(s\)$", re.MULTILINE )
 MARKDOWNLINT_LINE = re.compile( r"^(.+?):(\d+)(?::\d+)? (?:(?:error|warning) )?(MD\d+/[\w-]+) (.*)$" )
 DART_DOC_CODES    = frozenset( { "public_member_api_docs", "slash_for_doc_comments", "dangling_library_doc_comments",
                                  "unintended_html_in_doc_comment", "comment_references" } )
@@ -165,6 +166,7 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
         - a finding the tool places in a file that was not asked for yields one warning that names it
         - the word error or warning before the rule is optional, since the pinned 0.18.1 prints neither
         - exit status 1 with no finding read yields one Unchecked warning, so a changed output format cannot pass silently
+        - a count of files linted that differs from the files handed over, or no count at all, yields one Unchecked warning and no findings
 
     Raises:
         - nothing
@@ -177,6 +179,9 @@ def run_markdownlint( root, paths, runner=subprocess.run ):
     if not listed: return [], warnings
     res = runner( [ tool, "--no-globs", "--", *listed ], capture_output=True, text=True, encoding="utf-8", cwd=root )
     if res.returncode not in ( 0, 1 ): return [], warnings + [ Unchecked( f"[doc-lint] WARNING: markdownlint-cli2 failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ) ]
+    counted = MARKDOWNLINT_COUNT.search( res.stdout )
+    if counted is None: return [], warnings + [ Unchecked( "[doc-lint] WARNING: markdownlint-cli2 printed no count of files linted, so the markdown structure was NOT checked; fix: keep noProgress out of .markdownlint-cli2.jsonc" ) ]
+    if int( counted.group( 1 ) ) != len( listed ): return [], warnings + [ Unchecked( f"[doc-lint] WARNING: markdownlint-cli2 linted {counted.group( 1 )} of {len( listed )} file(s) it was given, so the markdown structure was NOT checked; a name the tool reads as a glob is not linted" ) ]
     findings = []
     for line in ( res.stdout + "\n" + res.stderr ).split( "\n" ):
         m = MARKDOWNLINT_LINE.match( line.strip() )

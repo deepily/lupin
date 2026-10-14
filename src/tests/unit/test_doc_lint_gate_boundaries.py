@@ -208,7 +208,7 @@ def _markdownlint_stub( tmp_path, monkeypatch ):
     """Install a markdownlint-cli2 stand-in that records the names it was given."""
     log  = tmp_path / "markdownlint-args.txt"
     tool = tmp_path / "markdownlint-cli2"
-    tool.write_text( f'#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a" >> "{log}"; done\nexit 0\n', encoding="utf-8" )
+    tool.write_text( f'#!/bin/sh\nfor a in "$@"; do printf "%s\\0" "$a" >> "{log}"; done\nn=0; for a in \"$@\"; do case \"$a\" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo \"Linting: $n file(s)\"\nexit 0\n', encoding="utf-8" )
     os.chmod( tool, 0o755 )
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tool ) )
     return log
@@ -237,7 +237,7 @@ def test_a_markdown_name_that_cannot_be_given_refuses_nothing_when_markdownlint_
 
 def test_markdownlint_names_a_finding_it_places_in_a_file_it_was_not_asked_about( monkeypatch, tmp_path ):
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
-    done = type( "Done", (), { "returncode": 1, "stdout": "a.md:3 error MD040/fenced-code-language m\nother.md:1 error MD041/first-line-h1 m\n", "stderr": "" } )()
+    done = type( "Done", (), { "returncode": 1, "stdout": "Linting: 1 file(s)\n", "stderr": "a.md:3 error MD040/fenced-code-language m\nother.md:1 error MD041/first-line-h1 m\n" } )()
     findings, warnings = tr.run_markdownlint( "/r", [ "a.md", LATIN_MD ], lambda cmd, **kwargs: done )
     assert [ ( f.path, f.line ) for f in findings ] == [ ( "a.md", 3 ), ( "other.md", 1 ) ]
     assert warnings == [

@@ -553,7 +553,7 @@ def test_the_report_names_the_epoch_and_counts_the_commits_held_to_it():
 def _tool_stubs( folder, monkeypatch ):
     folder.mkdir()
     for name, var in ( ( "ruff", "LUPIN_RUFF" ), ( "markdownlint-cli2", "LUPIN_MARKDOWNLINT" ) ):
-        ( folder / name ).write_text( "#!/bin/sh\nexit 0\n", encoding="utf-8" )
+        ( folder / name ).write_text( "#!/bin/sh\n" + ( 'n=0; for a in "$@"; do case "$a" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo "Linting: $n file(s)"\n' if name == "markdownlint-cli2" else "" ) + "exit 0\n", encoding="utf-8" )
         os.chmod( folder / name, 0o755 )
         monkeypatch.setenv( var, str( folder / name ) )
 

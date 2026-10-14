@@ -174,7 +174,8 @@ def _run( root, monkeypatch, target=None, error=None ):
             if kind == "subprocess.run" and args[ 0 ][ 0 ] == "node":                              # no test needs Node: every file gets its file record
                 return SimpleNamespace( returncode=0, stderr="", stdout="\n".join( '{"kind": "file", "file": "%s", "ts_version": "5", "parse_errors": []}' % name for name in args[ 0 ][ 4 : ] ) )
             if kind == "subprocess.run" and site is not None and site.split( ":" )[ 1 ].startswith( "runner" ):
-                return SimpleNamespace( returncode=0, stdout="", stderr="" )                       # ruff and markdownlint-cli2 stand-ins that report nothing
+                counted = "Linting: %d file(s)\n" % len( args[ 0 ][ 3: ] ) if "--no-globs" in args[ 0 ] else ""
+                return SimpleNamespace( returncode=0, stdout=counted, stderr="" )                  # ruff and markdownlint-cli2 stand-ins that report nothing
             return real[ kind ]( *args, **kwargs )
         return call
 

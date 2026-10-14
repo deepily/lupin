@@ -22,6 +22,5 @@
     "MD058": false,
     "MD060": false
   },
-  "noBanner": true,
-  "noProgress": true
+  "noBanner": true
 }

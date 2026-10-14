@@ -40,7 +40,8 @@ DOCSTRING_PY  = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n   
 COMMENT_PY    = "x = 1  # This is NOT fine.\n"
 MD041         = "MD041/first-line-heading First line in a file should be a top-level heading"
 QUIET_TOOL    = "#!/bin/sh\nexit 0\n"
-LOUD_MDLINT   = '#!/bin/sh\nfor f in "$@"; do case "$f" in *.md) echo "$f:1 error ' + MD041 + '" >&2;; esac; done\nexit 1\n'
+COUNTING_TOOL = '#!/bin/sh\nn=0; for a in "$@"; do case "$a" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo "Linting: $n file(s)"\nexit 0\n'
+LOUD_MDLINT   = '#!/bin/sh\nn=0; for a in "$@"; do case "$a" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo "Linting: $n file(s)"\nfor f in "$@"; do case "$f" in *.md) echo "$f:1 error ' + MD041 + '" >&2;; esac; done\nexit 1\n'
 CAP_PAGE      = "src/docs/wiki/capabilities/x.md"
 RUNBOOK       = "docs/ops-runbook.md"
 
@@ -112,7 +113,7 @@ def scratch( tmp_path, monkeypatch ):
     """Build a scratch repository whose own commit hook is a copy of the real chain."""
     monkeypatch.setenv( "PLANNING_IS_PROMPTING_ROOT", "" )
     monkeypatch.setenv( "LUPIN_RUFF", _tool( tmp_path / "tools" / "ruff", QUIET_TOOL ) )
-    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", _tool( tmp_path / "tools" / "markdownlint-cli2", QUIET_TOOL ) )
+    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", _tool( tmp_path / "tools" / "markdownlint-cli2", COUNTING_TOOL ) )
     root = tmp_path / "repo"
     root.mkdir()
     _git( root, "init", "-q" )

@@ -143,11 +143,11 @@ MDL_OUT = "a.md:12 error MD040/fenced-code-language Fenced code blocks should ha
 
 def test_run_markdownlint_parses_lines_with_and_without_columns( monkeypatch, tmp_path ):
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
-    fake = _fake( 1, "", MDL_OUT )
+    fake = _fake( 1, "Linting: 2 file(s)\n", MDL_OUT )
     findings, warnings = tr.run_markdownlint( "/r", [ "a.md", "b.md" ], fake )
     assert warnings == [] and [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "a.md", 12, "markdownlint:MD040/fenced-code-language" ), ( "b.md", 3, "markdownlint:MD051/link-fragments" ) ]
     assert fake.calls[ 0 ][ 0 ][ 1 : ] == [ "--no-globs", "--", "a.md", "b.md" ]
-    assert tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0 ) ) == ( [], [] )
+    assert tr.run_markdownlint( "/r", [ "a.md" ], _fake( 0, "Linting: 1 file(s)\n" ) ) == ( [], [] )
 
 
 MDL_FIXTURES = os.path.join( cu.get_project_root(), "src", "tests", "unit", "fixtures", "doc_lint" )
@@ -161,7 +161,7 @@ def test_run_markdownlint_parses_the_captured_output_of_the_pinned_tool( monkeyp
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
     captured = _mdl_fixture( "markdownlint-cli2-0.18.1-stderr.txt" )
     assert " error " not in captured and " warning " not in captured        # the real tool prints neither word
-    findings, warnings = tr.run_markdownlint( "/r", [ "bad.md" ], _fake( 1, "", captured ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "bad.md" ], _fake( 1, "Linting: 1 file(s)\n", captured ) )
     assert warnings == []
     assert [ ( f.line, f.rule ) for f in findings ] == [
         ( 3, "markdownlint:MD001/heading-increment" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ), ( 5, "markdownlint:MD037/no-space-in-emphasis" ),
@@ -171,7 +171,7 @@ def test_run_markdownlint_parses_the_captured_output_of_the_pinned_tool( monkeyp
 
 def test_run_markdownlint_refuses_to_pass_when_the_tool_reports_findings_and_none_are_read( monkeypatch, tmp_path ):
     monkeypatch.setenv( "LUPIN_MARKDOWNLINT", str( tmp_path ) )
-    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 1, "", "a.md(3,1) MD040 a format this reader does not know\n" ) )
+    findings, warnings = tr.run_markdownlint( "/r", [ "a.md" ], _fake( 1, "Linting: 1 file(s)\n", "a.md(3,1) MD040 a format this reader does not know\n" ) )
     assert findings == [] and len( warnings ) == 1 and isinstance( warnings[ 0 ], tr.Unchecked )
     assert "reported findings (exit 1) but none could be read" in warnings[ 0 ]
 
@@ -1096,7 +1096,7 @@ def _tool_stubs( folder ):
     """Write stand-ins for ruff and markdownlint-cli2 that report nothing."""
     folder.mkdir( exist_ok=True )
     for name in ( "ruff", "markdownlint-cli2" ):
-        ( folder / name ).write_text( "#!/bin/sh\nexit 0\n", encoding="utf-8" )
+        ( folder / name ).write_text( "#!/bin/sh\n" + ( 'n=0; for a in "$@"; do case "$a" in --|--no-globs) ;; *) n=$((n+1));; esac; done; echo "Linting: $n file(s)"\n' if name == "markdownlint-cli2" else "" ) + "exit 0\n", encoding="utf-8" )
         os.chmod( folder / name, 0o755 )
     return { "LUPIN_RUFF": str( folder / "ruff" ), "LUPIN_MARKDOWNLINT": str( folder / "markdownlint-cli2" ) }
 
