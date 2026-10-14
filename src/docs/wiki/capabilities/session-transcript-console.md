@@ -3,8 +3,8 @@ capability: session-transcript-console
 pin_algorithm: py3.13.x60338d/ts5.9.3
 pins:
   - cosa.rest.cc_transcript_mapper.map_records@98ee5b4526
-  - cosa.rest.cc_transcript_tailer.CcTranscriptTailer@d8e0b02bef
-  - cosa.rest.cc_transcript_tailer.CcTranscriptTailer.poll_once@af91a8d8e7
+  - cosa.rest.cc_transcript_tailer.CcTranscriptTailer@f2aa06e49b
+  - cosa.rest.cc_transcript_tailer.CcTranscriptTailer.poll_once@c3bf6dc23c
   - cosa.rest.cc_transcript_tailer.read_backlog@dc430655e2
   - cosa.rest.cc_transcript_tailer.resolve_transcript_path@26e6df1fcf
   - cosa.rest.routers.cc_transcript.get_cc_transcript@5d260a1ab5
