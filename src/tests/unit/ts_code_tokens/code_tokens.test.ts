@@ -48,6 +48,36 @@ test( "tokens: the same code gives the same tokens however it is commented", () 
     assert.deepEqual( words( plain ), words( noted ) );
 } );
 
+test( "tokens: each token says whether a line break comes before it, a comment's break included", () => {
+    const flags = ( source: string ): number[] => mod.describe( source, "a.ts" ).tokens.map( ( token: any[] ) => token[ 3 ] );
+    assert.deepEqual( flags( "return 1;\n" ), [ 0, 0, 0 ] );
+    assert.deepEqual( flags( "return\n1;\n" ), [ 0, 1, 0 ] );
+    assert.deepEqual( flags( "return /* a\n b */ 1;\n" ), [ 0, 1, 0 ] );
+    assert.deepEqual( flags( "return /* a b */ 1;\n" ), [ 0, 0, 0 ] );
+} );
+
+test( "marks: a directive comment is tied to the token that follows it, with its line position", () => {
+    const marks = mod.describe( "let a;\n// @ts-ignore\nlet b = f( a );\nlet c; // eslint-disable-line x\nlet d;\n", "a.ts" ).marks;
+    assert.deepEqual( marks, [ [ 3, "L:// @ts-ignore" ], [ 15, "T:// eslint-disable-line x" ] ] );
+} );
+
+test( "marks: banner, pure and coverage comments count, and plain comments do not", () => {
+    const source = "/*! banner */\nlet a = /*#__PURE__*/ f();\n/* c8 ignore next */\n// plain note\nlet b;\n";
+    assert.deepEqual( mod.describe( source, "a.ts" ).marks.map( ( mark: any[] ) => mark[ 1 ] ),
+        [ "L:/*! banner */", "T:/*#__PURE__*/", "L:/* c8 ignore next */" ] );
+} );
+
+test( "marks: bundler magic comments and a comment at the end of the file are kept", () => {
+    const marks = mod.describe( "const m = import( /* webpackChunkName: \"a\" */ \"./a.js\" );\n// @ts-nocheck\n", "a.ts" ).marks;
+    assert.deepEqual( marks.map( ( mark: any[] ) => mark[ 1 ] ), [ "T:/* webpackChunkName: \"a\" */", "L:// @ts-nocheck" ] );
+    assert.equal( marks[ 1 ][ 0 ], 11 );
+} );
+
+test( "marks: a documentation block is kept only for the words a tool reads", () => {
+    const source = "/**\n * Plain doc.\n */\nlet a;\n/**\n * Doc. @internal\n * @import { T } from './a.js'\n */\nlet b;\n";
+    assert.deepEqual( mod.describe( source, "a.ts" ).marks.map( ( mark: any[] ) => mark[ 1 ] ), [ "L:doc:@internal|@import { T } from './a.js'" ] );
+} );
+
 test( "tokens: the same text as an identifier and as a contextual keyword differs in the kind field", () => {
     const identifier = mod.describe( "let get = 1;\n", "a.ts" ).tokens.find( ( token: any[] ) => token[ 2 ] === "get" );
     const keyword    = mod.describe( "class A { get a() { return 1; } }\n", "a.ts" ).tokens.find( ( token: any[] ) => token[ 2 ] === "get" );

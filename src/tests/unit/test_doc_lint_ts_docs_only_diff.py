@@ -24,11 +24,12 @@ def _git( root, *args ):
     return res.stdout
 
 
-def _desc( tokens=None, shebang=None, directives=None, tags=None, errors=None ):
+def _desc( tokens=None, shebang=None, directives=None, tags=None, errors=None, marks=None ):
     return {
         "errors"    : errors or [],
-        "tokens"    : tokens if tokens is not None else [ [ 1, 80, "x" ], [ 1, 64, "=" ], [ 2, 9, "1" ] ],
+        "tokens"    : tokens if tokens is not None else [ [ 1, 80, "x", 0 ], [ 1, 64, "=", 0 ], [ 2, 9, "1", 0 ] ],
         "directives": directives or [],
+        "marks"     : marks or [],
         "tags"      : tags or [],
         "shebang"   : shebang
     }
@@ -50,7 +51,7 @@ def _stub_run( root, items ):
     out = {}
     for item in items:
         words = [ w for line in item[ "text" ].split( "\n" ) for w in line.split( "//" )[ 0 ].split() ]
-        out[ item[ "id" ] ] = _desc( tokens=[ [ 1, 1, w ] for w in words ] )
+        out[ item[ "id" ] ] = _desc( tokens=[ [ 1, 1, w, 0 ] for w in words ] )
     return out
 
 
@@ -61,17 +62,17 @@ def test_identical_descriptions_pass():
 
 
 def test_a_changed_token_is_named_with_its_line():
-    new = _desc( tokens=[ [ 1, 80, "x" ], [ 1, 64, "=" ], [ 2, 9, "2" ] ] )
+    new = _desc( tokens=[ [ 1, 80, "x", 0 ], [ 1, 64, "=", 0 ], [ 2, 9, "2", 0 ] ] )
     assert tdd.description_difference( _desc(), new ) == "line 2: token '1' became '2'"
 
 
 def test_same_text_with_another_token_kind_is_a_difference():
-    new = _desc( tokens=[ [ 1, 80, "x" ], [ 1, 64, "=" ], [ 2, 10, "1" ] ] )
+    new = _desc( tokens=[ [ 1, 80, "x", 0 ], [ 1, 64, "=", 0 ], [ 2, 10, "1", 0 ] ] )
     assert tdd.description_difference( _desc(), new ) is not None
 
 
 def test_a_removed_or_added_token_is_named():
-    short = _desc( tokens=[ [ 1, 80, "x" ], [ 1, 64, "=" ] ] )
+    short = _desc( tokens=[ [ 1, 80, "x", 0 ], [ 1, 64, "=", 0 ] ] )
     assert tdd.description_difference( _desc(), short ) == "removed token '1' at line 2"
     assert tdd.description_difference( short, _desc() ) == "added token '1' at line 2"
 
@@ -100,6 +101,31 @@ def test_a_parse_error_on_either_side_is_a_difference():
     err = [ { "line": 3, "message": "Unexpected token" } ]
     assert tdd.description_difference( _desc( errors=err ), _desc() ) == "old file does not parse, line 3: Unexpected token"
     assert tdd.description_difference( _desc(), _desc( errors=err ) ) == "new file does not parse, line 3: Unexpected token"
+
+
+def test_a_moved_line_break_is_named():
+    old = _desc( tokens=[ [ 1, 107, "return", 0 ], [ 1, 9, "1", 0 ] ] )
+    new = _desc( tokens=[ [ 1, 107, "return", 0 ], [ 2, 9, "1", 1 ] ] )
+    assert tdd.description_difference( old, new ) == "line 2: a line break before token '1' was added"
+    assert tdd.description_difference( new, old ) == "line 1: a line break before token '1' was removed"
+
+
+def test_a_moved_directive_comment_is_a_difference_even_when_its_text_is_kept():
+    old = _desc( marks=[ [ 0, "L:// @ts-ignore" ] ] )
+    new = _desc( marks=[ [ 2, "L:// @ts-ignore" ] ] )
+    msg = tdd.description_difference( old, new )
+    assert msg is not None and "moved or changed" in msg and "@ts-ignore" in msg
+
+
+def test_a_trailing_directive_made_a_line_of_its_own_is_a_difference():
+    old = _desc( marks=[ [ 1, "T:// eslint-disable-line no-console" ] ] )
+    new = _desc( marks=[ [ 1, "L:// eslint-disable-line no-console" ] ] )
+    assert tdd.description_difference( old, new ) is not None
+
+
+def test_identical_marks_pass():
+    marks = [ [ 0, "L:/*! banner */" ], [ 2, "T:/* c8 ignore next */" ] ]
+    assert tdd.description_difference( _desc( marks=marks ), _desc( marks=list( marks ) ) ) is None
 
 
 # ---- path_difference ----
@@ -222,6 +248,26 @@ def test_main_writes_pass_lines_to_stdout_by_default( repo, monkeypatch, capsys 
     assert "PASS a.ts" in capsys.readouterr().out
 
 
+def test_check_diff_a_file_that_is_not_utf8_fails_without_a_crash( repo ):
+    ( repo / "a.ts" ).write_bytes( b"x = 1; // caf\xc3\xa9\n" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-qm", "utf8" )
+    ( repo / "a.ts" ).write_bytes( b"x = 1; // caf\xe9\n" )
+    [ ( path, failure ) ] = tdd.check_diff( repo, "HEAD", None, None, _stub_run )
+    assert path == "a.ts" and "not valid UTF-8" in failure
+
+
+def test_check_diff_a_file_name_that_is_not_utf8_is_judged_and_named( repo ):
+    import os
+    raw = os.fsencode( str( repo ) ) + b"/caf\xff.ts"
+    with open( raw, "wb" ) as handle: handle.write( b"x = 1;\n" )
+    _git( repo, "add", "-A" )
+    _git( repo, "commit", "-qm", "odd name" )
+    with open( raw, "wb" ) as handle: handle.write( b"x = 2;\n" )
+    results = tdd.check_diff( repo, "HEAD", None, None, _stub_run )
+    assert len( results ) == 1 and results[ 0 ][ 0 ].startswith( "caf" ) and "became" in results[ 0 ][ 1 ]
+
+
 # ---- the real token script ----
 
 needs_node = pytest.mark.skipif( NODE is None, reason="Node is not installed" )
@@ -282,6 +328,48 @@ def test_real_template_and_typedef_names_in_javascript_are_type_code( repo ):
 @needs_node
 def test_real_a_file_that_does_not_parse_fails( repo ):
     assert "does not parse" in _diff_of( repo, "p.ts", "let a = 1;\n", "let a = ;\n" )
+
+
+@needs_node
+def test_real_a_newline_moved_after_return_fails_through_semicolon_insertion( repo ):
+    msg = _diff_of( repo, "r.ts", "function f() { return 1; }\n", "function f() { return\n1; }\n" )
+    assert msg is not None and "line break" in msg
+
+
+@needs_node
+def test_real_a_newline_inside_a_comment_after_return_fails( repo ):
+    msg = _diff_of( repo, "r2.ts", "function f() { return /* c */ 1; }\n", "function f() { return /* c\n */ 1; }\n" )
+    assert msg is not None and "line break" in msg
+
+
+@needs_node
+@pytest.mark.parametrize( "directive", [ "// @ts-ignore", "// eslint-disable-next-line no-console", "/* c8 ignore next */", "/*#__PURE__*/", "// istanbul ignore next", "// prettier-ignore" ] )
+def test_real_a_moved_directive_comment_fails( repo, directive ):
+    old = f"let a = 1;\n{directive}\nlet b = f( a );\nlet c = 3;\n"
+    new = f"let a = 1;\nlet b = f( a );\n{directive}\nlet c = 3;\n"
+    msg = _diff_of( repo, "d.ts", old, new )
+    assert msg is not None and "moved or changed" in msg
+
+
+@needs_node
+def test_real_a_changed_bundler_magic_comment_fails( repo ):
+    old = 'const m = import( /* webpackChunkName: "a" */ "./a.js" );\n'
+    assert _diff_of( repo, "w.ts", old, old.replace( '"a"', '"b"' ) ) is not None
+
+
+@needs_node
+def test_real_a_changed_import_tag_and_internal_tag_fail( repo ):
+    old_js = "/**\n * @import { T } from './a.js'\n */\nlet a = 1;\n"
+    assert _diff_of( repo, "i.js", old_js, old_js.replace( "'./a.js'", "'./b.js'" ) ) is not None
+    old_ts = "/**\n * Doc. @internal\n */\nexport let a = 1;\n"
+    assert _diff_of( repo, "n.ts", old_ts, old_ts.replace( " @internal", "" ) ) is not None
+
+
+@needs_node
+def test_real_a_comment_edit_that_keeps_every_line_break_still_passes( repo ):
+    old = "// @ts-ignore\nlet a: number = 'x'; // old note\n"
+    new = "// @ts-ignore\nlet a: number = 'x'; // a different, longer note\n"
+    assert _diff_of( repo, "k.ts", old, new ) is None
 
 
 @needs_node
