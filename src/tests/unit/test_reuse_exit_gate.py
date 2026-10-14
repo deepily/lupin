@@ -172,12 +172,16 @@ def test_one_run_given_twice_cannot_reach_the_floor( tmp_path ):
     assert again[ "total_new" ] == 5 and again[ "passed" ] is False                                          # a copied diff counts its ids once
 
 
-def test_a_real_run_plus_an_empty_run_does_not_pass( tmp_path ):
+def test_an_empty_run_passes_when_the_pair_holds_the_floor_and_fails_when_it_does_not( tmp_path ):
     ids, rid = _ten()
     logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ], pad=False )
     res = eg.run_gate( runs, logs )
-    assert res[ "passed" ] is False and res[ "total_new" ] == 10
-    assert res[ "reasons" ] == [ f"{runs[ 1 ][ 'diff' ]}: the run adds no definition" ]
+    assert res[ "passed" ] is True and res[ "total_new" ] == 10 and res[ "reasons" ] == []              # the floor is on the pair
+    ( tmp_path / "short" ).mkdir()
+    logs2, runs2 = _two_runs( tmp_path / "short", ( ids[ :9 ], [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ :9 ] ] ), ( [], [] ),
+                              [ _call( "a", i, rid[ i ] ) for i in ids[ :9 ] ], pad=False )
+    short = eg.run_gate( runs2, logs2 )
+    assert short[ "passed" ] is False and short[ "reasons" ] == [ "only 9 new definitions, at least 10 required" ]
 
 
 def test_gate_fails_on_a_call_without_ruling_and_a_ruling_without_call( tmp_path ):
@@ -211,6 +215,18 @@ def test_an_excluded_definition_shows_its_cause_and_passes_only_with_a_ruling( t
     logs2, runs2 = _two_runs( tmp_path / "again", ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) ] ), ( [], [] ), calls )
     res = eg.run_gate( runs2, logs2 )
     assert res[ "passed" ] is True and res[ "runs" ][ 0 ][ "rows" ][ -1 ][ "status" ] == "EXCLUDED"
+
+
+def test_an_excluded_ruling_needs_the_excluded_token( tmp_path ):
+    """A ruling on a refused definition that cites a real-looking receipt must not pass."""
+    ids, rid = _ten()
+    sent, priv = ids[ :9 ], ids[ 9 ]
+    calls = [ _call( "a", i, rid[ i ] ) for i in sent ] + [ _call( "a", priv, None, error="EXCLUDED_PREFIX" ) ]
+    base  = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in sent ]
+    logs, runs = _two_runs( tmp_path, ( ids, base + [ _ruling( priv, "DUPLICATE", rid[ sent[ 0 ] ] ) ] ), ( [], [] ), calls )
+    res = eg.run_gate( runs, logs )
+    row = [ r for r in res[ "runs" ][ 0 ][ "rows" ] if r[ "id" ] == priv ][ 0 ]
+    assert res[ "passed" ] is False and row == { "id": priv, "status": "EXCLUDED_BAD_TOKEN", "cause": "PREFIX" }
 
 
 def test_gate_refuses_a_near_empty_diff_even_when_every_row_is_ok( tmp_path ):

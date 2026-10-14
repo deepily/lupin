@@ -13,7 +13,8 @@ For all runs together there are the per-session call logs under `<data>/call-log
 Each seat runs its own server, so one file shows only that seat's calls. This script merges them all.
 
 The gate takes the first two runs together, as the plan says, and counts their new
-definitions as one total. Any other number of runs fails.
+definitions as one total. Any other number of runs fails. One run may be empty when the pair holds
+the floor. The floor is on the pair, as the plan says.
 
 A new definition passes when it has two things:
 
@@ -23,7 +24,7 @@ A new definition passes when it has two things:
 A matched log line proves a call happened. The cited ruling proves the reviewer used it.
 A definition that sendable() would not send has no receipt, because nothing was sent. Its call logs an error
 starting with `EXCLUDED_`, and the gate reports it as `EXCLUDED` with that cause. It passes
-only with a ruling line for the symbol, written with the receipt token `excluded`.
+only with a ruling line for the symbol whose receipt token is exactly `excluded`.
 Fewer than `MIN_NEW` definitions in total cannot pass, so a near-empty diff proves nothing.
 """
 import argparse
@@ -36,6 +37,7 @@ import sys
 MIN_NEW         = 10
 RUNS_REQUIRED   = 2
 EXCLUDED_PREFIX = "EXCLUDED_"
+EXCLUDED_TOKEN  = "excluded"
 
 RULING_RE = re.compile( r"^\s*RULING\s+(?P<id>\S+)\s+::\s+(?P<ruling>DUPLICATE|EXTEND\s+\S+|DISTINCT\s+\S.*?)\s+::\s+reuse-receipt:\s*(?P<rid>[0-9A-Za-z_-]+)\s*$" )
 ENTRY_RE  = re.compile( r"""['"]entry['"]\s*:\s*(['"])(?P<id>.+?)\1""" )
@@ -143,8 +145,9 @@ def check_run( added, receipts, rulings, excluded=None ):
         - returns one { id, status } per added id, plus `cause` for an excluded one
         - status is `OK` when a ruling cites one of the symbol's own receipts
         - a receipt of another symbol never satisfies a ruling: that row is `WRONG_RECEIPT`
-        - status is `EXCLUDED` when the symbol has no receipt, was refused for sending and has a ruling line
+        - status is `EXCLUDED` when the symbol has no receipt, was refused for sending and a ruling line carries the token `excluded`
         - status is `EXCLUDED_NO_RULING` for the same symbol with no ruling line
+        - status is `EXCLUDED_BAD_TOKEN` for the same symbol when every ruling line carries another token
         - status is `NO_CALL` when the symbol has no receipt and no recorded refusal
         - status is `NO_RULING` when it has a receipt and no ruling line
         - status is `WRONG_RECEIPT` when rulings exist and none cites a receipt of the symbol
@@ -155,7 +158,10 @@ def check_run( added, receipts, rulings, excluded=None ):
         have, cited = receipts.get( sid, set() ), rulings.get( sid, [] )
         row = { "id": sid }
         if not have and sid in excluded:
-            row[ "status" ], row[ "cause" ] = ( "EXCLUDED" if cited else "EXCLUDED_NO_RULING" ), excluded[ sid ]
+            if not cited:                                           row[ "status" ] = "EXCLUDED_NO_RULING"
+            elif any( c[ "receipt" ] == EXCLUDED_TOKEN for c in cited ): row[ "status" ] = "EXCLUDED"
+            else:                                                   row[ "status" ] = "EXCLUDED_BAD_TOKEN"
+            row[ "cause" ] = excluded[ sid ]
         elif not have:                                        row[ "status" ] = "NO_CALL"
         elif not cited:                                       row[ "status" ] = "NO_RULING"
         elif any( c[ "receipt" ] in have for c in cited ):    row[ "status" ] = "OK"
@@ -172,8 +178,9 @@ def run_gate( runs, log_dir, min_new=MIN_NEW, runs_required=RUNS_REQUIRED ):
         - runs is a list of { "diff": path to the diff JSON, "review": path to the review document }
     Ensures:
         - returns { passed, total_new, bad_log_lines, reasons, runs: [ { diff, review, rows } ] }
-        - passed only when len( runs ) == runs_required, the runs name different diffs, each adds a definition,
-          the unique ids across them number min_new or more, and every row is `OK` or `EXCLUDED`
+        - passed only when len( runs ) == runs_required, the runs name different diffs, the unique
+          ids across the pair number min_new or more, and every row is `OK` or `EXCLUDED`
+        - the floor is on the pair, so one run may add no definition when the other carries the floor
         - total_new counts each symbol id once, so one run given twice cannot reach the floor
         - a diff that reports algorithm_changed has no per-symbol list and fails with that reason
     """
@@ -187,7 +194,6 @@ def run_gate( runs, log_dir, min_new=MIN_NEW, runs_required=RUNS_REQUIRED ):
             reasons.append( f"{run[ 'diff' ]}: pin algorithm changed, no per-symbol diff" ); continue
         rows = check_run( diff[ "added" ], receipts, parse_rulings( pathlib.Path( run[ "review" ] ).read_text( encoding="utf-8" ) ), excluded )
         seen.update( r[ "id" ] for r in rows )
-        if not rows: reasons.append( f"{run[ 'diff' ]}: the run adds no definition" )
         reasons += [ f"{r[ 'id' ]}: {r[ 'status' ]}" for r in rows if r[ "status" ] not in ( "OK", "EXCLUDED" ) ]
         out.append( { "diff": run[ "diff" ], "review": run[ "review" ], "rows": rows } )
     total = len( seen )

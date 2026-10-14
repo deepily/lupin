@@ -93,6 +93,9 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
   `CALL_FAILED`, `KEY_UNREADABLE`, `DEPENDENCY_MISSING`, `NOT_LUPIN_TREE` and `INDEX_STALE`.
   Treat it as unknown, never as `NEW`.
 - A reuse miss is a symbol that should have been on the shortlist and was not.
+- A receipt for a `_private` or nested definition has `need_text` in its id, so its id is not the one the plan's id definition gives.
+- The id changes when the definition's signature or first docstring line changes, because the public index sha does not cover private definitions.
+- Cite the id from the call you made on the final head. An id from an earlier edit still replays, but it describes the older text.
 - Report a miss to the manager as a task-store row with the receipt id and the symbol.
 - The counter-reviewer replays your receipts with `replay( receipt_id )`.
 - The counter-reviewer also reads the source of any candidate you dismissed.
@@ -101,7 +104,7 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
 
 This brief is for the second reviewer. The first reviewer's rulings are claims. You re-run the evidence behind each one and read what the first reviewer set aside. You do not rewrite the rulings. You report where a ruling does not hold.
 
-The plan names this role as an optional counter-reviewer, or as a second reviewer instance given this brief. Spawn it for a review that rules `DUPLICATE` or `DISTINCT` on a shortlisted candidate.
+The plan names this role as an optional counter-reviewer, or as a second reviewer instance given this brief. Spawn it for every review that cites receipts, `EXTEND` rulings included.
 
 ### Inputs
 
@@ -111,7 +114,7 @@ The plan names this role as an optional counter-reviewer, or as a second reviewe
 
 ### Procedure
 
-1. **Replay every cited receipt.** For each ruling call `replay( receipt_id )` once. Read `frozen` and `head` beside `stored`.
+1. **Replay every cited receipt.** For each ruling call `replay( receipt_id )` once. A ruling whose receipt token is `excluded` has nothing to replay. Read the definition yourself and go to the `COUNTER` line with `NOTHING_TO_REPLAY`. Read `frozen` and `head` beside `stored`.
    - `frozen` is a re-run against the inputs the receipt recorded. It tests the receipt, not the model.
    - `head` is a re-run against the current tree and index. It tests whether the code or the model still agrees.
    - A difference in `frozen` means the receipt is damaged or was altered. Flag the ruling and stop on that row.
@@ -125,12 +128,13 @@ The plan names this role as an optional counter-reviewer, or as a second reviewe
 4. **Write one line per ruling** in the counter-review document:
 
    ```text
-   COUNTER <symbol id> :: HOLDS | CHALLENGED <why> | UNVERIFIED <cause> :: reuse-receipt: <id>
+   COUNTER <symbol id> :: HOLDS | CHALLENGED <why> | UNVERIFIED <cause> | NOTHING_TO_REPLAY :: reuse-receipt: <id>
    ```
 
    - `HOLDS`: the replay agrees and no dismissed candidate does the job.
    - `CHALLENGED <why>`: a dismissed candidate, or a head difference, changes the ruling. Name the symbol.
    - `UNVERIFIED <cause>`: a named replay error or an unreadable source stopped the check. Give the error name.
+   - `NOTHING_TO_REPLAY`: the ruling cites `excluded`, so the tool sent nothing and there is no receipt. It is not a failed check.
 
 5. **Log each miss.** A symbol the receipt should have listed is a miss. Report it to the manager as a task-store row with the receipt id and the symbol. The librarian repairs the wiki from that row.
 
