@@ -42,6 +42,11 @@ export const KEY_SEP = "\0";
 
 const TRIAGE_CLASS = "task-request-triage";
 
+/**
+ * What the operator had in a pane before a repaint.
+ *
+ * It holds typed values, chosen verbs, pending priorities, shown refusals, open control rows and the focused input with its caret.
+ */
 export interface OperatorState {
   inputs     : Array<[ string, string ]>;
   selects    : Array<[ string, string ]>;

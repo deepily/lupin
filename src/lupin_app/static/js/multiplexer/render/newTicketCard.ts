@@ -20,6 +20,11 @@ import {
 import { insertTranscriptionText } from "./insertTranscriptionText";
 import type { TaskRowRecorderLike } from "./taskRowController";
 
+/**
+ * What the New Ticket button is built from.
+ *
+ * `assignees` is read when the card opens. Passing `recorder` adds a mic to the Title and Details fields.
+ */
 export interface NewTicketButtonOptions {
   /** Sends the POST. In production, `apiPostTicket( apiClient.post )`. */
   postTicket : ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult>;

@@ -39,6 +39,12 @@ interface WindowGlobals {
 // <details> all reached the bubble. Pinned in a real browser by
 // src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py, and by the config
 // test in markdown.test.ts.
+/**
+ * The sanitizer settings for rendered markdown.
+ *
+ * Only the listed tags and attributes survive, and links may use http, https and mailto.
+ * It sets no `USE_PROFILES`, because a profile would override the two lists.
+ */
 export const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS : [
     "h1", "h2", "h3", "h4", "h5", "h6",

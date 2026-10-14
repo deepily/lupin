@@ -28,6 +28,11 @@ import {
   type ManagerPullState,
 } from "./flowRatioModel";
 
+/**
+ * The flow-ratio store calls the panel makes.
+ *
+ * It reads the ratio, the settings and the manager-pull state, and saves or resets the settings.
+ */
 export interface FlowRatioStoreLike {
   ratio(): FlowRatioPayload | null;
   settings(): FlowRatioSettings | null;
@@ -38,6 +43,11 @@ export interface FlowRatioStoreLike {
   resetSettings(): Promise<void>;
 }
 
+/**
+ * The panel's two elements and its cleanup.
+ *
+ * The caller places `readout` in the Holding Area header and `controls` under it. `dispose` removes the bus subscription.
+ */
 export interface FlowRatioPanel {
   /** The header readout. The caller places it after the count and the request badge. */
   readout  : HTMLSpanElement;
@@ -135,6 +145,11 @@ function buildControls(): { root: HTMLDivElement; els: Els } {
   return { root, els: { threshold, thresholdValue, window: windowEl, windowValue, managerPull, reset, status } };
 }
 
+/**
+ * Build the flow-ratio readout and its operator controls.
+ *
+ * The controls are built once with their listeners. A new settings body repaints the sliders, so a drag in progress is not interrupted.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFlowRatioPanel( opts: { bus: EventBus; store: FlowRatioStoreLike } ): FlowRatioPanel {
   const { bus, store } = opts;

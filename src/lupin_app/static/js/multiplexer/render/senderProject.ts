@@ -9,6 +9,11 @@
 // One implementation, two readers — a second copy would drift the moment a
 // sender-id shape changed, and only one of the two badges would follow it.
 
+/**
+ * The upper-cased project named by a `claude.code@<project>.deepily.ai` sender id.
+ *
+ * Returns "UNKNOWN" for any other shape.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line (notificationItem.ts:46 precedent).
 export function projectFromSenderId( senderId: string ): string {
   const project = senderId.match( /^claude\.code@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai/ )?.[ 1 ];

@@ -288,6 +288,12 @@ export type TransitionExtras = Record<string, string | null | TransitionReceiptR
  */
 export const MUX_OPERATOR_ATTESTATION = "operator (multiplexer)";
 
+/**
+ * Build the extra body fields a verb's transition sends.
+ *
+ * The reason goes under `park_reason` for park and `reason` otherwise. Un-park sends an explicit null chase date,
+ * and Fixed adds the operator attestation the server requires.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; every internal branch is exercised.
 export function transitionExtras(
   verb     : string,

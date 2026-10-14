@@ -20,6 +20,11 @@
 // is typed as `string`). Documented inline at the assignment site.
 
 type RawValue = { readonly __raw: string };
+/**
+ * The kinds of value the `html` template tag can interpolate.
+ *
+ * It takes primitives, DOM nodes, fragments, arrays of these, and raw HTML marked as trusted.
+ */
 export type Value = string | number | boolean | null | undefined | Node | DocumentFragment | readonly Value[] | RawValue;
 
 const CHILD_SENTINEL_PREFIX = "lupin-html-child-";

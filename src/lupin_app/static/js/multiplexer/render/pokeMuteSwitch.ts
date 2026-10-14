@@ -12,6 +12,7 @@
 // Legacy twin: notifications.js _paintPokeMute / refreshPokeMute / togglePokeMute. Same
 // endpoint, same request body, same three faces.
 
+/** The server's stop-poke state: whether it is muted, and who set it and when. */
 export interface PokeMuteState {
   muted  : boolean;
   set_by : string | null;
@@ -19,11 +20,17 @@ export interface PokeMuteState {
 }
 
 // The two ApiClient verbs this needs; production passes the canonical ApiClient.
+/** The two API calls the switch uses: `get` to read the state and `put` to change it. */
 export interface PokeMuteApiLike {
   get<T>(path: string): Promise<T>;
   put<T>(path: string, body: unknown): Promise<T>;
 }
 
+/**
+ * What the switch is built from.
+ *
+ * `isAdmin` decides whether the button is enabled. `onError` receives a failed read or flip.
+ */
 export interface PokeMuteSwitchOptions {
   api      : PokeMuteApiLike;
   isAdmin  : () => boolean;
@@ -31,12 +38,18 @@ export interface PokeMuteSwitchOptions {
   onError? : (message: string, error: unknown) => void;
 }
 
+/**
+ * The switch's button, with `refresh` to read the state and `toggle` to flip it.
+ *
+ * Both resolve to the state the server reports, or null on failure.
+ */
 export interface PokeMuteSwitchHandle {
   element : HTMLButtonElement;
   refresh(): Promise<PokeMuteState | null>;
   toggle(): Promise<PokeMuteState | null>;
 }
 
+/** The endpoint that reads the stop-poke state (GET) and sets it (PUT). */
 export const POKE_MUTE_PATH = "/api/heartbeat/poke-mute";
 
 function isState( value: unknown ): value is PokeMuteState {
@@ -44,6 +57,12 @@ function isState( value: unknown ): value is PokeMuteState {
       && typeof ( value as { muted?: unknown } ).muted === "boolean";
 }
 
+/**
+ * Build the stop-poke button.
+ *
+ * It shows the state the server last reported, or "unknown" if the read failed. It is created hidden,
+ * because the skeleton-crew toggle in the Fleet Status pane now covers the same control.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line; the body below is fully covered.
 export function createPokeMuteSwitch( opts: PokeMuteSwitchOptions ): PokeMuteSwitchHandle {
   const onError = opts.onError ?? ( (): void => {} );

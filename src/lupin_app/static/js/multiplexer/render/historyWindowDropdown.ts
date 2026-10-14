@@ -17,11 +17,13 @@
 import { HISTORY_WINDOW_OPTIONS, historyWindowLabel, type HistoryWindow } from "../stores/historyWindow";
 
 // Narrowed NotificationStore surface (the production store satisfies it).
+/** The two notification-store calls the picker uses: read the history window and set it. */
 export interface HistoryWindowStoreLike {
   historyWindow(): HistoryWindow;
   setHistoryWindow(w: HistoryWindow): void;
 }
 
+/** What the picker returns: its element, a `sync` to repaint from the store, and `dispose`. */
 export interface HistoryWindowDropdownHandle {
   /** The `#history-window-dropdown` element, ready to place in the header. */
   element : HTMLElement;

@@ -28,6 +28,11 @@
 // ⚠️ A SECOND PRESS BEFORE THE DEFERRED RELEASE RUNS (a double-click) must not be
 // released by the first press's timer; a generation count makes a stale timer a no-op.
 
+/**
+ * Holds a pane's repaint while a mouse press is in flight.
+ *
+ * A repaint between press and release would replace the pressed node, and the click would reach nothing.
+ */
 export interface PressHoldGuard {
   /**
    * Hold `paint` if a press is in flight.
@@ -46,6 +51,7 @@ export interface PressHoldGuard {
   dispose(): void;
 }
 
+/** What the guard is built from: an optional timer function that tests replace. */
 export interface PressHoldGuardOptions {
   /** Schedules the deferred `mouseup` release. Defaults to `setTimeout`. */
   setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;

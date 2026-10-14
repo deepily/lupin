@@ -155,6 +155,12 @@ function requestKey( chip: HTMLElement ): string {
   return `${ chip.dataset.taskId ?? "" }@${ chip.dataset.requestTs ?? "" }`;
 }
 
+/**
+ * The behaviour of one pane's request chips.
+ *
+ * The pane calls `handleClick` from its container listener and `hydrate` after each paint.
+ * `rememberInput` keeps a typed triage date across the next poll.
+ */
 export interface RequestChipController {
   /** Container click → a verdict, when the click was on a chip button. True when handled. */
   handleClick( target: EventTarget | null ): boolean;
@@ -300,6 +306,7 @@ export interface RequestBoardStoreLike extends RequestChipStoreLike {
   counts(): RequestBadgeCounts;
 }
 
+/** What `wireRequestPane` returns: click handling, hydration after a paint, and `dispose`. */
 export interface RequestPaneWiring {
   /** Call first from the pane's container click listener; true means the click was ours. */
   handleClick( target: EventTarget | null ): boolean;
@@ -309,6 +316,11 @@ export interface RequestPaneWiring {
   dispose(): void;
 }
 
+/**
+ * What one pane passes to `wireRequestPane`.
+ *
+ * `badgeKey` picks the one badge count the pane shows. `countEl` is where the badge is placed beside.
+ */
 export interface RequestPaneWiringOptions {
   bus      : EventBus;
   store    : RequestBoardStoreLike;
@@ -358,6 +370,11 @@ export function wireRequestPane( opts: RequestPaneWiringOptions ): RequestPaneWi
   };
 }
 
+/**
+ * Build the chip controller for one store.
+ *
+ * A pane normally gets it through `wireRequestPane`, which adds the badge and the date listeners.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createRequestChipController( store: RequestChipStoreLike ): RequestChipController {
   return new RequestChipControllerImpl( store );

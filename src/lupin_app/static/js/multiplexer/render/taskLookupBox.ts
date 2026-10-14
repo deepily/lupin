@@ -57,6 +57,11 @@ export interface TaskLookupBoxOptions {
   onCleared? : () => void;
 }
 
+/**
+ * The lookup box's parts.
+ *
+ * `submit` runs a lookup for what is typed. `clear` empties the box and removes the filter it applied.
+ */
 export interface TaskLookupBoxHandle {
   /** The whole control — input + button + result region. Mount this. */
   root   : HTMLElement;

@@ -21,11 +21,21 @@ import { SECTION_ID } from "./FilterSettingsRenderer";
 
 // The slice of SectionToolbarRenderer this reveal needs — keeps the unit test free to
 // inject a fake, and keeps this module from importing the whole renderer.
+/**
+ * The one toolbar call the reveal makes, `showSection`.
+ *
+ * The unit test passes a fake, and this module need not import the whole toolbar renderer.
+ */
 export interface RevealToolbarLike {
   /** Persist + un-hide + re-light the section's toolbar button. Does NOT scroll. */
   showSection( sectionId: string ): void;
 }
 
+/**
+ * What the reveal is built from.
+ *
+ * `toolbar` is a function that is called when the reveal runs, not when it is built. `doc` is the document to search.
+ */
 export interface FilterSettingsRevealOptions {
   /** Resolved at CALL time — see the header note on the temporal dead zone. */
   toolbar : () => RevealToolbarLike;

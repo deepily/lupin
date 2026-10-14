@@ -29,6 +29,11 @@ import { ownLookup } from "../shared/ownLookup";
 /** One `task_events` row as `_serialize_event` puts it on the wire. */
 import { personaLabel } from "../shared/personaLabel";
 
+/**
+ * One row of the task-event stream, as the server serializes it.
+ *
+ * `transition` is the status the row moved to, and `reason` and `actor` say why and who.
+ */
 export interface FinishedTaskEvent {
   id            : number;
   item_id       : string;
@@ -87,6 +92,7 @@ export const FINISHED_SHOWN_KEY = "lupin.finishedTasks.shownStatuses";
 
 /** The window slider's range, in DAYS. Days on screen, hours on the wire. */
 export const FINISHED_WINDOW_MIN_DAYS = 1;
+/** The widest the window slider goes, in days. */
 export const FINISHED_WINDOW_MAX_DAYS = 14;
 /** Rick's ruling, 2026-09-07 ~20:55 EDT by keypress: the day control is a
  *  WIDTH slider — you widen how far back the pane looks. It is NOT an offset
@@ -288,6 +294,12 @@ export function mergeShownEvents(
  */
 export type FinishedPaneState = "error" | "unmeasured" | "no_filter" | "empty" | "partial" | "rows";
 
+/**
+ * Decide which of the six pane states to show.
+ *
+ * It checks, in order: nothing measured, no pill lit, no visible rows, then whether any status failed.
+ * A total failure is therefore never shown as a measured zero.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line (object-literal param type erasure).
 export function finishedPaneState( opts: {
   measuredStatuses : ReadonlyArray<string>;

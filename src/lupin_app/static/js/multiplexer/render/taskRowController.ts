@@ -59,6 +59,11 @@ export interface TaskRowRecorderLike {
   getActiveContextId(): string | null;
 }
 
+/**
+ * What a pane passes to build its row controller.
+ *
+ * `container` scopes every lookup. `writer` performs the edits. `onTransitionSettled` runs after a transition succeeds.
+ */
 export interface TaskRowControllerOptions {
   /** The pane's persistent container — every lookup and every stripe is scoped to it. */
   container : HTMLElement;
@@ -77,6 +82,7 @@ export interface TaskRowControllerOptions {
 
 // How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
 // Mirrors the notifications.js checkmark dwell (~1.2s).
+/** How long the copied flash stays on a row id cell, in milliseconds. */
 export const COPIED_FLASH_MS = 1200;
 
 /** The stripe a mic shows when its row has no reason box. Carbon copy of `_handleReasonSttClick`. */
@@ -87,6 +93,12 @@ export function reasonMicContextId( id: string ): string {
   return `task-reason-${id}`;
 }
 
+/**
+ * Handles the clicks, changes and keys of the shared task row for one pane.
+ *
+ * `handleClick` returns false for anything that is not a row control, so the pane can route it.
+ * Edits and transitions go through the writer, and a refusal is shown as a stripe on the row.
+ */
 export class TaskRowController {
   private readonly container : HTMLElement;
   private readonly writer    : TaskRowWriter;

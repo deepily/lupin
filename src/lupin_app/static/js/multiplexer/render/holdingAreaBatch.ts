@@ -29,6 +29,7 @@
 /** The two batch verbs, in the fixed order they render in. */
 import { ownLookup } from "../shared/ownLookup";
 
+/** The two batch verbs, approve and won't-fix, in the order the buttons render. */
 export const HOLDING_BATCH_VERBS: ReadonlyArray<string> = [ "approve", "wont_fix" ];
 
 /**

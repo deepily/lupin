@@ -11,6 +11,11 @@
 // Wire shapes (all fields optional — rendered defensively)
 // ---------------------------------------------------------------------------
 
+/**
+ * How long ago each liveness signal was last seen, in seconds, and the arbiter's verdict.
+ *
+ * The tooltip prints them. `verdict` is "offline" when the session has gone quiet.
+ */
 export interface FleetLiveness {
   verdict?           : string;
   bridge_age_s?      : number | null;
@@ -20,6 +25,11 @@ export interface FleetLiveness {
   freshest_age_s?    : number | null;
 }
 
+/**
+ * One session row from the fleet arbiter.
+ *
+ * `manager` names the manager persona a worker reports to. `holding_on` and `stuck` come from the arbiter.
+ */
 export interface FleetSession {
   persona?    : string;
   session_id? : string;
@@ -31,13 +41,20 @@ export interface FleetSession {
   liveness?   : FleetLiveness;
 }
 
+/** One persona's context-window figures: the share used and the window size. */
 export interface FleetContextRecord {
   consumption_pct_of_window? : number | null;
   window_size?               : number | null;
 }
 
+/** Context-window figures keyed by persona name. */
 export type FleetPersonaMap = Record<string, FleetContextRecord>;
 
+/**
+ * One manager with its workers, or the trailing group of workers with no known manager.
+ *
+ * `isUnmanaged` is true only for that last group, where `manager` is null.
+ */
 export interface FleetGroup {
   managerPersona : string | null;
   manager        : FleetSession | null;
@@ -45,11 +62,21 @@ export interface FleetGroup {
   workers        : FleetSession[];
 }
 
+/**
+ * The fleet as groups.
+ *
+ * `totalCount` is the number of session rows. `groups` lists the managers sorted by name, then the unmanaged group.
+ */
 export interface FleetModel {
   totalCount : number;
   groups     : FleetGroup[];
 }
 
+/**
+ * The composite fleet answer the store caches.
+ *
+ * It carries the arbiter's sessions and the context-pressure figures per persona.
+ */
 export interface FleetComposite {
   status?           : string;
   app_timezone?     : string;
