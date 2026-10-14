@@ -55,6 +55,11 @@ export interface ConsoleWindowEvents {
   addEventListener( type: "online" | "offline", listener: () => void ): void;
 }
 
+/**
+ * What `bootConsolePage` needs from the browser.
+ *
+ * `connect` is called only after the login guard passes. `newSessionId` supplies this tab's own queue session id.
+ */
 export interface ConsolePageDeps {
   doc          : Document;
   win          : ConsoleWindowEvents;
@@ -65,13 +70,21 @@ export interface ConsolePageDeps {
   newSessionId : () => string;
 }
 
+/**
+ * How booting the console page ended.
+ *
+ * It is an error shown on the page, a redirect to login, or watching a seat with the store and renderer that are running.
+ */
 export type ConsolePageResult =
   | { status : "error";      error : string }
   | { status : "redirected" }
   | { status : "watching";   seat : string; sessionId : string; store : SessionTranscriptStore; renderer : SessionTranscriptRenderer };
 
+/** The id of the element the transcript renderer mounts into. */
 export const CONSOLE_PAGE_MOUNT_ID = "session-transcript-mount";
+/** The id of the element that shows the page title. */
 export const CONSOLE_PAGE_TITLE_ID = "console-page-title";
+/** The id of the element that shows a missing or malformed seat error. */
 export const CONSOLE_PAGE_ERROR_ID = "console-page-error";
 
 /**
