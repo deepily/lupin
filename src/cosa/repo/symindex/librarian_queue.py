@@ -300,6 +300,8 @@ class Librarian:
             - a rollup whose package has no findings is amended once with a clear notice and is never closed here
             - a rollup that already carries its clear notice is counted as waiting
             - the manager is notified once about refused creates and once about newly cleared rollups
+            - a run that finds rollups still waiting for their close notifies the manager again, so a daily run tells once a day
+            - a notice the notifier reports as not delivered is logged
             - miss rows are never amended here
             - refused creates are written to the pending file before this returns
             - raises RuntimeError when the store could not be read, leaving the pending file as it was
@@ -348,9 +350,14 @@ class Librarian:
             else: self.log( f"clear notice failed: {title}: status {status}: {reply}" )
         write_pending( self.pending_path, held )
         counts[ "pending" ] = len( held )
-        if self._refused and self.notify is not None: self.notify( f"{len( held )} wiki-librarian rows were not created and are pending" )
-        if cleared and self.notify is not None: self.notify( f"{len( cleared )} wiki-librarian rollups are clear; close each with a manager_attestation receipt" )
+        if self._refused: self._tell( f"{len( held )} wiki-librarian rows were not created and are pending" )
+        if cleared: self._tell( f"{len( cleared )} wiki-librarian rollups are clear; close each with a manager_attestation receipt" )
+        if counts[ "waiting" ]: self._tell( f"{counts[ 'waiting' ]} wiki-librarian rollup(s) are still clear and wait for a manager_attestation close" )
         return counts
+
+    def _tell( self, text ):
+        """Send one notice to the manager and log it when it was not delivered."""
+        if self.notify is not None and self.notify( text ) is False: self.log( f"manager notice failed: {text}" )
 
     def hold_or_create( self, title, body ):
         """
