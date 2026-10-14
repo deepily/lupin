@@ -78,7 +78,8 @@ export interface SequentialAudioManagerOptions {
 /**
  * A snapshot of the manager's counters.
  *
- * It holds chunks played and processed, queue length, the error count and the blob URLs not yet revoked.
+ * `chunksPlayed` and `totalProcessed` rise together when a chunk is taken off the queue, and `reset` zeroes both with `errorCount`.
+ * `errorCount` counts audio-element errors. `activeBlobUrls` is the object URLs not yet revoked.
  */
 export interface SequentialAudioStats {
   chunksPlayed   : number;

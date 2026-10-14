@@ -40,7 +40,7 @@ export interface DirectAudioElement {
 /**
  * The test seams for the player.
  *
- * They are the audio-element factory and the object-URL create and revoke calls.
+ * Each defaults to the browser's own: `new Audio( url )`, `URL.createObjectURL` and `URL.revokeObjectURL`.
  */
 export interface DirectTtsPlayerOptions {
   /** Test injection — the element factory. Production: `new Audio( url )`. */

@@ -34,9 +34,9 @@ export interface AudioContextLike {
 }
 
 /**
- * The buffer the decoder returns.
+ * The part of a browser `AudioBuffer` that the decoder fills and returns.
  *
- * It has one `copyToChannel` call plus the rate, length, channels and duration.
+ * A test can pass a plain object of this shape in place of a real buffer.
  */
 export interface AudioBufferLike {
   copyToChannel(source: Float32Array, channelNumber: number, bufferOffset?: number): void;

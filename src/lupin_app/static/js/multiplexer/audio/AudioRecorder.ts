@@ -16,7 +16,7 @@
 /**
  * What the recorder is built from; every field is optional.
  *
- * The upload goes to the transcription endpoint by POST. Recording stops by itself after `maxDurationMs`, 30 seconds by default.
+ * The upload is a POST to `/api/upload-and-transcribe-mp3` unless `uploadEndpoint` or `uploadMethod` say otherwise. Recording stops by itself after `maxDurationMs`, 30 seconds by default.
  * The callbacks report the start, the stop, the transcript and any error.
  */
 export interface AudioRecorderOptions {

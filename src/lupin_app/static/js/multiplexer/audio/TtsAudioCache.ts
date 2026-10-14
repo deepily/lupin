@@ -65,7 +65,7 @@ export interface MinimalIdbRequest<T = unknown> {
 /**
  * The object-store calls the cache makes.
  *
- * They are create an index, get, put, clear, and open a cursor.
+ * `createIndex` runs only in the upgrade handler. `clear` backs the full clear, and `openCursor` drives the expiry sweep.
  */
 export interface MinimalIdbObjectStore {
   createIndex( name: string, keyPath: string, options: { unique: boolean } ): void;
@@ -86,19 +86,33 @@ export interface MinimalIdbCursor {
   continue(): void;
 }
 
-/** A transaction, used only to reach an object store by name. */
+/**
+ * A transaction on the cache's one object store.
+ *
+ * Each read, write and sweep opens its own.
+ * A lookup uses "readonly" and a change uses "readwrite".
+ */
 export interface MinimalIdbTransaction {
   objectStore( name: string ): MinimalIdbObjectStore;
 }
 
-/** A database handle: check and create stores, open a transaction, and close. */
+/**
+ * A database handle.
+ *
+ * It declares no `close`, and this cache never closes its connection.
+ */
 export interface MinimalIdbDatabase {
   objectStoreNames : { contains( name: string ): boolean };
   createObjectStore( name: string, options: { keyPath: string } ): MinimalIdbObjectStore;
   transaction( storeNames: string[], mode: string ): MinimalIdbTransaction;
 }
 
-/** The request from opening the database, with success, error and upgrade handlers. */
+/**
+ * The request from opening the database.
+ *
+ * `onupgradeneeded` creates the object store and its indexes when the store is missing.
+ * `onsuccess` supplies the open handle in `result`.
+ */
 export interface MinimalIdbOpenRequest {
   onsuccess       : (( ev: unknown ) => void) | null;
   onerror         : (( ev: unknown ) => void) | null;
