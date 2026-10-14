@@ -475,3 +475,21 @@ def test_a_refused_empty_export_or_an_unwritable_folder_ends_the_run_with_one_an
     blocker.write_text( "a file" )
     code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), lambda r, p: report(), str( blocker / "sub" / "m.jsonl" ), state, NOON, log=lambda line: None )
     assert code == 1 and summary[ "ran" ] is False and not os.path.exists( state )
+
+
+def test_a_missing_wiki_folder_refuses_before_sync_and_touches_nothing( tmp_path, pipeline ):
+    state, lines, lib = str( tmp_path / "state.json" ), [], FakeLibrarian()
+    code, summary = lt.run_tick( "r", str( tmp_path / "no-wiki" ), None, lib, lambda r, p: report(), "m", state, NOON, log=lines.append )
+    assert code == 1 and summary[ "ran" ] is False and "no capability page" in summary[ "reason" ]
+    assert lib.seen is None and not os.path.exists( state )
+    assert any( "no capability page" in line for line in lines )
+
+
+def test_an_index_with_no_symbols_refuses_before_sync_and_touches_nothing( tmp_path, pipeline, monkeypatch ):
+    ( tmp_path / "capabilities" ).mkdir()
+    ( tmp_path / "capabilities" / "a.md" ).write_text( "# a\n" )
+    monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "idx-sha", "counts": { "symbols": 0 } } )
+    state, lines, lib = str( tmp_path / "state.json" ), [], FakeLibrarian()
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, lib, lambda r, p: report(), "m", state, NOON, log=lines.append )
+    assert code == 1 and "no symbols" in summary[ "reason" ]
+    assert lib.seen is None and not os.path.exists( state )
