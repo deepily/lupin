@@ -17,7 +17,7 @@ Modes:
     --live         asks the real Jev through the account ledger.
                    The key is read from JEV_API_TOASTER.
                    Needs --ledger and --ceiling.
-                   Add --store live to write the rows to the task store.
+                   The rows always go to an in-memory store; --store live is refused.
 
 Exit 0 means every expectation held.
 Exit 1 means one failed.
@@ -355,7 +355,7 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     environ = os.environ if environ is None else environ
     work    = pathlib.Path( work )
     if work.exists() and any( work.iterdir() ): raise RunRefused( f"{work} is not empty; give a new --work folder" )
-    if store_kind not in ( "fake", "live" ): raise RunRefused( f"--store must be fake or live, got {store_kind!r}" )
+    if store_kind != "fake": raise RunRefused( f"--store {store_kind} is refused: the rows are synthetic rows and must not enter the real store" )
     if mode == "live":
         if ceiling is None or ledger_path is None: raise RunRefused( "a live run needs --ceiling and --ledger" )
         if not jev_transport.has_key(): raise RunRefused( f"{jev_transport.KEY_VARIABLE} is not set; nothing was created" )
@@ -370,11 +370,7 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     else:
         stand_in = NoCallTransport() if answers is not None else StandInJev()
         ctx      = make_context( root, data, out, transport=stand_in )
-    if store_kind == "live":
-        store = _live_store()
-        if mode != "live": raise RunRefused( "--store live is for a live run" )
-    else:
-        store = FakeStore()
+    store     = FakeStore()
     librarian = Librarian( store, str( work / "pending.jsonl" ), log )
     try:
         page   = page_scenario( ctx, root, librarian, store, runs )
@@ -392,14 +388,6 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     report[ "ok" ] = bool( page[ "ok" ] and full[ "ok" ] and exported == expected and not export.skipped )
     ( work / "report.json" ).write_text( json.dumps( report, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
     return ( 0 if report[ "ok" ] else 1 ), report
-
-
-def _live_store():
-    """Ensures: returns the live task-store adapter, built from the client settings."""
-    from cosa.repo.symindex.librarian_tick import LiveStore
-    from lupin_cli.claude_code.hooks.lib import task_store_client as client
-    from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-    return LiveStore( load_task_store_settings(), client.read_api_key(), client )
 
 
 def summary_lines( report ):
