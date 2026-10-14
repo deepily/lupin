@@ -166,7 +166,8 @@ class TaskCreateIn( BaseModel ):
     """
     Create body for POST /api/tasks.
 
-    Creation defaults to status=queued, and the creation event stamps "->queued". The handler
+    An omitted status takes the approval settings' default: queued, or not_approved while the
+    holding default is on. The creation event stamps "->" and that status. The handler
     validates enum membership for item_class, gate_class, priority and authority through
     `task_store_rules.validate_create`. The rules live in one place and are not duplicated
     per layer.
@@ -175,8 +176,8 @@ class TaskCreateIn( BaseModel ):
     mint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona
     blocker requires. `rules.validate_create_status` enforces both and reuses the same
     `->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in
-    the handler through `is_manager_figure`. `status` is otherwise limited to queued or blocked.
-    The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
+    the handler through `is_manager_figure`. `status` is otherwise limited to queued or
+    not_approved (`CREATE_ALLOWED_STATUSES`). The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
 
     The create door narrows both paragraphs above. With the holding default on, an omitted
     status mints `not_approved`. An explicit live status (queued or blocked) is refused with 403
@@ -908,8 +909,9 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
     "/tasks",
     status_code = 201,
     summary     = "Create a task-store item",
-    description = "Creates one obligation row (always status=queued) plus its "
-                  "'->queued' creation event. Auth: X-API-Key or Bearer JWT. "
+    description = "Creates one obligation row (status queued, blocked or not_approved; "
+                  "an omitted status takes the approval settings' default) plus its "
+                  "creation event. Auth: X-API-Key or Bearer JWT. "
                   "Design §2.2 (v0.4, Rick-ruled F4: managers-first writes)."
 )
 def create_task(
@@ -1376,7 +1378,7 @@ def create_task(
     summary     = "Transition a task-store item",
     description = "Applies one state change + appends one audit event. "
                   "->done REJECTS without valid receipt_refs (T3, §4.1 AC1); "
-                  "->blocked REQUIRES next_chase_ts (I3) + typed blocked_by refs; "
+                  "->blocked REQUIRES typed blocked_by refs, plus next_chase_ts when one is a persona ref (I3); "
                   "done/dropped are terminal. Auth: X-API-Key or Bearer JWT."
 )
 def transition_task(
