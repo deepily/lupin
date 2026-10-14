@@ -21,11 +21,21 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    ```
 
    The new definitions are `added` in `diff.json`. If it holds `algorithm_changed`, rebuild
-   both sides with one tool version and diff again. Also treat a `changed` entry whose body
-   grew a new nested helper as a new definition.
+   both sides with one tool version and diff again. A diff that edits the indexer itself
+   (`src/cosa/repo/symindex/`, including `ts_extract.js`) always lands here. Use the head
+   tree's tool for both sides. Run `build --root <base tree>` from the head checkout, with
+   `LUPIN_ROOT` and `PYTHONPATH` pointing at the head tree. Also treat a `changed` entry whose
+   body grew a new nested helper as a new definition.
+
+   **The index does not see every file.** A definition in a file outside the index roots is
+   never in `added`. In the Lupin tree the script roots are the web tree under
+   `lupin_app/static/js`. So `src/cosa/repo/symindex/ts_extract.js` and `src/scripts/*.mjs`
+   are not indexed. List those from `git diff <base> <head> -- <file>` by hand. Search the
+   tree for a twin with a fixed-string search. Rule with the token `unindexed`, as the
+   **Rule** step below describes.
 
 2. **Ask the index, one definition at a time.** Call `fetch_similar( entry )` with the symbol
-   id exactly as `diff.json` lists it. Keep the `receipt_id` it returns. `UNKNOWN_ENTRY` means
+   id exactly as `diff.json` lists it. Keep the `receipt_id` it returns. Pair it with the symbol you asked about, never with the position of the reply. Parallel calls do not come back in the order they were sent. Run 3 of the W-F crew run matched three receipts to the wrong symbols this way, and the gate answered `WRONG_RECEIPT`. `UNKNOWN_ENTRY` means
    the id is in no definition of the head index, so copy it again from `diff.json`. `_private`
    and nested ids are looked up like public ones.
 
@@ -47,6 +57,13 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    RULING <symbol id> :: DUPLICATE | EXTEND <symbol> | DISTINCT <why> :: reuse-receipt: <receipt id>
    ```
 
+   One ruling line per symbol, and the symbol id has no spaces or commas. The gate's pattern
+   reads `\S+` for the id and `[0-9A-Za-z_-]+` for the receipt. The gate refuses a line that
+   opens with `RULING` and does not match, and it names the line.
+   For a file outside the index write `<file>#<name>` as the id and `unindexed` as the receipt
+   token. The gate only checks ids that are `added`, so it neither accepts nor rejects such a line.
+   The reader has to challenge it. Never put free text in the receipt position.
+
    - `DUPLICATE`: an existing symbol already does this. The diff should call it.
    - `EXTEND <symbol>`: the new code belongs inside that symbol, or should wrap it.
    - `DISTINCT <why>`: you read the candidates' source and name the difference in one clause.
@@ -61,8 +78,11 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    python -m cosa.repo.doc_lint.docstring_lint --strict --json <changed .py files>
    ```
 
-   Run `cosa.repo.doc_lint.prose_judge` through its API on the changed docstrings (it makes a
-   model call, so it runs here, not in a commit hook).
+   `cosa.repo.doc_lint.prose_judge` makes a model call, so it runs here and not in a commit hook.
+   It has no one-call entry point: the module offers `items_from_source`, `changed_items`,
+   `parse_findings` and `locate_line`, and the model call itself goes through `harness_runner`
+   and `model_transport`. If you cannot assemble that call, write "prose_judge: not run" and the
+   reason in the review document; never leave it out silently.
 
 7. **Report or reject.** Save the findings (linters plus any ruling you challenge) as a JSON
    list and ask the flag:
@@ -71,9 +91,10 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
    python -m lupin_mcp.reuse_review_gate --findings findings.json
    ```
 
-   It prints `mode`. With the flag false the mode is `report-only`: list the findings in the
-   review and reject nothing. With the flag true and a finding left, the mode is `reject`.
-   Exit code 1 means reject.
+   It prints JSON with `mode`, `reject`, `count` and `findings`. With the flag false the mode is
+   `report-only`: list the findings in the review and reject nothing. With the flag true and a
+   finding left, the mode is `reject`. Exit code 1 means reject. A finding is one object in the
+   list; an empty list `[]` is a valid input and answers `report-only`, `count` 0.
 
 ## The three vocabularies
 
