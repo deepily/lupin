@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "ac7923651c024c9d",
+  "rules_stamp": "f2eb2080c6e29ee3",
   "files": {
     "src/conftest.py": 68,
     "src/cosa/agents/prediction_engine/tests/test_accuracy_comparators.py": 1,
@@ -1089,7 +1089,7 @@
     "src/tests/unit/test_cc_transcript_registry_and_docs.py": 49,
     "src/tests/unit/test_cc_transcript_router.py": 71,
     "src/tests/unit/test_cc_transcript_tail_primitive.py": 38,
-    "src/tests/unit/test_cc_transcript_tailer.py": 89,
+    "src/tests/unit/test_cc_transcript_tailer.py": 85,
     "src/tests/unit/test_cc_transcript_thinking_fixture.py": 102,
     "src/tests/unit/test_cc_transcript_tool_call_name.py": 6,
     "src/tests/unit/test_cc_transcript_tool_result_name.py": 9,
@@ -1398,6 +1398,7 @@
     "src/tests/unit/test_mcp_stdout_is_jsonrpc_only.py": 34,
     "src/tests/unit/test_mcp_timeout_detection.py": 15,
     "src/tests/unit/test_mcp_tool_timeout_spawn_env.py": 17,
+    "src/tests/unit/test_md_lint_tic_skips_code.py": 3,
     "src/tests/unit/test_memento_block_reports_state_not_amendments.py": 29,
     "src/tests/unit/test_memento_merge_claim.py": 12,
     "src/tests/unit/test_memento_recency_across_offsets.py": 49,

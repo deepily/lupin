@@ -205,21 +205,25 @@ def emphasis_findings( text, path, first_line, words=None ):
     return findings
 
 
-def rhetoric_findings( text, path, first_line ):
+def rhetoric_findings( text, path, first_line, markdown=False ):
     """
     Check rule 5: no tic phrases from the frozen list.
 
     Requires:
         - text is a str
+        - markdown is True for a markdown page, which has no waiver comment
 
     Ensures:
         - one Finding per tic phrase occurrence, at its line
+        - in markdown a phrase inside an inline code span is not a finding, so a literal label can be quoted
+        - a docstring reading still checks inside backticks
 
     Raises:
         - nothing
     """
     findings = []
     for i, raw in enumerate( text.split( "\n" ) ):
+        if markdown: raw = INLINE_CODE.sub( " ", raw )
         for m in TIC_REGEX.finditer( raw ):
             findings.append( Finding( path, first_line + i, "tic", f"tic phrase {m.group( 0 )!r}" ) )
     return findings
@@ -424,7 +428,7 @@ def lint_text( text, path, first_line=1, structure=True, markdown=False, words=N
         findings += preface_findings( text, path, first_line )
     findings += sentence_findings( text, path, first_line, markdown )
     findings += emphasis_findings( text, path, first_line, words )
-    findings += rhetoric_findings( text, path, first_line )
+    findings += rhetoric_findings( text, path, first_line, markdown )
     findings += reference_findings( text, path, first_line )
     findings += history_findings( text, path, first_line, agent_rule )
     return sorted( findings, key=lambda f: ( f.line, f.rule, f.message ) )
