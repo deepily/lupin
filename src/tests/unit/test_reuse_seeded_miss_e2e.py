@@ -102,6 +102,15 @@ def test_a_dry_run_on_saved_answers_makes_no_call_and_a_run_missing_answers_stop
     with pytest.raises( sm.RunRefused, match = "not a folder" ): sm.run( tmp_path / "fourth", "dry", answers=tmp_path / "nowhere" )
 
 
+def test_an_answers_folder_over_the_size_limit_is_refused_before_it_is_copied( tmp_path, monkeypatch ):
+    big = tmp_path / "big" / "ab"
+    big.mkdir( parents=True )
+    ( big / "x.json" ).write_bytes( b"x" * 2048 )
+    monkeypatch.setattr( sm, "MAX_ANSWERS_BYTES", 1024 )
+    with pytest.raises( sm.RunRefused, match = "over the 1024 byte limit" ): sm.run( tmp_path / "w", "dry", answers=tmp_path / "big" )
+    assert not ( tmp_path / "w" / "data" ).exists()
+
+
 def test_refusals_come_before_anything_is_created( tmp_path, monkeypatch ):
     ( tmp_path / "busy" ).mkdir()
     ( tmp_path / "busy" / "x" ).write_text( "x" )
