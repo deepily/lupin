@@ -47,6 +47,11 @@ import {
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/**
+ * The slice of the audio store the renderer uses.
+ *
+ * It is the playback state, the burst length and the pause, resume, stop and skip calls.
+ */
 export interface AudioStoreLike {
   state(): AudioPlaybackState;
   burstLength(): number;   // OQ-F0.4: AudioStore PCM burst counter (renamed from queueLength)
@@ -56,10 +61,11 @@ export interface AudioStoreLike {
   skip(): void;
 }
 
-// WP4 — the TtsQueueStore surface the renderer consumes: read-only queries +
-// mutators dispatched via card/chrome handlers. NO advance(): the store
-// self-advances on store_audio_ended (TtsQueueStore.ts:168); the renderer never
-// calls advance() and never subscribes store_audio_ended (COND-2).
+/**
+ * The slice of the speech queue store the renderer uses.
+ *
+ * It is read queries plus remove, clear and focus resume. It has no `advance`, because the store advances itself when audio ends.
+ */
 export interface TtsQueueStoreLike {
   current(): string | null;
   activeItem(): TtsQueueItem | null;
@@ -74,11 +80,17 @@ export interface TtsQueueStoreLike {
   resumeFocus(): void;
 }
 
+/** The stores the chrome uses: the audio store and the speech queue store. */
 export interface TtsChromeRendererStores {
   audio    : AudioStoreLike;
   ttsQueue : TtsQueueStoreLike;   // WP4 — notification-item queue (active + pending)
 }
 
+/**
+ * The speech pane chrome: pause or resume, stop, skip and the queue counts.
+ *
+ * It paints again on audio state changes and decoded chunks, at most once per animation frame.
+ */
 export interface TtsChromeRenderer {
   /**
    * Mount onto `root`. Renders chrome immediately (initial paint) and
@@ -94,6 +106,11 @@ export interface TtsChromeRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createTtsChromeRenderer`.
+ *
+ * The bus and the stores are required. The animation frame hooks are for tests.
+ */
 export interface TtsChromeRendererOptions {
   eventBus              : EventBus;
   stores                : TtsChromeRendererStores;
@@ -325,6 +342,11 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createTtsChromeRenderer(opts: TtsChromeRendererOptions): TtsChromeRenderer {
   return new TtsChromeRendererImpl(opts);
 }

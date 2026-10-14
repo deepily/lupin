@@ -32,39 +32,12 @@ export function replaceChildren(parent: Element | DocumentFragment, incoming: No
   parent.replaceChildren(incoming);
 }
 
-/**
- * Keyed list merge — reconcile `parent`'s child elements against `entries`
- * keyed by `data-id-hash`.
- *
- * Algorithm:
- *   1. Build a map of existing children by `data-id-hash` value
- *   2. Walk `entries` in target order; for each:
- *      a. If existing child has matching id_hash, move into position +
- *         optionally re-render its body via `update()`
- *      b. Otherwise, render via `create()` and insert at the position
- *   3. Remove any existing children whose id_hash isn't in the new set
- *
- * Per F12 invariant: every renderable element MUST carry `data-id-hash`. The
- * `data-id-hash` value is the canonical key; legacy `id="..."` attribute is
- * NOT consulted (keyed-merge correctness depends on a single key surface).
- *
- * Requires:
- *   - `parent` is the element holding the keyed list
- *   - `entries` is the target ordering, each entry having a unique `idHash`
- *   - `create(entry)` returns a new element with `data-id-hash="${entry.idHash}"`
- *     already set
- *   - `update(el, entry)` mutates `el` in place; OPTIONAL — when omitted,
- *     existing elements are left untouched on match
- *
- * Ensures:
- *   - parent's children after the call exactly match `entries` order
- *   - elements whose id_hash appears in both old + new are reused (DOM
- *     identity preserved; no flicker; child state like focus survives)
- */
+/** One entry of a keyed list: `idHash` is the value of the element's `data-id-hash`. */
 export interface KeyedEntry {
   readonly idHash : string;
 }
 
+/** The options of `keyedListMerge`: the parent, the entries and the create and update callbacks. */
 export interface KeyedMergeOptions<T extends KeyedEntry> {
   parent : Element;
   entries: ReadonlyArray<T>;
@@ -72,6 +45,24 @@ export interface KeyedMergeOptions<T extends KeyedEntry> {
   update?: (el: Element, entry: T) => void;
 }
 
+/**
+ * Make `parent`'s children match `entries`, keyed by `data-id-hash`.
+ *
+ * The `data-id-hash` value is the only key: an `id` attribute is not consulted.
+ *
+ * Requires:
+ *   - `parent` is the element holding the keyed list
+ *   - `entries` is the target ordering, each entry having a unique `idHash`
+ *   - `create(entry)` returns a new element, normally with `data-id-hash` already set
+ *   - `update(el, entry)` is optional and mutates `el` in place; when omitted, a matched element is left untouched
+ *
+ * Ensures:
+ *   - children whose `data-id-hash` is not in `entries`, or that have none, are removed
+ *   - an element whose key is in both the old and the new list is reused, so focus and scroll state survive
+ *   - an entry with no element is built by `create` and gets `data-id-hash` set when `create` left it off
+ *   - parent's children afterwards are exactly the entries' elements, in `entries` order
+ *   - only elements that are out of position are moved, so an unchanged element is not detached
+ */
 export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>): void {
   const { parent, entries, create, update } = opts;
 

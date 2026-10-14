@@ -25,11 +25,13 @@ export const EPIC_UNASSIGNED_KEY = "epic:unassigned";
 /** The one human the highlight section watches for. */
 export const EPIC_BLOCKER_OF_INTEREST = "rick";
 
+/** One epic and its tasks: the `epic:` key and the rows under it. */
 export interface EpicGroup {
   epicKey : string;
   tasks   : TaskItem[];
 }
 
+/** The epic board data: total, rows on Rick, the epic groups and the drift rows. */
 export interface EpicBoardModel {
   totalCount : number;
   onRick     : TaskItem[];

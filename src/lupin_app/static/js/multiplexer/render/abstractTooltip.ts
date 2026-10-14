@@ -20,15 +20,19 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import type { LayoutMode } from "../shared/types";
 
+/** The DOM id of the abstract tooltip element. */
 export const ABSTRACT_TOOLTIP_ID = "abstract-tooltip";
 
 /** Gap between the indicator and the tooltip, and the minimum viewport margin (legacy values). */
 const GAP_PX    = 8;
 const MARGIN_PX = 10;
 
+/** A rectangle's top, bottom, left and width, in pixels. */
 export interface Rect { top: number; bottom: number; left: number; width: number; }
+/** A width and a height, in pixels. */
 export interface Size { width: number; height: number; }
 
+/** What the abstract tooltip needs: the layout mode, and an optional frame scheduler. */
 export interface AbstractTooltipDeps {
   /** The live layout mode; the tooltip acts only when this is not "horizontal". */
   getLayoutMode(): LayoutMode;
@@ -36,6 +40,11 @@ export interface AbstractTooltipDeps {
   schedule?: ( fn: () => void ) => void;
 }
 
+/**
+ * The floating abstract tooltip for the vertical layout.
+ *
+ * `mount` adds one element to the body and click and key listeners to the document. `unmount` removes them.
+ */
 export interface AbstractTooltip {
   mount(): void;
   unmount(): void;
@@ -139,6 +148,11 @@ class AbstractTooltipImpl implements AbstractTooltip {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the tooltip.
+ *
+ * It adds nothing to the page until `mount()` is called.
+ */
 export function createAbstractTooltip( deps: AbstractTooltipDeps ): AbstractTooltip {
   return new AbstractTooltipImpl( deps );
 }
