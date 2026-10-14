@@ -380,7 +380,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a holding area store from its options. */
+/** Build the store. It fetches nothing until `refresh()` or `startPolling()` is called. */
 export function createHoldingAreaStore( opts: HoldingAreaStoreOptions ): HoldingAreaStore {
   return new HoldingAreaStoreImpl( opts );
 }

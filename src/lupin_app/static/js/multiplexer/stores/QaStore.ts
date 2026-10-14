@@ -605,7 +605,11 @@ function errorText( e: unknown ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a question store from its options. */
+/**
+ * Build the store.
+ *
+ * It listens for `tts_job_request` at once, to show and speak a finished job's answer.
+ */
 export function createQaStore( opts: QaStoreOptions ): QaStore {
   return new QaStoreImpl( opts );
 }

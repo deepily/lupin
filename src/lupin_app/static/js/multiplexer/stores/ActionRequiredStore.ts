@@ -970,7 +970,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build an action-required store from its options. */
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once and restores saved prompts from storage.
+ */
 export function createActionRequiredStore(opts: ActionRequiredStoreOptions): ActionRequiredStore {
   return new ActionRequiredStoreImpl(opts);
 }

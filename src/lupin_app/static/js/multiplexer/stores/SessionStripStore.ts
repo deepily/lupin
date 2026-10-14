@@ -375,7 +375,11 @@ class SessionStripStoreImpl implements SessionStripStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a session strip store from its options. */
+/**
+ * Build the store.
+ *
+ * It subscribes to the bus at once, and `disposeForTesting` removes the subscriptions.
+ */
 export function createSessionStripStore(opts: SessionStripStoreOptions): SessionStripStore {
   return new SessionStripStoreImpl(opts);
 }

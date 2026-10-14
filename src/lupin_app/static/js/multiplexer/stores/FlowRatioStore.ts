@@ -244,7 +244,7 @@ class FlowRatioStoreImpl implements FlowRatioStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a flow ratio store from its options. */
+/** Build the store. It fetches nothing until `refresh()` or `startPolling()` is called. */
 export function createFlowRatioStore( opts: FlowRatioStoreOptions ): FlowRatioStore {
   return new FlowRatioStoreImpl( opts );
 }

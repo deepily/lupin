@@ -859,7 +859,11 @@ function defaultAudioContextFactory(): SchedulableAudioContext {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build an audio store from its options. */
+/**
+ * Build the store.
+ *
+ * It starts the playback state machine at once and emits `store_audio_state_change` when the state moves.
+ */
 export function createAudioStore(opts: AudioStoreOptions): AudioStore {
   return new AudioStoreImpl(opts);
 }

@@ -128,7 +128,11 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a strip reconnect rehydrator from its options. */
+/**
+ * Build the rehydrator.
+ *
+ * It reloads the strip only when the queue socket goes from `reconnecting` to `connected`.
+ */
 export function createStripReconnectRehydrator( opts: StripReconnectRehydratorOptions ): StripReconnectRehydrator {
   return new StripReconnectRehydratorImpl( opts );
 }

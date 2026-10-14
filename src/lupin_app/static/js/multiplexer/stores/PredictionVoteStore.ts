@@ -124,7 +124,7 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a prediction vote store from its options. */
+/** Build the store. It makes no request until a vote is cast. */
 export function createPredictionVoteStore(
   opts: PredictionVoteStoreOptions,
 ): PredictionVoteStore {

@@ -392,7 +392,7 @@ function NOOP_MUTATION(): TaskMutation {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a task list store from its options. */
+/** Build the store. It fetches nothing until `refresh()` or `startPolling()` is called. */
 export function createTaskListStore( opts: TaskListStoreOptions ): TaskListStore {
   return new TaskListStoreImpl( opts );
 }

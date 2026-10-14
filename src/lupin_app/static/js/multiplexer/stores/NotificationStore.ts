@@ -1057,7 +1057,11 @@ class NotificationStoreImpl implements NotificationStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a notification store from its options. */
+/**
+ * Build the store.
+ *
+ * It reads the saved filter mode and history window and subscribes to the bus at once.
+ */
 export function createNotificationStore(opts: NotificationStoreOptions): NotificationStore {
   return new NotificationStoreImpl(opts);
 }

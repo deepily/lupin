@@ -523,7 +523,11 @@ function errorText( e: unknown ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a submit-jobs store from its options. */
+/**
+ * Build the store.
+ *
+ * It does nothing until a card submits, and `onCcSubmitted` runs only after a successful CC submit.
+ */
 export function createSubmitJobsStore( opts: SubmitJobsStoreOptions ): SubmitJobsStore {
   return new SubmitJobsStoreImpl( opts );
 }

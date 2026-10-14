@@ -230,7 +230,7 @@ class TaskRequestStoreImpl implements TaskRequestStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a task request store from its options. */
+/** Build the store. It fetches nothing until `refresh()` or `startPolling()` is called. */
 export function createTaskRequestStore( opts: TaskRequestStoreOptions ): TaskRequestStore {
   return new TaskRequestStoreImpl( opts );
 }

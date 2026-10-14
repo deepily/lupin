@@ -34,7 +34,7 @@ export interface FleetApiClient {
 export const FLEET_STATE_ENDPOINT          = "/api/arbiter/fleet-state";
 /** The server path that reads and sets the fleet size cap. */
 export const FLEET_SIZE_CAP_ENDPOINT       = "/api/arbiter/fleet-size-cap";
-/** The server path that reads and sets the skeleton crew switch. */
+/** The server path that sets the skeleton crew switch. The server answers only `PUT` on it. */
 export const FLEET_SKELETON_CREW_ENDPOINT  = "/api/arbiter/skeleton-crew";
 /** How often the store polls the fleet state, in milliseconds. */
 export const FLEET_STATUS_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (D4)
@@ -322,7 +322,7 @@ function serverDetail( err: unknown, status: number ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a fleet status store from its options. */
+/** Build the store. It fetches nothing until `refresh()` or `startPolling()` is called. */
 export function createFleetStatusStore( opts: FleetStatusStoreOptions ): FleetStatusStore {
   return new FleetStatusStoreImpl( opts );
 }

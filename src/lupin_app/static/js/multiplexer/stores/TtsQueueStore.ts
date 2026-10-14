@@ -611,7 +611,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a speech queue store from its options. */
+/**
+ * Build the store.
+ *
+ * It restores a saved queue from storage and subscribes to the bus at once.
+ */
 export function createTtsQueueStore(opts: TtsQueueStoreOptions): TtsQueueStore {
   return new TtsQueueStoreImpl(opts);
 }

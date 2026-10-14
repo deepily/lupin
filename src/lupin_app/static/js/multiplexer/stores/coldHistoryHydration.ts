@@ -175,7 +175,11 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
-/** Build a cold-load history runner from its options. */
+/**
+ * Build the runner.
+ *
+ * It runs again on the Retry event and when the history window or the filter changes.
+ */
 export function createColdHistoryHydration(opts: ColdHistoryHydrationOptions): ColdHistoryHydration {
   return new ColdHistoryHydrationImpl(opts);
 }

@@ -101,7 +101,7 @@ class EpicStoriesStoreImpl implements EpicStoriesStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" (the identifier) where a real conditional carries two.
-/** Build an epic stories store from its options. */
+/** Build the store. It fetches nothing until `load()` is called, and then only once. */
 export function createEpicStoriesStore( opts: EpicStoriesStoreOptions ): EpicStoriesStore {
   return new EpicStoriesStoreImpl( opts );
 }

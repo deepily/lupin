@@ -203,7 +203,11 @@ class AckStoreImpl implements AckStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two (verified: locations=1), and the function itself is called by every test in ack_store.test.ts.
-/** Build an acknowledgement store on the given bus. */
+/**
+ * Build the store.
+ *
+ * It listens to nothing until `start()` is called, and `start()` returns the unsubscribe.
+ */
 export function createAckStore( options: AckStoreOptions ): AckStore {
   return new AckStoreImpl( options );
 }

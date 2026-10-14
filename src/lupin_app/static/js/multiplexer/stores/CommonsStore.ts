@@ -353,7 +353,11 @@ class CommonsStoreImpl implements CommonsStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-/** Build a commons store from its options. */
+/**
+ * Build the store.
+ *
+ * It restores the saved filter from storage and subscribes to the bus at once.
+ */
 export function createCommonsStore(opts: CommonsStoreOptions): CommonsStore {
   return new CommonsStoreImpl(opts);
 }
