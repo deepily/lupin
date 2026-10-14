@@ -123,7 +123,7 @@ export interface MinimalIdbTransaction {
 /**
  * A database handle.
  *
- * `close` is declared here, and nothing in this file calls it.
+ * `close` is called by `destroy()`, which clears the cache and closes the connection.
  */
 export interface MinimalIdbDatabase {
   objectStoreNames : { contains( name: string ): boolean };

@@ -769,7 +769,8 @@ export interface SenderRecord {
 /**
  * Payload of `session_topic`.
  *
- * The notification store re-emits the raw notification as this event, and the sender store keeps the name.
+ * The notification store emits it for a queue update that carries a session topic with both a sender id and a name.
+ * It drops one that lacks either. The sender store keeps the name.
  */
 export interface SessionTopicPayload {
   sender_id    : string;

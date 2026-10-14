@@ -1,8 +1,9 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 2 — EventBus singleton.
 // EventTarget-backed pub/sub with per-listener error isolation.
-// All cross-module communication routes through this bus (per Phase 1 ESLint
-// no-globals rule + Phase 0 Q2 directory layout).
+// Most cross-module communication goes through this bus (per Phase 1 ESLint
+// no-globals rule + Phase 0 Q2 directory layout). The connection state machine
+// also hands state changes straight to its subscribers.
 
 import type {
   LupinEvent,
@@ -13,7 +14,7 @@ import type {
 type AnyListener = (e: LupinEvent<unknown>) => void;
 
 /**
- * The pub/sub bus all modules talk through.
+ * The pub/sub bus the stores, renderers and transports share.
  *
  * `on` returns the function that removes the listener. A listener that throws is reported as a
  * `listener_error` event and does not stop the other listeners.
