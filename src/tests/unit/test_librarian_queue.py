@@ -348,3 +348,24 @@ def test_a_pending_entry_the_cap_keeps_back_stays_in_the_file_untouched(tmp_path
 def test_a_miss_row_is_not_counted_against_the_cap(tmp_path):
     lib = lq.Librarian( FakeStore(), str( tmp_path / "pending.jsonl" ), lambda line: None, max_creates=0 )
     assert lib.hold_or_create( lq.MISS_PREFIX + "pkg.sym", "b" ) == "created"
+
+
+def test_a_failed_manager_notice_is_logged_for_a_clear_and_for_a_refused_create(tmp_path):
+    rollup = row_for( "cosa.rest", [ ORPHAN ], "id-old" )
+    lib, lines = make( tmp_path, FakeStore( [ rollup ] ), notify=lambda text: False )
+    lib.sync( [], "idx-1" )
+    assert any( "manager notice failed" in line and "are clear" in line for line in lines )
+    refusing = FakeStore()
+    refusing.create_result = ( False, 422, "ratio" )
+    lib, lines = make( tmp_path, refusing, notify=lambda text: False )
+    lib.sync( [ ORPHAN ], "idx" )
+    assert any( "manager notice failed" in line and "not created" in line for line in lines )
+
+
+def test_a_rollup_still_waiting_for_its_close_notifies_the_manager_again_each_run(tmp_path):
+    rollup = row_for( "cosa.rest", [ ORPHAN ], "id-old" )
+    rollup[ "body" ] += "\n\n[amendment]\n" + lq.clear_note( "cosa.rest", "idx-1" )
+    said = []
+    lib, _ = make( tmp_path, FakeStore( [ rollup ] ), notify=said.append )
+    assert lib.sync( [], "idx-2" )[ "waiting" ] == 1
+    assert len( said ) == 1 and "1 wiki-librarian rollup" in said[ 0 ] and "still clear" in said[ 0 ]
