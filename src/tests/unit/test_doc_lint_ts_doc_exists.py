@@ -38,10 +38,11 @@ def repo( tmp_path ):
         full = tmp_path / rel
         full.parent.mkdir( parents=True, exist_ok=True )
         full.write_text( f"stamp file {rel}\n", encoding="utf-8" )
+    ( tmp_path / "src" / "conf" ).mkdir( parents=True, exist_ok=True )
     ( tmp_path / "a.ts" ).write_text( "x\n", encoding="utf-8" )
     ( tmp_path / "b.js" ).write_text( "x\n", encoding="utf-8" )
     ( tmp_path / "c.py" ).write_text( "x\n", encoding="utf-8" )
-    _git( tmp_path, "add", "." )
+    _git( tmp_path, "add", "a.ts", "b.js", "c.py" )
     _git( tmp_path, "commit", "-q", "-m", "seed" )
     return tmp_path
 
@@ -81,6 +82,17 @@ def test_the_export_extractor_is_a_rule_file_so_an_unstaged_edit_to_it_is_a_dive
 
 def test_counted_paths_are_the_scope_the_wording_linter_reads( repo ):
     assert ts_doc_exists.counted_paths( str( repo ) ) == tsdoc_lint.tracked_files( str( repo ) ) == [ "a.ts", "b.js" ]
+
+
+def test_counted_paths_leave_out_rnd_and_the_flutter_bundle_but_the_wording_linter_still_reads_them( repo ):
+    kept = [ "src/lupin_app/static/js/ok.js", "src/rndx/ok.js" ]
+    gone = [ "src/rnd/v1/probe.js", "src/cosa/rnd/note.ts", "src/lupin_app/static/lupin-mobile-test/flutter.js" ]
+    for rel in kept + gone:
+        ( repo / rel ).parent.mkdir( parents=True, exist_ok=True )
+        ( repo / rel ).write_text( "x\n", encoding="utf-8" )
+    _git( repo, "add", *kept, *gone )
+    assert set( gone ) <= set( tsdoc_lint.tracked_files( str( repo ) ) )
+    assert ts_doc_exists.counted_paths( str( repo ) ) == sorted( [ "a.ts", "b.js", *kept ] )
 
 
 # ---- reading one record --------------------------------------------------------------------
@@ -312,5 +324,5 @@ def test_the_real_extractor_reads_every_export_form_and_pairs_the_blocks_above_t
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
 def test_the_real_census_runs_over_this_repository_and_reads_every_file( ):
     result = ts_doc_exists.census( REPO_ROOT )
-    assert result.walked == len( tsdoc_lint.tracked_files( REPO_ROOT ) ) > 100 and result.symbols >= result.undocumented > 0
+    assert result.walked == len( ts_doc_exists.counted_paths( REPO_ROOT ) ) > 100 and result.symbols >= result.undocumented > 0
     assert set( result.found ) == set( result.missing )

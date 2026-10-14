@@ -31,7 +31,7 @@ STAMP_FILES      = (
     "src/cosa/repo/doc_lint/waivers.py",
     "src/conf/dm-tutor-lowercase-words.txt",
 )
-RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs" )
+RULE_PATHS       = ( "src/cosa/repo/doc_lint/", "src/conf/dm-tutor-lowercase-words.txt", "src/scripts/pre-commit-chain.sh", "src/scripts/ts_doc_extract.mjs", "src/scripts/ts_export_extract.mjs" )
 EXIT_TIGHT       = 0
 EXIT_MISMATCH    = 1
 EXIT_NOT_CHECKED = 2
