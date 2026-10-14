@@ -76,7 +76,7 @@ import type { PredictionVoteIntegration } from "./templates/predictionVoteContro
 /**
  * The slice of the action-required store the renderer uses.
  *
- * It is the list, respond, pause and step recording.
+ * It is the list, a lookup by id, respond, pause and step recording.
  */
 export interface ActionRequiredStoreLike {
   /** Arrival order: the first item is the active card, the rest are queued. */

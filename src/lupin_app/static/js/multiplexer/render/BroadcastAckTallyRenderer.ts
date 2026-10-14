@@ -442,7 +442,7 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
 /**
  * Build the renderer.
  *
- * It paints nothing until `mount()` is called, and tallies nothing until `track()` is called.
+ * It paints at `mount()`, which also restores a saved tally; a new broadcast is tallied from `track()`.
  */
 export function createBroadcastAckTallyRenderer(
   options: BroadcastAckTallyRendererOptions,
