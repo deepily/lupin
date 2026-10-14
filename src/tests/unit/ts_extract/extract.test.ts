@@ -125,6 +125,12 @@ test( "shapes: the two clones have one kind sequence and the literal kinds are m
     assert.ok( by[ "wrapper.<locals>.deep" ].includes( "Literal" ) );
 } );
 
+test( "shapes: a variable statement is named by its real kind, never the FirstStatement alias", () => {
+    const out = run( { "k.ts": "export function f() { const a = 1; return a; }\n" }, { mode: "shapes" } );
+    const kinds = out.defs[ 0 ].kinds;
+    assert.ok( kinds.includes( "VariableStatement" ) && !kinds.includes( "FirstStatement" ) );
+} );
+
 test( "shapes: public_only drops private members and everything nested", () => {
     const out = run( { "s.ts": SHAPES }, { mode: "shapes", public_only: true } );
     const names = out.defs.map( ( d: any ) => d.name );

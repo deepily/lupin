@@ -291,7 +291,8 @@ def test_the_tree_root_is_passed_to_check_dependencies_so_a_bundled_sdk_counts( 
 
 def _extractor_sources():
     here = pathlib.Path( bd.__file__ )
-    return tuple( here.with_name( n ).read_text( encoding="utf-8" ) for n in ( "py_index.py", "ts_extract.js", "dart_extract.dart" ) )
+    py, js, helper, dart = ( here.with_name( n ).read_text( encoding="utf-8" ) for n in ( "py_index.py", "ts_extract.js", "ts_kind_names.cjs", "dart_extract.dart" ) )
+    return py, js + "\n" + helper, dart                                                           # the kind-name helper is part of the JS extractor
 
 
 def test_the_extractor_logic_version_follows_code_not_comments():
@@ -305,6 +306,13 @@ def test_the_extractor_logic_version_follows_code_not_comments():
     assert bd.logic_version( py, js.replace( "return 1", "return 2" ), dart ) != base               # a code edit to the JS extractor
     assert bd.logic_version( py, js, dart.replace( "return 1", "return 2" ) ) != base               # a code edit to the Dart extractor
     assert bd.EXTRACTOR_LOGIC == bd.logic_version( *_extractor_sources() )                         # the module constant is computed from all three real files
+
+
+def test_editing_the_shared_kind_name_helper_changes_the_extractor_logic_version():
+    py, js, dart = _extractor_sources()
+    helper = ( pathlib.Path( bd.__file__ ).with_name( "ts_kind_names.cjs" ) ).read_text( encoding="utf-8" )
+    assert js.endswith( helper ) and ".reverse()" in helper
+    assert bd.logic_version( py, js.replace( ".reverse()", "" ), dart ) != bd.EXTRACTOR_LOGIC
 
 
 def test_editing_the_dart_extractor_source_makes_a_built_index_stale( tmp_path, monkeypatch ):

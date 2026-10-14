@@ -23,17 +23,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
-// The compiler's enum maps a value back to a name, and the markers declared after a kind share its value
-// (VariableStatement and FirstStatement). The entries are reversed so the first declared name wins.
-const KIND_NAMES = new Map(
-    Object.entries( ts.SyntaxKind )
-        .filter( ( [ , value ] ) => typeof value === "number" )
-        .reverse()
-        .map( ( [ name, value ] ) => [ value, name ] )
-);
+// The kind-name table is shared with src/cosa/repo/symindex/ts_extract.js, so the two scripts name a kind the same way.
+const KIND_NAMES = createRequire( import.meta.url )( "../cosa/repo/symindex/ts_kind_names.cjs" )( ts );
 
 const DIRECTIVE_BODY = new RegExp(
     "^(@ts-(expect-error|ignore|nocheck|check)\\b"

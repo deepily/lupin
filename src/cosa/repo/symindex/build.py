@@ -53,7 +53,8 @@ def _hash_text( text ):
 
 
 EXTRACTOR_LOGIC = logic_version( ( pathlib.Path( __file__ ).with_name( "py_index.py" ) ).read_text( encoding="utf-8" ),
-                                 ( pathlib.Path( __file__ ).with_name( "ts_extract.js" ) ).read_text( encoding="utf-8" ),
+                                 ( pathlib.Path( __file__ ).with_name( "ts_extract.js" ) ).read_text( encoding="utf-8" )
+                                 + "\n" + ( pathlib.Path( __file__ ).with_name( "ts_kind_names.cjs" ) ).read_text( encoding="utf-8" ),
                                  ( pathlib.Path( __file__ ).with_name( "dart_extract.dart" ) ).read_text( encoding="utf-8" ) )
 
 

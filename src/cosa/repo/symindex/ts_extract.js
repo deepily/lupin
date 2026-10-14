@@ -12,6 +12,9 @@ const crypto = require( "crypto" );
 const req = JSON.parse( fs.readFileSync( 0, "utf8" ) );
 const ts  = require( req.typescript );
 
+// The shared table, so this script and ts_doc_extract.mjs name a kind the same way.
+const KIND_NAMES = require( path.join( __dirname, "ts_kind_names.cjs" ) )( ts );
+
 
 // The one place a file's extension picks its parse mode. .tsx must be read as TSX, or its markup is a syntax error.
 function scriptKind( abs ) {
@@ -60,7 +63,7 @@ const LITERALS = new Set( [ ts.SyntaxKind.NumericLiteral, ts.SyntaxKind.StringLi
 
 function kindName( n ) {
     if ( n.kind === ts.SyntaxKind.PrivateIdentifier ) return "Identifier";
-    return LITERALS.has( n.kind ) ? "Literal" : ts.SyntaxKind[ n.kind ];
+    return LITERALS.has( n.kind ) ? "Literal" : KIND_NAMES.get( n.kind );
 }
 
 function preorder( node, acc ) {
