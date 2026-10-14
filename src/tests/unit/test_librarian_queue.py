@@ -24,10 +24,8 @@ class FakeStore:
         self.query_result  = None
         self.create_result = ( True, 201, {} )
         self.amend_result  = ( True, 200, {} )
-        self.close_result  = ( True, 200, {} )
         self.created       = []
         self.amended       = []
-        self.closed        = []
 
     def query( self, correlation_key ):
         self.queried = correlation_key
@@ -41,9 +39,6 @@ class FakeStore:
         self.amended.append( ( item_id, note ) )
         return self.amend_result
 
-    def close( self, item_id, reason ):
-        self.closed.append( ( item_id, reason ) )
-        return self.close_result
 
 
 def make( tmp_path, store=None, notify=None ):
@@ -92,6 +87,24 @@ def test_render_rollup_cuts_the_detail_list_and_says_how_many_more():
     assert "- and 7 more" in body
 
 
+def test_read_fingerprint_takes_the_last_line_because_an_amendment_appends_to_the_body():
+    original = "head\nrollup-fingerprint: " + "a" * 40
+    amended  = original + "\n\n[amendment]\nnew text\nrollup-fingerprint: " + "b" * 40
+    assert lq.read_fingerprint( amended ) == "b" * 40
+
+
+def test_a_rollup_amended_once_is_unchanged_on_the_next_run_and_amends_only_once(tmp_path):
+    first   = [ ORPHAN ]
+    second  = [ ORPHAN, dict( ORPHAN, symbol="cosa.rest.z.Z" ) ]
+    title, original = lq.render_rollup( "cosa.rest", first )
+    _, new_body     = lq.render_rollup( "cosa.rest", second )
+    stored          = original + "\n\n[amendment]\n" + new_body
+    store           = FakeStore( [ { "id": "id-1", "title": title, "body": stored } ] )
+    lib, _          = make( tmp_path, store )
+    counts          = lib.sync( second, "idx" )
+    assert counts[ "unchanged" ] == 1 and counts[ "amended" ] == 0 and store.amended == []
+
+
 def test_read_fingerprint_handles_none_missing_and_present():
     assert lq.read_fingerprint( None ) is None
     assert lq.read_fingerprint( "no line here" ) is None
@@ -113,8 +126,8 @@ def test_pending_file_round_trips_skips_bad_lines_and_empty_removes_it(tmp_path)
 def test_sync_creates_one_row_per_package_under_the_epic_key(tmp_path):
     store = FakeStore()
     lib, _ = make( tmp_path, store )
-    counts = lib.sync( [ STALE, ORPHAN, UNIDX ] )
-    assert counts == { "created": 3, "amended": 0, "unchanged": 0, "closed": 0, "pending": 0 }
+    counts = lib.sync( [ STALE, ORPHAN, UNIDX ], "idx" )
+    assert counts == { "created": 3, "amended": 0, "unchanged": 0, "cleared": 0, "waiting": 0, "deferred": 0, "pending": 0 }
     assert store.queried == lq.CORRELATION_KEY
     assert sorted( p[ "title" ] for p in store.created ) == sorted( lq.ROLLUP_PREFIX + n for n in ( "cosa.repo", "cosa.rest", "wiki" ) )
     assert { p[ "correlation_key" ] for p in store.created } == { "epic:wiki-librarian" }
@@ -127,7 +140,7 @@ def test_sync_leaves_an_unchanged_rollup_alone_and_amends_a_changed_one(tmp_path
     changed = row_for( "cosa.rest", [ ORPHAN ], "id-changed" )
     store   = FakeStore( [ same, changed ] )
     lib, _  = make( tmp_path, store )
-    counts  = lib.sync( [ STALE, ORPHAN, dict( ORPHAN, symbol="cosa.rest.z.Z" ) ] )
+    counts  = lib.sync( [ STALE, ORPHAN, dict( ORPHAN, symbol="cosa.rest.z.Z" ) ], "idx" )
     assert counts[ "unchanged" ] == 1 and counts[ "amended" ] == 1 and counts[ "created" ] == 0
     assert store.amended[ 0 ][ 0 ] == "id-changed"
     assert "orphan 2" in store.amended[ 0 ][ 1 ]
@@ -137,28 +150,74 @@ def test_a_failed_amend_is_logged_and_not_counted(tmp_path):
     store              = FakeStore( [ row_for( "cosa.rest", [ ORPHAN ], "id-x" ) ] )
     store.amend_result = ( False, 500, { "error": "boom" } )
     lib, lines         = make( tmp_path, store )
-    counts             = lib.sync( [ ORPHAN, dict( ORPHAN, symbol="cosa.rest.z.Z" ) ] )
+    counts             = lib.sync( [ ORPHAN, dict( ORPHAN, symbol="cosa.rest.z.Z" ) ], "idx" )
     assert counts[ "amended" ] == 0
     assert any( "amend failed" in line for line in lines )
 
 
-def test_a_rollup_whose_package_is_clean_is_closed_and_a_miss_row_is_not(tmp_path):
+def test_a_clean_package_gets_one_clear_notice_and_the_manager_is_told_and_nothing_is_closed(tmp_path):
     rollup = row_for( "cosa.rest", [ ORPHAN ], "id-old" )
     miss   = { "id": "id-miss", "title": lq.MISS_PREFIX + "pkg.sym", "body": "x" }
     other  = { "id": "id-other", "title": "[LUPIN] something else", "body": "" }
     store  = FakeStore( [ rollup, miss, other ] )
+    said   = []
+    lib    = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, notify=said.append )
+    counts = lib.sync( [], "idx-1" )
+    assert counts[ "cleared" ] == 1 and counts[ "waiting" ] == 0
+    assert [ item for item, _ in store.amended ] == [ "id-old" ]
+    note = store.amended[ 0 ][ 1 ]
+    assert note.startswith( lq.CLEARED_TAG + " idx-1" ) and "manager_attestation" in note
+    assert not hasattr( store, "close" ) and len( said ) == 1 and "close each with a manager_attestation" in said[ 0 ]
+
+
+def test_a_cleared_rollup_is_waiting_on_the_next_run_and_is_not_amended_again(tmp_path):
+    rollup = row_for( "cosa.rest", [ ORPHAN ], "id-old" )
+    rollup[ "body" ] += "\n\n[amendment]\n" + lq.clear_note( "cosa.rest", "idx-1" )
+    store  = FakeStore( [ rollup ] )
     lib, _ = make( tmp_path, store )
-    counts = lib.sync( [] )
-    assert counts[ "closed" ] == 1
-    assert store.closed == [ ( "id-old", "the package has no wiki lint findings" ) ]
+    counts = lib.sync( [], "idx-2" )
+    assert counts[ "waiting" ] == 1 and counts[ "cleared" ] == 0 and store.amended == []
 
 
-def test_a_failed_close_is_logged_and_not_counted(tmp_path):
+def test_findings_that_return_after_a_clear_notice_amend_the_rollup_even_with_the_same_fingerprint(tmp_path):
+    rollup = row_for( "cosa.rest", [ ORPHAN ], "id-old" )
+    rollup[ "body" ] += "\n\n[amendment]\n" + lq.clear_note( "cosa.rest", "idx-1" )
+    store  = FakeStore( [ rollup ] )
+    lib, _ = make( tmp_path, store )
+    counts = lib.sync( [ ORPHAN ], "idx-2" )
+    assert counts[ "amended" ] == 1 and counts[ "unchanged" ] == 0
+    assert not lq.is_cleared( rollup[ "body" ] + "\n\n[amendment]\n" + store.amended[ 0 ][ 1 ] )
+
+
+def test_a_failed_clear_notice_is_logged_and_not_counted(tmp_path):
     store              = FakeStore( [ row_for( "cosa.rest", [ ORPHAN ], "id-old" ) ] )
-    store.close_result = ( False, 409, "no" )
+    store.amend_result = ( False, 500, "no" )
     lib, lines         = make( tmp_path, store )
-    assert lib.sync( [] )[ "closed" ] == 0
-    assert any( "close failed" in line for line in lines )
+    assert lib.sync( [], "idx" )[ "cleared" ] == 0
+    assert any( "clear notice failed" in line for line in lines )
+
+
+def test_the_closing_receipt_passes_the_stores_own_rule_and_a_file_receipt_alone_does_not():
+    from cosa.rest.task_store_rules import validate_receipt_refs
+    assert validate_receipt_refs( lq.closing_receipt( "cosa.rest", "idx-1" ), require_checkable=True ) == []
+    assert validate_receipt_refs( { "log_line": "lupin/src/x.py:1" }, require_checkable=True ) != []
+    assert validate_receipt_refs( {}, require_checkable=True ) != []
+    assert len( lq.closing_receipt( "p" * 400, "idx" )[ "manager_attestation" ] ) == 255
+
+
+def test_is_cleared_reads_the_last_notice_against_the_last_fingerprint():
+    fp = lq.FINGERPRINT_TAG + " " + "a" * 40
+    assert lq.is_cleared( None ) is False and lq.is_cleared( fp ) is False
+    assert lq.is_cleared( fp + "\n" + lq.CLEARED_TAG + " s" ) is True
+    assert lq.is_cleared( fp + "\n" + lq.CLEARED_TAG + " s\n" + fp ) is False
+    assert lq.is_cleared( lq.CLEARED_TAG + " s" ) is True
+
+
+def test_owner_and_manager_are_two_settings_on_the_created_row(tmp_path):
+    store = FakeStore()
+    lib   = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, owner="tiffany", manager="rio" )
+    lib.sync( [ ORPHAN ], "idx" )
+    assert store.created[ 0 ][ "owner_persona" ] == "tiffany" and store.created[ 0 ][ "accountable_manager" ] == "rio"
 
 
 def test_a_refused_create_goes_to_the_pending_file_and_notifies_once(tmp_path):
@@ -166,7 +225,7 @@ def test_a_refused_create_goes_to_the_pending_file_and_notifies_once(tmp_path):
     store.create_result = ( False, 422, { "detail": "ratio" } )
     said                = []
     lib, lines          = make( tmp_path, store, notify=said.append )
-    counts              = lib.sync( [ STALE, ORPHAN ] )
+    counts              = lib.sync( [ STALE, ORPHAN ], "idx" )
     assert counts[ "pending" ] == 2 and counts[ "created" ] == 0
     assert len( lq.read_pending( lib.pending_path ) ) == 2
     assert len( said ) == 1 and "2 wiki-librarian rows" in said[ 0 ]
@@ -177,18 +236,18 @@ def test_a_refused_create_without_a_notify_callable_still_holds_the_row(tmp_path
     store               = FakeStore()
     store.create_result = ( False, 422, "ratio" )
     lib, _              = make( tmp_path, store )
-    assert lib.sync( [ ORPHAN ] )[ "pending" ] == 1
+    assert lib.sync( [ ORPHAN ], "idx" )[ "pending" ] == 1
 
 
 def test_a_held_row_survives_a_restart_and_is_created_on_the_next_run_once(tmp_path):
     refusing               = FakeStore()
     refusing.create_result = ( False, 422, "ratio" )
     first, _               = make( tmp_path, refusing )
-    first.sync( [ ORPHAN ] )
+    first.sync( [ ORPHAN ], "idx" )
     assert len( lq.read_pending( first.pending_path ) ) == 1
     accepting              = FakeStore()
     second, _              = make( tmp_path, accepting )
-    counts                 = second.sync( [ ORPHAN ] )
+    counts                 = second.sync( [ ORPHAN ], "idx" )
     assert counts[ "created" ] == 1 and counts[ "pending" ] == 0
     assert len( accepting.created ) == 1
     assert not os.path.exists( second.pending_path )
@@ -198,9 +257,9 @@ def test_a_pending_entry_that_is_still_refused_is_kept_once_even_when_the_packag
     store               = FakeStore()
     store.create_result = ( False, 422, "ratio" )
     lib, _              = make( tmp_path, store )
-    lib.sync( [ ORPHAN ] )
+    lib.sync( [ ORPHAN ], "idx" )
     again, _            = make( tmp_path, store )
-    counts              = again.sync( [ ORPHAN ] )
+    counts              = again.sync( [ ORPHAN ], "idx" )
     assert counts[ "pending" ] == 1
     assert len( lq.read_pending( again.pending_path ) ) == 1
 
@@ -210,8 +269,8 @@ def test_a_pending_entry_whose_row_now_exists_is_dropped(tmp_path):
     lq.write_pending( str( tmp_path / "pending.jsonl" ), [ { "title": title, "body": body, "status": 422 } ] )
     store  = FakeStore( [ { "id": "id-1", "title": title, "body": body } ] )
     lib, _ = make( tmp_path, store )
-    counts = lib.sync( [ ORPHAN ] )
-    assert counts == { "created": 0, "amended": 0, "unchanged": 1, "closed": 0, "pending": 0 }
+    counts = lib.sync( [ ORPHAN ], "idx" )
+    assert counts == { "created": 0, "amended": 0, "unchanged": 1, "cleared": 0, "waiting": 0, "deferred": 0, "pending": 0 }
     assert store.created == []
     assert not os.path.exists( lib.pending_path )
 
@@ -223,7 +282,7 @@ def test_an_unreadable_store_raises_and_leaves_the_pending_file_alone(tmp_path):
     store.query_result = ( False, None, { "error": "down" } )
     lib, _             = make( tmp_path, store )
     with pytest.raises( RuntimeError, match="query failed" ):
-        lib.sync( [ ORPHAN ] )
+        lib.sync( [ ORPHAN ], "idx" )
     assert len( lq.read_pending( path ) ) == 1
 
 
@@ -239,3 +298,53 @@ def test_hold_or_create_reports_exists_created_and_pending(tmp_path):
     assert lib.hold_or_create( title, "b" ) == "pending"
     assert lib.hold_or_create( title, "b" ) == "pending"
     assert [ e[ "title" ] for e in lq.read_pending( lib.pending_path ) ] == [ title ]
+
+
+def many( n ):
+    return [ dict( ORPHAN, package=f"pkg.p{i}", symbol=f"pkg.p{i}.m.f" ) for i in range( n ) ]
+
+
+def test_the_create_cap_defers_the_rest_without_pending_or_a_notice(tmp_path):
+    store  = FakeStore()
+    said   = []
+    lib    = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, notify=said.append, max_creates=2 )
+    counts = lib.sync( many( 5 ), "idx" )
+    assert counts[ "created" ] == 2 and counts[ "deferred" ] == 3 and counts[ "pending" ] == 0
+    assert len( store.created ) == 2 and said == [] and not os.path.exists( lib.pending_path )
+
+
+def test_a_cap_run_drains_the_backlog_over_several_runs(tmp_path):
+    findings = many( 5 )
+    titles   = set()
+    for _ in range( 3 ):
+        store = FakeStore( [ { "id": f"i{n}", "title": t, "body": lq.render_rollup( t[ len( lq.ROLLUP_PREFIX ): ], [ f for f in findings if f[ "package" ] == t[ len( lq.ROLLUP_PREFIX ): ] ] )[ 1 ] } for n, t in enumerate( sorted( titles ) ) ] )
+        lib   = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, max_creates=2 )
+        lib.sync( findings, "idx" )
+        titles |= { p[ "title" ] for p in store.created }
+    assert len( titles ) == 5
+
+
+def test_refused_attempts_spend_the_cap_and_pending_entries_are_retried_first(tmp_path):
+    held = lq.render_rollup( "pkg.p0", [ dict( ORPHAN, package="pkg.p0", symbol="pkg.p0.m.f" ) ] )
+    lq.write_pending( str( tmp_path / "pending.jsonl" ), [ { "title": held[ 0 ], "body": held[ 1 ], "status": 422 } ] )
+    store               = FakeStore()
+    store.create_result = ( False, 422, "ratio" )
+    lib                 = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, max_creates=2 )
+    counts              = lib.sync( many( 4 ), "idx" )
+    assert len( store.created ) == 2 and store.created[ 0 ][ "title" ] == held[ 0 ]
+    assert counts[ "deferred" ] == 2 and counts[ "pending" ] == 2
+
+
+def test_a_pending_entry_the_cap_keeps_back_stays_in_the_file_untouched(tmp_path):
+    entry = { "title": lq.ROLLUP_PREFIX + "pkg.p0", "body": "b", "status": 422 }
+    lq.write_pending( str( tmp_path / "pending.jsonl" ), [ entry ] )
+    store = FakeStore()
+    lib   = lq.Librarian( store, str( tmp_path / "pending.jsonl" ), lambda line: None, max_creates=0 )
+    counts = lib.sync( [], "idx" )
+    assert counts[ "deferred" ] == 1 and counts[ "pending" ] == 1 and store.created == []
+    assert lq.read_pending( lib.pending_path ) == [ entry ]
+
+
+def test_a_miss_row_is_not_counted_against_the_cap(tmp_path):
+    lib = lq.Librarian( FakeStore(), str( tmp_path / "pending.jsonl" ), lambda line: None, max_creates=0 )
+    assert lib.hold_or_create( lq.MISS_PREFIX + "pkg.sym", "b" ) == "created"

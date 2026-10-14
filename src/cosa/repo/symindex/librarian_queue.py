@@ -22,6 +22,7 @@ CORRELATION_KEY = "epic:wiki-librarian"
 ROLLUP_PREFIX   = "[LUPIN] wiki-librarian rollup: "
 MISS_PREFIX     = "[LUPIN] wiki-librarian miss: "
 FINGERPRINT_TAG = "rollup-fingerprint:"
+CLEARED_TAG     = "rollup-cleared:"
 WIKI_PACKAGE    = "wiki"
 DETAIL_LIMIT    = 25
 
@@ -112,10 +113,55 @@ def read_fingerprint( body ):
     Read the fingerprint line from a rollup body.
 
     Ensures:
-        - returns the 40-character digest, or None when the body has no such line or is None
+        - returns the digest of the last fingerprint line, or None when the body has none or is None
+        - the last one wins because an amendment appends to the body and keeps the original text
     """
-    match = FINGERPRINT_RE.search( body or "" )
-    return match.group( 1 ) if match else None
+    found = FINGERPRINT_RE.findall( body or "" )
+    return found[ -1 ] if found else None
+
+
+def is_cleared( body ):
+    """
+    Say whether a rollup body already carries a clear notice after its last fingerprint.
+
+    Requires:
+        - body is a string or None
+
+    Ensures:
+        - returns True when the last clear notice sits after the last fingerprint line
+        - a notice followed by a newer fingerprint, which means findings came back, returns False
+    """
+    text = body or ""
+    return text.rfind( CLEARED_TAG ) > text.rfind( FINGERPRINT_TAG )
+
+
+def closing_receipt( package, index_sha ):
+    """
+    Build the receipt a manager closes a cleared rollup with.
+
+    Requires:
+        - package and index_sha are non-empty strings
+
+    Ensures:
+        - returns a receipt_refs dict holding one manager_attestation of at most 255 characters
+        - the store accepts the shape as a closing receipt, and the tick never sends it itself
+    """
+    return { "manager_attestation": f"wiki lint is clean for {package} at index {index_sha}"[ : 255 ] }
+
+
+def clear_note( package, index_sha ):
+    """
+    Build the note appended to a rollup whose package has no findings left.
+
+    Requires:
+        - package and index_sha are non-empty strings
+
+    Ensures:
+        - returns text that starts with the clear tag and the index sha
+        - the text names the receipt the accountable manager closes the row with
+    """
+    receipt = json.dumps( closing_receipt( package, index_sha ) )
+    return f"{CLEARED_TAG} {index_sha}\nNo wiki lint findings remain for {package} at index {index_sha}. The accountable manager closes this row with receipt_refs {receipt}."
 
 
 def read_pending( path ):
@@ -166,35 +212,40 @@ class Librarian:
     Keep the store's wiki-librarian rows in step with the lint findings.
 
     Requires:
-        - store is an object with query( correlation_key ), create( payload ), amend( item_id, note ) and close( item_id, reason )
-        - each store call returns ( ok, status, body ) and never raises
+        - store is an object with query( correlation_key ), create( payload ) and amend( item_id, note )
+        - query returns the open and held rows; each call returns ( ok, status, body ) and never raises
         - log is a callable taking one line
         - pending_path is where refused creates are kept
     """
 
-    def __init__( self, store, pending_path, log, notify=None, project="lupin", owner="cheech", priority="P5" ):
+    def __init__( self, store, pending_path, log, notify=None, project="lupin", owner="cheech", manager="cheech", priority="P5", max_creates=None ):
         """
         Keep the store, the pending path and the row settings.
 
         Ensures:
-            - owner is the persona that owns and chases the rows
+            - owner is the persona that does the librarian's work and manager is the one that chases and closes the rows
+            - max_creates caps the create calls one sync may make, or None for no cap
         """
+        self.max_creates  = max_creates
+        self._budget      = None
+        self._refused     = 0
         self.store        = store
         self.pending_path = pending_path
         self.log          = log
         self.notify       = notify
         self.project      = project
         self.owner        = owner
+        self.manager      = manager
         self.priority     = priority
 
     def _payload( self, title, body ):
         """Build the create payload for one row."""
         return { "item_class": "task", "title": title, "body": body, "project": self.project, "owner_persona": self.owner,
-                 "accountable_manager": self.owner, "priority": self.priority, "correlation_key": CORRELATION_KEY }
+                 "accountable_manager": self.manager, "priority": self.priority, "correlation_key": CORRELATION_KEY }
 
     def _existing( self ):
         """
-        Read the open wiki-librarian rows.
+        Read the open and held wiki-librarian rows.
 
         Ensures:
             - returns a dict of title to row
@@ -203,6 +254,19 @@ class Librarian:
         ok, status, body = self.store.query( CORRELATION_KEY )
         if not ok: raise RuntimeError( f"task store query failed: status {status}: {body}" )
         return { row[ "title" ]: row for row in body.get( "tasks", [] ) }
+
+    def _take( self ):
+        """
+        Spend one create from this sync's budget.
+
+        Ensures:
+            - returns True when a create may be made, False when the budget is spent
+            - with no cap it always returns True
+        """
+        if self._budget is None: return True
+        if self._budget <= 0: return False
+        self._budget -= 1
+        return True
 
     def _create_or_hold( self, title, body, held ):
         """
@@ -214,32 +278,45 @@ class Librarian:
         """
         ok, status, reply = self.store.create( self._payload( title, body ) )
         if ok: return "created"
+        self._refused += 1
         self.log( f"create held: {title}: status {status}: {reply}" )
         if all( entry[ "title" ] != title for entry in held ): held.append( { "title": title, "body": body, "status": status } )
         return "pending"
 
-    def sync( self, findings ):
+    def sync( self, findings, index_sha ):
         """
         Bring the rollup rows in step with the findings, after retrying the pending creates.
 
         Requires:
             - findings is the list wiki_lint.queue returned
+            - index_sha names the index the findings came from
 
         Ensures:
-            - returns a dict of counts: created, amended, unchanged, closed, pending
+            - returns a dict of counts: created, amended, unchanged, cleared, waiting, deferred, pending
+            - no more than max_creates create calls are made, pending retries first; a refused attempt counts
+            - a rollup the cap kept back is counted as deferred and is derived again on the next run
+            - a pending entry the cap kept back stays in the pending file untouched
             - a package with findings and no row gets one row; a changed fingerprint gets one amendment
-            - a row whose package now has no findings is closed
-            - miss rows are never amended or closed here
+            - a rollup whose package has no findings is amended once with a clear notice and is never closed here
+            - a rollup that already carries its clear notice is counted as waiting
+            - the manager is notified once about refused creates and once about newly cleared rollups
+            - miss rows are never amended here
             - refused creates are written to the pending file before this returns
-            - the owner is notified once when a create was held
             - raises RuntimeError when the store could not be read, leaving the pending file as it was
         """
         existing = self._existing()
-        counts   = { "created": 0, "amended": 0, "unchanged": 0, "closed": 0, "pending": 0 }
+        counts   = { "created": 0, "amended": 0, "unchanged": 0, "cleared": 0, "waiting": 0, "deferred": 0, "pending": 0 }
         held     = []
         made     = set()
+        cleared  = []
+        self._budget  = self.max_creates
+        self._refused = 0
         for entry in read_pending( self.pending_path ):
             if entry[ "title" ] in existing: continue
+            if not self._take():
+                held.append( entry )
+                counts[ "deferred" ] += 1
+                continue
             if self._create_or_hold( entry[ "title" ], entry[ "body" ], held ) == "created":
                 counts[ "created" ] += 1
                 made.add( entry[ "title" ] )
@@ -251,20 +328,28 @@ class Librarian:
             row = existing.get( title )
             if title in made: continue
             if row is None:
-                if all( entry[ "title" ] != title for entry in held ) and self._create_or_hold( title, body, held ) == "created": counts[ "created" ] += 1
-            elif read_fingerprint( row.get( "body" ) ) == read_fingerprint( body ): counts[ "unchanged" ] += 1
+                if any( entry[ "title" ] == title for entry in held ): continue
+                if not self._take(): counts[ "deferred" ] += 1
+                elif self._create_or_hold( title, body, held ) == "created": counts[ "created" ] += 1
+            elif read_fingerprint( row.get( "body" ) ) == read_fingerprint( body ) and not is_cleared( row.get( "body" ) ): counts[ "unchanged" ] += 1
             else:
                 ok, status, reply = self.store.amend( row[ "id" ], body )
                 if ok: counts[ "amended" ] += 1
                 else: self.log( f"amend failed: {title}: status {status}: {reply}" )
         for title, row in existing.items():
-            if title.startswith( ROLLUP_PREFIX ) and title not in wanted:
-                ok, status, reply = self.store.close( row[ "id" ], "the package has no wiki lint findings" )
-                if ok: counts[ "closed" ] += 1
-                else: self.log( f"close failed: {title}: status {status}: {reply}" )
+            if not title.startswith( ROLLUP_PREFIX ) or title in wanted: continue
+            if is_cleared( row.get( "body" ) ):
+                counts[ "waiting" ] += 1
+                continue
+            ok, status, reply = self.store.amend( row[ "id" ], clear_note( title[ len( ROLLUP_PREFIX ): ], index_sha ) )
+            if ok:
+                counts[ "cleared" ] += 1
+                cleared.append( title )
+            else: self.log( f"clear notice failed: {title}: status {status}: {reply}" )
         write_pending( self.pending_path, held )
         counts[ "pending" ] = len( held )
-        if held and self.notify is not None: self.notify( f"{len( held )} wiki-librarian rows were not created and are pending" )
+        if self._refused and self.notify is not None: self.notify( f"{len( held )} wiki-librarian rows were not created and are pending" )
+        if cleared and self.notify is not None: self.notify( f"{len( cleared )} wiki-librarian rollups are clear; close each with a manager_attestation receipt" )
         return counts
 
     def hold_or_create( self, title, body ):
@@ -277,6 +362,7 @@ class Librarian:
         Ensures:
             - returns "exists" when a row with that title is already open, "created", or "pending"
             - a held row is added to the pending file, once per title
+            - the create cap does not apply
         """
         if title in self._existing(): return "exists"
         held   = read_pending( self.pending_path )
