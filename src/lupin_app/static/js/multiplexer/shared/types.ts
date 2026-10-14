@@ -357,7 +357,7 @@ export interface AuthStateChangePayload {
 /**
  * Payload of `refresh_started`.
  *
- * `reason` says whether the token ran out or was invalidated by a 401.
+ * `reason` is "invalidated" when `invalidate()` marked the token expired, else "expired".
  */
 export interface RefreshStartedPayload {
   reason : "expired" | "invalidated";
@@ -649,7 +649,11 @@ export interface StoreNotificationsChangedPayload {
 
 /** The four queue states of a job: todo, running, done and dead. */
 export type JobStatus = "todo" | "running" | "done" | "dead";
-/** A job status, or `history` for jobs loaded from past runs. */
+/**
+ * A job status, or `history`.
+ *
+ * `history` holds finished jobs that left the live lists, and jobs loaded from the server's history.
+ */
 export type JobBucket = JobStatus | "history";
 
 /**

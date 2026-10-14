@@ -146,7 +146,8 @@ export interface ApiClient {
 /**
  * The error thrown when the server answers with a non-2xx status.
  *
- * It carries the `status` and the `url`. The message is the response text, or "unauthorized" for a 401.
+ * It carries the `status` and the `url`. The message reads `HTTP <status> <url>: <text>`,
+ * where the text is the response body, or "unauthorized" for a 401.
  */
 export class ApiError extends Error {
   constructor(
