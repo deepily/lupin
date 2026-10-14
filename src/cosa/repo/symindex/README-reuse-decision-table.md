@@ -124,6 +124,10 @@ one. A later healthy call therefore gets its own receipt.
 Changing the prompt, the tool version, a threshold or the model therefore yields a new id, and a
 cached answer for the old prompt is never returned as current.
 
+A `fetch_similar` receipt for a `_private` or nested definition also carries `need_text`, the text asked about,
+and it is part of the id. The index_sha covers public symbols only. Without the field, an edit to the private definition would reuse the old receipt. Replay could not rebuild the question from the public snapshot either.
+A receipt for a public symbol has no such field.
+
 A receipt is immutable: it holds the inputs, the verdict, `cause`, `causes`, the shortlist and the
 Jev cache keys. It never holds callers or times. Who asked, and when, lives only in the per-session
 call log, one file per server, merged at read time. Two callers asking the same question share one

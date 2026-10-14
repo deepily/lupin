@@ -237,6 +237,25 @@ def test_fetch_similar_resolves_a_private_definition_against_the_whole_index( en
     assert fake.unexpected == [] and all( b[ "state" ][ "need" ] == text for b in fake.seen )
 
 
+def test_replay_of_a_private_definition_receipt_is_deterministic_and_tamper_evident( env ):
+    # red when: replay asks for the bare id instead of the stored need text (CACHE_MISSING), or the need text is outside the receipt id
+    _add_module( env, "priv", 'def _helper( x ):\n    """Normalise one value."""\n    return x\n' )
+    text = "cosa.priv._helper(x) — Normalise one value."
+    fake = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
+    ctx  = ctx_for( env, fake )
+    f    = rt.fetch_similar_impl( "cosa.priv._helper", ctx )
+    rep  = rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )
+    assert rep[ "status" ] == "ok" and rep[ "differences" ] == { "frozen": [], "head": [] }
+    assert rep[ "stored" ][ "need_text" ] == text and [ s[ "id" ] for s in rep[ "frozen" ][ "shortlist" ] ] == [ "cosa.mathx.add" ]
+    path = env[ 1 ] / "receipts" / f"{f[ 'receipt_id' ]}.json"
+    doc  = json.loads( path.read_text( encoding="utf-8" ) )
+    doc[ "need_text" ] = "cosa.priv._helper(x) — Something else."
+    path.write_text( json.dumps( doc ), encoding="utf-8" )
+    assert rt.replay_impl( f[ "receipt_id" ], ctx_for( env, fake ) )[ "error" ] == "RECEIPT_ID_MISMATCH"
+    again = rt.fetch_similar_impl( "cosa.mathx.add", ctx_for( env, FakeJev( need=MATHX_TEXT ) ) )
+    assert "need_text" not in rt.load_receipt( ctx_for( env, None ), again[ "receipt_id" ] )      # a public receipt keeps its old shape
+
+
 def test_fetch_similar_names_the_cause_when_a_definition_may_not_be_sent( env ):
     # red when: a refused definition answers UNKNOWN_ENTRY (the gate would then read it as NO_CALL)
     _add_module( env, "leaky", 'def _mail( x ):\n    """Mail ops@example.com when done."""\n    return x\n' )

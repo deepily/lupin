@@ -122,7 +122,7 @@ def request_hash( body ):
     return sha( canonical( body ) )
 
 
-def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None, sweep_only=False, exclude_id=None ):
+def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(), tool_version=None, request_shape=None, sweep_only=False, exclude_id=None, need_text=None ):
     """
     Ensures:
         - returns 16 hex characters identifying one question against one set of inputs
@@ -135,6 +135,7 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
           shape when there is one; with no shape the id is the one the old path has always produced
         - a sweep-only question carries that mark and its excluded id in the id
         - a check_exists question that leaves one symbol out without being sweep-only carries the excluded id and not the mark
+        - a question carrying need_text (a fetch_similar of a definition the public snapshot does not hold) has it in the id
         - any other question's id is unchanged
     """
     fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
@@ -142,6 +143,7 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
     if request_shape is not None: fields[ "request_shape" ] = request_shape
     if sweep_only: fields[ "sweep_only" ], fields[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: fields[ "exclude_id" ] = exclude_id
+    if need_text is not None: fields[ "need_text" ] = need_text
     return sha( canonical( fields ), 16 )
 
 
@@ -888,7 +890,8 @@ def load_receipt( ctx, rid ):
         ok = _receipt_shape_ok( r )
         again = receipt_id( r[ "tool" ], r[ "query" ], r[ "index_sha" ], r[ "model" ], r[ "policy" ], r[ "prompt_template_hash" ], r[ "causes" ],
                             r[ "tool_version" ], r[ "request_shape" ] if "request_shape" in r else None,
-                            "sweep_only" in r, r[ "exclude_id" ] if "exclude_id" in r else None ) if ok else None
+                            "sweep_only" in r, r[ "exclude_id" ] if "exclude_id" in r else None,
+                            r[ "need_text" ] if "need_text" in r else None ) if ok else None
     except ( ValueError, KeyError, TypeError, OSError ) as e:
         raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: {e}" ) from e
     if not ok: raise ReuseError( "RECEIPT_CORRUPT", f"{rid}: wrong field types" )
@@ -1097,6 +1100,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if pair and ( ctx.sweeper is None or ctx.pack_size is None ): raise ReuseError( "PAIR_NEEDS_PACKED", "the provides question is asked on the packed path only" )
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
     pages = ctx.pages if tool == "check_exists" and not sweep_only and not pair else []     # fetch_similar lists neighbours, so it sweeps every entry
+    need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
@@ -1114,7 +1118,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     template_hash = rpr.template_hash() if pair else prompt_template_hash( ctx.template ) + ( prompt_template_hash( PAGE_TEMPLATE ) if pages else "" )
     packed        = ctx.sweeper is not None
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
-    rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id ),
+    rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id, need_text ),
             "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
             "policy": policy, "prompt_template_hash": template_hash, "prompt_template": template,
             "page_prompt_template": PAGE_TEMPLATE if pages else None, "route": routed[ "route" ], "pages": plan,
@@ -1134,6 +1138,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
+    if need_text is not None: rec[ "need_text" ] = need_text
     if packed:
         rec[ "request_shape" ] = shape
         rec[ "pack_size" ]     = ctx.pack_size
@@ -1334,7 +1339,7 @@ def replay_impl( rid, ctx ):
         entries, _ = sendable( entries, ctx.exclude_prefixes )
         need       = stored[ "query" ]
         if stored[ "tool" ] == "fetch_similar":
-            need    = next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
+            need    = stored[ "need_text" ] if "need_text" in stored else next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
         sweep_only = "sweep_only" in stored
         left_out   = stored[ "exclude_id" ] if "exclude_id" in stored else None                  # a sweep-only receipt and a page-route receipt both name it
