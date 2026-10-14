@@ -1692,6 +1692,30 @@ def test_a_file_outside_the_swept_scope_that_is_not_utf8_is_skipped_with_a_warni
     assert "0 files checked" in text and "0 undecodable" in text
 
 
+@pytest.mark.parametrize( "name,data", [ ( "docs/u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ), ( "docs/l1.md", b"# T\n\nSome caf\xe9 text.\n" ),
+                                         ( "src/lupin_mcp/u16.py", "x = 1\n".encode( "utf-16" ) ), ( "src/lupin_mcp/l1.py", b"x = '\xe9'\n" ) ] )
+def test_a_page_the_gate_cannot_read_is_refused_when_the_commit_changes_it_whatever_the_encoding( repo, monkeypatch, name, data ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "docs/keep.md", b"# K\n\nFine.\n" )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _stage_bytes( repo, name, data )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( name, lines )
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED: {name} " ) or ln.startswith( f"[doc-lint] REFUSED {name}: " ) ]
+
+
+def test_a_page_the_gate_cannot_read_but_the_commit_does_not_change_is_only_warned_about( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    for name, data in ( ( "docs/old/l1.md", b"# T\n\nSome caf\xe9 text.\n" ), ( "docs/old/u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ) ):
+        _stage_bytes( repo, name, data )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", "docs/old/l1.md", "docs/l1.md" )
+    _git( repo, "mv", "docs/old/u16.md", "docs/u16.md" )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] WARNING: docs/l1.md is not UTF-8, it was NOT checked" in lines and "[doc-lint] WARNING: docs/u16.md is not UTF-8, it was NOT checked" in lines
+
+
 def test_staged_source_raises_the_decode_error_for_non_utf8_bytes( repo ):
     _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
     with pytest.raises( UnicodeDecodeError ):

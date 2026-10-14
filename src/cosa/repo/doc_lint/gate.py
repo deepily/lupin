@@ -946,6 +946,7 @@ def collect( root ):
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
         - a swept file that is not UTF-8 is refused the same way, counted in tally["undecodable"]; any other file that is not UTF-8 is skipped with a warning
+        - that warning is an Unchecked when the commit adds the file or changes its content, and is_warn_only does not name it, as for a file git treats as binary
         - tally is the denominator: files, docstrings, findings, waivers, unparsed, and one count block for each counted scope
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
@@ -995,7 +996,7 @@ def collect( root ):
                 tally[ "undecodable" ] += 1
                 decode_out.append( f"[doc-lint] REFUSED {shown( path )}: not UTF-8: {err}; fix: {FIX_HOME[ 'not-utf-8' ]}; this cannot be waived" )
             else:
-                warnings.append( f"[doc-lint] WARNING: {shown( path )} is not UTF-8, it was NOT checked" )
+                warnings.append( ( Unchecked if path in created and not is_warn_only( path ) else str )( f"[doc-lint] WARNING: {shown( path )} is not UTF-8, it was NOT checked" ) )
             continue
         if path.endswith( ".py" ):
             if ranges.get( path ) and BARE_RETURN.search( source ): ranges[ path ] = [ ( 1, len( split_lines( source ) ) ) ]
