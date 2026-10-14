@@ -366,5 +366,25 @@ def test_the_real_extractor_counts_commonjs_assignments_by_the_declaration_they_
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
 def test_the_real_census_runs_over_this_repository_and_reads_every_file( ):
     result = ts_doc_exists.census( REPO_ROOT )
-    assert result.walked == len( ts_doc_exists.counted_paths( REPO_ROOT ) ) > 100 and result.symbols >= result.undocumented > 0
+    assert result.walked == len( ts_doc_exists.counted_paths( REPO_ROOT ) ) > 100 and result.symbols >= result.undocumented >= 0
+    assert result.symbols > 0, "the walk read files but saw no exported symbol, so a zero below proves nothing"
     assert set( result.found ) == set( result.missing )
+
+
+@pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+def test_the_real_census_over_this_repository_sees_one_planted_undocumented_export( tmp_path, monkeypatch ):
+    """Plant one undocumented export, since the tree itself may have none."""
+    ( tmp_path / "planted.ts" ).write_text( "export function planted() {}\n", encoding="utf-8" )
+    real_paths = ts_doc_exists.counted_paths( REPO_ROOT )
+    baseline   = ts_doc_exists.census( REPO_ROOT )
+    monkeypatch.setattr( ts_doc_exists, "counted_paths", lambda root: [ *real_paths, "planted.ts" ] )
+
+    def run( root, files ):
+        got = ts_doc_exists.run_extractor( root, [ f for f in files if f != "planted.ts" ] )
+        got.update( ts_doc_exists.run_extractor( root, [ "planted.ts" ], source_root=str( tmp_path ) ) )
+        return got
+
+    result = ts_doc_exists.census( REPO_ROOT, run=run )
+    assert result.walked == baseline.walked + 1
+    assert result.undocumented == baseline.undocumented + 1
+    assert result.found.get( "planted.ts" ) == 1 and [ s for s in result.missing[ "planted.ts" ] ] != []
