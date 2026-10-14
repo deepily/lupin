@@ -204,22 +204,25 @@ class FakeLibrarian:
 
 
 @pytest.fixture
-def pipeline( monkeypatch ):
+def pipeline( monkeypatch, tmp_path ):
+    for wiki in ( tmp_path, tmp_path / "repo" / "src" / "docs" / "wiki" ):
+        ( wiki / "capabilities" ).mkdir( parents=True, exist_ok=True )
+        ( wiki / "capabilities" / "a.md" ).write_text( "# a\n" )
     monkeypatch.setattr( lt.build_mod, "ensure", lambda root, out: "gen-dir" )
-    monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "idx-sha" } )
+    monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "idx-sha", "counts": { "symbols": 5 } } )
     monkeypatch.setattr( lt, "queue", lambda wiki, gen: [ { "kind": "stale" }, { "kind": "orphan" } ] )
 
 
 def test_a_run_that_is_not_due_does_nothing( tmp_path, pipeline ):
     state = str( tmp_path / "state.json" )
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), lambda rows, path: report(), "m", state, EARLY )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda rows, path: report(), "m", state, EARLY )
     assert code == 0 and summary == { "ran": False, "reason": "not due" }
     assert not os.path.exists( state )
 
 
 def test_a_due_run_syncs_exports_and_records_the_day( tmp_path, pipeline ):
     state, lib, exported = str( tmp_path / "state.json" ), FakeLibrarian(), []
-    code, summary = lt.run_tick( "r", "w", None, lib, lambda rows, path: exported.append( ( rows, path ) ) or report( 3 ), "m.jsonl", state, NOON )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, lib, lambda rows, path: exported.append( ( rows, path ) ) or report( 3 ), "m.jsonl", state, NOON )
     assert lib.index_sha == "idx-sha"
     assert code == 0 and summary[ "ran" ] is True and summary[ "findings" ] == 2 and summary[ "misses" ] == 3
     assert lib.seen == [ { "kind": "stale" }, { "kind": "orphan" } ]
@@ -230,24 +233,24 @@ def test_a_due_run_syncs_exports_and_records_the_day( tmp_path, pipeline ):
 
 def test_pending_rows_make_the_exit_code_two( tmp_path, pipeline ):
     lib = FakeLibrarian( counts={ "created": 0, "amended": 0, "unchanged": 0, "closed": 0, "pending": 2 } )
-    assert lt.run_tick( "r", "w", None, lib, lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON )[ 0 ] == 2
+    assert lt.run_tick( "r", str( tmp_path ), None, lib, lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON )[ 0 ] == 2
 
 
 def test_force_runs_a_tick_that_is_not_due( tmp_path, pipeline ):
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), EARLY, force=True )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), EARLY, force=True )
     assert code == 0 and summary[ "ran" ] is True
 
 
 def test_an_unreadable_store_ends_the_run_with_one_and_records_nothing( tmp_path, pipeline ):
     state, lines = str( tmp_path / "state.json" ), []
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian( error=RuntimeError( "down" ) ), lambda r, p: report(), "m", state, NOON, log=lines.append )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian( error=RuntimeError( "down" ) ), lambda r, p: report(), "m", state, NOON, log=lines.append )
     assert code == 1 and summary[ "ran" ] is False and "down" in summary[ "reason" ]
     assert not os.path.exists( state ) and any( "could not finish" in line for line in lines )
 
 
 def test_a_failed_export_query_ends_the_run_with_one( tmp_path, pipeline ):
     lib = FakeLibrarian( query=( False, 500, {} ) )
-    code, summary = lt.run_tick( "r", "w", None, lib, lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON, log=lambda line: None )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, lib, lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON, log=lambda line: None )
     assert code == 1 and "export query failed" in summary[ "reason" ]
 
 
@@ -459,7 +462,7 @@ def test_main_writes_the_misses_file_to_the_data_folder_unless_told_otherwise( c
 def test_skipped_blocks_are_logged_with_title_and_reason( tmp_path, pipeline ):
     lines = []
     skipped = [ { "title": "[LUPIN] wiki-librarian miss: a.b", "reason": "not JSON: bad" } ]
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), lambda rows, path: report( 2, skipped ), str( tmp_path / "out" / "m.jsonl" ),
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda rows, path: report( 2, skipped ), str( tmp_path / "out" / "m.jsonl" ),
                                  str( tmp_path / "s.json" ), NOON, log=lines.append )
     assert code == 0 and summary[ "misses" ] == 2
     assert any( "miss block skipped: [LUPIN] wiki-librarian miss: a.b: not JSON: bad" in line for line in lines )
@@ -469,11 +472,11 @@ def test_skipped_blocks_are_logged_with_title_and_reason( tmp_path, pipeline ):
 def test_a_refused_empty_export_or_an_unwritable_folder_ends_the_run_with_one_and_records_nothing( tmp_path, pipeline ):
     state = str( tmp_path / "s.json" )
     def refuse( rows, path ): raise ValueError( "refusing to replace a populated file with an empty export" )
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), refuse, str( tmp_path / "m.jsonl" ), state, NOON, log=lambda line: None )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), refuse, str( tmp_path / "m.jsonl" ), state, NOON, log=lambda line: None )
     assert code == 1 and "refusing" in summary[ "reason" ] and not os.path.exists( state )
     blocker = tmp_path / "blocker"
     blocker.write_text( "a file" )
-    code, summary = lt.run_tick( "r", "w", None, FakeLibrarian(), lambda r, p: report(), str( blocker / "sub" / "m.jsonl" ), state, NOON, log=lambda line: None )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), str( blocker / "sub" / "m.jsonl" ), state, NOON, log=lambda line: None )
     assert code == 1 and summary[ "ran" ] is False and not os.path.exists( state )
 
 
@@ -486,8 +489,6 @@ def test_a_missing_wiki_folder_refuses_before_sync_and_touches_nothing( tmp_path
 
 
 def test_an_index_with_no_symbols_refuses_before_sync_and_touches_nothing( tmp_path, pipeline, monkeypatch ):
-    ( tmp_path / "capabilities" ).mkdir()
-    ( tmp_path / "capabilities" / "a.md" ).write_text( "# a\n" )
     monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "idx-sha", "counts": { "symbols": 0 } } )
     state, lines, lib = str( tmp_path / "state.json" ), [], FakeLibrarian()
     code, summary = lt.run_tick( "r", str( tmp_path ), None, lib, lambda r, p: report(), "m", state, NOON, log=lines.append )

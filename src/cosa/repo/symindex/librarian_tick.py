@@ -283,6 +283,7 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     Ensures:
         - returns ( exit_code, summary dict )
         - nothing is done and 0 is returned when the run is not due and force is False
+        - a wiki folder with no capability page, or an index with no symbols, returns 1 before the sync and leaves the store and state untouched
         - the index sha from the index header goes to the librarian for its clear notices
         - the export reads every row, done and dropped included
         - the state file records today's date only when the sync finished
@@ -292,10 +293,17 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     """
     state = read_state( state_path )
     if not force and not due( now, state ): return 0, { "ran": False, "reason": "not due" }
-    gen      = build_mod.ensure( root, out_dir )
+    if not list( ( pathlib.Path( wiki_dir ) / "capabilities" ).glob( "*.md" ) ):
+        log( f"tick refused: no capability page under {wiki_dir}; an empty lint read would clear every open rollup" )
+        return 1, { "ran": False, "reason": "no capability page" }
+    gen    = build_mod.ensure( root, out_dir )
+    header = build_mod.read_header( gen )
+    if not header[ "counts" ][ "symbols" ]:
+        log( "tick refused: the symbol index holds no symbols; an empty lint read would clear every open rollup" )
+        return 1, { "ran": False, "reason": "no symbols in the index" }
     findings = queue( pathlib.Path( wiki_dir ), gen )
     try:
-        counts = librarian.sync( findings, build_mod.read_header( gen )[ "symbols_sha" ] )
+        counts = librarian.sync( findings, header[ "symbols_sha" ] )
         ok, status, body = librarian.store.query_all( CORRELATION_KEY )
     except RuntimeError as error:
         log( f"tick could not finish: {error}" )
