@@ -505,10 +505,11 @@ def test_both_reads_ask_for_parked_rows_with_the_routes_own_parameter_names():
     ok, _, body = store.query( "k" )
     assert ok and [ r[ "id" ] for r in body[ "tasks" ] ] == [ "id-7" ]
     assert client.calls[ 0 ][ 1 ][ "hide_parked" ] == "false"
+    sent = { key for _, params in client.calls for key in params }
     client.calls.clear()
     assert store.query_all( "k" )[ 0 ]
     assert client.calls[ 0 ][ 1 ][ "hide_parked" ] == "false" and client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
-    sent = { key for _, params in client.calls for key in params }
+    sent |= { key for _, params in client.calls for key in params }
     assert sent <= set( inspect.signature( route ).parameters ), sent - set( inspect.signature( route ).parameters )
 
 
