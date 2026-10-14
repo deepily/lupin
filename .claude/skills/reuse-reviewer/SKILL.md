@@ -26,7 +26,14 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
 
 2. **Ask the index, one definition at a time.** Call `fetch_similar( entry )` with the symbol
    id exactly as `diff.json` lists it. Keep the `receipt_id` it returns. `UNKNOWN_ENTRY` means
-   the head index is stale: rebuild and call again.
+   the id is in no definition of the head index, so copy it again from `diff.json`. `_private`
+   and nested ids are looked up like public ones.
+
+   An error whose name starts with `EXCLUDED_` means the tool may not send that definition.
+   `EXCLUDED_SENSITIVE_CONTENT` is a signature or first docstring line that holds an address,
+   path or token. `EXCLUDED_PREFIX` is an id under an excluded prefix. There is no receipt, so
+   read the definition and its neighbours yourself and write `excluded` as the receipt token
+   in the ruling line.
 
 3. **Read the capability pages** the shortlist points to (`read_capability( names )`). The
    page says the capability's canonical entry point and its "don't" rules.
@@ -72,14 +79,12 @@ Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-r
 
 One table maps the labels in use, so a receipt cited in a plan's prior-art table needs no translation.
 
-```text
 | `check_exists` verdict | `plan-review.md` section 4 prior-art label | Reuse-reviewer ruling |
 | --- | --- | --- |
-| REUSE | reuse-as-is | DUPLICATE |
-| EXTEND | extend-existing | EXTEND `<symbol>` |
-| NEW | genuinely-new | DISTINCT `<why>`, only after the reviewer has read the shortlist's source; a NEW verdict does not rule DISTINCT by itself |
-| UNCERTAIN_READ_SOURCE | none yet: read the source first | the reviewer rules only after reading the candidates |
-```
+| `REUSE` | `reuse-as-is` | `DUPLICATE` |
+| `EXTEND` | `extend-existing` | `EXTEND <symbol>` |
+| `NEW` | gen&#117;inely-new | `DISTINCT <why>`, only after the reviewer has read the shortlist's source; a `NEW` verdict does not rule `DISTINCT` by itself |
+| `UNCERTAIN_READ_SOURCE` | none yet: read the source first | the reviewer rules only after reading the candidates |
 
 ## Rules
 

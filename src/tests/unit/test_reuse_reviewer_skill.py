@@ -1,14 +1,21 @@
 """
 Pins the reuse-reviewer skill to the plan and to the exit-gate script that enforces it.
 """
+import html
 import pathlib
 import re
 
+import cosa.utils.util as cu
 from lupin_mcp import reuse_exit_gate
 
-ROOT  = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+ROOT  = pathlib.Path( cu.get_project_root() )
 SKILL = ROOT / ".claude" / "skills" / "reuse-reviewer" / "SKILL.md"
 PLAN  = ROOT / "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-reuse-review-implementation-plan.md"
+
+
+def _plain( line ):
+    """Return a table line with backticks and character references removed."""
+    return html.unescape( line.replace( "`", "" ) )
 
 
 def _table( text ):
@@ -23,10 +30,12 @@ def _table( text ):
 
 
 def test_skill_carries_the_plan_table_verbatim():
-    plan_rows = _table( PLAN.read_text( encoding="utf-8" ) )
-    skill     = SKILL.read_text( encoding="utf-8" )
+    plan_rows = [ _plain( l ) for l in _table( PLAN.read_text( encoding="utf-8" ) ) ]
+    skill     = [ _plain( l ) for l in SKILL.read_text( encoding="utf-8" ).splitlines() ]
     assert len( plan_rows ) == 6                                   # header, rule, four verdicts
     for row in plan_rows: assert row in skill
+    head = skill.index( plan_rows[ 0 ] )
+    assert not skill[ head - 1 ].startswith( "```" ) and not skill[ head - 2 ].startswith( "```" )    # a real markdown table, not a fenced block
 
 
 def test_skill_names_the_flag_and_the_gate_modules():

@@ -1236,16 +1236,27 @@ def fetch_similar_impl( entry, ctx ):
     What does this symbol resemble? The shortlist for an indexed symbol, excluding itself by id.
 
     Requires:
-        - entry is a symbol id present in the current index
+        - entry is a symbol id of the index, public or private
     Ensures:
         - returns { status, receipt_id, shortlist, nearest, uncertain } where uncertain is the cause
           that obliges the caller to read the source, or None
-        - an id that is not in a healthy index returns { status: error, error: UNKNOWN_ENTRY } and no receipt
+        - the entry is looked up among every definition, `_private` and nested ones included
+        - a definition that sendable() would not send answers { status: error, error, entry, detail }
+          with error EXCLUDED_PREFIX or EXCLUDED_SENSITIVE_CONTENT, and no receipt
+        - an id that is in no healthy index returns { status: error, error: UNKNOWN_ENTRY } and no receipt
     """
     prepared = prepare( ctx )
-    hit = next( ( e for e in prepared[ 1 ] if e[ "id" ] == entry ), None )
-    if hit is None and not prepared[ 0 ] & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
+    flags, gen = prepared[ 0 ], prepared[ 3 ]
+    hit      = next( ( r for r in sx_build.read_symbols( gen, all_symbols=True ) if r[ "id" ] == entry ), None ) if gen else None
+    if hit is None and not flags & { "NOT_LUPIN_TREE", "INDEX_STALE" }:
         return { "status": "error", "error": "UNKNOWN_ENTRY", "entry": entry }
+    if hit is not None:
+        kept, dropped = sendable( [ hit ], ctx.exclude_prefixes )
+        if not kept:
+            patterns = c1_hits( { **hit, "sig": blank_string_defaults( hit[ "sig" ] ) } ) if dropped else []
+            return { "status": "error", "error": "EXCLUDED_SENSITIVE_CONTENT" if dropped else "EXCLUDED_PREFIX", "entry": entry,
+                     "detail": ", ".join( patterns ) if dropped else "the id is under an excluded prefix" }
+        hit = kept[ 0 ]
     try:
         rec = run_question( ctx, "fetch_similar", entry, entry_text( hit ) if hit else entry, exclude_id=entry, prepared=prepared )
     except ReuseError as e:

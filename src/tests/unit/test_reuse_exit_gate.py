@@ -23,12 +23,29 @@ def _ruling( sid, ruling, rid ):
     return f"RULING {sid} :: {ruling} :: reuse-receipt: {rid}"
 
 
-def _fixture( tmp_path, ids, calls_a, calls_b, review_lines ):
+def _two_runs( tmp_path, run_a, run_b, calls_a=(), calls_b=() ):
+    """
+    Write two crew runs and their call logs.
+
+    Requires:
+        - run_a and run_b are ( added ids, review lines ) pairs
+    Ensures:
+        - returns ( log dir, [ run dict, run dict ] ) in the shape run_gate takes
+    """
     logs = tmp_path / "call-log"; logs.mkdir()
-    _write_log( logs, "sess-a", calls_a ); _write_log( logs, "sess-b", calls_b )
-    diff = tmp_path / "diff.json"; diff.write_text( json.dumps( { "added": ids, "removed": [], "changed": [] } ), encoding="utf-8" )
-    rev = tmp_path / "review.md"; rev.write_text( "\n".join( review_lines ) + "\n", encoding="utf-8" )
-    return logs, diff, rev
+    _write_log( logs, "sess-a", list( calls_a ) ); _write_log( logs, "sess-b", list( calls_b ) )
+    runs = []
+    for n, ( ids, lines ) in enumerate( ( run_a, run_b ) ):
+        diff = tmp_path / f"diff{n}.json"; diff.write_text( json.dumps( { "added": ids, "removed": [], "changed": [] } ), encoding="utf-8" )
+        rev  = tmp_path / f"review{n}.md"; rev.write_text( "\n".join( lines ) + "\n", encoding="utf-8" )
+        runs.append( { "diff": str( diff ), "review": str( rev ) } )
+    return logs, runs
+
+
+def _ten( prefix="m.f" ):
+    """Ensures: returns ten symbol ids, each with its own receipt id."""
+    ids = [ f"{prefix}{i}" for i in range( 10 ) ]
+    return ids, { i: f"r{prefix.replace( '.', '' )}{n}" for n, i in enumerate( ids ) }
 
 
 def test_merge_skips_blank_bad_and_non_object_lines( tmp_path ):
@@ -77,53 +94,114 @@ def test_check_run_assigns_each_status():
     assert { r[ "id" ]: r[ "status" ] for r in rows } == { "m.ok": "OK", "m.norule": "NO_RULING", "m.wrong": "WRONG_RECEIPT", "m.nocall": "NO_CALL" }
 
 
+def test_check_run_assigns_excluded_statuses():
+    rows = eg.check_run( [ "m.priv", "m.priv2", "m.none" ], {}, { "m.priv": [ { "ruling": "DUPLICATE", "receipt": "excluded" } ] },
+                         { "m.priv": "SENSITIVE_CONTENT", "m.priv2": "PREFIX" } )
+    assert rows == [ { "id": "m.priv", "status": "EXCLUDED", "cause": "SENSITIVE_CONTENT" },
+                     { "id": "m.priv2", "status": "EXCLUDED_NO_RULING", "cause": "PREFIX" },
+                     { "id": "m.none", "status": "NO_CALL" } ]
+
+
+def test_a_ruling_that_cites_another_symbols_receipt_is_wrong_receipt():
+    """The receipt exists in the log, but it belongs to m.b. m.a's ruling must not pass on it."""
+    receipts = { "m.a": { "r-a" }, "m.b": { "r-b" } }
+    rulings  = eg.parse_rulings( _ruling( "m.a", "DUPLICATE", "r-b" ) + "\n" + _ruling( "m.b", "DUPLICATE", "r-b" ) )
+    rows     = { r[ "id" ]: r[ "status" ] for r in eg.check_run( [ "m.a", "m.b" ], receipts, rulings ) }
+    assert rows == { "m.a": "WRONG_RECEIPT", "m.b": "OK" }
+
+
+def test_exclusions_by_symbol_reads_the_refusal_cause():
+    recs = [ _call( "a", "m.p", None, error="EXCLUDED_SENSITIVE_CONTENT" ), _call( "a", "m.q", None, error="EXCLUDED_PREFIX" ),
+             _call( "a", "m.r", None, error="UNKNOWN_ENTRY" ), _call( "a", "m.s", None, tool="check_exists", error="EXCLUDED_PREFIX" ),
+             { "tool": "fetch_similar", "error": "EXCLUDED_PREFIX", "args": "[]" }, _call( "a", "m.t", "r1" ) ]
+    assert eg.exclusions_by_symbol( recs ) == { "m.p": "SENSITIVE_CONTENT", "m.q": "PREFIX" }
+
+
 def test_gate_passes_when_every_definition_has_call_and_ruling( tmp_path ):
-    ids   = [ f"m.f{i}" for i in range( 10 ) ]
-    calls = [ _call( "a", i, f"r{n}" ) for n, i in enumerate( ids[ :5 ] ) ], [ _call( "b", i, f"r{n + 5}" ) for n, i in enumerate( ids[ 5: ] ) ]
-    rev   = [ _ruling( i, "DUPLICATE", f"r{n}" ) for n, i in enumerate( ids ) ]
-    logs, diff, rv = _fixture( tmp_path, ids, calls[ 0 ], calls[ 1 ], rev )
-    res = eg.run_gate( [ { "diff": str( diff ), "review": str( rv ) } ], logs )
-    assert res[ "passed"  ] is True and res[ "total_new" ] == 10 and res[ "reasons" ] == []
+    ids_a, rid_a = _ten( "m.a" ); ids_b, rid_b = _ten( "m.b" )
+    logs, runs = _two_runs( tmp_path, ( ids_a[ :5 ], [ _ruling( i, "DUPLICATE", rid_a[ i ] ) for i in ids_a[ :5 ] ] ),
+                            ( ids_b[ :5 ], [ _ruling( i, "EXTEND m.x", rid_b[ i ] ) for i in ids_b[ :5 ] ] ),
+                            [ _call( "a", i, rid_a[ i ] ) for i in ids_a[ :5 ] ], [ _call( "b", i, rid_b[ i ] ) for i in ids_b[ :5 ] ] )
+    res = eg.run_gate( runs, logs )
+    assert res[ "passed" ] is True and res[ "total_new" ] == 10 and res[ "reasons" ] == []
+
+
+def test_the_two_runs_count_together_not_one_by_one( tmp_path ):
+    """Five new definitions in each run is ten together: the plan's floor is on the pair."""
+    ids_a, rid_a = _ten( "m.a" ); ids_b, rid_b = _ten( "m.b" )
+    one = ( ids_a[ :5 ], [ _ruling( i, "DUPLICATE", rid_a[ i ] ) for i in ids_a[ :5 ] ] )
+    two = ( ids_b[ :4 ], [ _ruling( i, "DUPLICATE", rid_b[ i ] ) for i in ids_b[ :4 ] ] )
+    logs, runs = _two_runs( tmp_path, one, two, [ _call( "a", i, rid_a[ i ] ) for i in ids_a[ :5 ] ], [ _call( "b", i, rid_b[ i ] ) for i in ids_b[ :4 ] ] )
+    res = eg.run_gate( runs, logs )
+    assert res[ "total_new" ] == 9 and res[ "passed" ] is False and "only 9 new definitions, at least 10 required" in res[ "reasons" ]
+
+
+def test_gate_refuses_other_than_two_runs( tmp_path ):
+    ids, rid = _ten()
+    logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
+    assert eg.run_gate( runs, logs )[ "passed" ] is True
+    one = eg.run_gate( runs[ :1 ], logs )
+    assert one[ "passed" ] is False and "exactly 2 runs are required together, got 1" in one[ "reasons" ]
+    assert "got 0" in eg.run_gate( [], logs )[ "reasons" ][ 0 ]
+    assert eg.run_gate( runs[ :1 ], logs, runs_required=1 )[ "passed" ] is True
 
 
 def test_gate_fails_on_a_call_without_ruling_and_a_ruling_without_call( tmp_path ):
-    ids   = [ f"m.f{i}" for i in range( 10 ) ]
-    calls = [ _call( "a", i, f"r{n}" ) for n, i in enumerate( ids[ :9 ] ) ]                     # m.f9 never fetched
-    rev   = [ _ruling( i, "DUPLICATE", f"r{n}" ) for n, i in enumerate( ids[ 1: ], 1 ) ]       # m.f0 never ruled
-    logs, diff, rv = _fixture( tmp_path, ids, calls, [], rev )
-    res = eg.run_gate( [ { "diff": str( diff ), "review": str( rv ) } ], logs )
-    assert res[ "passed" ] is False
-    assert sorted( res[ "reasons" ] ) == [ "m.f0: NO_RULING", "m.f9: NO_CALL" ]
+    ids, rid = _ten()
+    calls = [ _call( "a", i, rid[ i ] ) for i in ids[ :9 ] ]                                      # m.f9 never fetched
+    rev   = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 1: ] ]                            # m.f0 never ruled
+    logs, runs = _two_runs( tmp_path, ( ids, rev ), ( [], [] ), calls )
+    res = eg.run_gate( runs, logs )
+    assert res[ "passed" ] is False and sorted( res[ "reasons" ] ) == [ "m.f0: NO_RULING", "m.f9: NO_CALL" ]
+
+
+def test_gate_fails_when_a_ruling_cites_a_receipt_of_another_symbol( tmp_path ):
+    ids, rid = _ten()
+    rev = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ 1: ] ] + [ _ruling( ids[ 0 ], "DUPLICATE", rid[ ids[ 1 ] ] ) ]
+    logs, runs = _two_runs( tmp_path, ( ids, rev ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
+    res = eg.run_gate( runs, logs )
+    assert res[ "passed" ] is False and res[ "reasons" ] == [ "m.f0: WRONG_RECEIPT" ]
+
+
+def test_an_excluded_definition_shows_its_cause_and_passes_only_with_a_ruling( tmp_path ):
+    ids, rid = _ten()
+    sent, priv = ids[ :9 ], ids[ 9 ]
+    calls = [ _call( "a", i, rid[ i ] ) for i in sent ] + [ _call( "a", priv, None, error="EXCLUDED_SENSITIVE_CONTENT" ) ]
+    rev   = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in sent ]
+    logs, runs = _two_runs( tmp_path, ( ids, rev ), ( [], [] ), calls )
+    bad = eg.run_gate( runs, logs )
+    assert bad[ "passed" ] is False and bad[ "reasons" ] == [ f"{priv}: EXCLUDED_NO_RULING" ]
+    row = [ r for r in bad[ "runs" ][ 0 ][ "rows" ] if r[ "id" ] == priv ][ 0 ]
+    assert row == { "id": priv, "status": "EXCLUDED_NO_RULING", "cause": "SENSITIVE_CONTENT" }       # not NO_CALL
+    ( tmp_path / "again" ).mkdir()
+    logs2, runs2 = _two_runs( tmp_path / "again", ( ids, rev + [ _ruling( priv, "DISTINCT it reads a mailbox", "excluded" ) ] ), ( [], [] ), calls )
+    res = eg.run_gate( runs2, logs2 )
+    assert res[ "passed" ] is True and res[ "runs" ][ 0 ][ "rows" ][ -1 ][ "status" ] == "EXCLUDED"
 
 
 def test_gate_refuses_a_near_empty_diff_even_when_every_row_is_ok( tmp_path ):
-    logs, diff, rv = _fixture( tmp_path, [ "m.only" ], [ _call( "a", "m.only", "r1" ) ], [], [ _ruling( "m.only", "DUPLICATE", "r1" ) ] )
-    res = eg.run_gate( [ { "diff": str( diff ), "review": str( rv ) } ], logs )
+    logs, runs = _two_runs( tmp_path, ( [ "m.only" ], [ _ruling( "m.only", "DUPLICATE", "r1" ) ] ), ( [], [] ), [ _call( "a", "m.only", "r1" ) ] )
+    res = eg.run_gate( runs, logs )
     assert res[ "passed" ] is False and "only 1 new definitions, at least 10 required" in res[ "reasons" ]
-
-
-def test_gate_with_no_runs_fails( tmp_path ):
-    ( tmp_path / "call-log" ).mkdir()
-    res = eg.run_gate( [], tmp_path / "call-log" )
-    assert res[ "passed" ] is False and "no runs given" in res[ "reasons" ]
 
 
 def test_gate_reports_algorithm_change( tmp_path ):
     logs = tmp_path / "call-log"; logs.mkdir()
     diff = tmp_path / "d.json"; diff.write_text( json.dumps( { "algorithm_changed": { "was": "a", "now": "b" } } ), encoding="utf-8" )
     rev  = tmp_path / "r.md"; rev.write_text( "", encoding="utf-8" )
-    res  = eg.run_gate( [ { "diff": str( diff ), "review": str( rev ) } ], logs )
+    run  = { "diff": str( diff ), "review": str( rev ) }
+    res  = eg.run_gate( [ run, run ], logs )
     assert res[ "passed" ] is False and any( "pin algorithm changed" in r for r in res[ "reasons" ] )
 
 
 def test_main_exit_codes_and_output( tmp_path ):
-    ids   = [ f"m.f{i}" for i in range( 10 ) ]
-    logs, diff, rv = _fixture( tmp_path, ids, [ _call( "a", i, f"r{n}" ) for n, i in enumerate( ids ) ], [],
-                               [ _ruling( i, "DUPLICATE", f"r{n}" ) for n, i in enumerate( ids ) ] )
+    ids, rid = _ten()
+    logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
+    args = [ "--log-dir", str( logs ) ] + [ x for r in runs for x in ( "--run", f"{r[ 'diff' ]}:{r[ 'review' ]}" ) ]
     buf = io.StringIO()
-    assert eg.main( [ "--log-dir", str( logs ), "--run", f"{diff}:{rv}" ], out=buf ) == 0
+    assert eg.main( args, out=buf ) == 0
     assert json.loads( buf.getvalue() )[ "passed" ] is True
-    assert eg.main( [ "--log-dir", str( logs ), "--run", f"{diff}:{rv}", "--min-new", "11" ], out=io.StringIO() ) == 1
+    assert eg.main( args + [ "--min-new", "11" ], out=io.StringIO() ) == 1
 
 
 def test_main_stdout_default_and_malformed_run( tmp_path, capsys ):

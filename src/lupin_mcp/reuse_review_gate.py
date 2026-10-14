@@ -58,7 +58,7 @@ def read_gating( path=None, quiet=False ):
         - every answer that is not a clean boolean prints one tagged line, unless quiet
     """
     target = path if path is not None else ini_path()
-    raw    = fleet_cap_ini_io.read_value_from_disk( target, GATING_KEY )
+    raw    = fleet_cap_ini_io.read_value_from_disk( target, GATING_KEY )     # a fresh disk read: ConfigurationManager is a process-lifetime singleton and would keep a stale value
     if raw is None:
         if not quiet: _say( f"could not read `{GATING_KEY}` from {target}; gating reads as false (report only)." )
         return False

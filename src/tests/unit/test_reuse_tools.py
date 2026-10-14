@@ -223,6 +223,32 @@ def test_fetch_similar_excludes_the_symbol_itself_and_reports_its_uncertainty( e
     assert stale[ "uncertain" ] == "NOT_LUPIN_TREE"
 
 
+def _add_module( env, name, source ):
+    ( env[ 0 ] / "src" / "cosa" / f"{name}.py" ).write_text( source, encoding="utf-8" )
+
+
+def test_fetch_similar_resolves_a_private_definition_against_the_whole_index( env ):
+    # red when: the entry is looked up among public symbols only (every _private id then answers UNKNOWN_ENTRY)
+    _add_module( env, "priv", 'def _helper( x ):\n    """Normalise one value."""\n    return x\n' )
+    text = "cosa.priv._helper(x) — Normalise one value."
+    fake = FakeJev( need=text, answers={ MATHX_TEXT: resp( 0.94, 0.03, 0.03 ) } )
+    r    = rt.fetch_similar_impl( "cosa.priv._helper", ctx_for( env, fake ) )
+    assert r[ "status" ] == "ok" and [ s[ "id" ] for s in r[ "shortlist" ] ] == [ "cosa.mathx.add" ]
+    assert fake.unexpected == [] and all( b[ "state" ][ "need" ] == text for b in fake.seen )
+
+
+def test_fetch_similar_names_the_cause_when_a_definition_may_not_be_sent( env ):
+    # red when: a refused definition answers UNKNOWN_ENTRY (the gate would then read it as NO_CALL)
+    _add_module( env, "leaky", 'def _mail( x ):\n    """Mail ops@example.com when done."""\n    return x\n' )
+    leak = rt.fetch_similar_impl( "cosa.leaky._mail", ctx_for( env, FakeJev() ) )
+    assert ( leak[ "status" ], leak[ "error" ], leak[ "entry" ], leak[ "detail" ] ) == ( "error", "EXCLUDED_SENSITIVE_CONTENT", "cosa.leaky._mail", "email" )
+    assert "receipt_id" not in leak
+    fake = FakeJev()
+    held = rt.fetch_similar_impl( "cosa.feeds.parse_feed", ctx_for( env, fake, exclude_prefixes=( "cosa.feeds", ) ) )
+    assert held == { "status": "error", "error": "EXCLUDED_PREFIX", "entry": "cosa.feeds.parse_feed", "detail": "the id is under an excluded prefix" }
+    assert fake.seen == []
+
+
 def test_read_capability_pages_errors_and_receipt( env ):
     wiki = env[ 0 ] / "src" / "docs" / "wiki" / "capabilities"; wiki.mkdir( parents=True )
     ( wiki / "feeds.md" ).write_text( "# feeds\nhow to parse\n", encoding="utf-8" )

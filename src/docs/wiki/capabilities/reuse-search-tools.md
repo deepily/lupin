@@ -19,7 +19,7 @@ Four MCP tools ask whether a new definition already exists. They read the [[symb
 
 ## The four tools
 - `check_exists( need )` asks about capability pages first, then sweeps the symbols they cover, then every indexed symbol if that finds nothing. It returns a verdict, a shortlist capped at 10, and a receipt id. An empty need answers `EMPTY_NEED`.
-- `fetch_similar( entry )` uses one indexed symbol as the need and leaves that symbol out. It returns the same shape without a verdict. `UNKNOWN_ENTRY` comes back for an id not in the sendable list, only while the index is healthy.
+- `fetch_similar( entry )` uses one indexed symbol as the need and leaves that symbol out. It returns the same shape without a verdict. The id is looked up among every definition, `_private` and nested ones included. `UNKNOWN_ENTRY` comes back for an id in no definition, only while the index is healthy. A definition the tool may not send answers `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX`, with no receipt.
 - `read_capability( names )` reads `capabilities/<name>.md` from the wiki and makes no Jev call. A bad or missing name is reported per name, and a receipt is written regardless.
 - `replay( receipt_id )` checks the receipt, re-runs a search receipt against the stored snapshot (cache only), then again at the current tree. A receipt stored with a hard flag is copied, not re-run, for the snapshot step. A `read_capability` receipt has no re-run. It returns both results and the differences.
 - The search tools write a receipt, a snapshot and Jev cache entries. `read_capability` writes only a receipt. Nothing is overwritten. By default all live under the fleet data root's `reuse-review` folder; `LUPIN_REUSE_DATA_DIR` moves them.
