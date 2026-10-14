@@ -789,6 +789,73 @@ def test_a_finding_that_came_in_with_the_merged_or_picked_commit_is_allowed_with
     assert "[doc-lint] 1 findings came in with the merged or picked commit (warn mode, commit allowed)" in lines and "[doc-lint] 0 findings on staged lines (blocking)" in lines
 
 
+def test_an_octopus_merge_lets_off_the_findings_that_came_in_with_each_of_its_parents( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    for name in ( "one", "two", "three" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/legacy-{name}.md": SEEDED } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    res = subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "--no-commit", "--no-ff", "one", "two", "three" ], capture_output=True, text=True )
+    assert res.returncode == 0, res.stdout + res.stderr
+    heads = ( repo / ".git" / "MERGE_HEAD" ).read_text( encoding="utf-8" ).split()
+    assert len( heads ) == 3
+    rc, lines = _blocking( repo )
+    for name in ( "one", "two", "three" ): assert f"[doc-lint] docs/legacy-{name}.md:1: {CAPS}{MERGED_MARK}" in lines
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert "[doc-lint] 3 findings came in with the merged or picked commit (warn mode, commit allowed)" in lines
+    assert gate.incoming_commits( str( repo ) ) == ( heads, [] ) and gate.incoming_commit( str( repo ) ) == ( heads[ 0 ], [] )
+
+
+def test_a_range_replay_of_an_octopus_merge_judges_each_parent_with_the_real_gate( repo, monkeypatch, tmp_path ):
+    from cosa.repo.doc_lint import range_gate
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n", "src/conf/dm-tutor-lowercase-words.txt": "\n".join( WORDS ) + "\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    base = _git( repo, "rev-parse", "HEAD" ).strip()
+    for name in ( "one", "two", "three" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/legacy-{name}.md": SEEDED } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    _git( repo, "merge", "-q", "--no-ff", "-m", "merge three", "one", "two", "three" )
+    merge = _git( repo, "rev-parse", "HEAD" ).strip()
+    assert len( _git( repo, "rev-list", "--parents", "-n", "1", merge ).split() ) == 5
+    work = str( tmp_path.parent / f"{tmp_path.name}-replay" )
+    _git( repo, "worktree", "add", "-q", "--detach", work, base )
+    seen = []
+    def runner( worktree, blocking=False ):
+        err  = io.StringIO()
+        code = gate.main( [ "--repo-root", worktree ] + ( [ "--blocking" ] if blocking else [] ), err )
+        seen.append( err.getvalue() )
+        return code, err.getvalue()
+    result = range_gate.check_commit( str( repo ), work, merge, runner, epoch=base )
+    assert result.blocking is True and result.verdict == "passed", ( result.verdict, result.lines, seen )
+    for name in ( "one", "two", "three" ): assert f"docs/legacy-{name}.md:1: {CAPS}{MERGED_MARK}" in seen[ 0 ]
+    parents = _git( repo, "rev-list", "--parents", "-n", "1", merge ).split()[ 2: ]
+    assert result.lines == [ f"merge commit: judged with {', '.join( sha[ :9 ] for sha in parents )} as the incoming commits, so a line that came in unchanged with one of them was not enforced" ]
+
+
+def test_an_octopus_merge_still_refuses_a_finding_that_no_parent_brought( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/a.md": "# A\n\nThe base text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "branch", "-M", "main" )
+    for name in ( "one", "two" ):
+        _git( repo, "checkout", "-q", "-b", name, "main" )
+        _stage( repo, { f"docs/{name}.md": "# Clean\n\nFine text.\n" } )
+        _git( repo, "commit", "-q", "-m", name )
+    _git( repo, "checkout", "-q", "main" )
+    subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=t@t", "-c", "user.name=t", "merge", "--no-commit", "--no-ff", "one", "two" ], capture_output=True, text=True, check=True )
+    _stage( repo, { "docs/own.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/own.md:1: {CAPS}" ]
+
+
 @pytest.mark.parametrize( "how", [ "merge", "cherry-pick" ] )
 def test_a_finding_the_resolution_itself_adds_is_refused( repo, monkeypatch, how ):
     _no_external( monkeypatch )

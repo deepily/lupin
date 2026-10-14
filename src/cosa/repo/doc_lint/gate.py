@@ -236,18 +236,18 @@ def predating( root, findings, renamed_from ):
     return kept
 
 
-def incoming_commit( root ):
+def incoming_commits( root ):
     """
-    Name the commit that a merge or a cherry-pick in progress is bringing in.
+    Name every commit that a merge or a cherry-pick in progress is bringing in.
 
     Requires:
         - root is a git working tree, the main one or a linked one
 
     Ensures:
-        - returns ( sha, warnings )
-        - sha is the first line of the first INCOMING_HEADS file found in this working tree's own git directory, when it names a commit
-        - sha is None when no such file exists, which is every ordinary commit
-        - a file that names no commit in the repository is ignored, and warnings then holds one loud line that says so
+        - returns ( shas, warnings )
+        - shas holds each line of the first INCOMING_HEADS file found in this working tree's own git directory that names a commit, in order: an octopus merge has one line per merged parent
+        - shas is [] when no such file exists, which is every ordinary commit
+        - a file with no line that names a commit in the repository is ignored, and warnings then holds one loud line that says so
         - a file that cannot be read is ignored the same way, with a line that names the error
         - an ignored file lets no finding off, so every finding is enforced
         - a revert in progress is not looked at
@@ -261,36 +261,57 @@ def incoming_commit( root ):
         path = os.fsdecode( res.stdout ).strip( "\n" )
         if not os.path.isfile( path ): continue
         try:
-            with open( path, encoding="utf-8", errors="replace" ) as handle: sha = handle.read().split( "\n" )[ 0 ].strip()
+            with open( path, encoding="utf-8", errors="replace" ) as handle: lines = [ ln.strip() for ln in handle.read().split( "\n" ) ]
         except OSError as err:
             warnings.append( f"[doc-lint] WARNING: {name} could not be read ({type( err ).__name__}), so it was ignored and every finding is enforced" )
             continue
-        if FULL_SHA.fullmatch( sha ) and subprocess.run( [ "git", "-C", root, "cat-file", "-e", f"{sha}^{{commit}}" ], capture_output=True ).returncode == 0:
-            return sha, warnings
+        shas = [ ln for ln in lines if FULL_SHA.fullmatch( ln ) and subprocess.run( [ "git", "-C", root, "cat-file", "-e", f"{ln}^{{commit}}" ], capture_output=True ).returncode == 0 ]
+        if shas: return shas, warnings
         warnings.append( f"[doc-lint] WARNING: {name} names no commit in this repository, so it was ignored and every finding is enforced" )
-    return None, warnings
+    return [], warnings
+
+
+def incoming_commit( root ):
+    """
+    Name the first commit that a merge or a cherry-pick in progress is bringing in.
+
+    Requires:
+        - root is a git working tree, the main one or a linked one
+
+    Ensures:
+        - returns ( sha, warnings ) as incoming_commits gives them, sha being its first commit or None when it gives none
+
+    Raises:
+        - nothing
+    """
+    shas, warnings = incoming_commits( root )
+    return ( shas[ 0 ] if shas else None ), warnings
 
 
 def merged_in( root, findings, incoming ):
     """
-    Pick the findings on lines that came in unchanged with the commit being merged or picked.
+    Pick the findings on lines that came in unchanged with a commit being merged or picked.
 
     Requires:
         - root is a git working tree
-        - findings are the findings on staged lines; incoming is the sha incoming_commit gave, or None
+        - findings are the findings on staged lines; incoming is a sha incoming_commit gave, a list of them from incoming_commits, or None
 
     Ensures:
-        - returns [] when incoming is None
-        - else returns each finding whose line is the same in the index and in incoming's copy of the file
-        - a line that differs from incoming's copy, such as one written while resolving a conflict, is not returned
-        - a page-level finding is returned only when the whole file is the same as incoming's copy
+        - returns [] when incoming is None or empty
+        - else returns each finding whose line is the same in the index and in the copy of the file of at least one incoming commit
+        - a line that differs from every incoming copy, such as one written while resolving a conflict, is not returned
+        - a page-level finding is returned only when the whole file is the same as an incoming commit's copy
 
     Raises:
-        - RuntimeError from git when the diff against incoming fails
+        - RuntimeError from git when the diff against an incoming commit fails
     """
-    if incoming is None: return []
-    theirs = { id( f ) for f in filter_findings( findings, changed_line_ranges( root, None, cached=True, against=incoming ) ) }
-    return [ f for f in findings if id( f ) not in theirs ]
+    shas = [] if incoming is None else [ incoming ] if isinstance( incoming, str ) else list( incoming )
+    if not shas: return []
+    came = set()
+    for sha in shas:
+        differs = { id( f ) for f in filter_findings( findings, changed_line_ranges( root, None, cached=True, against=sha ) ) }
+        came   |= { id( f ) for f in findings if id( f ) not in differs }
+    return [ f for f in findings if id( f ) in came ]
 
 
 def staged_entries( root, against=None ):
@@ -949,8 +970,8 @@ def collect( root ):
     refusals   = []
     warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
     binary     = set( staged_binary( root ) )
-    incoming   = incoming_commit( root )[ 0 ]
-    created    = staged_entries( root )[ 3 ] & ( staged_entries( root, incoming )[ 3 ] if incoming else set( paths ) )
+    incoming   = incoming_commits( root )[ 0 ]
+    created    = staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ] & set( paths )
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
     decode_out = []
@@ -1064,7 +1085,7 @@ def main( argv=None, err=None ):
         root                                = git_toplevel( args.repo_root )
         findings, warnings, refusals, tally = collect( root )
         earlier                             = predating( root, findings, staged_changes( root )[ 1 ] )
-        incoming, merge_warnings            = incoming_commit( root )
+        incoming, merge_warnings            = incoming_commits( root )
         merged                              = merged_in( root, findings, incoming )
         bare                                = sorted( { f.path for f in merged if f.path.endswith( ".py" ) and BARE_RETURN.search( staged_source( root, f.path ) ) } )
     except Exception as exc:

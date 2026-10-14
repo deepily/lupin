@@ -491,7 +491,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False 
         - an unchecked result keeps every line of a git error and ends with the worktree path and the time
         - the worktree is left holding the staged commit, to be reset by the next call
         - a merge commit is staged against its first parent, and its other parents are written to the worktree's MERGE_HEAD while the gate runs
-        - so the gate lets off a finding on a line that came in unchanged with the second parent, as the hook did when the merge was concluded
+        - so the gate lets off a finding on a line that came in unchanged with any of the other parents, as the hook did when the merge was concluded
         - a merge carries a line that names that parent; the MERGE_HEAD file is removed before the call returns
         - a commit made by a cherry-pick has one parent and is judged like any other, since git keeps no record of what it picked
 
@@ -518,7 +518,8 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False 
         if marker is not None and os.path.exists( marker ): os.remove( marker )
     notes = [] if blocking or epoch is None else [ f"predates the blocking epoch {epoch[ :9 ]}: judged in warn mode, findings on its staged lines were not enforced" ]
     if blocking and not held and epoch is not None: notes.append( f"forked before the blocking epoch {epoch[ :9 ]}: its parent predates it, but it entered the protected history after it, so it is held to blocking" )
-    notes = ( [ f"merge commit: judged with {merged[ 0 ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced" ] if merged else [] ) + notes
+    names = ", ".join( parent[ :9 ] for parent in merged )
+    notes = ( [ f"merge commit: judged with {names} as the incoming commit{'s' if len( merged ) > 1 else ''}, so a line that came in unchanged with {'one of them' if len( merged ) > 1 else 'it'} was not enforced" ] if merged else [] ) + notes
     if code == GATE_REFUSED:
         return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] + notes, blocking )
     if code == 0: return Result( sha, subject, "passed", code, notes, blocking )
