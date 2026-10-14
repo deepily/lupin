@@ -42,7 +42,9 @@ import type { AudioStore, TtsMode } from "./stores/AudioStore";
 import type { ApiClient } from "./api/ApiClient";
 
 // Narrow consume-surfaces (Pass-2 minimal-interface discipline).
+/** The part of the TTS queue store this wire reads: `activeItem()`, the item now playing. */
 export type TtsPlaybackActiveReader = Pick<TtsQueueStore, "activeItem">;
+/** The part of the API client this wire calls: `post( path, body )`, to request speech. */
 export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
 /** The one thing this wire asks AudioStore: which door to knock on (parity B-1). */
 export type TtsPlaybackModeReader   = Pick<AudioStore, "ttsMode">;
