@@ -42,7 +42,8 @@ interface WindowGlobals {
 /**
  * The sanitizer settings for rendered markdown.
  *
- * Only the listed tags and attributes survive, and links may use http, https and mailto.
+ * Tags outside `ALLOWED_TAGS` are removed. Attributes outside `ALLOWED_ATTR` are removed too, except `data-*` and `aria-*`.
+ * Links may use http, https and mailto, and a relative href is kept.
  * It sets no `USE_PROFILES`, because a profile would override the two lists.
  */
 export const DOMPURIFY_CONFIG = {

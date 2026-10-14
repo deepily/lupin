@@ -217,17 +217,18 @@ export function taskTitleLabel( task: TaskItem | null | undefined ): string {
 // (bug 6ce252e7). This number stayed at 60 because the two caps answer different
 // questions and always did: the store cap decides what is KEPT, and losing a tail
 // there destroys a qualifier permanently. This one decides how much fits in a
-// fixed-width column, and what it cuts is recoverable in place — the row renders
-// an ellipsis and the full title rides the cell's hover tooltip.
+// fixed-width column. No row applies it today: the row template renders the whole
+// title (render/templates/taskRowDisclosed.ts).
 //
 // ⚠️ SO: DO NOT "RESYNC" THIS TO 120 to restore the old identity. A 120-char cell
 // changes the row layout, and nothing is lost at 60. Whether the column should get
 // wider now that titles may legitimately run to 120 is a UI question for Rick, and
 // it is banked rather than decided here.
 /**
- * How many characters of a title the row shows before an ellipsis.
+ * The cap `truncateTaskTitle` applies, in characters.
  *
- * The full title is in the tooltip. It is shorter than the store's own cap.
+ * The row template shows the whole title, and no TypeScript production code calls `truncateTaskTitle`.
+ * Only tests do. The cap is shorter than the store's own.
  */
 export const TASK_TITLE_TRUNCATE_LEN = 60;
 

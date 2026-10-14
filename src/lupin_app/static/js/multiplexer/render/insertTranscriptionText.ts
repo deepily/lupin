@@ -15,7 +15,7 @@
 /**
  * The outcome of splicing a transcription into a field.
  *
- * The new value and where to put the caret.
+ * `caret` is the index after the inserted text. It is null when the field exposed no caret and the text was appended.
  */
 export interface InsertTranscriptionResult {
   /** The field's new value after the splice. */

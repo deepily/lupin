@@ -32,7 +32,8 @@ import { personaLabel } from "../shared/personaLabel";
 /**
  * One row of the task-event stream, as the server serializes it.
  *
- * `transition` is the status the row moved to, and `reason` and `actor` say why and who.
+ * `transition` is a "from->to" string such as "queued->done", and `transitionTarget` reads its right-hand side.
+ * `reason` and `actor` say why and who.
  */
 export interface FinishedTaskEvent {
   id            : number;

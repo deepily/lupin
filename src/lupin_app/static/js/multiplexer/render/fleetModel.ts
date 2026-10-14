@@ -14,7 +14,8 @@
 /**
  * How long ago each liveness signal was last seen, in seconds, and the arbiter's verdict.
  *
- * The tooltip prints them. `verdict` is "offline" when the session has gone quiet.
+ * The tooltip prints them. `verdict` is the arbiter's own label: "LIVE", "quiet <age>" or "stale <age>".
+ * It is "offline" when there is no signal, or the signal is older than the stale limit.
  */
 export interface FleetLiveness {
   verdict?           : string;
@@ -65,7 +66,7 @@ export interface FleetGroup {
 /**
  * The fleet as groups.
  *
- * `totalCount` is the number of session rows. `groups` lists the managers sorted by name, then the unmanaged group.
+ * `totalCount` is the number of session rows. `groups` lists the managers sorted by label, then the unmanaged group.
  */
 export interface FleetModel {
   totalCount : number;
@@ -76,6 +77,7 @@ export interface FleetModel {
  * The composite fleet answer the store caches.
  *
  * It carries the arbiter's sessions and the context-pressure figures per persona.
+ * The store sets `status` to "auth_required" or "unreachable" when the fetch fails. `app_timezone` formats the updated stamp.
  */
 export interface FleetComposite {
   status?           : string;

@@ -62,7 +62,8 @@ export interface TaskRowRecorderLike {
 /**
  * What a pane passes to build its row controller.
  *
- * `container` scopes every lookup. `writer` performs the edits. `onTransitionSettled` runs after a transition succeeds.
+ * `container` scopes every lookup. `writer` performs the edits.
+ * `onTransitionSettled` runs after a transition succeeds, and also when the server answers 404 and `gone` is true.
  */
 export interface TaskRowControllerOptions {
   /** The pane's persistent container — every lookup and every stripe is scoped to it. */

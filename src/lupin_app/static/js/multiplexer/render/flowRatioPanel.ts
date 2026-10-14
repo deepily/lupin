@@ -31,7 +31,8 @@ import {
 /**
  * The flow-ratio store calls the panel makes.
  *
- * It reads the ratio, the settings and the manager-pull state, and saves or resets the settings.
+ * It reads the ratio, the settings, the manager-pull state and the controls message.
+ * It saves or resets the settings and saves the manager-pull switch.
  */
 export interface FlowRatioStoreLike {
   ratio(): FlowRatioPayload | null;
@@ -148,7 +149,8 @@ function buildControls(): { root: HTMLDivElement; els: Els } {
 /**
  * Build the flow-ratio readout and its operator controls.
  *
- * The controls are built once with their listeners. A new settings body repaints the sliders, so a drag in progress is not interrupted.
+ * The controls are built once with their listeners. The sliders repaint only when the store hands back a different settings body.
+ * A poll that returns the same body leaves a drag in progress alone.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createFlowRatioPanel( opts: { bus: EventBus; store: FlowRatioStoreLike } ): FlowRatioPanel {

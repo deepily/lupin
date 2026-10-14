@@ -12,7 +12,7 @@
 /**
  * The upper-cased project named by a `claude.code@<project>.deepily.ai` sender id.
  *
- * Returns "UNKNOWN" for any other shape.
+ * Anything may follow the domain, such as a `#<session>` suffix. It returns "UNKNOWN" when the id does not start that way.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line (notificationItem.ts:46 precedent).
 export function projectFromSenderId( senderId: string ): string {
