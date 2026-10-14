@@ -1,7 +1,7 @@
 // Extract function/class/method definitions from JS/TS files with the TypeScript compiler.
 // stdin : JSON { "root": "<abs dir>", "files": [ "<abs path>", ... ], "typescript": "<path to typescript module>" }
 // stdout: JSON [ { file, name, kind, sig, doc, pin, line } ... ]   (file relative to root)
-// With "mode": "shapes" in the request the output is instead { scanned: [ file ... ], defs: [ { file, name, kinds } ... ] }:
+// With "mode": "shapes" in the request the output is instead { scanned: [ file ... ], skipped: [ file ... ], defs: [ { file, name, kinds } ... ] }:
 // one entry per function-like definition at any depth, private and nested included ("public_only": true drops both),
 // kinds being the pre-order node kind names of its body with names, literal values and access modifiers erased, for the duplicate finder.
 // A pin hashes the node's leaf tokens joined by one space, so comments and whitespace never change it.
@@ -78,11 +78,14 @@ function fnName( n, sf ) {
 }
 
 function shapes( req ) {
-    const defs = [], scanned = [];
+    const defs = [], scanned = [], skipped = [];
     for ( const abs of req.files ) {
         const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
-        const kind = abs.endsWith( ".ts" ) || abs.endsWith( ".tsx" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+        // .tsx must be read as TSX, or its markup is a syntax error and the whole file is skipped.
+        const kind = abs.endsWith( ".tsx" ) ? ts.ScriptKind.TSX : ( abs.endsWith( ".ts" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS );
         const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
+        // A file the parser reported errors for is skipped whole, as the Python pass skips a file that does not parse.
+        if ( sf.parseDiagnostics.length > 0 ) { skipped.push( rel ); continue; }
         scanned.push( rel );
         const walk = ( node, prefix, nested ) => {
             ts.forEachChild( node, c => {
@@ -91,7 +94,9 @@ function shapes( req ) {
                     walk( c, prefix.concat( [ c.name.text ] ), nested );
                 } else if ( isFnLike( c ) ) {
                     const name = fnName( c, sf );
-                    const hidden = ( ts.isMethodDeclaration( c ) || ts.isConstructorDeclaration( c ) || ts.isGetAccessorDeclaration( c ) || ts.isSetAccessorDeclaration( c ) ) && isPrivate( c );
+                    // A function that is the value of a class property is as private as the property.
+                    const field  = ts.isPropertyDeclaration( c.parent );
+                    const hidden = ( ts.isMethodDeclaration( c ) || ts.isConstructorDeclaration( c ) || ts.isGetAccessorDeclaration( c ) || ts.isSetAccessorDeclaration( c ) || field ) && isPrivate( field ? c.parent : c );
                     const skip = req.public_only && ( nested || hidden );
                     if ( name !== null && !skip ) defs.push( { file: rel, name: prefix.concat( [ name ] ).join( "." ), kinds: preorder( c, [] ) } );
                     walk( c, name === null ? prefix : prefix.concat( [ name, "<locals>" ] ), true );
@@ -100,7 +105,7 @@ function shapes( req ) {
         };
         walk( sf, [], false );
     }
-    return { scanned, defs };
+    return { scanned, skipped, defs };
 }
 
 const out = [];

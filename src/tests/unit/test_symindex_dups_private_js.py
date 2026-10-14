@@ -157,7 +157,7 @@ def test_provenance_languages_and_files_scanned_cover_both_passes( tmp_path ):
 def test_empty_js_list_never_starts_node( tmp_path, monkeypatch ):
     def boom( *a, **k ): raise DependencyMissing( "node" )
     monkeypatch.setattr( ji, "find_node", boom )
-    assert ji.extract_js_shapes( tmp_path, [] ) == { "scanned": [], "defs": [] }
+    assert ji.extract_js_shapes( tmp_path, [] ) == { "scanned": [], "skipped": [], "defs": [] }
     root, spec = _repo( tmp_path )
     with pytest.raises( DependencyMissing ): ji.extract_js_shapes( root, [ root / "t.ts" ] )
 
@@ -176,3 +176,88 @@ def test_default_node_minimum_is_stated_in_provenance( tmp_path ):
     root, spec = _repo( tmp_path )
     assert dp.DEFAULT_MIN_NODE == 25
     assert dp.find_duplicates( spec, [ root / "p.py" ] )[ "provenance" ][ "min_nodes" ] == 25
+
+
+FIELDS = '''
+export class A {
+    public p = ( xs: number[] ) => { let t = 0; for ( const x of xs ) { t += x; } return t; };
+    private f = ( xs: number[] ) => { let t = 0; for ( const x of xs ) { t += x; } return t; };
+    #g = ( xs: number[] ) => { let t = 0; for ( const x of xs ) { t += x; } return t; };
+    protected static h = function ( xs: number[] ) { let t = 0; for ( const x of xs ) { t += x; } return t; };
+}
+'''
+
+BODY = "{ let t = 0; for ( const x of xs ) { if ( x > 2 ) { t += x * 3; } } return t; }"
+
+
+def test_public_only_drops_private_and_protected_property_functions( tmp_path ):
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "a.ts" ).write_text( FIELDS, encoding="utf-8" )
+    spec = sp.spec_for( root )
+    pub = ji.extract_js_shapes( root, [ root / "a.ts" ], public_only=True )
+    assert [ d[ "name" ] for d in pub[ "defs" ] ] == [ "A.p" ]
+    full = ji.extract_js_shapes( root, [ root / "a.ts" ] )
+    assert [ d[ "name" ] for d in full[ "defs" ] ] == [ "A.p", "A.f", "A.#g", "A.h" ]
+    rep = dp.find_duplicates( spec, [], js_files=[ root / "a.ts" ], min_nodes=5, include_private=False )
+    assert rep[ "provenance" ][ "considered" ] == 1
+
+
+def test_a_repeated_definition_id_is_numbered_so_no_group_holds_one_definition_twice( tmp_path ):
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "a.js" ).write_text( f"const o = {{ render: function ( xs ) {BODY}, render: function ( xs ) {BODY} }};\n", encoding="utf-8" )
+    ( root / "w.py" ).write_text( "if FLAG:\n    def pick( xs ):\n        t = 0\n        for x in xs:\n            t += x\n        return t\n"
+                                 "else:\n    def pick( xs ):\n        t = 0\n        for x in xs:\n            t += x\n        return t\n", encoding="utf-8" )
+    spec = sp.spec_for( root )
+    rep  = dp.find_duplicates( spec, [ root / "w.py" ], js_files=[ root / "a.js" ], min_nodes=5 )
+    assert [ "a.js#render", "a.js#render~2" ] in rep[ "exact" ]
+    assert [ "w.pick", "w.pick~2" ] in rep[ "exact" ]                                 # a conditional redefinition, numbered
+    assert all( len( set( g ) ) == len( g ) for g in rep[ "exact" ] )
+
+
+def test_without_node_the_report_is_python_only_and_names_the_missing_tool( tmp_path, monkeypatch ):
+    root, spec = _repo( tmp_path )
+    def boom( *a, **k ): raise DependencyMissing( "node", "not on PATH" )
+    monkeypatch.setattr( ji, "find_node", boom )
+    rep = dp.find_duplicates( spec, [ root / "p.py" ], js_files=[ root / "t.ts" ], min_nodes=10 )
+    assert rep[ "exact" ] and rep[ "provenance" ][ "languages" ] == [ "python" ]
+    assert rep[ "provenance" ][ "missing_dependencies" ] == [ "node" ] and rep[ "provenance" ][ "files_scanned" ] == 1
+    ok = dp.find_duplicates( spec, [ root / "p.py" ], min_nodes=10 )                          # no script file: no tool is looked up
+    assert ok[ "provenance" ][ "missing_dependencies" ] == []
+
+
+def test_cli_dups_exits_3_and_still_prints_the_python_findings_when_a_tool_is_missing( tmp_path, monkeypatch, capsys ):
+    root, _ = _repo( tmp_path )
+    def boom( *a, **k ): raise DependencyMissing( "typescript", "no node_modules" )
+    monkeypatch.setattr( ji, "find_typescript", boom )
+    rc = cli.main( [ "dups", "--root", str( root ), "--min-nodes", "10" ] ); cap = capsys.readouterr()
+    assert rc == 3 and "EXACT" in cap.out and "missing dependencies: typescript" in cap.err
+
+
+def test_a_script_file_that_does_not_parse_is_skipped_and_not_counted( tmp_path ):
+    root = tmp_path / "r"; root.mkdir()
+    ( root / "good.js" ).write_text( f"function a( xs ) {BODY}\n", encoding="utf-8" )
+    ( root / "bad.js" ).write_text( "function ( {{{ broken\n", encoding="utf-8" )
+    ( root / "t.ts" ).write_text( f"function b( xs: number[] ) {BODY}\n", encoding="utf-8" )
+    spec = sp.spec_for( root )
+    res = ji.extract_js_shapes( root, [ root / "good.js", root / "bad.js" ] )
+    assert res[ "scanned" ] == [ "good.js" ] and res[ "skipped" ] == [ "bad.js" ]
+    prov = dp.find_duplicates( spec, [], js_files=[ root / "good.js", root / "bad.js" ], min_nodes=5 )[ "provenance" ]
+    assert prov[ "files_scanned" ] == 1 and prov[ "languages" ] == [ "python", "javascript" ]
+    both = dp.find_duplicates( spec, [], js_files=[ root / "good.js", root / "t.ts" ], min_nodes=5 )
+    assert both[ "provenance" ][ "languages" ] == [ "python", "javascript", "typescript" ]
+
+
+def test_python_and_script_definitions_are_never_grouped_or_paired( tmp_path, monkeypatch ):
+    root, spec = _repo( tmp_path )
+    same = dp.shingles_of( [ "A", "B", "C", "D", "E", "F", "G", "H" ] )
+    def fake( *a, **k ):
+        yield "py.f", 30, "same-digest", same, dp.PY_LANG
+        yield "t.ts#f", 30, "same-digest", same, dp.SCRIPT_LANG
+    monkeypatch.setattr( dp, "_definitions", fake )
+    rep = dp.find_duplicates( spec, [], min_nodes=1, threshold=0.5 )
+    assert rep[ "exact" ] == [] and rep[ "near" ] == [] and rep[ "provenance" ][ "considered" ] == 2
+    def twin( *a, **k ):
+        yield "t.js#f", 30, "same-digest", same, dp.SCRIPT_LANG
+        yield "t.ts#f", 30, "same-digest", same, dp.SCRIPT_LANG
+    monkeypatch.setattr( dp, "_definitions", twin )
+    assert dp.find_duplicates( spec, [], min_nodes=1 )[ "exact" ] == [ [ "t.js#f", "t.ts#f" ] ]      # the two script languages do group

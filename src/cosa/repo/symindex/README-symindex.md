@@ -13,7 +13,9 @@ Exit codes: `build` 3 when a tool was missing (the index is still written), `fre
 
 `dups` reads Python, JavaScript and TypeScript files (`.js`, `.ts`, `.tsx`; node and the TypeScript compiler as for `build`).
 It includes private and nested definitions by default (`--public-only` leaves them out) and drops bodies under 25 nodes
-(`--min-nodes`). The provenance block names the languages read and the files that parsed. A JavaScript or TypeScript id is `<file>#<name>`.
+(`--min-nodes`). The provenance block names the languages read and the files that parsed. A JavaScript or TypeScript id is `<file>#<name>`;
+a repeated id is numbered `<id>~2`. With node or the compiler missing the report covers Python only, the provenance lists the tool under
+`missing_dependencies`, and the command exits 3.
 
 ## Layout of one published index
 

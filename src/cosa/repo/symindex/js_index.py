@@ -106,14 +106,16 @@ def extract_js_shapes( root, files, public_only=False ):
     Requires:
         - files are absolute paths under root
     Ensures:
-        - returns { "scanned": [ file relative to root ], "defs": [ { file, name, kinds } ] }
+        - returns { "scanned": [ file relative to root ], "skipped": [ file ], "defs": [ { file, name, kinds } ] }
+        - a file the parser reported errors for is in skipped and contributes no definition
         - kinds is the pre-order list of node kind names of the definition, identifier names and literal values erased
         - nested functions are named <parent>.<locals>.<name>; an anonymous callback is walked but not reported
-        - private and protected members, and nested functions, are returned unless public_only
+        - private and protected members, including functions held in a private or protected class property,
+          and nested functions, are returned unless public_only
         - an empty file list returns an empty result without starting node
     Raises:
         - DependencyMissing when node or typescript is absent
         - RuntimeError when the compiler script exits non-zero
     """
-    if not files: return { "scanned": [], "defs": [] }
+    if not files: return { "scanned": [], "skipped": [], "defs": [] }
     return _run( root, files, { "mode": "shapes", "public_only": bool( public_only ) } )

@@ -134,7 +134,29 @@ test( "shapes: public_only drops private members and everything nested", () => {
 } );
 
 test( "shapes: JavaScript and TSX files are read too", () => {
-    const out = run( { "a.js": "function twice( n ) { return n * 2; }\n", "b.tsx": "const view = () => <div/>;\n" }, { mode: "shapes" } );
+    const out = run( { "a.js": "function twice( n ) { return n * 2; }\n", "b.tsx": "const view = <T,>( n: T ): JSX.Element => <div>{ n as T }</div>;\n" }, { mode: "shapes" } );   // a generic arrow is TSX-only syntax
     assert.deepEqual( out.scanned, [ "a.js", "b.tsx" ] );
     assert.deepEqual( out.defs.map( ( d: any ) => d.name ), [ "twice", "view" ] );
+} );
+
+test( "shapes: a function held in a private or protected class property is as private as the property", () => {
+    const src = [
+        "export class A {",
+        "    public p = () => 1;",
+        "    private f = () => 2;",
+        "    #g = () => 3;",
+        "    protected static h = function () { return 4; };",
+        "}",
+        "",
+    ].join( "\n" );
+    const names = ( extra: Record<string, unknown> ) => run( { "a.ts": src }, { mode: "shapes", ...extra } ).defs.map( ( d: any ) => d.name );
+    assert.deepEqual( names( {} ), [ "A.p", "A.f", "A.#g", "A.h" ] );
+    assert.deepEqual( names( { public_only: true } ), [ "A.p" ] );
+} );
+
+test( "shapes: a file the parser reports errors for is skipped, and listed apart from the scanned ones", () => {
+    const out = run( { "good.js": "function a( x ) { return x; }\n", "bad.js": "function ( {{{ broken\n" }, { mode: "shapes" } );
+    assert.deepEqual( out.scanned, [ "good.js" ] );
+    assert.deepEqual( out.skipped, [ "bad.js" ] );
+    assert.deepEqual( out.defs.map( ( d: any ) => d.name ), [ "a" ] );
 } );

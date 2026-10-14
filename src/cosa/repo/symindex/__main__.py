@@ -3,7 +3,7 @@ Command line for the symbol index:  python -m cosa.repo.symindex <command>
 
   - build   [--root R] [--out D]            build and publish the index; exit 3 if a tool was missing
   - fresh   [--root R] [--out D]            exit 0 when the published index matches the tree, else 1
-  - dups    [--root R] [--min-nodes N] [--threshold T] [--public-only] [--json]
+  - dups    [--root R] [--min-nodes N] [--threshold T] [--public-only] [--json]   exit 3 when a tool was missing
   - diff    OLD_GEN NEW_GEN [--all]         symbols added, removed or changed between two generations
   - lint    [--root R] [--out D] [--wiki W] wiki findings as JSON lines; exit 1 when any
 """
@@ -64,6 +64,9 @@ def main( argv=None ):
             for g in rep[ "exact" ]: print( f"EXACT x{len( g )}: " + " == ".join( g ) )
             for n in rep[ "near" ]: print( f"NEAR {n[ 'jaccard' ]}: " + " ~ ".join( n[ "ids" ] ) )
         print( f"symindex: {len( rep[ 'exact' ] )} exact groups, {len( rep[ 'near' ] )} near pairs", file=sys.stderr )
+        missing = rep[ "provenance" ][ "missing_dependencies" ]
+        if missing:
+            print( f"symindex: WARNING missing dependencies: {', '.join( missing )}; the report covers Python only", file=sys.stderr ); return 3
         return 1 if rep[ "exact" ] or rep[ "near" ] else 0
     out   = pathlib.Path( a.out ) if a.out else default_out_dir( root )
     if a.cmd == "fresh": return 0 if build_mod.is_fresh( spec, out ) else 1
