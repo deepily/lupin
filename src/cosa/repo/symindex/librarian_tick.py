@@ -6,8 +6,9 @@ wiki-librarian rows in step with the findings and exports the miss records. A ru
 local day, from 10:00 on. A host that was off at ten catches up on its first tick after boot.
 The state file records the day of the last run that finished.
 
-It reads no fleet pause flag. Whether a pause applies to this tick is an open question.
-The absence is a named gap and not a decision.
+The tick is off until the configuration switch `wiki librarian tick enabled` is true.
+No existing tick reads a fleet pause, so this switch is the pause. A tick that is off logs
+one line and exits before it builds anything or reads the store.
 
 Installing the cron lines goes through the shared crontab lock and nothing else. Without that
 lock module the installer refuses and writes nothing.
@@ -15,6 +16,7 @@ lock module the installer refuses and writes nothing.
 Exit 0 means nothing was due, or the run finished and nothing is held.
 Exit 1 means the run could not finish, or an install was refused.
 Exit 2 means the run finished and some rows are held in the pending file.
+Exit 3 means the tick is switched off.
 """
 import argparse
 import datetime
@@ -37,6 +39,16 @@ STATE_NAME       = "tick-state.json"
 PENDING_NAME     = "pending.jsonl"
 LOG_NAME         = "librarian.log"
 DEFAULT_API_BASE = "http://localhost:7999"
+CAP_KEY          = "wiki librarian max creates per tick"
+CAP_ENV          = "WIKI_LIBRARIAN_MAX_CREATES"
+ENABLED_KEY      = "wiki librarian tick enabled"
+OWNER_KEY        = "wiki librarian owner persona"
+MANAGER_KEY      = "wiki librarian accountable manager"
+DEFAULT_CAP      = 10
+DEFAULT_PERSONA  = "cheech"
+MISSES_NAME      = "misses.jsonl"
+PAGE_LIMIT       = 500
+EXIT_DISABLED    = 3
 
 
 class InstallRefused( RuntimeError ):
@@ -56,6 +68,64 @@ def data_dir( root=None ):
     """
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
     return os.path.join( str( fleet_data_root( root ) ), "reuse-review", "librarian" )
+
+
+def _disk_value( key, reader=None ):
+    """
+    Read one value from the configuration file, fresh.
+
+    Requires:
+        - reader is a callable ( key ) returning a string or None, or None for the live disk reader
+
+    Ensures:
+        - returns the raw string, or None when the key is absent or unreadable
+        - never raises
+    """
+    try:
+        if reader is not None: return reader( key )
+        from lupin_mcp import fleet_cap_ini_io, fleet_size_cap
+        return fleet_cap_ini_io.read_value_from_disk( fleet_size_cap.config_file_path(), key )
+    except Exception:
+        return None
+
+
+def read_create_cap( environ, reader=None ):
+    """
+    Read how many rows one tick may create.
+
+    Ensures:
+        - returns the environment value when it is a positive integer
+        - otherwise returns the configuration file's value when that is a positive integer
+        - otherwise returns DEFAULT_CAP
+        - never raises
+    """
+    raw = environ.get( CAP_ENV, "" ).strip()
+    if raw.isdigit() and int( raw ) > 0: return int( raw )
+    value = ( _disk_value( CAP_KEY, reader ) or "" ).strip()
+    return int( value ) if value.isdigit() and int( value ) > 0 else DEFAULT_CAP
+
+
+def read_enabled( reader=None ):
+    """
+    Read the switch that turns the tick on.
+
+    Ensures:
+        - returns True only when the key reads true, 1, yes or on, in any case
+        - an absent key, an unreadable file or any other text returns False
+        - never raises
+    """
+    return ( _disk_value( ENABLED_KEY, reader ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+
+
+def read_persona( key, reader=None ):
+    """
+    Read a persona name from the configuration file.
+
+    Ensures:
+        - returns the stripped value, or DEFAULT_PERSONA when the key is absent or blank
+        - never raises
+    """
+    return ( _disk_value( key, reader ) or "" ).strip() or DEFAULT_PERSONA
 
 
 def due( now, state ):
@@ -120,7 +190,7 @@ def make_logger( path ):
 
 class LiveStore:
     """
-    The store adapter the tick uses: the task-store HTTP client behind four calls.
+    The store adapter the tick uses: the task-store HTTP client behind three calls.
 
     Requires:
         - settings is the dict load_task_store_settings returns
@@ -134,9 +204,41 @@ class LiveStore:
         self.api_key  = api_key
         self.client   = client
 
+    def _pages( self, correlation_key, extra ):
+        """
+        Read every page of one filtered query.
+
+        Ensures:
+            - returns ( True, status, { "tasks": rows } ) holding every row, following offsets while the store says more remain
+            - returns ( False, status, body ) for a failed page, and for a page the store marks truncated
+        """
+        rows, offset = [], 0
+        while True:
+            params = { "correlation_key": correlation_key, "limit": PAGE_LIMIT, "offset": offset, **extra }
+            ok, status, body = self.client.query_tasks( self.settings, self.api_key, params )
+            if not ok: return False, status, body
+            if body.get( "truncated" ): return False, status, { "error": "the store truncated the read" }
+            page  = body.get( "tasks", [] )
+            rows += page
+            if not body.get( "has_more" ) or not page: return True, status, { "tasks": rows }
+            offset += len( page )
+
+    def _merged( self, correlation_key, passes ):
+        """Run each filtered query and merge the rows by id; the first failure is returned as it is."""
+        seen = {}
+        for extra in passes:
+            ok, status, body = self._pages( correlation_key, extra )
+            if not ok: return ok, status, body
+            for row in body[ "tasks" ]: seen[ row[ "id" ] ] = row
+        return True, 200, { "tasks": list( seen.values() ) }
+
     def query( self, correlation_key ):
-        """Return ( ok, status, body ) for the open rows under one correlation key."""
-        return self.client.query_by_correlation_key( self.settings, self.api_key, correlation_key )
+        """Return ( ok, status, body ) for open and held rows; the default read hides held ones."""
+        return self._merged( correlation_key, ( {}, { "status": "not_approved" } ) )
+
+    def query_all( self, correlation_key ):
+        """Return ( ok, status, body ) for every row, done and dropped included."""
+        return self._merged( correlation_key, ( { "include_terminal": "true" }, { "status": "not_approved" } ) )
 
     def create( self, payload ):
         """Return ( ok, status, body ) for one create; the actor is stamped here."""
@@ -145,10 +247,6 @@ class LiveStore:
     def amend( self, item_id, note ):
         """Return ( ok, status, body ) for one append-only amendment."""
         return self.client.amend_task( self.settings, self.api_key, item_id, { "note": note, "actor": ACTOR, "authority": "standing" } )
-
-    def close( self, item_id, reason ):
-        """Return ( ok, status, body ) for a move to done with a reason."""
-        return self.client.transition_task( self.settings, self.api_key, item_id, { "to_status": "done", "actor": ACTOR, "authority": "standing", "reason": reason } )
 
 
 def notify_owner( persona, text, environ, post=None, api_key=None ):
@@ -179,29 +277,40 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
 
     Requires:
         - librarian is a Librarian
-        - export_fn is a callable ( rows, path ) returning the number of lines written
+        - export_fn is a callable ( rows, path ) returning an object with written and skipped, as miss_record.export_report does
         - now is a datetime in local time
 
     Ensures:
         - returns ( exit_code, summary dict )
         - nothing is done and 0 is returned when the run is not due and force is False
+        - the index sha from the index header goes to the librarian for its clear notices
+        - the export reads every row, done and dropped included
         - the state file records today's date only when the sync finished
         - a store that could not be read returns 1 and leaves the state and pending file as they were
+        - a miss export that raises ValueError or OSError returns 1 and leaves the state as it was
+        - every block the export could not read is logged with its row title and reason
     """
     state = read_state( state_path )
     if not force and not due( now, state ): return 0, { "ran": False, "reason": "not due" }
     gen      = build_mod.ensure( root, out_dir )
     findings = queue( pathlib.Path( wiki_dir ), gen )
     try:
-        counts = librarian.sync( findings )
-        ok, status, body = librarian.store.query( CORRELATION_KEY )
+        counts = librarian.sync( findings, build_mod.read_header( gen )[ "symbols_sha" ] )
+        ok, status, body = librarian.store.query_all( CORRELATION_KEY )
     except RuntimeError as error:
         log( f"tick could not finish: {error}" )
         return 1, { "ran": False, "reason": str( error ) }
     if not ok:
         log( f"tick could not read rows to export: status {status}" )
         return 1, { "ran": False, "reason": f"export query failed: {status}" }
-    exported = export_fn( body.get( "tasks", [] ), misses_path )
+    try:
+        os.makedirs( os.path.dirname( os.path.abspath( misses_path ) ), exist_ok=True )
+        report = export_fn( body.get( "tasks", [] ), misses_path )
+    except ( ValueError, OSError ) as error:
+        log( f"tick could not write the misses file: {error}" )
+        return 1, { "ran": False, "reason": str( error ) }
+    for item in report.skipped: log( f"miss block skipped: {item[ 'title' ]}: {item[ 'reason' ]}" )
+    exported = report.written
     write_state( state_path, { "last_run_date": now.date().isoformat(), "findings": len( findings ), **counts, "misses": exported } )
     summary = { "ran": True, "findings": len( findings ), "misses": exported, **counts }
     log( "tick finished: " + json.dumps( summary, sort_keys=True ) )
@@ -317,18 +426,20 @@ def _live_librarian( environ, pending_path, log ):
     """Build the Librarian with the live store and the owner notice."""
     from lupin_cli.claude_code.hooks.lib import task_store_client as client
     from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-    owner = environ.get( "WIKI_LIBRARIAN_OWNER", "cheech" )
-    store = LiveStore( load_task_store_settings(), client.read_api_key(), client )
-    return Librarian( store, pending_path, log, notify=lambda text: notify_owner( owner, text, environ ), owner=owner )
+    owner   = read_persona( OWNER_KEY )
+    manager = read_persona( MANAGER_KEY )
+    store   = LiveStore( load_task_store_settings(), client.read_api_key(), client )
+    return Librarian( store, pending_path, log, notify=lambda text: notify_owner( manager, text, environ ), owner=owner, manager=manager,
+                      max_creates=read_create_cap( environ ) )
 
 
 def _live_export():
-    """Return the miss exporter from miss_record."""
-    from cosa.repo.symindex.miss_record import export_misses
-    return export_misses
+    """Return the report-giving miss exporter from miss_record."""
+    from cosa.repo.symindex.miss_record import export_report
+    return export_report
 
 
-def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, make_librarian=None, export_fn=None ):
+def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, make_librarian=None, export_fn=None, enabled_fn=None ):
     """
     Run the command line.
 
@@ -337,6 +448,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
 
     Ensures:
         - with no mode flag, runs one tick and returns its exit code
+        - a tick that is switched off logs one line and returns EXIT_DISABLED before anything is built or read
         - --print-install prints the cron lines and changes nothing
         - --install, --uninstall and --status go through edit_crontab or read the crontab
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
@@ -348,6 +460,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     for flag in ( "--install", "--uninstall", "--status", "--print-install" ): mode.add_argument( flag, action="store_true" )
     parser.add_argument( "--force", action="store_true" )
     parser.add_argument( "--root" )
+    parser.add_argument( "--misses-out", help="where misses.jsonl is written; the default is the librarian data folder" )
     parser.add_argument( "--python", default=sys.executable )
     args    = parser.parse_args( argv )
     root    = args.root or os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
@@ -370,10 +483,14 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         print( f"wiki-librarian-tick: {error}", file=err )
         return 1
     log       = make_logger( os.path.join( folder, LOG_NAME ) )
+    if not ( enabled_fn or read_enabled )():
+        log( f"tick is switched off: {ENABLED_KEY} is not true" )
+        print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
+        return EXIT_DISABLED
     pending   = os.path.join( folder, PENDING_NAME )
     wiki_dir  = os.path.join( root, "src", "docs", "wiki" )
     librarian = ( make_librarian or _live_librarian )( environ, pending, log )
-    code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), os.path.join( wiki_dir, "misses.jsonl" ),
+    code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
                               os.path.join( folder, STATE_NAME ), now, force=args.force, log=log )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
