@@ -506,3 +506,8 @@ def test_both_reads_include_parked_rows_so_a_parked_rollup_is_not_created_again(
     client.calls.clear()
     assert store.query_all( "k" )[ 0 ]
     assert client.calls[ 0 ][ 1 ][ "include_parked" ] == "true" and client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
+
+
+def test_the_shell_wrapper_header_lists_every_exit_code_the_tick_returns():
+    header = ( pathlib.Path( __file__ ).resolve().parents[ 2 ] / "scripts" / "wiki-librarian-tick.sh" ).read_text().split( "set -uo" )[ 0 ]
+    assert "3 switched off" in header
