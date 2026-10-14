@@ -93,9 +93,10 @@ export interface SectionToggleSpec {
 // Adding a pane? Add it here. The guard is
 // `src/tests/unit/multiplexer/the_hand_lists_are_checked_against_what_boot_reaches.test.ts`.
 /**
- * The toolbar's toggle buttons, in the page's vertical section order.
+ * The toolbar's toggle buttons.
  *
  * The list is written by hand, and a test checks it in both directions. A pane without a toggle fails it, and so does a toggle without a pane.
+ * The `commons-activity-pane` entry names a pane that is injected at runtime, so the list is not a copy of the page.
  */
 export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // Added 2026-09-16 (parity A-2 #2a, Phase 2 A3 B4). Action Required had no

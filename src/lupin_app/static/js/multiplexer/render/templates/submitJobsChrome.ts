@@ -27,7 +27,11 @@ export interface ScheduleEls {
   monopolize : HTMLInputElement | null;
 }
 
-/** Handles to the elements of the CC card. */
+/**
+ * The elements of the CC card: project and task type selects, prompt and dry-run box.
+ *
+ * The card also holds a mic button, a submit button with a spinner, a status line and the schedule controls.
+ */
 export interface CcCardEls {
   card      : HTMLDivElement;
   header    : HTMLDivElement;
@@ -44,7 +48,11 @@ export interface CcCardEls {
   schedule  : ScheduleEls;
 }
 
-/** Handles to the elements of the research card. */
+/**
+ * The elements of the research card: topic and budget inputs, output and dry-run boxes.
+ *
+ * The output boxes are podcast and presentation. The card also holds a mic, a submit button, a status line and the schedule controls.
+ */
 export interface ResearchCardEls {
   card         : HTMLDivElement;
   header       : HTMLDivElement;
@@ -62,7 +70,11 @@ export interface ResearchCardEls {
   schedule     : ScheduleEls;
 }
 
-/** Handles to the elements of the test suite card. */
+/**
+ * The elements of the test suite card: types, file path, fail-fast, arguments, flags.
+ *
+ * The flags are dry run and auto-fix. The card also holds a submit button, a status line and the schedule controls.
+ */
 export interface TestSuiteCardEls {
   card         : HTMLDivElement;
   header       : HTMLDivElement;
