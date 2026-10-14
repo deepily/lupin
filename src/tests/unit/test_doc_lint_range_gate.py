@@ -690,7 +690,7 @@ def test_an_epoch_that_names_an_object_which_is_not_a_commit_is_refused( gated, 
     assert code == range_gate.EXIT_UNCHECKED and len( lines ) == 1 and "names no commit" in lines[ 0 ]
 
 
-def test_an_epoch_on_a_branch_the_range_never_took_holds_nobody_and_says_it_is_not_an_ancestor( gated ):
+def test_an_epoch_on_a_branch_the_range_never_took_judges_nothing_and_says_it_is_not_an_ancestor( gated ):
     root = gated[ "root" ]
     _git( root, "checkout", "-q", "-b", "apart", gated[ "base" ] )
     _write( root, "docs/apart.md", "# Page\n\nThis is fine.\n" )
@@ -699,9 +699,9 @@ def test_an_epoch_on_a_branch_the_range_never_took_holds_nobody_and_says_it_is_n
     _write( root, range_gate.EPOCH_PATH, apart + "\n" )
     assert range_gate.descends( root, gated[ "base" ], apart ) and not range_gate.descends( root, apart, gated[ "newer" ] )
     code, lines = _range( gated )
-    note = f"    the blocking epoch {apart[ :9 ]} is not an ancestor of the head of this range: judged in warn mode, findings on its staged lines were not enforced"
-    assert code == 0 and lines.count( note ) == 3 and not [ ln for ln in lines if "predates" in ln ]
-    assert lines[ -2 ] == f"blocking epoch {apart[ :9 ]}: 0 commits held to blocking, 3 judged in warn mode{FROM_WORK}"
+    assert code == range_gate.EXIT_UNCHECKED
+    assert lines == [ f"the blocking epoch {apart} is not an ancestor of the head of the range {gated[ 'newer' ]}; "
+                      "nothing there can be told to predate it, so no commit was judged" ]
 
 
 # ---- a merge, and a cherry-pick, replayed by the real gate ----------------------------------------

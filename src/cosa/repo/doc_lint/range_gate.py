@@ -415,20 +415,18 @@ def where( worktree ):
     return [ f"worktree {worktree}", f"at {now()}" ]
 
 
-def check_commit( root, worktree, sha, runner=run_gate, epoch=None, apart=False ):
+def check_commit( root, worktree, sha, runner=run_gate, epoch=None ):
     """
     Judge one commit by the gate of its own tree, in the mode the commit was made under.
 
     Requires:
         - root is the repository; worktree is a detached worktree of it, free to be reset
         - runner( worktree, blocking ) returns ( exit_code, output_text )
-        - epoch is the blocking epoch, or None when none is recorded
-        - apart is True when the epoch is not in the history of the range at all
+        - epoch is the blocking epoch, or None when none is recorded; it is an ancestor of the head of the range
 
     Ensures:
         - returns a Result whose verdict is passed, refused or unchecked, and whose blocking says which mode the gate ran in
-        - the gate runs with blocking True only for a commit is_held accepts, and for none when apart is True
-        - with apart True the warn-mode line says the epoch is not an ancestor of the head of the range, since nothing there predates it
+        - the gate runs with blocking True only for a commit is_held accepts
         - exit 3 from the gate is refused and carries the lines that name a refusal
         - exit 0 is passed; any other exit, and any git failure, is unchecked
         - with an epoch recorded, a commit judged in warn mode carries a line that says it predates blocking
@@ -448,7 +446,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, apart=False 
         subject  = git( root, "log", "-1", "--format=%s", sha ).strip()
         found    = changes( root, sha )
         merged   = other_parents( root, sha )
-        blocking = not apart and is_held( root, epoch, sha )
+        blocking = is_held( root, epoch, sha )
         git( worktree, "checkout", "-q", "-f", "--detach", f"{sha}^1" )
         git( worktree, "clean", "-fdq" )
         stage( worktree, sha, found )
@@ -460,8 +458,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, apart=False 
         return Result( sha, subject, "unchecked", None, str( error ).splitlines() + where( worktree ), blocking )
     finally:
         if marker is not None and os.path.exists( marker ): os.remove( marker )
-    why   = "" if epoch is None else f"the blocking epoch {epoch[ :9 ]} is not an ancestor of the head of this range" if apart else f"predates the blocking epoch {epoch[ :9 ]}"
-    notes = [] if blocking or epoch is None else [ f"{why}: judged in warn mode, findings on its staged lines were not enforced" ]
+    notes = [] if blocking or epoch is None else [ f"predates the blocking epoch {epoch[ :9 ]}: judged in warn mode, findings on its staged lines were not enforced" ]
     notes = ( [ f"merge commit: judged with {merged[ 0 ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced" ] if merged else [] ) + notes
     if code == GATE_REFUSED:
         return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] + notes, blocking )
@@ -485,13 +482,14 @@ def check_range( root, base, head, worktree, runner=run_gate, epoch=None ):
         - a merge commit is judged like the rest, under the merged-line rule (see check_commit)
 
     Raises:
-        - RangeRefused when the range holds no commit
+        - RangeRefused when the range holds no commit, or when the epoch is not an ancestor of head, since no commit of it can then be told to predate it
         - RuntimeError when the range cannot be listed, or the epoch cannot be compared with head
     """
     commits = list_commits( root, base, head )
     if not commits: raise RangeRefused( f"range {base}..{head} holds 0 commits, nothing was checked" )
-    apart = epoch is not None and not descends( root, epoch, head )
-    return [ check_commit( root, worktree, sha, runner, epoch, apart ) for sha in commits ]
+    if epoch is not None and not descends( root, epoch, head ):
+        raise RangeRefused( f"the blocking epoch {epoch} is not an ancestor of the head of the range {head}; nothing there can be told to predate it, so no commit was judged" )
+    return [ check_commit( root, worktree, sha, runner, epoch ) for sha in commits ]
 
 
 def exit_code( results ):
