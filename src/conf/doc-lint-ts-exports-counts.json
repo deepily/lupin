@@ -2,8 +2,5 @@
   "format": 1,
   "rules_stamp": "9a3fa1b78da879d3",
   "files": {
-    "src/conf/constants.js": 84,
-    "src/tests/unit/multiplexer/fixtures/actionRequiredQuestionsPayload.ts": 2,
-    "src/tests/unit/ts_doc_extract/extract.test.ts": 1
   }
 }
