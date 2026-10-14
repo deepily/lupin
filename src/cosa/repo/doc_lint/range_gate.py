@@ -447,7 +447,7 @@ def where( worktree ):
     return [ f"worktree {worktree}", f"at {now()}" ]
 
 
-def check_commit( root, worktree, sha, runner=run_gate, epoch=None ):
+def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False ):
     """
     Judge one commit by the gate of its own tree, in the mode the commit was made under.
 
@@ -455,10 +455,12 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None ):
         - root is the repository; worktree is a detached worktree of it, free to be reset
         - runner( worktree, blocking ) returns ( exit_code, output_text )
         - epoch is the blocking epoch, or None when none is recorded; it is an ancestor of the head of the range
+        - after is True when the base of the range is the epoch or descends from it
 
     Ensures:
         - returns a Result whose verdict is passed, refused or unchecked, and whose blocking says which mode the gate ran in
-        - the gate runs with blocking True only for a commit is_held accepts
+        - the gate runs with blocking True for a commit is_held accepts, and for every commit when after is True
+        - so a commit that forked before the epoch and came in with a merge after it is held to blocking too
         - exit 3 from the gate is refused and carries the lines that name a refusal
         - exit 0 is passed; any other exit, and any git failure, is unchecked
         - with an epoch recorded, a commit judged in warn mode carries a line that says it predates blocking
@@ -478,7 +480,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None ):
         subject  = git( root, "log", "-1", "--format=%s", sha ).strip()
         found    = changes( root, sha )
         merged   = other_parents( root, sha )
-        blocking = is_held( root, epoch, sha )
+        blocking = after or is_held( root, epoch, sha )
         git( worktree, "checkout", "-q", "-f", "--detach", f"{sha}^1" )
         git( worktree, "clean", "-fdq" )
         stage( worktree, sha, found )
@@ -509,6 +511,7 @@ def check_range( root, base, head, worktree, runner=run_gate, epoch=None ):
 
     Ensures:
         - returns one Result per commit, oldest first
+        - a range whose base is the epoch or descends from it holds every commit to blocking, whatever its parent
         - a commit that cannot be judged does not stop the commits after it
 
         - a merge commit is judged like the rest, under the merged-line rule (see check_commit)
@@ -521,7 +524,8 @@ def check_range( root, base, head, worktree, runner=run_gate, epoch=None ):
     if not commits: raise RangeRefused( f"range {base}..{head} holds 0 commits, nothing was checked" )
     if epoch is not None and not descends( root, epoch, head ):
         raise RangeRefused( f"the blocking epoch {epoch} is not an ancestor of the head of the range {head}; nothing there can be told to predate it, so no commit was judged" )
-    return [ check_commit( root, worktree, sha, runner, epoch ) for sha in commits ]
+    after = epoch is not None and descends( root, epoch, base )
+    return [ check_commit( root, worktree, sha, runner, epoch, after ) for sha in commits ]
 
 
 def exit_code( results ):

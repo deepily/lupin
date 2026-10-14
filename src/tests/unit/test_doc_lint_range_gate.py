@@ -706,10 +706,10 @@ def test_an_epoch_on_a_branch_the_range_never_took_judges_nothing_and_says_it_is
 
 # ---- a merge, and a cherry-pick, replayed by the real gate ----------------------------------------
 
-def _side_with_a_finding( gated ):
-    """Commit a page with a finding on a branch that forks before the epoch; return to main."""
+def _side_with_a_finding( gated, fork="base" ):
+    """Commit a finding on a branch forked at `fork`, before the epoch by default."""
     root = gated[ "root" ]
-    _git( root, "checkout", "-q", "-b", "side", gated[ "base" ] )
+    _git( root, "checkout", "-q", "-b", "side", gated[ fork ] )
     _write( root, "docs/legacy.md", SEEDED )
     gated[ "side" ] = _commit( root, "a finding made on a branch that forked before the epoch" )
     _git( root, "checkout", "-q", "main" )
@@ -723,25 +723,36 @@ def _judge( gated, base, head ):
 
 
 def test_the_real_gate_passes_a_merge_whose_finding_came_in_unchanged_with_the_merged_commit( gated ):
+    _side_with_a_finding( gated, fork="newer" )
+    root = gated[ "root" ]
+    _git( root, "merge", "-q", "--no-ff", "-m", "merge side", "side" )
+    merge = _git( root, "rev-parse", "HEAD" )
+    code, lines = _judge( gated, gated[ "side" ], merge )
+    note = f"    merge commit: judged with {gated[ 'side' ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced"
+    assert code == 0 and lines[ -4 : -2 ] == [ f"passed    {merge[ :9 ]} gate=0 merge side", note ]
+    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 0 judged in warn mode{FROM_WORK}"
+    assert lines[ -1 ].endswith( ": 1 commits, 1 passed, 0 refused, 0 unchecked" ) and not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+def test_a_commit_merged_in_from_a_branch_that_forked_before_the_epoch_is_held_to_blocking( gated ):
     _side_with_a_finding( gated )
     root = gated[ "root" ]
     _git( root, "merge", "-q", "--no-ff", "-m", "merge side", "side" )
     merge = _git( root, "rev-parse", "HEAD" )
     code, lines = _judge( gated, gated[ "newer" ], merge )
-    note = f"    merge commit: judged with {gated[ 'side' ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced"
-    assert code == 0 and lines[ -4 : -2 ] == [ f"passed    {merge[ :9 ]} gate=0 merge side", note ]
-    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 1 commits held to blocking, 1 judged in warn mode{FROM_WORK}"
-    assert lines[ -1 ].endswith( ": 2 commits, 2 passed, 0 refused, 0 unchecked" ) and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert code == 1 and f"refused   {gated[ 'side' ][ :9 ]} gate=3 a finding made on a branch that forked before the epoch" in lines
+    assert [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/legacy.md:3: caps: ALL-CAPS word NOT" ]
+    assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 2 commits held to blocking, 0 judged in warn mode{FROM_WORK}"
 
 
 def test_the_real_gate_refuses_a_merge_for_a_finding_the_merge_itself_adds( gated ):
-    _side_with_a_finding( gated )
+    _side_with_a_finding( gated, fork="newer" )
     root = gated[ "root" ]
     _git( root, "merge", "-q", "--no-ff", "--no-commit", "side" )
     _write( root, "docs/own.md", SEEDED )
     merge = _commit( root, "merge side and add a page" )
     assert range_gate.other_parents( root, merge ) == [ gated[ "side" ] ]
-    code, lines = _judge( gated, gated[ "newer" ], merge )
+    code, lines = _judge( gated, gated[ "side" ], merge )
     assert code == 1 and [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/own.md:3: caps: ALL-CAPS word NOT" ]
     assert f"refused   {merge[ :9 ]} gate=3 merge side and add a page" in lines
 
