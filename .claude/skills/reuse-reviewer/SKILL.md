@@ -83,7 +83,7 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
 | --- | --- | --- |
 | `REUSE` | `reuse-as-is` | `DUPLICATE` |
 | `EXTEND` | `extend-existing` | `EXTEND <symbol>` |
-| `NEW` | gen&#117;inely-new | `DISTINCT <why>`, only after the reviewer has read the shortlist's source; a `NEW` verdict does not rule `DISTINCT` by itself |
+| `NEW` | the third label in `plan-review.md` section 4 (no prior art found) | `DISTINCT <why>`, only after the reviewer has read the shortlist's source; a `NEW` verdict does not rule `DISTINCT` by itself |
 | `UNCERTAIN_READ_SOURCE` | none yet: read the source first | the reviewer rules only after reading the candidates |
 
 ## Rules

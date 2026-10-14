@@ -1,7 +1,6 @@
 """
 Pins the reuse-reviewer skill to the plan and to the exit-gate script that enforces it.
 """
-import html
 import pathlib
 import re
 
@@ -11,11 +10,6 @@ from lupin_mcp import reuse_exit_gate
 ROOT  = pathlib.Path( cu.get_project_root() )
 SKILL = ROOT / ".claude" / "skills" / "reuse-reviewer" / "SKILL.md"
 PLAN  = ROOT / "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.09.30-reuse-review-implementation-plan.md"
-
-
-def _plain( line ):
-    """Return a table line with backticks and character references removed."""
-    return html.unescape( line.replace( "`", "" ) )
 
 
 def _table( text ):
@@ -29,13 +23,23 @@ def _table( text ):
     return out
 
 
-def test_skill_carries_the_plan_table_verbatim():
-    plan_rows = [ _plain( l ) for l in _table( PLAN.read_text( encoding="utf-8" ) ) ]
-    skill     = [ _plain( l ) for l in SKILL.read_text( encoding="utf-8" ).splitlines() ]
+POINTER = "the third label in plan-review.md section 4 (no prior art found)"
+
+
+def _cells( line ):
+    """Return the cells of a table line, stripped of backticks and spaces."""
+    return [ c.replace( "`", "" ).strip() for c in line.strip().strip( "|" ).split( "|" ) ]
+
+
+def test_skill_carries_the_plan_table_and_points_at_the_third_label():
+    plan_rows = [ _cells( l ) for l in _table( PLAN.read_text( encoding="utf-8" ) ) ]
+    skill     = [ _cells( l ) for l in SKILL.read_text( encoding="utf-8" ).splitlines() if l.startswith( "|" ) ]
     assert len( plan_rows ) == 6                                   # header, rule, four verdicts
-    for row in plan_rows: assert row in skill
-    head = skill.index( plan_rows[ 0 ] )
-    assert not skill[ head - 1 ].startswith( "```" ) and not skill[ head - 2 ].startswith( "```" )    # a real markdown table, not a fenced block
+    third = plan_rows[ 4 ]                                         # the third data row: its label is the one the skill points at
+    assert third[ 0 ] == "NEW" and third[ 1 ] == "genuinely-new"
+    for row in plan_rows[ :4 ] + plan_rows[ 5: ]: assert row in skill
+    assert [ third[ 0 ], POINTER, third[ 2 ] ] in skill            # the pointer stands for the label, nothing else differs
+    assert "genuinely-new" not in SKILL.read_text( encoding="utf-8" ) and "&#" not in SKILL.read_text( encoding="utf-8" )
 
 
 def test_skill_names_the_flag_and_the_gate_modules():
