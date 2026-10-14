@@ -248,6 +248,40 @@ def test_python_directive_comments_are_code():
     assert "removed: '# noqa: b'" in dod.python_difference( "x = 1  # noqa: a\ny = 2  # noqa: b\n", "x = 1  # noqa: a\ny = 2\n" )
 
 
+def test_python_directive_moved_to_other_code_fails():
+    old = "a = f()  # noqa: E501\nb = g()\n"
+    new = "a = f()\nb = g()  # noqa: E501\n"
+    found = dod.python_difference( old, new )
+    assert found is not None and "moved from 'a = f()' to 'b = g()'" in found
+    assert dod.python_directives( old ) == [ ( "a = f()", "# noqa: E501" ) ]
+    # the same pairing survives a docstring edit that shifts every line
+    assert dod.python_difference( '"""one"""\nx = f()  # noqa\n', '"""one\ntwo"""\nx = f()  # noqa\n' ) is None
+
+
+def test_python_standalone_directive_is_paired_with_the_next_code_line():
+    old = "# fmt: off\nx = 1\ny = 2\n"
+    new = "x = 1\n# fmt: off\ny = 2\n"
+    found = dod.python_difference( old, new )
+    assert found is not None and "moved from 'x = 1' to 'y = 2'" in found
+    assert dod.python_directives( "x = 1\n# fmt: off\n\n# note\ny = 2\n" ) == [ ( "y = 2", "# fmt: off" ) ]
+    assert dod.python_directives( "x = 1\n# fmt: on\n" ) == [ ( "", "# fmt: on" ) ]
+
+
+def test_python_nosec_directive_is_code():
+    assert "directive comment removed" in dod.python_difference( "x = f()  # nosec B101\n", "x = f()\n" )
+    assert "directive comment added" in dod.python_difference( "x = f()\n", "x = f()  # nosec\n" )
+
+
+def test_python_skipcq_directive_is_code():
+    assert "directive comment removed" in dod.python_difference( "x = f()  # skipcq: PYL-W0613\n", "x = f()\n" )
+
+
+def test_module_docstring_says_markdown_is_exempt_including_agent_files():
+    doc = " ".join( dod.__doc__.split() )
+    assert "Markdown is exempt wholesale" in doc
+    for name in ( ".claude/commands/*.md", "`SKILL.md`", "CLAUDE.md" ): assert name in doc
+
+
 def test_dart_line_directive_comments_are_code():
     assert "directive comment removed" in dod.dart_difference( "// @dart=2.9\nclass A {}\n", "class A {}\n" )
     assert "directive comment removed" in dod.dart_difference( "a(); // coverage:ignore-line\n", "a();\n" )
@@ -318,7 +352,12 @@ MUTANTS = [
     ( "type( old ) is not type( new ) or repr( old ) != repr( new )", "old != new", "test_python_constant_type_change_is_code" ),
     ( "if paths is not None and not any( path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" ) for p in paths ): continue", "pass", "test_paths_limits_the_check_to_whole_directory_names" ),
     ( "path == p or path.startswith( p.rstrip( \"/\" ) + \"/\" )", "path.startswith( p )", "test_paths_limits_the_check_to_whole_directory_names" ),
-    ( "return [ c for c in comments if PY_DIRECTIVE.match( c ) ]", "return []", "test_python_directive_comments_are_code" ),
+    ( "or not PY_DIRECTIVE.match( t.string.strip() ): continue", "or True: continue", "test_python_directive_comments_are_code" ),
+    ( "found.append( ( code, t.string.strip() ) )", "found.append( ( \"\", t.string.strip() ) )", "test_python_directive_moved_to_other_code_fails" ),
+    ( "        if not code:\n            rest", "        if False:\n            rest", "test_python_standalone_directive_is_paired_with_the_next_code_line" ),
+    ( "nosec\\b|", "", "test_python_nosec_directive_is_code" ),
+    ( "skipcq\\b|", "", "test_python_skipcq_directive_is_code" ),
+    ( "Markdown is exempt wholesale", "Markdown is checked wholesale", "test_module_docstring_says_markdown_is_exempt_including_agent_files" ),
     ( "if directives is not None and DART_DIRECTIVE.match( source[ i : end ] ):", "if False:", "test_dart_line_directive_comments_are_code" ),
     ( "if directives is not None and DART_DIRECTIVE.match( source[ start : i ] ):", "if False:", "test_dart_block_directive_comments_are_code" ),
     ( "        if path.endswith( DOC_SUFFIX ): continue\n", "", "test_cli_markdown_changes_are_ignored_and_other_types_are_unchecked" ),

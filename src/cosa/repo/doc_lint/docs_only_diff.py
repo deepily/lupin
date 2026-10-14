@@ -1,11 +1,15 @@
 """
 Docs-only diff check: proves a documentation rewrite left the code unchanged.
 
-Python files pass when their ASTs are identical once docstrings are removed and their directive
-comments (pragma, noqa, type:, coding, shebang) match. Dart files pass when every non-comment
-token is identical and their directive comments (@dart, ignore, coverage) match. A failure names
-the first difference. Every other changed file type, a mode change and an untracked new file
-fail too, except markdown, which is the documentation itself. Stdlib only.
+Python files pass when their ASTs are identical once docstrings are removed. Their directive
+comments (pragma, noqa, nosec, skipcq, type:, coding, shebang) must match too, each paired with
+the line of code it sits on. Dart files pass when every non-comment token is identical and their directive
+comments (@dart, ignore, coverage) match. A failure names the first difference. Every other
+changed file type, a mode change and an untracked new file fail too, except markdown. Stdlib only.
+
+Markdown is exempt wholesale, and that includes the files that steer agents: .claude/commands/*.md,
+`SKILL.md` and CLAUDE.md. A change to one of those can change what an agent does, and this check
+does not see it. Review those files as behaviour, not as documentation.
 
 What "docs-only" means here, and does not:
     - no AST change besides docstrings; a docstring is a runtime value, so code that reads
@@ -14,6 +18,9 @@ What "docs-only" means here, and does not:
       `a--b`, passes; the compiler gate catches it
     - a comment that merely looks like a directive, such as "# type: the kind", also fails; that
       errs toward a failure
+    - a Python directive is paired with the code on its line, or with the next line of code when
+      it stands alone, so moving `# noqa` to another line fails; editing the code that a
+      standalone directive points at also fails. Dart directives are compared as text only
 """
 
 import argparse
@@ -30,7 +37,7 @@ IDENT_REGEX = re.compile( r"[A-Za-z0-9_$]+" )
 SUFFIXES    = ( ".py", ".dart" )
 DOC_SUFFIX  = ".md"
 
-PY_DIRECTIVE   = re.compile( r"^#(!|\s*(pragma\b|noqa\b|type\s*:|fmt\s*:|pylint\s*:|mypy\s*:|pyright\s*:|isort\s*:|ruff\s*:|flake8\s*:|yapf\s*:|-\*-|.*coding[:=]))" )
+PY_DIRECTIVE   = re.compile( r"^#(!|\s*(pragma\b|noqa\b|nosec\b|skipcq\b|type\s*:|fmt\s*:|pylint\s*:|mypy\s*:|pyright\s*:|isort\s*:|ruff\s*:|flake8\s*:|yapf\s*:|-\*-|.*coding[:=]))" )
 DART_DIRECTIVE = re.compile( r"^(//+|/\*+)\s*(@dart\b|ignore\s*:|ignore_for_file\s*:|coverage\s*:|dart\s+format\s+(off|on)\b)" )
 
 
@@ -72,25 +79,43 @@ def _describe( node ):
     return label
 
 
+def _directive_text( item ):
+    """
+    Name one directive for a failure message.
+
+    Requires:
+        - item is a comment str, or a ( code, comment ) pair from python_directives
+
+    Ensures:
+        - returns the repr of the comment, followed by " on <code>" for a pair
+    """
+    if isinstance( item, str ): return repr( item )
+    code, comment = item
+    return f"{comment!r} on {code!r}"
+
+
 def directive_difference( old, new ):
     """
     Compare two ordered lists of directive comments.
 
     Requires:
-        - old and new are lists of str
+        - old and new are lists of str, or lists of ( code, comment ) pairs
 
     Ensures:
         - returns None when they are equal
-        - otherwise returns a string naming the first directive that was removed, added or changed
+        - otherwise returns a string naming the first directive that was removed, added, moved to
+          other code or changed
 
     Raises:
         - nothing
     """
     for a, b in zip( old, new ):
-        if a != b: return f"directive comment {a!r} became {b!r}"
+        if a == b: continue
+        if isinstance( a, tuple ) and a[ 1 ] == b[ 1 ]: return f"directive comment {a[ 1 ]!r} moved from {a[ 0 ]!r} to {b[ 0 ]!r}"
+        return f"directive comment {_directive_text( a )} became {_directive_text( b )}"
     if len( old ) == len( new ): return None
     longer = old if len( old ) > len( new ) else new
-    return f"directive comment {'removed' if longer is old else 'added'}: {longer[ min( len( old ), len( new ) ) ]!r}"
+    return f"directive comment {'removed' if longer is old else 'added'}: {_directive_text( longer[ min( len( old ), len( new ) ) ] )}"
 
 
 def first_difference( old, new, path="Module" ):
@@ -128,21 +153,33 @@ def first_difference( old, new, path="Module" ):
 
 def python_directives( source ):
     """
-    List the directive comments of a Python source, in order.
+    List the directive comments of a Python source, in order, each with its code line.
 
     Requires:
         - source is Python text that tokenizes
 
     Ensures:
-        - returns the stripped text of each comment that PY_DIRECTIVE matches: pragma, noqa,
-          type:, fmt:, linter switches, a coding line and a shebang
+        - returns [ ( code, comment ) ] for each comment that PY_DIRECTIVE matches: pragma, noqa,
+          nosec, skipcq, type:, fmt:, linter switches, a coding line and a shebang
+        - comment is the stripped comment text
+        - code is the stripped code before the comment on its line; for a comment on a line of
+          its own it is the next line that is neither blank nor a comment, or "" at end of file
         - a hash inside a string literal is not a comment
 
     Raises:
         - tokenize.TokenError or SyntaxError when the source does not tokenize
     """
-    comments = ( t.string.strip() for t in tokenize.generate_tokens( io.StringIO( source ).readline ) if t.type == tokenize.COMMENT )
-    return [ c for c in comments if PY_DIRECTIVE.match( c ) ]
+    lines  = source.splitlines()
+    found  = []
+    for t in tokenize.generate_tokens( io.StringIO( source ).readline ):
+        if t.type != tokenize.COMMENT or not PY_DIRECTIVE.match( t.string.strip() ): continue
+        row, col = t.start
+        code     = lines[ row - 1 ][ : col ].strip()
+        if not code:
+            rest = ( l.strip() for l in lines[ row : ] )
+            code = next( ( l for l in rest if l and not l.startswith( "#" ) ), "" )
+        found.append( ( code, t.string.strip() ) )
+    return found
 
 
 def python_difference( old_source, new_source ):
