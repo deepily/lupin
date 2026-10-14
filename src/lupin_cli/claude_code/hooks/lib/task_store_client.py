@@ -174,6 +174,21 @@ def correlate_task( settings, api_key, item_id, payload ):
     return _request( "POST", f"{settings['api_base_url']}/api/tasks/{item_id}/correlate", api_key, settings[ "timeout_seconds" ], body=payload )
 
 
+def amend_task( settings, api_key, item_id, payload ):
+    """
+    POST /api/tasks/{item_id}/amend.
+
+    Requires:
+        - item_id is the store item uuid string
+        - payload is the TaskAmendIn-shaped dict
+
+    Ensures:
+        - Returns ( ok, status_code, body ) — body is { item, event } on 200
+        - Never raises
+    """
+    return _request( "POST", f"{settings['api_base_url']}/api/tasks/{item_id}/amend", api_key, settings[ "timeout_seconds" ], body=payload )
+
+
 def query_by_correlation_key( settings, api_key, correlation_key ):
     """
     GET /api/tasks?correlation_key=... (spool-replay idempotency probe).

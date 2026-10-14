@@ -33,6 +33,19 @@ def _package( symbol_id ):
     return ".".join( symbol_id.split( ":" )[ -1 ].split( "." )[ :2 ] )
 
 
+def package_of( symbol_id ):
+    """
+    Return the package part of a symbol id.
+
+    Requires:
+        - symbol_id is an id from the symbol index
+
+    Ensures:
+        - returns the same value the lint uses to group orphans
+    """
+    return _package( symbol_id )
+
+
 def queue( wiki_dir, gen ):
     """
     Produce the lint findings for a wiki directory against one index generation.

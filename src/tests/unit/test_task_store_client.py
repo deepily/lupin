@@ -153,6 +153,13 @@ class TestWireShape:
         tc.correlate_task( SETTINGS, "k", "uuid-2", { "correlation_key": "ck" } )
         assert capture[ "request" ].full_url == "http://test:7999/api/tasks/uuid-2/correlate"
 
+    def test_amend_posts_the_payload_to_the_amend_url( self, capture ):
+        ok, status, body = tc.amend_task( SETTINGS, "k", "uuid-3", { "note": "n", "actor": "a" } )
+        req = capture[ "request" ]
+        assert req.full_url == "http://test:7999/api/tasks/uuid-3/amend"
+        assert req.get_method() == "POST"
+        assert json.loads( req.data.decode( "utf-8" ) ) == { "note": "n", "actor": "a" }
+
     def test_query_encodes_correlation_key( self, capture ):
         capture[ "outcome" ] = FakeResponse( 200, '{"tasks": [], "count": 0}' )
         ok, status, body = tc.query_by_correlation_key( SETTINGS, "k", "cc-task:sid:1" )
