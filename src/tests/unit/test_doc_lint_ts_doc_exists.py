@@ -165,6 +165,47 @@ def test_report_leaves_out_those_lines_when_there_are_none( repo ):
     assert "re-exports" not in text and "did not parse" not in text
 
 
+# ---- surviving mutants: scratch cleanup, parse message, census result ------------------------
+
+def test_extract_removes_its_scratch_tree_after_a_run_and_after_a_failed_run( tmp_path, monkeypatch ):
+    made = []
+    def mk( prefix ):
+        d = tmp_path / f"scratch{len( made )}"
+        d.mkdir()
+        made.append( d )
+        return str( d )
+    monkeypatch.setattr( ts_doc_exists.tempfile, "mkdtemp", mk )
+    monkeypatch.setattr( ts_doc_exists, "run_extractor", lambda root, files, source_root=None: { f: rec( f, [] ) for f in files } )
+    ts_doc_exists.extract( "/r", { "a.ts": "x\n" } )
+    def boom( root, files, source_root=None ): raise RuntimeError( "node died" )
+    monkeypatch.setattr( ts_doc_exists, "run_extractor", boom )
+    with pytest.raises( RuntimeError, match="node died" ): ts_doc_exists.extract( "/r", { "a.ts": "x\n" } )
+    assert len( made ) == 2 and not any( d.exists() for d in made )
+
+
+def test_a_file_that_did_not_parse_names_the_first_parse_error_in_its_finding():
+    fc = ts_doc_exists.count_record( "a.ts", rec( "a.ts", [], errors=[ "Unexpected token at 3:1", "second" ] ) )
+    assert fc.count == 1 and fc.findings[ 0 ].rule == "parse-error"
+    assert fc.findings[ 0 ].message == "the file did not parse: Unexpected token at 3:1"
+
+
+def test_census_of_texts_lists_only_nonzero_files_in_path_order_and_walks_every_counted_file( monkeypatch ):
+    paths = [ "z.ts", "m.ts", "a.ts" ]
+    by    = { "z.ts": rec( "z.ts", [ sym( "f", False ) ] ), "m.ts": rec( "m.ts", [ sym( "g", True ) ] ), "a.ts": rec( "a.ts", [ sym( "h", False ) ] ) }
+    monkeypatch.setattr( ts_doc_exists, "counted_paths", lambda root: paths )
+    monkeypatch.setattr( ts_doc_exists, "run_extractor", lambda root, files, source_root=None: { f: by[ f ] for f in files } )
+    found, walked = ts_doc_exists.census_of_texts( "/r", lambda path: "x\n" )
+    assert list( found.items() ) == [ ( "a.ts", 1 ), ( "z.ts", 1 ) ]
+    assert walked == 3
+
+
+@pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+def test_extract_gives_a_path_that_starts_with_a_dash_a_stand_in_name_and_keys_it_by_the_real_path():
+    got = ts_doc_exists.extract( REPO_ROOT, { "--dash.ts": "export function bare() {}\n" } )
+    assert list( got ) == [ "--dash.ts" ]
+    assert [ s[ "name" ] for s in ts_doc_exists.missing( got[ "--dash.ts" ] ) ] == [ "bare" ]
+
+
 # ---- run_extractor -------------------------------------------------------------------------
 
 class Done:
