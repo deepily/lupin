@@ -73,7 +73,12 @@ export interface TaskPatchFields {
   owner_persona? : string | null;
 }
 
-/** The handle of an optimistic task change: a rollback and a promise of the server answer. */
+/**
+ * The handle of an optimistic task change.
+ *
+ * `restoreState` undoes the change. `done` settles when the server has answered and carries no body.
+ * For a transition it carries `alreadyAt` when the task was already at the target status.
+ */
 export interface TaskMutation {
   restoreState : () => void;
   done         : Promise<TransitionOutcome | void>;
