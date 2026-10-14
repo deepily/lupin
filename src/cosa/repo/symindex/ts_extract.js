@@ -1,6 +1,9 @@
 // Extract function/class/method definitions from JS/TS files with the TypeScript compiler.
 // stdin : JSON { "root": "<abs dir>", "files": [ "<abs path>", ... ], "typescript": "<path to typescript module>" }
 // stdout: JSON [ { file, name, kind, sig, doc, pin, line } ... ]   (file relative to root)
+// With "mode": "shapes" in the request the output is instead { scanned: [ file ... ], defs: [ { file, name, kinds } ... ] }:
+// one entry per function-like definition at any depth, private and nested included ("public_only": true drops both),
+// kinds being the pre-order node kind names of its body with names, literal values and access modifiers erased, for the duplicate finder.
 // A pin hashes the node's leaf tokens joined by one space, so comments and whitespace never change it.
 const fs     = require( "fs" );
 const path   = require( "path" );
@@ -44,6 +47,62 @@ function isPrivate( member ) {
     return member.name && ts.isPrivateIdentifier( member.name );
 }
 
+
+// Compared by numeric kind: the reverse enum lookup answers an alias such as FirstLiteralToken for NumericLiteral.
+const LITERALS = new Set( [ ts.SyntaxKind.NumericLiteral, ts.SyntaxKind.StringLiteral, ts.SyntaxKind.BigIntLiteral,
+                            ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.RegularExpressionLiteral ] );
+
+function kindName( n ) {
+    if ( n.kind === ts.SyntaxKind.PrivateIdentifier ) return "Identifier";
+    return LITERALS.has( n.kind ) ? "Literal" : ts.SyntaxKind[ n.kind ];
+}
+
+function preorder( node, acc ) {
+    acc.push( kindName( node ) );
+    ts.forEachChild( node, c => { if ( !ts.isJSDoc( c ) && !ts.isModifier( c ) ) preorder( c, acc ); } );
+    return acc;
+}
+
+function isFnLike( n ) {
+    return ts.isFunctionDeclaration( n ) || ts.isMethodDeclaration( n ) || ts.isConstructorDeclaration( n ) ||
+           ts.isGetAccessorDeclaration( n ) || ts.isSetAccessorDeclaration( n ) || ts.isArrowFunction( n ) || ts.isFunctionExpression( n );
+}
+
+// The name a function-like node answers to, or null when it is an anonymous callback (still walked, never reported).
+function fnName( n, sf ) {
+    if ( ts.isConstructorDeclaration( n ) ) return "constructor";
+    if ( n.name ) return n.name.getText( sf );
+    const p = n.parent;
+    if ( p && ( ts.isVariableDeclaration( p ) || ts.isPropertyAssignment( p ) || ts.isPropertyDeclaration( p ) ) && p.name ) return p.name.getText( sf );
+    return null;
+}
+
+function shapes( req ) {
+    const defs = [], scanned = [];
+    for ( const abs of req.files ) {
+        const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
+        const kind = abs.endsWith( ".ts" ) || abs.endsWith( ".tsx" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
+        const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
+        scanned.push( rel );
+        const walk = ( node, prefix, nested ) => {
+            ts.forEachChild( node, c => {
+                if ( ts.isClassDeclaration( c ) || ts.isClassExpression( c ) ) {
+                    if ( !c.name ) { walk( c, prefix, nested ); return; }
+                    walk( c, prefix.concat( [ c.name.text ] ), nested );
+                } else if ( isFnLike( c ) ) {
+                    const name = fnName( c, sf );
+                    const hidden = ( ts.isMethodDeclaration( c ) || ts.isConstructorDeclaration( c ) || ts.isGetAccessorDeclaration( c ) || ts.isSetAccessorDeclaration( c ) ) && isPrivate( c );
+                    const skip = req.public_only && ( nested || hidden );
+                    if ( name !== null && !skip ) defs.push( { file: rel, name: prefix.concat( [ name ] ).join( "." ), kinds: preorder( c, [] ) } );
+                    walk( c, name === null ? prefix : prefix.concat( [ name, "<locals>" ] ), true );
+                } else walk( c, prefix, nested );
+            } );
+        };
+        walk( sf, [], false );
+    }
+    return { scanned, defs };
+}
+
 const out = [];
 
 function emit( file, name, kind, sig, node, sf, docNode ) {
@@ -51,7 +110,7 @@ function emit( file, name, kind, sig, node, sf, docNode ) {
     out.push( { file, name, kind, sig, doc: firstDocLine( docNode || node, sf ), pin: pinOf( node, sf ), line: pos.line + 1 } );
 }
 
-for ( const abs of req.files ) {
+for ( const abs of req.mode === "shapes" ? [] : req.files ) {
     const rel  = path.relative( req.root, abs ).split( path.sep ).join( "/" );
     const kind = abs.endsWith( ".ts" ) || abs.endsWith( ".tsx" ) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
     const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
@@ -76,4 +135,4 @@ for ( const abs of req.files ) {
         }
     }
 }
-process.stdout.write( JSON.stringify( out ) );
+process.stdout.write( JSON.stringify( req.mode === "shapes" ? shapes( req ) : out ) );

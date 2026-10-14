@@ -11,13 +11,15 @@ import ast
 import collections
 import hashlib
 
+from cosa.repo.symindex.js_index import extract_js_shapes
 from cosa.repo.symindex.py_index import _walk_scope, module_name, strip_docs
 
 SHINGLE          = 5
 SEEDS            = 12             # each definition is compared only with those sharing one of its rarest shingles
-DEFAULT_MIN_NODE = 40
+DEFAULT_MIN_NODE = 25            # a 3-5 statement helper is 25-40 nodes; below 25 a 5-long shingle set holds under 21 members
 DEFAULT_THRESH   = 0.85
-LANGUAGES        = ( "python", )   # the only languages this pass reads: the dups command hands it .py files
+LANGUAGES        = ( "python", )   # always read; "typescript" is added to the provenance when a .js/.ts/.tsx file parsed
+JS_LANGUAGE      = "typescript"
 
 
 class _Norm( ast.NodeTransformer ):
@@ -55,19 +57,25 @@ def shingles( node ):
     Ensures:
         - returns the set of SHINGLE-long windows over the pre-order node types, each hashed to an int
     """
-    seq = _preorder_types( normalised( node ) )
+    return shingles_of( _preorder_types( normalised( node ) ) )
+
+
+def shingles_of( seq ):
+    """Ensures: returns the hashed SHINGLE-long windows over a list of node type names."""
     return { hash( tuple( seq[ i:i + SHINGLE ] ) ) for i in range( max( len( seq ) - SHINGLE + 1, 1 ) ) }
 
 
-def _functions( spec, paths, scanned ):
+def _functions( spec, paths, scanned, include_private=False ):
     """
-    Yield every public function and method in the given Python files.
+    Yield every function and method in the given Python files.
 
     Requires:
         - scanned is a list
 
     Ensures:
-        - yields ( id, node ) for every public function and method of the given files, ids as in the index
+        - yields ( id, node ) for every public function and method of the given files, ids as in the index;
+          with include_private also the underscore-named ones and the functions nested inside functions
+          (id parts joined with <locals>, as the index names them)
         - appends to scanned each file that was read and parsed, once, before its definitions are yielded;
           a file that does not parse is skipped and is not appended
     """
@@ -78,32 +86,52 @@ def _functions( spec, paths, scanned ):
             continue
         scanned.append( p )
         mod = module_name( spec, p )
-        for parts, node, _ in _walk_scope( tree.body, [], False, False ):
+        for parts, node, _ in _walk_scope( tree.body, [], False, include_private ):
             if not isinstance( node, ast.ClassDef ): yield ".".join( x for x in ( mod, *parts ) if x ), node
 
 
-def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_THRESH ):
+def _definitions( spec, paths, js_files, include_private, scanned, js_scanned ):
+    """
+    Yield ( id, node count, structure key, shingles ) for each definition of both languages.
+
+    Requires:
+        - scanned and js_scanned are lists; they receive the Python files and the script files that were read
+
+    Ensures:
+        - the Python entries come first, then the script ones; a script id is "<file relative to the root>#<qualified name>"
+    """
+    for fid, node in _functions( spec, paths, scanned, include_private ):
+        yield fid, sum( 1 for _ in ast.walk( node ) ), hashlib.sha1( ast.dump( normalised( node ) ).encode( "utf-8" ) ).hexdigest(), shingles( node )
+    res = extract_js_shapes( spec.root, js_files, public_only=not include_private )
+    js_scanned.extend( res[ "scanned" ] )
+    for d in res[ "defs" ]:
+        yield f"{d[ 'file' ]}#{d[ 'name' ]}", len( d[ "kinds" ] ), hashlib.sha1( ",".join( d[ "kinds" ] ).encode( "utf-8" ) ).hexdigest(), shingles_of( d[ "kinds" ] )
+
+
+def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_THRESH, js_files=(), include_private=True ):
     """
     Find exact and near duplicate functions.
 
     Requires:
-        - paths are Python files under spec.root
+        - paths are Python files under spec.root; js_files are JavaScript or TypeScript files under spec.root
         - 0 < threshold <= 1 and min_nodes >= 1
     Ensures:
         - returns { "provenance", "exact", "near" }
-        - provenance names the languages the pass read (the module's language tuple) and files_scanned, the number of files that
-          parsed; files that did not parse are in neither, so files_scanned can be below len( paths )
+        - provenance names the languages the pass read (the module's language tuple, plus "typescript" when a script file
+          was read) and files_scanned, the number of files that parsed; files that did not parse are in neither, so files_scanned
+          can be below len( paths ) + len( js_files )
+        - with include_private (the default) private and nested definitions take part
+        - Python and script definitions are never grouped together: the two use different node type names
         - exact is a list of id lists (size >= 2), largest first
         - near is a list of { "ids": [a, b], "jaccard": float } for pairs at or above the
           threshold whose normalised trees are not identical (candidates are pairs sharing a rare shingle), sorted by similarity then ids
         - only definitions with at least min_nodes AST nodes take part
     """
-    groups, sets, scanned = collections.defaultdict( list ), {}, []
-    for fid, node in _functions( spec, paths, scanned ):
-        if sum( 1 for _ in ast.walk( node ) ) < min_nodes: continue
-        key = hashlib.sha1( ast.dump( normalised( node ) ).encode( "utf-8" ) ).hexdigest()
+    groups, sets, scanned, js_scanned = collections.defaultdict( list ), {}, [], []
+    for fid, size, key, shs in _definitions( spec, paths, js_files, include_private, scanned, js_scanned ):
+        if size < min_nodes: continue
         groups[ key ].append( fid )
-        sets[ fid ] = ( key, shingles( node ) )
+        sets[ fid ] = ( key, shs )
     exact  = sorted( ( sorted( g ) for g in groups.values() if len( g ) > 1 ), key=lambda g: ( -len( g ), g ) )
     df = collections.Counter( sh for _, ( _, s ) in sets.items() for sh in s )
     index = collections.defaultdict( set )
@@ -120,6 +148,7 @@ def find_duplicates( spec, paths, min_nodes=DEFAULT_MIN_NODE, threshold=DEFAULT_
             if jac >= threshold: near.append( { "ids": [ fid, other ], "jaccard": round( jac, 4 ) } )
     near.sort( key=lambda d: ( -d[ "jaccard" ], d[ "ids" ] ) )
     prov = { "index_root": str( spec.root ), "min_nodes": min_nodes, "threshold": threshold, "shingle": SHINGLE,
-             "languages": list( LANGUAGES ), "files_scanned": len( scanned ),
+             "languages": list( LANGUAGES ) + ( [ JS_LANGUAGE ] if js_scanned else [] ),
+             "files_scanned": len( scanned ) + len( js_scanned ), "include_private": include_private,
              "considered": len( sets ), "kind": "structural only: exact clones and near pass; not an evaluation set by itself" }
     return { "provenance": prov, "exact": exact, "near": near }

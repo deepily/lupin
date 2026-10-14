@@ -3,7 +3,7 @@ Command line for the symbol index:  python -m cosa.repo.symindex <command>
 
   - build   [--root R] [--out D]            build and publish the index; exit 3 if a tool was missing
   - fresh   [--root R] [--out D]            exit 0 when the published index matches the tree, else 1
-  - dups    [--root R] [--min-nodes N] [--threshold T] [--json]
+  - dups    [--root R] [--min-nodes N] [--threshold T] [--public-only] [--json]
   - diff    OLD_GEN NEW_GEN [--all]         symbols added, removed or changed between two generations
   - lint    [--root R] [--out D] [--wiki W] wiki findings as JSON lines; exit 1 when any
 """
@@ -30,6 +30,7 @@ def _parser():
         if name != "dups": p.add_argument( "--out" )
     sub.choices[ "dups" ].add_argument( "--min-nodes", type=int, default=DEFAULT_MIN_NODE )
     sub.choices[ "dups" ].add_argument( "--threshold", type=float, default=DEFAULT_THRESH )
+    sub.choices[ "dups" ].add_argument( "--public-only", action="store_true", help="leave out private and nested definitions" )
     sub.choices[ "dups" ].add_argument( "--json", action="store_true" )
     sub.choices[ "lint" ].add_argument( "--wiki" )
     d = sub.add_parser( "diff" )
@@ -56,7 +57,8 @@ def main( argv=None ):
             print( f"symindex: WARNING missing dependencies: {', '.join( h[ 'missing_dependencies' ] )}", file=sys.stderr ); return 3
         return 0
     if a.cmd == "dups":
-        rep = find_duplicates( spec, iter_files( spec, spec.py_roots, { ".py" } ), a.min_nodes, a.threshold )
+        rep = find_duplicates( spec, iter_files( spec, spec.py_roots, { ".py" } ), a.min_nodes, a.threshold,
+                               js_files=iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ), include_private=not a.public_only )
         if a.json: print( json.dumps( rep, indent=2 ) )
         else:
             for g in rep[ "exact" ]: print( f"EXACT x{len( g )}: " + " == ".join( g ) )

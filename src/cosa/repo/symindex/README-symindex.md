@@ -11,6 +11,10 @@ python -m cosa.repo.symindex fresh | dups | diff OLD NEW [--all] | lint
 Exit codes: `build` 3 when a tool was missing (the index is still written), `fresh` 1 when stale,
 `dups` and `lint` 1 when they report anything.
 
+`dups` reads Python, JavaScript and TypeScript files (`.js`, `.ts`, `.tsx`; node and the TypeScript compiler as for `build`).
+It includes private and nested definitions by default (`--public-only` leaves them out) and drops bodies under 25 nodes
+(`--min-nodes`). The provenance block names the languages read and the files that parsed. A JavaScript or TypeScript id is `<file>#<name>`.
+
 ## Layout of one published index
 
 `<out>/current` is a symlink to `gen-<manifest>/`, replaced atomically. A generation holds

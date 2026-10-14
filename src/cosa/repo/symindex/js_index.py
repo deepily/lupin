@@ -74,13 +74,46 @@ def extract_js( root, files ):
         - RuntimeError when the compiler script exits non-zero
     """
     if not files: return []
-    node = find_node()
-    ts   = find_typescript( root )
-    req  = json.dumps( { "root": str( root ), "files": [ str( f ) for f in files ], "typescript": str( ts ) } )
-    res  = subprocess.run( [ node, str( EXTRACTOR ) ], input=req, capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT )
-    if res.returncode != 0: raise RuntimeError( f"ts_extract.js failed: {res.stderr.strip()[ :400 ]}" )
     out = []
-    for r in json.loads( res.stdout ):
+    for r in _run( root, files, {} ):
         out.append( { "lang": "ts", "file": r[ "file" ], "name": r[ "name" ], "kind": r[ "kind" ], "sig": r[ "sig" ],
                       "doc": r[ "doc" ], "pin": r[ "pin" ], "line": r[ "line" ], "public": True } )
     return out
+
+
+def _run( root, files, extra ):
+    """
+    Run the compiler script once and return its decoded JSON.
+
+    Requires:
+        - files is a non-empty list of absolute paths under root
+    Raises:
+        - DependencyMissing when node or typescript is absent
+        - RuntimeError when the compiler script exits non-zero
+    """
+    node = find_node()
+    ts   = find_typescript( root )
+    req  = json.dumps( { "root": str( root ), "files": [ str( f ) for f in files ], "typescript": str( ts ), **extra } )
+    res  = subprocess.run( [ node, str( EXTRACTOR ) ], input=req, capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT )
+    if res.returncode != 0: raise RuntimeError( f"ts_extract.js failed: {res.stderr.strip()[ :400 ]}" )
+    return json.loads( res.stdout )
+
+
+def extract_js_shapes( root, files, public_only=False ):
+    """
+    Extract the structural shape of every function-like definition in script files.
+
+    Requires:
+        - files are absolute paths under root
+    Ensures:
+        - returns { "scanned": [ file relative to root ], "defs": [ { file, name, kinds } ] }
+        - kinds is the pre-order list of node kind names of the definition, identifier names and literal values erased
+        - nested functions are named <parent>.<locals>.<name>; an anonymous callback is walked but not reported
+        - private and protected members, and nested functions, are returned unless public_only
+        - an empty file list returns an empty result without starting node
+    Raises:
+        - DependencyMissing when node or typescript is absent
+        - RuntimeError when the compiler script exits non-zero
+    """
+    if not files: return { "scanned": [], "defs": [] }
+    return _run( root, files, { "mode": "shapes", "public_only": bool( public_only ) } )
