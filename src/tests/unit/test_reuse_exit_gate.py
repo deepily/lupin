@@ -6,6 +6,7 @@ Each test writes its own per-session logs, diff and review. A definition passes 
 """
 import io
 import json
+import pathlib
 
 from lupin_mcp import reuse_exit_gate as eg
 
@@ -23,16 +24,19 @@ def _ruling( sid, ruling, rid ):
     return f"RULING {sid} :: {ruling} :: reuse-receipt: {rid}"
 
 
-def _two_runs( tmp_path, run_a, run_b, calls_a=(), calls_b=() ):
+def _two_runs( tmp_path, run_a, run_b, calls_a=(), calls_b=(), pad=True ):
     """
     Write two crew runs and their call logs.
 
     Requires:
         - run_a and run_b are ( added ids, review lines ) pairs
+        - an empty run_b is filled with one valid definition, `m.pad`, unless pad is false
     Ensures:
         - returns ( log dir, [ run dict, run dict ] ) in the shape run_gate takes
     """
     logs = tmp_path / "call-log"; logs.mkdir()
+    if pad and not run_b[ 0 ]:
+        run_b, calls_b = ( [ "m.pad" ], [ _ruling( "m.pad", "DUPLICATE", "rpad" ) ] ), [ _call( "b", "m.pad", "rpad" ) ]
     _write_log( logs, "sess-a", list( calls_a ) ); _write_log( logs, "sess-b", list( calls_b ) )
     runs = []
     for n, ( ids, lines ) in enumerate( ( run_a, run_b ) ):
@@ -138,12 +142,42 @@ def test_the_two_runs_count_together_not_one_by_one( tmp_path ):
 
 def test_gate_refuses_other_than_two_runs( tmp_path ):
     ids, rid = _ten()
-    logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
+    ids_b, rid_b = _ten( "m.g" )
+    logs, runs = _two_runs( tmp_path, ( ids[ :5 ], [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ :5 ] ] ),
+                            ( ids_b[ :5 ], [ _ruling( i, "DUPLICATE", rid_b[ i ] ) for i in ids_b[ :5 ] ] ),
+                            [ _call( "a", i, rid[ i ] ) for i in ids[ :5 ] ], [ _call( "b", i, rid_b[ i ] ) for i in ids_b[ :5 ] ] )
     assert eg.run_gate( runs, logs )[ "passed" ] is True
     one = eg.run_gate( runs[ :1 ], logs )
     assert one[ "passed" ] is False and "exactly 2 runs are required together, got 1" in one[ "reasons" ]
-    assert "got 0" in eg.run_gate( [], logs )[ "reasons" ][ 0 ]
-    assert eg.run_gate( runs[ :1 ], logs, runs_required=1 )[ "passed" ] is True
+    assert "exactly 2 runs are required together, got 0" in eg.run_gate( [], logs )[ "reasons" ]
+    assert eg.run_gate( runs[ :1 ], logs, runs_required=1 )[ "passed" ] is False                          # five definitions are under the floor
+    ids_c, rid_c = _ten( "m.h" )
+    third = tmp_path / "diff2.json"; third.write_text( json.dumps( { "added": ids_c, "removed": [], "changed": [] } ), encoding="utf-8" )
+    ( tmp_path / "review2.md" ).write_text( "\n".join( _ruling( i, "DUPLICATE", rid_c[ i ] ) for i in ids_c ) + "\n", encoding="utf-8" )
+    _write_log( logs, "sess-c", [ _call( "c", i, rid_c[ i ] ) for i in ids_c ] )
+    three = eg.run_gate( runs + [ { "diff": str( third ), "review": str( tmp_path / "review2.md" ) } ], logs )
+    assert three[ "passed" ] is False and "exactly 2 runs are required together, got 3" in three[ "reasons" ]
+    assert three[ "total_new" ] == 20                                                                         # only the run count fails it
+
+
+def test_one_run_given_twice_cannot_reach_the_floor( tmp_path ):
+    ids, rid = _ten()
+    logs, runs = _two_runs( tmp_path, ( ids[ :5 ], [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids[ :5 ] ] ), ( [], [] ),
+                            [ _call( "a", i, rid[ i ] ) for i in ids[ :5 ] ], pad=False )
+    same = eg.run_gate( [ runs[ 0 ], runs[ 0 ] ], logs )
+    assert same[ "passed" ] is False and same[ "total_new" ] == 5
+    assert "two runs name the same diff file" in same[ "reasons" ] and "only 5 new definitions, at least 10 required" in same[ "reasons" ]
+    copy = tmp_path / "copy.json"; copy.write_text( pathlib.Path( runs[ 0 ][ "diff" ] ).read_text( encoding="utf-8" ), encoding="utf-8" )
+    again = eg.run_gate( [ runs[ 0 ], { "diff": str( copy ), "review": runs[ 0 ][ "review" ] } ], logs )
+    assert again[ "total_new" ] == 5 and again[ "passed" ] is False                                          # a copied diff counts its ids once
+
+
+def test_a_real_run_plus_an_empty_run_does_not_pass( tmp_path ):
+    ids, rid = _ten()
+    logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ], pad=False )
+    res = eg.run_gate( runs, logs )
+    assert res[ "passed" ] is False and res[ "total_new" ] == 10
+    assert res[ "reasons" ] == [ f"{runs[ 1 ][ 'diff' ]}: the run adds no definition" ]
 
 
 def test_gate_fails_on_a_call_without_ruling_and_a_ruling_without_call( tmp_path ):
@@ -182,7 +216,7 @@ def test_an_excluded_definition_shows_its_cause_and_passes_only_with_a_ruling( t
 def test_gate_refuses_a_near_empty_diff_even_when_every_row_is_ok( tmp_path ):
     logs, runs = _two_runs( tmp_path, ( [ "m.only" ], [ _ruling( "m.only", "DUPLICATE", "r1" ) ] ), ( [], [] ), [ _call( "a", "m.only", "r1" ) ] )
     res = eg.run_gate( runs, logs )
-    assert res[ "passed" ] is False and "only 1 new definitions, at least 10 required" in res[ "reasons" ]
+    assert res[ "passed" ] is False and "only 2 new definitions, at least 10 required" in res[ "reasons" ]
 
 
 def test_gate_reports_algorithm_change( tmp_path ):
@@ -201,7 +235,7 @@ def test_main_exit_codes_and_output( tmp_path ):
     buf = io.StringIO()
     assert eg.main( args, out=buf ) == 0
     assert json.loads( buf.getvalue() )[ "passed" ] is True
-    assert eg.main( args + [ "--min-new", "11" ], out=io.StringIO() ) == 1
+    assert eg.main( args + [ "--min-new", "12" ], out=io.StringIO() ) == 1
 
 
 def test_main_stdout_default_and_malformed_run( tmp_path, capsys ):

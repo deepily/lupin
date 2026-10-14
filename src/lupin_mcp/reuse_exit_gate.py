@@ -172,19 +172,25 @@ def run_gate( runs, log_dir, min_new=MIN_NEW, runs_required=RUNS_REQUIRED ):
         - runs is a list of { "diff": path to the diff JSON, "review": path to the review document }
     Ensures:
         - returns { passed, total_new, bad_log_lines, reasons, runs: [ { diff, review, rows } ] }
-        - passed only when len( runs ) == runs_required, total_new >= min_new and every row is `OK` or `EXCLUDED`
+        - passed only when len( runs ) == runs_required, the runs name different diffs, each adds a definition,
+          the unique ids across them number min_new or more, and every row is `OK` or `EXCLUDED`
+        - total_new counts each symbol id once, so one run given twice cannot reach the floor
         - a diff that reports algorithm_changed has no per-symbol list and fails with that reason
     """
     records, bad = merge_call_logs( log_dir )
-    receipts, excluded, out, reasons, total = receipts_by_symbol( records ), exclusions_by_symbol( records ), [], [], 0
+    receipts, excluded, out, reasons, seen = receipts_by_symbol( records ), exclusions_by_symbol( records ), [], [], set()
+    diffs = [ str( pathlib.Path( r[ "diff" ] ).resolve() ) for r in runs ]
+    if len( set( diffs ) ) != len( diffs ): reasons.append( "two runs name the same diff file" )
     for run in runs:
         diff = json.loads( pathlib.Path( run[ "diff" ] ).read_text( encoding="utf-8" ) )
         if "algorithm_changed" in diff:
             reasons.append( f"{run[ 'diff' ]}: pin algorithm changed, no per-symbol diff" ); continue
         rows = check_run( diff[ "added" ], receipts, parse_rulings( pathlib.Path( run[ "review" ] ).read_text( encoding="utf-8" ) ), excluded )
-        total += len( rows )
+        seen.update( r[ "id" ] for r in rows )
+        if not rows: reasons.append( f"{run[ 'diff' ]}: the run adds no definition" )
         reasons += [ f"{r[ 'id' ]}: {r[ 'status' ]}" for r in rows if r[ "status" ] not in ( "OK", "EXCLUDED" ) ]
         out.append( { "diff": run[ "diff" ], "review": run[ "review" ], "rows": rows } )
+    total = len( seen )
     if len( runs ) != runs_required: reasons.append( f"exactly {runs_required} runs are required together, got {len( runs )}" )
     if total < min_new: reasons.append( f"only {total} new definitions, at least {min_new} required" )
     return { "passed": not reasons, "total_new": total, "bad_log_lines": bad, "reasons": reasons, "runs": out }
