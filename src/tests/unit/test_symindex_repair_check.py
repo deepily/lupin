@@ -101,8 +101,8 @@ def test_an_error_that_is_not_replay_failed_propagates_and_nothing_is_rewritten(
 # ---- the adapter over the real replay tool result ------------------------------------------
 # Shapes are read from lupin_mcp.reuse_tools.replay_impl: status ok with a head dict, or status error with a name.
 
-def head( verdict="NEW", cause=None, ids=() ):
-    return { "status": "ok", "receipt_id": "r", "head": { "verdict": verdict, "cause": cause, "index_sha": "x",
+def head( verdict="NEW", cause=None, ids=(), route="pages" ):
+    return { "status": "ok", "receipt_id": "r", "stored": { "route": route }, "head": { "verdict": verdict, "cause": cause, "index_sha": "x",
                                                          "shortlist": [ { "id": i, "score": 0.9 } for i in ids ] } }
 
 
@@ -110,7 +110,7 @@ def test_shortlist_ids_reads_the_head_shortlist_in_order():
     assert rc.shortlist_ids( head( "REUSE", None, [ "b", "a" ] ) ) == [ "b", "a" ]
 
 
-@pytest.mark.parametrize( "cause", [ "UNCERTAIN_READ_SOURCE", "CALL_FAILED", "KEY_UNREADABLE", "INDEX_STALE", "NOT_LUPIN_TREE", "MALFORMED_ANSWER" ] )
+@pytest.mark.parametrize( "cause", [ "CALL_FAILED", "KEY_UNREADABLE", "INDEX_STALE", "NOT_LUPIN_TREE", "MALFORMED_ANSWER", "DEPENDENCY_MISSING" ] )
 def test_an_uncertain_head_is_replay_failed_even_with_a_shortlist( cause ):
     with pytest.raises( rc.ReplayFailed, match=f"uncertain read: {cause}" ): rc.shortlist_ids( head( "UNCERTAIN_READ_SOURCE", cause, [ "a" ] ) )
 
@@ -121,11 +121,51 @@ def test_an_error_result_is_replay_failed_naming_the_error( name ):
 
 
 def test_a_result_with_no_head_run_is_replay_failed():
-    with pytest.raises( rc.ReplayFailed, match="no HEAD run" ): rc.shortlist_ids( { "status": "ok", "receipt_id": "r", "head": None } )
+    with pytest.raises( rc.ReplayFailed, match="no HEAD run" ): rc.shortlist_ids( { **head(), "head": None } )
 
 
 def test_the_adapter_feeds_the_harness_and_an_uncertain_replay_is_call_failed_not_absent():
-    ok  = lambda rid: head( "NEW", None, [ "a" ] )
-    bad = lambda rid: head( "UNCERTAIN_READ_SOURCE", "CALL_FAILED", [] )
+    ok  = lambda rid, repeat: head( "NEW", None, [ "a" ] )
+    bad = lambda rid, repeat: head( "UNCERTAIN_READ_SOURCE", "CALL_FAILED", [] )
     assert rc.run_repair_check( rc.replayer_over( bad ), Rewrite(), "r", "target" ).verdict == rc.CALL_FAILED
     assert rc.run_repair_check( rc.replayer_over( ok ), Rewrite(), "r", "target" ).verdict == rc.NOT_REPAIRED
+
+
+def test_low_confidence_is_a_real_shortlist_not_a_failed_replay():
+    assert rc.shortlist_ids( head( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [ "target" ] ) ) == [ "target" ]
+    assert rc.shortlist_ids( head( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [ "other" ] ) ) == [ "other" ]
+
+
+def test_a_low_confidence_replay_counts_as_present_or_absent_in_the_harness():
+    on  = lambda rid, repeat: head( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [ "target" ] )
+    off = lambda rid, repeat: head( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE", [ "other" ] )
+    assert rc.run_repair_check( rc.replayer_over( on ), Rewrite(), "r", "target" ).verdict == rc.ALREADY_MATCHED
+    assert rc.run_repair_check( rc.replayer_over( off ), Rewrite(), "r", "target" ).verdict == rc.NOT_REPAIRED
+
+
+def test_the_adapter_asks_for_repeat_one_to_n_in_order_across_before_and_after():
+    seen = []
+    def tool( receipt_id, repeat ):
+        seen.append( repeat )
+        return head( "NEW", None, [ "target" ] if len( seen ) > 5 else [] )
+    got = rc.run_repair_check( rc.replayer_over( tool ), Rewrite(), "r", "target" )
+    assert got.verdict == rc.REPAIRED and seen == list( range( 1, 11 ) )
+
+
+@pytest.mark.parametrize( "route", [ "full", None ] )
+def test_a_receipt_that_never_reads_the_wiki_is_refused_with_a_clear_error( route ):
+    result = head( "NEW", None, [ "a" ], route=route )
+    if route is None: result[ "stored" ] = {}                                              # a receipt from before page-first has no route
+    with pytest.raises( rc.UnrepairableReceipt, match="full-sweep receipt.*never reads the wiki" ): rc.shortlist_ids( result )
+
+
+@pytest.mark.parametrize( "route", [ "pages", "pages_then_full" ] )
+def test_a_page_route_receipt_can_prove_a_repair( route ):
+    assert rc.shortlist_ids( head( "NEW", None, [ "a" ], route=route ) ) == [ "a" ]
+
+
+def test_the_harness_does_not_swallow_the_refusal_and_rewrites_nothing():
+    rewrite = Rewrite()
+    tool    = lambda rid, repeat: head( "NEW", None, [], route="full" )
+    with pytest.raises( rc.UnrepairableReceipt ): rc.run_repair_check( rc.replayer_over( tool ), rewrite, "r", "s" )
+    assert rewrite.calls == 0

@@ -1,4 +1,9 @@
-"""The repair check: replay a missed receipt R times before and after a rewrite."""
+"""
+The repair check: replay a missed receipt R times before and after a rewrite.
+
+The live proof that two repeats can differ is a scheduled test, not the unit tier.
+The unit tier covers this harness over cached answers only.
+"""
 from dataclasses import dataclass
 
 R = 5
@@ -87,6 +92,13 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     return RepairResult( NOT_REPAIRED, before, after, runs )
 
 
+PAGE_ROUTES = ( "pages", "pages_then_full" )
+
+
+class UnrepairableReceipt( ValueError ):
+    """A full-sweep receipt never reads the wiki, so no rewrite of a summary can repair it."""
+
+
 def shortlist_ids( result ):
     """
     Read the HEAD shortlist ids out of a replay tool result.
@@ -97,16 +109,22 @@ def shortlist_ids( result ):
     Ensures:
         - returns the ids of result["head"]["shortlist"], in order
         - an error result raises ReplayFailed naming its error, and so does a missing head
-        - a head whose verdict is UNCERTAIN_READ_SOURCE raises ReplayFailed naming its cause, whatever
-          shortlist it carries, since an uncertain read does not show the symbol absent
+        - a head that is uncertain for a gap cause (a failed call, a malformed answer, an unreadable key,
+          a stale index, a foreign tree, a missing tool) raises ReplayFailed naming the cause
+        - a head that is uncertain only for low confidence returns its shortlist, since that is a real
+          shortlist and its absence of the symbol is a finding
 
     Raises:
+        - UnrepairableReceipt when the receipt's route is not a page route, or has none
         - ReplayFailed in the cases above
     """
     if result[ "status" ] != "ok": raise ReplayFailed( f"replay error: {result[ 'error' ]}" )
+    route = result[ "stored" ].get( "route" )
+    if route not in PAGE_ROUTES:
+        raise UnrepairableReceipt( f"full-sweep receipt (route {route!r}) never reads the wiki, so a summary rewrite cannot repair it; only {', '.join( PAGE_ROUTES )} receipts can" )
     head = result[ "head" ]
     if head is None: raise ReplayFailed( "replay returned no HEAD run" )
-    if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE": raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
+    if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and head[ "cause" ] != "LOW_CONFIDENCE": raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
     return [ entry[ "id" ] for entry in head[ "shortlist" ] ]
 
 
@@ -115,12 +133,20 @@ def replayer_over( replay_tool ):
     Wrap a replay tool as the replay callable run_repair_check takes.
 
     Requires:
-        - replay_tool( receipt_id ) returns the replay tool's result dict
+        - replay_tool( receipt_id, repeat=n ) returns the replay tool's result dict, and answers repeat
+          n under its own cache key (lupin_mcp.reuse_tools.replay_impl does, from n = 1)
 
     Ensures:
-        - returns replay( receipt_id ) giving the HEAD shortlist ids, or raising ReplayFailed
+        - returns replay( receipt_id ) giving the HEAD shortlist ids, or raising as shortlist_ids does
+        - the k-th call passes repeat=k, counting from 1 and across before and after, so every replay is its own draw
+        - a replay tool without a repeat index would read one cached answer R times, so it must not be passed here
 
     Raises:
         - nothing
     """
-    return lambda receipt_id: shortlist_ids( replay_tool( receipt_id ) )
+    calls = [ 0 ]
+
+    def replay( receipt_id ):
+        calls[ 0 ] += 1
+        return shortlist_ids( replay_tool( receipt_id, repeat=calls[ 0 ] ) )
+    return replay
