@@ -1,7 +1,7 @@
 # Backup Script - Version Check
 
 **Project**: Lupin
-**Prefix**: [LUPIN]
+**Prefix**: `[LUPIN]`
 **Version**: 1.0
 
 ---

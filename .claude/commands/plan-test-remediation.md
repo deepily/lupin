@@ -1,6 +1,6 @@
 ---
 description: Run post-change verification for Lupin project
-allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit, Grep, Glob
+allowed-tools: Bash(.*), Read, Write, Edit, Grep, Glob
 arguments:
   - name: baseline_report
     description: Path to baseline report (auto-detects if not provided)
@@ -14,8 +14,9 @@ arguments:
 # Post-Change Remediation for Lupin
 
 **Purpose**: Verify code and tests after changes
-**Project**: Lupin (AI Agent Framework with CoSA submodule)
-**Note**: FULL scope recommended (code project benefits from active remediation)
+**Project**: Lupin (AI agent framework)
+**Note**: A full scope is recommended (a code project benefits from active remediation)
+
 **Version**: 1.0
 
 ---
@@ -23,7 +24,7 @@ arguments:
 ## Project Configuration
 
 **Identity**:
-- **Prefix**: [LUPIN]
+- **Prefix**: `[LUPIN]`
 - **Project Name**: Lupin
 - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
@@ -47,8 +48,8 @@ arguments:
 
 **On every invocation of this command:**
 
-1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+1. **Must use the following project-specific configuration**:
+   - **[SHORT_PROJECT_PREFIX]**: `[LUPIN]`
    - **Project Name**: Lupin
    - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Arguments**:
@@ -62,19 +63,19 @@ arguments:
      - Test Types: smoke, unit, integration, websocket
      - Logs Directory: src/tests/logs
      - Reports Directory: src/rnd/
-   - Do NOT proceed without these parameters
+   - Never proceed without these parameters
 
-2. **MUST read the canonical workflow document**:
+2. **Must read the canonical workflow document**:
    - Location: planning-is-prompting → workflow/testing-remediation.md
-   - This is the ONLY authoritative source for ALL remediation steps
-   - Do NOT proceed without reading this document in full
+   - This is the only authoritative source for all remediation steps
+   - Never proceed without reading this document in full
 
-3. **MUST execute the complete remediation workflow**:
-   - Execute ALL steps exactly as described in the canonical workflow document
-   - Do NOT skip any steps (including TodoWrite tracking, notifications, or comparison analysis)
-   - Do NOT substitute a shortened or summarized version
-   - Follow the workflow exactly as documented using the configuration parameters from Step 1
-   - For this code project, FULL scope is recommended (runs tests, identifies regressions, applies fixes in priority order)
+3. **Must execute the complete remediation workflow**:
+   - Execute all steps exactly as described in the canonical workflow document
+   - Never skip any steps (including notifications or comparison analysis)
+   - Never substitute a shortened or summarized version
+   - Follow the workflow exactly as documented using the configuration parameters from instruction 1
+   - For this code project, a full scope is recommended (runs tests, identifies regressions, applies fixes in priority order)
 
 ---
 

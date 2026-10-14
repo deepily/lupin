@@ -1,6 +1,6 @@
 ---
 description: Analyze code changes and plan test coverage updates for Lupin
-allowed-tools: Bash(.*), TodoWrite, Read, Write, Edit, Grep, Glob
+allowed-tools: Bash(.*), Read, Write, Edit, Grep, Glob
 arguments:
   - name: date_range
     description: Date range for git log analysis (auto-detects last 7 days if not provided)
@@ -10,7 +10,8 @@ arguments:
 # Test Harness Update for Lupin
 
 **Purpose**: Identify code changes and ensure test coverage is maintained
-**Project**: Lupin (AI Agent Framework with CoSA submodule)
+
+**Project**: Lupin (AI agent framework)
 **Note**: For code repo, test coverage means smoke, unit, and integration tests
 **Version**: 1.0
 
@@ -19,7 +20,7 @@ arguments:
 ## Project Configuration
 
 **Identity**:
-- **Prefix**: [LUPIN]
+- **Prefix**: `[LUPIN]`
 - **Project Name**: Lupin
 - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
@@ -62,7 +63,7 @@ arguments:
   test_location: "src/cosa/tests/unit/"
 ```
 
-`test_kinds` names the kinds of test a component needs. It is not the `test_types` argument of the scheduled test-suite door: unit tests run on the host (`pytest src/tests/unit/`), and the test container refuses a request that names `unit`.
+`test_kinds` names the kinds of test a component needs. It is not the `test_types` argument of the scheduled test-suite door. Unit tests run on the host (`pytest src/tests/unit/`), and the test container refuses a request that names `unit`.
 
 ---
 
@@ -70,8 +71,8 @@ arguments:
 
 **On every invocation of this command:**
 
-1. **MUST use the following project-specific configuration**:
-   - **[SHORT_PROJECT_PREFIX]**: [LUPIN]
+1. **Must use the following project-specific configuration**:
+   - **[SHORT_PROJECT_PREFIX]**: `[LUPIN]`
    - **Project Name**: Lupin
    - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Date Range**: ${1:-auto} (defaults to last 7 days)
@@ -82,19 +83,19 @@ arguments:
      - src/cosa/agents/: business_logic, non-critical (unit + smoke, tests at src/cosa/tests/unit/agents/)
      - src/lupin_app/: lupin_integration, critical (smoke only, tests at src/tests/unit/)
      - src/cosa/utils/: support, non-critical (unit only, tests at src/cosa/tests/unit/)
-   - Do NOT proceed without these parameters
+   - Never proceed without these parameters
 
-2. **MUST read the canonical workflow document**:
+2. **Must read the canonical workflow document**:
    - Location: planning-is-prompting → workflow/testing-harness-update.md
-   - This is the ONLY authoritative source for ALL test harness update steps
-   - Do NOT proceed without reading this document in full
+   - This is the only authoritative source for all test harness update steps
+   - Never proceed without reading this document in full
 
-3. **MUST execute the complete test harness update workflow**:
-   - Execute ALL steps exactly as described in the canonical workflow document
-   - Do NOT skip any steps (including TodoWrite tracking, notifications, or analysis)
-   - Do NOT substitute a shortened or summarized version
-   - Follow the workflow exactly as documented using the configuration parameters from Step 1
-   - For this code project, "test harness updates" means actual test file creation/modification (write new tests, update existing test suites, ensure coverage for changed components)
+3. **Must execute the complete test harness update workflow**:
+   - Execute all steps exactly as described in the canonical workflow document
+   - Never skip any steps (including notifications or analysis)
+   - Never substitute a shortened or summarized version
+   - Follow the workflow exactly as documented using the configuration parameters from instruction 1
+   - For this code project, "test harness updates" means actual test file work: write new tests, update existing suites, and ensure coverage for changed components
 
 ---
 
