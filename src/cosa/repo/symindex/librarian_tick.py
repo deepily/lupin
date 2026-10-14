@@ -233,12 +233,12 @@ class LiveStore:
         return True, 200, { "tasks": list( seen.values() ) }
 
     def query( self, correlation_key ):
-        """Return ( ok, status, body ) for open and held rows; the default read hides held ones."""
-        return self._merged( correlation_key, ( {}, { "status": "not_approved" } ) )
+        """Return ( ok, status, body ) for open, parked and held rows."""
+        return self._merged( correlation_key, ( { "include_parked": "true" }, { "status": "not_approved" } ) )
 
     def query_all( self, correlation_key ):
         """Return ( ok, status, body ) for every row, done and dropped included."""
-        return self._merged( correlation_key, ( { "include_terminal": "true" }, { "status": "not_approved" } ) )
+        return self._merged( correlation_key, ( { "include_terminal": "true", "include_parked": "true" }, { "status": "not_approved" } ) )
 
     def create( self, payload ):
         """Return ( ok, status, body ) for one create; the actor is stamped here."""
