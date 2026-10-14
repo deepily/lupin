@@ -94,6 +94,7 @@ export interface SchedulingInput {
   monopolize?  : boolean;
 }
 
+/** The values the CC card submits: prompt, project, task type, dry-run flag and scheduling. */
 export interface CcSubmitInput {
   prompt     : string;
   project    : string;
@@ -102,6 +103,7 @@ export interface CcSubmitInput {
   scheduling : SchedulingInput;
 }
 
+/** The values the research card submits: topic, budget, outputs, dry run and scheduling. */
 export interface ResearchSubmitInput {
   topic            : string;
   budget           : string;
@@ -111,6 +113,7 @@ export interface ResearchSubmitInput {
   scheduling       : SchedulingInput;
 }
 
+/** The values the test suite card submits: types, file path, flags, arguments and scheduling. */
 export interface TestSuiteSubmitInput {
   testTypes  : string;
   filePath   : string;
@@ -131,12 +134,15 @@ export interface CardStatus {
   color : string;
 }
 
+/** The four submit cards: `cc`, `research`, `testSuite` and `tfe`. */
 export type CardKey = "cc" | "research" | "testSuite" | "tfe";
 
+/** The slice of the API client the store needs: a `post` that takes optional headers. */
 export interface SubmitJobsApiClient {
   post<T>( path: string, body: unknown, opts?: { headers?: Readonly<Record<string, string>> } ): Promise<T>;
 }
 
+/** The status line, busy flag and submit call of each of the four job cards. */
 export interface SubmitJobsStore {
   /** A card's status line. Empty text until something is submitted (B10). */
   status( card: CardKey ): CardStatus;
@@ -159,6 +165,7 @@ export interface SubmitJobsStore {
   submitTfeResume( resumeFrom: string ): Promise<boolean>;
 }
 
+/** Options for `createSubmitJobsStore`: the bus, the API client, the session id and a hook. */
 export interface SubmitJobsStoreOptions {
   bus       : EventBus;
   api       : SubmitJobsApiClient;
@@ -202,7 +209,9 @@ export const RESEARCH_BUDGET_DEFAULT = 3.0;
  * reading it would be a bug rather than a behaviour.
  */
 export const RESEARCH_COMMAND_PLAIN        = "agent router go to deep research";
+/** The router command that runs research and then makes a podcast. */
 export const RESEARCH_COMMAND_PODCAST      = "agent router go to research to podcast";
+/** The router command that runs research and then makes a presentation. */
 export const RESEARCH_COMMAND_PRESENTATION = "agent router go to research to presentation";
 
 class SubmitJobsStoreImpl implements SubmitJobsStore {
@@ -514,6 +523,7 @@ function errorText( e: unknown ): string {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a submit-jobs store from its options. */
 export function createSubmitJobsStore( opts: SubmitJobsStoreOptions ): SubmitJobsStore {
   return new SubmitJobsStoreImpl( opts );
 }

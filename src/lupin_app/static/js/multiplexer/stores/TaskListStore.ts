@@ -60,40 +60,26 @@ function awaitingApproval( body: unknown ): boolean {
     && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
 }
 
-// Narrowed ApiClient surface. The production ApiClient.get throws ApiError
-// (carrying `.status`) on non-2xx; refresh() maps that to the display-only
-// sentinels rather than letting it propagate. Phase 2 widens this to the WRITE
-// verbs the editing controls ride: PATCH (priority / owner reassignment) and
-// POST (drop-with-reason via the transition endpoint). The production ApiClient
-// satisfies all three structurally; the read-only fleet/get callers are
-// unaffected (they only ever touch `.get`).
+/** The slice of the API client the store needs: `get`, `patch` and `post`. */
 export interface TaskListApiClient {
   get<T>( path: string ): Promise<T>;
   patch<T>( path: string, body: unknown ): Promise<T>;
   post<T>( path: string, body: unknown ): Promise<T>;
 }
 
-// The descriptive fields the PATCH endpoint accepts from the card (D2/D3 scope):
-// priority (P0–P5) and owner_persona (reassignment; null clears the owner).
-// Title/body/accountable_manager/gate_class are PATCH-able server-side but out
-// of the per-row editing scope, so they are not surfaced here.
+/** The fields a card may change on a task: the priority and the owner persona. */
 export interface TaskPatchFields {
   priority?      : string;
   owner_persona? : string | null;
 }
 
-// The optimistic-mutation handle returned by patchTask/transitionTask — mirrors the
-// `{ restoreState }` rollback contract of JobStore.delete, plus a `done` promise
-// the renderer awaits to drive the JobsPaneRenderer-style success / 404-as-
-// success / rollback-on-error flow. `done` resolves on a 2xx and rejects with
-// the ApiError the production ApiClient throws on non-2xx.
+/** The handle of an optimistic task change: a rollback and a promise of the server answer. */
 export interface TaskMutation {
   restoreState : () => void;
   done         : Promise<TransitionOutcome | void>;
 }
 
-// What a transition's `done` resolves with when the row was ALREADY at the target (row 71a11ed7):
-// success, but not this click's doing. Anything else resolves with nothing.
+/** What a transition resolves with when the task was already at the target status. */
 export interface TransitionOutcome {
   alreadyAt? : string;
 }
@@ -112,9 +98,12 @@ export interface TransitionOutcome {
 // since ordering is newest-first, the evicted rows were OPEN ones this card
 // exists to show. Re-exported under the historical name so importers are
 // unaffected.
+/** The server path that lists the fleet's tasks, newest first. */
 export const TASK_LIST_ENDPOINT         = TASK_LIST_QUERY;
+/** How often the store polls the task list, in milliseconds. */
 export const TASK_LIST_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (fleet parity)
 
+/** The fleet's task list as one composite, with the reads and the verbs that change a task. */
 export interface TaskListStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): TaskListComposite | null;
@@ -172,6 +161,7 @@ export interface TaskListStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createTaskListStore`: the bus, the API client, an actor provider and timer hooks. */
 export interface TaskListStoreOptions {
   bus             : EventBus;
   api             : TaskListApiClient;
@@ -402,6 +392,7 @@ function NOOP_MUTATION(): TaskMutation {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a task list store from its options. */
 export function createTaskListStore( opts: TaskListStoreOptions ): TaskListStore {
   return new TaskListStoreImpl( opts );
 }

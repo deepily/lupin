@@ -88,7 +88,9 @@ import type {
 // `StorageService.keys()` never sees them. It is a separate key from
 // `lupin:operatorState` (A-1c2), whose whole payload is Action Required prompts.
 // ---------------------------------------------------------------------------
+/** The key the speech queue is saved under in the storage service. */
 export const TTS_STORAGE_KEY    = "ttsQueue";
+/** The schema version of the saved speech queue. */
 export const TTS_STORAGE_SCHEMA = 1;
 
 interface PersistedTtsQueue {
@@ -101,6 +103,7 @@ interface PersistedTtsQueue {
 // Public interface
 // ---------------------------------------------------------------------------
 
+/** The queue of notifications waiting to be spoken, and the one being spoken now. */
 export interface TtsQueueStore {
   /**
    * F0-a active id — the `id_hash` of the notification whose TTS is currently
@@ -162,6 +165,7 @@ export interface TtsQueueStore {
 // would create a second place the slider's default lives without adding meaning.
 const UNGATED_FRACTION = 1;
 
+/** Options for `createTtsQueueStore`: the bus, the storage, focus and preview fraction hooks. */
 export interface TtsQueueStoreOptions {
   bus    : EventBus;
   nowFn ?: () => number;
@@ -607,6 +611,7 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a speech queue store from its options. */
 export function createTtsQueueStore(opts: TtsQueueStoreOptions): TtsQueueStore {
   return new TtsQueueStoreImpl(opts);
 }

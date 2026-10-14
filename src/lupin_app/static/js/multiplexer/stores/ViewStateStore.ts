@@ -40,6 +40,7 @@ type FlagMap = Record<string, boolean>;
 interface SectionVisibilityEnvelope { sections: FlagMap }
 interface AccordionCollapsedEnvelope { accordions: FlagMap }
 
+/** The saved view state: which sections are hidden and which accordions are collapsed. */
 export interface ViewStateStore {
   /** True unless the section was explicitly hidden. Default: visible. */
   isSectionVisible(sectionId: string): boolean;
@@ -71,6 +72,7 @@ export interface ViewStateStore {
   requestBulkAccordionCollapse(collapsed: boolean): void;
 }
 
+/** Options for `createViewStateStore`: the bus and the storage service. */
 export interface ViewStateStoreOptions {
   bus     : EventBus;
   storage : StorageService;

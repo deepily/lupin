@@ -23,6 +23,7 @@ import {
   requestFiledDetail,
 } from "../../shared/task-request.js";
 
+/** The slice of the API client the store needs: `get` and `post`. */
 export interface TaskRequestApiClient {
   get<T>( path: string ): Promise<T>;
   post<T>( path: string, body: unknown ): Promise<T>;
@@ -45,8 +46,10 @@ export type RequestFiledDetail = { filer: string; reason: string } | null;
  */
 export type RequestVerdictResult = { ok: true; stale: boolean } | { ok: false; message: string };
 
+/** How often the store polls the request badge counts, in milliseconds. */
 export const TASK_REQUEST_POLL_INTERVAL_MS = 60000;   // the boards' cadence
 
+/** The badge counts of task requests, with the reads, the polling and the verdict post. */
 export interface TaskRequestStore {
   /** The last badge counts, or null before the first poll or after a failed one. */
   counts(): RequestBadgeCounts;
@@ -86,6 +89,7 @@ export interface TaskRequestStore {
   disposeForTesting(): void;
 }
 
+/** Options for `createTaskRequestStore`: the bus, the API client, a hook and timer hooks. */
 export interface TaskRequestStoreOptions {
   bus              : EventBus;
   api              : TaskRequestApiClient;
@@ -226,6 +230,7 @@ class TaskRequestStoreImpl implements TaskRequestStore {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/** Build a task request store from its options. */
 export function createTaskRequestStore( opts: TaskRequestStoreOptions ): TaskRequestStore {
   return new TaskRequestStoreImpl( opts );
 }

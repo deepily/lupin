@@ -169,7 +169,7 @@
     "src/lupin_app/static/js/multiplexer/stores/SessionTranscriptStore.ts": 43,
     "src/lupin_app/static/js/multiplexer/stores/StripReconnectRehydrator.ts": 12,
     "src/lupin_app/static/js/multiplexer/stores/SubmitJobsStore.ts": 110,
-    "src/lupin_app/static/js/multiplexer/stores/TaskListStore.ts": 116,
+    "src/lupin_app/static/js/multiplexer/stores/TaskListStore.ts": 115,
     "src/lupin_app/static/js/multiplexer/stores/TaskRequestStore.ts": 88,
     "src/lupin_app/static/js/multiplexer/stores/TtsQueueStore.ts": 113,
     "src/lupin_app/static/js/multiplexer/stores/ViewStateStore.ts": 14,
