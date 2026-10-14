@@ -126,7 +126,7 @@ export interface BounceResult {
 /**
  * The authenticated JSON client the stores call.
  *
- * Each request adds the bearer token and a timeout. A 401 marks the token expired and throws `ApiError`.
+ * Each request adds a timeout, and the bearer token unless the call sets `noAuth`. A 401 marks the token expired and throws `ApiError`.
  * A 204 resolves to null, a JSON answer is parsed, and anything else comes back as text.
  */
 export interface ApiClient {
