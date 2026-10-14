@@ -43,8 +43,11 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
-// Narrowed NotificationStore surface this renderer consumes (the production
-// NotificationStore satisfies it structurally).
+/**
+ * The slice of the notification store the header uses.
+ *
+ * It is the lists, the visible entries, removal by id, and the history window and filter mode.
+ */
 export interface NotificationsHeaderStoreLike {
   list(): ReadonlyArray<Notification>;
   history(): ReadonlyArray<Notification>;
@@ -58,9 +61,7 @@ export interface NotificationsHeaderStoreLike {
   setFilterMode(mode: NotificationFilterMode): void;
 }
 
-// Narrowed api surface — the generic delete<T> (clear-all) plus the managed
-// bounce (row 1b4211ac R2). Production passes the canonical ApiClient, which
-// satisfies both structurally.
+/** The API calls the header needs: `delete` and the managed dev-server bounce. */
 export interface NotificationDeleteApiLike {
   delete<T>(path: string): Promise<T>;
   // Managed dev-server bounce. On 202 the host-side watcher was handed the job;
@@ -68,13 +69,17 @@ export interface NotificationDeleteApiLike {
   bounceDevServer(): Promise<{ status: string; detail?: string; timestamp: string }>;
 }
 
-// Narrowed sys_time_update payload (server clock loop, main.py:265 →
-// {date, env_label}). Both fields optional — the renderer degrades to empty.
+/** The `sys_time_update` payload: a date and an environment label, both optional. */
 export interface SysTimeUpdatePayload {
   date?      : string;
   env_label? : string;
 }
 
+/**
+ * Options for `createNotificationsHeaderRenderer`.
+ *
+ * The bus, the store and the API are required. The confirm hook, admin check, reveal hook and bounce timers are optional.
+ */
 export interface NotificationsHeaderRendererOptions {
   eventBus  : EventBus;
   store     : NotificationsHeaderStoreLike;
@@ -104,6 +109,11 @@ export interface NotificationsHeaderRendererOptions {
   pokeMuteSwitch? : PokeMuteSwitchHandle;
 }
 
+/**
+ * The notifications section header controls.
+ *
+ * They are the count, the history dropdown and window picker, clear-all and the admin filter switch.
+ */
 export interface NotificationsHeaderRenderer {
   mount(root: HTMLElement): void;
   unmount(): void;
@@ -122,8 +132,7 @@ function clearConfirmMessage( count: number, windowLabel: string ): string {
   return `Clear all ${count} notification${count !== 1 ? "s" : ""} (${windowLabel})? This cannot be undone.`;
 }
 
-// Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
-// Exported for the jobs pane (row 83c3ff74): legacy's single control has one set of labels.
+/** The three filter modes with their icons and labels, in switch order. */
 export const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
   { mode: "own",    icon: "👤", label: "Mine" },
   { mode: "others", icon: "🚫", label: "Not Mine" },
@@ -608,6 +617,11 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the factory declaration line.
+/**
+ * Build the renderer.
+ *
+ * It throws when `store` is missing, and paints nothing until `mount()` is called.
+ */
 export function createNotificationsHeaderRenderer(
   opts: NotificationsHeaderRendererOptions,
 ): NotificationsHeaderRenderer {

@@ -18,15 +18,22 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreMissedChangedPayload } from "../shared/types";
 import { renderMissedBadge } from "./templates/missedBadge";
 
+/** The slice of the missed store the renderer uses: the count and the reset. */
 export interface MissedStoreLike {
   count(): number;
   reset(): Promise<number>;
 }
 
+/** The stores the missed badge reads: only the missed store. */
 export interface MissedBadgeRendererStores {
   missed : MissedStoreLike;
 }
 
+/**
+ * The "missed while away" badge and its Reset button.
+ *
+ * Both are shown only while the count is above zero.
+ */
 export interface MissedBadgeRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -36,6 +43,7 @@ export interface MissedBadgeRenderer {
   forceRenderForTesting(): void;
 }
 
+/** Options for `createMissedBadgeRenderer`: the bus and the stores. */
 export interface MissedBadgeRendererOptions {
   eventBus : EventBus;
   stores   : MissedBadgeRendererStores;
@@ -108,6 +116,11 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createMissedBadgeRenderer(
   opts: MissedBadgeRendererOptions,
 ): MissedBadgeRenderer {

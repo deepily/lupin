@@ -27,8 +27,11 @@ import type { EventBus } from "../shared/EventBus";
 import type { AuthStateChangePayload } from "../shared/types";
 import { renderNavBar } from "./templates/navBar";
 
-// Narrow auth surface the nav needs. boot.ts supplies the production adapter;
-// tests inject a fake.
+/**
+ * The narrow auth surface the nav bar needs.
+ *
+ * It is whether a token is present, the user's email and logout. Boot supplies the adapter and tests supply a fake.
+ */
 export interface NavAuthPort {
   /** True when a persisted access token is present (legacy presence-semantics). */
   isAuthenticated(): boolean;
@@ -38,6 +41,11 @@ export interface NavAuthPort {
   logout(): void;
 }
 
+/**
+ * Options for `createNavBarRenderer`.
+ *
+ * All three are required: the bus, the auth port and a getter for the active path.
+ */
 export interface NavBarRendererOptions {
   eventBus      : EventBus;
   auth          : NavAuthPort;
@@ -45,6 +53,11 @@ export interface NavBarRendererOptions {
   getActivePath : () => string;
 }
 
+/**
+ * The top nav bar, painted from the auth port and painted again on `auth_state_change`.
+ *
+ * `mount` throws on a second call without an `unmount`.
+ */
 export interface NavBarRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -118,6 +131,11 @@ class NavBarRendererImpl implements NavBarRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createNavBarRenderer( opts: NavBarRendererOptions ): NavBarRenderer {
   return new NavBarRendererImpl( opts );
 }

@@ -59,6 +59,11 @@ import {
 // Public interfaces
 // ---------------------------------------------------------------------------
 
+/**
+ * The jobs pane: the job buckets and the history bucket.
+ *
+ * `mount` throws on a second call and when `#jobs-buckets-container` is missing.
+ */
 export interface JobsPaneRenderer {
   /**
    * Attach to a root DOM node. Per Pass 2 F26: throws Error
@@ -72,6 +77,7 @@ export interface JobsPaneRenderer {
   forceRenderForTesting(): void;
 }
 
+/** The stores the jobs pane reads: only the job store. */
 export interface JobsPaneRendererStores {
   jobs : JobStore;
 }
@@ -98,6 +104,11 @@ export interface JobsPaneApiClient extends JobHistoryApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
 }
 
+/**
+ * Options for `createJobsPaneRenderer`.
+ *
+ * The bus, the stores and the API client are required. The timezone, websocket id, filter and user hooks are optional.
+ */
 export interface JobsPaneRendererOptions {
   eventBus     : EventBus;
   stores       : JobsPaneRendererStores;

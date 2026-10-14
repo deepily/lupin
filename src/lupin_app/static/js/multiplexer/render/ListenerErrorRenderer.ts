@@ -50,6 +50,11 @@ import { renderListenerErrorBadge } from "./templates/listenerErrorBadge";
  *  tees to `console.error` AND the debug panel. */
 export type ListenerErrorSink = ( message: string, ...args: unknown[] ) => void;
 
+/**
+ * A badge that counts errors thrown by event listeners and reports each to a sink.
+ *
+ * The count is the number since the last dismiss.
+ */
 export interface ListenerErrorRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -59,6 +64,11 @@ export interface ListenerErrorRenderer {
   countForTesting(): number;
 }
 
+/**
+ * Options for `createListenerErrorRenderer`.
+ *
+ * The bus is required. The sink defaults to the debug error writer.
+ */
 export interface ListenerErrorRendererOptions {
   eventBus : EventBus;
   /** Defaults to debugSink.error. */
@@ -160,6 +170,11 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It listens for nothing until `mount()` is called.
+ */
 export function createListenerErrorRenderer(
   opts: ListenerErrorRendererOptions,
 ): ListenerErrorRenderer {

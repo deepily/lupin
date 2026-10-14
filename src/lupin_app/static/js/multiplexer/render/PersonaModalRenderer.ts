@@ -49,12 +49,22 @@ interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
 }
 
+/**
+ * The persona popovers, one per sender that has a voice persona.
+ *
+ * They live in `#persona-modal-portal`. `mount` throws when that element is missing.
+ */
 export interface PersonaModalRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createPersonaModalRenderer`.
+ *
+ * The bus and the sender store are required.
+ */
 export interface PersonaModalRendererOptions {
   eventBus : EventBus;
   stores   : { senders: SenderStoreLike };

@@ -45,6 +45,11 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 
+/**
+ * The slice of the fleet store the renderer uses.
+ *
+ * It is the composite, the offline flag, refresh, and the size cap and skeleton crew reads and writes.
+ */
 export interface FleetStoreLike {
   composite(): FleetComposite | null;
   showOfflineFlag(): boolean;
@@ -57,16 +62,27 @@ export interface FleetStoreLike {
   setSkeletonCrew( on: boolean ): Promise<void>;
 }
 
+/** The stores the fleet pane reads: only the fleet store. */
 export interface FleetStatusRendererStores {
   fleet : FleetStoreLike;
 }
 
+/**
+ * The Fleet Status pane: fleet table, live count, updated stamp and cap dial.
+ *
+ * It repaints on each fleet store change.
+ */
 export interface FleetStatusRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createFleetStatusRenderer`.
+ *
+ * The bus and the stores are required. The clock for the updated stamp is for tests.
+ */
 export interface FleetStatusRendererOptions {
   eventBus   : EventBus;
   stores     : FleetStatusRendererStores;
@@ -445,6 +461,11 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createFleetStatusRenderer( opts: FleetStatusRendererOptions ): FleetStatusRenderer {
   return new FleetStatusRendererImpl( opts );
 }

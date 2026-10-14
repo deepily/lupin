@@ -103,6 +103,11 @@ export interface HoldingAreaSentinels {
 // the dynamic `SENTINELS[ status ]` lookup needs; the named fields are what the
 // direct reads need. Caught by `tsc -p`, NOT by the suite: the tests run under
 // tsx, which strips types rather than checking them.
+/**
+ * The messages the pane shows for each task-list state that is not a list of rows.
+ *
+ * The keys are `auth_required`, `query_unavailable` and `unreachable`.
+ */
 export const HOLDING_AREA_SENTINELS: HoldingAreaSentinels = Object.freeze( {
   auth_required     : "Sign-in required to read the holding area.",
   query_unavailable : "The shared query module did not load — this is a deploy defect, not an outage.",
@@ -115,6 +120,11 @@ export const HOLDING_AREA_EMPTY_MESSAGE = "Nothing waiting on triage.";
 /** What the count chip reads while a sentinel is showing — a count is not known. */
 export const HOLDING_AREA_COUNT_UNKNOWN = "—";
 
+/**
+ * The slice of the holding area store the renderer uses.
+ *
+ * It is the composite, the two reads and the row write verbs, which resolve to a result and never reject.
+ */
 export interface HoldingAreaStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
@@ -139,12 +149,22 @@ export interface HoldingAreaStoreLike {
   patchTask( id: string, fields: TaskPatchFields ): Promise<{ ok: boolean; message?: string }>;
 }
 
+/**
+ * The Holding Area pane: grouped held rows under a header with a count chip.
+ *
+ * It shows a message for every state, so the pane is never silently blank.
+ */
 export interface HoldingAreaRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createHoldingAreaRenderer`.
+ *
+ * The bus and the store are required. The request store and flow ratio store are passed by boot and omitted only in tests.
+ */
 export interface HoldingAreaRendererOptions {
   eventBus   : EventBus;
   store      : HoldingAreaStoreLike;
@@ -1034,6 +1054,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — c8 reports ONE location for this "branch" (240:16-43, the identifier itself) where a real conditional carries two, and the factory is called by every test in the suite.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createHoldingAreaRenderer( opts: HoldingAreaRendererOptions ): HoldingAreaRenderer {
   return new HoldingAreaRendererImpl( opts );
 }

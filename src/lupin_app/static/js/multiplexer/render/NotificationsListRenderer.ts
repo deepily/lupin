@@ -121,6 +121,11 @@ interface SenderCardApiLike {
   delete<T>(path: string): Promise<T>;
 }
 
+/**
+ * The stores the list renders from.
+ *
+ * The notification and sender stores are required. The prediction vote, view state, speech queue and audio stores are optional, and boot wires them.
+ */
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
   senders        : SenderStoreLike;
@@ -139,6 +144,11 @@ export interface NotificationsListRendererStores {
   audio?         : AudioControlsLike;
 }
 
+/**
+ * The notifications list: one card per sender, with an empty state.
+ *
+ * It does not draw action-required cards. The action-required renderer owns those.
+ */
 export interface NotificationsListRenderer {
   /** Attach to a root DOM node. Throws if expected mount points are missing. */
   mount(root: HTMLElement): void;
@@ -163,6 +173,11 @@ export interface NotificationsListRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Options for `createNotificationsListRenderer`.
+ *
+ * The bus and the stores are required. The timezone, sort comparator, API and confirm, clipboard and failure hooks are optional.
+ */
 export interface NotificationsListRendererOptions {
   eventBus              : EventBus;
   stores                : NotificationsListRendererStores;

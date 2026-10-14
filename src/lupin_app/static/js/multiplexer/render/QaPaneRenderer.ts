@@ -48,16 +48,23 @@ export interface QaTtsModeWriter {
   setTtsMode( mode: TtsMode ): void;
 }
 
+/** The stores the Q&A pane uses: the question store and a speech mode writer. */
 export interface QaPaneRendererStores {
   qa    : QaStore;
   audio : QaTtsModeWriter;
 }
 
+/** The Q&A Interface pane: agent select, input, mic, submit, metrics and response. */
 export interface QaPaneRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
 }
 
+/**
+ * Options for `createQaPaneRenderer`.
+ *
+ * The bus and the stores are required. Without a mic handler the mic button does nothing.
+ */
 export interface QaPaneRendererOptions {
   eventBus : EventBus;
   stores   : QaPaneRendererStores;
@@ -290,6 +297,11 @@ class QaPaneRendererImpl implements QaPaneRenderer {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Build the renderer.
+ *
+ * It paints nothing until `mount()` is called.
+ */
 export function createQaPaneRenderer( opts: QaPaneRendererOptions ): QaPaneRenderer {
   return new QaPaneRendererImpl( opts );
 }
