@@ -80,6 +80,8 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
         - returns ( findings, warnings ); findings carry the rule as ruff:<code>
         - a missing ruff yields one warning and no findings
         - an exit status other than 0 or 1 yields one Unchecked warning carrying ruff's stderr, and no findings
+        - unless ruff also fails on a blank file, which is a version or configuration skew that fails every commit alike:
+          that yields one plain warning, no refusal, and the line says how to fix it
         - a file name follows the option's equals sign or a -- separator, so one that starts with a dash is read as a name
         - with sources, each run checks one file, and its findings carry the path that was asked for, not the name ruff printed
         - so a file name that is not UTF-8, which ruff prints with a replacement character, keeps its findings
@@ -97,15 +99,37 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
     jobs     = [ ( p, [ f"--stdin-filename={p}", "-" ], sources[ p ] ) for p in paths ] if sources is not None else [ ( None, [ "--", *listed ], None ) ] if listed else []
     findings = []
     for asked, extra, stdin in jobs:
-        kwargs = {} if stdin is None else { "input": stdin }
-        res = runner( [ tool, "check", "--config", os.path.join( root, "pyproject.toml" ), "--output-format", "json", "--no-cache", *extra ],
-                      capture_output=True, text=True, encoding="utf-8", cwd=root, **kwargs )
-        if res.returncode not in ( 0, 1 ): return [], [ Unchecked( f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ) ]
+        res = _ruff_check( runner, tool, root, extra, stdin )
+        if res.returncode not in ( 0, 1 ):
+            blank = _ruff_check( runner, tool, root, [ "--stdin-filename=probe.py", "-" ], "" )
+            why   = res.stderr.strip()[ :200 ]
+            if blank.returncode not in ( 0, 1 ):
+                return [], [ f"[doc-lint] WARNING: ruff cannot run here (exit {res.returncode}), so no file was checked by it: {why}; fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" ]
+            return [], [ Unchecked( f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {why}" ) ]
         for item in json.loads( res.stdout or "[]" ):
             rel = asked if asked is not None else os.path.relpath( os.path.join( root, item[ "filename" ] ), root )
             if rel not in paths: warnings.append( f"[doc-lint] WARNING: ruff placed a finding in {shown( rel )}, a file it was not asked about, so that finding is NOT attached to any staged file" )
             findings.append( Finding( rel, item[ "location" ][ "row" ], f"ruff:{item[ 'code' ]}", item[ "message" ] ) )
     return findings, warnings
+
+
+def _ruff_check( runner, tool, root, extra, stdin ):
+    """
+    Run ruff check once with the pinned config.
+
+    Requires:
+        - runner has the signature of subprocess.run; tool is ruff's path; extra are its trailing arguments
+        - stdin is the text to feed it, or None when the arguments name the files
+
+    Ensures:
+        - returns the finished process; its exit status is the caller's to read
+
+    Raises:
+        - OSError when the process cannot be started
+    """
+    kwargs = {} if stdin is None else { "input": stdin }
+    return runner( [ tool, "check", "--config", os.path.join( root, "pyproject.toml" ), "--output-format", "json", "--no-cache", *extra ],
+                   capture_output=True, text=True, encoding="utf-8", cwd=root, **kwargs )
 
 
 def unnamed_warning( tool, path ):

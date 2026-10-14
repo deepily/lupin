@@ -102,7 +102,19 @@ def test_run_ruff_warns_loudly_when_missing_and_when_ruff_itself_fails( no_tools
     assert tr.run_ruff( str( no_tools ), [] ) == ( [], [] )                       # nothing to check, nothing to warn about
     monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
     findings, warnings = tr.run_ruff( "/r", [ "a.py" ], _fake( 2, "", "bad config" ) )
-    assert findings == [] and "ruff failed (exit 2), SKIPPED: bad config" in warnings[ 0 ]
+    assert findings == [] and "ruff cannot run here (exit 2), so no file was checked by it: bad config" in warnings[ 0 ]
+    assert not isinstance( warnings[ 0 ], tr.Unchecked )                                  # a tool that fails on a blank file fails on every commit, so it is not a refusal
+
+
+def test_run_ruff_refuses_only_the_input_it_failed_on_when_it_checks_a_blank_file_fine( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    calls = []
+    def run( cmd, **kwargs ):
+        calls.append( kwargs.get( "input" ) )
+        return SimpleNamespace( returncode=2 if kwargs.get( "input" ) == "BOOM" else 0, stdout="[]", stderr="crashed on this file" )
+    findings, warnings = tr.run_ruff( "/r", [ "a.py" ], run, sources={ "a.py": "BOOM" } )
+    assert findings == [] and isinstance( warnings[ 0 ], tr.Unchecked ) and "ruff failed (exit 2), SKIPPED: crashed on this file" in warnings[ 0 ]
+    assert calls == [ "BOOM", "" ]                                                         # the blank probe came after the failure and not before it
 
 
 def test_real_ruff_output_parses_when_ruff_is_installed( tmp_path ):
@@ -122,7 +134,7 @@ def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatc
     assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/b.py", 4 ) ]         # the path asked for, not the name ruff printed
     assert [ ( c[ 0 ][ -2: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename=src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename=src/b.py", "-" ], "B TEXT" ) ]
     failing = tr.run_ruff( "/r", [ "src/a.py" ], _fake( 2, "", "boom" ), sources={ "src/a.py": "x" } )
-    assert failing[ 0 ] == [] and "SKIPPED: boom" in failing[ 1 ][ 0 ]
+    assert failing[ 0 ] == [] and "so no file was checked by it: boom" in failing[ 1 ][ 0 ]
 
 
 def test_real_ruff_reads_the_staged_text_not_the_disk_copy_when_installed( repo ):

@@ -730,13 +730,16 @@ def test_the_real_extractor_counts_a_staged_file_whose_name_starts_with_two_dash
     assert rc == gate.REFUSAL_EXIT and _over( lines ) == [ "[doc-lint] REFUSED --x.ts" ] and f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines
 
 
-@pytest.mark.parametrize( "tool,var,rel,text", [
-    ( "ruff",              "LUPIN_RUFF",         "src/lupin_mcp/a.py", "x = 1\n" ),
-    ( "markdownlint-cli2", "LUPIN_MARKDOWNLINT", "docs/a.md",          "A clean page.\n" ),
+FAILS = "echo 'unexpected argument' >&2\nexit 2\n"
+
+
+@pytest.mark.parametrize( "tool,var,rel,text,body", [
+    ( "ruff",              "LUPIN_RUFF",         "src/lupin_mcp/a.py", "x = 1\n",       f"if grep -q .; then {FAILS.replace( chr( 10 ), '; ' )}fi\necho '[]'\n" ),
+    ( "markdownlint-cli2", "LUPIN_MARKDOWNLINT", "docs/a.md",          "A clean page.\n", FAILS ),
 ] )
-def test_a_tool_that_fails_on_the_files_it_was_given_refuses_the_commit_in_blocking_mode( repo, monkeypatch, tmp_path, tool, var, rel, text ):
+def test_a_tool_that_fails_on_the_files_it_was_given_refuses_the_commit_in_blocking_mode( repo, monkeypatch, tmp_path, tool, var, rel, text, body ):
     stub = tmp_path / tool
-    stub.write_text( "#!/bin/sh\necho 'unexpected argument' >&2\nexit 2\n", encoding="utf-8" )
+    stub.write_text( "#!/bin/sh\n" + body, encoding="utf-8" )
     os.chmod( stub, 0o755 )
     monkeypatch.setenv( var, str( stub ) )
     _stage( repo, { rel: text } )
@@ -747,3 +750,31 @@ def test_a_tool_that_fails_on_the_files_it_was_given_refuses_the_commit_in_block
     err = io.StringIO()
     assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0                                    # warn mode says so and lets the commit through
     assert f"[doc-lint] WARNING: {said}" in err.getvalue().split( "\n" ) and "REFUSED" not in err.getvalue()
+
+
+# ---- a ruff that cannot run at all, against a ruff that fails on one file ---------------------------
+
+def _stub_ruff( tmp_path, monkeypatch, body ):
+    stub = tmp_path / "stub-tools" / "ruff"
+    stub.parent.mkdir()
+    stub.write_text( "#!/bin/sh\n" + body, encoding="utf-8" )
+    stub.chmod( 0o755 )
+    monkeypatch.setenv( "LUPIN_RUFF", str( stub ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [], [] ) )
+    monkeypatch.setattr( gate, "markdownlint_unnamed", lambda root, paths: [] )
+
+
+def test_a_ruff_that_cannot_run_at_all_lets_the_commit_through_with_one_loud_line( repo, monkeypatch, tmp_path ):
+    _stub_ruff( tmp_path, monkeypatch, 'echo "unknown field in pyproject.toml" >&2\nexit 2\n' )
+    _stage( repo, { "src/lupin_mcp/plain.py": "x = 1\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not _refused( lines )
+    assert [ ln for ln in lines if "ruff cannot run here" in ln ] == [ "[doc-lint] WARNING: ruff cannot run here (exit 2), so no file was checked by it: unknown field in pyproject.toml; "
+                                                                       "fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" ]
+
+
+def test_a_ruff_that_fails_on_one_staged_text_still_refuses_the_commit( repo, monkeypatch, tmp_path ):
+    _stub_ruff( tmp_path, monkeypatch, 'if grep -q BOOM; then echo crashed >&2; exit 2; fi\necho "[]"\nexit 0\n' )
+    _stage( repo, { "src/lupin_mcp/plain.py": "# BOOM\nx = 1\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and any( "ruff failed (exit 2), SKIPPED: crashed" in ln for ln in lines )

@@ -58,7 +58,7 @@ EXPECTED = {
     "md_lint.sibling_paths:os.listdir#0"                  : ( CRASH, CRASH ),
     "tool_runners.run_dart_analyze:runner#0"              : OFF,
     "tool_runners.run_markdownlint:runner#0"              : ( CRASH, CRASH ),
-    "tool_runners.run_ruff:runner#0"                      : ( CRASH, CRASH ),
+    "tool_runners._ruff_check:runner#0"                   : ( CRASH, CRASH ),
     "ts_counts._disk_text:open#0"                         : OFF,
     "ts_counts.extract:open#0"                            : ( CRASH, CRASH ),
     "ts_counts.main:open#0"                               : OFF,
