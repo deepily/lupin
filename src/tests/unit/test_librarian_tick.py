@@ -521,5 +521,6 @@ def test_an_unreadable_configuration_file_is_logged_as_a_read_failure_not_as_a_f
     assert code == lt.EXIT_DISABLED
     log = ( tmp_path / "data" / "repo" / "reuse-review" / "librarian" / lt.LOG_NAME ).read_text()
     assert "could not read" in log and "permission denied" in log and "is not true" not in log
+    def denied_key( key ): raise OSError( "permission denied" )
     errors = []
-    assert lt.read_enabled( reader=denied, errors=errors ) is False and errors == [ "permission denied" ]
+    assert lt.read_enabled( reader=denied_key, errors=errors ) is False and errors == [ "permission denied" ]
