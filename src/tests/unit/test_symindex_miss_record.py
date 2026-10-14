@@ -152,3 +152,22 @@ def test_an_empty_export_may_replace_an_empty_file( tmp_path ):
     path = tmp_path / "m.jsonl"
     path.write_text( "", encoding="utf-8" )
     assert mr.export_misses( [], str( path ) ) == 0
+
+
+def test_mixed_utc_offsets_order_by_the_moment_not_the_text():
+    earlier = at( "2026-10-14T09:00:00-05:00", MISS )                                # 14:00 UTC
+    later   = at( "2026-10-14T13:30:00+00:00", { **MISS, "repaired": True } )       # 13:30 UTC is EARLIER
+    assert mr.collect( [ later, earlier ] ) == [ MISS ]
+
+
+def test_a_z_suffix_and_a_naive_time_are_read_as_utc():
+    assert mr.row_time( { "updated_ts": "2026-10-14T13:30:00Z" } ) == mr.row_time( { "updated_ts": "2026-10-14T13:30:00" } )
+    assert mr.row_time( { "updated_ts": "2026-10-14T13:30:00Z" } ) == mr.row_time( { "updated_ts": "2026-10-14T09:30:00-04:00" } )
+
+
+def test_a_missing_time_is_none_and_an_unreadable_time_is_oldest_and_reported():
+    assert mr.row_time( { "title": "t" } ) is None and mr.row_time( { "updated_ts": "yesterday" } ) is mr.OLDEST
+    assert mr.row_time( { "updated_ts": 5 } ) is mr.OLDEST
+    bad = { **at( "yesterday", MISS ), "title": "odd row" }
+    misses, skipped = mr.collect_with_skips( [ bad ] )
+    assert misses == [ MISS ] and skipped == [ { "title": "odd row", "reason": "updated_ts not readable: 'yesterday'" } ]

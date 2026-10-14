@@ -85,3 +85,42 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     if after == runs: return RepairResult( REPAIRED, before, after, runs )
     if after > 0:     return RepairResult( FLIPPY_AFTER, before, after, runs )
     return RepairResult( NOT_REPAIRED, before, after, runs )
+
+
+def shortlist_ids( result ):
+    """
+    Read the HEAD shortlist ids out of a replay tool result.
+
+    Requires:
+        - result is the dict the replay tool returns
+
+    Ensures:
+        - returns the ids of result["head"]["shortlist"], in order
+        - an error result raises ReplayFailed naming its error, and so does a missing head
+        - a head whose verdict is UNCERTAIN_READ_SOURCE raises ReplayFailed naming its cause, whatever
+          shortlist it carries, since an uncertain read does not show the symbol absent
+
+    Raises:
+        - ReplayFailed in the cases above
+    """
+    if result[ "status" ] != "ok": raise ReplayFailed( f"replay error: {result[ 'error' ]}" )
+    head = result[ "head" ]
+    if head is None: raise ReplayFailed( "replay returned no HEAD run" )
+    if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE": raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
+    return [ entry[ "id" ] for entry in head[ "shortlist" ] ]
+
+
+def replayer_over( replay_tool ):
+    """
+    Wrap a replay tool as the replay callable run_repair_check takes.
+
+    Requires:
+        - replay_tool( receipt_id ) returns the replay tool's result dict
+
+    Ensures:
+        - returns replay( receipt_id ) giving the HEAD shortlist ids, or raising ReplayFailed
+
+    Raises:
+        - nothing
+    """
+    return lambda receipt_id: shortlist_ids( replay_tool( receipt_id ) )

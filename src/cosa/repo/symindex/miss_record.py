@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 FIELDS     = ( "receipt_id", "symbol", "caught_by", "repaired" )
 TEXT_KEYS  = ( "receipt_id", "symbol", "caught_by" )
@@ -92,17 +93,44 @@ def parse_block( body ):
     return scan_blocks( body )[ 0 ]
 
 
+OLDEST = datetime.min.replace( tzinfo=timezone.utc )
+
+
+def row_time( row ):
+    """
+    Read a row's updated_ts as an aware datetime.
+
+    Requires:
+        - row is a dict
+
+    Ensures:
+        - returns the datetime, a trailing Z read as UTC and a time with no offset read as UTC
+        - returns None when updated_ts is absent, and the module constant `OLDEST` when it cannot be read
+
+    Raises:
+        - nothing
+    """
+    raw = row.get( "updated_ts" )
+    if not raw: return None
+    try:
+        when = datetime.fromisoformat( raw.replace( "Z", "+00:00" ) )
+    except ( ValueError, AttributeError ):
+        return OLDEST
+    return when if when.tzinfo is not None else when.replace( tzinfo=timezone.utc )
+
+
 def collect_with_skips( rows ):
     """
     Gather the misses of many store rows, and the blocks that could not be read.
 
     Requires:
         - rows is an iterable of dicts with a "body" key, a string or None
-        - a row may carry "updated_ts", an ISO-8601 string, and "title"
+        - a row may carry "updated_ts", an ISO-8601 string with or without an offset, and "title"
 
     Ensures:
         - returns ( misses, skipped ), misses sorted by ( receipt_id, symbol ), one per pair
-        - rows are read oldest first by updated_ts, so the newest state of a pair wins
+        - rows are read oldest first by updated_ts as a point in time, so mixed offsets order correctly
+        - a row with no updated_ts sorts first; one that cannot be read does too, and is named in skipped
         - a repair that was re-broken later therefore reads as not repaired
         - skipped is a list of { "title", "reason" }, one per unusable block
 
@@ -110,8 +138,9 @@ def collect_with_skips( rows ):
         - nothing
     """
     by_key, skipped = {}, []
-    for row in sorted( rows, key=lambda r: r.get( "updated_ts" ) or "" ):
+    for row in sorted( rows, key=lambda r: row_time( r ) or OLDEST ):
         found, bad = scan_blocks( row[ "body" ] or "" )
+        if row_time( row ) is OLDEST: bad = [ *bad, f"updated_ts not readable: {row.get( 'updated_ts' )!r}" ]
         skipped += [ { "title": row.get( "title" ), "reason": reason } for reason in bad ]
         for miss in found: by_key[ ( miss[ "receipt_id" ], miss[ "symbol" ] ) ] = miss
     return [ by_key[ k ] for k in sorted( by_key ) ], skipped
