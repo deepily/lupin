@@ -18,6 +18,12 @@
 // Public state enum (frozen to keep consumers honest)
 // ===========================================================================
 
+/**
+ * The six connection states a channel can be in, as frozen string values.
+ *
+ * A channel starts in `DISCONNECTED` and stays in `OPEN_CIRCUIT` until `manualRetry()` is called.
+ * Consumers compare against these values instead of writing the strings.
+ */
 export const STATE = Object.freeze( {
     DISCONNECTED   : "DISCONNECTED",
     CONNECTING     : "CONNECTING",
@@ -31,7 +37,18 @@ export const STATE = Object.freeze( {
 // Public event names dispatched on `window`
 // ===========================================================================
 
+/**
+ * Name of the `window` event dispatched when a channel gives up reconnecting.
+ *
+ * The event detail holds `name`, `attempts`, `reason` and `code`. The reason is
+ * "auth-permanent", "budget-exhausted" or "rapid-fail".
+ */
 export const CIRCUIT_OPEN_EVENT = "ws-circuit-open";
+/**
+ * Name of the `window` event dispatched on every channel state transition.
+ *
+ * The event detail holds `name`, `prev`, `state` and `attempts`.
+ */
 export const STATE_CHANGE_EVENT = "ws-state-change";
 
 // ===========================================================================
