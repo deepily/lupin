@@ -1091,6 +1091,28 @@ RUNBOOK      = "docs/ops-runbook.md"
 RUNBOOK_FULL = "# Ops\n\n## Prerequisites\n\nOne.\n\n## Steps\n\nTwo.\n\n## Verify\n\nThree.\n\n## Rollback\n\nFour.\n"
 
 
+def test_a_page_moved_unedited_out_of_an_unjudged_folder_is_judged_like_a_new_file( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { "src/rnd/x.md": SEEDED, "src/rnd/ops-runbook.md": "# Ops\n\nSome text.\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "mv", "src/rnd/x.md", "docs/x.md" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/x.md:1: {CAPS}" ]
+    _git( repo, "reset", "-q", "--hard" )
+    _git( repo, "mv", "src/rnd/ops-runbook.md", RUNBOOK )
+    rc, lines = _blocking( repo )
+    refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
+    assert rc == gate.REFUSAL_EXIT and len( refused ) == 4 and not [ ln for ln in lines if ln.endswith( PREDATES_MARK ) ]
+
+
+def test_a_page_moved_unedited_between_judged_folders_keeps_its_earlier_findings( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _page_base( repo, { "docs/old/x.md": SEEDED, "docs/old/ops-runbook.md": "# Ops\n\nSome text.\n" } )
+    _git( repo, "mv", "docs/old/x.md", "docs/x.md" )
+    _git( repo, "mv", "docs/old/ops-runbook.md", RUNBOOK )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+
+
 def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
     _no_external( monkeypatch )
     _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )

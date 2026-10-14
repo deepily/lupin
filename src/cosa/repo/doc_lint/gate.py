@@ -85,6 +85,7 @@ PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the c
 MERGED_MARK        = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
 # The files git keeps in its directory while a merge or a cherry-pick waits to be concluded. A revert is not among them.
 INCOMING_HEADS     = ( "MERGE_HEAD", "CHERRY_PICK_HEAD" )
+UNBOUNDED          = 1 << 60       # the end of a range that holds every line of a file
 FULL_SHA           = re.compile( r"[0-9a-f]{40,64}" )
 # A carriage return that no line feed follows. Python's parser ends a line there and git does not.
 BARE_RETURN        = re.compile( "\r(?!\n)" )
@@ -217,6 +218,7 @@ def predating( root, findings, renamed_from ):
         - returns the findings in PAGE_LEVEL_RULES that HEAD's copy of the page also has, with a measure that did not rise
         - a renamed page is compared with the page it was renamed from, linted under the path it had at HEAD
         - so a page moved to a path that brings a limit has no earlier condition, and the commit that moved it created it
+        - a page moved out of a folder the gate does not judge, such as src/rnd, has no earlier condition either: it was never judged there
         - a page HEAD does not hold has no earlier condition, so none of its findings is returned
         - HEAD's copy is linted under the rules of this commit
         - a finding outside PAGE_LEVEL_RULES is never returned
@@ -229,7 +231,7 @@ def predating( root, findings, renamed_from ):
         if f.rule not in PAGE_LEVEL_RULES: continue
         if f.path not in before:
             old  = renamed_from.get( f.path, f.path )
-            text = head_table_text( root, old )
+            text = head_table_text( root, old ) if in_scope( old ) else None
             before[ f.path ] = dict( page_condition( h ) for h in md_lint.lint_source( old, text, root ) if h.rule in PAGE_LEVEL_RULES ) if text is not None else {}
         key, measure = page_condition( f )
         if key in before[ f.path ] and ( measure is None or measure <= before[ f.path ][ key ] ): kept.append( f )
@@ -953,6 +955,7 @@ def collect( root ):
         - git does not end a line at a bare carriage return, so its line numbers for such a Python file are not the parser's
         - every line of such a file counts as touched when the commit touches any of it
         - a page moved without an edit keeps its page-level findings, since the diff reader gives a move its entry
+        - a page moved without an edit from a folder the gate does not judge is judged like a new file: every line counts as touched
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
 
     Raises:
@@ -962,6 +965,8 @@ def collect( root ):
     paths    = staged_paths( root )
     gitlinks = [ p for p in staged_entries( root )[ 2 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     ranges   = changed_line_ranges( root, None, cached=True )
+    for new, old in staged_changes( root )[ 1 ].items():
+        if not in_scope( old ) and in_scope( new ): ranges[ new ] = [ ( 1, UNBOUNDED ) ]
     findings = []
     py_sources = {}
     swept      = []
