@@ -387,10 +387,13 @@ def test_live_builders_wire_the_client_the_store_the_settings_and_the_exporter( 
     monkeypatch.setattr( lt, "notify_owner", lambda persona, text, environ: sent.append( ( persona, text ) ) or True )
     lib.notify( "held" )
     assert sent == [ ( "rio", "held" ) ]
-    stub = types.ModuleType( "cosa.repo.symindex.miss_record" )
-    stub.export_report = lambda rows, path: report()
-    monkeypatch.setitem( sys.modules, "cosa.repo.symindex.miss_record", stub )
-    assert lt._live_export() is stub.export_report
+
+
+def test_the_live_exporter_is_the_real_export_report_not_a_stand_in():
+    """Imports the real module with nothing stubbed, so a missing name fails here."""
+    from cosa.repo.symindex import miss_record
+    assert lt._live_export() is miss_record.export_report
+    assert miss_record.__file__.endswith( "miss_record.py" )
 
 
 def test_the_shell_wrapper_prints_the_install_lines_and_changes_nothing( tmp_path ):
