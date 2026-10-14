@@ -70,7 +70,7 @@ def data_dir( root=None ):
     return os.path.join( str( fleet_data_root( root ) ), "reuse-review", "librarian" )
 
 
-def _disk_value( key, reader=None ):
+def _disk_value( key, reader=None, errors=None ):
     """
     Read one value from the configuration file, fresh.
 
@@ -79,13 +79,15 @@ def _disk_value( key, reader=None ):
 
     Ensures:
         - returns the raw string, or None when the key is absent or unreadable
+        - a read failure appends its message to errors when errors is a list
         - never raises
     """
     try:
         if reader is not None: return reader( key )
         from lupin_mcp import fleet_cap_ini_io, fleet_size_cap
         return fleet_cap_ini_io.read_value_from_disk( fleet_size_cap.config_file_path(), key )
-    except Exception:
+    except Exception as error:
+        if errors is not None: errors.append( str( error ) )
         return None
 
 
@@ -105,16 +107,17 @@ def read_create_cap( environ, reader=None ):
     return int( value ) if value.isdigit() and int( value ) > 0 else DEFAULT_CAP
 
 
-def read_enabled( reader=None ):
+def read_enabled( reader=None, errors=None ):
     """
     Read the switch that turns the tick on.
 
     Ensures:
         - returns True only when the key reads true, 1, yes or on, in any case
         - an absent key, an unreadable file or any other text returns False
+        - a read failure appends its message to errors when errors is a list
         - never raises
     """
-    return ( _disk_value( ENABLED_KEY, reader ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+    return ( _disk_value( ENABLED_KEY, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
 
 
 def read_persona( key, reader=None ):
@@ -491,8 +494,9 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
         print( f"wiki-librarian-tick: {error}", file=err )
         return 1
     log       = make_logger( os.path.join( folder, LOG_NAME ) )
-    if not ( enabled_fn or read_enabled )():
-        log( f"tick is switched off: {ENABLED_KEY} is not true" )
+    read_errors = []
+    if not ( enabled_fn or ( lambda: read_enabled( errors=read_errors ) ) )():
+        log( f"tick could not read {ENABLED_KEY}, so it stays off: {read_errors[ 0 ]}" if read_errors else f"tick is switched off: {ENABLED_KEY} is not true" )
         print( json.dumps( { "ran": False, "reason": "switched off" }, sort_keys=True ), file=out )
         return EXIT_DISABLED
     pending   = os.path.join( folder, PENDING_NAME )
