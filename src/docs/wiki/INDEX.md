@@ -104,6 +104,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[gate-reachability]] — the census of test files that no gate runner can reach, and of reachable files that collect no test. `cosa.repo` (gate_reachability)
 - [[iterative-debugging-agent]] — the agent that asks an LLM to fix code that failed, runs the fix, and reports whether it worked. `cosa.agents` (iterative_debugging_agent), `cosa.agents.agent_base`
 - [[runtime-argument-expeditor]] — finding the arguments a voice command left out, asking the user for them, and returning a complete args dict. `cosa.agents.runtime_argument_expeditor` (expeditor, agent_registry, cli_help)
+- [[prediction-engine]] — guessing how the user will answer a notification, showing the guess as a hint, and logging the real answer to measure accuracy. `cosa.agents.prediction_engine`
 
 ## Draft slugs folded into written pages
 
@@ -116,4 +117,4 @@ These names were in the first draft of this index. Each now has no page of its o
 - `long-running-generator-agents` is split into `deep-research`, `podcast-generation`, `presentation-generation`, `research-chained-pipelines` and `generator-sdk-clients`.
 - `web-client` is the six `web-client-*` pages. JavaScript and TypeScript docs are out of scope for plan 1 per Rick's ruling.
 - `docs-and-code-analysis-tools` is `doc-lint-gate`, `symbol-index` and `branch-and-directory-loc-analysis`. `cosa.repo.gate_reachability` is `gate-reachability`.
-- `simple-task-agents` is `small-agents-core` for seven agents. `iterative_debugging_agent` is `iterative-debugging-agent`. `runtime_argument_expeditor` is `runtime-argument-expeditor`. `prediction_engine` has no page.
+- `simple-task-agents` is `small-agents-core` for seven agents. `iterative_debugging_agent` is `iterative-debugging-agent`. `runtime_argument_expeditor` is `runtime-argument-expeditor`. `prediction_engine` is `prediction-engine`.
