@@ -36,5 +36,5 @@ Shows another Claude Code seat's transcript as display blocks: a REST backlog pl
 - `notifications.js` holds a separate legacy copy of this client logic.
 
 ## When not to use it
-- The server's `ended` state has no producer: `mark_seat_ended` has no caller outside tests, and the tailer's ring is written but never read.
+- The server's `ended` state has no producer: `mark_seat_ended` has no caller outside tests.
 - Admin gates differ: REST uses `require_admin`, WebSocket uses the session's stored admin flag. See [[cc-session-bridge]] for the bridge it reads and [[websocket-events]] for the event list.

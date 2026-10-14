@@ -89,7 +89,7 @@ def test_the_ws_append_frame_carries_the_name( tmp_path ):
     emit   = _Recorder()
     tailer = CcTranscriptTailer( SEAT, emit, settings={
         "poll_interval_seconds": 0.01, "grace_seconds": 0, "coalesce_window_ms": 0,
-        "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 1 << 20,
+        "backlog_tail_bytes": 65536, "block_budget_bytes": 0,
     }, bridge_reader=bridge )
     tailer.transcript_path = str( copy )
     tailer.file_epoch      = SEAT

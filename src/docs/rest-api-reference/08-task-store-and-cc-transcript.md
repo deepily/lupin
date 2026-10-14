@@ -98,8 +98,8 @@ That proves the route **wiring**, not the live gate. It is stated here, not roun
 
 ### Configuration
 
-Six INI keys, all in `src/conf/lupin-app.ini`.
-Three carry Rick's ruled values. Three are defaults chosen by the implementer, to be moved without a code change.
+Five INI keys, all in `src/conf/lupin-app.ini`.
+Two carry Rick's ruled values. Three are defaults chosen by the implementer, to be moved without a code change.
 
 | Key | Default | Source |
 |---|---|---|
@@ -108,12 +108,5 @@ Three carry Rick's ruled values. Three are defaults chosen by the implementer, t
 | `cc transcript coalesce window ms` | `300` | **ruled** |
 | `cc transcript backlog tail bytes` | `65536` | **ruled** (about 64 KB) |
 | `cc transcript block budget bytes` | `8192` | implementer default; **`0` means unbounded**, not zero |
-| `cc transcript ring buffer bytes` | `262144` | implementer default |
-
-**The ring is bounded in bytes, not in records**.
-`arbiter_state.FleetEventAccumulator` has the right *shape*: session id to a bounded per-session tail.
-But it is bounded in records (`DEFAULT_TAIL_MAXLEN = 50`), and a record-count ring cannot answer a byte-offset question.
-The server could not say which `from_offset` values it is able to serve.
-The ring therefore carries the offset span it holds, and a `from_offset` outside that span is answered by pointing the client at REST.
 
 ---

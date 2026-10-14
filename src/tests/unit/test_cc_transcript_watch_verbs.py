@@ -687,7 +687,6 @@ async def test_a_real_tailer_stops_itself_once_its_seat_has_no_watchers( tmp_pat
         "coalesce_window_ms"    : 0,
         "backlog_tail_bytes"    : 65536,
         "block_budget_bytes"    : 0,
-        "ring_buffer_bytes"     : 4096,
     }
 
     async def emit( *args, **kwargs ):
@@ -726,7 +725,7 @@ async def test_a_tailer_with_no_predicate_keeps_running( tmp_path ):
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = None,
     )
@@ -801,7 +800,7 @@ async def test_the_grace_period_is_a_real_wait_not_an_immediate_stop( tmp_path )
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0.5, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = lambda: watched[ "value" ],
     )
@@ -840,7 +839,7 @@ async def test_a_watcher_returning_inside_the_grace_window_cancels_the_teardown(
     tailer = CcTranscriptTailer(
         SEAT, emit,
         settings = { "poll_interval_seconds": 0.01, "grace_seconds": 0.3, "coalesce_window_ms": 0,
-                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0, "ring_buffer_bytes": 4096 },
+                     "backlog_tail_bytes": 65536, "block_budget_bytes": 0 },
         bridge_reader = lambda _: { "transcript_path": str( path ) },
         has_watchers  = lambda: watched[ "value" ],
     )

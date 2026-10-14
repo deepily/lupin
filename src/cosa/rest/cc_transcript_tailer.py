@@ -10,7 +10,6 @@ What this owns
 - resolving a seat's transcript from the session bridge, on every poll
 - a byte offset per seat, and the `file_epoch` that scopes it
 - mapping new records to display blocks, coalesced into one frame per coalesce window
-- a byte-bounded ring so a brief reconnect need not go to REST
 - starting on the first watcher and stopping a grace period after the last leaves
 
 A `/clear` swaps the path; it never shrinks the file
@@ -65,14 +64,13 @@ DEFAULT_GRACE_SECONDS         = 30
 DEFAULT_COALESCE_WINDOW_MS    = 300      # ruled — Q7
 DEFAULT_BACKLOG_TAIL_BYTES    = 65536    # ruled — Q6, "~64 KB"
 DEFAULT_BLOCK_BUDGET_BYTES    = 8192
-DEFAULT_RING_BUFFER_BYTES     = 262144
 
 
 def load_settings( config_mgr=None ):
     """
-    Read the six dials from the INI, falling back to the defaults above.
+    Read the five dials from the INI, falling back to the defaults above.
 
-    All six are INI keys so their values can change without a code change, even where the
+    All five are INI keys so their values can change without a code change, even where the
     values themselves are still unsettled.
 
     Requires:
@@ -80,7 +78,7 @@ def load_settings( config_mgr=None ):
           if that fails, the defaults above)
 
     Ensures:
-        - returns a dict with the six keys, every value an int except poll_interval_seconds
+        - returns a dict with the five keys, every value an int except poll_interval_seconds
         - never raises: a missing config manager yields the defaults rather than an error,
           because a tailer that cannot start is worse than one running on defaults
     """
@@ -98,7 +96,6 @@ def load_settings( config_mgr=None ):
             "coalesce_window_ms"    : DEFAULT_COALESCE_WINDOW_MS,
             "backlog_tail_bytes"    : DEFAULT_BACKLOG_TAIL_BYTES,
             "block_budget_bytes"    : DEFAULT_BLOCK_BUDGET_BYTES,
-            "ring_buffer_bytes"     : DEFAULT_RING_BUFFER_BYTES,
         }
 
     return {
@@ -116,9 +113,6 @@ def load_settings( config_mgr=None ):
                                                   return_type="int" ),
         "block_budget_bytes"    : config_mgr.get( "cc transcript block budget bytes",
                                                   default=DEFAULT_BLOCK_BUDGET_BYTES,
-                                                  return_type="int" ),
-        "ring_buffer_bytes"     : config_mgr.get( "cc transcript ring buffer bytes",
-                                                  default=DEFAULT_RING_BUFFER_BYTES,
                                                   return_type="int" ),
     }
 
@@ -181,90 +175,6 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
     return path if path and os.path.isfile( path ) else ""
 
 
-class SeatRing:
-    """
-    A byte-bounded ring of recently-sent blocks, carrying the offset span it holds.
-
-    Bounded in bytes, not records. `arbiter_state.FleetEventAccumulator` has the right shape
-    (session id to bounded per-session tail) but is bounded in records (`DEFAULT_TAIL_MAXLEN = 50`).
-    A record-count ring cannot answer a byte-offset question, because the server could not say
-    which `from_offset` values it is able to serve.
-    """
-
-    def __init__( self, max_bytes ):
-        """
-        Requires:
-            - max_bytes is a non-negative int; 0 disables the ring
-
-        Ensures:
-            - starts empty, with an empty span
-        """
-        self.max_bytes = max_bytes
-        self.chunks    = [ ]          # [ { offset, next_offset, blocks } ]
-        self.held      = 0
-
-    def add( self, offset, next_offset, blocks ):
-        """
-        Record one chunk, evicting from the front until the byte budget holds.
-
-        Requires:
-            - offset <= next_offset
-            - blocks is a list
-
-        Ensures:
-            - the ring holds at most max_bytes of transcript span
-            - a chunk larger than the whole budget leaves the ring empty rather than
-              over-full, so `span()` never claims more than it can serve
-        """
-        if self.max_bytes <= 0: return
-
-        self.chunks.append( { "offset": offset, "next_offset": next_offset, "blocks": blocks } )
-        self.held += max( 0, next_offset - offset )
-
-        while self.chunks and self.held > self.max_bytes:
-            evicted   = self.chunks.pop( 0 )
-            self.held -= max( 0, evicted[ "next_offset" ] - evicted[ "offset" ] )
-
-    def span( self ):
-        """
-        The offset span this ring can serve.
-
-        Ensures:
-            - returns ( start, end ), or ( None, None ) when empty — the honest answer to
-              "which from_offset values can you serve?"
-        """
-        if not self.chunks: return None, None
-        return self.chunks[ 0 ][ "offset" ], self.chunks[ -1 ][ "next_offset" ]
-
-    def can_serve( self, from_offset ):
-        """
-        Whether `from_offset` falls inside the span held.
-
-        Ensures:
-            - returns True iff a chunk boundary at or after from_offset is held
-        """
-        start, end = self.span()
-        if start is None: return False
-        return start <= from_offset <= end
-
-    def blocks_from( self, from_offset ):
-        """
-        Every held block at or after `from_offset`.
-
-        Ensures:
-            - returns ( blocks, next_offset ); ( [], from_offset ) when nothing is held
-            - chunks straddling from_offset are included whole, because a chunk is the
-              smallest unit the ring stored
-        """
-        out         = [ ]
-        next_offset = from_offset
-        for chunk in self.chunks:
-            if chunk[ "next_offset" ] <= from_offset: continue
-            out.extend( chunk[ "blocks" ] )
-            next_offset = chunk[ "next_offset" ]
-        return out, next_offset
-
-
 class CcTranscriptTailer:
     """
     Polls one watched seat and pushes coalesced append frames to its watchers.
@@ -308,7 +218,6 @@ class CcTranscriptTailer:
         self.transcript_path = ""
         self.file_epoch      = ""
         self.offset          = 0
-        self.ring            = SeatRing( self.settings[ "ring_buffer_bytes" ] )
         # tool_use_id -> tool name, kept across polls so a result finds the call that landed in
         # an earlier poll (row 687310b7). Emptied wherever the file it indexes is left behind.
         self.tool_names      = { }
@@ -458,7 +367,6 @@ class CcTranscriptTailer:
             self.transcript_path = current_path
             self.file_epoch      = epoch_for_path( current_path )
             self.offset          = 0
-            self.ring            = SeatRing( self.settings[ "ring_buffer_bytes" ] )
             self.tool_names      = { }   # a call in the OLD file cannot pair with a result in the new one
             return { "offset": 0, "next_offset": 0, "blocks": [ ], "rotated": True }
 
@@ -468,7 +376,6 @@ class CcTranscriptTailer:
         if rotated:
             self.offset     = 0
             self.file_epoch = f"{epoch_for_path( self.transcript_path )}#{int( time.time() )}"
-            self.ring       = SeatRing( self.settings[ "ring_buffer_bytes" ] )
             self.tool_names = { }        # the file was rewritten: earlier calls are no longer in view
             return { "offset": 0, "next_offset": 0, "blocks": [ ], "rotated": True }
 
@@ -484,7 +391,6 @@ class CcTranscriptTailer:
 
         if not blocks: return None
 
-        self.ring.add( chunk_offset, new_offset, blocks )
         return { "offset": chunk_offset, "next_offset": new_offset, "blocks": blocks, "rotated": False }
 
     async def _flush( self, offset, next_offset, blocks ):

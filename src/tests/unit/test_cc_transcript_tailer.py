@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A2.3, A2.5, A2.10 and A2.11 — the tailer's clear/rotation detection, lifecycle, and ring.
+A2.3, A2.5 and A2.10 — the tailer's clear/rotation detection and lifecycle.
 
 Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` §2 items 1, 5, 6, 7.
 Module under test: `cosa/rest/cc_transcript_tailer.py`.
@@ -41,13 +41,11 @@ from cosa.rest.cc_transcript_tailer import (
     DEFAULT_COALESCE_WINDOW_MS,
     DEFAULT_GRACE_SECONDS,
     DEFAULT_POLL_INTERVAL_SECONDS,
-    DEFAULT_RING_BUFFER_BYTES,
     STATE_ENDED,
     STATE_EVENT,
     STATE_LIVE,
     STATE_ROTATED,
     CcTranscriptTailer,
-    SeatRing,
     epoch_for_path,
     load_settings,
     read_backlog,
@@ -100,7 +98,6 @@ def _fast_settings( **overrides ):
         "coalesce_window_ms"    : 0,
         "backlog_tail_bytes"    : DEFAULT_BACKLOG_TAIL_BYTES,
         "block_budget_bytes"    : 0,
-        "ring_buffer_bytes"     : DEFAULT_RING_BUFFER_BYTES,
     }
     settings.update( overrides )
     return settings
@@ -277,25 +274,6 @@ def test_an_in_place_truncation_bumps_the_epoch_and_emits_no_replayed_record( se
     assert tailer.offset == 0
 
 
-def test_a_rotation_clears_the_ring_so_it_cannot_serve_stale_offsets( seat ):
-    """
-    A ring surviving a rotation would answer a resume with blocks from the previous file.
-
-    Offsets are only meaningful inside one epoch, so the ring must be epoch-scoped too.
-    """
-    path, bridge = seat
-    _write_records( path, 4 )
-    tailer = CcTranscriptTailer( SEAT, EmitRecorder(), settings=_fast_settings(), bridge_reader=bridge )
-    tailer.transcript_path = str( path )
-    tailer.file_epoch      = epoch_for_path( path )
-    tailer.poll_once()
-    assert tailer.ring.span() != ( None, None )
-
-    path.write_text( "" )
-    tailer.poll_once()
-    assert tailer.ring.span() == ( None, None ), "the ring survived a rotation"
-
-
 # ── the verbatim-path constraint ──────────────────────────────────────────────
 
 def test_the_bridge_path_is_used_verbatim_and_never_rejoined( tmp_path ):
@@ -375,101 +353,6 @@ def test_records_that_map_to_no_block_advance_the_offset_without_a_frame( seat )
 
     assert tailer.poll_once() is None
     assert tailer.offset == os.path.getsize( path ), "the offset stalled on non-displayable records"
-
-
-# ── A2.11: the ring is BYTE-bounded and names its span ────────────────────────
-
-def test_the_ring_reports_the_offset_span_it_holds( ):
-    """
-    A2.11 — the server can say which `from_offset` values it can serve.
-
-    This is the property P7 names: a record-count ring cannot answer it at all.
-    """
-    ring = SeatRing( 1000 )
-    assert ring.span()          == ( None, None )
-    assert ring.can_serve( 0 )  is False
-
-    ring.add( 0,   100, [ { "kind": "text", "text": "a" } ] )
-    ring.add( 100, 250, [ { "kind": "text", "text": "b" } ] )
-    assert ring.span()            == ( 0, 250 )
-    assert ring.can_serve( 0 )    is True
-    assert ring.can_serve( 250 )  is True
-    assert ring.can_serve( 251 )  is False
-
-
-def test_the_ring_evicts_by_bytes_and_its_span_follows( ):
-    """
-    Eviction is by byte span, and `span()` must never claim more than the ring holds.
-
-    A ring whose span outran its contents would tell the server it can serve a `from_offset`
-    it has already dropped — a resume answered with a gap.
-    """
-    ring = SeatRing( 200 )
-    ring.add( 0,   100, [ { "text": "a" } ] )
-    ring.add( 100, 200, [ { "text": "b" } ] )
-    assert ring.span() == ( 0, 200 )
-
-    ring.add( 200, 300, [ { "text": "c" } ] )              # now over budget — the front goes
-    start, end = ring.span()
-    assert end   == 300
-    assert start == 100, "the evicted chunk is still being claimed"
-    assert ring.can_serve( 0 ) is False
-
-
-def test_a_chunk_larger_than_the_whole_ring_leaves_it_empty_rather_than_overfull( ):
-    """
-    A single huge tool result must not leave the ring claiming a span it cannot serve.
-
-    Empty is the honest answer: it sends the client to REST, which can serve it.
-    """
-    ring = SeatRing( 100 )
-    ring.add( 0, 5000, [ { "text": "enormous" } ] )
-    assert ring.span() == ( None, None )
-    assert ring.can_serve( 0 ) is False
-
-
-def test_a_ring_of_zero_bytes_is_disabled_not_unbounded( ):
-    """
-    The one place 0 does NOT mean unbounded, stated because the budget's 0 does.
-
-    A ring is a cache: 0 means "keep nothing", and everything goes to REST. Reading it as
-    unbounded would make the server hold every byte of every watched seat.
-    """
-    ring = SeatRing( 0 )
-    ring.add( 0, 100, [ { "text": "a" } ] )
-    assert ring.span() == ( None, None )
-
-
-def test_the_ring_serves_the_blocks_at_or_after_an_offset( ):
-    """A resume inside the span is served from memory, with the next_offset to continue from."""
-    ring = SeatRing( 1000 )
-    ring.add( 0,   100, [ { "text": "a" } ] )
-    ring.add( 100, 200, [ { "text": "b" } ] )
-    ring.add( 200, 300, [ { "text": "c" } ] )
-
-    blocks, next_offset = ring.blocks_from( 100 )
-    assert [ b[ "text" ] for b in blocks ] == [ "b", "c" ]
-    assert next_offset == 300
-
-    blocks, next_offset = ring.blocks_from( 300 )
-    assert blocks == [ ]
-    assert next_offset == 300
-
-
-def test_an_empty_ring_serves_nothing_and_says_so( ):
-    """An empty ring returns the offset it was asked about, so the caller can go to REST."""
-    assert SeatRing( 1000 ).blocks_from( 42 ) == ( [ ], 42 )
-
-
-def test_the_tailer_records_each_chunk_into_its_ring( seat ):
-    """The ring is wired to the poll, not merely instantiated."""
-    path, bridge = seat
-    _write_records( path, 3 )
-    tailer = CcTranscriptTailer( SEAT, EmitRecorder(), settings=_fast_settings(), bridge_reader=bridge )
-    tailer.transcript_path = str( path )
-    tailer.file_epoch      = epoch_for_path( path )
-    chunk = tailer.poll_once()
-    assert tailer.ring.span() == ( chunk[ "offset" ], chunk[ "next_offset" ] )
 
 
 # ── A2.5: lifecycle, and the frames the loop emits ────────────────────────────
@@ -777,9 +660,9 @@ async def test_rotation_is_announced_as_its_own_state_frame( seat ):
 
 def test_the_defaults_are_the_documented_values( ):
     """
-    Pins the six defaults, so a change is a deliberate edit with a test to update.
+    Pins the five defaults, so a change is a deliberate edit with a test to update.
 
-    Three are Rick's rulings (coalesce = Q7, backlog tail = Q6); three are implementer
+    Two are Rick's rulings (coalesce = Q7, backlog tail = Q6); three are implementer
     defaults standing in for the open sub-questions.
     """
     assert DEFAULT_POLL_INTERVAL_SECONDS == 0.25
@@ -787,12 +670,11 @@ def test_the_defaults_are_the_documented_values( ):
     assert DEFAULT_COALESCE_WINDOW_MS    == 300
     assert DEFAULT_BACKLOG_TAIL_BYTES    == 65536
     assert DEFAULT_BLOCK_BUDGET_BYTES    == 8192
-    assert DEFAULT_RING_BUFFER_BYTES     == 262144
 
 
 def test_load_settings_reads_every_dial_from_the_config_manager( ):
     """
-    All six come from the INI, not from constants — the unresolved-HOMES requirement (T8).
+    All five come from the INI, not from constants — the unresolved-HOMES requirement (T8).
 
     The stub returns a distinct value per key, so a dial wired to the wrong key is visible
     rather than masked by a shared default.
@@ -806,8 +688,7 @@ def test_load_settings_reads_every_dial_from_the_config_manager( ):
                      "cc transcript watcher grace seconds"  : 11,
                      "cc transcript coalesce window ms"     : 22,
                      "cc transcript backlog tail bytes"     : 33,
-                     "cc transcript block budget bytes"     : 44,
-                     "cc transcript ring buffer bytes"      : 55 }[ key ]
+                     "cc transcript block budget bytes"     : 44 }[ key ]
 
     settings = load_settings( ConfigStub() )
     assert settings == {
@@ -816,10 +697,9 @@ def test_load_settings_reads_every_dial_from_the_config_manager( ):
         "coalesce_window_ms"    : 22,
         "backlog_tail_bytes"    : 33,
         "block_budget_bytes"    : 44,
-        "ring_buffer_bytes"     : 55,
     }
     assert calls[ "cc transcript poll interval seconds" ] == "float"
-    assert calls[ "cc transcript ring buffer bytes" ]     == "int"
+    assert calls[ "cc transcript block budget bytes" ]    == "int"
 
 
 def test_load_settings_falls_back_to_the_defaults_when_no_config_is_reachable( monkeypatch ):
@@ -840,7 +720,7 @@ def test_load_settings_falls_back_to_the_defaults_when_no_config_is_reachable( m
     monkeypatch.setattr( builtins, "__import__", refuse )
     settings = load_settings( None )
     assert settings[ "poll_interval_seconds" ] == DEFAULT_POLL_INTERVAL_SECONDS
-    assert settings[ "ring_buffer_bytes" ]     == DEFAULT_RING_BUFFER_BYTES
+    assert settings[ "block_budget_bytes" ]    == DEFAULT_BLOCK_BUDGET_BYTES
 
 
 def test_a_config_manager_that_resolves_is_used_when_none_is_passed( monkeypatch ):
@@ -858,12 +738,12 @@ def test_a_config_manager_that_resolves_is_used_when_none_is_passed( monkeypatch
 
 
 def test_the_tailer_loads_settings_when_none_are_given( seat ):
-    """A tailer built without explicit settings still has all six dials."""
+    """A tailer built without explicit settings still has all five dials."""
     _, bridge = seat
     tailer = CcTranscriptTailer( SEAT, EmitRecorder(), bridge_reader=bridge )
     assert set( tailer.settings ) == {
         "poll_interval_seconds", "grace_seconds", "coalesce_window_ms",
-        "backlog_tail_bytes", "block_budget_bytes", "ring_buffer_bytes",
+        "backlog_tail_bytes", "block_budget_bytes",
     }
 
 
