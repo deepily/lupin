@@ -7,7 +7,7 @@ pins:
   - src.lupin_app.static.js.multiplexer.audio.pcm-decoder.pcm16ToAudioBuffer@a1fc299226
   - src.lupin_app.static.js.multiplexer.stores.AudioStore.createAudioStore@1a56a14b2a
   - src.lupin_app.static.js.multiplexer.stores.TtsQueueStore.createTtsQueueStore@b45f90b61e
-  - src.lupin_app.static.js.multiplexer.wireTtsPlayback.wireTtsPlayback@6284cc3a19
+  - src.lupin_app.static.js.multiplexer.wireTtsPlayback.wireTtsPlayback@5edac5aca1
   - src.lupin_app.static.js.multiplexer.wireTtsIntent.wireNotificationTtsIntent@0a44a0071a
   - src.lupin_app.static.js.multiplexer.shared.ttsPreview.computeTtsPreview@27e7f93477
   - src.lupin_app.static.js.multiplexer.render.TtsPreviewSliderRenderer.createTtsPreviewSliderRenderer@0bcd474087
