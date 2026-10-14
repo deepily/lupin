@@ -51,7 +51,7 @@ function item( over: Partial<ActionRequiredItem> = {} ): ActionRequiredItem {
 
 let live: Harness | null = null;
 
-function mount( items: ActionRequiredItem[] ): Harness {
+function mount( items: ActionRequiredItem[], activeContext: string | null = null ): Harness {
   const sent   : Array<{ idHash: string; response: ActionRequiredResponse }> = [];
   const paused : string[] = [];
   const store: ActionRequiredStoreLike = {
@@ -64,6 +64,11 @@ function mount( items: ActionRequiredItem[] ): Harness {
   const renderer = createActionRequiredRenderer( {
     eventBus : createEventBusForTesting(),
     stores   : { actionRequired: store },
+    recorder : {
+      startRecording     : async () => {},
+      stopRecording      : async () => {},
+      getActiveContextId : () => activeContext,
+    },
   } );
   const root = document.createElement( "div" );
   root.id = "action-required-pane";
@@ -192,7 +197,19 @@ test( "Escape is a keydown, not a keypress — legacy splits them for exactly th
   assert.equal( h.sent.length, 1, "keydown must" );
 } );
 
-// --- suppression while typing --------------------------------------------------
+// Bug da15c818 — Escape that stops a recording must not also cancel the card. Focus is on
+// the mic button (not an input) after a click, so the typing() test alone lets it through.
+test( "Escape while a recording is active leaves the card open (focus on the mic button)", () => {
+  const h = mount( [ item() ], "ar1-other" );
+  const btn = document.createElement( "button" );
+  h.root.appendChild( btn );
+  btn.focus();
+  assert.ok( document.activeElement === btn, "focus is on a button, not an input" );
+  const e = new KeyboardEvent( "keydown", { key: "Escape", bubbles: true, cancelable: true } );
+  document.dispatchEvent( e );
+  assert.deepEqual( h.sent, [], "no cancel was sent" );
+  assert.equal( e.defaultPrevented, false, "the key is left for the recorder" );
+} );
 
 // --- suppression while typing --------------------------------------------------
 //

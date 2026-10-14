@@ -280,6 +280,47 @@ class TestActionRequiredCardParity:
             print( _card_wait_report( page, "e2ecard-esc" ) )
             raise
 
+    def test_escape_that_stops_a_recording_in_other_keeps_the_dialog_open( self, logged_in_page ):
+        """Escape that stops a recording in Other leaves the dialog open."""
+        # Focus sits on the mic button after the click, so the typing test never held.
+        # The recorder and the card both hear Escape; the card must stand down.
+        page = logged_in_page
+        _open_multiplexer( page )
+        # A fake microphone: the recorder reads getUserMedia at call time, so this
+        # stands in for the device without a permission prompt.
+        page.evaluate(
+            """() => {
+                const ctx = new AudioContext();
+                const dest = ctx.createMediaStreamDestination();
+                navigator.mediaDevices.getUserMedia = async () => dest.stream;
+            }"""
+        )
+        _emit( page, {
+            "id_hash"         : "e2ecard-rec",
+            "response_type"   : "multiple_choice",
+            "response_options": { "questions": [
+                { "header": "db", "question": "Which store?", "options": [ "PostgreSQL", "SQLite" ] },
+            ] },
+        } )
+        card = _card( page, "e2ecard-rec" )
+        mic  = card.locator( ".mc-other-mic" )
+
+        mic.click()
+        page.wait_for_selector(
+            '[data-id-hash="e2ecard-rec"] .mc-other-mic.recording', timeout=10000,
+        )
+        assert page.evaluate( "() => document.activeElement.tagName" ) not in ( "INPUT", "TEXTAREA" ), (
+            "focus is on the mic button — the case the typing test did not cover"
+        )
+
+        page.keyboard.press( "Escape" )
+        page.wait_for_selector(
+            '[data-id-hash="e2ecard-rec"] .mc-other-mic:not(.recording)', timeout=10000,
+        )
+        page.wait_for_timeout( 300 )
+        _assert_still_answerable( card, "Escape that stops the recording must not cancel the dialog" )
+        assert page.locator( _interactive_selector( "e2ecard-rec" ) ).count() == 1
+
     # ---- #2k, #2l : the other two response types -----------------------------
 
     def test_open_ended_card_is_voice_first_with_the_default_prefilled( self, logged_in_page ):

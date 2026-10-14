@@ -27753,6 +27753,10 @@ class NotificationsUI {
                 const isInInput = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
                 if ( isInInput ) return;
 
+                // Escape that stops a recording must not also cancel the dialog (bug da15c818):
+                // focus sits on the mic button, not an input, so the test above lets it through.
+                if ( this.recordingManager.activeRecording ) return;
+
                 e.preventDefault();
                 this.cancelActionRequired( this.activeActionRequiredId );
             }

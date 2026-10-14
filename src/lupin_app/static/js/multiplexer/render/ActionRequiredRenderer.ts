@@ -199,15 +199,18 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // A-2 #2h — the detach for the document-level Y/N/C/P/Esc shortcuts, or null when
   // they are not attached. Doubles as legacy's `keyboardListenerActive` latch.
   private keyboardOff : (() => void) | null = null;
+  // Escape asks it whether a card mic is recording (bug da15c818).
+  private readonly recorder : ActionRequiredRecorderLike;
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
     this.predictionVote = opts.predictionVote;
+    /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
+    this.recorder = opts.recorder ?? recordingManager;
     this.onMic = createActionRequiredMic(
-      /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
-      opts.recorder ?? recordingManager,
+      this.recorder,
       opts.getAuthToken ?? (() => null),
     );
   }
@@ -704,6 +707,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       if (e.key !== "Escape") return;
       // Legacy lets Escape out of a text input reach the recorder instead (:25936-25939).
       if (typing()) return;
+      // Escape that stops a recording must not also cancel the card (bug da15c818). Focus is on
+      // the mic button, not an input, so typing() lets it through; the recorder's own Escape
+      // (window, after this document-level one) takes it.
+      if (this.recorder.getActiveContextId() !== null) return;
       const head = headWidget();
       if (head === null) return;
       e.preventDefault();
