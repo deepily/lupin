@@ -1309,7 +1309,7 @@ def _differences( stored, fresh ):
     return diffs
 
 
-def replay_impl( rid, ctx ):
+def replay_impl( rid, ctx, repeat=0 ):
     """
     Re-check a receipt: the stored result, a re-run against the frozen inputs, and a re-run at HEAD.
 
@@ -1329,7 +1329,16 @@ def replay_impl( rid, ctx ):
           RECEIPT_MISSING, RECEIPT_CORRUPT, RECEIPT_ID_MISMATCH, SNAPSHOT_MISSING, SNAPSHOT_CORRUPT,
           CACHE_MISSING, CACHE_CORRUPT
         - a read_capability receipt has no re-run: frozen and head are None
+        - repeat is a whole number of 0 or more; 0 is the replay above, and a cached answer is read as before
+        - repeat n of 1 or more asks the HEAD run again under keys that hold n, so it is a new draw and is
+          cached under that key; the frozen re-run and the stored receipt are unchanged, and no receipt is written
+        - a repeat of 1 or more on an unpacked context returns error REPEAT_NEEDS_PACKED_CONTEXT, and a repeat
+          that is not a whole number of 0 or more returns error REPEAT_OUT_OF_RANGE, before anything is read
     """
+    if not isinstance( repeat, int ) or isinstance( repeat, bool ) or repeat < 0:
+        return { "status": "error", "error": "REPEAT_OUT_OF_RANGE", "detail": f"repeat must be a whole number of 0 or more, got {repeat!r}", "receipt_id": rid }
+    if repeat and ( ctx.sweeper is None or ctx.pack_size is None ):
+        return { "status": "error", "error": "REPEAT_NEEDS_PACKED_CONTEXT", "detail": "a repeat is asked on a packed context only", "receipt_id": rid }
     try:
         stored = load_receipt( ctx, rid )
         question = stored[ "question" ] if "question" in stored else "choice"          # a receipt from before the new question has none
@@ -1365,7 +1374,13 @@ def replay_impl( rid, ctx ):
                             template=stored[ "prompt_template" ], page_template=pt, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else left_out
-        head    = run_question( ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
+        head_ctx = ctx
+        if repeat:
+            from lupin_mcp import reuse_flip                                                      # imported here: it imports this module
+            head_ctx        = copy.copy( ctx )
+            head_ctx.sweeper = reuse_flip.repeat_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
+            if question == "provides": head_ctx.pair_sweeper = reuse_flip.repeat_pair_sweeper( ctx.pack_size, reuse_flip.rp.WORKERS_DEFAULT, repeat )
+        head    = run_question( head_ctx, stored[ "tool" ], stored[ "query" ], need, exclude_id=exclude, write=False, sweep_only=sweep_only, question=question )
     except ReuseError as e:
         return { "status": "error", "error": e.name, "detail": e.detail, "receipt_id": rid }
     return { "status": "ok", "receipt_id": rid, "stored": stored, "frozen": fz,
