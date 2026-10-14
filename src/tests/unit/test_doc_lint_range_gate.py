@@ -798,3 +798,33 @@ def test_the_range_that_lands_the_epoch_is_judged_under_the_value_its_head_recor
     assert range_gate.committed_epoch_text( root, gated[ "epoch" ] ) is None and gated[ "epoch" ] in range_gate.committed_epoch_text( root, gated[ "record" ] )
     assert range_gate.resolve_blocking_epoch( root, gated[ "epoch" ], gated[ "newer" ] ) == ( gated[ "epoch" ], True )
     assert range_gate.resolve_blocking_epoch( root, gated[ "base" ], gated[ "epoch" ] ) == ( gated[ "epoch" ], False )      # neither end records it: the working copy does
+
+
+# ---- the range that lands the epoch may not move it -----------------------------------------------
+
+def _landing_that_moves( gated, second ):
+    """Record the epoch twice above a base with none; the second record is `second` or a removal."""
+    root = gated[ "root" ]
+    _write( root, range_gate.EPOCH_PATH, f"{gated[ 'older' ]}\n" )
+    _commit( root, "records an early epoch" )
+    if second is None: os.remove( os.path.join( root, range_gate.EPOCH_PATH ) )
+    else: _write( root, range_gate.EPOCH_PATH, f"{second}\n" )
+    return _commit( root, "moves the epoch" )
+
+
+def test_a_range_that_lands_the_epoch_and_then_moves_it_judges_nothing( gated ):
+    head   = _landing_that_moves( gated, gated[ "epoch" ] )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", gated[ "newer" ], "--head", head, "--repo-root", gated[ "root" ] ], out=stream )
+    assert code == range_gate.EXIT_UNCHECKED
+    assert stream.getvalue().splitlines() == [ f"the blocking epoch moves inside the range: its commits record {gated[ 'older' ]} and {gated[ 'epoch' ]}; "
+                                               "a range is judged under one value, so no commit was judged" ]
+
+
+def test_a_range_that_lands_the_epoch_and_then_removes_the_file_judges_nothing( gated ):
+    head   = _landing_that_moves( gated, None )
+    stream = io.StringIO()
+    code   = range_gate.main( [ "--base", gated[ "newer" ], "--head", head, "--repo-root", gated[ "root" ] ], out=stream )
+    assert code == range_gate.EXIT_UNCHECKED
+    assert stream.getvalue().splitlines() == [ f"the blocking epoch moves inside the range: a commit of it records {gated[ 'older' ]} and the head of the range records no file; "
+                                               "a range is judged under one value, so no commit was judged" ]

@@ -253,6 +253,35 @@ def committed_epoch_text( root, commit ):
     return res.stdout.decode( "utf-8", "replace" ) if res.returncode == 0 else None
 
 
+def require_one_value( root, base, head, head_text ):
+    """
+    Refuse a range that lands the epoch and then moves or removes it.
+
+    Requires:
+        - root is a git working tree; base and head name the two ends of a range whose base records no value
+        - head_text is the epoch file as head holds it, or None
+
+    Ensures:
+        - returns None when every commit of the range that records a value records the same one
+        - a head that holds the file with no value, or no file, while a commit of the range records one is refused
+
+    Raises:
+        - RangeRefused naming the values when two commits of the range record different ones
+        - RangeRefused naming the value when a commit of the range records one and the head records none
+    """
+    seen = []
+    for sha in list_commits( root, base, head ):
+        text  = committed_epoch_text( root, sha )
+        value = parse_blocking_epoch( text ) if text is not None else None
+        if value is not None and value not in seen: seen.append( value )
+    if len( seen ) > 1:
+        raise RangeRefused( f"the blocking epoch moves inside the range: its commits record {seen[ 0 ]} and {seen[ 1 ]}; a range is judged under one value, so no commit was judged" )
+    at_head = parse_blocking_epoch( head_text ) if head_text is not None else None
+    if seen and at_head is None:
+        have = "no file" if head_text is None else "no value"
+        raise RangeRefused( f"the blocking epoch moves inside the range: a commit of it records {seen[ 0 ]} and the head of the range records {have}; a range is judged under one value, so no commit was judged" )
+
+
 def resolve_blocking_epoch( root, base, head ):
     """
     Settle which blocking epoch a range is judged against.
@@ -265,12 +294,14 @@ def resolve_blocking_epoch( root, base, head ):
         - when base's tree records a value, the range is judged under it, and head's tree must record the same value
         - so a range cannot lift its own blocking by moving, emptying, deleting or rewriting the file in its head
         - when base's tree records no value, which is the range that lands the epoch, head's value is used
+        - that range must record one value throughout: two values, or a value and then none, are refused
         - when head's tree holds EPOCH_PATH, its value is the epoch and from_head is True
         - then the working copy under root must record the same value, an absent file counting as no value
         - when head's tree has no such file and base records no value, the range predates it: the working copy's value is used and from_head is False
 
     Raises:
         - RangeRefused naming both values when base records a value and head records another, no value or no file
+        - RangeRefused when the commits of a range that lands the epoch record two values, or a value that its head then drops
         - RangeRefused naming both values when head and the working copy disagree, so an emptied or deleted working copy cannot lift blocking
         - RangeRefused when a value is malformed, or the epoch is a sha that require_commit refuses
     """
@@ -282,6 +313,7 @@ def resolve_blocking_epoch( root, base, head ):
         if at_head != at_base:
             have = at_head or ( "no file" if head_text is None else "no value" )
             raise RangeRefused( f"the blocking epoch differs: the base of the range records {at_base} in {EPOCH_PATH}, the head of the range records {have}; a range is judged under the value its base records and cannot change it; no commit was judged" )
+    if at_base is None: require_one_value( root, base, head, head_text )
     text    = working_epoch_text( root )
     working = parse_blocking_epoch( text ) if text is not None else None
     if head_text is None: return ( require_commit( root, working ) if working is not None else None ), False
