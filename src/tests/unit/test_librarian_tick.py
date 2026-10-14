@@ -524,3 +524,12 @@ def test_an_unreadable_configuration_file_is_logged_as_a_read_failure_not_as_a_f
     def denied_key( key ): raise OSError( "permission denied" )
     errors = []
     assert lt.read_enabled( reader=denied_key, errors=errors ) is False and errors == [ "permission denied" ]
+
+
+def test_a_refused_empty_export_log_line_says_how_to_clear_it( tmp_path, pipeline ):
+    lines = []
+    def refuse( rows, path ): raise ValueError( "refusing to replace a populated file with an empty export" )
+    path = str( tmp_path / "m.jsonl" )
+    lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), refuse, path, str( tmp_path / "s.json" ), NOON, log=lines.append )
+    line = [ l for l in lines if "could not write the misses file" in l ][ 0 ]
+    assert "move " + path + " aside" in line
