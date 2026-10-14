@@ -416,7 +416,8 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
                 return { "ok": True, "detail": f"slide_count={slide_count} (from artifacts)" }
             return { "ok": False, "detail": f"slide_count={slide_count} — chain produced 0 slides" }
         import re
-        match = re.search( r"(\d+)\s+slide", response )
+        # The done queue's row has no artifacts dict, only `abstract` ("**Slides**: N slides") and the answer.
+        match = re.search( r"(\d+)\s+slide", response ) or re.search( r"(\d+)\s+slide", job_data.get( "abstract" ) or "" )
         if match:
             count = int( match.group( 1 ) )
             if count > 0:
