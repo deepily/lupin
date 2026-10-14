@@ -19,8 +19,15 @@
 // invocations from a prior socket cannot mutate state that belongs to the
 // current connection.
 
+/** The states of a channel's socket, from connecting through open and closing to closed. */
 export type WSChannelState = "connecting" | "open" | "closing" | "closed";
 
+/**
+ * What a channel is built from.
+ *
+ * The `url` is required. A text frame reaches `onMessage` already parsed, and a binary frame reaches `onBinaryMessage`.
+ * `generationToken` is the starting value of the channel's generation counter.
+ */
 export interface WSChannelOptions {
   url             : string;
   protocols?      : string | string[];
@@ -37,6 +44,11 @@ export interface WSChannelOptions {
   WebSocketCtor?  : typeof WebSocket;
 }
 
+/**
+ * A single WebSocket with no reconnect logic of its own.
+ *
+ * `generation` increases on each `start`, and callbacks from an earlier socket are dropped.
+ */
 export interface WSChannel {
   start(): void;
   stop(): void;
@@ -214,6 +226,7 @@ class WSChannelImpl implements WSChannel {
   }
 }
 
+/** Build a channel; it throws if `url` is empty or no WebSocket constructor is available. */
 export function createWSChannel(opts: WSChannelOptions): WSChannel {
   return new WSChannelImpl(opts);
 }

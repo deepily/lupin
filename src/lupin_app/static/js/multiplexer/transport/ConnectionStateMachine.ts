@@ -85,6 +85,12 @@ interface ConnectionInput {
   graceMs? : number;
 }
 
+/**
+ * The inputs the connection state machine accepts.
+ *
+ * Socket, page-visibility and network events come from the page. `backoff_expire` and `max_attempts_reached`
+ * come from the transport that owns the timers. `permanent_failure` carries an auth close code.
+ */
 export type ConnectionEvent =
   | { type: "socket_open" }
   | { type: "socket_close" }
@@ -202,6 +208,12 @@ const connectionMachine = setup({
 // ConnectionStateMachine class.
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks one transport's connection state.
+ *
+ * The machine records state only. The transport owns the timers and the socket.
+ * `subscribe` returns the function that removes the listener, and `stop` ends the machine.
+ */
 export interface ConnectionStateMachine {
   send(event: ConnectionEvent): void;
   readonly state    : ConnectionState;
@@ -212,6 +224,12 @@ export interface ConnectionStateMachine {
   stop(): void;
 }
 
+/**
+ * What the machine is built from.
+ *
+ * `transportName` is put in each event's `payload.transport` so listeners can tell machines apart on one bus.
+ * `graceMs` replaces the 100 ms grace period, for tests.
+ */
 export interface ConnectionStateMachineOptions {
   bus           : EventBus;
   // Per-transport identifier ("QueueTransport" / "AudioTransport" etc.).
@@ -225,6 +243,11 @@ export interface ConnectionStateMachineOptions {
 
 const CSM_EVENT_SOURCE = "ConnectionStateMachine";
 
+/**
+ * The connection state machine behind `createConnectionStateMachine`.
+ *
+ * It emits `connection_state_change` and related events on the bus, each with `source` set to ConnectionStateMachine.
+ */
 export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   private readonly bus           : EventBus;
   private readonly transportName : string;
@@ -329,6 +352,11 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   }
 }
 
+/**
+ * Build a connection state machine that reports on the given bus.
+ *
+ * Each transport gets its own, so one socket's backoff does not reset another's.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on factory function declaration line.
 export function createConnectionStateMachine(
   opts: ConnectionStateMachineOptions,
@@ -336,6 +364,7 @@ export function createConnectionStateMachine(
   return new ConnectionStateMachineImpl(opts);
 }
 
+/** The bus events the machine emits: state change, reconnecting, and lifecycle. */
 export type ConnectionEventOnBus =
   | LupinEvent<ConnectionStateChangePayload>
   | LupinEvent<ConnectionReconnectingPayload>

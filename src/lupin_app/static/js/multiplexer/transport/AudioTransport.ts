@@ -41,12 +41,24 @@ function defaultBinaryHandler(data: Blob | ArrayBuffer): void {
 }
 /* c8 ignore stop */
 
+/**
+ * A transport for `/ws/audio/{sessionId}` that also delivers binary audio frames.
+ *
+ * `start( sessionId, binaryHandler )` takes the function called once per binary frame.
+ */
 export interface AudioTransport extends Transport {
   start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void;
 }
 
+/** The options of an audio transport; they are the base transport options unchanged. */
 export type AudioTransportOptions = BaseTransportOptions;
 
+/**
+ * The audio transport.
+ *
+ * It uses the base handshake and reconnect handling, and routes each binary frame to the handler given at `start`.
+ * A handler that throws is logged and does not stop the transport.
+ */
 export class AudioTransportImpl extends BaseTransportImpl implements AudioTransport {
   protected readonly transportName    : string                = TRANSPORT_NAME;
   protected readonly endpointPath     : string                = "/ws/audio";
@@ -77,6 +89,7 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
   };
 }
 
+/** Build an audio transport for `/ws/audio`; no socket opens until `start` is called. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createAudioTransport(opts: AudioTransportOptions): AudioTransport {
   return new AudioTransportImpl(opts);

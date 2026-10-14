@@ -23,11 +23,17 @@ import { createQueueTransport } from "./QueueTransport";
 import type { AudioTransport } from "./AudioTransport";
 import { createAudioTransport } from "./AudioTransport";
 
+/** The two transports a page uses, each with its own connection state machine. */
 export interface TransportSet {
   queue : Transport;
   audio : AudioTransport;
 }
 
+/**
+ * Build the queue and audio transports over one auth manager and one bus.
+ *
+ * Neither socket is opened. The caller starts each with a session id.
+ */
 export function createTransports(
   authManager : AuthManager,
   eventBus    : EventBus,

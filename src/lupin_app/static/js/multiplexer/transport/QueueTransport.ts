@@ -50,6 +50,12 @@ const PERMANENT_CLOSE_CODES = new Set<number>([ 4001, 4002, 4003 ]);
 // the reconnect budget (→ socket_close → backoff → eventually max_attempts → failed).
 const HANDSHAKE_TIMEOUT_MS = 10000;
 
+/**
+ * A WebSocket transport the stores talk to.
+ *
+ * `start( sessionId )` opens the socket and runs the auth handshake. `send` posts an envelope.
+ * `state` is the connection state.
+ */
 export interface Transport {
   start(sessionId: string): void;
   stop(): void;
@@ -59,6 +65,11 @@ export interface Transport {
   readonly state: ConnectionState;
 }
 
+/**
+ * What a transport is built from.
+ *
+ * It needs the auth manager, the bus and the base URL. `WebSocketCtor`, `graceMs` and `maxAttempts` are optional.
+ */
 export interface BaseTransportOptions {
   authManager   : AuthManager;
   bus           : EventBus;
@@ -464,14 +475,22 @@ const QUEUE_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   "sys_ping",
 ];
 
+/**
+ * The transport for `/ws/queue`.
+ *
+ * It adds only the endpoint path and the events to subscribe to: job state, notification queue,
+ * task-store changes and the console transcript.
+ */
 export class QueueTransportImpl extends BaseTransportImpl {
   protected readonly transportName    : string                  = "QueueTransport";
   protected readonly endpointPath     : string                  = "/ws/queue";
   protected readonly subscribedEvents : ReadonlyArray<string>   = QUEUE_SUBSCRIBED_EVENTS;
 }
 
+/** The options of a queue transport; they are the base transport options unchanged. */
 export type QueueTransportOptions = BaseTransportOptions;
 
+/** Build a queue transport for `/ws/queue`; no socket opens until `start` is called. */
 export function createQueueTransport(opts: QueueTransportOptions): Transport {
   return new QueueTransportImpl(opts);
 }
