@@ -24,10 +24,20 @@
 
 // Minimal AudioContext shape we depend on. Tests inject a stub satisfying
 // this contract — full Web Audio API surface is not needed.
+/**
+ * The one `AudioContext` call the decoder makes.
+ *
+ * That call is `createBuffer`, so a test passes a stub with just that.
+ */
 export interface AudioContextLike {
   createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBufferLike;
 }
 
+/**
+ * The buffer the decoder returns.
+ *
+ * It has one `copyToChannel` call plus the rate, length, channels and duration.
+ */
 export interface AudioBufferLike {
   copyToChannel(source: Float32Array, channelNumber: number, bufferOffset?: number): void;
   readonly sampleRate: number;

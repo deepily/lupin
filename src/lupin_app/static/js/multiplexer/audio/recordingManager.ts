@@ -14,6 +14,11 @@
 
 import { AudioRecorder } from "./AudioRecorder";
 
+/**
+ * What a caller passes to start a recording.
+ *
+ * Only `contextId` is required. `onCancel` is the one hook that fires when the recording is cancelled, so a mic can reset.
+ */
 export interface RecordingManagerStartOptions {
   /** Required: identifier for the active recording (per sender card session). */
   contextId         : string;
@@ -169,5 +174,11 @@ class RecordingManager {
 }
 
 // Singleton (matches legacy this.recordingManager pattern).
+/**
+ * The shared recording manager, holding at most one active recording.
+ *
+ * Starting a new one cancels the old one, and Escape cancels the active one.
+ * It pauses TTS while recording, and resumes it afterwards only if it paused it.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the top-level singleton instantiation (executed on every import; no real branch).
 export const recordingManager = new RecordingManager();

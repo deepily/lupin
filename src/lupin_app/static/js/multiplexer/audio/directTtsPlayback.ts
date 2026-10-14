@@ -37,6 +37,11 @@ export interface DirectAudioElement {
   onerror     : ( () => void ) | null;
 }
 
+/**
+ * The test seams for the player.
+ *
+ * They are the audio-element factory and the object-URL create and revoke calls.
+ */
 export interface DirectTtsPlayerOptions {
   /** Test injection — the element factory. Production: `new Audio( url )`. */
   audioFactory?    : ( url: string ) => DirectAudioElement;
@@ -44,6 +49,11 @@ export interface DirectTtsPlayerOptions {
   revokeObjectURL? : ( url: string ) => void;
 }
 
+/**
+ * Plays a cached speech blob and stops it.
+ *
+ * `play( blob )` resolves when playback ends, and a second play stops the first.
+ */
 export interface DirectTtsPlayer {
   /**
    * Play a cached blob, resolving when playback ENDS.
@@ -142,6 +152,11 @@ class DirectTtsPlayerImpl implements DirectTtsPlayer {
   }
 }
 
+/**
+ * Build a player for cached speech blobs.
+ *
+ * It wraps each blob in an object URL and revokes it once, when playback ends, errors or is stopped.
+ */
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line.
 export function createDirectTtsPlayer( opts: DirectTtsPlayerOptions = {} ): DirectTtsPlayer {
   return new DirectTtsPlayerImpl( opts );

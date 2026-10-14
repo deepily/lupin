@@ -53,6 +53,12 @@ interface AudioErrorEvent {
 /** Constructs a playable audio element for a given (blob) URL. */
 export type AudioFactory = ( src: string ) => PlayableAudio;
 
+/**
+ * What the manager is built from; every field is optional.
+ *
+ * The queue holds 100 chunks. A rejected `play()` is retried up to 3 times, 100 ms apart.
+ * The chunk callbacks receive the running count of chunks played. The rest are test seams.
+ */
 export interface SequentialAudioManagerOptions {
   onChunkStart?    : (( chunkIndex: number ) => void) | null;
   onChunkEnd?      : (( chunkIndex: number ) => void) | null;
@@ -69,6 +75,11 @@ export interface SequentialAudioManagerOptions {
   userAgent?       : string;
 }
 
+/**
+ * A snapshot of the manager's counters.
+ *
+ * It holds chunks played and processed, queue length, the error count and the blob URLs not yet revoked.
+ */
 export interface SequentialAudioStats {
   chunksPlayed   : number;
   queueLength    : number;
@@ -83,6 +94,12 @@ const DEFAULT_RETRY_ATTEMPTS   = 3;
 const DEFAULT_RETRY_DELAY_MS   = 100;
 const DEFAULT_CLEANUP_DELAY_MS = 50;
 
+/**
+ * Plays audio chunks one after another, in the order they were added.
+ *
+ * Each blob becomes an object URL that is revoked shortly after the chunk ends or errors.
+ * A chunk that errors is skipped, and when the queue is full the oldest chunk is dropped.
+ */
 export class SequentialAudioManager {
   private readonly onChunkStart   : (( chunkIndex: number ) => void) | null;
   private readonly onChunkEnd     : (( chunkIndex: number ) => void) | null;

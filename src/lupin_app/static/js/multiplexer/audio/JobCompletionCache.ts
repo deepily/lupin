@@ -34,6 +34,12 @@
 /** A single cached job-completion record (in-memory + IndexedDB row shape). */
 import * as debugSink from "../shared/debugSink";
 
+/**
+ * One cached job-completion message.
+ *
+ * `timestampMs` is the expiry basis, and `size` is the UTF-8 byte length of the text.
+ * The same shape is held in memory and stored in IndexedDB.
+ */
 export interface JobCacheEntry {
   jobId        : string;
   text         : string;
@@ -72,6 +78,11 @@ export interface JobCacheAnalytics {
 /** A request carrying an `event.target.result` payload of type `T`. */
 export interface IdbEventTarget<T> { target?: { result?: T } | null; }
 
+/**
+ * An IndexedDB request: success and error handlers, then the `result` or `error`.
+ *
+ * Only the members this cache calls are modelled, so a test can supply a small in-memory fake.
+ */
 export interface MinimalIdbRequest<T = unknown> {
   onsuccess : (( ev: IdbEventTarget<T> ) => void) | null;
   onerror   : (( ev: unknown ) => void) | null;
@@ -79,10 +90,16 @@ export interface MinimalIdbRequest<T = unknown> {
   error     : unknown;
 }
 
+/** An IndexedDB index; the cache uses it to look an entry up by its text hash. */
 export interface MinimalIdbIndex {
   get( key: string ): MinimalIdbRequest<JobCacheEntry | undefined>;
 }
 
+/**
+ * The object-store calls the cache makes.
+ *
+ * They are create an index, get, put, delete, clear, list all, and reach an index.
+ */
 export interface MinimalIdbObjectStore {
   createIndex( name: string, keyPath: string, options: { unique: boolean } ): void;
   get( key: string ): MinimalIdbRequest<JobCacheEntry | undefined>;
@@ -93,10 +110,12 @@ export interface MinimalIdbObjectStore {
   index( name: string ): MinimalIdbIndex;
 }
 
+/** A transaction, used only to reach an object store by name. */
 export interface MinimalIdbTransaction {
   objectStore( name: string ): MinimalIdbObjectStore;
 }
 
+/** A database handle: check and create stores, open a transaction, and close. */
 export interface MinimalIdbDatabase {
   objectStoreNames : { contains( name: string ): boolean };
   createObjectStore( name: string, options: { keyPath: string } ): MinimalIdbObjectStore;
@@ -104,6 +123,7 @@ export interface MinimalIdbDatabase {
   close(): void;
 }
 
+/** The request from opening the database, with success, error and upgrade handlers. */
 export interface MinimalIdbOpenRequest {
   onsuccess       : (( ev: unknown ) => void) | null;
   onerror         : (( ev: unknown ) => void) | null;
@@ -112,12 +132,20 @@ export interface MinimalIdbOpenRequest {
   error           : unknown;
 }
 
+/** The `open( name, version )` call of the global `indexedDB`. Tests replace it. */
 export interface MinimalIdbFactory {
   open( name: string, version: number ): MinimalIdbOpenRequest;
 }
 
+/** The shape of `crypto.subtle.digest`, which hashes message text. Tests replace it. */
 export type SubtleDigestFn = ( algorithm: string, data: BufferSource ) => Promise<ArrayBuffer>;
 
+/**
+ * What the cache is built from; every field is optional.
+ *
+ * Caching is on unless `cacheEnabled` is false. The limits default to 10 MB of text, 30 days and 1000 entries.
+ * The database, digest and clock fields are test seams.
+ */
 export interface JobCompletionCacheOptions {
   cacheEnabled?     : boolean;
   cacheMaxSize?     : number;
@@ -157,6 +185,13 @@ function defaultIndexedDBFactory(): MinimalIdbFactory | null {
   return null;
 }
 
+/**
+ * A two-tier cache of job-completion messages, keyed by job id, in memory and in IndexedDB.
+ *
+ * Each text is hashed with SHA-256 so a repeated message can be found by its text.
+ * Entries expire by age and are evicted when the size or entry limit is passed.
+ * If the database cannot open, the cache stays memory-only.
+ */
 export class JobCompletionCache {
   private readonly cacheEnabled : boolean;
   private readonly cacheMaxSize : number;

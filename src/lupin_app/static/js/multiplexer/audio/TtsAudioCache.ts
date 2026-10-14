@@ -50,6 +50,11 @@ export interface CacheStats {
 /** A request carrying an `event.target.result` payload of type `T`. */
 export interface IdbEventTarget<T> { target?: { result?: T } | null; }
 
+/**
+ * An IndexedDB request: success and error handlers, then the `result` or `error`.
+ *
+ * Only the members this cache calls are modelled, so a test can supply a small in-memory fake.
+ */
 export interface MinimalIdbRequest<T = unknown> {
   onsuccess : (( ev: IdbEventTarget<T> ) => void) | null;
   onerror   : (( ev: unknown ) => void) | null;
@@ -57,6 +62,11 @@ export interface MinimalIdbRequest<T = unknown> {
   error     : unknown;
 }
 
+/**
+ * The object-store calls the cache makes.
+ *
+ * They are create an index, get, put, clear, and open a cursor.
+ */
 export interface MinimalIdbObjectStore {
   createIndex( name: string, keyPath: string, options: { unique: boolean } ): void;
   get( key: string ): MinimalIdbRequest<CacheEntry | undefined>;
@@ -65,22 +75,30 @@ export interface MinimalIdbObjectStore {
   openCursor(): MinimalIdbRequest<MinimalIdbCursor | null>;
 }
 
+/**
+ * A cursor over stored entries, with the current `value`.
+ *
+ * The cleanup sweep calls `delete` on an expired one and `continue` to move on.
+ */
 export interface MinimalIdbCursor {
   value : CacheEntry;
   delete(): void;
   continue(): void;
 }
 
+/** A transaction, used only to reach an object store by name. */
 export interface MinimalIdbTransaction {
   objectStore( name: string ): MinimalIdbObjectStore;
 }
 
+/** A database handle: check and create stores, open a transaction, and close. */
 export interface MinimalIdbDatabase {
   objectStoreNames : { contains( name: string ): boolean };
   createObjectStore( name: string, options: { keyPath: string } ): MinimalIdbObjectStore;
   transaction( storeNames: string[], mode: string ): MinimalIdbTransaction;
 }
 
+/** The request from opening the database, with success, error and upgrade handlers. */
 export interface MinimalIdbOpenRequest {
   onsuccess       : (( ev: unknown ) => void) | null;
   onerror         : (( ev: unknown ) => void) | null;
@@ -89,12 +107,20 @@ export interface MinimalIdbOpenRequest {
   error           : unknown;
 }
 
+/** The `open( name, version )` call of the global `indexedDB`. Tests replace it. */
 export interface MinimalIdbFactory {
   open( name: string, version: number ): MinimalIdbOpenRequest;
 }
 
+/** The shape of `crypto.subtle.digest`, which hashes the text key. Tests replace it. */
 export type SubtleDigestFn = ( algorithm: string, data: BufferSource ) => Promise<ArrayBuffer>;
 
+/**
+ * What the cache is built from; every field is optional.
+ *
+ * Caching is on unless `cacheEnabled` is false. Entries last 24 hours and the size limit is 50 MB by default.
+ * The database, digest, clock and timer fields are test seams.
+ */
 export interface TtsAudioCacheOptions {
   cacheEnabled?     : boolean;
   maxAge?           : number;
@@ -127,6 +153,12 @@ function defaultIndexedDBFactory(): MinimalIdbFactory | null {
 }
 /* c8 ignore stop */
 
+/**
+ * A two-tier cache of synthesized speech, in memory and in IndexedDB.
+ *
+ * Entries are keyed by a hash of the text. An entry past its age is dropped by a sweep that runs every 30 minutes, and when the tracked size passes the limit.
+ * If the database cannot open, the cache stays memory-only.
+ */
 export class TtsAudioCache {
   private readonly cacheEnabled : boolean;
   private readonly maxAge       : number;
