@@ -463,9 +463,9 @@ export function createAuthManager(opts: AuthManagerOptions): AuthManager {
 // Re-export types consumed by tests / boot.
 export type { Token };
 /**
- * The bus events the manager emits.
+ * The four event types the manager emits on the bus.
  *
- * They are the state change and the refresh start, completion and failure.
+ * `auth_state_change` fires each time the state machine moves. The three `refresh_*` events fire around one refresh attempt.
  */
 export type AuthEvent =
   | LupinEvent<AuthStateChangePayload>
