@@ -18,6 +18,9 @@ What "docs-only" means here, and does not:
     - a documentation tag in a .ts file is documentation; the compiler ignores it there
     - a comment that merely looks like a directive also fails; that errs toward a failure
     - a block comment that gains a line break between two tokens fails, since it moves a break
+    - a JSDoc tag such as @private, @readonly, @override or @deprecated is not compared
+    - the position of a typed tag in a .js file is not compared, only the tags and their types
+    - a prose line comment that starts with global, exported or region is refused as a directive
 """
 
 import argparse
