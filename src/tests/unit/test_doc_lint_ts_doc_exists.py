@@ -190,13 +190,16 @@ def test_a_file_that_did_not_parse_names_the_first_parse_error_in_its_finding():
 
 
 def test_census_of_texts_lists_only_nonzero_files_in_path_order_and_walks_every_counted_file( monkeypatch ):
-    paths = [ "z.ts", "m.ts", "a.ts" ]
+    paths = [ "z.ts", "m.ts", "bad.ts", "a.ts" ]
     by    = { "z.ts": rec( "z.ts", [ sym( "f", False ) ] ), "m.ts": rec( "m.ts", [ sym( "g", True ) ] ), "a.ts": rec( "a.ts", [ sym( "h", False ) ] ) }
     monkeypatch.setattr( ts_doc_exists, "counted_paths", lambda root: paths )
     monkeypatch.setattr( ts_doc_exists, "run_extractor", lambda root, files, source_root=None: { f: by[ f ] for f in files } )
-    found, walked = ts_doc_exists.census_of_texts( "/r", lambda path: "x\n" )
-    assert list( found.items() ) == [ ( "a.ts", 1 ), ( "z.ts", 1 ) ]
-    assert walked == 3
+    def read( path ):
+        if path == "bad.ts": raise UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "invalid start byte" )
+        return "x\n"
+    found, walked = ts_doc_exists.census_of_texts( "/r", read )
+    assert list( found.items() ) == [ ( "a.ts", 1 ), ( "bad.ts", 1 ), ( "z.ts", 1 ) ]
+    assert walked == 4
 
 
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
@@ -428,4 +431,4 @@ def test_the_real_census_over_this_repository_sees_one_planted_undocumented_expo
     result = ts_doc_exists.census( REPO_ROOT, run=run )
     assert result.walked == baseline.walked + 1
     assert result.undocumented == baseline.undocumented + 1
-    assert result.found.get( "planted.ts" ) == 1 and [ s for s in result.missing[ "planted.ts" ] ] != []
+    assert result.found.get( "planted.ts" ) == 1 and [ s[ "name" ] for s in result.missing[ "planted.ts" ] ] == [ "planted" ]
