@@ -37,7 +37,11 @@ import type { SenderRecord, Notification, VoicePersona } from "../shared/types";
 // Canonical scenario shape (matches notifications-parity-scenario.json).
 // ---------------------------------------------------------------------------
 
-/** A sender's voice persona as the canonical scenario file stores it. */
+/**
+ * A sender's voice persona as the canonical scenario file stores it.
+ *
+ * The senders-visible shape adds `assigned_at`, set to the sender's `last_activity`.
+ */
 export interface ParityVoicePersona {
   name     : string;
   voice_id : string;
@@ -64,7 +68,12 @@ export interface ParityScenarioNotification {
   response_value    ?: { value: string } | null;
 }
 
-/** One sender in the canonical scenario, with its persona and its notifications in order. */
+/**
+ * One sender in the canonical scenario.
+ *
+ * On the mux side `new_count` becomes `unread_count`.
+ * `last_activity` becomes `last_active_ts` in milliseconds.
+ */
 export interface ParityScenarioSender {
   sender_id      : string;
   display_name   : string;
@@ -75,7 +84,11 @@ export interface ParityScenarioSender {
   notifications  : ReadonlyArray<ParityScenarioNotification>;
 }
 
-/** The canonical scenario file: a schema version, the app time zone, and the senders. */
+/**
+ * The canonical scenario file.
+ *
+ * Three adapters derive the mux model, the conversation-by-date shape and the senders-visible shape from it.
+ */
 export interface ParityScenario {
   schema_version: number;
   description   : string;
