@@ -661,11 +661,13 @@ export type NotificationFilterMode = "own" | "others" | "all";
 /**
  * Payload of `store_notifications_changed`.
  *
- * `id_hash` names the notification and is absent for a hydration. `source` is `local-sweep` when the expiry sweep caused it.
+ * `id_hash` names the notification for a change to one. It is absent for `hydrated`, `filtered`, `hydration_state`,
+ * `history_window` and `history_reset`, and for the single bulk `updated` of mark-all-read and the bulk `removed`.
+ * `source` is `local-sweep` when the expiry sweep caused it.
  */
 export interface StoreNotificationsChangedPayload {
   changeKind : NotificationChangeKind;
-  id_hash?   : string;                // present except for "hydrated"
+  id_hash?   : string;                // present for a change to one notification
   source?    : "local-sweep";          // present when local expiry sweep triggered the change
 }
 
