@@ -1,8 +1,9 @@
 /* c8 ignore next */
 // Multiplexer Phase 2 — StorageService. Typed JSON wrapper around localStorage
 // with `lupin:` key prefix, schema versioning, corrupt-payload recovery, and
-// first-class session-ID accessors (DC2 resolution: StorageService owns ALL
-// storage; no raw localStorage elsewhere in the multiplexer tree).
+// first-class session-ID accessors. It owns the `lupin:` keys and the two auth tokens.
+// Three render files still call localStorage directly: epicBoardCollapse.ts,
+// taskListCollapse.ts and podcastLinks.ts.
 
 import { eventBus, createEventBusForTesting } from "./EventBus";
 import type { EventBus } from "./EventBus";
@@ -24,7 +25,7 @@ const SESSION_ID_SCHEMA    = 1;
 // (auth.js, notifications.js, lupin-nav.js, broadcast-panel.js). The WP0 token
 // migration routes the multiplexer onto these same keys (no dual-read) so a
 // user authenticated via /app/auth/login is authenticated in the multiplexer.
-// StorageService still owns the access (DC2 — no raw localStorage elsewhere).
+// StorageService owns access to them.
 const ACCESS_TOKEN_KEY  = "lupin_access_token";
 const REFRESH_TOKEN_KEY = "lupin_refresh_token";
 
@@ -44,8 +45,9 @@ export interface StorageBackend {
 }
 
 /**
- * The only code that touches stored state in the multiplexer.
+ * The multiplexer's store for its own state and its auth tokens.
  *
+ * Three render files call localStorage directly, and do not go through it.
  * `getJSON` and `setJSON` keep values under `lupin:` keys with a schema version. A value that fails to read emits `storage_corrupt` and returns null.
  * The two auth tokens are stored raw under their own unprefixed keys, shared with the other clients.
  */
