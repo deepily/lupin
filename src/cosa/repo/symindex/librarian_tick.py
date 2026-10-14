@@ -318,7 +318,7 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         os.makedirs( os.path.dirname( os.path.abspath( misses_path ) ), exist_ok=True )
         report = export_fn( body.get( "tasks", [] ), misses_path )
     except ( ValueError, OSError ) as error:
-        log( f"tick could not write the misses file: {error}" )
+        log( f"tick could not write the misses file: {error}; if the empty export is right, move {misses_path} aside and run again" )
         return 1, { "ran": False, "reason": str( error ) }
     for item in report.skipped: log( f"miss block skipped: {item[ 'title' ]}: {item[ 'reason' ]}" )
     exported = report.written
