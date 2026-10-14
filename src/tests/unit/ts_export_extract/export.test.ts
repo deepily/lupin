@@ -78,6 +78,27 @@ test( "an export statement the parser cannot finish adds nothing and the error i
     assert.ok( rec.parse_errors.length > 0 );
 } );
 
+// ---------------------------------------------------------------- CommonJS
+
+test( "commonjs: an assignment names the declaration on its right, guarded or not, and merges by that name", () => {
+    const src = [
+        "/** d */", "class Doc {}", "class Bare {}", "class Both {}", "function helper() {}",
+        "if ( typeof module !== \"undefined\" ) {", "    module.exports = Doc;", "    exports.Bare = Bare;",
+        "    module.exports.Both = Both;", "    exports.Both = Both;", "}"
+    ].join( "\n" );
+    assert.deepEqual( symbols( src, "a.js" ), [ [ "commonjs", "Doc", true ], [ "commonjs", "Bare", false ], [ "commonjs", "Both", false ] ] );
+} );
+
+test( "commonjs: a right side that names no declaration of the file is a symbol named by its target", () => {
+    const src = "/** shim */\nmodule.exports = { a: 1 };\nexports.fn = function () {};\nmodule.exports.n = make();\n";
+    assert.deepEqual( symbols( src, "a.js" ), [ [ "commonjs", "module.exports", true ], [ "commonjs", "exports.fn", false ], [ "commonjs", "module.exports.n", false ] ] );
+} );
+
+test( "commonjs: a name already exported with the export keyword is not counted twice, and other assignments are ignored", () => {
+    const src = "export class K {}\nmodule.exports = K;\nconst o = {};\no.exports = 1;\nexports = 2;\nmodule.other = 3;\nexports.x += 1;\n";
+    assert.deepEqual( symbols( src, "a.js" ), [ [ "class", "K", false ] ] );
+} );
+
 // ---------------------------------------------------------------- what is a doc comment
 
 test( "a block must be between the statement before and this one, and must say something", () => {

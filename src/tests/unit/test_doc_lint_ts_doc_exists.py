@@ -113,14 +113,14 @@ def test_census_counts_per_file_and_totals( repo ):
                          "b.js": rec( "b.js", [ sym( "d", True ) ] ) } )
     result = ts_doc_exists.census( str( repo ), run=run )
     assert result.found == { "a.ts": 2 }
-    assert ( result.walked, result.symbols, result.undocumented, result.reexports, result.unparsed ) == ( 2, 4, 2, 2, 0 )
+    assert ( result.walked, result.symbols, result.undocumented, result.reexports, result.unparsed ) == ( 2, 4, 2, 2, [] )
     assert [ s[ "name" ] for s in result.missing[ "a.ts" ] ] == [ "a", "c" ]
 
 
 def test_census_counts_a_file_that_did_not_parse_and_still_reads_its_symbols( repo ):
     run    = fake_run( { "a.ts": rec( "a.ts", [ sym( "a", False ) ], errors=[ { "line": 1, "message": "broken" } ] ), "b.js": rec( "b.js", [] ) } )
     result = ts_doc_exists.census( str( repo ), run=run )
-    assert result.unparsed == 1 and result.found == { "a.ts": 1 }
+    assert result.unparsed == [ "a.ts" ] and result.found == { "a.ts": 1 }
 
 
 def test_census_over_an_empty_tree_says_so( tmp_path ):
@@ -156,7 +156,7 @@ def test_report_lists_each_symbol_then_a_count_table_largest_first_then_totals( 
 def test_report_mentions_unparsed_files_and_reexports_when_there_are_some( repo ):
     run    = fake_run( { "a.ts": rec( "a.ts", [], reexports=4, errors=[ { "line": 1, "message": "x" } ] ), "b.js": rec( "b.js", [] ) } )
     text   = ts_doc_exists.report( ts_doc_exists.census( str( repo ), run=run ) )
-    assert "re-exports not counted: 4" in text and "files that did not parse: 1" in text
+    assert "re-exports not counted: 4" in text and "files that did not parse: 1 (a.ts)" in text
 
 
 def test_report_leaves_out_those_lines_when_there_are_none( repo ):
@@ -247,6 +247,22 @@ def test_check_reports_a_table_that_cannot_be_read_as_not_checked( repo, monkeyp
     assert code == 2 and text.startswith( "not checked: " )
 
 
+def test_check_and_write_refuse_when_a_file_did_not_parse_and_name_it( repo, monkeypatch ):
+    by_file = { "a.ts": rec( "a.ts", [], errors=[ { "line": 3, "message": "broken" } ] ), "b.js": rec( "b.js", [] ) }
+    for mode in ( "--check", "--write" ):
+        code, text = _main( repo, monkeypatch, by_file, mode )
+        assert code == 2 and text.startswith( "not checked: " ) and "a.ts" in text and "did not parse" in text, mode
+    assert not ( repo / ts_doc_exists.TABLE_PATH ).exists()
+
+
+def test_a_parse_error_that_would_read_as_a_fall_is_refused_not_passed( repo, monkeypatch ):
+    by_file = { "a.ts": rec( "a.ts", [ sym( "a", False ) ] ), "b.js": rec( "b.js", [] ) }
+    assert _main( repo, monkeypatch, by_file, "--write" )[ 0 ] == 0
+    by_file[ "a.ts" ] = rec( "a.ts", [], errors=[ { "line": 1, "message": "lost the export" } ] )
+    code, text = _main( repo, monkeypatch, by_file, "--check" )
+    assert code == 2 and "a.ts" in text
+
+
 def test_check_reports_an_extractor_failure_as_not_checked( repo, monkeypatch ):
     def boom( root, files, source_root=None ): raise RuntimeError( "extractor failed" )
     monkeypatch.setattr( ts_doc_exists, "run_extractor", boom )
@@ -307,6 +323,22 @@ export * from "./all";
 export default 5;
 """
 
+CJS_SOURCE = """\
+/** Documented class. */
+class Doc {}
+class Bare {}
+class Both {}
+function helper() {}
+if ( typeof module !== "undefined" ) {
+    module.exports = Doc;
+    exports.Bare = Bare;
+    module.exports.Both = Both;
+    exports.Both = Both;
+    exports.anon = function () {};
+    module.exports.n = helper();
+}
+"""
+
 
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
 def test_the_real_extractor_reads_every_export_form_and_pairs_the_blocks_above_them( tmp_path ):
@@ -319,6 +351,16 @@ def test_the_real_extractor_reads_every_export_form_and_pairs_the_blocks_above_t
         ( "class", "Empty" ): False, ( "interface", "Blank" ): False, ( "type", "T" ): True,
         ( "list", "local" ): True, ( "list", "renamed" ): False, ( "assignment", "default" ): False }
     assert got[ "reexports" ] == 3 and got[ "parse_errors" ] == []
+
+
+@pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
+def test_the_real_extractor_counts_commonjs_assignments_by_the_declaration_they_name( tmp_path ):
+    ( tmp_path / "c.js" ).write_text( CJS_SOURCE, encoding="utf-8" )
+    got  = ts_doc_exists.run_extractor( REPO_ROOT, [ "c.js" ], source_root=str( tmp_path ) )[ "c.js" ]
+    seen = { ( s[ "kind" ], s[ "name" ] ): s[ "documented" ] for s in got[ "symbols" ] }
+    assert seen == {
+        ( "commonjs", "Doc" ): True, ( "commonjs", "Bare" ): False, ( "commonjs", "Both" ): False,
+        ( "commonjs", "exports.anon" ): False, ( "commonjs", "module.exports.n" ): False }
 
 
 @pytest.mark.skipif( shutil.which( "node" ) is None, reason="node is not installed" )
