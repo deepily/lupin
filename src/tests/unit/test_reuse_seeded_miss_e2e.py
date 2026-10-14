@@ -104,7 +104,7 @@ def test_refusals_come_before_anything_is_created( tmp_path, monkeypatch ):
     ( tmp_path / "busy" ).mkdir()
     ( tmp_path / "busy" / "x" ).write_text( "x" )
     with pytest.raises( sm.RunRefused, match = "not empty" ): sm.run( tmp_path / "busy", "dry" )
-    with pytest.raises( sm.RunRefused, match = "--store must be" ): sm.run( tmp_path / "a", "dry", store_kind="other" )
+    with pytest.raises( sm.RunRefused, match = "is refused" ): sm.run( tmp_path / "a", "dry", store_kind="other" )
     with pytest.raises( sm.RunRefused, match = "--ceiling and --ledger" ): sm.run( tmp_path / "b", "live" )
     with pytest.raises( sm.RunRefused, match = "is not set" ): sm.run( tmp_path / "c", "live", ceiling=1000, ledger_path=tmp_path / "l" )
     monkeypatch.setattr( jt, "has_key", lambda: True )
