@@ -12,6 +12,12 @@ import type {
 
 type AnyListener = (e: LupinEvent<unknown>) => void;
 
+/**
+ * The pub/sub bus all modules talk through.
+ *
+ * `on` returns the function that removes the listener. A listener that throws is reported as a
+ * `listener_error` event and does not stop the other listeners.
+ */
 export interface EventBus {
   on<T = unknown>(
     type: LupinEventType,
@@ -94,11 +100,13 @@ class EventBusImpl implements EventBus {
 
 // Singleton instance — every module imports from here. ESLint no-globals rule
 // (Phase 1) prevents creating ad-hoc EventTargets elsewhere.
+/** The one shared bus. Production modules import it rather than creating their own. */
 export const eventBus: EventBus = new EventBusImpl();
 
 // Test-only factory. Production code MUST use the singleton above. Exposed so
 // unit tests can build isolated buses without singleton state leaking between
 // test cases.
+/** Build a separate bus for a test, so no listeners leak between test cases. */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createEventBusForTesting(): EventBus {
   return new EventBusImpl();

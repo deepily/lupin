@@ -30,6 +30,11 @@ const REFRESH_TOKEN_KEY = "lupin_refresh_token";
 
 // Minimal Storage shape for dependency injection. `localStorage` satisfies
 // this in browser; tests provide an in-memory implementation.
+/**
+ * The part of `localStorage` the service uses.
+ *
+ * A test passes `InMemoryStorage` or any object with these members.
+ */
 export interface StorageBackend {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -38,6 +43,12 @@ export interface StorageBackend {
   readonly length: number;
 }
 
+/**
+ * The only code that touches stored state in the multiplexer.
+ *
+ * `getJSON` and `setJSON` keep values under `lupin:` keys with a schema version. A value that fails to read emits `storage_corrupt` and returns null.
+ * The two auth tokens are stored raw under their own unprefixed keys, shared with the other clients.
+ */
 export interface StorageService {
   getJSON<T>(key: string, expectedSchemaVersion: number): T | null;
   setJSON<T>(key: string, value: T, schemaVersion: number): void;
@@ -188,12 +199,18 @@ function isEnvelope(v: unknown): v is StorageEnvelope<unknown> {
 
 // Production singleton. Browsers expose `localStorage` on `window`; the
 // `dom` lib in tsconfig types it.
+/** The shared storage service, backed by the page's `localStorage`. */
 export const storage: StorageService = new StorageServiceImpl(
   eventBus,
   globalThis.localStorage,
 );
 
 // Test-only factory. Pass a custom EventBus + backend for isolation.
+/**
+ * Build a storage service for a test.
+ *
+ * It gets its own bus and an in-memory backend unless the caller passes them.
+ */
 export function createStorageServiceForTesting(
   bus: EventBus = createEventBusForTesting(),
   backend?: StorageBackend,
@@ -204,6 +221,7 @@ export function createStorageServiceForTesting(
 
 // Test-only in-memory backend. Mirrors the parts of the Web Storage API the
 // service uses; tests can also pass any other backend that matches the shape.
+/** A storage backend that holds keys in a map and forgets them with the page, for tests. */
 export class InMemoryStorage implements StorageBackend {
   private readonly store = new Map<string, string>();
 

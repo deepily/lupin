@@ -19,6 +19,12 @@
 // Test code may cast: bus.emit({type: "fake_event" as LupinEventType, ...}).
 // ---------------------------------------------------------------------------
 
+/**
+ * The name of every event on the bus, as a string union.
+ *
+ * The groups are auth, storage, connection and page lifecycle, server frames, and the `store_*` events
+ * that the stores emit after they change.
+ */
 export type LupinEventType =
   // AuthManager (Phase 2)
   | "auth_state_change"
@@ -292,6 +298,11 @@ export type LupinEventType =
 // LupinEvent envelope — the canonical pub/sub shape.
 // ---------------------------------------------------------------------------
 
+/**
+ * The envelope of every bus event.
+ *
+ * It holds the `type`, the `payload`, the emitting module as `source`, and `ts` in milliseconds.
+ */
 export interface LupinEvent<T = unknown> {
   type    : LupinEventType;
   payload : T;
@@ -309,6 +320,11 @@ export interface LupinEvent<T = unknown> {
 // the event `payload` (i.e. the server's `data` dict), which is what every store
 // reads. This is the single client-side frame-shape contract (WP0 flat-frame
 // fix) — no per-event server `data`-mirroring.
+/**
+ * A WebSocket frame as the server sends it, with its data keys at the top level.
+ *
+ * The transport removes `type` and `timestamp`. The remaining keys become the event payload.
+ */
 export interface ServerFrameEnvelope {
   type       : string;
   timestamp? : string;            // present on broadcast frames, absent on auth_success
@@ -319,26 +335,45 @@ export interface ServerFrameEnvelope {
 // Auth types — token shape + state machine states.
 // ---------------------------------------------------------------------------
 
+/**
+ * The access and refresh tokens.
+ *
+ * `expiresAt` is the access token's expiry in milliseconds since the epoch.
+ */
 export interface Token {
   accessToken  : string;
   refreshToken : string;
   expiresAt    : number;   // ms epoch
 }
 
+/** The auth manager's states: idle, ready, refreshing and expired. */
 export type AuthState = "idle" | "ready" | "refreshing" | "expired";
 
+/** Payload of `auth_state_change`: the state the auth manager has just entered. */
 export interface AuthStateChangePayload {
   state : AuthState;
 }
 
+/**
+ * Payload of `refresh_started`.
+ *
+ * `reason` says whether the token ran out or was invalidated by a 401.
+ */
 export interface RefreshStartedPayload {
   reason : "expired" | "invalidated";
 }
 
+/** Payload of `refresh_completed`: the new access token's expiry in milliseconds. */
 export interface RefreshCompletedPayload {
   expiresAt : number;
 }
 
+/**
+ * Payload of `refresh_failed`.
+ *
+ * `sentRefresh` is the refresh token the failed attempt sent. A listener compares it with storage
+ * to tell a dead token from one that another tab has replaced.
+ */
 export interface RefreshFailedPayload {
   error     : string;
   willRetry : boolean;
@@ -352,17 +387,20 @@ export interface RefreshFailedPayload {
 // StorageService — typed JSON envelope.
 // ---------------------------------------------------------------------------
 
+/** How a value is kept under a `lupin:` key: the value, its schema version and a time stamp. */
 export interface StorageEnvelope<T> {
   schemaVersion : number;
   payload       : T;
   ts            : number;   // ms epoch
 }
 
+/** The stored form of a session id, with the time it was generated. */
 export interface SessionIdEnvelope {
   sessionId   : string;     // server-generated "adjective noun" form per existing convention
   generatedAt : number;     // ms epoch
 }
 
+/** Payload of `storage_corrupt`: the full key that could not be read, and why. */
 export interface StorageCorruptPayload {
   key   : string;
   error : string;
@@ -372,6 +410,7 @@ export interface StorageCorruptPayload {
 // EventBus — listener_error payload references the original event opaquely.
 // ---------------------------------------------------------------------------
 
+/** Payload of `listener_error`: the event whose listener threw, and the error message. */
 export interface ListenerErrorPayload {
   originalEvent : LupinEvent<unknown>;
   error         : string;
@@ -381,6 +420,11 @@ export interface ListenerErrorPayload {
 // ConnectionStateMachine (Phase 3) — connection lifecycle states + payloads.
 // ---------------------------------------------------------------------------
 
+/**
+ * A transport's connection states.
+ *
+ * They are connecting, connected, reconnecting, backoff, offline and failed.
+ */
 export type ConnectionState =
   | "connecting"
   | "connected"
@@ -389,6 +433,11 @@ export type ConnectionState =
   | "offline"
   | "failed";
 
+/**
+ * Payload of `connection_state_change`.
+ *
+ * `transport` names which transport changed. `reason` and `code` appear only on a move to `failed` after a permanent auth close.
+ */
 export interface ConnectionStateChangePayload {
   state     : ConnectionState;
   prev      : ConnectionState;
@@ -407,11 +456,17 @@ export interface ConnectionStateChangePayload {
   code?     : number;
 }
 
+/** Payload of `connection_reconnecting`: the attempt number and the transport name. */
 export interface ConnectionReconnectingPayload {
   attempts  : number;
   transport : string;
 }
 
+/**
+ * Payload of `connection_offline` and `connection_online`.
+ *
+ * A time stamp and the transport name.
+ */
 export interface ConnectionLifecyclePayload {
   ts        : number;
   transport : string;
@@ -421,6 +476,7 @@ export interface ConnectionLifecyclePayload {
 // Transport wrappers (Phase 3) — emitted after auth_success arrives.
 // ---------------------------------------------------------------------------
 
+/** Payload of `transport_ready`: the transport whose auth handshake has just succeeded. */
 export interface TransportReadyPayload {
   // Transport name: "QueueTransport" / "AudioTransport".
   // Mirrors the LupinEvent.source field for the same emission so consumers
@@ -435,6 +491,13 @@ export interface TransportReadyPayload {
 // `bfcache: true`.
 // ---------------------------------------------------------------------------
 
+/**
+ * Payload of the four page and network events.
+ *
+ * They are `page_hidden`, `page_visible`, `network_online` and `network_offline`.
+ *
+ * `bfcache` is true on a `page_visible` that comes from a back-forward-cache restore.
+ */
 export interface LifecyclePayload {
   ts       : number;
   bfcache? : true;
@@ -446,6 +509,11 @@ export interface LifecyclePayload {
 // Phase 6 TTS routing consumes `voice_id` (legacy `getVoiceIdForSender:9000`).
 // ---------------------------------------------------------------------------
 
+/**
+ * A sender's voice persona.
+ *
+ * It holds the name, the ElevenLabs `voice_id`, an icon, a color and whether the persona is borrowed.
+ */
 export interface VoicePersona {
   name     : string;   // human-readable persona name (e.g., "Tiberius")
   voice_id : string;   // ElevenLabs voice_id — Phase 6 TTS routing input
@@ -482,6 +550,11 @@ export interface VoicePersona {
 // echoed back verbatim at vote-POST time (the server does not persist the hint,
 // so the client supplies what was voted on — parity with legacy notifications.js
 // `_predictionVoteContext`).
+/**
+ * The server's prediction of how the user will answer a prompt.
+ *
+ * `confidence` runs from 0 to 1. `predicted_value` and `category` are sent back when the user votes.
+ */
 export interface PredictionHint {
   confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
   predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
@@ -492,6 +565,12 @@ export interface PredictionHint {
   strategy?       : string;
 }
 
+/**
+ * One notification as the stores hold it.
+ *
+ * The store turns the server's ISO `timestamp` into `ts` in milliseconds, and `response_requested` into `action_required`.
+ * `direction` is outgoing for the synthetic reply made from a responded notification.
+ */
 export interface Notification {
   id_hash         : string;
   ts              : number;          // ms epoch (normalized from server `timestamp` ISO string)
@@ -521,6 +600,11 @@ export interface Notification {
   direction?        : "incoming" | "outgoing";
 }
 
+/**
+ * The kinds of notification-store change.
+ *
+ * They are add, update, expire, remove and hydrate, plus the filter and history-window changes.
+ */
 export type NotificationChangeKind =
   | "added"
   | "updated"
@@ -540,8 +624,18 @@ export type NotificationChangeKind =
 // others = the user's own sent replies (direction === "outgoing"), all = pass.
 // Default + only-wired mode is "own"; the toggle/badge/admin-gating UI is
 // DEFERRED per Rick's scope, so a future real axis swaps in with zero rework.
+/**
+ * Which notifications the list shows.
+ *
+ * `own` is inbound ones, `others` is the user's own replies, and `all` passes everything.
+ */
 export type NotificationFilterMode = "own" | "others" | "all";
 
+/**
+ * Payload of `store_notifications_changed`.
+ *
+ * `id_hash` names the notification and is absent for a hydration. `source` is `local-sweep` when the expiry sweep caused it.
+ */
 export interface StoreNotificationsChangedPayload {
   changeKind : NotificationChangeKind;
   id_hash?   : string;                // present except for "hydrated"
@@ -553,9 +647,16 @@ export interface StoreNotificationsChangedPayload {
 // `running_fifo_queue.py:1024, :147`).
 // ---------------------------------------------------------------------------
 
+/** The four queue states of a job: todo, running, done and dead. */
 export type JobStatus = "todo" | "running" | "done" | "dead";
+/** A job status, or `history` for jobs loaded from past runs. */
 export type JobBucket = JobStatus | "history";
 
+/**
+ * One queue job.
+ *
+ * It holds the id, the job type, the status, the creation time, the start and completion times when set, and free-form `meta`.
+ */
 export interface Job {
   id_hash      : string;
   job_type     : string;
@@ -566,8 +667,14 @@ export interface Job {
   meta         : Record<string, unknown>;
 }
 
+/** The kinds of job-store change: added, transitioned, removed and hydrated. */
 export type JobChangeKind = "added" | "transitioned" | "removed" | "hydrated";
 
+/**
+ * Payload of `store_jobs_changed`.
+ *
+ * `from` and `to` are set on a transition. `bucket` is set on a hydration.
+ */
 export interface StoreJobsChangedPayload {
   changeKind : JobChangeKind;
   id_hash?   : string;
@@ -589,6 +696,12 @@ export interface StoreJobsChangedPayload {
 // that resolves before re-scoping.
 // ---------------------------------------------------------------------------
 
+/**
+ * The data behind one sender card.
+ *
+ * It holds the id, display name, last activity, unread count and persona. `is_worker` is set for a managed worker.
+ * `session_name` is the topic the session last announced.
+ */
 export interface SenderRecord {
   sender_id                : string;
   display_name             : string;
@@ -613,6 +726,7 @@ export interface SenderRecord {
 // R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore
 // → SenderStore). Both fields required at the emit site (NotificationStore only
 // emits when raw sender_id + session_name are present).
+/** Payload of `session_topic`: the sender and the session name it announced. */
 export interface SessionTopicPayload {
   sender_id    : string;
   session_name : string;
@@ -627,12 +741,22 @@ export interface SessionTopicPayload {
 // predicate, the ORM Index, and the guard that compares them). This is the fifth,
 // and it cannot import the Python one — so `test_broadcast_ack_type_spellings_agree.py`
 // READS THIS LINE and fails if it drifts. Do not inline the literal anywhere else.
+/**
+ * The notification type that marks a broadcast acknowledgement.
+ *
+ * A unit test reads this line and fails if it differs from the server's spelling.
+ */
 export const COMMONS_BROADCAST_ACK_TYPE = "commons_broadcast_ack";
 
 // The ack identity the server puts in `payload` (CommonsAckWatcher._ack_payload).
 // Every field but broadcast_id can be null: a pre-S3 row, or a seat whose bridge
 // carried no persona. The store keeps such an ack rather than dropping it —
 // an unattributed acknowledgement is still an acknowledgement.
+/**
+ * One seat's acknowledgement of a broadcast, as the server puts it in the payload.
+ *
+ * Only `broadcast_id` is always set. The store keeps an ack whose persona fields are null.
+ */
 export interface BroadcastAckPayload {
   broadcast_id   : string;
   session_id    ?: string | null;
@@ -643,15 +767,27 @@ export interface BroadcastAckPayload {
   body_summary  ?: string | null;
 }
 
+/** The kinds of ack-store change: added, updated, hydrated and cleared. */
 export type BroadcastAckChangeKind = "added" | "updated" | "hydrated" | "cleared";
 
+/**
+ * Payload of `store_broadcast_acks_changed`.
+ *
+ * The kind of change and the broadcast it concerns.
+ */
 export interface StoreBroadcastAcksChangedPayload {
   changeKind   : BroadcastAckChangeKind;
   broadcast_id : string;
 }
 
+/** The kinds of sender-store change: added, updated, removed and hydrated. */
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";
 
+/**
+ * Payload of `store_senders_changed`.
+ *
+ * `sender_id` is absent for a hydration, which seeds every sender at once.
+ */
 export interface StoreSendersChangedPayload {
   changeKind : SenderChangeKind;
   // Present for added/updated/removed; OMITTED for "hydrated" (cold-load bulk
@@ -676,6 +812,11 @@ export interface StoreSendersChangedPayload {
 // icon derives its own initial from the session persona name.
 // ---------------------------------------------------------------------------
 
+/**
+ * The persona of the manager that spawned a session.
+ *
+ * It is shown as a badge on the session's strip icon.
+ */
 export interface ManagerPersona {
   name  : string;   // manager persona name (e.g., "Tiberius") — initial derived from this
   icon  : string;   // emoji or icon id
@@ -688,6 +829,11 @@ export interface ManagerPersona {
 // the legacy `senderPersonaMap`-membership inactivity model
 // (`notifications.js:_isStripIconInactive`). `session_reaped` removes the
 // record outright.
+/**
+ * One session icon in the session strip.
+ *
+ * `active` turns false when the persona is released, and the icon stays visible. A reaped session is removed.
+ */
 export interface StripSession {
   sender_id        : string;
   voice_persona    : VoicePersona;
@@ -696,8 +842,14 @@ export interface StripSession {
   active           : boolean;   // false after voice_persona_released; hide-inactive filter targets !active
 }
 
+/** The kinds of session-strip change: added, updated, removed and hydrated. */
 export type SessionStripChangeKind = "added" | "updated" | "removed" | "hydrated";
 
+/**
+ * Payload of `store_session_strip_changed`.
+ *
+ * `sender_id` is absent for a hydration.
+ */
 export interface StoreSessionStripChangedPayload {
   changeKind : SessionStripChangeKind;
   // Present for added/updated/removed; OMITTED for "hydrated" (WP9 cold-reload
@@ -720,6 +872,11 @@ export interface StoreSessionStripChangedPayload {
 //
 // The signature is `(a, b) => number` exactly like `Array.prototype.sort`;
 // callers don't need to know about entry-wrapping.
+/**
+ * A sort function over sender records, of the kind `Array.prototype.sort` takes.
+ *
+ * The list renderer defaults to most recently active first. Boot passes one that puts conversation-mode senders first.
+ */
 export type SenderSortComparator = ( a: SenderRecord, b: SenderRecord ) => number;
 
 // ---------------------------------------------------------------------------
@@ -727,6 +884,11 @@ export type SenderSortComparator = ( a: SenderRecord, b: SenderRecord ) => numbe
 // `response_type` field). One actor per active prompt.
 // ---------------------------------------------------------------------------
 
+/**
+ * The states of an action-required prompt.
+ *
+ * They are pending, submitting, responded, failed, expired and cancelled.
+ */
 export type ActionRequiredState =
   | "pending"
   | "submitting"     // Phase 6b — non-optimistic respondAndAwait() in flight (per Pass 2 A1)
@@ -737,11 +899,17 @@ export type ActionRequiredState =
 
 // P0 5ebd2aff step 2 — one question of a multiple_choice or open_ended_batch ask, read from
 // `response_options.questions` by stores/responseQuestions.ts (the wire shape is documented there).
+/** One choice of a multiple-choice question: its label and an optional description. */
 export interface ActionRequiredOption {
   label        : string;
   description? : string;
 }
 
+/**
+ * One question of a multiple-choice or batch prompt.
+ *
+ * `header` is the key its answer is sent under. `multiSelect` makes it checkboxes with a list answer.
+ */
 export interface ActionRequiredQuestion {
   question      : string;
   header        : string;                                // the key this question's answer is sent under
@@ -756,12 +924,28 @@ export interface ActionRequiredQuestion {
 //                               value a string[] when the question is multiSelect, else a string
 //                               (notifications.js:23666, :23855, :23451)
 // On the wire a string goes bare and the object goes as its JSON string (toWireResponseValue).
+/**
+ * The answers to a multiple-choice or batch prompt, keyed by question `header`.
+ *
+ * A value is a list when the question is multi-select, else a string.
+ */
 export interface ActionRequiredAnswers {
   answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
 }
 
+/**
+ * An answer to a prompt.
+ *
+ * It is a string for yes/no and open-ended prompts, or an answers object for the others.
+ */
 export type ActionRequiredResponse = string | ActionRequiredAnswers;
 
+/**
+ * One action-required prompt with its countdown.
+ *
+ * `expires_at` is null while the card waits in the queue. `paused_at` and `total_paused_ms` track the operator's pauses.
+ * `step` holds the multiple-choice position.
+ */
 export interface ActionRequiredItem {
   id_hash       : string;
   prompt        : string;
@@ -800,6 +984,12 @@ export interface ActionRequiredStep {
   answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
 }
 
+/**
+ * The kinds of prompt-store change.
+ *
+ * They cover a new prompt, the countdown tick, the response and failure states, expiry, cancel,
+ * offline freeze and resume, activation, removal, and pause and resume.
+ */
 export type ActionRequiredChangeKind =
   | "added"
   | "tick"                  // countdown tick (1Hz UX update; UI repaints countdown)
@@ -815,6 +1005,11 @@ export type ActionRequiredChangeKind =
   | "paused"                // A-2 #2f — the operator paused the active card; countdownMs is the frozen remainder
   | "resumed";              // A-2 #2f — the operator resumed it; countdownMs is the remainder it resumes from
 
+/**
+ * Payload of `store_action_required_changed`.
+ *
+ * `countdownMs` is the time left, set on tick, offline-frozen, paused and resumed. `response` and `error` ride the response and failure kinds.
+ */
 export interface StoreActionRequiredChangedPayload {
   changeKind   : ActionRequiredChangeKind;
   id_hash      : string;
@@ -827,14 +1022,31 @@ export interface StoreActionRequiredChangedPayload {
 // Phase 4 — Audio playback state (per design § AudioStore XState).
 // ---------------------------------------------------------------------------
 
+/**
+ * The audio store's playback states.
+ *
+ * They are idle, decoding, playing, paused, ended and error.
+ */
 export type AudioPlaybackState = "idle" | "decoding" | "playing" | "paused" | "ended" | "error";
 
+/**
+ * Payload of `store_audio_state_change`.
+ *
+ * It holds the new state, the previous one, and an optional reason such as a decode failure.
+ */
 export interface StoreAudioStateChangePayload {
   state    : AudioPlaybackState;
   prev     : AudioPlaybackState;
   reason?  : string;     // e.g. "audiocontext-blocked" / "decode-failed" / "out-of-frames"
 }
 
+/**
+ * Payload of `store_audio_chunk_decoded`.
+ *
+ * The decoded chunk's duration, sample rate and frame count.
+ *
+ * `firstInUtterance` is true for the first chunk of an utterance, where the time to first audio is stamped.
+ */
 export interface StoreAudioChunkDecodedPayload {
   // ms duration of the decoded chunk (informational; renderer may show it).
   durationMs : number;
@@ -877,6 +1089,11 @@ export interface StoreAudioChunkDecodedPayload {
 /** The two TTS doors. Mirrors `AudioStore`'s own union (stores/AudioStore.ts). */
 export type TtsMode = "instant" | "reliable";
 
+/**
+ * One notification waiting to be spoken, keyed by `id_hash`.
+ *
+ * `voice_id` and `tts_mode` apply to this utterance only. `user_initiated` marks a button press, which the 0 percent slider does not silence.
+ */
 export interface TtsQueueItem {
   id_hash       : string;
   notification ?: Notification;   // the source notification (renderer context)
@@ -936,6 +1153,11 @@ export interface TtsQueueItem {
 // plays, never a stale id. `pending` is the FIFO tail of items waiting to be
 // spoken (does NOT include the active head). Plan 01 B4 gates exactly one
 // bubble on `activeNotificationId`; Plan 03 renders `pending`.
+/**
+ * Payload of `store_tts_queue_changed`.
+ *
+ * `activeNotificationId` is the one being spoken, or null. `pending` lists the items waiting behind it.
+ */
 export interface StoreTtsQueueChangedPayload {
   activeNotificationId : string | null;
   pending              : ReadonlyArray<TtsQueueItem>;
@@ -944,12 +1166,22 @@ export interface StoreTtsQueueChangedPayload {
 // store_tts_slot_released payload (Parity A-2 #3e). `releasedId` is the id_hash
 // of the item that just left the TTS slot. The store has already applied the
 // change when this fires, so isPlaying() / current() read the state AFTER it.
+/**
+ * Payload of `store_tts_slot_released`.
+ *
+ * The `id_hash` of the item that just left the TTS slot.
+ */
 export interface StoreTtsSlotReleasedPayload {
   releasedId : string;
 }
 
 // tts_request_failed payload (row 0b384107). `idHash` is the item whose speech
 // request failed; the queue ignores it unless that item still holds the slot.
+/**
+ * Payload of `tts_request_failed`.
+ *
+ * It names the item whose speech request failed. The queue acts only if that item still holds the slot.
+ */
 export interface TtsRequestFailedPayload {
   idHash : string;
 }
@@ -963,6 +1195,11 @@ export interface TtsRequestFailedPayload {
 // frames, and AudioStore drops a complete or error frame that names another one.
 // It is unique per request, not per item: the same item can be requested twice.
 // Optional so an emitter that sends no id keeps the behaviour from before.
+/**
+ * Payload of `tts_request_started`.
+ *
+ * `utteranceId` is the id sent as `utterance_id`. The server echoes it on its status, complete and error frames.
+ */
 export interface TtsRequestStartedPayload {
   idHash       : string;
   utteranceId? : string;
@@ -970,6 +1207,11 @@ export interface TtsRequestStartedPayload {
 
 // What AudioStore reads off an audio_streaming_complete or tts_error frame.
 // Absent when the request carried no id, or the server predates the echo.
+/**
+ * What the audio store reads from a completion or error frame.
+ *
+ * The echoed `utterance_id`, absent if none was sent.
+ */
 export interface UtteranceFramePayload {
   utterance_id? : unknown;
 }
@@ -978,6 +1220,11 @@ export interface UtteranceFramePayload {
 // as QueueTransport reconstructs it. Every field is optional because the frame is
 // built by several producers; `text` is the completion text legacy reads at
 // notifications.js:4035, and its absence is the "No text provided" case there.
+/**
+ * Payload of `tts_job_request`: the server frame without `type` and `timestamp`.
+ *
+ * Every field is optional because several producers build the frame. `text` is the completion text to speak.
+ */
 export interface TtsJobRequestPayload {
   text?       : string;
   id?         : string;
@@ -987,15 +1234,18 @@ export interface TtsJobRequestPayload {
 }
 
 // store_qa_changed payload (parity B-1). Carries nothing: the pane reads the store.
+/** Payload of `store_qa_changed`, which carries nothing. The pane reads the store. */
 export type StoreQaChangedPayload = Record<string, never>;
 
 // store_tts_mode_changed payload (parity B-1, §6a ruling 3).
+/** Payload of `store_tts_mode_changed`: the speech door now selected, instant or reliable. */
 export interface StoreTtsModeChangedPayload {
   mode : "instant" | "reliable";
 }
 
 // store_submit_jobs_changed payload (parity B-2). Carries nothing: the pane reads
 // the store, as the Q&A pane does.
+/** Payload of `store_submit_jobs_changed`, which carries nothing. The pane reads the store. */
 export type StoreSubmitJobsChangedPayload = Record<string, never>;
 
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
@@ -1006,6 +1256,11 @@ export type StoreSubmitJobsChangedPayload = Record<string, never>;
 // is carried through for the renderer/consumer (never re-gated downstream — the
 // gate lives ONLY at the emit site). See the LupinEventType member comment for the
 // full ratified SPEC + legacy line citations.
+/**
+ * Payload of `store_notification_tts_intent`, emitted for each spoken new arrival.
+ *
+ * `ttsText` is the text to speak. Only high and urgent notifications reach it. `voice_id` is the sender's persona voice, if any.
+ */
 export interface StoreNotificationTtsIntentPayload {
   id_hash  : string;
   ttsText  : string;
@@ -1027,6 +1282,11 @@ export interface StoreNotificationTtsIntentPayload {
 // subscribes and self-advances. It is a SIGNAL — F0 reads NO fields from it
 // (it just calls advance()), so the payload is a minimal marker. `reason` is an
 // optional free-text emit-side annotation 00c may set; F0 ignores it.
+/**
+ * Payload of `store_audio_ended`, the signal that an utterance finished.
+ *
+ * The TTS queue advances on it and reads no fields. `reason` is an optional note.
+ */
 export interface StoreAudioEndedPayload {
   reason ?: string;
 }
@@ -1045,6 +1305,11 @@ export interface StoreAudioEndedPayload {
 // snippet.
 // ---------------------------------------------------------------------------
 
+/**
+ * Payload of `boot_complete`, emitted once at the end of boot.
+ *
+ * `handlers` names the audio binary handler and gives "mounted" for each renderer that was mounted.
+ */
 export interface BootCompletePayload {
   handlers : {
     audioBinary            : string;   // Function.name of the bound binary handler
@@ -1172,6 +1437,7 @@ export interface BootCompletePayload {
 // rejects).
 // ---------------------------------------------------------------------------
 
+/** Payload of `hydration_failed`: which renderer's history load was rejected, and the error. */
 export interface HydrationFailedPayload {
   /** Discriminator: which renderer's hydrate path rejected (e.g. "jobs"). */
   source : string;
@@ -1204,6 +1470,11 @@ export interface ContentPaneEntry {
   title   : string;
 }
 
+/**
+ * The kinds of reading-pane change.
+ *
+ * They are opened, closed, back, layout mode, split ratio, entering and leaving the action-required pane, and console open and close.
+ */
 export type ReadingPaneChangeKind =
   | "opened"        // open(): pushed a new entry; pane now shows it
   | "closed"        // close(): history cleared, pane hidden
@@ -1222,6 +1493,7 @@ export type ReadingPaneChangeKind =
  */
 export type PaneContent = "reading" | "console";
 
+/** Payload of `store_reading_pane_changed`: the kind of change. */
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;
 }
@@ -1236,10 +1508,16 @@ export interface StoreReadingPaneChangedPayload {
 // applies DOM directly), so the only `changeKind`s are the two bulk ones.
 // ---------------------------------------------------------------------------
 
+/**
+ * The two bulk intents of the view-state store.
+ *
+ * They collapse every accordion, or expand every one.
+ */
 export type ViewStateChangeKind =
   | "collapse-all"   // requestBulkAccordionCollapse(true): collapse every accordion
   | "expand-all";    // requestBulkAccordionCollapse(false): expand every accordion
 
+/** Payload of `store_view_state_changed`: whether all accordions are to collapse or expand. */
 export interface StoreViewStateChangedPayload {
   changeKind : ViewStateChangeKind;
 }
@@ -1258,6 +1536,11 @@ export interface StoreViewStateChangedPayload {
 // topics / system rows may omit them.
 // ---------------------------------------------------------------------------
 
+/**
+ * One commons entry.
+ *
+ * The shape is the same from the REST history call and the live WebSocket push. `ts` is an ISO string. The persona fields can be null for reserved topics and system rows.
+ */
 export interface CommonsActivityEntry {
   ts                ?: string | null;   // ISO-8601 (UTC); may be absent on malformed rows
   topic              : string;
@@ -1274,24 +1557,42 @@ export interface CommonsActivityEntry {
 // hours-since-local-midnight; "all" applies no cutoff; numeric strings ("1",
 // "6", "24", …) are passed through as an `hours` query param. Mirrors the
 // legacy dropdown semantics (`notifications.js:10685-10697`).
+/** The panel's time window: `today`, `all`, or a number of hours as a string. */
 export type CommonsActivityWindow = string;
 
 // 3-axis filter (per `2026.05.21-recent-activity-filter-and-focus-bar-...md`).
 // Each axis at its default contributes no constraint.
+/** Whether to show entries the persona sent or received, or null for both. */
 export type CommonsActivityDirection = "sender" | "recipient" | null;
+/** The entry kinds the panel can show: all, heartbeats, personas or broadcasts. */
 export type CommonsActivityKind = "all" | "heartbeats" | "personas" | "broadcasts";
 
+/**
+ * The panel's three filter axes.
+ *
+ * An axis left at its default adds no constraint.
+ */
 export interface CommonsActivityFilter {
   direction : CommonsActivityDirection;
   kind      : CommonsActivityKind;
   persona   : string | null;   // lowercased persona name; null = "any"
 }
 
+/**
+ * The kinds of commons-store change.
+ *
+ * They are a full reload, a live entry added at the head, and a filter change.
+ */
 export type CommonsChangeKind =
   | "hydrated"      // full reload from REST (window change / refresh / initial)
   | "prepended"     // single live WS entry added to the head
   | "filter-changed"; // filter axis mutated — re-render from cache, no fetch
 
+/**
+ * Payload of `store_commons_changed`.
+ *
+ * `matchesFilter` is set on a prepended entry: true when it passes the active filter.
+ */
 export interface StoreCommonsChangedPayload {
   changeKind : CommonsChangeKind;
   // Present on "prepended" — true when the live entry passes the active filter
@@ -1305,6 +1606,11 @@ export interface StoreCommonsChangedPayload {
 
 // WP15 (F7) — MissedStore. Surfaces the "N missed while away" count from
 // auth_success.undelivered_count and the Reset (soft-dismiss) round-trip.
+/**
+ * Payload of `store_missed_changed`.
+ *
+ * The count of notifications missed while away. Zero hides the badge.
+ */
 export interface StoreMissedChangedPayload {
   count : number;   // non-negative integer; 0 hides the badge + Reset button
 }
@@ -1312,8 +1618,10 @@ export interface StoreMissedChangedPayload {
 // WP14 (F8) — PredictionVoteStore. Thumbs up/down training signal on a
 // prediction hint (up = reinforce, down = steer away). Emitted after a vote
 // is recorded server-side so the controls highlight the cast direction.
+/** The direction of a vote on a prediction hint: up to reinforce it, down to steer away. */
 export type PredictionVoteDir = "up" | "down";
 
+/** Payload of `store_prediction_vote_changed`: the notification voted on and the vote cast. */
 export interface StorePredictionVoteChangedPayload {
   notificationId : string;
   vote           : PredictionVoteDir;
@@ -1323,16 +1631,27 @@ export interface StorePredictionVoteChangedPayload {
 // live-only/offline view toggle flips. `stampUpdated` distinguishes a real
 // fetch (re-stamp the "updated HH:MM:SS" label) from a pure view re-render
 // (the toggle — must NOT claim fresh data).
+/**
+ * Payload of `store_fleet_status_changed`.
+ *
+ * `stampUpdated` is true when a fetch resolved, and false for a view-only toggle.
+ */
 export interface StoreFleetStatusChangedPayload {
   stampUpdated : boolean;
 }
 
 // Parity A-2 #8 — the Holding Area's flow-ratio gate. No fields: every subscriber
 // reads the store, because the readout and the controls need different parts of it.
+/** Payload of `store_flow_ratio_changed`, which carries nothing. Subscribers read the store. */
 export type StoreFlowRatioChangedPayload = Record<string, never>;
 
 // Parity A-2 #5 — the fleet-size-cap dial. `saving` is true while a PUT is in
 // flight, so a subscriber can tell the disable from the repaint without asking.
+/**
+ * Payload of `store_fleet_size_cap_changed`.
+ *
+ * `saving` is true while the save request is in flight.
+ */
 export interface StoreFleetSizeCapChangedPayload {
   saving : boolean;
 }
@@ -1341,6 +1660,7 @@ export interface StoreFleetSizeCapChangedPayload {
 // resolves (success / unreachable / 401). `stampUpdated` re-stamps the
 // "updated HH:MM:SS" label; always true here (this store has no view-only
 // toggle), but the field mirrors the fleet-status payload shape for symmetry.
+/** Payload of `store_task_list_changed`: `stampUpdated` is true when a poll resolved. */
 export interface StoreTaskListChangedPayload {
   stampUpdated : boolean;
 }

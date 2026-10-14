@@ -18,14 +18,25 @@
 //                                               "full" if that reaches the end
 // Pure: no DOM, no storage, no bus.
 
+/**
+ * What the limiter decided.
+ *
+ * Speak the `full` text, speak a `preview` cut, or `skip` and speak nothing.
+ */
 export type TtsPreviewStage = "full" | "preview" | "skip";
 
+/**
+ * The limiter's inputs.
+ *
+ * `fraction` is the slider position from 0 to 1. `enabled` and `minChars` come from the server's INI settings.
+ */
 export interface TtsPreviewSettings {
   fraction : number;    // slider fraction in [0, 1]
   enabled  : boolean;   // INI `tts preview enabled` (legacy: false until config loads)
   minChars : number;    // INI `tts preview min chars` (legacy default 100)
 }
 
+/** The limiter's answer: the stage, and the text to speak, which is empty for `skip`. */
 export interface TtsPreview {
   stage : TtsPreviewStage;
   text  : string;       // what to speak; "" for "skip"
