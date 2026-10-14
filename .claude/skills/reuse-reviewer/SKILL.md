@@ -96,3 +96,46 @@ One table maps the labels in use, so a receipt cited in a plan's prior-art table
 - Report a miss to the manager as a task-store row with the receipt id and the symbol.
 - The counter-reviewer replays your receipts with `replay( receipt_id )`.
 - The counter-reviewer also reads the source of any candidate you dismissed.
+
+## Counter-reviewer brief
+
+This brief is for the second reviewer. The first reviewer's rulings are claims. You re-run the evidence behind each one and read what the first reviewer set aside. You do not rewrite the rulings. You report where a ruling does not hold.
+
+The plan names this role as an optional counter-reviewer, or as a second reviewer instance given this brief. Spawn it for a review that rules `DUPLICATE` or `DISTINCT` on a shortlisted candidate.
+
+### Inputs
+
+- The review document with its `RULING` lines.
+- The head tree the review was written against.
+- Nothing from the first reviewer's notes. Read the rulings, not the reasoning around them.
+
+### Procedure
+
+1. **Replay every cited receipt.** For each ruling call `replay( receipt_id )` once. Read `frozen` and `head` beside `stored`.
+   - `frozen` is a re-run against the inputs the receipt recorded. It tests the receipt, not the model.
+   - `head` is a re-run against the current tree and index. It tests whether the code or the model still agrees.
+   - A difference in `frozen` means the receipt is damaged or was altered. Flag the ruling and stop on that row.
+   - A difference in `head` means the answer moved. Note which shortlist entries appeared or left.
+   - A named error (`RECEIPT_MISSING`, `RECEIPT_CORRUPT`, `RECEIPT_ID_MISMATCH`, `SNAPSHOT_MISSING`, `SNAPSHOT_CORRUPT`, `CACHE_MISSING`, `CACHE_CORRUPT`) is a finding. It is not a verdict.
+
+2. **Read the dismissed candidates.** Take each symbol on a receipt's `shortlist` or `nearest` that the ruling does not name. Read its source and its capability page. For a `DISTINCT` ruling, check the stated reason against what the candidate does. For a `DUPLICATE` ruling, check that the named symbol is the best of the shortlist.
+
+3. **Look for what the receipt missed.** Search the tree for the operation the new definition performs. This takes one or two fixed-string searches, not a survey. A twin that is in neither the shortlist nor `nearest` is a miss.
+
+4. **Write one line per ruling** in the counter-review document:
+
+   ```text
+   COUNTER <symbol id> :: HOLDS | CHALLENGED <why> | UNVERIFIED <cause> :: reuse-receipt: <id>
+   ```
+
+   - `HOLDS`: the replay agrees and no dismissed candidate does the job.
+   - `CHALLENGED <why>`: a dismissed candidate, or a head difference, changes the ruling. Name the symbol.
+   - `UNVERIFIED <cause>`: a named replay error or an unreadable source stopped the check. Give the error name.
+
+5. **Log each miss.** A symbol the receipt should have listed is a miss. Report it to the manager as a task-store row with the receipt id and the symbol. The librarian repairs the wiki from that row.
+
+### Limits
+
+- Replay at `head` makes a model call. Replay the receipts of definitions in dispute first, and the rest after.
+- A `HOLDS` line is a statement about the receipt and the candidates you read. It is not a statement about the tree you did not read.
+- The counter-reviewer cites its own receipt only for a call it makes. A ruling it challenges keeps the first reviewer's receipt id.
