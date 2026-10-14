@@ -15,6 +15,7 @@
 
 /** The two server doors the page calls. */
 export const CHECK_URL = "/api/podcast-proxy/from-viewer/check";
+/** The endpoint a confirmed click posts `{ path }` to, which queues the podcast job. */
 export const START_URL = "/api/podcast-proxy/from-viewer";
 
 /** The event the page fires, with `detail.path`, once it knows it is showing a FILE (not a listing). */
@@ -34,6 +35,16 @@ export const IDS = {
   status  : "doc-download-status",
 } as const;
 
+/**
+ * Where the button is in its life.
+ *
+ * The values, in order of a normal run:
+ * - "hidden" until the check answers ok
+ * - "ready" once the button is shown
+ * - "confirming" while the question is open
+ * - "posting" while the request is out
+ * - "done" once a job is queued or already running
+ */
 export type PodcastState = "hidden" | "ready" | "confirming" | "posting" | "done";
 
 /** What the module needs from the browser, so a test can hand it stand-ins. */
@@ -43,6 +54,11 @@ export interface DocPodcastDeps {
   path        : string;
 }
 
+/**
+ * The handle {@link createDocPodcast} returns.
+ *
+ * `start()` runs the check and wires the button. `state()` reads the current state.
+ */
 export interface DocPodcast {
   start : () => Promise<void>;
   state : () => PodcastState;
