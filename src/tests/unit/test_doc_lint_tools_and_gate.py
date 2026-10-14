@@ -1113,6 +1113,33 @@ def test_a_page_moved_unedited_between_judged_folders_keeps_its_earlier_findings
     assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
 
 
+def test_a_symlink_named_like_a_page_is_not_linted_as_its_target_path_text( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/real.md": "# Real\n\nFine text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    os.symlink( "This is NOT fine.md", repo / "docs" / "link.md" )
+    _git( repo, "add", "docs/link.md" )
+    assert _git( repo, "ls-files", "-s", "docs/link.md" ).split()[ 0 ] == "120000"
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln or "docs/link.md:1" in ln ]
+    assert "[doc-lint] WARNING: docs/link.md is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" in lines
+    assert gate.staged_entries( str( repo ) )[ 4 ] == [ "docs/link.md" ] and "docs/link.md" not in gate.staged_entries( str( repo ) )[ 0 ]
+    assert "docs/link.md" not in gate.staged_paths( str( repo ) )
+
+
+def test_a_symlink_replacing_a_page_is_named_and_the_target_page_is_still_judged( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/real.md": "# Real\n\nFine text.\n", "docs/swap.md": "# Swap\n\nFine text.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / "docs" / "swap.md" ).unlink()
+    os.symlink( "real.md", repo / "docs" / "swap.md" )
+    _stage( repo, { "docs/real.md": SEEDED } )
+    _git( repo, "add", "docs/swap.md" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ] == [ f"[doc-lint] REFUSED docs/real.md:1: {CAPS}" ]
+    assert "[doc-lint] WARNING: docs/swap.md is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" in lines
+
+
 def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
     _no_external( monkeypatch )
     _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )

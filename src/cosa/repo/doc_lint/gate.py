@@ -91,6 +91,8 @@ FULL_SHA           = re.compile( r"[0-9a-f]{40,64}" )
 BARE_RETURN        = re.compile( "\r(?!\n)" )
 # The mode git records for a submodule entry. Such an entry names a commit of another repository and holds no text.
 GITLINK_MODE       = "160000"
+# The mode git records for a symbolic link. Its blob is the target path, so it is no page and no source file.
+SYMLINK_MODE       = "120000"
 NUMBER             = re.compile( r"\d+" )
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
@@ -326,11 +328,12 @@ def staged_entries( root, against=None ):
 
     Ensures:
         - the changes are additions, copies, modifications, renames and type changes
-        - returns ( names, renamed_from, gitlinks, changed ), names being the new path of every change that is not a gitlink, in git's order
+        - returns ( names, renamed_from, gitlinks, changed, symlinks ), names being the new path of every change that is neither a gitlink nor a symbolic link, in git's order
         - changed is the set of new paths whose staged blob id is not the old side's, so a move or a change of mode alone is not in it
         - the old side of a rename is the path it came from; with against no rename is followed, so the old side is that commit's same path
         - renamed_from maps the new path of each rename to the path it came from; a copy is seen as an addition, since only renames are detected, and inherits nothing
         - gitlinks holds the new path of every change whose staged entry is a submodule entry, which has no text to read
+        - symlinks holds the new path of every change whose staged entry is a symbolic link, whose blob is its target path and not a page
         - a type change is listed, so a link replaced by a file is read and a file replaced by a gitlink is named
         - names are read apart at the NUL byte and decoded as the file system decodes them
 
@@ -341,7 +344,7 @@ def staged_entries( root, against=None ):
     res      = subprocess.run( [ "git", "-C", root, "diff", "--cached", *compared, "--raw", "-z", "--no-abbrev", "--diff-filter=ACMRT", "--", ":/" ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git diff --cached failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
     tokens = res.stdout.split( b"\0" )
-    names, renamed_from, gitlinks, changed, i = [], {}, [], set(), 0
+    names, renamed_from, gitlinks, changed, symlinks, i = [], {}, [], set(), [], 0
     while i < len( tokens ) and tokens[ i ]:
         fields = tokens[ i ].decode( "ascii" ).split( " " )
         if fields[ 4 ][ 0 ] == "R":
@@ -349,9 +352,9 @@ def staged_entries( root, against=None ):
             renamed_from[ new ] = old
         else:
             new, i = os.fsdecode( tokens[ i + 1 ] ), i + 2
-        ( gitlinks if fields[ 1 ] == GITLINK_MODE else names ).append( new )
+        ( gitlinks if fields[ 1 ] == GITLINK_MODE else symlinks if fields[ 1 ] == SYMLINK_MODE else names ).append( new )
         if fields[ 2 ] != fields[ 3 ]: changed.add( new )
-    return names, renamed_from, gitlinks, changed
+    return names, renamed_from, gitlinks, changed, symlinks
 
 
 def staged_binary( root ):
@@ -382,7 +385,7 @@ def staged_changes( root ):
         - root is a git working tree
 
     Ensures:
-        - returns ( names, renamed_from ) as staged_entries gives them, so no gitlink is among the names
+        - returns ( names, renamed_from ) as staged_entries gives them, so no gitlink and no symbolic link is among the names
 
     Raises:
         - RuntimeError naming the git error when the listing fails
@@ -946,6 +949,7 @@ def collect( root ):
         - tally is the denominator: files, docstrings, findings, waivers, unparsed, and one count block for each counted scope
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
+        - a staged symbolic link whose name a linter would read adds one warning the same way: its blob is a target path, not a page
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
         - a staged Python or markdown file that staged_binary lists adds one warning, since the diff gives no touched line for it
         - that warning is an Unchecked when the commit adds the file or changes its content, and is_warn_only does not name it
@@ -974,6 +978,7 @@ def collect( root ):
     waived     = []
     refusals   = []
     warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
+    warnings  += [ f"[doc-lint] WARNING: {shown( p )} is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" for p in staged_entries( root )[ 4 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     binary     = set( staged_binary( root ) )
     incoming   = incoming_commits( root )[ 0 ]
     created    = staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ] & set( paths )
