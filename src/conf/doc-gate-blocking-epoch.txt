@@ -5,3 +5,4 @@
 # after the commits that make the chain pass --blocking are on the working branch, add one line
 # below holding the full 40-character sha of the last of them as it stands on that branch.
 # One sha at most. A value that is not one full lower-case sha, or names no commit, stops the range gate.
+97a4e02ef07ce215ea60b642d1affd39273c16ad
