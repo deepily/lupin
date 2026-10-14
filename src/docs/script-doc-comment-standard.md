@@ -8,7 +8,7 @@ This page holds the rules for doc comments in `.ts`, `.js` and `.mjs` files. The
 - The limits are a summary of 90 characters, a sentence of 25 words and a block of 40 lines.
 - A `Design:` path inside the repo must name a file that exists.
 - A line or block comment gets a reduced set: the emphasis, tic and history rules. It has no sentence rule and no length rule, so a long line comment passes.
-- The comment at the top of a file also gets the 90-character summary rule.
+- The line comment at the top of a file also gets the 90-character summary rule. A block comment there does not.
 - The docs-only check, not the commit gate, rejects a change to a line comment that starts with `global`, `exported` or `region`.
 - The commit gate keeps a count of findings per file in `src/conf/doc-lint-ts-counts.json`. A count may fall and may not rise.
 - A count table whose rules stamp is stale refuses every commit that stages an in-scope file.
