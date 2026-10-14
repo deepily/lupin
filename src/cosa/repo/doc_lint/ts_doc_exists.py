@@ -11,12 +11,15 @@ The table format, the stamp and the checks are those of counts.py.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from collections import namedtuple
 
-from . import counts, tsdoc_lint
+from . import counts, ts_counts, tsdoc_lint
 from .cli import shown
+from .text_rules import Finding
 from .word_list import configure_root
 
 TABLE_PATH       = "src/conf/doc-lint-ts-exports-counts.json"
@@ -107,6 +110,102 @@ def missing( record ):
         - nothing
     """
     return [ s for s in record[ "symbols" ] if not s[ "documented" ] ]
+
+
+def extract( root, texts ):
+    """
+    Run the export extractor over given texts instead of the working-tree files.
+
+    Requires:
+        - root is a git working tree that holds the extractor script
+        - texts maps repo-relative paths to file text
+
+    Ensures:
+        - returns { path: record } for every path given, so a staged text is judged, not the disk copy
+        - a path Node cannot be given by name is written under the stand-in name ts_counts.scratch_names gives
+        - the scratch tree is removed afterwards, also when the extractor fails
+        - no texts start no process
+
+    Raises:
+        - RuntimeError from the extractor
+    """
+    if not texts: return {}
+    scratch = tempfile.mkdtemp( prefix="ts-exports-" )
+    names   = ts_counts.scratch_names( texts )
+    try:
+        for path, text in texts.items():
+            full = os.path.join( scratch, names[ path ] )
+            os.makedirs( os.path.dirname( full ), exist_ok=True )
+            with open( full, "w", encoding="utf-8" ) as handle: handle.write( text )
+        by_name = run_extractor( root, [ names[ path ] for path in texts ], source_root=scratch )
+        return { path: by_name[ names[ path ] ] for path in texts }
+    finally:
+        shutil.rmtree( scratch, ignore_errors=True )
+
+
+def count_record( path, record ):
+    """
+    Turn one extractor record into a count with one finding per undocumented export.
+
+    Requires:
+        - record is an extractor record for path
+
+    Ensures:
+        - returns a counts.FileCount with no waivers, since a missing comment has no line to carry a marker
+        - a file that did not parse adds one parse-error finding, so a lost export never reads as a fall
+
+    Raises:
+        - nothing
+    """
+    findings = [ Finding( path, s[ "line" ], "undocumented-export", f"exported {s[ 'kind' ]} {s[ 'name' ]} has no doc comment" ) for s in missing( record ) ]
+    if record[ "parse_errors" ]: findings.append( Finding( path, 1, "parse-error", f"the file did not parse: {record[ 'parse_errors' ][ 0 ]}" ) )
+    return counts.FileCount( len( findings ), findings, 0 )
+
+
+def counts_for( root, texts ):
+    """
+    Count the undocumented exports of several texts with one extractor run.
+
+    Requires:
+        - root is a git working tree
+        - texts maps repo-relative paths to file text
+
+    Ensures:
+        - returns { path: counts.FileCount } for every path given
+
+    Raises:
+        - RuntimeError from the extractor
+    """
+    by_file = extract( root, texts )
+    return { path: count_record( path, by_file[ path ] ) for path in texts }
+
+
+def census_of_texts( root, read ):
+    """
+    Count every counted file of a tree from texts a reader supplies.
+
+    Requires:
+        - root is a git working tree
+        - read( path ) returns the text of a counted path
+
+    Ensures:
+        - returns ( found, walked ), where found maps each path with a nonzero count to it
+        - walked is the number of counted files read, so a census over nothing says so
+        - a file that is not UTF-8 counts as one finding
+
+    Raises:
+        - RuntimeError from git or the extractor
+    """
+    paths = counted_paths( root )
+    found = {}
+    texts = {}
+    for path in paths:
+        try:
+            texts[ path ] = read( path )
+        except UnicodeDecodeError as err:
+            found[ path ] = counts.unreadable_count( path, err ).count
+    found.update( { path: r.count for path, r in counts_for( root, texts ).items() if r.count } )
+    return dict( sorted( found.items() ) ), len( paths )
 
 
 def census( root, run=None ):
@@ -213,7 +312,7 @@ def main( argv=None, out=None ):
         - --check returns EXIT_TIGHT when the table is exact and EXIT_MISMATCH when a count differs, which includes a rise
         - EXIT_NOT_CHECKED when the table cannot be read or the tree cannot be measured
         - EXIT_NOT_CHECKED, naming the files, when a file did not parse, since a lost export would read as a fall
-        - nothing here is wired into a gate
+        - the commit gate reads the same table through gate.EXPORTS_SCOPE
 
     Raises:
         - nothing

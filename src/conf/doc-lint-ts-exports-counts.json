@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "a2f0d9adbbe4decd",
+  "rules_stamp": "9a3fa1b78da879d3",
   "files": {
     "src/conf/constants.js": 84,
     "src/lupin_app/static/js/diagnostic/boot.ts": 1,

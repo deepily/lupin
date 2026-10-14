@@ -1,6 +1,7 @@
 #!/bin/bash
 # Runs the documentation lint over every swept Python file and fails if any has a finding.
-# Run on the whole tree, it then checks the metrics dashboard page, as a second step.
+# Run on the whole tree, it then checks the metrics dashboard page, as a second step, and the
+# table of undocumented exported symbols, as a third.
 #
 # Usage:
 #   run-doclint-gate.sh                         # the whole swept scope, then the dashboard check
@@ -25,6 +26,12 @@
 # --dashboard-base exists for a repo that does not hold the default before commit, such as the
 # scratch repos of the tests.
 #
+# Step 3, the export check (cosa.repo.doc_lint.ts_doc_exists --check). It lists the exported
+# TypeScript and JavaScript symbols that have no doc comment and fails unless the committed table
+# src/conf/doc-lint-ts-exports-counts.json is exact. A count that rose is exit 1 here, and so is a
+# count that fell with the table not lowered, since the table is a ratchet. Its exit 2 (the table
+# cannot be read, a file did not parse, Node is missing) is exit 2 here. --tree does not run it.
+#
 # Exit codes: 0 clean, 1 a finding remains or the dashboard check failed, 2 nothing was checked,
 # 3 no interpreter. The dashboard check's own codes map like this: 0 passes; 1 (a value rose)
 # and 3 (a row is missing or the page names another before commit) are exit 1 here; 2 (could not
@@ -33,8 +40,9 @@
 #
 # The summary block. With --tree it is the docstring step's own: the unit is files. On the whole
 # tree the docstring step's four lines are printed under other names, and one block follows whose
-# unit is the swept files plus one for the dashboard check. Errors there is the findings plus the
-# lines the dashboard check printed for a rise, a missing row or a stale page.
+# unit is the swept files plus two, one for the dashboard check and one for the export check. Errors
+# there is the findings plus the lines the dashboard check printed for a rise, a missing row or a
+# stale page, plus the problems the export check printed.
 # TestSuiteJob reads a run with no summary block as not executed, never as passed, so a run
 # that could not check prints none.
 #
@@ -95,7 +103,8 @@ echo "==========================================================================
 
 REPORT="$( mktemp )"
 DASH_REPORT="$( mktemp )"
-trap 'rm -f "$REPORT" "$DASH_REPORT"' EXIT
+EXPORT_REPORT="$( mktemp )"
+trap 'rm -f "$REPORT" "$DASH_REPORT" "$EXPORT_REPORT"' EXIT
 
 "$VENV_PYTHON" -m cosa.repo.doc_lint.scope_gate --repo-root "$TARGET" --words-root "$PROJECT_ROOT" > "$REPORT" 2>&1
 RC=$?
@@ -187,18 +196,48 @@ fi
 DASH_LINES="$( grep -c '^\(ROSE\|MISSING\|STALE\) ' "$DASH_REPORT" )"
 
 echo "=========================================================================="
-echo "Documentation lint gate: both steps. The unit is the swept files plus one for the dashboard check."
-echo "Total Tests: $(( FILES + 1 ))"
-echo "Passed: $(( CLEAN + 1 - DASH_FAILED ))"
-echo "Failed: $(( FOUND + DASH_FAILED ))"
-echo "Errors: $(( FINDINGS + DASH_LINES ))"
-if [ "$RC" -eq 0 ] && [ "$DASH_FAILED" -eq 0 ]; then
+echo "Documentation lint gate, step 3: the export check"
+echo "=========================================================================="
+
+"$VENV_PYTHON" -m cosa.repo.doc_lint.ts_doc_exists --check --repo-root "$TARGET" > "$EXPORT_REPORT" 2>&1
+ERC=$?
+cat "$EXPORT_REPORT"
+
+# The check answers 0, 1 or 2. Anything else is a crash, and a crashed check checked nothing.
+if [ "$ERC" -eq 2 ]; then
+    echo "REFUSING: the export check could not check (exit 2). Nothing is summarised."
+    exit 2
+fi
+if [ "$ERC" -ne 0 ] && [ "$ERC" -ne 1 ]; then
+    echo "REFUSING: the export check exited $ERC, which is not a check result. Nothing was checked."
+    exit 2
+fi
+# An interpreter that dies also exits 1, the code for a mismatch. The totals line tells them apart.
+if ! tail -n 1 "$EXPORT_REPORT" | grep -q '^[0-9][0-9]* counted files walked, [0-9][0-9]* problems$'; then
+    echo "REFUSING: the export check exited $ERC without its totals line. Nothing was checked."
+    exit 2
+fi
+EXPORT_PROBLEMS="$( tail -n 1 "$EXPORT_REPORT" | sed -n 's/^[0-9]* counted files walked, \([0-9]*\) problems$/\1/p' )"
+EXPORT_FAILED=0
+EXPORT_WORD="passed"
+if [ "$ERC" -ne 0 ]; then
+    EXPORT_FAILED=1
+    EXPORT_WORD="failed"
+fi
+
+echo "=========================================================================="
+echo "Documentation lint gate: all three steps. The unit is the swept files plus one each for the dashboard check and the export check."
+echo "Total Tests: $(( FILES + 2 ))"
+echo "Passed: $(( CLEAN + 2 - DASH_FAILED - EXPORT_FAILED ))"
+echo "Failed: $(( FOUND + DASH_FAILED + EXPORT_FAILED ))"
+echo "Errors: $(( FINDINGS + DASH_LINES + EXPORT_PROBLEMS ))"
+if [ "$RC" -eq 0 ] && [ "$DASH_FAILED" -eq 0 ] && [ "$EXPORT_FAILED" -eq 0 ]; then
     if [ -n "$STALE_NOTE" ]; then
         echo "DOCLINT GATE PASSED: $FILES files clean$STALE_NOTE"
     else
-        echo "DOCLINT GATE PASSED: $FILES files clean and the dashboard check passed."
+        echo "DOCLINT GATE PASSED: $FILES files clean, the dashboard check and the export check passed."
     fi
     exit 0
 fi
-echo "DOCLINT GATE FAILED: $FOUND of $FILES files hold a finding; the dashboard check $DASH_WORD$STALE_NOTE."
+echo "DOCLINT GATE FAILED: $FOUND of $FILES files hold a finding; the dashboard check $DASH_WORD, the export check $EXPORT_WORD$STALE_NOTE."
 exit 1

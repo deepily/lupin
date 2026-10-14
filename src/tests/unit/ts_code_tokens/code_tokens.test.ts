@@ -13,6 +13,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 
+/** Absolute path of the script module these tests load. */
 export const SCRIPT = path.resolve( process.env.TS_CODE_TOKENS_MODULE ?? path.join( process.cwd(), "src/scripts/ts_code_tokens.mjs" ) );
 
 let mod: any;

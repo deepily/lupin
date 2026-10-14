@@ -6,7 +6,8 @@ The script is what the merge pyramid and the pre-push hook call. These tests pin
 print what a clean tree prints.
 
 Run on the whole tree, the script has a second step: the check of the metrics dashboard page.
-The summary then counts the swept files plus one for that check.
+A third step checks the table of undocumented exported symbols.
+The summary then counts the swept files plus one for each of the two checks.
 """
 
 import os
@@ -51,6 +52,12 @@ def _write_page( repo ):
     assert done.returncode == 0, done.stdout + done.stderr
 
 
+def _write_exports_table( repo, files=None ):
+    """Write an export table that is exact for the scratch tree, unless a test gives entries."""
+    from cosa.repo.doc_lint import counts, ts_doc_exists
+    _write( repo, ts_doc_exists.TABLE_PATH, counts.table_text( files or {}, ts_doc_exists.rules_stamp( str( repo ) ) ) )
+
+
 def _page( repo ):
     """Commit what is staged, then write the dashboard page."""
     _git( repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base" )
@@ -64,8 +71,11 @@ def repo( tmp_path ):
     for src, rel in ( ( GATE, "src/tests/run-doclint-gate.sh" ), ( RESOLVER, "src/scripts/lib/resolve-venv-pytest.sh" ), ( WORD_LIST, "src/conf/dm-tutor-lowercase-words.txt" ) ):
         ( tmp_path / rel ).parent.mkdir( parents=True, exist_ok=True )
         shutil.copy( src, tmp_path / rel )
+    for rel in ( "src/scripts/ts_export_extract.mjs", "src/scripts/ts_doc_extract.mjs" ):
+        shutil.copy( os.path.join( PROJECT_ROOT, rel ), tmp_path / rel )
     os.symlink( os.path.join( PROJECT_ROOT, "src", "cosa" ), tmp_path / "src" / "cosa" )
     if os.path.isdir( VENV ): os.symlink( VENV, tmp_path / ".venv" )
+    _write_exports_table( tmp_path )
     return tmp_path
 
 
@@ -97,9 +107,9 @@ def test_a_clean_tree_exits_zero_and_prints_the_file_count( repo ):
     assert "Docstring step, files checked: 1\nDocstring step, files clean: 1\nDocstring step, files with a finding: 0\nDocstring step, findings: 0\n" in text
     assert "Docstring step passed: all 1 files clean." in text
     assert "DASHBOARD CHECK PASSED: 1 rows, no compared value rose and the page matches the tree." in text
-    assert "Total Tests: 2\nPassed: 2\nFailed: 0\nErrors: 0\n" in text
+    assert "Total Tests: 3\nPassed: 3\nFailed: 0\nErrors: 0\n" in text
     assert text.count( "Total Tests:" ) == 1 and text.count( "Passed:" ) == 1 and text.count( "Failed:" ) == 1
-    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE PASSED: 1 files clean and the dashboard check passed."
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE PASSED: 1 files clean, the dashboard check and the export check passed."
 
 
 def test_one_planted_finding_exits_one_and_names_its_line( repo ):
@@ -114,8 +124,8 @@ def test_one_planted_finding_exits_one_and_names_its_line( repo ):
     assert "src/app/loud.py:2: caps: ALL-CAPS word NEVER" in text
     assert "Docstring step failed: 1 findings in 1 of 2 files." in text
     assert "DASHBOARD CHECK PASSED: 1 rows" in text
-    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in text
-    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed."
+    assert "Total Tests: 4\nPassed: 3\nFailed: 1\nErrors: 1\n" in text
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed, the export check passed."
 
 
 # The second step, the dashboard check. Its exit 1 (a value rose) and 3 (a row is missing, or the page
@@ -148,9 +158,9 @@ def test_stale_numbers_on_the_dashboard_page_pass_the_gate_with_a_warning( repo 
     assert out.count( warning ) == 1 and out.count( "WARNING " ) == 1
     assert out.index( warning ) < out.index( "Total Tests:" )
     assert "REFUSING" not in out and "could not check" not in out
-    assert "Total Tests: 2\nPassed: 2\nFailed: 0\nErrors: 0\n" in out
+    assert "Total Tests: 3\nPassed: 3\nFailed: 0\nErrors: 0\n" in out
     assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == f"DOCLINT GATE PASSED: 1 files clean; dashboard numbers are stale, regenerate with: {command}"
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 0 )
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 3, 0 )
 
 
 def test_stale_numbers_beside_a_docstring_finding_fail_the_gate_and_keep_the_warning( repo ):
@@ -166,9 +176,9 @@ def test_stale_numbers_beside_a_docstring_finding_fail_the_gate_and_keep_the_war
 
     assert code == 1
     assert text.count( "WARNING " ) == 1
-    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in text
+    assert "Total Tests: 4\nPassed: 3\nFailed: 1\nErrors: 1\n" in text
     last = text.rstrip( "\n" ).split( "\n" )[ -1 ]
-    assert last.startswith( "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed; dashboard numbers are stale, regenerate with: PYTHONPATH=src python3 " )
+    assert last.startswith( "DOCLINT GATE FAILED: 1 of 2 files hold a finding; the dashboard check passed, the export check passed; dashboard numbers are stale, regenerate with: PYTHONPATH=src python3 " )
 
 
 def test_a_row_missing_from_the_dashboard_page_fails_the_gate_while_the_docstrings_are_clean( repo ):
@@ -188,9 +198,9 @@ def test_a_row_missing_from_the_dashboard_page_fails_the_gate_while_the_docstrin
     assert code == 1
     assert "Docstring step passed: all 1 files clean." in out
     assert f"MISSING src/app: no row on {PAGE}" in out
-    assert "Total Tests: 2\nPassed: 1\nFailed: 1\nErrors: 1\n" in out
-    assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 0 of 1 files hold a finding; the dashboard check failed."
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 1, 1 )
+    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in out
+    assert out.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 0 of 1 files hold a finding; the dashboard check failed, the export check passed."
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 2, 1 )
 
 
 def test_a_risen_marker_rate_fails_the_gate( repo ):
@@ -205,8 +215,8 @@ def test_a_risen_marker_rate_fails_the_gate( repo ):
     assert code == 1
     assert "ROSE src/app: caps_words 0/3 -> 1/5 per token (0.0 -> 200.0 per 1,000)" in text
     assert "DASHBOARD CHECK FAILED: 1 values rose in 1 rows; the page matches the tree." in text
-    assert "Total Tests: 2\nPassed: 0\nFailed: 2\nErrors: 2\n" in text
-    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 1 files hold a finding; the dashboard check failed."
+    assert "Total Tests: 3\nPassed: 1\nFailed: 2\nErrors: 2\n" in text
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 1 of 1 files hold a finding; the dashboard check failed, the export check passed."
 
 
 def test_a_missing_dashboard_page_refuses_and_prints_no_summary_block( repo ):
@@ -256,6 +266,54 @@ def test_a_dashboard_check_that_dies_is_refused_not_read_as_a_rise( repo, body, 
     assert code == 2
     assert said in text
     assert "Total Tests:" not in text and "PASSED" not in text
+
+
+def test_an_export_table_that_is_not_exact_fails_the_gate_while_the_docstrings_are_clean( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _write_exports_table( repo, { "src/ghost.ts": 3 } )
+    _page( repo )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 1
+    assert "Documentation lint gate, step 3: the export check" in text
+    assert "src/ghost.ts" in text and "0 problems" not in text
+    assert "Total Tests: 3\nPassed: 2\nFailed: 1\nErrors: 1\n" in text
+    assert text.rstrip( "\n" ).split( "\n" )[ -1 ] == "DOCLINT GATE FAILED: 0 of 1 files hold a finding; the dashboard check passed, the export check failed."
+
+
+def test_a_missing_export_table_refuses_and_prints_no_summary_block( repo ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _page( repo )
+    os.unlink( repo / "src" / "conf" / "doc-lint-ts-exports-counts.json" )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 2
+    assert "not checked: FileNotFoundError" in text
+    assert "REFUSING: the export check could not check (exit 2). Nothing is summarised." in text
+    assert "Total Tests:" not in text and "DOCLINT GATE PASSED" not in text
+
+
+@pytest.mark.parametrize( "body,said", [
+    ( 'if __name__ == "__main__": raise ValueError( "boom" )\n', "REFUSING: the export check exited 1 without its totals line. Nothing was checked." ),
+    ( 'import sys\nif __name__ == "__main__":\n    print( "5 counted files walked, many problems" )\n    sys.exit( 0 )\n', "REFUSING: the export check exited 0 without its totals line. Nothing was checked." ),
+    ( 'import sys\nif __name__ == "__main__": sys.exit( 7 )\n', "REFUSING: the export check exited 7, which is not a check result. Nothing was checked." )
+] )
+def test_an_export_check_that_dies_is_refused_not_read_as_a_mismatch( repo, body, said ):
+    _write( repo, "src/app/a.py", CLEAN )
+    _git( repo, "add", "src/app" )
+    _stub_gate( repo, STUB_CLEAN )
+    _write( repo, "src/cosa/repo/doc_lint/doc_metrics.py", 'if __name__ == "__main__": print( "DASHBOARD CHECK PASSED: 1 rows" )\n' )
+    _write( repo, "src/cosa/repo/doc_lint/ts_doc_exists.py", body )
+
+    code, text = _run( repo, *BASE )
+
+    assert code == 2
+    assert said in text
+    assert "Total Tests:" not in text and "DOCLINT GATE PASSED" not in text
 
 
 def test_a_docstring_step_whose_counts_cannot_be_read_is_refused( repo ):
@@ -437,7 +495,7 @@ def test_the_job_reads_a_red_run_as_files_passed_and_failed( repo ):
 
     assert code == 1
     assert parsed is not None, "the job does not parse the doclint runner's summary, so a red gate would read as not executed"
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 3, 1 ), "two clean files and the dashboard check passed; one file failed"
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 4, 1 ), "two clean files and both checks passed; one file failed"
 
 
 def test_the_job_reads_a_clean_run_as_all_files_passed( repo ):
@@ -452,7 +510,7 @@ def test_the_job_reads_a_clean_run_as_all_files_passed( repo ):
     parsed       = TestSuiteJob._parse_non_pytest_stdout( "doclint", out )
 
     assert code == 0
-    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 3, 0 ), "two clean files and the dashboard check"
+    assert ( parsed[ "passed" ], parsed[ "failed" ] ) == ( 4, 0 ), "two clean files and both checks"
 
 
 def test_the_job_reads_a_refused_run_as_nothing_parsed( repo ):

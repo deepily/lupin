@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cosa.repo.doc_lint import counts, gate, tool_runners as tr, ts_counts, tsdoc_lint, word_list
+from cosa.repo.doc_lint import counts, gate, tool_runners as tr, ts_counts, ts_doc_exists, tsdoc_lint, word_list
 
 PACKAGE = os.path.dirname( os.path.abspath( gate.__file__ ) )
 WORDS   = [ "not", "never", "the" ]
@@ -23,7 +23,7 @@ SEEDED  = "This is NOT fine.\n"
 
 # The modules the gate module imports from its own package, directly or through another of them.
 MODULES = ( "changed_ranges", "cli", "comment_lint", "counts", "docstring_lint", "gate", "links", "marker_counts", "md_lint", "rule_lists",
-            "swept_scope", "text_rules", "tool_runners", "ts_counts", "tsdoc_lint", "waivers", "word_list" )
+            "swept_scope", "text_rules", "tool_runners", "ts_counts", "ts_doc_exists", "tsdoc_lint", "waivers", "word_list" )
 
 # What the gate does when the place fails. CRASH is the loud line and exit 0, the top-level handler of gate.main.
 # SAID is a warning or a refusal that names the failure, with no crash. OFF is a place no commit reaches: a
@@ -63,6 +63,10 @@ EXPECTED = {
     "ts_counts.extract:open#0"                            : ( CRASH, CRASH ),
     "ts_counts.main:open#0"                               : OFF,
     "ts_counts.main:open#1"                               : OFF,
+    "ts_doc_exists.extract:open#0"                        : ( CRASH, CRASH ),
+    "ts_doc_exists.main:open#0"                           : OFF,
+    "ts_doc_exists.main:open#1"                           : OFF,
+    "ts_doc_exists.run_extractor:subprocess.run#0"        : ( CRASH, CRASH ),
     "tsdoc_lint.run_extractor:subprocess.run#0"           : ( CRASH, CRASH ),
     "tsdoc_lint.tracked_files:subprocess.run#0"           : ( CRASH, CRASH ),
     "word_list.load_words:open#0"                         : ( CRASH, CRASH ),
@@ -130,11 +134,12 @@ def _build( root, new_stamp ):
     _git( root, "init", "-q" )
     ( root / "src" / "conf" ).mkdir( parents=True )
     ( root / "src" / "conf" / "dm-tutor-lowercase-words.txt" ).write_text( "\n".join( WORDS ) + "\n", encoding="utf-8" )     # left untracked: staged_bytes reads it from the disk
-    for rel in ts_counts.STAMP_FILES:
+    for rel in ts_counts.STAMP_FILES + ts_doc_exists.STAMP_FILES:
         if not ( root / rel ).exists(): _stage( root, { rel: f"stamp file {rel}\n" } )
     _stage( root, {
         counts.TABLE_PATH    : counts.table_text( {}, counts.rules_stamp( str( root ) ) ),
         ts_counts.TABLE_PATH : counts.table_text( {}, ts_counts.rules_stamp( str( root ) ) ),
+        ts_doc_exists.TABLE_PATH : counts.table_text( {}, ts_doc_exists.rules_stamp( str( root ) ) ),
         "docs/split.md"      : "# Split\n\nThe index.\n",
         "docs/split/01-a.md" : "# Part\n\nA part.\n",
     } )
@@ -142,7 +147,7 @@ def _build( root, new_stamp ):
     ( root / ".git" / "MERGE_HEAD" ).write_text( _git( root, "rev-parse", "HEAD" ), encoding="utf-8" )
     _stage( root, { "src/pkg/a.py": _doc( "This is NOT fine." ), "src/tests/t.py": _doc( "This is NOT fine." ), "src/web/a.ts": "/** Fine. */\n", "docs/split/02-b.md": SEEDED } )
     if new_stamp:
-        _stage( root, { counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ), ts_counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ) } )
+        _stage( root, { counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ), ts_counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ), ts_doc_exists.TABLE_PATH: counts.table_text( {}, "another-stamp" ) } )
     return root
 
 
@@ -171,6 +176,8 @@ def _run( root, monkeypatch, target=None, error=None ):
             if site is not None:
                 reached.add( site )
                 if site == target: raise error
+            if kind == "subprocess.run" and args[ 0 ][ 0 ] == "node" and args[ 0 ][ 1 ].endswith( "ts_export_extract.mjs" ):     # the export extractor: every file gets an export record with no symbols
+                return SimpleNamespace( returncode=0, stderr="", stdout="\n".join( '{"kind": "exports", "file": "%s", "parse_errors": [], "reexports": 0, "symbols": []}' % name for name in args[ 0 ][ 4 : ] ) )
             if kind == "subprocess.run" and args[ 0 ][ 0 ] == "node":                              # no test needs Node: every file gets its file record
                 return SimpleNamespace( returncode=0, stderr="", stdout="\n".join( '{"kind": "file", "file": "%s", "ts_version": "5", "parse_errors": []}' % name for name in args[ 0 ][ 4 : ] ) )
             if kind == "subprocess.run" and site is not None and site.split( ":" )[ 1 ].startswith( "runner" ):
@@ -203,10 +210,10 @@ def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
 
 def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     sites = [ site for site, _path, _first, _last in _sites() ]
-    assert len( sites ) == len( set( sites ) ) == 33 and sorted( sites ) == sorted( EXPECTED )
+    assert len( sites ) == len( set( sites ) ) == 37 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert sum( 1 for row in EXPECTED.values() if row != OFF ) == 23 and sum( 1 for row in EXPECTED.values() if row == OFF ) == 10
+    assert sum( 1 for row in EXPECTED.values() if row != OFF ) == 25 and sum( 1 for row in EXPECTED.values() if row == OFF ) == 12
 
 
 def test_every_place_on_the_gates_path_answers_an_oserror_and_a_decode_error_as_its_row_says( scenarios, monkeypatch ):

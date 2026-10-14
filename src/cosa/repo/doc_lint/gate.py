@@ -14,7 +14,7 @@ Three kinds of finding are printed and let through instead. One is a finding in 
 One is a page-level finding (PAGE_LEVEL_RULES) that the last commit's copy of the page already had, no worse.
 A page moved to another path is compared with the copy at its old path, whether or not the move also edits it.
 One is a finding on a line that came in unchanged with the commit a merge or a cherry-pick is concluding.
-Four more refusals apply with or without --blocking. Every refusal exits REFUSAL_EXIT.
+Five more refusals apply with or without --blocking. Every refusal exits REFUSAL_EXIT.
 
 1. The swept scope, defined once in swept_scope.is_swept. A staged Python file for which it is True is refused when its docstring
    lint holds any finding on any line, touched or not, from any rule. The refusal names the file,
@@ -29,14 +29,15 @@ Four more refusals apply with or without --blocking. Every refusal exits REFUSAL
 3. The TypeScript and JavaScript counted scope: every tracked file tsdoc_lint accepts. The same rule as the Python
    counted scope, with its own table (ts_counts.TABLE_PATH) and its own rules stamp. A staged file is counted from
    the index through the Node extractor, in one run for the commit. A commit that stages none runs no extractor.
-4. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
+4. The exported-symbol scope: ts_doc_exists's files, its own table and stamp. A refusal says to add the doc comment, since a waiver has no line.
+5. BLOCKING_PACKAGES. A staged file inside a listed package is refused for a mechanical history
    finding on any line. The list starts empty.
 
 Before any of these, a tracked rule file that differs between the index and the working tree refuses the commit.
 The rule files are every tracked file in the doc_lint package, the word list, the chain script and the extractor script.
 The findings would be counted under rules that are not the ones being committed.
 
-Every run prints the denominator for all three scopes: files checked, docstrings or counts, waivers honoured.
+Every run prints the denominator for all four scopes: files checked, docstrings or counts, waivers honoured.
 Without --blocking, every other finding on a staged line is printed and the commit goes through.
 """
 
@@ -51,7 +52,7 @@ import traceback
 from . import comment_lint, docstring_lint, md_lint
 from collections import namedtuple
 
-from . import counts, ts_counts, tsdoc_lint
+from . import counts, ts_counts, ts_doc_exists, tsdoc_lint
 from .changed_ranges import PAGE_LEVEL_RULES, changed_line_ranges, filter_findings
 from .cli import SURROGATE, in_scope, line_text, shown, split_lines, split_names
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
@@ -376,6 +377,27 @@ def staged_ts_counted( root ):
     return [ n for n in names if tsdoc_lint.in_scope( n ) ], renamed_from, ts_counts.TABLE_PATH in names
 
 
+def staged_exports_counted( root ):
+    """
+    List the staged script files whose exports are counted, with renames and the table flag.
+
+    Requires:
+        - root is a git working tree
+
+    Ensures:
+        - returns ( paths, renamed_from, table_staged )
+        - paths holds the files staged_ts_counted lists, less those under ts_doc_exists.EXCLUDED_PREFIXES
+        - renamed_from is the map staged_changes gives
+        - table_staged is True when ts_doc_exists.TABLE_PATH is among the staged files
+
+    Raises:
+        - RuntimeError naming the git error when the listing fails
+    """
+    names, renamed_from = staged_changes( root )
+    paths = [ n for n in names if tsdoc_lint.in_scope( n ) and not n.startswith( ts_doc_exists.EXCLUDED_PREFIXES ) ]
+    return paths, renamed_from, ts_doc_exists.TABLE_PATH in names
+
+
 def staged_bytes( root, path ):
     """
     Read a file's bytes from the index, or from the working tree when the index has none.
@@ -415,7 +437,10 @@ def head_table_text( root, table_path=counts.TABLE_PATH ):
 
 REGENERATE_COMMAND = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.counts --repo-root "$PWD" --write'
 REGENERATE_TS      = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.ts_counts --repo-root "$PWD" --write'
+REGENERATE_EXPORTS = 'LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" python3 -m cosa.repo.doc_lint.ts_doc_exists --repo-root "$PWD" --write'
 TS_NAME            = "TypeScript and JavaScript"
+EXPORTS_NAME       = "exported-symbol doc"
+EXPORTS_ADVICE     = "add a doc comment to each exported symbol listed below"
 
 
 def staged_deleted( root ):
@@ -436,7 +461,7 @@ def staged_deleted( root ):
     return split_names( res.stdout )
 
 
-def counted_refusal( path, result, allowed, ranges, gone=() ):
+def counted_refusal( path, result, allowed, ranges, gone=(), advice=None ):
     """
     Format the refusal for a counted file whose count rose above its entry.
 
@@ -446,9 +471,10 @@ def counted_refusal( path, result, allowed, ranges, gone=() ):
 
     Ensures:
         - returns one string: a header line, then up to SHOWN_FINDINGS findings with the touched ones first
-        - the header names the count, the entry, and how to waive
+        - the header names the count, the entry, and how to waive, or advice when advice is given
         - gone lists deleted paths that had entries; when it is not empty the header says the file may be a rename
           that git no longer pairs, and names the way out
+        - advice replaces the waiver sentence for a count that has no line to carry a waiver marker
 
     Raises:
         - nothing
@@ -457,7 +483,7 @@ def counted_refusal( path, result, allowed, ranges, gone=() ):
     ordered = touched + [ f for f in result.findings if f not in touched ]
     lines   = [
         f"[doc-lint] REFUSED {shown( path )}: {result.count} findings, the count table allows {allowed} (+{result.count - allowed}); "
-        f"reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>"
+        f"{advice if advice is not None else 'reword the text you added, or waive a finding on its own line with: doc-lint: waive <rule> -- <reason>'}"
         + ( f"; this commit also deletes {', '.join( shown( g ) for g in gone[ : 3 ] )}, which had an entry: if this file is a rename that git no longer pairs because too much changed, rename it in one commit and rewrite it in the next" if gone else "" )
     ]
     lines += [ f"[doc-lint]   {shown( f.path )}:{f.line}: {f.rule}: {f.message}" for f in ordered[ : SHOWN_FINDINGS ] ]
@@ -489,7 +515,7 @@ def rule_divergence( compared, differing, judged ):
     )
 
 
-Scope = namedtuple( "Scope", [ "noun", "table_path", "staged", "count_many", "census", "stamp", "regenerate" ] )
+Scope = namedtuple( "Scope", [ "noun", "table_path", "staged", "count_many", "census", "stamp", "regenerate", "advice" ], defaults=[ None ] )
 
 
 def _python_counts( root, paths ):
@@ -538,6 +564,30 @@ def _ts_counts( root, paths ):
     return found
 
 
+def _exports_counts( root, paths ):
+    """
+    Count the undocumented exports of staged script files, read from the index.
+
+    Requires:
+        - root is a git working tree; paths are staged TypeScript or JavaScript files
+
+    Ensures:
+        - returns { path: counts.FileCount }; a file that is not UTF-8 counts as one finding
+        - one extractor run covers every readable file
+
+    Raises:
+        - RuntimeError from git or the extractor
+    """
+    found, texts = {}, {}
+    for path in paths:
+        try:
+            texts[ path ] = staged_source( root, path )
+        except UnicodeDecodeError as err:
+            found[ path ] = counts.unreadable_count( path, err )
+    found.update( ts_doc_exists.counts_for( root, texts ) if texts else {} )
+    return found
+
+
 def _python_stamp( root, read ):
     """Return the Python rules stamp, looked up when called."""
     return counts.rules_stamp( root, read=read )
@@ -558,8 +608,19 @@ def _ts_census( root, read ):
     return ts_counts.census( root, read=read )
 
 
+def _exports_stamp( root, read ):
+    """Return the exports rules stamp, looked up when called."""
+    return ts_doc_exists.rules_stamp( root, read=read )
+
+
+def _exports_census( root, read ):
+    """Return the exports census, looked up when called."""
+    return ts_doc_exists.census_of_texts( root, read )
+
+
 PYTHON_SCOPE = Scope( "", counts.TABLE_PATH, staged_counted, _python_counts, _python_census, _python_stamp, REGENERATE_COMMAND )
 TS_SCOPE     = Scope( f"{TS_NAME} ", ts_counts.TABLE_PATH, staged_ts_counted, _ts_counts, _ts_census, _ts_stamp, REGENERATE_TS )
+EXPORTS_SCOPE = Scope( f"{EXPORTS_NAME} ", ts_doc_exists.TABLE_PATH, staged_exports_counted, _exports_counts, _exports_census, _exports_stamp, REGENERATE_EXPORTS, EXPORTS_ADVICE )
 
 
 def scope_check( root, ranges, scope ):
@@ -569,7 +630,7 @@ def scope_check( root, ranges, scope ):
     Requires:
         - root is a git working tree
         - ranges is the staged diff's changed-line map
-        - scope is PYTHON_SCOPE or TS_SCOPE
+        - scope is PYTHON_SCOPE, TS_SCOPE or EXPORTS_SCOPE
 
     Ensures:
         - returns ( refusals, warnings, stats ); each refusal is one printable string, stats is the denominator
@@ -632,7 +693,7 @@ def scope_check( root, ranges, scope ):
         stats[ "waivers" ] += result.waivers
         if result.count > allowed:
             stats[ "over" ] += 1
-            refusals.append( counted_refusal( path, result, allowed, ranges, gone ) )
+            refusals.append( counted_refusal( path, result, allowed, ranges, gone, scope.advice ) )
         else:
             stats[ "at_or_below" ] += 1
     return refusals, warnings, stats
@@ -672,6 +733,24 @@ def ts_counted_check( root, ranges ):
         - OSError when a rule file cannot be read
     """
     return scope_check( root, ranges, TS_SCOPE )
+
+
+def exports_counted_check( root, ranges ):
+    """
+    Hold the staged script files to their table of undocumented exports.
+
+    Requires:
+        - root is a git working tree
+        - ranges is the staged diff's changed-line map
+
+    Ensures:
+        - returns what scope_check returns for the exported-symbol scope
+
+    Raises:
+        - RuntimeError from git or the extractor when a listing, read or extraction fails
+        - OSError when a rule file cannot be read
+    """
+    return scope_check( root, ranges, EXPORTS_SCOPE )
 
 
 def git_toplevel( start ):
@@ -803,7 +882,7 @@ def collect( root ):
         - refusals also hold every docstring finding anywhere in a staged swept file that no waiver covers
         - a swept file that does not parse is refused, counted in tally["unparsed"], and cannot be waived
         - a swept file that is not UTF-8 is refused the same way, counted in tally["undecodable"]; any other file that is not UTF-8 is skipped with a warning
-        - tally is the denominator: files, docstrings, findings, waivers, unparsed
+        - tally is the denominator: files, docstrings, findings, waivers, unparsed, and one count block for each counted scope
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
@@ -867,9 +946,10 @@ def collect( root ):
     lines_out = [ refusal_line( f ) for f in refusals ] + decode_out
     staged_counted_paths, _renames, table_staged = staged_counted( root )
     staged_ts_paths, _ts_renames, ts_table_staged = staged_ts_counted( root )
+    staged_exports_paths, _ex_renames, exports_table_staged = staged_exports_counted( root )
     compared, differing = counts.differing_rule_files( root )
     tally[ "rules" ]    = { "compared": compared, "differing": len( differing ) }
-    judged   = bool( swept ) or bool( staged_counted_paths ) or table_staged or bool( staged_ts_paths ) or ts_table_staged
+    judged   = bool( swept ) or bool( staged_counted_paths ) or table_staged or bool( staged_ts_paths ) or ts_table_staged or bool( staged_exports_paths ) or exports_table_staged
     diverged = rule_divergence( compared, differing, judged )
     if diverged:
         lines_out.append( diverged )
@@ -895,6 +975,7 @@ def collect( root ):
     if diverged:
         tally[ "counted" ]    = { "files": 0, "at_or_below": 0, "over": 0, "waivers": 0, "table": "diverged" }
         tally[ "ts_counted" ] = dict( tally[ "counted" ] )
+        tally[ "exports_counted" ] = dict( tally[ "counted" ] )
     else:
         counted_refusals, counted_warnings, tally[ "counted" ] = counted_check( root, ranges )
         lines_out += counted_refusals
@@ -902,6 +983,9 @@ def collect( root ):
         ts_refusals, ts_warnings, tally[ "ts_counted" ] = ts_counted_check( root, ranges )
         lines_out += ts_refusals
         warnings  += ts_warnings
+        exports_refusals, exports_warnings, tally[ "exports_counted" ] = exports_counted_check( root, ranges )
+        lines_out += exports_refusals
+        warnings  += exports_warnings
     dropped  = { id( f ) for f in refusals + waived }
     kept     = [ f for f in filter_findings( findings, ranges ) if id( f ) not in dropped ]
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
@@ -966,6 +1050,8 @@ def main( argv=None, err=None ):
     say( f"[doc-lint] counted scope: {c[ 'files' ]} files checked, {c[ 'at_or_below' ]} at or below their count, {c[ 'over' ]} over, {c[ 'waivers' ]} waivers honoured, table {c[ 'table' ]}" )
     t = tally[ "ts_counted" ]
     say( f"[doc-lint] {TS_NAME} counted scope: {t[ 'files' ]} files checked, {t[ 'at_or_below' ]} at or below their count, {t[ 'over' ]} over, {t[ 'waivers' ]} waivers honoured, table {t[ 'table' ]}" )
+    e = tally[ "exports_counted" ]
+    say( f"[doc-lint] {EXPORTS_NAME} counted scope: {e[ 'files' ]} files checked, {e[ 'at_or_below' ]} at or below their count, {e[ 'over' ]} over, {e[ 'waivers' ]} waivers honoured, table {e[ 'table' ]}" )
     if args.blocking and warn_only: say( f"[doc-lint] {len( warn_only )} findings in {' or '.join( WARN_ONLY_PATHS + WARN_ONLY_PREFIXES )}{WARN_ONLY_MARK}" )
     if args.blocking and merged: say( f"[doc-lint] {len( merged )} findings came in with the merged or picked commit{WARN_ONLY_MARK}" )
     if args.blocking and earlier: say( f"[doc-lint] {len( earlier )} page-level findings predate this commit{WARN_ONLY_MARK}" )
