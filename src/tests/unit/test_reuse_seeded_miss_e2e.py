@@ -78,14 +78,16 @@ def test_the_sandbox_has_the_wrong_page_matching_and_the_right_page_terse( tmp_p
     assert sm.REPAIRED_LINE in ( root / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
 
 
-def test_a_dry_run_on_the_stand_in_repairs_the_page_miss_and_refuses_the_full_sweep_miss( tmp_path ):
+def test_a_dry_run_on_the_stand_in_repairs_the_page_miss_and_the_full_sweep_miss( tmp_path ):
     code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     assert code == 0 and report[ "ok"] and report[ "mode" ] == "dry-stand-in" and report[ "calls" ] > 0
     page, full = report[ "page" ], report[ "full" ]
     assert page[ "route" ] == "pages" and page[ "shortlist_before" ] == [ "cosa.newsx.read_articles" ]
     assert page[ "repair" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5, "replay_routes": [ "pages" ] }
-    assert full[ "route" ] == "full" and full[ "repair" ][ "verdict" ] == "UNREPAIRABLE" and full[ "repair" ][ "rewrites" ] == 0
-    assert report[ "exported" ] == { sm.SYMBOL_PAGE: True, sm.SYMBOL_FULL: False }
+    assert full[ "route" ] == "full" and full[ "shortlist_before" ] == []
+    assert full[ "repair" ][ "no_change" ][ "verdict" ] == "NO_INPUT_CHANGE" and full[ "repair" ][ "docstring" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5 }
+    assert report[ "exported" ] == { sm.SYMBOL_PAGE: True, sm.SYMBOL_FULL: True }
+    assert sm.NEW_DOC in ( tmp_path / "w" / "sandbox" / "src" / "cosa" / "feeds.py" ).read_text()
     lines = ( tmp_path / "w" / "misses.jsonl" ).read_text().splitlines()
     assert len( lines ) == 2 and json.loads( ( tmp_path / "w" / "report.json" ).read_text() )[ "ok" ] is True
     assert sm.REPAIRED_LINE in ( tmp_path / "w" / "sandbox" / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
@@ -146,7 +148,7 @@ def test_a_seed_that_finds_the_symbol_is_reported_and_no_row_is_written( tmp_pat
     ctx, root, lib, store = scenario_parts( tmp_path, EverythingRelevant() )
     page = sm.page_scenario( ctx, root, lib, store, 5 )
     assert page[ "ok" ] is False and "did not produce a page-route miss" in page[ "reason" ]
-    full = sm.full_scenario( ctx, lib, store, 5 )
+    full = sm.full_scenario( ctx, root, lib, store, 5 )
     assert full[ "ok" ] is False and "did not produce a full-sweep miss" in full[ "reason" ] and store.rows == []
 
 
@@ -161,14 +163,22 @@ def test_a_failed_seed_ask_is_reported_for_both_scenarios( tmp_path, monkeypatch
     monkeypatch.setattr( rt, "page_route_need_impl", lambda need, exclude, c: { "status": "error", "error": "NO" } )
     monkeypatch.setattr( rt, "sweep_need_impl", lambda need, exclude, c: { "status": "error", "error": "NO" } )
     assert sm.page_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
-    assert sm.full_scenario( ctx, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
+    assert sm.full_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
 
 
-def test_a_full_sweep_receipt_the_check_would_accept_fails_the_scenario( tmp_path, monkeypatch ):
-    ctx, root, lib, store = scenario_parts( tmp_path, sm.StandInJev() )
-    monkeypatch.setattr( sm, "run_repair_check", lambda *a, **k: None )
-    full = sm.full_scenario( ctx, lib, store, 5 )
-    assert full[ "ok" ] is False and "accepted a full-sweep receipt" in full[ "reason" ]
+class NothingRelevant( sm.StandInJev ):
+    """Answers every candidate as unrelated, so no docstring rewrite can repair a miss."""
+
+    def post_with_meta( self, body ):
+        response, meta = super().post_with_meta( body )
+        for answer in response[ "answers" ].values(): answer[ "probabilities" ] = sm.UNRELATED
+        return response, meta
+
+
+def test_a_docstring_rewrite_that_the_model_does_not_accept_leaves_the_full_sweep_miss_open( tmp_path ):
+    ctx, root, lib, store = scenario_parts( tmp_path, NothingRelevant() )
+    full = sm.full_scenario( ctx, root, lib, store, 5 )
+    assert full[ "ok" ] is False and "checks gave NO_INPUT_CHANGE and NOT_REPAIRED" in full[ "reason" ] and "repaired_noted" not in full[ "row" ]
 
 
 def test_a_live_run_goes_through_the_ledger_and_closes_its_run( tmp_path, monkeypatch ):
@@ -191,7 +201,7 @@ def test_a_live_run_goes_through_the_ledger_and_closes_its_run( tmp_path, monkey
 def test_the_summary_names_both_scenarios_and_the_verdict( tmp_path ):
     _, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     text = "\n".join( sm.summary_lines( report ) )
-    assert "dry-stand-in" in text and "REPAIRED" in text and "UNREPAIRABLE" in text and "PASS" in text
+    assert "dry-stand-in" in text and "REPAIRED" in text and "NO_INPUT_CHANGE" in text and "PASS" in text
     report[ "ok" ] = False
     assert "FAIL" in sm.summary_lines( report )[ -1 ]
 

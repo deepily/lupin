@@ -7,7 +7,9 @@ The wrong page is chosen and decides alone, so the right symbol is never asked.
 That is the seeded miss, and its receipt takes the page route.
 The run records the miss as a store row and rewrites the right page's index line.
 It replays the receipt five times before and five times after, each repeat its own draw.
-A second miss, from a full-sweep receipt, must be refused: no summary rewrite can repair it.
+A second miss comes from a full-sweep receipt, which never reads the wiki.
+A rewrite that changes nothing must return `NO_INPUT_CHANGE`.
+Rewriting the missed symbol's first docstring line must reach `REPAIRED`.
 
 Modes:
     dry (default)  a stand-in Jev answers from word overlap.
@@ -38,10 +40,11 @@ import threading
 from cosa.repo.doc_lint import jev_transport
 from cosa.repo.symindex import miss_record
 from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MISS_PREFIX, Librarian
-from cosa.repo.symindex.repair_check import PAGE_ROUTES, R, REPAIRED, UnrepairableReceipt, replayer_over, run_repair_check
+from cosa.repo.symindex.repair_check import NO_INPUT_CHANGE, R, REPAIRED, replayer_over, run_repair_check
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 
+PAGE_ROUTES    = ( "pages", "pages_then_full" )
 CAUGHT_BY      = "seeded-miss-e2e"
 PACK_SIZE      = 10
 NEED_PAGE      = "read the articles of an RSS feed"
@@ -57,6 +60,8 @@ FILES          = { "src/cosa/newsx.py"      : 'def read_articles( source ):\n   
                    "src/cosa/feeds.py"      : 'def parse_feed( url ):\n    """Parse an RSS feed into Article objects."""\n    return []\n\n\n'
                                               'def episodes( url ):\n    """Return the items."""\n    return []\n',
                    "src/lupin_mcp/tool.py"  : 'def serve():\n    """Serve the tools."""\n    return 1\n' }
+OLD_DOC        = '"""Return the items."""'
+NEW_DOC        = '"""List the episodes of a podcast."""'
 PINS           = { WRONG_PAGE: "cosa.newsx.read_articles@aaaaaaaaaa", RIGHT_PAGE: "cosa.feeds.parse_feed@bbbbbbbbbb" }
 STOP_WORDS     = frozenset( ( "the", "and", "for", "its", "with", "that", "this", "from", "are", "was" ) )
 RELEVANT       = { "reuse": 0.95, "extend": 0.03, "unrelated": 0.02 }
@@ -225,6 +230,13 @@ def write_index( root, right_line ):
     ( pathlib.Path( root ) / "src" / "docs" / "wiki" / "INDEX.md" ).write_text( text, encoding="utf-8" )
 
 
+def write_docstring( root ):
+    """Ensures: rewrites the full-sweep symbol's first docstring line to hold the need's words."""
+    path = pathlib.Path( root ) / "src" / "cosa" / "feeds.py"
+    text = path.read_text( encoding="utf-8" )
+    path.write_text( text.replace( OLD_DOC, NEW_DOC ), encoding="utf-8" )
+
+
 def make_context( root, data, out, transport=None, ceiling=None, run_name=None, ledger=None ):
     """Ensures: returns a packed ReuseContext; with no transport the live one is built later."""
     return rt.ReuseContext( root, data, out_dir=out, transport=transport, sweeper=rp.packed_sweeper( PACK_SIZE ), request_shape=rp.SHAPE, pack_size=PACK_SIZE,
@@ -307,13 +319,15 @@ def page_scenario( ctx, root, librarian, store, runs ):
     return report
 
 
-def full_scenario( ctx, librarian, store, runs ):
+def full_scenario( ctx, root, librarian, store, runs ):
     """
-    Detect a miss from a full-sweep receipt and show that the repair check refuses it.
+    Detect a miss from a full-sweep receipt and repair it through the symbol's own docstring.
 
     Ensures:
-        - returns a report dict; "ok" is True only when the receipt took the full route without the symbol and
-          the repair check raised UnrepairableReceipt, so no rewrite was made
+        - returns a report dict; "ok" is True only when the receipt took the full route without the symbol,
+          a rewrite that changed nothing returned `NO_INPUT_CHANGE`, and a rewrite of the symbol's first
+          docstring line returned `REPAIRED` with no hit before and every run a hit after
+        - the second check takes new draws, so it does not read the first check's cached answers
     """
     seed   = rt.sweep_need_impl( NEED_FULL, None, ctx )
     report = { "need": NEED_FULL, "symbol": SYMBOL_FULL, "status": seed[ "status" ], "ok": False }
@@ -325,14 +339,18 @@ def full_scenario( ctx, librarian, store, runs ):
         return { **report, "reason": "the seed did not produce a full-sweep miss" }
     title, outcome = record_miss( librarian, store, rid, SYMBOL_FULL, NEED_FULL )
     report[ "row" ] = { "title": title, "outcome": outcome }
-    rewrites = []
-    try:
-        run_repair_check( replayer_over( lambda receipt_id, repeat: rt.replay_impl( receipt_id, ctx, repeat=repeat ) ), lambda: rewrites.append( 1 ), rid, SYMBOL_FULL, runs=runs )
-    except UnrepairableReceipt as error:
-        report[ "repair" ] = { "verdict": "UNREPAIRABLE", "reason": str( error ), "rewrites": len( rewrites ) }
-        report[ "ok" ] = not rewrites and outcome == "created"
-        return report
-    return { **report, "reason": "the repair check accepted a full-sweep receipt" }
+
+    def replay_tool( receipt_id, repeat ): return rt.replay_impl( receipt_id, ctx, repeat=repeat )
+
+    same = run_repair_check( replayer_over( replay_tool, first_repeat=1 ), lambda: None, rid, SYMBOL_FULL, runs=runs )
+    real = run_repair_check( replayer_over( replay_tool, first_repeat=runs + 2 ), lambda: write_docstring( root ), rid, SYMBOL_FULL, runs=runs )
+    report[ "repair" ] = { "no_change": { "verdict": same.verdict, "before": same.before, "after": same.after },
+                           "docstring": { "verdict": real.verdict, "before": real.before, "after": real.after, "runs": real.runs } }
+    if same.verdict != NO_INPUT_CHANGE or real.verdict != REPAIRED or real.before != 0 or real.after != runs:
+        return { **report, "reason": f"checks gave {same.verdict} and {real.verdict}" }
+    report[ "row" ][ "repaired_noted" ] = mark_repaired( store, title, rid, SYMBOL_FULL )
+    report[ "ok" ] = outcome == "created" and report[ "row" ][ "repaired_noted" ]
+    return report
 
 
 def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="fake", runs=R, environ=None, log=print ):
@@ -374,14 +392,14 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     librarian = Librarian( store, str( work / "pending.jsonl" ), log )
     try:
         page   = page_scenario( ctx, root, librarian, store, runs )
-        full   = full_scenario( ctx, librarian, store, runs )
+        full   = full_scenario( ctx, root, librarian, store, runs )
     finally:
         if mode == "live" and ctx.transport is not None: ctx.transport.budget.end()
     if isinstance( stand_in, NoCallTransport ) and stand_in.refused:
         raise SavedAnswerMissing( f"{len( stand_in.refused )} requests were not in the saved answers; first need: {stand_in.refused[ 0 ]!r}" )
     export = miss_record.export_report( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ], str( work / "misses.jsonl" ), allow_empty=True )
     exported = { m[ "symbol" ]: m[ "repaired" ] for m in miss_record.collect( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ] ) }
-    expected = { SYMBOL_PAGE: True, SYMBOL_FULL: False }
+    expected = { SYMBOL_PAGE: True, SYMBOL_FULL: True }
     report   = { "mode": mode if mode == "live" else ( "dry-saved" if answers is not None else "dry-stand-in" ), "store": store_kind, "runs": runs,
                  "page": page, "full": full, "exported": exported, "exported_skipped": export.skipped,
                  "calls": stand_in.calls if stand_in is not None else None }
