@@ -40,6 +40,7 @@ EXCLUDED_PREFIX = "EXCLUDED_"
 EXCLUDED_TOKEN  = "excluded"
 
 RULING_RE = re.compile( r"^\s*RULING\s+(?P<id>\S+)\s+::\s+(?P<ruling>DUPLICATE|EXTEND\s+\S+|DISTINCT\s+\S.*?)\s+::\s+reuse-receipt:\s*(?P<rid>[0-9A-Za-z_-]+)\s*$" )
+RULING_LEAD_RE = re.compile( r"^\s*RULING\b" )
 ENTRY_RE  = re.compile( r"""['"]entry['"]\s*:\s*(['"])(?P<id>.+?)\1""" )
 
 
@@ -133,6 +134,17 @@ def parse_rulings( text ):
     return out
 
 
+def unparsed_ruling_lines( text ):
+    """
+    Find the lines that open as a ruling and do not read as one.
+
+    Ensures:
+        - returns the stripped text of every line that opens with the ruling keyword and that RULING_RE does not match, in document order
+        - a line that does not open with that keyword is never returned
+    """
+    return [ line.strip() for line in text.splitlines() if RULING_LEAD_RE.match( line ) and not RULING_RE.match( line ) ]
+
+
 def check_run( added, receipts, rulings, excluded=None ):
     """
     Give each added symbol a status.
@@ -183,6 +195,7 @@ def run_gate( runs, log_dir, min_new=MIN_NEW, runs_required=RUNS_REQUIRED ):
         - the floor is on the pair, so one run may add no definition when the other carries the floor
         - total_new counts each symbol id once, so one run given twice cannot reach the floor
         - a diff that reports algorithm_changed has no per-symbol list and fails with that reason
+        - a review line that opens with the ruling keyword and does not parse fails the gate, with the line in the reason
     """
     records, bad = merge_call_logs( log_dir )
     receipts, excluded, out, reasons, seen = receipts_by_symbol( records ), exclusions_by_symbol( records ), [], [], set()
@@ -192,7 +205,9 @@ def run_gate( runs, log_dir, min_new=MIN_NEW, runs_required=RUNS_REQUIRED ):
         diff = json.loads( pathlib.Path( run[ "diff" ] ).read_text( encoding="utf-8" ) )
         if "algorithm_changed" in diff:
             reasons.append( f"{run[ 'diff' ]}: pin algorithm changed, no per-symbol diff" ); continue
-        rows = check_run( diff[ "added" ], receipts, parse_rulings( pathlib.Path( run[ "review" ] ).read_text( encoding="utf-8" ) ), excluded )
+        review = pathlib.Path( run[ "review" ] ).read_text( encoding="utf-8" )
+        reasons += [ f"{run[ 'review' ]}: unparsed RULING line: {line}" for line in unparsed_ruling_lines( review ) ]
+        rows = check_run( diff[ "added" ], receipts, parse_rulings( review ), excluded )
         seen.update( r[ "id" ] for r in rows )
         reasons += [ f"{r[ 'id' ]}: {r[ 'status' ]}" for r in rows if r[ "status" ] not in ( "OK", "EXCLUDED" ) ]
         out.append( { "diff": run[ "diff" ], "review": run[ "review" ], "rows": rows } )

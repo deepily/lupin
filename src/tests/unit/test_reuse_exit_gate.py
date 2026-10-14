@@ -244,6 +244,17 @@ def test_gate_reports_algorithm_change( tmp_path ):
     assert res[ "passed" ] is False and any( "pin algorithm changed" in r for r in res[ "reasons" ] )
 
 
+def test_a_ruling_line_the_pattern_cannot_read_fails_the_gate_and_is_named( tmp_path ):
+    ids, rid = _ten()
+    bad  = "RULING m.f0, m.f1 :: DISTINCT no twin :: reuse-receipt: none (not in index)"          # comma in the id, free text receipt
+    rev  = [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] + [ bad, "RULINGS in prose are not rulings", "  RULING   " ]
+    logs, runs = _two_runs( tmp_path, ( ids, rev ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
+    res = eg.run_gate( runs, logs )
+    assert res[ "passed" ] is False
+    assert res[ "reasons" ] == [ f"{runs[ 0 ][ 'review' ]}: unparsed RULING line: {bad}", f"{runs[ 0 ][ 'review' ]}: unparsed RULING line: RULING" ]
+    assert eg.unparsed_ruling_lines( "no ruling here\n" + _ruling( "m.a", "DUPLICATE", "r1" ) ) == []   # a good line and prose stay quiet
+
+
 def test_main_exit_codes_and_output( tmp_path ):
     ids, rid = _ten()
     logs, runs = _two_runs( tmp_path, ( ids, [ _ruling( i, "DUPLICATE", rid[ i ] ) for i in ids ] ), ( [], [] ), [ _call( "a", i, rid[ i ] ) for i in ids ] )
