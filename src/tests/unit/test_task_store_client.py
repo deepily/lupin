@@ -160,6 +160,14 @@ class TestWireShape:
         assert req.get_method() == "POST"
         assert json.loads( req.data.decode( "utf-8" ) ) == { "note": "n", "actor": "a" }
 
+    def test_query_tasks_encodes_every_parameter( self, capture ):
+        capture[ "outcome" ] = FakeResponse( 200, '{"tasks": [], "has_more": false}' )
+        ok, status, body = tc.query_tasks( SETTINGS, "k", { "correlation_key": "epic:x", "limit": 500, "offset": 100, "include_terminal": "true" } )
+        req = capture[ "request" ]
+        assert req.get_method() == "GET" and req.data is None
+        assert req.full_url == "http://test:7999/api/tasks?correlation_key=epic%3Ax&limit=500&offset=100&include_terminal=true"
+        assert ok is True
+
     def test_query_encodes_correlation_key( self, capture ):
         capture[ "outcome" ] = FakeResponse( 200, '{"tasks": [], "count": 0}' )
         ok, status, body = tc.query_by_correlation_key( SETTINGS, "k", "cc-task:sid:1" )

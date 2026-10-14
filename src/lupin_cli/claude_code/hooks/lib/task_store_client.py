@@ -189,6 +189,20 @@ def amend_task( settings, api_key, item_id, payload ):
     return _request( "POST", f"{settings['api_base_url']}/api/tasks/{item_id}/amend", api_key, settings[ "timeout_seconds" ], body=payload )
 
 
+def query_tasks( settings, api_key, params ):
+    """
+    GET /api/tasks with the given query parameters.
+
+    Requires:
+        - params is a dict of query parameters, for example correlation_key, limit, offset
+
+    Ensures:
+        - Returns ( ok, status_code, body ) — body is { tasks, count, total, has_more, truncated } on 200
+        - Never raises
+    """
+    return _request( "GET", f"{settings['api_base_url']}/api/tasks?{urllib.parse.urlencode( params )}", api_key, settings[ "timeout_seconds" ] )
+
+
 def query_by_correlation_key( settings, api_key, correlation_key ):
     """
     GET /api/tasks?correlation_key=... (spool-replay idempotency probe).
