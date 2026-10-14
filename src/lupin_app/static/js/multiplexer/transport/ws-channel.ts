@@ -19,7 +19,12 @@
 // invocations from a prior socket cannot mutate state that belongs to the
 // current connection.
 
-/** The states of a channel's socket, from connecting through open and closing to closed. */
+/**
+ * The states of a channel's socket.
+ *
+ * A new channel is `closed`. `start` moves it to `connecting`, and the socket's open event moves it to `open`.
+ * `closing` is set inside `stop` and replaced by `closed` before `stop` returns, so a caller never reads it.
+ */
 export type WSChannelState = "connecting" | "open" | "closing" | "closed";
 
 /**
