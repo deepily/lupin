@@ -496,16 +496,20 @@ def test_an_index_with_no_symbols_refuses_before_sync_and_touches_nothing( tmp_p
     assert lib.seen is None and not os.path.exists( state )
 
 
-def test_both_reads_include_parked_rows_so_a_parked_rollup_is_not_created_again():
+def test_both_reads_ask_for_parked_rows_with_the_routes_own_parameter_names():
+    import inspect
+    from cosa.rest.routers.tasks import query_tasks as route
     parked = ( True, 200, { "tasks": [ dict( row( 7 ), status="parked" ) ], "has_more": False } )
     client = Client( { ( None, None, 0 ): parked, ( None, "true", 0 ): parked } )
     store  = lt.LiveStore( {}, "k", client )
     ok, _, body = store.query( "k" )
     assert ok and [ r[ "id" ] for r in body[ "tasks" ] ] == [ "id-7" ]
-    assert client.calls[ 0 ][ 1 ][ "include_parked" ] == "true"
+    assert client.calls[ 0 ][ 1 ][ "hide_parked" ] == "false"
     client.calls.clear()
     assert store.query_all( "k" )[ 0 ]
-    assert client.calls[ 0 ][ 1 ][ "include_parked" ] == "true" and client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
+    assert client.calls[ 0 ][ 1 ][ "hide_parked" ] == "false" and client.calls[ 0 ][ 1 ][ "include_terminal" ] == "true"
+    sent = { key for _, params in client.calls for key in params }
+    assert sent <= set( inspect.signature( route ).parameters ), sent - set( inspect.signature( route ).parameters )
 
 
 def test_the_shell_wrapper_header_lists_every_exit_code_the_tick_returns():
