@@ -34,7 +34,7 @@ export const VOX_CMD_SELECT_ALL     = "select all";
 /**
  * The five edit phrases as a list.
  *
- * The munger skips this line, because its value is a list and not one quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because its value is a list and not one quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const VOX_EDIT_COMMANDS   = [ VOX_CMD_CUT, VOX_CMD_COPY, VOX_CMD_PASTE, VOX_CMD_DELETE, VOX_CMD_SELECT_ALL ];
 
@@ -77,7 +77,7 @@ export const VOX_CMD_LOAD_CURRENT_TAB = "go to current tab";
 /**
  * Five tab phrases as a list, without the open-in-current-tab phrase.
  *
- * The munger skips this line, because its value is a list and not one quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because its value is a list and not one quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const VOX_TAB_COMMANDS       = [ VOX_CMD_TAB_BACK, VOX_CMD_TAB_FORWARD, VOX_CMD_TAB_REFRESH, VOX_CMD_TAB_CLOSE, VOX_CMD_LOAD_NEW_TAB ];
 
@@ -97,7 +97,7 @@ export const VOX_CMD_OPEN_FILE      = "open file";
 /**
  * The phrase for the open-url-bucket command, which the munger never loads.
  *
- * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. Nothing else in this repository reads it.
+ * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const VOX_CMD_OPEN_URL_BUCKET= "open url bucket";
 /**
@@ -197,7 +197,7 @@ export const LINK_MODE_CURRENT_TAB  = "current tab";
 /**
  * The link mode used when none is named: `LINK_MODE_DRILL_DOWN`.
  *
- * The munger skips this line, because the value is a name and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a name and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const LINK_MODE_DEFAULT      = LINK_MODE_DRILL_DOWN;
 
@@ -222,7 +222,7 @@ export const PROMPT_MODE_QUIET        = "quiet";
 /**
  * The prompt mode used when none is named: `PROMPT_MODE_VERBOSE`.
  *
- * The munger skips this line, because the value is a name and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a name and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const PROMPT_MODE_DEFAULT      = PROMPT_MODE_VERBOSE;
 
@@ -409,14 +409,14 @@ export const VOX_CMD_SUFFIX_FROM_FILE     = "from file";
 /**
  * The suffix "from clipboard", which the munger never loads.
  *
- * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. Nothing else in this repository reads it.
+ * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const VOX_CMD_SUFFIX_FROM_CLIPBOARD= "from clipboard";
 
 /**
  * The phrase for the save-from-clipboard command, which the munger never loads.
  *
- * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. Nothing else in this repository reads it.
+ * There is no space before the equals sign, so the munger's split on a spaced equals finds one piece and skips the line. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const VOX_CMD_SAVE_FROM_CLIPBOARD= "save from clipboard";
 
@@ -442,87 +442,87 @@ export const MODE_AGENT               = "agent mode";
 /**
  * The address of the speech server, on this machine at port 5002.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const TTS_SERVER_ADDRESS        = "http://127.0.0.1:5002";
 /**
  * The address of the Lupin server, on this machine at port 7999.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const GIB_SERVER_ADDRESS        = "http://127.0.0.1:7999";
 
 /**
  * The page address of the quill editor, served on this machine at port 8080.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const EDITOR_URL                = "http://127.0.0.1:8080/genie-plugin-firefox/html/editor-quill.html";
 /**
  * The page address of the blank page, served on this machine at port 8080.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const BUCKET_URL                = "http://127.0.0.1:8080/genie-plugin-firefox/html/blank.html";
 /**
  * The address of the plugin's own constants file, served at port 8080 on this machine.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const CONSTANTS_URL             = "http://127.0.0.1:8080/genie-plugin-firefox/js/constants.js";
 /**
  * The search page address of Google.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const SEARCH_URL_GOOGLE         = "https://www.google.com/search";
 /**
  * The search page address of Google Scholar.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const SEARCH_URL_GOOGLE_SCHOLAR = "https://scholar.google.com/scholar";
 /**
  * The search page address of DuckDuckGo.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const SEARCH_URL_DDG            = "https://www.duckduckgo.com/";
 /**
  * The search page address of Phind.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const SEARCH_URL_PHIND          = "https://www.phind.com/search";
 /**
  * The search page address of Perplexity.
  *
- * The munger skips values that start with a quoted http scheme. Nothing else in this repository reads it.
+ * The munger skips values that start with a quoted http scheme. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const SEARCH_URL_PERPLEXITY     = "https://www.perplexity.ai/search";
 
 /**
  * The zoom step, 0.075 of the page size.
  *
- * The munger skips this line, because the value is a number and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a number and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file. Its copy holds 0.125.
  */
 export const ZOOM_INCREMENT = 0.075;
 /**
  * The largest zoom factor, 5.
  *
- * The munger skips this line, because the value is a number and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a number and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const ZOOM_MAX       = 5;
 /**
  * The smallest zoom factor, 0.3.
  *
- * The munger skips this line, because the value is a number and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a number and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const ZOOM_MIN       = 0.3;
 /**
  * The zoom factor of an unzoomed page, 1.
  *
- * The munger skips this line, because the value is a number and not a quoted phrase. Nothing else in this repository reads it.
+ * The munger skips this line, because the value is a number and not a quoted phrase. No file in this repository imports it. The Firefox plugin keeps its own copy, src/lupin-plugin-firefox/js/constants.js, and its scripts import the name from that copy, which can differ from this file.
  */
 export const ZOOM_DEFAULT   = 1;
 
