@@ -839,3 +839,28 @@ def test_a_range_that_lands_the_epoch_and_then_removes_the_file_judges_nothing( 
     assert code == range_gate.EXIT_UNCHECKED
     assert stream.getvalue().splitlines() == [ f"the blocking epoch moves inside the range: a commit of it records {gated[ 'older' ]} and the head of the range records no file; "
                                                "a range is judged under one value, so no commit was judged" ]
+
+
+# ---- a commit may not be judged by a gate it wrote ---------------------------------------------------
+
+def test_a_commit_that_edits_the_gate_is_judged_by_the_gate_of_its_parent( gated ):
+    root = gated[ "root" ]
+    gate = os.path.join( root, "src", "cosa", "repo", "doc_lint", "gate.py" )
+    text = open( gate, encoding="utf-8" ).read()
+    assert text.count( "    sys.exit( main() )" ) == 1
+    open( gate, "w", encoding="utf-8" ).write( text.replace( "    sys.exit( main() )", "    sys.exit( 0 )" ) )
+    _write( root, "docs/own.md", SEEDED )
+    head = _commit( root, "a finding made together with a gate that passes everything" )
+    code, lines = _judge( gated, gated[ "newer" ], head )
+    assert code == 1 and f"refused   {head[ :9 ]} gate=3 a finding made together with a gate that passes everything" in lines
+    assert [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/own.md:3: caps: ALL-CAPS word NOT" ]
+
+
+def test_run_gate_runs_the_gate_code_of_another_tree_with_the_worktree_as_its_root( tmp_path ):
+    for name, marker in ( ( "wt", "WORKTREE" ), ( "code", "CODE" ) ):
+        pkg = tmp_path / name / "src" / "cosa" / "repo" / "doc_lint"
+        pkg.mkdir( parents=True )
+        for folder in ( pkg.parent.parent, pkg.parent, pkg ): ( folder / "__init__.py" ).write_text( "" )
+        ( pkg / "gate.py" ).write_text( f"import os\nprint( '{marker}', os.environ[ 'LUPIN_ROOT' ] )\n" )
+    code, output = range_gate.run_gate( str( tmp_path / "wt" ), code=str( tmp_path / "code" ) )
+    assert code == 0 and output.strip() == f"CODE {tmp_path / 'wt'}"

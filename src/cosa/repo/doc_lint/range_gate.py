@@ -393,26 +393,48 @@ def incoming_path( worktree ):
     return os.fsdecode( git_bytes( worktree, "rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD" ) ).strip( "\n" )
 
 
-def run_gate( worktree, blocking=False, python=None ):
+def run_gate( worktree, blocking=False, python=None, code=None ):
     """
     Run the commit gate of a worktree, with --blocking when the commit is held to it.
 
     Requires:
         - worktree is a git working tree with its changes staged
         - blocking is True for a commit is_held accepts, which is how the pre-commit chain runs the gate
+        - code is a second tree whose gate code runs instead of the worktree's, or None to run the worktree's
 
     Ensures:
         - returns ( exit_code, output_text ) of python -m cosa.repo.doc_lint.gate for that tree
-        - the gate code comes from the worktree, with LUPIN_ROOT and PYTHONPATH pinned to it
+        - the gate code comes from code when given, else from the worktree; LUPIN_ROOT is the worktree either way
         - the worktree's own commit hook is not involved
 
     Raises:
         - nothing
     """
-    env  = dict( os.environ, LUPIN_ROOT=worktree, PYTHONPATH=os.path.join( worktree, "src" ) )
+    env  = dict( os.environ, LUPIN_ROOT=worktree, PYTHONPATH=os.path.join( code or worktree, "src" ) )
     mode = [ "--blocking" ] if blocking else []
     res  = subprocess.run( [ python or sys.executable, "-m", "cosa.repo.doc_lint.gate" ] + mode + [ "--repo-root", worktree ], capture_output=True, env=env, cwd=worktree )
     return res.returncode, ( res.stdout + res.stderr ).decode( "utf-8", "replace" )
+
+
+def parent_gate( code_tree ):
+    """
+    Build a runner that judges a staged commit with the gate code of its parent.
+
+    Requires:
+        - code_tree is a detached worktree of the repository, free to be reset
+
+    Ensures:
+        - returns runner( worktree, blocking ) like run_gate, for a worktree checked out at the parent of the commit
+        - code_tree is put at that parent first, so a gate.py the commit itself edits is linted, not run
+        - a git failure is raised for check_commit to report as unchecked
+
+    Raises:
+        - RuntimeError when git cannot read the parent or move code_tree to it
+    """
+    def runner( worktree, blocking=False ):
+        git( code_tree, "checkout", "-q", "-f", "--detach", git( worktree, "rev-parse", "HEAD" ).strip() )
+        return run_gate( worktree, blocking, code=code_tree )
+    return runner
 
 
 def now():
@@ -675,6 +697,7 @@ def main( argv=None, out=None, runner=run_gate ):
         - the same when --base records an epoch and --head records another, none or no file, or when --head and the working copy of --repo-root differ
         - a merge commit in the range is judged under the merged-line rule, with its other parents as the incoming commit
         - a commit is replayed with --blocking only when its parent descends from that epoch; the report names the epoch
+        - the real gate runs from the code of each commit's parent, so a commit that edits gate.py is linted by the old one
         - a termination signal removes the worktree before the process ends
         - the holder folder is named range-gate-PID-suffix from the moment it exists, so a sweep never takes a live run's
         - a holder left by a run that was killed outright is swept when the next run starts
@@ -698,6 +721,10 @@ def main( argv=None, out=None, runner=run_gate ):
     previous = signal.signal( signal.SIGTERM, _terminate )
     try:
         git( args.repo_root, "worktree", "add", "--detach", work, args.head )
+        code_tree = os.path.join( holder, "code" )
+        if runner is run_gate:
+            git( args.repo_root, "worktree", "add", "--detach", code_tree, args.head )
+            runner = parent_gate( code_tree )
         try:
             epoch, from_head = resolve_blocking_epoch( args.repo_root, args.base, args.head )
             results          = check_range( args.repo_root, args.base, args.head, work, runner, epoch )
@@ -711,7 +738,7 @@ def main( argv=None, out=None, runner=run_gate ):
         return exit_code( results )
     finally:
         signal.signal( signal.SIGTERM, previous )
-        subprocess.run( [ "git", "-C", args.repo_root, "worktree", "remove", "--force", work ], capture_output=True )
+        for tree in ( work, os.path.join( holder, "code" ) ): subprocess.run( [ "git", "-C", args.repo_root, "worktree", "remove", "--force", tree ], capture_output=True )
         shutil.rmtree( holder, ignore_errors=True )
 
 
