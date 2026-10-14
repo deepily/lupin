@@ -14,7 +14,8 @@
 # A Claude seat never installs. --print-install is the form a seat may run. A person installs from the
 # main checkout, so the cron lines name that checkout and not a worktree.
 #
-# Exit codes: 0 nothing due or finished clean, 1 could not finish or install refused, 2 finished with rows held.
+# Exit codes: 0 nothing due or finished clean, 1 could not finish or install refused, 2 finished with rows held,
+#   3 switched off (the INI key `wiki librarian tick enabled` is not true).
 set -uo pipefail
 
 # Cron's environment is bare. Nothing below relies on the profile.
