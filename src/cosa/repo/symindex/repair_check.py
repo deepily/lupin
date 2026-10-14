@@ -4,6 +4,7 @@ The repair check: replay a missed receipt R times before and after a rewrite.
 The live proof that two repeats can differ is a scheduled test, not the unit tier.
 The unit tier covers this harness over cached answers only.
 """
+from collections import namedtuple
 from dataclasses import dataclass
 
 R = 5
@@ -13,7 +14,10 @@ ALREADY_MATCHED = "ALREADY_MATCHED"
 FLIPPY_BEFORE   = "FLIPPY_BEFORE"
 FLIPPY_AFTER    = "FLIPPY_AFTER"
 NOT_REPAIRED    = "NOT_REPAIRED"
+NO_INPUT_CHANGE = "NO_INPUT_CHANGE"
 CALL_FAILED     = "CALL_FAILED"
+
+Replayed = namedtuple( "Replayed", [ "ids", "index_sha" ] )
 
 
 class ReplayFailed( Exception ):
@@ -37,30 +41,12 @@ class RepairResult:
     runs    : int
 
 
-def count_hits( replay, receipt_id, symbol, runs ):
-    """
-    Replay a receipt and count the runs whose shortlist holds the symbol.
-
-    Requires:
-        - replay( receipt_id ) returns an iterable of symbol ids, or raises ReplayFailed
-        - runs is a positive int
-
-    Ensures:
-        - returns an int from 0 to runs
-        - makes exactly runs calls, stopping early only by an exception
-
-    Raises:
-        - ReplayFailed from replay, so an unknown is never counted as absent
-    """
-    return sum( 1 for _ in range( runs ) if symbol in set( replay( receipt_id ) ) )
-
-
 def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     """
     Check that a rewrite repaired a miss, replaying before and after.
 
     Requires:
-        - replay( receipt_id ) returns the shortlist at the current HEAD, or raises ReplayFailed
+        - replay( receipt_id ) returns a Replayed, the shortlist ids and the index sha of that run, or raises ReplayFailed
         - rewrite() applies the summary rewrite and takes no arguments
         - runs is a positive int, R by default
 
@@ -70,6 +56,9 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
         - `ALREADY_MATCHED` means the symbol was on every before-shortlist: no miss was reproduced
         - `FLIPPY_BEFORE` and `FLIPPY_AFTER` mean a mixed count, which is not evidence either way
         - `NOT_REPAIRED` means the symbol was still absent in every after-run
+        - `NO_INPUT_CHANGE` means the first after-run saw the same index sha as the last before-run,
+          so the rewrite changed nothing the replay reads; the other after-runs are not spent
+        - the first after-run counts toward the after hits when the index sha changed
         - `CALL_FAILED` means a replay raised ReplayFailed; the counts are None for phases not reached
 
     Raises:
@@ -77,14 +66,17 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     """
     if not isinstance( runs, int ) or isinstance( runs, bool ) or runs < 1: raise ValueError( f"runs must be a positive int, got {runs!r}" )
     try:
-        before = count_hits( replay, receipt_id, symbol, runs )
+        seen   = [ replay( receipt_id ) for _ in range( runs ) ]
+        before = sum( 1 for r in seen if symbol in r.ids )
     except ReplayFailed:
         return RepairResult( CALL_FAILED, None, None, runs )
     if before == runs: return RepairResult( ALREADY_MATCHED, before, None, runs )
     if before > 0:     return RepairResult( FLIPPY_BEFORE, before, None, runs )
     rewrite()
     try:
-        after = count_hits( replay, receipt_id, symbol, runs )
+        first = replay( receipt_id )
+        if first.index_sha == seen[ -1 ].index_sha: return RepairResult( NO_INPUT_CHANGE, before, None, runs )
+        after = ( 1 if symbol in first.ids else 0 ) + sum( 1 for _ in range( runs - 1 ) if symbol in replay( receipt_id ).ids )
     except ReplayFailed:
         return RepairResult( CALL_FAILED, before, None, runs )
     if after == runs: return RepairResult( REPAIRED, before, after, runs )
@@ -92,22 +84,15 @@ def run_repair_check( replay, rewrite, receipt_id, symbol, runs=R ):
     return RepairResult( NOT_REPAIRED, before, after, runs )
 
 
-PAGE_ROUTES = ( "pages", "pages_then_full" )
-
-
-class UnrepairableReceipt( ValueError ):
-    """A full-sweep receipt never reads the wiki, so no rewrite of a summary can repair it."""
-
-
-def shortlist_ids( result ):
+def read_head( result ):
     """
-    Read the HEAD shortlist ids out of a replay tool result.
+    Read the HEAD shortlist ids and index sha out of a replay tool result.
 
     Requires:
         - result is the dict the replay tool returns
 
     Ensures:
-        - returns the ids of result["head"]["shortlist"], in order
+        - returns a Replayed of the ids of result["head"]["shortlist"], in order, and result["head"]["index_sha"]
         - an error result raises ReplayFailed naming its error, and so does a missing head
         - a head that is uncertain for a gap cause (a failed call, a malformed answer, an unreadable key,
           a stale index, a foreign tree, a missing tool) raises ReplayFailed naming the cause
@@ -115,38 +100,38 @@ def shortlist_ids( result ):
           shortlist and its absence of the symbol is a finding
 
     Raises:
-        - UnrepairableReceipt when the receipt's route is not a page route, or has none
         - ReplayFailed in the cases above
     """
     if result[ "status" ] != "ok": raise ReplayFailed( f"replay error: {result[ 'error' ]}" )
-    route = result[ "stored" ].get( "route" )
-    if route not in PAGE_ROUTES:
-        raise UnrepairableReceipt( f"full-sweep receipt (route {route!r}) never reads the wiki, so a summary rewrite cannot repair it; only {', '.join( PAGE_ROUTES )} receipts can" )
     head = result[ "head" ]
     if head is None: raise ReplayFailed( "replay returned no HEAD run" )
     if head[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and head[ "cause" ] != "LOW_CONFIDENCE": raise ReplayFailed( f"uncertain read: {head[ 'cause' ]}" )
-    return [ entry[ "id" ] for entry in head[ "shortlist" ] ]
+    return Replayed( [ entry[ "id" ] for entry in head[ "shortlist" ] ], head[ "index_sha" ] )
 
 
-def replayer_over( replay_tool ):
+def replayer_over( replay_tool, first_repeat=1 ):
     """
     Wrap a replay tool as the replay callable run_repair_check takes.
 
     Requires:
         - replay_tool( receipt_id, repeat=n ) returns the replay tool's result dict, and answers repeat
           n under its own cache key (lupin_mcp.reuse_tools.replay_impl does, from n = 1)
+        - first_repeat is a positive int; pass a higher base to re-check a receipt with new draws
 
     Ensures:
-        - returns replay( receipt_id ) giving the HEAD shortlist ids, or raising as shortlist_ids does
-        - the k-th call passes repeat=k, counting from 1 and across before and after, so every replay is its own draw
+        - returns replay( receipt_id ) giving a Replayed, or raising as read_head does
+        - the k-th call passes repeat = first_repeat + k - 1, across before and after, so every replay is its own draw
+        - the default first_repeat of 1 repeats draws once: a second check with the same base reads the first check's cached answers
         - a replay tool without a repeat index would read one cached answer R times, so it must not be passed here
 
     Raises:
-        - nothing
+        - ValueError when first_repeat is not a positive int
     """
-    calls = [ 0 ]
+    if not isinstance( first_repeat, int ) or isinstance( first_repeat, bool ) or first_repeat < 1:
+        raise ValueError( f"first_repeat must be a positive int, got {first_repeat!r}" )
+    calls = [ first_repeat - 1 ]
 
     def replay( receipt_id ):
         calls[ 0 ] += 1
-        return shortlist_ids( replay_tool( receipt_id, repeat=calls[ 0 ] ) )
+        return read_head( replay_tool( receipt_id, repeat=calls[ 0 ] ) )
     return replay
