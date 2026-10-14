@@ -25,6 +25,7 @@ BULLET_LINE     = re.compile( r"^\s*(?:[-*+]|\d+[.)])\s" )
 FIELD_HEADER    = re.compile( r"^\s*(?:Attributes|Parameters|Params|Examples?)\s*:\s*$" )
 SENTENCE_SPLIT  = re.compile( r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])" )
 CONFIG_KEY_LINE = re.compile( r"^[ \t]*([a-z][a-z0-9 _.:-]*?)[ \t]=[ \t]" )
+CODE_SPAN       = re.compile( r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)" )
 
 
 def line_of_offset( text, offset ):
@@ -215,7 +216,8 @@ def rhetoric_findings( text, path, first_line, markdown=False ):
 
     Ensures:
         - one Finding per tic phrase occurrence, at its line
-        - in markdown a phrase inside an inline code span is not a finding, so a literal label can be quoted
+        - in markdown a phrase inside an inline code span, of any backtick run length, is not a finding, so a literal label can be quoted
+        - known limit: indented code (four spaces) and a span across two lines are still read as prose
         - a docstring reading still checks inside backticks
 
     Raises:
@@ -223,7 +225,7 @@ def rhetoric_findings( text, path, first_line, markdown=False ):
     """
     findings = []
     for i, raw in enumerate( text.split( "\n" ) ):
-        if markdown: raw = INLINE_CODE.sub( " ", raw )
+        if markdown: raw = CODE_SPAN.sub( " ", raw )
         for m in TIC_REGEX.finditer( raw ):
             findings.append( Finding( path, first_line + i, "tic", f"tic phrase {m.group( 0 )!r}" ) )
     return findings

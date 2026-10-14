@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "f2eb2080c6e29ee3",
+  "rules_stamp": "596b19c593119c66",
   "files": {
     "src/conftest.py": 68,
     "src/cosa/agents/prediction_engine/tests/test_accuracy_comparators.py": 1,

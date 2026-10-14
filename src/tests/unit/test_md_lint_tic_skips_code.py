@@ -47,3 +47,20 @@ def test_the_line_number_survives_code_above():
 def test_a_docstring_reading_keeps_refusing_inside_backticks():
     found = rhetoric_findings( "Uses `genuinely` here.", "a.py", 1 )
     assert len( found ) == 1
+
+
+def test_a_tic_word_inside_a_double_backtick_span_passes():
+    assert _tics( "The third label is ``genuinely-new`` in the review table.\n" ) == []
+
+
+def test_a_double_backtick_span_holding_a_backtick_passes():
+    assert _tics( "Quote ``a ` genuinely b`` as a label.\n" ) == []
+
+
+def test_a_span_between_two_halves_of_a_word_does_not_join_them():
+    assert len( _tics( "The word genu`x`inely is split.\n" ) ) == 0
+
+
+def test_prose_after_a_double_backtick_span_is_still_refused():
+    found = _tics( "Label ``genuinely-new`` is genuinely useful.\n" )
+    assert [ f.line for f in found ] == [ 1 ] and len( found ) == 1
