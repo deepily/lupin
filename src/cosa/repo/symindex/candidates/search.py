@@ -12,13 +12,14 @@ import sys
 from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex.candidates import candidate_stage as cs
 from cosa.repo.symindex.candidates import rank_fusion as rf
-from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING
+from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING, VECTOR_SET_CORRUPT, VECTOR_SET_UNAVAILABLE
 from cosa.repo.symindex.candidates.bm25 import SCORE_DIGITS
 
 REQUEST_ERROR        = "BAD_SEARCH_REQUEST"
 INDEX_UNREADABLE     = "INDEX_UNREADABLE"
 VECTOR_IDS_NOT_INDEX = "VECTOR_IDS_NOT_IN_INDEX"
 FUSION_KEYS          = ( "k", "depth", "head" )
+FLOAT32_MAX          = 3.4028234663852886e38
 
 
 def is_count( value, minimum ):
@@ -42,7 +43,7 @@ def validate_request( request ):
         - returns None when need is a string, K a positive int, index_dir a string
         - checks fusion, when present, holds k and depth as positive ints and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
-        - checks query_vectors is a non-empty dict of lists of finite numbers when vectors_dir is set
+        - checks query_vectors is a non-empty dict of lists of finite numbers within float32 range when vectors_dir is set
 
     Raises:
         - CandidateError BAD_SEARCH_REQUEST naming the first key that is wrong
@@ -68,6 +69,7 @@ def validate_request( request ):
     for name, vector in vectors.items():
         numbers = isinstance( vector, list ) and vector and all( isinstance( v, ( int, float ) ) and not isinstance( v, bool ) and math.isfinite( v ) for v in vector )
         if not numbers: bad( f"query vector {name} is not a non-empty list of finite numbers" )
+        if any( abs( v ) > FLOAT32_MAX for v in vector ): bad( f"query vector {name} holds a value beyond float32 range" )
 
 
 def cosine_ranked( ids, matrix, query ):
@@ -84,16 +86,19 @@ def cosine_ranked( ids, matrix, query ):
         - returns ( id, score ) pairs ordered by ( -rounded score, id )
 
     Raises:
+        - CandidateError BAD_SEARCH_REQUEST when a score is not finite
         - CandidateError DEPENDENCY_MISSING when numpy is not importable
     """
     try:
         import numpy as np
     except ImportError as e:
         raise CandidateError( DEPENDENCY_MISSING, f"numpy is not importable in this process: {e}" )
-    q     = np.asarray( query, dtype=np.float32 )
-    norms = np.linalg.norm( matrix, axis=1 ) * np.linalg.norm( q )
-    dots  = matrix @ q
-    flat  = np.divide( dots, norms, out=np.zeros( len( ids ), dtype=np.float32 ), where=norms > 0 )
+    q = np.asarray( query, dtype=np.float32 )
+    with np.errstate( all="ignore" ):
+        norms = np.linalg.norm( matrix, axis=1 ) * np.linalg.norm( q )
+        dots  = matrix @ q
+        flat  = np.divide( dots, norms, out=np.zeros( len( ids ), dtype=np.float32 ), where=norms > 0 )
+    if not np.isfinite( norms ).all(): raise CandidateError( REQUEST_ERROR, "a cosine norm is not finite, the query vector is too large" )
     pairs = [ ( doc_id, round( float( s ), SCORE_DIGITS ) ) for doc_id, s in zip( ids, flat ) ]
     return sorted( pairs, key=lambda p: ( -p[ 1 ], p[ 0 ] ) )
 
@@ -135,6 +140,8 @@ def answer( request, load_vectors ):
     Raises:
         - CandidateError BAD_SEARCH_REQUEST for a malformed request, an unknown matrix or a wrong vector width
         - CandidateError INDEX_UNREADABLE when the index folder or the purpose file cannot be read
+        - CandidateError VECTOR_SET_UNAVAILABLE when the loader raises an OSError
+        - CandidateError VECTOR_SET_CORRUPT when a matrix has a different row count from the ids
         - CandidateError VECTOR_IDS_NOT_IN_INDEX when the set holds an id the index lacks
         - CandidateError HEAD_EXCEEDS_LIMIT when the heads of the lists do not fit in K
     """
@@ -147,7 +154,10 @@ def answer( request, load_vectors ):
         raise CandidateError( INDEX_UNREADABLE, f"{type( e ).__name__}: {e}" )
     extra, scores, manifest_hash, without_vectors = {}, {}, None, None
     if request.get( "vectors_dir" ) is not None:
-        vectors       = load_vectors( request[ "vectors_dir" ] )
+        try:
+            vectors = load_vectors( request[ "vectors_dir" ] )
+        except OSError as e:
+            raise CandidateError( VECTOR_SET_UNAVAILABLE, f"{type( e ).__name__}: {e}" )
         manifest_hash = vectors.manifest_hash
         index_ids     = set( stage.ids )
         ghosts        = sorted( i for i in vectors.ids if i not in index_ids )
@@ -155,7 +165,9 @@ def answer( request, load_vectors ):
         without_vectors = len( index_ids.difference( vectors.ids ) )
         for name in sorted( request[ "query_vectors" ] ):
             if name not in vectors.matrices: raise CandidateError( REQUEST_ERROR, f"the vector set has no matrix {name}" )
-            width = vectors.matrices[ name ].shape[ 1 ]
+            rows, width = vectors.matrices[ name ].shape
+            if rows != len( vectors.ids ):
+                raise CandidateError( VECTOR_SET_CORRUPT, f"matrix {name} has {rows} rows for {len( vectors.ids )} ids" )
             if len( request[ "query_vectors" ][ name ] ) != width:
                 raise CandidateError( REQUEST_ERROR, f"query vector {name} has {len( request[ 'query_vectors' ][ name ] )} values, the matrix has {width}" )
             pairs          = cosine_ranked( vectors.ids, vectors.matrices[ name ], request[ "query_vectors" ][ name ] )

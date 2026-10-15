@@ -212,6 +212,40 @@ class TestIndexAgainstVectors:
         assert code == 0 and body[ "index_ids_without_vectors" ] == 0
 
 
+class TestLowNotes:
+    """Krishna's three low notes: float32 range, loader OSError, ids and rows that disagree."""
+
+    def test_value_beyond_float32_is_refused( self, generation ):
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 1e300, 1e300 ] } )
+        code, body = run_main( request )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "float32" in body[ "detail" ]
+
+    def test_value_inside_float32_whose_norm_overflows_is_refused( self, generation ):
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 3.4e38, 0.0 ] } )
+        code, body = run_main( request )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "not finite" in body[ "detail" ]
+
+    def test_scores_that_overflow_are_refused( self, generation ):
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 3e19, 3e19 ] } )
+        code, body = run_main( request )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "not finite" in body[ "detail" ]
+
+    def test_loader_oserror_is_a_named_error( self, generation ):
+        def loader( folder ): raise PermissionError( "denied" )
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
+        code, body = run_main( request, loader )
+        assert code == 2 and body[ "error" ] == "VECTOR_SET_UNAVAILABLE" and "denied" in body[ "detail" ]
+
+    def test_ids_and_rows_that_disagree_are_refused( self, generation ):
+        class Skewed( FakeSet ):
+            def __init__( self ):
+                super().__init__()
+                self.matrices = { k: v[ :2 ] for k, v in self.matrices.items() }
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
+        code, body = run_main( request, lambda d: Skewed() )
+        assert code == 2 and body[ "error" ] == "VECTOR_SET_CORRUPT" and "2 rows" in body[ "detail" ]
+
+
 class TestShortlistSize:
     """K is a hard cap on the answer."""
 
