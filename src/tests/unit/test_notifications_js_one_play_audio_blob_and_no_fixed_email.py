@@ -9,7 +9,7 @@ import re
 
 STATIC   = pathlib.Path( __file__ ).resolve().parents[ 2 ] / "lupin_app" / "static"
 SOURCE   = STATIC / "js" / "notifications.js"
-DEF_RX   = re.compile( r"^[ \t]+async playAudioBlob\(", re.M )
+DEF_RX   = re.compile( r"^[ \t]+(?:async[ \t]+)?playAudioBlob\(", re.M )
 FIXED    = "ricardo.felipe.ruiz@gmail.com"
 
 
@@ -22,6 +22,11 @@ def test_the_finder_counts_two_definitions_in_a_script_that_has_two():
     two = "    async playAudioBlob( audioUrl ) {\n    }\n    async playAudioBlob( audioBlob ) {\n    }\n"
     assert len( definitions( two ) ) == 2
     assert len( definitions( "    this.playAudioBlob( x );\n" ) ) == 0
+    assert len( definitions( "    await this.playAudioBlob( x );\n" ) ) == 0
+
+
+def test_the_finder_counts_a_definition_that_is_not_async():
+    assert len( definitions( "    playAudioBlob( audioBlob ) {\n    }\n    async playAudioBlob( b ) {\n    }\n" ) ) == 2
 
 
 def test_play_audio_blob_is_defined_once():
