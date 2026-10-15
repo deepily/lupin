@@ -55,8 +55,8 @@ class InputAndOutputTable():
         # The question-embedding cache table generates query/input embeddings.
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
 
-    def insert_io_row( self, date: str=du.get_current_date(), time: str=du.get_current_time( include_timezone=False ),
-        input_type: str="", input: str="", input_embedding: list[float]=[], output_raw: str="", output_final: str="", output_final_embedding: list[float]=[], solution_path_wo_root: Optional[str]=None, async_embedding: bool=None
+    def insert_io_row( self, date: str=None, time: str=None,
+        input_type: str="", input: str="", input_embedding: list[float]=None, output_raw: str="", output_final: str="", output_final_embedding: list[float]=None, solution_path_wo_root: Optional[str]=None, async_embedding: bool=None
     ) -> None:
         """
         Insert a new row into the input/output table.
@@ -85,6 +85,9 @@ class InputAndOutputTable():
         # In this case the only embedding that we are caching is the one that corresponds to the query/input, otherwise known
         # as the 'question' in the solution snapshot object and the 'query' in the self._question_embeddings_tbl object.
         # TODO: Make consistent the use of the terms 'input', 'query' and 'question'. While they are synonymous that's not necessarily clear to the casual reader.
+        # None means "not given": the date and time are read per call, not once at import
+        if date is None: date = du.get_current_date()
+        if time is None: time = du.get_current_time( include_timezone=False )
         # Get debug text truncation length from config first (needed for timer message)
         debug_truncate_len = self._config_mgr.get( "debug text truncation length", default=48, return_type="int" )
         timer = Stopwatch( msg=f"insert_io_row( '{input[ :debug_truncate_len ]}...' )", silent=True )

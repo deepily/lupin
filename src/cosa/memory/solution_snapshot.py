@@ -191,7 +191,7 @@ class SolutionSnapshot( RunnableCode ):
                   runtime_stats: dict=None,
                   id_hash: str="", solution_summary: str="", code: list[str]=None, solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
                   programming_language: str="Python", language_version: str="3.10",
-                  question_embedding: list[float]=[ ], question_normalized_embedding: list[float]=[ ], question_gist_embedding: list[float]=[ ], solution_embedding: list[float]=[ ], code_embedding: list[float]=[ ], thoughts_embedding: list[float]=[ ], solution_gist_embedding: list[float]=[ ],
+                  question_embedding: list[float]=None, question_normalized_embedding: list[float]=None, question_gist_embedding: list[float]=None, solution_embedding: list[float]=None, code_embedding: list[float]=None, thoughts_embedding: list[float]=None, solution_gist_embedding: list[float]=None,
                   solution_directory: str="/src/conf/long-term-memory/solutions/", solution_file: Optional[str]=None, user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="", session_id: str="",
                   replay_history: list=None, replay_stats: dict=None, is_cache_hit: bool=False,
                   answer_is_correct: bool=None,
@@ -333,6 +333,15 @@ class SolutionSnapshot( RunnableCode ):
         self.solution_directory    = solution_directory
         self.solution_file         = solution_file
         
+        # None means "not given": each snapshot builds its own embedding lists
+        if question_embedding is None:            question_embedding            = [ ]
+        if question_normalized_embedding is None: question_normalized_embedding = [ ]
+        if question_gist_embedding is None:       question_gist_embedding       = [ ]
+        if solution_embedding is None:            solution_embedding            = [ ]
+        if code_embedding is None:                code_embedding                = [ ]
+        if thoughts_embedding is None:            thoughts_embedding            = [ ]
+        if solution_gist_embedding is None:       solution_gist_embedding       = [ ]
+
         # If the question embedding is empty, generate it
         if question != "" and not question_embedding:
             self.question_embedding = self._embedding_provider.generate_embedding( question, content_type="prose" )
@@ -525,7 +534,7 @@ class SolutionSnapshot( RunnableCode ):
         """
         return list( self.synonymous_questions.keys() )[ -1 ]
         
-    def complete( self, answer: str, code: list[str]=[ ], solution_summary: str="" ) -> None:
+    def complete( self, answer: str, code: list[str]=None, solution_summary: str="" ) -> None:
         """
         Complete the snapshot with execution results.
         
@@ -581,6 +590,7 @@ class SolutionSnapshot( RunnableCode ):
             - None
         """
         # ¡OJO! code is a list of strings, not a string!
+        if code is None: code = [ ]
         self.code           = code
         self.code_embedding = self._embedding_provider.generate_embedding( " ".join( code ), content_type="code" )
         self.updated_date   = self.get_timestamp()

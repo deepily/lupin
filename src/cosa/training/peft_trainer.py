@@ -685,7 +685,7 @@ class PeftTrainer:
     
     def run_validation( self, banner_prefix: str="",
             model: Optional[Any]=None, switch: str="", path_prefix: str="/var/model/lupin",
-            device_map: dict={ "": 0 }, validation_sample_size: int=1000, debug: Optional[bool]=None, verbose: Optional[bool]=None,
+            device_map: dict=None, validation_sample_size: int=1000, debug: Optional[bool]=None, verbose: Optional[bool]=None,
             vllm_base_url: Optional[str]=None
     ) -> pd.DataFrame:
         """
@@ -708,6 +708,7 @@ class PeftTrainer:
         # set debug and verbose to the class defaults if not provided
         if debug is not None: self.debug = debug
         if verbose is not None: self.verbose = verbose
+        if device_map is None: device_map = { "": 0 }
         
         if model is None:
             raise ValueError( "Model must be provided" )
@@ -765,7 +766,7 @@ class PeftTrainer:
             "stage"       : stage_name
         }
     
-    def load_and_merge_adapter( self, checkpoint_dir: Optional[str]=None, device_map: dict={ "": 0 } ) -> None:
+    def load_and_merge_adapter( self, checkpoint_dir: Optional[str]=None, device_map: dict=None ) -> None:
         """
         Load PEFT adapter and merge with base model.
         
@@ -781,6 +782,7 @@ class PeftTrainer:
         Raises:
             - ValueError if no adapter path available
         """
+        if device_map is None: device_map = { "": 0 }
         du.print_banner( f"Load and merge adapter {checkpoint_dir}" )
         self._load_model_and_tokenizer( device_map=device_map, mode="inference" )
         

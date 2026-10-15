@@ -1282,7 +1282,7 @@ class MultiModalMunger:
         
         return False, command_dict
     
-    def _get_command_dict( self, command: str="none", confidence: float=0.0, args: list[str]=[ "" ], match_type: str="none" ) -> dict:
+    def _get_command_dict( self, command: str="none", confidence: float=0.0, args: list[str]=None, match_type: str="none" ) -> dict:
         """
         Create a dictionary with command metadata.
         
@@ -1296,6 +1296,7 @@ class MultiModalMunger:
         Raises:
             - None
         """
+        if args is None: args = [ "" ]
         command_dict = {
             "match_type": match_type,
                "command": command,

@@ -99,6 +99,24 @@ class TestPeftTrainer( unittest.TestCase ):
         """
         self.mock_manager.reset_mocks()
     
+    def test_load_and_merge_adapter_builds_its_own_device_map_per_call( self ):
+        """Each call passes a new device map, not one shared dict."""
+        trainer = PeftTrainer.__new__( PeftTrainer )
+        trainer.checkpoint_dir = None
+        seen = [ ]
+        with patch.object( PeftTrainer, "_load_model_and_tokenizer", side_effect=lambda **kw: seen.append( kw[ "device_map" ] ) ), \
+             patch( "cosa.training.peft_trainer.du.print_banner" ):
+            for _ in range( 2 ):
+                with self.assertRaises( ValueError ): trainer.load_and_merge_adapter()
+        self.assertEqual( seen, [ { "": 0 }, { "": 0 } ] )
+        self.assertIsNot( seen[ 0 ], seen[ 1 ] )
+
+    def test_run_validation_device_map_default_is_none( self ):
+        """The signature holds no dict, so no two calls share one."""
+        import inspect
+        self.assertIsNone( inspect.signature( PeftTrainer.run_validation ).parameters[ "device_map" ].default )
+        self.assertIsNone( inspect.signature( PeftTrainer.load_and_merge_adapter ).parameters[ "device_map" ].default )
+
     def test_initialization_success( self ):
         """
         Test successful PeftTrainer initialization with valid parameters.

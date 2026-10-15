@@ -97,6 +97,28 @@ class TestInit( unittest.TestCase ):
 class TestInsertIoRow( unittest.TestCase ):
     """insert_io_row() — sync, async-via-pool, provided-vs-generated embeddings, failure accounting."""
 
+    def test_date_and_time_are_read_per_call_not_at_import( self ):
+        """A call with no date or time gets the clock's value at that call."""
+        table, _, _ = _make()
+        repo, ctx, repo_ctx = _patch_repo()
+        with ctx, repo_ctx, patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ), \
+             patch( "cosa.memory.input_and_output_table.du.get_current_date", side_effect=[ "2026-10-14", "2026-10-15" ] ), \
+             patch( "cosa.memory.input_and_output_table.du.get_current_time", side_effect=[ "23:00:00", "01:00:00" ] ):
+            table.insert_io_row( input_type="t", input="q1", output_raw="r", output_final="o", async_embedding=False )
+            table.insert_io_row( input_type="t", input="q2", output_raw="r", output_final="o", async_embedding=False )
+        dates = [ c.kwargs[ "date" ] for c in repo.insert_io_row.call_args_list ]
+        times = [ c.kwargs[ "time" ] for c in repo.insert_io_row.call_args_list ]
+        self.assertEqual( dates, [ "2026-10-14", "2026-10-15" ] )
+        self.assertEqual( times, [ "23:00:00", "01:00:00" ] )
+
+    def test_embedding_defaults_are_none_not_a_shared_list( self ):
+        """The signature holds no list for the two embedding arguments."""
+        import inspect
+        params = inspect.signature( InputAndOutputTable.insert_io_row ).parameters
+        for name in ( "input_embedding", "output_final_embedding", "date", "time" ):
+            with self.subTest( argument=name ):
+                self.assertIsNone( params[ name ].default )
+
     def test_sync_stores_via_repo( self ):
         table, question_tbl, provider = _make()
         repo, ctx, repo_ctx = _patch_repo()

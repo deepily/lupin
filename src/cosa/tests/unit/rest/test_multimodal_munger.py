@@ -425,6 +425,13 @@ class TestCommandMatching( _MungerBase ):
         d = self.mm._get_command_dict()
         self.assertEqual( d, { "match_type": "none", "command": "none", "confidence": 0.0, "args": [ "" ] } )
 
+    def test_get_command_dict_args_are_not_shared_between_calls( self ):
+        first, second = self.mm._get_command_dict(), self.mm._get_command_dict()
+        first[ "args" ].append( "x" )
+        self.assertEqual( second[ "args" ], [ "" ] )
+        mine = [ "a" ]
+        self.assertIs( self.mm._get_command_dict( args=mine )[ "args" ], mine )
+
     def test_is_match_exact( self ):
         is_match, d = self.mm._is_match( "go to new tab" )
         self.assertTrue( is_match )
