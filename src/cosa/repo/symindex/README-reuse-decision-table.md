@@ -16,8 +16,16 @@ One sweep asks Jev one question per index entry. Each answered call gives probab
 | failed | the call did not return an answer after its retries |
 | malformed | the answer is not exactly the three keys, each a finite number in [0, 1], summing to 1 within 0.02; or its id is not an index entry, or is answered twice |
 
-Policy constants, all part of the receipt (see Receipt identity): `T = 0.5` relevance threshold,
-`C = 0.9` confidence bar, `F = 0.3` uncertainty floor, `K = 10` shortlist size, `0.02` sum tolerance, `S = 0.9` strong-match bar (`STRONG_MATCH`).
+Policy constants are all part of the receipt (see Receipt identity).
+
+- `T = 0.3` relevance threshold.
+- `C = 0.9` confidence bar.
+- `F = 0.3` uncertainty floor.
+- `K = 10` shortlist size.
+- `0.02` sum tolerance.
+- `S = 0.9` strong-match bar (`STRONG_MATCH`).
+
+`T` is the fitted cut; the receipt file and its hash are named in the comment above `POLICY` in `verdict.py`.
 
 ## Which calls count (B3)
 

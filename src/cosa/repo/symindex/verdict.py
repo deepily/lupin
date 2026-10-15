@@ -11,7 +11,8 @@ import math
 
 STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reach this for a strong match to win
 
-POLICY = { "threshold": 0.5, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH }
+# threshold 0.3 is the fitted cut (seed 20261014, rate 0.05): projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt.json, sha256 d15ed2812915885e105fdc781fb75cdd6c412a7d452712246024fb0bb21da1d9; strong and band are not fitted
+POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH }
 
 CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF" )
 BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many places before it meets the band, as the stored numbers are

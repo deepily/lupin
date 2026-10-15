@@ -21,7 +21,7 @@ from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev, resp
 
 SHIPPED_WIDE_K = rt.WIDE_K                                                                # read at import, before the fixture below sets it to 3
 BAND   = dict( vd.POLICY, band=0.05 )
-NEAR   = resp( 0.3, 0.2, 0.5 )                                                           # p_overlap 0.5, the threshold itself, and confidence 0.5
+NEAR   = resp( 0.18, 0.12, 0.7 )                                                         # p_overlap 0.3, the shipped threshold itself, and confidence 0.6
 RANKED = [ FEEDS_ID, MATH_ID, SERVE_ID ]
 
 

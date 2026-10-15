@@ -6,6 +6,7 @@ The canonical bytes of each receipt are hashed and the hash is a literal taken b
 """
 import pytest
 
+from cosa.repo.symindex import verdict as vd
 from lupin_mcp import reuse_tools as rt
 from tests.unit.test_reuse_pack_route import PackedFake, env, no_jev_key, packed_ctx, receipt_of      # noqa: F401  (fixtures)
 from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev
@@ -13,6 +14,16 @@ from tests.unit.test_reuse_page_first import HIT
 
 NEED    = "read an RSS feed [pin]"
 PINNED  = { "packed": "9f37ab288d110bf280321db3d17d3311b001b2d6", "old": "95d85b4660ba7b851c020d80a4e52c5a3855c8d6" }      # taken at db8e910eb, before unit 5
+
+
+@pytest.fixture( autouse=True )
+def policy_at_the_pinned_cut( monkeypatch ):
+    """Pins the threshold at 0.5, the cut the literals below were taken at.
+
+    Ensures:
+        - the receipt carries the policy, so the shipped 0.3 would move both hashes
+    """
+    monkeypatch.setitem( vd.POLICY, "threshold", 0.5 )
 
 
 def receipt_sha( rec ): return rt.sha( rt.canonical( rec ), 40 )

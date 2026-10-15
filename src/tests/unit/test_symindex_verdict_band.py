@@ -25,7 +25,8 @@ def _decide( top, policy ):
 
 # A confidence bar of 0 keeps LOW_CONFIDENCE out of these cases: near a cut-off of 0.5 no answer can be confident, so under the
 # shipped bar of 0.9 that cause always holds first. The fitted policy moves the bar, so the band is tested on its own here.
-BASE   = dict( vd.POLICY, confidence=0.0 )
+AT_HALF = dict( vd.POLICY, threshold=0.5 )                                # the arithmetic below is written around a cut-off of 0.5, not the shipped 0.3
+BASE   = dict( AT_HALF, confidence=0.0 )
 BANDED = dict( BASE, band=BAND )
 
 
@@ -97,7 +98,7 @@ def test_the_distance_to_a_cut_off_is_rounded_to_the_named_number_of_places_befo
 
 
 def test_under_the_shipped_confidence_bar_a_score_near_the_threshold_holds_both_causes_in_table_order():
-    got = _decide( 0.52, dict( vd.POLICY, band=BAND ) )
+    got = _decide( 0.52, dict( AT_HALF, band=BAND ) )
     assert got[ "causes" ] == [ "LOW_CONFIDENCE", "NEAR_CUTOFF" ] and got[ "cause" ] == "LOW_CONFIDENCE"
 
 
@@ -134,24 +135,24 @@ def _strong_answer( top_probability ):
 
 @pytest.mark.parametrize( "confidence", [ 0.9001, 0.8999, 0.9, 0.9499, 0.8501 ] )
 def test_a_confidence_inside_the_band_of_the_bar_is_near_cutoff_on_both_sides( confidence ):
-    got = vd.decide( [ { "id": "e0", "probabilities": _strong_answer( confidence ) } ], [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )
+    got = vd.decide( [ { "id": "e0", "probabilities": _strong_answer( confidence ) } ], [ "e0" ], [], set(), dict( AT_HALF, band=BAND ) )
     assert "NEAR_CUTOFF" in got[ "causes" ]
 
 
 @pytest.mark.parametrize( "confidence", [ 0.95, 0.85, 0.99 ] )
 def test_a_confidence_outside_the_band_of_the_bar_is_decided_as_today( confidence ):
-    policy = dict( vd.POLICY, band=BAND )
+    policy = dict( AT_HALF, band=BAND )
     answers = [ { "id": "e0", "probabilities": _strong_answer( confidence ) } ]
-    assert vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ] == vd.decide( answers, [ "e0" ], [], set(), vd.POLICY )[ "causes" ]
+    assert vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ] == vd.decide( answers, [ "e0" ], [], set(), AT_HALF )[ "causes" ]
 
 
 def test_a_confident_unrelated_entry_is_not_near_the_confidence_bar_whatever_its_confidence():
     answers = [ { "id": "e0", "probabilities": { "reuse": 0.0, "extend": 0.0, "unrelated": 1.0 } }, { "id": "e1", "probabilities": { "reuse": 0.02, "extend": 0.02, "unrelated": 0.96 } } ]
-    assert vd.decide( answers, [ "e0", "e1" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ] == []
+    assert vd.decide( answers, [ "e0", "e1" ], [], set(), dict( AT_HALF, band=BAND ) )[ "causes" ] == []
 
 
 def test_the_confidence_of_a_strong_candidate_is_banded_against_the_strong_cut_off_when_the_bar_differs():
-    policy = dict( vd.POLICY, confidence=0.5, strong=0.8, band=BAND )
+    policy = dict( AT_HALF, confidence=0.5, strong=0.8, band=BAND )
     answers = [ { "id": "e0", "probabilities": { "reuse": 0.81, "extend": 0.1, "unrelated": 0.09 } } ]
     assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ]
 
@@ -159,13 +160,13 @@ def test_the_confidence_of_a_strong_candidate_is_banded_against_the_strong_cut_o
 @pytest.mark.parametrize( "overlap", [ 0.31, 0.299, 0.3, 0.349, 0.251 ] )
 def test_an_entry_that_could_be_doubtful_and_sits_inside_the_band_of_the_floor_is_near_cutoff( overlap ):
     answers = [ { "id": "e0", "probabilities": _p( overlap ) } ]
-    assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ]
+    assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), dict( AT_HALF, band=BAND ) )[ "causes" ]
 
 
 @pytest.mark.parametrize( "overlap", [ 0.35, 0.25, 0.1 ] )
 def test_an_entry_outside_the_band_of_the_floor_is_not_flagged_for_the_floor( overlap ):
     answers = [ { "id": "e0", "probabilities": _p( overlap ) } ]
-    assert "NEAR_CUTOFF" not in vd.decide( answers, [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ]
+    assert "NEAR_CUTOFF" not in vd.decide( answers, [ "e0" ], [], set(), dict( AT_HALF, band=BAND ) )[ "causes" ]
 
 
 def test_an_entry_that_cannot_be_doubtful_is_not_flagged_for_the_floor():

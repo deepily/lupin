@@ -34,8 +34,16 @@ def test_thousands_of_confident_unrelated_entries_give_new_with_the_nearest_name
 
 
 def test_relevance_boundary_is_p_overlap_at_least_threshold():
-    at    = _decide( [ _ans( "at", _p( 0.25, 0.25, 0.5 ) ) ] )                                   # p_overlap exactly 0.5, confidence 0.5
-    below = _decide( [ _ans( "below", _p( 0.24, 0.25, 0.51 ) ) ] )                                # p_overlap 0.49
+    half  = { **vd.POLICY, "threshold": 0.5 }                                                      # the boundary rule at a cut of 0.5, whatever the shipped cut
+    at    = _decide( [ _ans( "at", _p( 0.25, 0.25, 0.5 ) ) ], policy=half )                       # p_overlap exactly 0.5, confidence 0.5
+    below = _decide( [ _ans( "below", _p( 0.24, 0.25, 0.51 ) ) ], policy=half )                   # p_overlap 0.49
+    assert [ s[ "id" ] for s in at[ "shortlist" ] ] == [ "at" ] and below[ "shortlist" ] == []
+
+
+def test_the_shipped_threshold_is_the_fitted_point_three_and_the_boundary_is_at_it():
+    at    = _decide( [ _ans( "at", _p( 0.15, 0.15, 0.7 ) ) ] )                                    # p_overlap exactly 0.3
+    below = _decide( [ _ans( "below", _p( 0.14, 0.15, 0.71 ) ) ] )                                # p_overlap 0.29
+    assert vd.POLICY[ "threshold" ] == 0.3
     assert [ s[ "id" ] for s in at[ "shortlist" ] ] == [ "at" ] and below[ "shortlist" ] == []
 
 
