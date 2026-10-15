@@ -174,9 +174,18 @@ class TestKillIdleWaiter:
         block = sb.get_idle_detection( "test-sid" )
         assert block[ "waiter_pid" ] is None
 
-    def test_kills_real_short_lived_subprocess( self, fake_bridge ):
+    def test_kills_real_short_lived_subprocess( self, fake_bridge, tmp_path ):
         # Spawn a real sleep process; our kill should reach it
-        proc = subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(30)", "lupin_cli.claude_code.hooks.lib.idle_waiter" ] )
+        module_dir = tmp_path / "fake_tree"
+        for part in ( "lupin_cli", "claude_code", "hooks", "lib" ):
+            module_dir = module_dir / part
+            module_dir.mkdir( parents=True, exist_ok=True )
+            ( module_dir / "__init__.py" ).write_text( "" )
+        ( module_dir / "idle_waiter.py" ).write_text( "import time\ntime.sleep( 30 )\n" )
+        proc = subprocess.Popen(
+            [ sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter" ],
+            cwd=str( tmp_path / "fake_tree" ),
+        )
         try:
             sb.set_idle_detection_field( "test-sid", waiter_pid=proc.pid )
             killed = sb.kill_idle_waiter( "test-sid" )
