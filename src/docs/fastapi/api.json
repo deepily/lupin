@@ -13556,6 +13556,156 @@
                     }
                 }
             }
+        },
+        "/api/reuse-candidates/stage": {
+            "put": {
+                "tags": [
+                    "reuse-candidates"
+                ],
+                "summary": "Hold a stage",
+                "description": "Build the BM25 indexes for uploaded entries and hold them under a key.",
+                "operationId": "put_stage_api_reuse_candidates_stage_put",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/StageUpload"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reuse-candidates/search": {
+            "post": {
+                "tags": [
+                    "reuse-candidates"
+                ],
+                "summary": "Search a held stage",
+                "description": "Rank a need against a held stage and the stored vectors, and return the shortlist.",
+                "operationId": "search_api_reuse_candidates_search_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "additionalProperties": true,
+                                "title": "Request"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -16098,6 +16248,57 @@
                 ],
                 "title": "SpeakerphoneBody",
                 "description": "POST body for setting speakerphone state.\n\nRequires:\n    - on is a bool (True to enable speakerphone, False to disable)"
+            },
+            "StageUpload": {
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "title": "Key"
+                    },
+                    "entries": {
+                        "items": {
+                            "additionalProperties": true,
+                            "type": "object"
+                        },
+                        "type": "array",
+                        "title": "Entries"
+                    },
+                    "purposes": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": {
+                                    "type": "string"
+                                },
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Purposes"
+                    },
+                    "fusion": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": {
+                                    "type": "integer"
+                                },
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Fusion"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "key",
+                    "entries"
+                ],
+                "title": "StageUpload",
+                "description": "The entries of one index, its purpose lines and fusion constants, under the caller's key."
             },
             "StartIn": {
                 "properties": {

@@ -4773,6 +4773,58 @@ Serves display blocks from a seat's transcript in ONE OF THREE DIRECTIONS. `tail
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## PUT `/api/reuse-candidates/stage`
+
+> **Hold a stage**
+
+Build the BM25 indexes for uploaded entries and hold them under a key.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[StageUpload](#stageupload)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
+## POST `/api/reuse-candidates/search`
+
+> **Search a held stage**
+
+Rank a need against a held stage and the stored vectors, and return the shortlist.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+object
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ---
 
 # 📋 Components
@@ -5798,6 +5850,20 @@ Requires:
 | on | boolean |  |
 
 
+## StageUpload
+
+
+The entries of one index, its purpose lines and fusion constants, under the caller's key.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| key | string |  |
+| entries | array |  |
+| purposes |  |  |
+| fusion |  |  |
+
+
 ## StartIn
 
 
@@ -6277,4 +6343,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.14 23:51:49 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.14 23:52:25 by `src/scripts/generate-api-docs.sh`_

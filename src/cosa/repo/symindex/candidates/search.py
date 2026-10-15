@@ -32,15 +32,16 @@ def is_count( value, minimum ):
     return isinstance( value, int ) and not isinstance( value, bool ) and value >= minimum
 
 
-def validate_request( request ):
+def validate_request( request, with_index=True ):
     """
     Check the shape of a request before any work is done.
 
     Requires:
         - request is a dict
+        - with_index is False for a request that names a held stage and has no index folder
 
     Ensures:
-        - returns None when need is a string, K a positive int, index_dir a string
+        - returns None when need is a string, K a positive int, index_dir a string (index_dir is not required when with_index is False)
         - checks fusion, when present, holds k and depth as positive ints of at most FUSION_MAX and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
         - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
@@ -50,11 +51,11 @@ def validate_request( request ):
         - CandidateError BAD_SEARCH_REQUEST naming the first key that is wrong
     """
     def bad( detail ): raise CandidateError( REQUEST_ERROR, detail )
-    for key in ( "need", "K", "index_dir" ):
+    for key in ( "need", "K" ) + ( ( "index_dir", ) if with_index else () ):
         if key not in request: bad( f"missing {key}" )
     if not isinstance( request[ "need" ], str ): bad( "need is not a string" )
     if not is_count( request[ "K" ], 1 ): bad( "K is not a positive integer" )
-    if not isinstance( request[ "index_dir" ], str ): bad( "index_dir is not a string" )
+    if with_index and not isinstance( request[ "index_dir" ], str ): bad( "index_dir is not a string" )
     if request.get( "purposes" ) is not None and not isinstance( request[ "purposes" ], str ): bad( "purposes is not a string" )
     wiki = request.get( "wiki" )
     if wiki is not None and not ( isinstance( wiki, list ) and all( isinstance( w, str ) for w in wiki ) ): bad( "wiki is not a list of strings" )
@@ -125,10 +126,37 @@ def read_purposes( path ):
 
 def answer( request, load_vectors ):
     """
-    Answer one search request.
+    Answer one search request from an index folder.
 
     Requires:
         - request has passed the shape rules of validate_request
+        - load_vectors takes a folder and returns an object with ids, matrices and manifest_hash
+
+    Ensures:
+        - builds the stage from the index folder and the purpose file, then ranks as answer_for_stage does
+        - returns what answer_for_stage returns
+
+    Raises:
+        - CandidateError INDEX_UNREADABLE when the index folder or the purpose file cannot be read
+        - everything answer_for_stage raises
+    """
+    validate_request( request )
+    try:
+        entries  = sx_build.read_symbols( request[ "index_dir" ] )
+        purposes = read_purposes( request.get( "purposes" ) )
+        stage    = cs.build_stage( entries, purposes, **{ k: request[ "fusion" ][ k ] for k in FUSION_KEYS } if "fusion" in request else {} )
+    except ( OSError, ValueError, KeyError, TypeError ) as e:
+        raise CandidateError( INDEX_UNREADABLE, f"{type( e ).__name__}: {e}" )
+    return answer_for_stage( request, stage, load_vectors )
+
+
+def answer_for_stage( request, stage, load_vectors ):
+    """
+    Answer one search request against a built stage.
+
+    Requires:
+        - request has passed validate_request, with or without an index folder
+        - stage is the stage built from the entries and purpose lines the request is about
         - load_vectors takes a folder and returns an object with ids, matrices and manifest_hash
 
     Ensures:
@@ -140,20 +168,12 @@ def answer( request, load_vectors ):
         - the shortlist holds at most K ids
 
     Raises:
-        - CandidateError BAD_SEARCH_REQUEST for a malformed request, an unknown matrix or a wrong vector width
-        - CandidateError INDEX_UNREADABLE when the index folder or the purpose file cannot be read
+        - CandidateError BAD_SEARCH_REQUEST for an unknown matrix or a wrong vector width
         - CandidateError VECTOR_SET_UNAVAILABLE when the loader raises an OSError
         - CandidateError VECTOR_SET_CORRUPT when a matrix has a different row count from the ids
         - CandidateError VECTOR_IDS_NOT_IN_INDEX when the set holds an id the index lacks
         - CandidateError HEAD_EXCEEDS_LIMIT when the heads of the lists do not fit in K
     """
-    validate_request( request )
-    try:
-        entries  = sx_build.read_symbols( request[ "index_dir" ] )
-        purposes = read_purposes( request.get( "purposes" ) )
-        stage    = cs.build_stage( entries, purposes, **{ k: request[ "fusion" ][ k ] for k in FUSION_KEYS } if "fusion" in request else {} )
-    except ( OSError, ValueError, KeyError, TypeError ) as e:
-        raise CandidateError( INDEX_UNREADABLE, f"{type( e ).__name__}: {e}" )
     extra, scores, manifest_hash, without_vectors = {}, {}, None, None
     if request.get( "vectors_dir" ) is not None:
         try:

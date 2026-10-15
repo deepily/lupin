@@ -1,4 +1,4 @@
-> Part 8 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 26 and 27: task store, CC transcript.
+> Part 8 of 9 of the [Lupin REST API Quick Reference](../rest-api-reference.md): routes 26 to 28: task store, CC transcript, reuse candidate search.
 
 ## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
 
@@ -110,3 +110,25 @@ Two carry Rick's ruled values. Three are defaults chosen by the implementer, to 
 | `cc transcript block budget bytes` | `8192` | implementer default; **`0` means unbounded**, not zero |
 
 ---
+
+## 28. Reuse Candidate Search (`/api/reuse-candidates/*`)
+
+The resident search of the reuse-lookup candidate stage. It keeps the BM25 indexes and the memory-mapped vector matrices between lookups.
+Callers authenticate with `X-API-Key` or a JWT. A vectors folder must sit under this server's reuse-review data directory.
+
+| Method | Path | Auth | Summary |
+|---|---|---|---|
+| PUT | `/api/reuse-candidates/stage` | API key or JWT | Hold the entries of one index, with purpose lines and fusion constants, under the caller's key |
+| POST | `/api/reuse-candidates/search` | API key or JWT | Rank a need against a held stage and the stored vectors, and return the sorted shortlist |
+
+A failure answers `{ error, detail }`. The status says what to do next:
+
+| Status | Error | The caller should |
+|---|---|---|
+| 409 | `STAGE_UNKNOWN` | upload the stage again, then search |
+| 409 | `VECTOR_SET_REPLACED` | stop: the set on disk is not the one the caller expected |
+| 422 | `BAD_STAGE_UPLOAD`, `BAD_SEARCH_REQUEST` | fix the request |
+| 403 | `PATH_REFUSED` | stop: the vectors folder is outside the data directory |
+| 503 | any other candidate error | stop: the vector set or the dependency is unavailable |
+
+Held stages and vector sets are kept for the two most recent of each. Full schemas: `/docs`.
