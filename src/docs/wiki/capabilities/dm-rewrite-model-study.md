@@ -12,7 +12,7 @@ pins:
 ---
 # DM rewrite model study
 
-A one-off package compares two models on the DM Tutor's rewrite task: Phi-4 14B on a local vLLM host and `gemini-3.1-flash-lite` on Vertex. It replays frozen DM bodies through the production tutor. Only tests import it.
+A one-off package compares two models on the DM Tutor's rewrite task: Phi-4 14B on a local vLLM host and `gemini-3.1-flash-lite` on Vertex. It replays frozen DM bodies through the production tutor. Only tests import it. By module: [[dm-rewrite-study-freeze]], [[dm-rewrite-study-replay]], [[dm-rewrite-study-checks]], [[dm-rewrite-study-report]].
 
 ## What it does
 - `freeze` copies tutor-eligible rows from the live `dm_traffic.jsonl` into a checksummed snapshot and manifest. Eligible means a claim count above the trigger, default 4.
