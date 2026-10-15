@@ -236,6 +236,21 @@ class TestLowNotes:
         code, body = run_main( request )
         assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "float32 range" in body[ "detail" ]
 
+    @pytest.mark.parametrize( "fusion", [
+        { "k": 10 ** 400, "depth": 9, "head": 2 },
+        { "k": 1_000_001, "depth": 9, "head": 2 },
+        { "k": 60, "depth": 10 ** 400, "head": 2 },
+        { "k": 60, "depth": 1_000_001, "head": 2 },
+    ] )
+    def test_fusion_constants_are_bounded( self, generation, fusion ):
+        # the need matches an entry, so the fused score is really computed
+        code, body = run_main( request_for( generation, fusion=fusion ) )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "at most" in body[ "detail" ]
+
+    def test_fusion_constants_at_the_bound_are_accepted( self, generation ):
+        code, body = run_main( request_for( generation, fusion={ "k": 1_000_000, "depth": 1_000_000, "head": 1 } ) )
+        assert code == 0 and body[ "ranking" ] == [ "py:a" ]
+
     def test_loader_oserror_is_a_named_error( self, generation ):
         def loader( folder ): raise PermissionError( "denied" )
         request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )

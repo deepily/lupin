@@ -19,6 +19,7 @@ INDEX_UNREADABLE     = "INDEX_UNREADABLE"
 VECTOR_IDS_NOT_INDEX = "VECTOR_IDS_NOT_IN_INDEX"
 FUSION_KEYS          = ( "k", "depth", "head" )
 FLOAT32_MAX          = 3.4028234663852886e38
+FUSION_MAX           = 1_000_000
 
 
 def is_count( value, minimum ):
@@ -40,7 +41,7 @@ def validate_request( request ):
 
     Ensures:
         - returns None when need is a string, K a positive int, index_dir a string
-        - checks fusion, when present, holds k and depth as positive ints and head as an int from 0 to depth
+        - checks fusion, when present, holds k and depth as positive ints of at most FUSION_MAX and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
         - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
         - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
@@ -61,6 +62,7 @@ def validate_request( request ):
         fusion = request[ "fusion" ]
         if not isinstance( fusion, dict ) or set( fusion ) != set( FUSION_KEYS ): bad( f"fusion must hold exactly {', '.join( FUSION_KEYS )}" )
         if not is_count( fusion[ "k" ], 1 ) or not is_count( fusion[ "depth" ], 1 ): bad( "fusion k and depth must be positive integers" )
+        if fusion[ "k" ] > FUSION_MAX or fusion[ "depth" ] > FUSION_MAX: bad( f"fusion k and depth must be at most {FUSION_MAX}" )
         if not is_count( fusion[ "head" ], 0 ) or fusion[ "head" ] > fusion[ "depth" ]: bad( "fusion head must be an integer from 0 to depth" )
     if request.get( "vectors_dir" ) is None: return
     if not isinstance( request[ "vectors_dir" ], str ): bad( "vectors_dir is not a string" )
