@@ -52,6 +52,7 @@ WATCHED = {
     "tempfile"   : { "mkdtemp", "mkstemp", "TemporaryDirectory", "NamedTemporaryFile" },
     "shutil"     : { "copy", "copy2", "copyfile", "copytree", "move", "rmtree" },
     "glob"       : { "glob", "iglob" },
+    "os.path"    : { "exists" },
 }
 METHODS    = { "read_text", "read_bytes", "iterdir", "glob", "rglob", "open", "write_text", "write_bytes", "stat", "exists" }
 UNRESOLVED = { "getattr", "__import__", "eval", "exec" }
@@ -111,15 +112,15 @@ EXPECTED = {
     "range_gate.main:subprocess.run#0"                       : RANGE,
     "ts_counts.extract:tempfile.mkdtemp#0"                   : ( CRASH, CRASH ),
     "ts_doc_exists.extract:tempfile.mkdtemp#0"               : ( CRASH, CRASH ),
-    "links.markdown_link_findings:.exists#0"              : SAFE,
-    "links.design_path_findings:.exists#0"                : SAFE,
-    "tool_runners.find_tool:.exists#0"                    : SAFE,
-    "tool_runners.find_tool:.exists#1"                    : SAFE,
+    "links.markdown_link_findings:os.path.exists#0"              : SAFE,
+    "links.design_path_findings:os.path.exists#0"                : SAFE,
+    "tool_runners.find_tool:os.path.exists#0"                    : SAFE,
+    "tool_runners.find_tool:os.path.exists#1"                    : SAFE,
     "ts_counts.extract:shutil.rmtree#0"                   : SAFE,
     "ts_doc_exists.extract:shutil.rmtree#0"               : SAFE,
-    "range_gate.working_epoch_text:.exists#0"                : RANGE,
-    "range_gate.check_commit:.exists#0"                      : RANGE,
-    "range_gate.sweep_stale:.exists#0"                       : RANGE,
+    "range_gate.working_epoch_text:os.path.exists#0"                : RANGE,
+    "range_gate.check_commit:os.path.exists#0"                      : RANGE,
+    "range_gate.sweep_stale:os.path.exists#0"                       : RANGE,
     "range_gate.sweep_stale:shutil.rmtree#0"                 : RANGE,
     "range_gate.main:shutil.rmtree#0"                        : RANGE,
 }
@@ -147,6 +148,8 @@ def _kind( call, aliases ):
         resolved = aliases.get( func.id, "" )
     elif isinstance( func, ast.Attribute ) and isinstance( func.value, ast.Name ):
         resolved = f"{aliases.get( func.value.id, func.value.id )}.{func.attr}"
+    elif isinstance( func, ast.Attribute ) and isinstance( func.value, ast.Attribute ) and isinstance( func.value.value, ast.Name ):
+        resolved = f"{aliases.get( func.value.value.id, func.value.value.id )}.{func.value.attr}.{func.attr}"
     elif isinstance( func, ast.Attribute ):
         return f".{func.attr}" if func.attr in METHODS else None
     else:
@@ -338,6 +341,17 @@ def test_the_scanner_sees_every_spelling_of_a_place_and_nothing_else():
                                                     "tempfile.mkdtemp", ".read_text", ".iterdir", "open", "runner", "os.listdir", "subprocess.run",
                                                     "os.popen", "os.system", "os.stat", "os.fdopen", "subprocess.getoutput", "shutil.copy", "glob.glob",
                                                     ".open", ".write_text", ".exists", "getattr", "__import__", "open-alias" ) ]
+
+
+def test_os_path_exists_is_its_own_kind_and_path_exists_is_not_it():
+    """A Path.exists can raise where os.path.exists answers False, so they are two kinds."""
+    source = "import os\nfrom os import path as p\nfrom os.path import exists as ex\nfrom pathlib import Path\ndef f( x ):\n    os.path.exists( x )\n    p.exists( x )\n    ex( x )\n    Path( x ).exists()\n    x.exists()\n"
+    found  = [ site.split( ":" )[ 1 ].split( "#" )[ 0 ] for site, _p, _a, _b in _scan( "m", "m.py", ast.parse( source ) ) ]
+    assert found == [ "os.path.exists", "os.path.exists", "os.path.exists", ".exists", ".exists" ]
+
+
+def test_no_method_exists_site_is_labelled_safe():
+    assert [ site for site, row in EXPECTED.items() if row == SAFE and ":.exists#" in site ] == []
 
 
 def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
