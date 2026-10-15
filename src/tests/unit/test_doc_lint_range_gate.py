@@ -742,6 +742,9 @@ def test_a_commit_merged_in_from_a_branch_that_forked_before_the_epoch_is_held_t
     code, lines = _judge( gated, gated[ "newer" ], merge )
     assert code == 1 and f"refused   {gated[ 'side' ][ :9 ]} gate=3 a finding made on a branch that forked before the epoch" in lines
     assert [ ln.strip() for ln in lines if "REFUSED docs" in ln ] == [ "[doc-lint] REFUSED docs/legacy.md:3: caps: ALL-CAPS word NOT" ]
+    reason = f"    forked before the blocking epoch {gated[ 'epoch' ][ :9 ]}: its parent predates it, but it entered the protected history after it, so it is held to blocking"
+    refused = lines.index( f"refused   {gated[ 'side' ][ :9 ]} gate=3 a finding made on a branch that forked before the epoch" )
+    assert reason in lines[ refused : refused + 4 ] and lines.count( reason ) == 1                    # the reason sits under the refusal it explains, once
     assert lines[ -2 ] == f"blocking epoch {gated[ 'epoch' ][ :9 ]}: 2 commits held to blocking, 0 judged in warn mode{FROM_WORK}"
 
 

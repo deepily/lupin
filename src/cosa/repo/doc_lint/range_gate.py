@@ -483,6 +483,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False 
         - returns a Result whose verdict is passed, refused or unchecked, and whose blocking says which mode the gate ran in
         - the gate runs with blocking True for a commit is_held accepts, and for every commit when after is True
         - so a commit that forked before the epoch and came in with a merge after it is held to blocking too
+        - such a commit carries a line that says it forked before the epoch and is held because it came in after it
         - exit 3 from the gate is refused and carries the lines that name a refusal
         - exit 0 is passed; any other exit, and any git failure, is unchecked
         - with an epoch recorded, a commit judged in warn mode carries a line that says it predates blocking
@@ -502,7 +503,8 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False 
         subject  = git( root, "log", "-1", "--format=%s", sha ).strip()
         found    = changes( root, sha )
         merged   = other_parents( root, sha )
-        blocking = after or is_held( root, epoch, sha )
+        held     = is_held( root, epoch, sha )
+        blocking = after or held
         git( worktree, "checkout", "-q", "-f", "--detach", f"{sha}^1" )
         git( worktree, "clean", "-fdq" )
         stage( worktree, sha, found )
@@ -515,6 +517,7 @@ def check_commit( root, worktree, sha, runner=run_gate, epoch=None, after=False 
     finally:
         if marker is not None and os.path.exists( marker ): os.remove( marker )
     notes = [] if blocking or epoch is None else [ f"predates the blocking epoch {epoch[ :9 ]}: judged in warn mode, findings on its staged lines were not enforced" ]
+    if blocking and not held and epoch is not None: notes.append( f"forked before the blocking epoch {epoch[ :9 ]}: its parent predates it, but it entered the protected history after it, so it is held to blocking" )
     notes = ( [ f"merge commit: judged with {merged[ 0 ][ :9 ]} as the incoming commit, so a line that came in unchanged with it was not enforced" ] if merged else [] ) + notes
     if code == GATE_REFUSED:
         return Result( sha, subject, "refused", code, [ line for line in output.splitlines() if "REFUSED" in line or "refus" in line ] + notes, blocking )
