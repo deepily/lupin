@@ -823,13 +823,13 @@ _KILL_WORD_RE  = re.compile( r"(?<![\w.-])(?:kill|pkill|killall)(?![\w-])" )
 
 _TWO_STAGE_RE = re.compile(
     r"^[ \t]*(?:\w+=\S*[ \t]+)*(?:pgrep|ps)(?![\w./-])(?P<first>[^|;&\n]*)"
-    r"\|[ \t]*xargs(?![\w./-])[^|;&\n]*$"
+    r"\|[ \t]*xargs(?:[ \t]+-r)?[ \t]+kill(?:[ \t]+-[A-Za-z0-9]+)?[ \t]*$"
 )
 
 
 def _is_own_children_pipe( command: str ) -> bool:
     """
-    True iff the whole command is an own-children `pgrep` or `ps` piped into xargs.
+    True iff the whole command is an own-children `pgrep` or `ps` piped into `xargs kill`.
 
     Ensures:
         - exactly two stages; any other `|`, `||`, `&&`, `;`, `&` or newline refuses
@@ -853,8 +853,8 @@ def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]
           literal is judged on its own; inside a literal every shell is judged
         - the argument text ends at the first unquoted separator
         - an xargs is skipped only when the whole command is exactly two stages,
-          a pgrep or ps scoped to own children piped into xargs
-          (`pgrep -P $$ | xargs kill`, the guard's recommended substitute)
+          a pgrep or ps scoped to own children piped into `xargs [-r] kill [-SIGNAL]`
+          with no other argument or redirection (the guard's recommended substitute)
         - never raises
     """
     extracted = { match.start() for match in _SHELL_C_RE.finditer( command ) }
