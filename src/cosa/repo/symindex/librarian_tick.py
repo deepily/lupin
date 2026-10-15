@@ -13,8 +13,8 @@ one line and exits before it builds anything or reads the store.
 Installing the cron lines goes through the shared crontab lock and nothing else. Without that
 lock module the installer refuses and writes nothing.
 
-The tick also carries the vector set's staleness verdict (vector_status.py) on its report when the
-daily vector refresh job is switched on.
+The tick also carries the vector set's staleness verdict (vector_status.py) on its report. It does so
+whether or not the daily vector refresh job is switched on.
 
 Exit 0 means nothing was due, or the run finished and nothing is held.
 Exit 1 means the run could not finish, or an install was refused.
@@ -480,7 +480,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     Ensures:
         - with no mode flag, runs one tick and returns its exit code
         - a tick that is switched off logs one line and returns EXIT_DISABLED before anything is built or read
-        - the vector status check runs in the tick only when the vector refresh switch is on, because a set no job rebuilds is not owed
+        - the vector status check runs in every tick, whether or not the vector refresh switch is on, because a refresh that is off is when the set goes stale
         - --print-install prints the cron lines and changes nothing
         - --install, --uninstall and --status go through edit_crontab or read the crontab
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
@@ -523,8 +523,8 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     pending   = os.path.join( folder, PENDING_NAME )
     wiki_dir  = os.path.join( root, "src", "docs", "wiki" )
     librarian = ( make_librarian or _live_librarian )( environ, pending, log )
-    from cosa.repo.symindex import vector_refresh, vector_status
-    check     = ( lambda: vector_status.check( root, now, librarian=librarian, environ=environ, log=log ) ) if read_enabled( key=vector_refresh.ENABLED_KEY ) else None
+    from cosa.repo.symindex import vector_status
+    check     = lambda: vector_status.check( root, now, librarian=librarian, environ=environ, log=log )
     code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
                               os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check )
     print( json.dumps( summary, sort_keys=True ), file=out )

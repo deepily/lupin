@@ -196,6 +196,9 @@ class FakeLibrarian:
         self.store  = type( "S", (), { "query_all": lambda s, key: query } )()
         self.seen   = None
 
+    def hold_or_create( self, title, body ):
+        return "created"
+
     def sync( self, findings, index_sha ):
         self.seen = findings
         self.index_sha = index_sha
@@ -593,15 +596,15 @@ def test_a_vector_check_that_fails_is_logged_and_does_not_fail_the_tick( tmp_pat
     assert any( "vector status check failed" in line and str( error ) in line for line in lines )
 
 
-@pytest.mark.parametrize( "switch, runs", [ ( True, 1 ), ( False, 0 ) ] )
-def test_main_runs_the_vector_check_only_when_the_vector_refresh_switch_is_on( cron, tmp_path, monkeypatch, pipeline, switch, runs ):
+@pytest.mark.parametrize( "switch", [ True, False ] )
+def test_main_runs_the_vector_check_whether_or_not_the_vector_refresh_switch_is_on( cron, tmp_path, monkeypatch, pipeline, switch ):
     from cosa.repo.symindex import vector_refresh, vector_status
     keys, seen = [], []
     def reader( reader=None, errors=None, key=lt.ENABLED_KEY ): keys.append( key ); return switch
     monkeypatch.setattr( lt, "read_enabled", reader )
-    monkeypatch.setattr( vector_status, "check", lambda root, now, **kw: seen.append( kw[ "librarian" ] ) or { "stale": False, "reasons": [] } )
+    monkeypatch.setattr( vector_status, "check", lambda root, now, **kw: seen.append( kw[ "librarian" ] ) or { "stale": True, "reasons": [ "old" ] } )
     lib = FakeLibrarian()
     code, out, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: lib,
                              export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
-    assert vector_refresh.ENABLED_KEY in keys and len( seen ) == runs
-    assert ( "vector_status" in json.loads( out ) ) is bool( runs ) and ( seen == [ lib ] if runs else seen == [] )
+    assert vector_refresh.ENABLED_KEY not in keys
+    assert seen == [ lib ] and json.loads( out )[ "vector_status" ] == { "stale": True, "reasons": [ "old" ] }
