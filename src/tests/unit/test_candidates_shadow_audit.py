@@ -31,10 +31,17 @@ class TestBound:
     """The 95 percent upper bound."""
 
     def test_zero_in_three_hundred_is_about_one_percent( self ):
-        assert sa.audit_bound( 0, 300 ) == pytest.approx( 0.01 )
+        assert sa.audit_bound( 0, 300 ) == pytest.approx( 0.01, abs=0.0001 )
 
     def test_zero_in_thirty_is_about_ten_percent( self ):
-        assert sa.audit_bound( 0, 30 ) == pytest.approx( 0.1 )
+        assert sa.audit_bound( 0, 30 ) == pytest.approx( 0.095, abs=0.0005 )
+
+    def test_zero_misses_use_the_exact_form_and_never_pass_the_rule_of_three( self ):
+        assert sa.audit_bound( 0, 5 ) == pytest.approx( 1 - 0.05 ** ( 1 / 5 ) )
+        assert all( sa.audit_bound( 0, n ) <= 3.0 / n for n in range( 1, 400 ) )
+
+    def test_a_miss_never_lowers_the_bound_at_any_count( self ):
+        assert all( sa.audit_bound( 1, n ) > sa.audit_bound( 0, n ) for n in range( 1, 200 ) )
 
     def test_one_miss_in_three_hundred_uses_the_wilson_bound( self ):
         assert sa.audit_bound( 1, 300 ) == pytest.approx( 0.0148, abs=0.0002 )
@@ -51,8 +58,9 @@ class TestBound:
         assert sa.audit_bound( 0, 0 ) == 1.0
 
     def test_the_bound_never_passes_one( self ):
-        assert sa.audit_bound( 0, 1 ) == 1.0
+        assert sa.audit_bound( 0, 1 ) == pytest.approx( 0.95 )
         assert sa.audit_bound( 5, 5 ) == pytest.approx( 1.0 )
+        assert sa.audit_bound( 1, 1 ) <= 1.0
 
     @pytest.mark.parametrize( "misses, n", [ ( -1, 10 ), ( 11, 10 ), ( 0, -1 ), ( 1.5, 10 ), ( 0, 10.0 ), ( True, 10 ) ] )
     def test_bad_counts_are_refused( self, misses, n ):
@@ -101,6 +109,9 @@ class TestCompare:
 
     def test_a_new_verdict_from_the_full_sweep_is_ok( self ):
         assert sa.compare( "NEW", "NEW", [], [ "a" ] ) == "ok"
+
+    def test_a_match_that_names_no_causal_id_is_inconclusive( self ):
+        assert sa.compare( "NEW", "REUSE", [], [ "a" ] ) == "inconclusive"
 
     def test_an_undecided_full_sweep_is_inconclusive( self ):
         assert sa.compare( "NEW", "UNCERTAIN_READ_SOURCE", [], [ "a" ] ) == "inconclusive"
@@ -188,7 +199,7 @@ class TestTally:
     def test_a_write_new_verdict_reads_the_bound_from_disk( self, tmp_path ):
         for need in ( "a", "b", "c" ): sa.store_receipt( tmp_path, receipt_for( need, "NEW", [] ) )
         got = sa.bound_for_verdict( tmp_path, "py", GEN )
-        assert got[ "audits" ] == 3 and got[ "bound" ] == pytest.approx( 1.0 )
+        assert got[ "audits" ] == 3 and got[ "bound" ] == pytest.approx( sa.audit_bound( 0, 3 ) )
 
 
 class TestQueueAndRun:
@@ -228,14 +239,50 @@ class TestQueueAndRun:
         assert ( out[ "audited" ], out[ "failed" ] ) == ( 1, 1 )
         assert len( list( ( tmp_path / "shadow-pending" ).glob( "*.json" ) ) ) == 1
 
-    def test_limit_takes_the_first_items_only( self, tmp_path ):
-        for need in ( "n1", "n2", "n3" ): sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
-        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15", limit=2 )
-        assert out[ "audited" ] == 2
+    def test_limit_takes_the_oldest_queued_items_first( self, tmp_path ):
+        for need, day in ( ( "n-new", "2026-10-14" ), ( "n-old", "2026-10-12" ), ( "n-mid", "2026-10-13" ) ):
+            sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, day, rate=1 )
+        seen = []
+        def transport( need ):
+            seen.append( need )
+            return sweep_of( "NEW" )
+        out = sa.run_pending( tmp_path, transport, "2026-10-15", limit=2 )
+        assert out[ "audited" ] == 2 and seen == [ "n-old", "n-mid" ]
         assert len( list( ( tmp_path / "shadow-pending" ).glob( "*.json" ) ) ) == 1
 
+    def test_failing_items_go_behind_the_fresh_ones( self, tmp_path ):
+        for need in ( "bad-1", "bad-2", "good" ): sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        def transport( need ):
+            if need.startswith( "bad" ): raise TimeoutError( need )
+            return sweep_of( "NEW" )
+        runs = [ sa.run_pending( tmp_path, transport, "2026-10-15", limit=1 ) for _ in range( 3 ) ]
+        assert sum( r[ "audited" ] for r in runs ) == 1
+        queued = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
+        assert sorted( q[ "need" ] for q in queued ) == [ "bad-1", "bad-2" ]
+        assert [ q[ "attempts" ] for q in queued ] == [ 1, 1 ]
+
+    def test_a_truncated_queue_file_is_set_aside_and_the_run_goes_on( self, tmp_path ):
+        sa.enqueue_if_sampled( tmp_path, "good", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        ( tmp_path / "shadow-pending" / "0000000000000000.json" ).write_text( '{"id": "0000' )
+        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+        assert ( out[ "audited" ], out[ "corrupt" ] ) == ( 1, 1 )
+        assert ( tmp_path / "shadow-pending" / "0000000000000000.json.corrupt" ).exists()
+
+    def test_a_truncated_receipt_is_named_when_the_same_audit_is_stored( self, tmp_path ):
+        receipt = receipt_for( "n", "NEW", [] )
+        ( tmp_path / "receipts" ).mkdir()
+        ( tmp_path / "receipts" / f"shadow-{receipt[ 'id' ]}.json" ).write_text( '{"kind": "shad' )
+        with pytest.raises( CandidateError ) as caught:
+            sa.store_receipt( tmp_path, receipt )
+        assert caught.value.code == sa.AUDIT_RECEIPT_CORRUPT
+
+    def test_no_temporary_file_is_left_behind( self, tmp_path ):
+        sa.enqueue_if_sampled( tmp_path, "n", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+        assert list( tmp_path.rglob( ".tmp-*" ) ) == []
+
     def test_an_empty_queue_audits_nothing( self, tmp_path ):
-        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" ) == { "audited": 0, "failed": 0, "receipts": [] }
+        assert sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" ) == { "audited": 0, "failed": 0, "corrupt": 0, "receipts": [] }
 
     def test_daily_volume_joins_lookups_and_audits( self, tmp_path ):
         sa.enqueue_if_sampled( tmp_path, "n1", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )

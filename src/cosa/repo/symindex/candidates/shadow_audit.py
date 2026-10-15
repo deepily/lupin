@@ -22,6 +22,7 @@ KIND           = "shadow_audit"
 SAMPLE_RATE    = 0.01
 SAMPLE_BUCKETS = 10000
 Z_ONE_SIDED_95 = 1.6448536269514722
+CONFIDENCE     = 0.95
 MATCHING       = ( "REUSE", "EXTEND" )
 OUTCOMES       = ( "miss", "ok", "inconclusive" )
 RECEIPT_FIELDS = ( "kind", "id", "need_hash", "language", "generation", "index_sha", "live_verdict", "full_verdict",
@@ -37,7 +38,8 @@ def audit_bound( misses, n ):
 
     Ensures:
         - returns 1.0 when n is 0, because no audit says nothing
-        - returns the rule of three, 3 / n, when misses is 0
+        - returns the exact one-sided bound, 1 - 0.05 ** ( 1 / n ), when misses is 0, which is never above the rule of three, 3 / n
+        - a miss never lowers the bound: for every n the bound at one miss is above the bound at none
         - otherwise returns the one-sided Wilson upper bound
         - the result is never above 1.0
 
@@ -47,7 +49,7 @@ def audit_bound( misses, n ):
     if not all( isinstance( v, int ) and not isinstance( v, bool ) for v in ( misses, n ) ) or n < 0 or misses < 0 or misses > n:
         raise CandidateError( AUDIT_COUNTS_INVALID, f"misses {misses!r} of n {n!r}" )
     if n == 0: return 1.0
-    if misses == 0: return min( 1.0, 3.0 / n )
+    if misses == 0: return 1.0 - ( 1.0 - CONFIDENCE ) ** ( 1.0 / n )
     p, z2 = misses / n, Z_ONE_SIDED_95 ** 2
     centre = p + z2 / ( 2 * n )
     spread = Z_ONE_SIDED_95 * math.sqrt( p * ( 1 - p ) / n + z2 / ( 4 * n * n ) )
@@ -88,11 +90,13 @@ def compare( live_verdict, full_verdict, causal_ids, candidate_ids ):
 
     Ensures:
         - returns "inconclusive" when the full sweep could not decide, so the audit is not counted
+        - returns "inconclusive" when the full sweep matched but named no causal id, since that answer is malformed
         - returns "miss" when the full sweep matched and none of its causal ids was kept
         - returns "ok" otherwise, including when the judge disagreed with itself about a kept id
         - live_verdict does not change the outcome: the stage is judged on what it kept
     """
     if full_verdict not in MATCHING and full_verdict != "NEW": return "inconclusive"
+    if full_verdict in MATCHING and not causal_ids: return "inconclusive"
     if full_verdict in MATCHING and not set( causal_ids ) & set( candidate_ids ): return "miss"
     return "ok"
 
@@ -128,20 +132,41 @@ def _folder( data_dir, name ):
     return path
 
 
+def _write_once( path, text ):
+    """
+    Put a file in place whole, or leave an existing one alone.
+
+    Ensures:
+        - the text is written to a temporary name in the same folder and linked to path, so path is whole or absent
+        - an existing path is never replaced, and the temporary name is gone afterwards
+        - returns True when this call created the file
+    """
+    temp = path.with_name( f".tmp-{os.getpid()}-{path.name}" )
+    temp.write_text( text, encoding="utf-8" )
+    try:
+        os.link( temp, path )
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        os.remove( temp )
+
+
 def store_receipt( data_dir, receipt ):
     """
     Write a receipt once.
 
     Ensures:
-        - the file receipts/shadow-<id>.json exists afterwards
+        - the file receipts/shadow-<id>.json exists afterwards, whole
         - an existing receipt is kept and returned, so a repeat audit never rewrites history
+
+    Raises:
+        - CandidateError AUDIT_RECEIPT_CORRUPT when the file already there is not JSON
     """
     path = _folder( data_dir, "receipts" ) / f"shadow-{receipt[ 'id' ]}.json"
-    try:
-        with open( path, "x", encoding="utf-8" ) as handle: handle.write( json.dumps( receipt, sort_keys=True ) + "\n" )
-    except FileExistsError:
-        pass
-    return json.loads( path.read_text( encoding="utf-8" ) )
+    _write_once( path, json.dumps( receipt, sort_keys=True ) + "\n" )
+    try: return json.loads( path.read_text( encoding="utf-8" ) )
+    except ValueError as exc: raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: {exc}" ) from exc
 
 
 def load_receipts( data_dir ):
@@ -210,6 +235,7 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
 
     Requires:
         - live holds verdict and candidate_ids of the lookup that was served
+        - need is the redacted need, because the queue file keeps its words so the sweep can read them
 
     Ensures:
         - the day's lookup count goes up by one, sampled or not
@@ -222,12 +248,9 @@ def enqueue_if_sampled( data_dir, need, language, generation, index_sha, live, t
     count_lookup( data_dir, today )
     if not is_sampled( need, generation, rate ): return None
     key  = hashlib.sha256( f"{need_hash( need )}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
-    item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today }
-    path = _folder( data_dir, "shadow-pending" ) / f"{key}.json"
-    try:
-        with open( path, "x", encoding="utf-8" ) as handle: handle.write( json.dumps( item, sort_keys=True ) + "\n" )
-    except FileExistsError:
-        pass
+    item = { "id": key, "need": need, "language": language, "generation": generation, "index_sha": index_sha, "live": live, "queued_on": today,
+             "attempts": 0 }
+    _write_once( _folder( data_dir, "shadow-pending" ) / f"{key}.json", json.dumps( item, sort_keys=True ) + "\n" )
     return key
 
 
@@ -239,24 +262,34 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         - sweep_fn takes a need and returns { verdict, causal_ids }
 
     Ensures:
-        - returns { audited, failed, receipts }
+        - returns { audited, failed, corrupt, receipts }
         - each audited item leaves a receipt and its queue file is removed
-        - an item whose sweep raises stays queued and counts as failed, and the run goes on
-        - at most limit items are taken, oldest queue id first
+        - an item whose sweep raises stays queued with its attempt count up by one, and counts as failed
+        - a queue file that is not JSON is renamed to <name>.corrupt and counted, and the run goes on
+        - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
     """
-    items = sorted( _folder( data_dir, "shadow-pending" ).glob( "*.json" ) )
-    if limit is not None: items = items[ :limit ]
+    queued, corrupt = [], 0
+    for path in sorted( _folder( data_dir, "shadow-pending" ).glob( "*.json" ) ):
+        try: queued.append( ( json.loads( path.read_text( encoding="utf-8" ) ), path ) )
+        except ValueError:
+            path.rename( path.with_name( path.name + ".corrupt" ) )
+            corrupt += 1
+    queued.sort( key=lambda pair: ( pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
+    if limit is not None: queued = queued[ :limit ]
     receipts, failed = [], 0
-    for path in items:
-        item = json.loads( path.read_text( encoding="utf-8" ) )
+    for item, path in queued:
         try: sweep = sweep_fn( item[ "need" ] )
-        except Exception:                      # a transport failure of any kind leaves the item queued for the next run
+        except Exception:                      # a transport failure of any kind leaves the item queued, behind the fresh ones
             failed += 1
+            fresh = dict( item, attempts=item[ "attempts" ] + 1 )
+            temp  = path.with_name( f".tmp-{os.getpid()}-{path.name}" )
+            temp.write_text( json.dumps( fresh, sort_keys=True ) + "\n", encoding="utf-8" )
+            os.replace( temp, path )
             continue
         receipts.append( store_receipt( data_dir, audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ],
                                                                  item[ "live" ], sweep, today ) ) )
         os.remove( path )
-    return { "audited": len( receipts ), "failed": failed, "receipts": receipts }
+    return { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
 
 
 def daily_volume( data_dir ):
