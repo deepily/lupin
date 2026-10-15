@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "70b990a5b8211017",
+  "rules_stamp": "b6dd51f014879ff6",
   "files": {
     "src/cosa/repo/symindex/ts_extract.js": 2,
     "src/lupin_app/static/html/admin/js/admin-snapshots.js": 6,
@@ -148,7 +148,7 @@
     "src/lupin_app/static/js/multiplexer/shared/ttsPreview.ts": 8,
     "src/lupin_app/static/js/multiplexer/shared/types.ts": 212,
     "src/lupin_app/static/js/multiplexer/stores/AckStore.ts": 22,
-    "src/lupin_app/static/js/multiplexer/stores/ActionRequiredStore.ts": 64,
+    "src/lupin_app/static/js/multiplexer/stores/ActionRequiredStore.ts": 63,
     "src/lupin_app/static/js/multiplexer/stores/AudioStore.ts": 92,
     "src/lupin_app/static/js/multiplexer/stores/BroadcastStore.ts": 10,
     "src/lupin_app/static/js/multiplexer/stores/CommonsStore.ts": 7,
@@ -302,7 +302,7 @@
     "src/tests/unit/multiplexer/render/abstract_tooltip.test.ts": 4,
     "src/tests/unit/multiplexer/render/action_required_auto_reveal.test.ts": 3,
     "src/tests/unit/multiplexer/render/action_required_cancel.test.ts": 7,
-    "src/tests/unit/multiplexer/render/action_required_chrome.test.ts": 17,
+    "src/tests/unit/multiplexer/render/action_required_chrome.test.ts": 16,
     "src/tests/unit/multiplexer/render/action_required_failed_submit_keeps_typing.test.ts": 3,
     "src/tests/unit/multiplexer/render/action_required_keyboard.test.ts": 20,
     "src/tests/unit/multiplexer/render/action_required_open_ended_mic.test.ts": 2,
