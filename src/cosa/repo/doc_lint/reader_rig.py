@@ -150,4 +150,4 @@ async def run_reader_test( old, new, questions, config, ledger=None, query_fn=No
 # It names the READER_SYSTEM text it was pinned for (see READER_PINS in test_doc_lint_reader_rig.py). Edit
 # READER_SYSTEM only together with a new pin there, knowing every ledger answer under the old key is asked again.
 PROMPT_VERSION = "reader-8e02a7acb1"
-GRADER_VERSION = model_transport.prompt_version( "grader", GRADER_SYSTEM, inspect.getsource( _parse_object ), inspect.getsource( parse_score ) )
+GRADER_VERSION = model_transport.prompt_version( "grader", GRADER_SYSTEM, inspect.getsource( _parse_object ), inspect.getsource( parse_score ), _FENCE.pattern )

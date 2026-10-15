@@ -132,18 +132,40 @@ def test_a_closing_tag_in_the_text_or_an_answer_cannot_end_its_block():
     assert read.count( f"</text_{suffix}>" ) == 1 and suffix not in attack and tagged( read, "text" ) == attack
 
 
-# Append-only: one row per reader key ever pinned, with the sha256 of READER_SYSTEM that key stood for.
-# A reader prompt edit changes the sha and fails the test below. Add a row and bump reader_rig.PROMPT_VERSION
-# together, knowing every ledger answer under the old key is then asked again.
-READER_PINS = { "reader-8e02a7acb1": "9c61ac81c726c7396ffaf0377ca6b00200a8594c54fdab1bc3451f5f11826516" }
-
-
-def test_the_reader_key_is_a_pinned_literal_and_names_the_prompt_it_was_pinned_for():
+def reader_pin_digest():
+    """Return the sha256 of the reader prompt, its reply parser and the fence pattern."""
     import hashlib
+    import inspect
+    parts = [ rt.READER_SYSTEM, inspect.getsource( rt.parse_answer ), inspect.getsource( rt._parse_object ), rt._FENCE.pattern ]
+    return hashlib.sha256( "\0".join( parts ).encode( "utf-8" ) ).hexdigest()
+
+
+# Append-only: one row per reader key ever pinned, with the digest of the reader's prompt and reply parser that
+# key stood for. A reader-side edit changes the digest and fails the test below. Add a row and bump
+# reader_rig.PROMPT_VERSION together, knowing every ledger answer under the old key is then asked again.
+# _parse_object is shared with the grader, so an edit to it also needs a row here: that is intended.
+READER_PINS = { "reader-8e02a7acb1": "24383bcfdbf62683aea51c5b806a22695a91ef3d05cb132c3d57c0ee8862abb2" }
+
+
+def test_the_reader_key_is_a_pinned_literal_and_names_what_it_was_pinned_for():
     assert rt.PROMPT_VERSION == "reader-8e02a7acb1"
     assert rt.PROMPT_VERSION in READER_PINS
-    assert hashlib.sha256( rt.READER_SYSTEM.encode( "utf-8" ) ).hexdigest() == READER_PINS[ rt.PROMPT_VERSION ], \
-        "READER_SYSTEM changed: bump reader_rig.PROMPT_VERSION and add a READER_PINS row, or revert the edit"
+    assert reader_pin_digest() == READER_PINS[ rt.PROMPT_VERSION ], \
+        "reader prompt, parse_answer, _parse_object or _FENCE changed: bump reader_rig.PROMPT_VERSION and add a READER_PINS row, or revert the edit"
+
+
+def test_each_piece_of_the_reader_pin_moves_the_digest( monkeypatch ):
+    import re
+    base = reader_pin_digest()
+    monkeypatch.setattr( rt, "READER_SYSTEM", rt.READER_SYSTEM + " " )
+    assert reader_pin_digest() != base
+    monkeypatch.undo()
+    monkeypatch.setattr( rt, "_FENCE", re.compile( rt._FENCE.pattern.replace( "(?:json)?", "(?:json|js)?" ), re.DOTALL ) )
+    assert reader_pin_digest() != base
+    monkeypatch.undo()
+    def parse_answer( raw ): return raw
+    monkeypatch.setattr( rt, "parse_answer", parse_answer )
+    assert reader_pin_digest() != base
 
 
 def test_the_reader_key_does_not_move_when_the_grader_prompt_or_parser_changes( monkeypatch ):
@@ -158,8 +180,18 @@ def test_the_reader_key_does_not_move_when_the_grader_prompt_or_parser_changes( 
 def test_the_grader_version_is_derived_from_the_grader_prompt_and_parser():
     import inspect
     from cosa.repo.doc_lint import model_transport as mt
-    assert rt.GRADER_VERSION == mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ) )
+    assert rt.GRADER_VERSION == mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), rt._FENCE.pattern )
     assert rt.GRADER_VERSION != rt.PROMPT_VERSION and rt.GRADER_VERSION.startswith( "grader-" )
+
+
+def test_changing_the_fence_pattern_moves_the_grader_version():
+    import re
+    from cosa.repo.doc_lint import model_transport as mt
+    import inspect
+    def version( fence ):
+        return mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), fence )
+    assert version( rt._FENCE.pattern ) == rt.GRADER_VERSION
+    assert version( rt._FENCE.pattern.replace( "(?:json)?", "(?:json|js)?" ) ) != rt.GRADER_VERSION
 
 
 def test_only_the_grade_key_carries_the_grader_version( tmp_path ):
