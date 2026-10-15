@@ -244,10 +244,25 @@ def test_run_markdownlint_refuses_a_count_above_the_names_given( monkeypatch, tm
     assert "linted 2 of 1 file(s)" in warnings[ 0 ]
 
 
+def _real_markdownlint( monkeypatch, tmp_path ):
+    """
+    Skip unless markdownlint-cli2 is installed, else link it under tmp_path.
+
+    The file system and the search path decide whether the tool is installed. find_tool plays no part.
+    So a find_tool that stops finding the tool turns the test red.
+    The link sits at node_modules/.bin under tmp_path, the root the test gives run_markdownlint.
+    So the root-relative search is the one that has to find it.
+    """
+    local = os.path.join( cu.get_project_root(), "node_modules", ".bin", "markdownlint-cli2" )
+    found = [ c for c in ( os.environ.get( "LUPIN_MARKDOWNLINT" ), local, shutil.which( "markdownlint-cli2" ) ) if c and os.path.isfile( c ) ]
+    if not found: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
+    monkeypatch.delenv( "LUPIN_MARKDOWNLINT", raising=False )
+    ( tmp_path / "node_modules" / ".bin" ).mkdir( parents=True )
+    os.symlink( os.path.realpath( found[ 0 ] ), tmp_path / "node_modules" / ".bin" / "markdownlint-cli2" )
+
+
 def test_real_markdownlint_does_not_pass_a_name_whose_pattern_matches_a_good_neighbour_when_installed( monkeypatch, tmp_path ):
-    tool = tr.find_tool( cu.get_project_root(), [ "node_modules/.bin/markdownlint-cli2" ], "markdownlint-cli2", "LUPIN_MARKDOWNLINT" )
-    if tool is None: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
-    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", tool )     # run_markdownlint searches from tmp_path and PATH, not the project root
+    _real_markdownlint( monkeypatch, tmp_path )
     shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
     bad, good = "# T\n\n```\ncode\n```\n", "# T\n"
     for name, neighbour in ( ( "{a,b}.md", "a.md" ), ( "@(x).md", "x.md" ), ( "+(x).md", "xx.md" ) ):
@@ -265,9 +280,7 @@ def test_run_markdownlint_refuses_when_the_tool_prints_no_count_of_files_linted(
 
 
 def test_real_markdownlint_lints_or_refuses_every_name_it_is_given_when_installed( monkeypatch, tmp_path ):
-    tool = tr.find_tool( cu.get_project_root(), [ "node_modules/.bin/markdownlint-cli2" ], "markdownlint-cli2", "LUPIN_MARKDOWNLINT" )
-    if tool is None: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
-    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", tool )     # run_markdownlint searches from tmp_path and PATH, not the project root
+    _real_markdownlint( monkeypatch, tmp_path )
     shutil.copy( os.path.join( cu.get_project_root(), ".markdownlint-cli2.jsonc" ), tmp_path / ".markdownlint-cli2.jsonc" )
     page = "# T\n\n```\ncode\n```\n"
     outcomes = {}
@@ -289,9 +302,7 @@ def test_run_markdownlint_warns_loudly_when_missing_and_when_the_tool_fails( no_
 
 
 def test_real_markdownlint_output_parses_when_the_tool_is_installed( monkeypatch, tmp_path ):
-    tool = tr.find_tool( cu.get_project_root(), [ "node_modules/.bin/markdownlint-cli2" ], "markdownlint-cli2", "LUPIN_MARKDOWNLINT" )
-    if tool is None: pytest.skip( "markdownlint-cli2 is not installed in this environment" )
-    monkeypatch.setenv( "LUPIN_MARKDOWNLINT", tool )     # run_markdownlint searches from tmp_path and PATH, not the project root
+    _real_markdownlint( monkeypatch, tmp_path )
     ( tmp_path / "a.md" ).write_text( "# T\n\n```\ncode\n```\n", encoding="utf-8" )
     findings, warnings = tr.run_markdownlint( str( tmp_path ), [ "a.md" ] )
     assert warnings == [] and [ ( f.path, f.line ) for f in findings if f.rule.startswith( "markdownlint:MD040" ) ] == [ ( "a.md", 3 ) ]
