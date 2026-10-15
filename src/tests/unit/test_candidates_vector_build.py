@@ -372,3 +372,55 @@ def test_a_guard_field_of_the_wrong_shape_is_a_named_mismatch( tmp_path, field, 
     out1, live = first_build( tmp_path, base_entries() )
     manifest   = { **copy.deepcopy( live.manifest ), field: value }
     assert vb.reuse_mismatches( manifest, FakeClient().info() ) == [ "manifest" ]
+
+
+def test_the_default_batch_is_small_enough_for_the_model_servers_code_engine():
+    """Pin the batch ceiling the code engine was measured to hold."""
+    import inspect
+    assert vb.BATCH_SIZE == 16
+    assert inspect.signature( vb.build_vectors ).parameters[ "batch_size" ].default == vb.BATCH_SIZE
+
+
+class SizeClient:
+    """Answers one two-number vector per text and records each batch's lengths."""
+
+    def __init__( self ): self.batches = []
+
+    def embed( self, texts, content_type, role ):
+        assert texts, "an empty batch was sent"
+        assert len( self.batches ) < 100, "the batching did not advance"
+        self.batches.append( [ len( t ) for t in texts ] )
+        return [ [ float( len( t ) ), 0.0 ] for t in texts ]
+
+
+def test_a_batch_stops_before_rows_times_the_longest_text_passes_the_character_budget():
+    texts  = [ "a" * 1000, "a" * 1000, "b" * 12000, "c" * 1000, "c" * 1000 ]
+    client = SizeClient()
+    out    = vb._embed_all( client, texts, "code", "document", 16, 0, lambda s: None )
+    assert client.batches == [ [ 1000, 1000 ], [ 12000, 1000 ], [ 1000 ] ]
+    assert [ v[ 0 ] for v in out ] == [ float( len( t ) ) for t in texts ]            # order and count kept
+
+
+def test_a_text_longer_than_the_budget_is_sent_alone_and_the_next_text_starts_a_new_batch():
+    texts  = [ "x" * ( vb.CHAR_BUDGET + 1 ), "y" ]
+    client = SizeClient()
+    vb._embed_all( client, texts, "code", "document", 16, 0, lambda s: None )
+    assert client.batches == [ [ vb.CHAR_BUDGET + 1 ], [ 1 ] ]
+
+
+def test_the_count_limit_still_applies_when_every_text_is_short():
+    client = SizeClient()
+    vb._embed_all( client, [ "z" ] * 5, "code", "document", 2, 0, lambda s: None )
+    assert client.batches == [ [ 1, 1 ], [ 1, 1 ], [ 1 ] ]
+
+
+def test_the_budget_is_pinned_below_the_measured_failure():
+    """16 rows with a 3,857-character text is 61,712 and failed; 44,960 passed."""
+    assert vb.CHAR_BUDGET <= 44960
+
+
+def test_a_batch_that_lands_exactly_on_the_budget_is_kept_whole():
+    half   = vb.CHAR_BUDGET // 2
+    client = SizeClient()
+    vb._embed_all( client, [ "a" * half, "b" * half, "c" * half ], "code", "document", 16, 0, lambda s: None )
+    assert client.batches == [ [ half, half ], [ half ] ]

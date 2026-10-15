@@ -10,7 +10,13 @@ import time
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED
 
-BATCH_SIZE    = 64
+# 16, not 64: a code batch of 32 or 64 holding a text over about 2,000 characters made model server 0.1.2 answer
+# 500. Its log shows CUDA out of memory on GPU 0, where vLLM holds about 17 GB and leaves the server about 7 GB
+# at float32. The same rows in batches of 16 answered 200.
+BATCH_SIZE    = 16
+# Rows times the longest text of a batch may not pass this many characters. Measured against model server 0.1.2:
+# 16 rows with a 3,857-character text (61,712) answered 500; 44,960 and 32,400 answered 200.
+CHAR_BUDGET   = 32000
 PAUSE_SECONDS = 0.5
 WARM_TEXT     = "warm up"
 
@@ -94,19 +100,28 @@ def _embed_all( client, texts, content_type, role, batch_size, pause_seconds, sl
 
     Ensures:
         - returns one vector per text, in order
+        - a batch holds at most batch_size texts, and at most CHAR_BUDGET characters counted as
+          rows times the longest text, except a single text longer than the budget, sent alone
         - every vector has the length of the first
 
     Raises:
         - CandidateError EMBEDDING_SHAPE when a batch returns the wrong count or a ragged row
     """
     vectors = []
-    for i in range( 0, len( texts ), batch_size ):
-        batch = texts[ i:i + batch_size ]
+    i       = 0
+    while i < len( texts ):
+        end, longest = i, 0
+        while end < len( texts ) and end - i < batch_size:
+            longest = max( longest, len( texts[ end ] ) )
+            if end > i and ( end - i + 1 ) * longest > CHAR_BUDGET: break
+            end += 1
+        batch = texts[ i:end ]
         out   = client.embed( batch, content_type, role )
         if len( out ) != len( batch ):
             raise CandidateError( EMBEDDING_SHAPE, f"asked for {len( batch )} vectors and got {len( out )}" )
         vectors.extend( out )
-        if i + batch_size < len( texts ): sleep( pause_seconds )
+        i = end
+        if i < len( texts ): sleep( pause_seconds )
     if len( { len( v ) for v in vectors } ) > 1: raise CandidateError( EMBEDDING_SHAPE, "the vectors differ in length" )
     return vectors
 
