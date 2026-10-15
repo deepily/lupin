@@ -65,6 +65,9 @@ interface ScrollRoot {
   scrollBy( x: number, y: number ): void;
 }
 
+/**
+ * Says whether the reading pane is open, so the left column owns the scroll.
+ */
 function paneIsOpen( doc: Document ): boolean {
   const shell = doc.querySelector(".content-shell");
   return shell !== null && shell.classList.contains("pane-open");
