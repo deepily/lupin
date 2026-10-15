@@ -124,6 +124,15 @@ def test_the_excluded_id_is_dropped_and_k_still_bounds_the_list( world ):
     assert bridge.seen[ -1 ][ 2 ][ "K" ] == 3                                              # one more is asked for, so K survive the exclusion
 
 
+def test_a_k_for_one_call_replaces_the_clients_own_and_still_adds_one_for_an_exclusion( world ):
+    make, bridge, *_ = world
+    stage = make( K=2, fusion=SMALL )
+    r     = lookup( stage, K=512 )
+    assert bridge.seen[ -1 ][ 2 ][ "K" ] == 512 and r[ "K" ] == 512
+    lookup( stage, exclude_id=r[ "ranking" ][ 0 ], K=512 )
+    assert bridge.seen[ -1 ][ 2 ][ "K" ] == 513
+
+
 def test_the_arms_ask_about_their_own_matrices_and_only_the_wiki_arm_sends_the_wiki_list( world ):
     make, bridge, *_ = world
     lookup( make( arm="B1" ) )

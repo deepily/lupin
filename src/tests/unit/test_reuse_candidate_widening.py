@@ -19,6 +19,7 @@ from tests.unit.test_reuse_candidate_route import FEEDS_ID, MANIFEST, MATH_ID, S
 from tests.unit.test_reuse_pack_route import PackedFake, env, no_jev_key, receipt_of   # noqa: F401  (env and no_jev_key are fixtures)
 from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev, resp
 
+SHIPPED_WIDE_K = rt.WIDE_K                                                                # read at import, before the fixture below sets it to 3
 BAND   = dict( vd.POLICY, band=0.05 )
 NEAR   = resp( 0.3, 0.2, 0.5 )                                                           # p_overlap 0.5, the threshold itself, and confidence 0.5
 RANKED = [ FEEDS_ID, MATH_ID, SERVE_ID ]
@@ -209,3 +210,21 @@ def test_a_replay_decides_over_the_widened_entries_too( env ):
 def rt_math_text():
     from tests.unit.test_reuse_tools import MATHX_TEXT
     return MATHX_TEXT
+
+
+def test_the_shipped_wide_size_is_512():
+    assert SHIPPED_WIDE_K == 512
+
+
+def test_an_empty_widened_ids_adds_no_key_to_the_candidate_block( env ):
+    need = "read an RSS feed [wide-empty-key]"
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=None ) )
+    cs   = receipt_of( env, r )[ "candidate_stage" ]
+    assert cs[ "widened_ids" ] == [] and "widened_ids" not in rt._candidate_of( cs )           # so no unwidened receipt id moves
+
+
+def test_merged_rows_are_numbered_in_one_run_over_both_sweeps():
+    a = { "rows": [ { "index": 0 }, { "index": 1 } ], "calls": 2, "stopped_by": None }
+    b = { "rows": [ { "index": 0 }, { "index": 1 }, { "index": 2 } ], "calls": 3, "stopped_by": "budget" }
+    out = rt._merge_sweeps( a, b )
+    assert [ r[ "index" ] for r in out[ "rows" ] ] == [ 0, 1, 2, 3, 4 ] and out[ "calls" ] == 5 and out[ "stopped_by" ] == "budget"
