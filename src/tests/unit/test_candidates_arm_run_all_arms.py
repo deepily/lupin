@@ -6,6 +6,7 @@ The cache is a dict. Nothing touches a model, the network or the shared data fol
 """
 import gzip
 import json
+import re
 import types
 
 import numpy as np
@@ -166,6 +167,11 @@ class TestRenderAllArmsPage:
         assert out[ "pages" ] == 1 and "Capability pages offered to the wiki list: 1." in page
         ref = out[ "reference" ]
         assert f"mean over the {ref[ 'needs' ]} needs whose repeat-1 reference is not empty, which hold {ref[ 'items' ]} reference items" in page
+        assert "mean of each need's own fraction" in page and "## Recall as pooled items" in page
+        section = page.split( "## Recall as pooled items" )[ 1 ].split( "\n## " )[ 0 ]
+        row     = [ l for l in section.splitlines() if l.startswith( "| B2 |" ) ][ 0 ]
+        assert all( re.fullmatch( r"[01]/1", c.strip() ) for c in row.strip( "|" ).split( "|" )[ 1: ] )       # one reference item, so each cell is 0/1 or 1/1
+
 
     def test_a_run_without_vectors_says_the_choice_and_the_selection_were_not_made( self, tmp_path ):
         w = world( tmp_path )

@@ -483,6 +483,7 @@ def render_all_arms_page( result, redactable ):
     Ensures:
         - returns the page text: the shared report, then the fusion selection, the entry counts and the empty-purpose finding
         - the replay column is the verdict replay at K=128, and the page says so
+        - the page says recall is the mean of each need's own fraction and gives the pooled found-of-total item count per arm and K
         - a run that fused no vector list says the vector choice and the fusion selection were not made
 
     Raises:
@@ -493,7 +494,16 @@ def render_all_arms_page( result, redactable ):
     t2 = { arm: measured[ arm ][ "t2" ][ "K=128" ] for arm in measured }
     page = ar.render_report( result[ "meta" ], t1, result[ "t3" ], t2, ( f"{result[ 'vectors_choice' ]} by the rule, which keeps B1 unless B2 beats it on recall at K=128 or on median twin rank, so a tie is B1" if result[ "vectors_choice" ] else "not decided: no vector arm was measured" ),
                              result[ "fusion" ], redactable )
-    lines = [ "", "## Fusion constants chosen on the in-sample needs", "" ]
+    items = result[ "reference" ][ "per_need" ]
+    ks    = sorted( next( iter( t1.values() ) ) )
+    lines = [ "", "## Recall as pooled items", "",
+              "The recall in the T1 table is the mean of each need's own fraction, found items over that need's reference items. It is not found items over "
+              f"all {result[ 'reference' ][ 'items' ]}. The same runs counted as pooled items are below, as found out of {result[ 'reference' ][ 'items' ]}.", "",
+              "| arm | " + " | ".join( f"K={k}" for k in ks ) + " |", "|---|" + "---|" * len( ks ) ]
+    for arm in sorted( t1 ):
+        cells = [ f"{round( sum( recall * items[ n ] for n, recall in t1[ arm ][ k ][ 'per_need' ].items() ) )}/{result[ 'reference' ][ 'items' ]}" for k in ks ]
+        lines.append( f"| {arm} | " + " | ".join( cells ) + " |" )
+    lines += [ "", "## Fusion constants chosen on the in-sample needs", "" ]
     if result[ "recall_by_params" ]:
         lines += [ f"Chosen by arms.select_fusion on {SELECTION_ARM} recall at K={SELECTION_K}, repeat-1 reference. Ties go to the smaller k, then depth, then head.", "",
                    "| k | depth | head | recall |", "|---|---|---|---|" ]
