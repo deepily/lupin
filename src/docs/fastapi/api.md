@@ -857,6 +857,11 @@ Expose complete internal WebSocket manager state for troubleshooting. Debug endp
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -864,6 +869,7 @@ Expose complete internal WebSocket manager state for troubleshooting. Debug endp
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/config/client`
 
 > **Get client config**
@@ -1718,6 +1724,11 @@ Clear all five queues (todo, run, done, dead, notification) and return items-cle
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1725,6 +1736,7 @@ Clear all five queues (todo, run, done, dead, notification) and return items-cle
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror) |
 ## GET `/api/get-job-interactions/{job_id}`
 
 > **Get job interactions**
