@@ -251,12 +251,14 @@ def parse_table( text ):
         - every count is an integer above zero, since a file at zero has no entry
 
     Raises:
-        - TableError naming what is wrong when the text is not a valid table
+        - TableError naming what is wrong when the text is not a valid table, or is too deeply nested for the reader
     """
     try:
         data = json.loads( text )
     except ValueError as err:
         raise TableError( f"table is not JSON: {err}" ) from err
+    except ( RecursionError, MemoryError ) as err:
+        raise TableError( f"table is nested too deeply to read ({type( err ).__name__})" ) from err
     if not isinstance( data, dict ) or data.get( "format" ) != TABLE_FORMAT: raise TableError( f"table format is not {TABLE_FORMAT}" )
     if not isinstance( data.get( "rules_stamp" ), str ): raise TableError( "table has no rules_stamp" )
     files = data.get( "files" )

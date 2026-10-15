@@ -1835,6 +1835,20 @@ def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_onl
     assert rc == 0 and "[doc-lint] WARNING: the count table at HEAD is malformed" in text and "table malformed" in text
 
 
+def test_a_staged_table_nested_too_deeply_to_read_is_refused_and_does_not_crash_the_gate( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { "src/pkg/keep.py": CLEAN, TABLE: "[" * 200000 + "]" * 200000 } )
+    rc, text = _gate( stamped )
+    assert "GATE CRASHED" not in text
+    assert rc == 3 and f"REFUSED {TABLE}: the staged table is malformed: table is nested too deeply to read (RecursionError)" in text and "table malformed" in text
+
+
+def test_a_table_that_runs_the_parser_out_of_memory_is_a_malformed_table_too( monkeypatch ):
+    def boom( text ): raise MemoryError( "out of memory" )
+    monkeypatch.setattr( counts.json, "loads", boom )
+    with pytest.raises( counts.TableError, match=r"nested too deeply to read \(MemoryError\)" ): counts.parse_table( "{}" )
+
+
 def test_staged_counted_reads_paths_renames_and_the_table_with_odd_names( stamped ):
     shared = "".join( f"value_{i} = {i}\n" for i in range( 40 ) )
     _stage( stamped, { "src/tests/old name.py": CLEAN + shared, "src/pkg/swept.py": "swept = 1\n", "src/tests/unï.py": "other = 2\n" } )
