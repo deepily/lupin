@@ -443,6 +443,13 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-panes-modals-and-state]] — persisted open state of job buckets, the session rename dialog and the persona popover. `src.lupin_app.static.js.multiplexer.render` (jobsBucketExpand, sessionNameEditModal, personaModal)
 - [[web-client-render-panes-section-chrome]] — section header with collapse chevron, visibility toolbar and top nav bar. `src.lupin_app.static.js.multiplexer.render` (sectionHeader, sectionToolbar, navBar)
 - [[web-client-render-panes-submit-and-qa]] — element builders for the Submit Agentic Jobs pane cards and the question pane. `src.lupin_app.static.js.multiplexer.render` (submitJobsChrome, qaChrome)
+- [[web-client-render-notifications-list]] — the notifications list and header renderers: sender cards, patch-or-replace repaint, Clear All. `src.lupin_app.static.js.multiplexer.render` (NotificationsListRenderer, NotificationsHeaderRenderer)
+- [[web-client-render-action-required-and-badges]] — the Action Required pane, listener-error and missed badges and persona popovers. `src.lupin_app.static.js.multiplexer.render` (ActionRequiredRenderer, ListenerErrorRenderer, MissedBadgeRenderer, PersonaModalRenderer)
+- [[web-client-render-broadcast-and-sender-cards]] — the broadcast card and ack tally, commons activity, sender card controls and the session strip. `src.lupin_app.static.js.multiplexer.render` (BroadcastCardRenderer, BroadcastAckTallyRenderer, CommonsActivityRenderer, SenderCard*, SessionStripRenderer)
+- [[web-client-render-voice-and-tts]] — Direct TTS, TTS chrome, preview slider, conversation-mode pin and time-saved tiles. `src.lupin_app.static.js.multiplexer.render` (DirectTtsRenderer, TtsChromeRenderer, TtsPreviewSliderRenderer, ConversationModePinRenderer, TimeSavedRenderer)
+- [[web-client-render-transcript-and-reading]] — the console transcript, reading pane, Q&A pane and Submit Agentic Jobs pane. `src.lupin_app.static.js.multiplexer.render` (SessionTranscriptRenderer, ReadingPaneRenderer, QaPaneRenderer, SubmitJobsPaneRenderer)
+- [[web-client-render-task-board-panes]] — the Epic Board, Finished Tasks, Fleet Status, Holding Area, Task List and Jobs pane renderers. `src.lupin_app.static.js.multiplexer.render` (EpicBoardRenderer, FinishedTasksRenderer, FleetStatusRenderer, HoldingAreaRenderer, TaskListRenderer, JobsPaneRenderer)
+- [[web-client-render-chrome-and-settings]] — the nav bar, section toolbar, debug, filter settings and system status panes. `src.lupin_app.static.js.multiplexer.render` (NavBarRenderer, SectionToolbarRenderer, DebugPanelRenderer, FilterSettingsRenderer, SystemStatusRenderer)
 
 ## Draft slugs folded into written pages
 
