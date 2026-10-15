@@ -34,5 +34,5 @@ How a v2 request turns a sentence into a command: the command table, the router 
 
 ## Invariants
 - `speakable_commands` raises `ValueError` when the served order and the registry's speakable set disagree in either direction.
-- `get_bearer_token` returns `None` when nothing set it. It is scoped to one request. It follows the call into `run_in_threadpool`, because anyio copies the context.
+- `get_bearer_token` returns `None` when nothing set it. `/api/v2/submit` sets it from the Authorization header, calls the flow through `run_in_threadpool`, then resets it. The worker thread sees it because anyio copies the context.
 - The generated prompt leaves `{voice_command}` as a literal for the router to fill at serve time.

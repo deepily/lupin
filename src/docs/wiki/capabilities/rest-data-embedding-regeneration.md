@@ -17,7 +17,7 @@ pins:
 Run control is in [[rest-data-embedding-regen-run-control]] and batching in [[rest-data-embedding-regen-batching]]. The runtime embedding path is in [[embedding-pipeline]].
 
 ## What it does
-- A `RegenSpec` names one target: a label, a table, its key, a text column, the live vector column, a shadow column and a content type. `REGEN_SPECS` lists three: `input_and_output.input`, `input_and_output.output_final` and `prediction_decisions.question`.
+- A `RegenSpec` names one target: a label, a table, its key, a text column, the live vector column, a shadow column and a content type. `REGEN_SPECS` lists three, labelled `io_input`, `io_output` and `decisions`: `input_and_output.input`, `input_and_output.output_final` and `prediction_decisions.question`. `--only=<label>` limits a run to one.
 - Scope is every row that has source text, not every row that looks stale. A norm cannot say which model made a vector.
 - `qualify` puts a table prefix such as `regen_probe.` in front of a table name, so a whole run can target a clone. A non-empty prefix must end in a dot or it raises `ValueError`.
 - `is_excluded` and `excluded_ids_clause` keep the deliberate bad fixture row `clamp-001` out of scope, in Python for `fill` and in SQL for `verify` and `plan`.

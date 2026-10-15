@@ -28,5 +28,5 @@ pins:
 
 ## Invariants
 - Every write flushes and none commits. The commit is the caller's `get_db()` block, and event summaries wait on the session until it commits.
-- Entering `parked` writes one timestamp to both `park_reason_captured_at` and the event. Any other status clears both fields.
+- Entering `parked` writes one instant to `updated_ts`, `park_reason_captured_at` and the park event. Any other status clears `park_reason` and `park_reason_captured_at`.
 - A filing sets `request_state` to `pending`. A verdict sets it to the verdict. Neither moves the row's status.

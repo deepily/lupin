@@ -25,7 +25,7 @@ The pieces around a v2 request that remember, measure and vet input. The flow is
 
 ## Don't
 - Don't add a size limit to source documents there. The ruling is that there is none. The only cap is 16 documents per request.
-- Don't import the scope registry into that module. `scopes` is injected and needs only a `.root` on each value.
+- `validate_source_documents` takes `scopes` as an argument and needs only a `.root` on each value. The module still imports four helper functions from `routers._scope_registry`.
 
 ## Invariants
 - Only a tier-1 exact hit sets `is_replay_hit`. The flow's near-match step can still replay a candidate.
