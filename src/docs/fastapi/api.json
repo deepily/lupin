@@ -6466,7 +6466,7 @@
                     "embeddings"
                 ],
                 "summary": "Get embedding info",
-                "description": "Return provider name, dimensions, and readiness status of the embedding model.",
+                "description": "Return provider name, dimensions, readiness status and the engines block: model, revision, dtype, device and prefixes of each local engine.",
                 "operationId": "get_info_api_embeddings_info_get",
                 "parameters": [
                     {
@@ -14637,6 +14637,21 @@
                         "type": "string",
                         "title": "Content Type",
                         "default": "prose"
+                    },
+                    "role": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "query",
+                                    "document"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Role"
                     }
                 },
                 "type": "object",
@@ -14644,7 +14659,7 @@
                     "texts"
                 ],
                 "title": "EmbedBatchRequest",
-                "description": "Request body for batch embedding generation."
+                "description": "Request body for batch embedding generation. role is as in EmbedRequest."
             },
             "EmbedBatchResponse": {
                 "properties": {
@@ -14689,13 +14704,19 @@
                     "status": {
                         "type": "string",
                         "title": "Status"
+                    },
+                    "engines": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Engines"
                     }
                 },
                 "type": "object",
                 "required": [
                     "provider",
                     "dimensions",
-                    "status"
+                    "status",
+                    "engines"
                 ],
                 "title": "EmbedInfoResponse",
                 "description": "Response for provider info."
@@ -14710,6 +14731,21 @@
                         "type": "string",
                         "title": "Content Type",
                         "default": "prose"
+                    },
+                    "role": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "query",
+                                    "document"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Role"
                     }
                 },
                 "type": "object",
@@ -14717,7 +14753,7 @@
                     "text"
                 ],
                 "title": "EmbedRequest",
-                "description": "Request body for single-text embedding generation."
+                "description": "Request body for single-text embedding generation.\n\nrole is \"query\" or \"document\" and picks the encoder's prefix.\nLeft out, the result is what the endpoint returned before role existed.\nA code text then has no prefix, and a prose text has the query prefix."
             },
             "EmbedResponse": {
                 "properties": {

@@ -2359,7 +2359,7 @@ Generate embedding vectors for multiple texts in a single call.
 
 > **Get embedding info**
 
-Return provider name, dimensions, and readiness status of the embedding model.
+Return provider name, dimensions, readiness status and the engines block: model, revision, dtype, device and prefixes of each local engine.
 
 
 
@@ -5370,13 +5370,14 @@ frame it as "[DM from <persona> <icon>]".
 ## EmbedBatchRequest
 
 
-Request body for batch embedding generation.
+Request body for batch embedding generation. role is as in EmbedRequest.
 
 
 | Field | Type | Description |
 |-------|------|-------------|
 | texts | array |  |
 | content_type | string |  |
+| role |  |  |
 
 
 ## EmbedBatchResponse
@@ -5403,6 +5404,7 @@ Response for provider info.
 | provider | string |  |
 | dimensions | integer |  |
 | status | string |  |
+| engines | object |  |
 
 
 ## EmbedRequest
@@ -5410,11 +5412,16 @@ Response for provider info.
 
 Request body for single-text embedding generation.
 
+role is "query" or "document" and picks the encoder's prefix.
+Left out, the result is what the endpoint returned before role existed.
+A code text then has no prefix, and a prose text has the query prefix.
+
 
 | Field | Type | Description |
 |-------|------|-------------|
 | text | string |  |
 | content_type | string |  |
+| role |  |  |
 
 
 ## EmbedResponse

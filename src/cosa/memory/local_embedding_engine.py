@@ -240,6 +240,28 @@ class CodeEmbeddingEngine:
         """Return whether the model is loaded on GPU."""
         return self._model is not None
 
+    def describe( self ):
+        """
+        Report what this engine will use to encode, without loading the model.
+
+        Ensures:
+            - returns model id, revision, dtype, device, prefixes and dimensions
+            - revision is None until the model has been loaded
+            - never loads the model and never touches the GPU
+        """
+        revision = None
+        if self._model is not None: revision = self._model[ 0 ].auto_model.config._commit_hash
+        return {
+            "model"           : self._model_name,
+            "revision"        : revision,
+            "dtype"           : self._dtype_str,
+            "device"          : self._device,
+            "query_prefix"    : self._query_prefix,
+            "document_prefix" : "",
+            "dimensions"      : self._dimensions,
+            "loaded"          : self._model is not None
+        }
+
 
 class ProseEmbeddingEngine:
     """
@@ -520,6 +542,28 @@ class ProseEmbeddingEngine:
         """Return whether the model is loaded on GPU."""
         return self._model is not None
 
+    def describe( self ):
+        """
+        Report what this engine will use to encode, without loading the model.
+
+        Ensures:
+            - returns model id, revision, dtype, device, prefixes and dimensions
+            - revision is None until the model has been loaded
+            - never loads the model and never touches the GPU
+        """
+        revision = None
+        if self._model is not None: revision = self._model.config._commit_hash
+        return {
+            "model"           : self._model_name,
+            "revision"        : revision,
+            "dtype"           : self._dtype_str,
+            "device"          : self._device,
+            "query_prefix"    : self._query_prefix,
+            "document_prefix" : self._document_prefix,
+            "dimensions"      : self._matryoshka_dim,
+            "loaded"          : self._model is not None
+        }
+
 
 # ---------------------------------------------------------------------------
 # Module-level convenience functions
@@ -549,6 +593,22 @@ def get_prose_engine( debug=False, verbose=False ):
         - Returns singleton ProseEmbeddingEngine instance
     """
     return ProseEmbeddingEngine( debug=debug, verbose=verbose )
+
+
+def device_class( device ):
+    """
+    Name the kind of device an engine runs on, for the vector manifest.
+
+    Requires:
+        - device is a device string such as "cuda:0" or "cpu"
+
+    Ensures:
+        - a CUDA device that is available returns "<card name>, sm_<major><minor>"
+        - anything else returns the device string unchanged
+    """
+    if not device.startswith( "cuda" ) or not torch.cuda.is_available(): return device
+    major, minor = torch.cuda.get_device_capability( device )
+    return f"{torch.cuda.get_device_name( device )}, sm_{major}{minor}"
 
 
 def vram_report( device="cuda:0" ):

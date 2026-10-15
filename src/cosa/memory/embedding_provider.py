@@ -32,6 +32,19 @@ import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+EMBEDDING_ROLES = ( "query", "document" )
+
+
+class EmbeddingRoleUnsupported( RuntimeError ):
+    """
+    A role was asked of a service that cannot honour it.
+
+    Only the FastAPI embeddings router takes a role. A call that sets one and
+    resolves to lupin-model-server is refused here, so a vector is never built
+    with the wrong prefix. It subclasses RuntimeError like its sibling.
+    """
+
+
 class EmbeddingProviderUnreachable( RuntimeError ):
     """
     The embedding service could not be reached at all, a transport failure.
@@ -236,12 +249,13 @@ class EmbeddingProvider:
             return None
 
     @classmethod
-    def _resolve_http_target( cls ) -> tuple:
+    def _resolve_http_target( cls, pin_fastapi=False ) -> tuple:
         """
         Pick the HTTP target for embedding fallback calls.
 
         Uses lupin-model-server when its URL resolves, else the FastAPI server.
         Both branches call `_http_api_key()`. Only the URL and prefix differ.
+        pin_fastapi=True skips the model-server lookup, so no env var or INI value reroutes it.
 
         Returns:
             tuple[str, Optional[str], str]: (base_url, api_key, endpoint_prefix)
@@ -251,10 +265,36 @@ class EmbeddingProvider:
                                    "/api/embeddings" for the FastAPI path
                   (model-server omits the `/api/` prefix per its leaner routing)
         """
-        model_server_url = cls._resolve_model_server_url()
+        model_server_url = None if pin_fastapi else cls._resolve_model_server_url()
         if model_server_url:
             return ( model_server_url, cls._http_api_key(), "/embeddings" )
         return ( cls._resolve_server_url(), cls._http_api_key(), "/api/embeddings" )
+
+    @classmethod
+    def _check_role( cls, role, pin_fastapi ):
+        """
+        Refuse a role the chosen service cannot honour.
+
+        Requires:
+            - role is None, "query" or "document"
+
+        Ensures:
+            - returns None when role is None, or the target is the FastAPI router
+            - raises EmbeddingRoleUnsupported when role is set and the target
+              resolves to lupin-model-server, which has no role field
+
+        Raises:
+            - EmbeddingRoleUnsupported: ROLE_UNSUPPORTED_ON_MODEL_SERVER
+            - ValueError: role is not one of EMBEDDING_ROLES
+        """
+        if role is None: return
+        if role not in EMBEDDING_ROLES:
+            raise ValueError( f"role must be one of {EMBEDDING_ROLES}, got {role!r}" )
+        if not pin_fastapi and cls._resolve_model_server_url():
+            raise EmbeddingRoleUnsupported(
+                "ROLE_UNSUPPORTED_ON_MODEL_SERVER: lupin-model-server has no role field. "
+                "Pass pin_fastapi=True to use the FastAPI embeddings router."
+            )
 
     # HTTP status codes worth a second attempt. A 5xx is the server failing to
     # answer a request it accepted; 429 is explicit backpressure. Everything
@@ -338,7 +378,7 @@ class EmbeddingProvider:
             f"assuming the service is down (bug 574fd1dc)."
         )
 
-    def _generate_embedding_via_http( self, text: str, content_type: str ) -> List[float]:
+    def _generate_embedding_via_http( self, text: str, content_type: str, role=None, pin_fastapi=False ) -> List[float]:
         """
         Single-text embedding via HTTP fallback to /api/embeddings/generate.
 
@@ -366,7 +406,8 @@ class EmbeddingProvider:
         # "/embeddings"). Otherwise falls through to the existing FastAPI
         # path with the notification key + "/api/embeddings" prefix.
         # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
-        base_url, api_key, prefix = self._resolve_http_target()
+        self._check_role( role, pin_fastapi )
+        base_url, api_key, prefix = self._resolve_http_target( pin_fastapi )
         if not api_key:
             raise RuntimeError(
                 "EmbeddingProvider HTTP fallback: no API key found. Expected one of: "
@@ -381,8 +422,11 @@ class EmbeddingProvider:
         # (31.5-66.0s) defeated. Config-driven now; see bug 574fd1dc.
         timeout = float( self._config_mgr.get( "embedding http timeout seconds", default="90" ) )
 
+        payload = { "text": text, "content_type": content_type }
+        if role is not None: payload[ "role" ] = role
+
         response = self._post_with_retry(
-            url, { "text": text, "content_type": content_type },
+            url, payload,
             api_key, timeout, "EmbeddingProvider HTTP fallback"
         )
 
@@ -399,7 +443,7 @@ class EmbeddingProvider:
                 f"EmbeddingProvider HTTP fallback: malformed response from {url}: {e}"
             )
 
-    def _generate_embeddings_batch_via_http( self, texts: List[str], content_type: str ) -> List[List[float]]:
+    def _generate_embeddings_batch_via_http( self, texts: List[str], content_type: str, role=None, pin_fastapi=False ) -> List[List[float]]:
         """
         Batch embedding via HTTP fallback to /api/embeddings/batch.
 
@@ -418,7 +462,8 @@ class EmbeddingProvider:
             RuntimeError: when HTTP routing cannot complete the request
         """
         # Phase 3.1 carve-out: same resolver as the single-text path above.
-        base_url, api_key, prefix = self._resolve_http_target()
+        self._check_role( role, pin_fastapi )
+        base_url, api_key, prefix = self._resolve_http_target( pin_fastapi )
         if not api_key:
             raise RuntimeError(
                 "EmbeddingProvider HTTP batch fallback: no API key found. Expected one of: "
@@ -431,8 +476,11 @@ class EmbeddingProvider:
         # path (a batch is more work) at a magnitude every cold start defeated.
         timeout = float( self._config_mgr.get( "embedding http batch timeout seconds", default="120" ) )
 
+        payload = { "texts": texts, "content_type": content_type }
+        if role is not None: payload[ "role" ] = role
+
         response = self._post_with_retry(
-            url, { "texts": texts, "content_type": content_type },
+            url, payload,
             api_key, timeout, "EmbeddingProvider HTTP batch fallback"
         )
 
@@ -449,7 +497,57 @@ class EmbeddingProvider:
                 f"EmbeddingProvider HTTP batch fallback: malformed response from {url}: {e}"
             )
 
-    def generate_embedding( self, text, content_type="prose", normalize_for_cache=True ):
+    def _encode_local( self, texts, content_type, role ):
+        """
+        Encode with the in-process engine, choosing the encoder by content type and role.
+
+        Requires:
+            - this process owns the engines
+            - role is None, "query" or "document"
+
+        Ensures:
+            - role None keeps today's choice: encode_code for code, encode_query for prose
+            - "query" uses the query prefix, "document" the document prefix (none for code)
+        """
+        if content_type == "code":
+            engine = self._get_code_engine()
+            if role == "query": return engine.encode_query( texts )
+            return engine.encode_code( texts )
+        engine = self._get_prose_engine()
+        if role == "document": return engine.encode_document( texts )
+        return engine.encode_query( texts )
+
+    def describe_engines( self ):
+        """
+        Report the settings that decide what a vector means, without loading a model.
+
+        Ensures:
+            - returns { code, prose, device_class, libraries }
+            - code and prose are each engine's describe() dict
+            - libraries holds torch, transformers, sentence-transformers and numpy
+              versions, None for a package that is not installed
+            - never loads a model
+        """
+        from importlib import metadata
+        from cosa.memory.local_embedding_engine import device_class
+
+        libraries = {}
+        for package in ( "torch", "transformers", "sentence-transformers", "numpy" ):
+            try:
+                libraries[ package ] = metadata.version( package )
+            except metadata.PackageNotFoundError:
+                libraries[ package ] = None
+
+        code  = self._get_code_engine().describe()
+        prose = self._get_prose_engine().describe()
+        return {
+            "code"         : code,
+            "prose"        : prose,
+            "device_class" : device_class( code[ "device" ] ),
+            "libraries"    : libraries
+        }
+
+    def generate_embedding( self, text, content_type="prose", normalize_for_cache=True, role=None, pin_fastapi=False ):
         """
         Embed one text with the configured provider, in-process or over HTTP.
 
@@ -484,20 +582,20 @@ class EmbeddingProvider:
         timer = sw.Stopwatch( silent=True )
 
         if self._provider == "openai":
+            if role is not None:
+                raise EmbeddingRoleUnsupported( "ROLE_UNSUPPORTED_ON_OPENAI: the OpenAI provider has no role field." )
             if content_type == "code":
                 print( "WARNING: OpenAI provider does not support code-specific embeddings. "
                        "Using text-embedding-3-small for code content." )
             embedding = self._get_openai_engine().generate_embedding( text, normalize_for_cache=normalize_for_cache )
         elif self._is_in_process_engine_owner:
             # In-process owner: use the loaded engine singletons directly.
-            if content_type == "code":
-                embedding = self._get_code_engine().encode_code( [ text ] )[ 0 ]
-            else:
-                # prose - use encode_query for single-text embedding (query context)
-                embedding = self._get_prose_engine().encode_query( [ text ] )[ 0 ]
+            # role None keeps today's choice (code: encode_code, prose: encode_query).
+            self._check_role( role, True )
+            embedding = self._encode_local( [ text ], content_type, role )[ 0 ]
         else:
             # Non-owner: HTTP route. No GPU touch in this process.
-            embedding = self._generate_embedding_via_http( text, content_type )
+            embedding = self._generate_embedding_via_http( text, content_type, role=role, pin_fastapi=pin_fastapi )
 
         delta_ms = timer.get_delta_ms()
         self._record_metric( content_type, self._provider, delta_ms, len( embedding ) if embedding else 0 )
@@ -507,7 +605,7 @@ class EmbeddingProvider:
 
         return embedding
 
-    def generate_embeddings_batch( self, texts, content_type="prose" ):
+    def generate_embeddings_batch( self, texts, content_type="prose", role=None, pin_fastapi=False ):
         """
         Embed a batch of texts, using the same routing as generate_embedding().
 
@@ -535,18 +633,18 @@ class EmbeddingProvider:
         timer = sw.Stopwatch( silent=True )
 
         if self._provider == "openai":
+            if role is not None:
+                raise EmbeddingRoleUnsupported( "ROLE_UNSUPPORTED_ON_OPENAI: the OpenAI provider has no role field." )
             if content_type == "code":
                 print( "WARNING: OpenAI provider does not support code-specific embeddings. "
                        "Using text-embedding-3-small for code content." )
             # OpenAI engine doesn't support batch - loop
             embeddings = [ self._get_openai_engine().generate_embedding( t ) for t in texts ]
         elif self._is_in_process_engine_owner:
-            if content_type == "code":
-                embeddings = self._get_code_engine().encode_code( texts )
-            else:
-                embeddings = self._get_prose_engine().encode_query( texts )
+            self._check_role( role, True )
+            embeddings = self._encode_local( texts, content_type, role )
         else:
-            embeddings = self._generate_embeddings_batch_via_http( texts, content_type )
+            embeddings = self._generate_embeddings_batch_via_http( texts, content_type, role=role, pin_fastapi=pin_fastapi )
 
         delta_ms = timer.get_delta_ms()
         self._record_metric( content_type, self._provider, delta_ms, len( embeddings[ 0 ] ) if embeddings and embeddings[ 0 ] else 0 )
