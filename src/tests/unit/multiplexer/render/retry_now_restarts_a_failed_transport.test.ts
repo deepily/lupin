@@ -10,6 +10,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createQueueTransport } from "../../../../lupin_app/static/js/multiplexer/transport/QueueTransport";
+import { createAudioTransport } from "../../../../lupin_app/static/js/multiplexer/transport/AudioTransport";
 import { createSystemStatusRenderer, HEALTH_CIRCUIT } from "../../../../lupin_app/static/js/multiplexer/render/SystemStatusRenderer";
 import type { AuthManager } from "../../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 
@@ -76,5 +77,51 @@ test( "clicking Retry-now on a failed queue transport opens a fresh socket and h
   } finally {
     renderer.unmount();
     transport.stop();
+  }
+} );
+
+test( "an audio-only failure shows Retry-now, and a click restarts the audio transport and leaves the queue alone", async () => {
+  MockWebSocket.instances = [];
+  const bus       = createEventBusForTesting();
+  const ctor      = MockWebSocket as unknown as typeof WebSocket;
+  const queue     = createQueueTransport( { authManager: auth, bus, baseUrl: "", WebSocketCtor: ctor } );
+  const audio     = createAudioTransport( { authManager: auth, bus, baseUrl: "", WebSocketCtor: ctor } );
+  const root      = document.createElement( "div" );
+  const renderer  = createSystemStatusRenderer( {
+    eventBus     : bus,
+    auth         : { getToken: async () => ( {} as never ), getCurrentUserEmail: () => null, isCurrentUserAdmin: () => false },
+    transports   : { queue, audio },
+    sessionIds   : { queue: "wise_penguin", audio: "wise_penguin" },
+    reinitConfig : async () => ( {} ),
+    logFn        : () => {},
+    setIntervalFn: () => 1,
+  } );
+  renderer.mount( root );
+  const socketsFor = ( path: string ) => MockWebSocket.instances.filter( ( w ) => w.url.includes( path ) );
+  try {
+    queue.start( "wise_penguin" );
+    audio.start( "wise_penguin" );
+    for ( const ws of MockWebSocket.instances ) ws.fireOpen();
+    await new Promise( ( r ) => setTimeout( r, 10 ) );
+    for ( const ws of MockWebSocket.instances ) ws.receive( JSON.stringify( { type: "auth_success", data: {} } ) );
+    const audioSocket = socketsFor( "/ws/audio" )[ 0 ]!;
+    audioSocket.fireClose( 4001, "token expired" );
+    assert.equal( audio.state, "failed", "precondition: a 4001 close fails the audio transport" );
+    assert.notEqual( queue.state, "failed", "precondition: the queue transport did not fail" );
+
+    const btn = root.querySelector( '[data-testid="multiplexer-ws-retry-now-btn"]' ) as HTMLButtonElement;
+    assert.equal( btn.hidden, false, "an audio failure alone offers the button" );
+
+    const queueBefore = socketsFor( "/ws/queue" ).length;
+    const audioBefore = socketsFor( "/ws/audio" ).length;
+    btn.click();
+    assert.equal( socketsFor( "/ws/audio" ).length, audioBefore + 1, "the click opened one fresh audio socket" );
+    assert.equal( socketsFor( "/ws/queue" ).length, queueBefore, "and left the queue transport alone" );
+    assert.notEqual( audio.state, "failed", "the audio transport left failed" );
+    assert.equal( btn.hidden, true, "the button goes away once nothing is failed" );
+  } finally {
+    renderer.unmount();
+    queue.stop();
+    audio.stop();
   }
 } );
