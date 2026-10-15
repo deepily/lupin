@@ -276,7 +276,7 @@ class TestDuplicateListenerReapRegression:
     sweep kills BOTH.
 
     SAFETY: children are throwaway `sleep` processes carrying the listener
-    marker + a uuid-unique FAKE hash in argv — never a real session hash.
+    module name run with -m + a uuid-unique made-up hash in argv — never a real session hash.
     """
 
     def test_both_duplicates_reaped_when_bridge_knows_only_one( self, tmp_path ):
@@ -284,11 +284,13 @@ class TestDuplicateListenerReapRegression:
         fake_stable = uuid.uuid4().hex
         fake_hash   = fake_stable[ :8 ]
 
+        # A real listener runs as `python -m <module>`, and the identity check reads exactly that.
+        ( tmp_path / "cc_notification_listener.py" ).write_text( "import time\ntime.sleep( 30 )\n" )
+
         def spawn_fake():
             return subprocess.Popen(
-                [ _sys.executable, "-c", "import time; time.sleep( 30 )",
-                  "cc_notification_listener", "--session-id", fake_hash ],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                [ _sys.executable, "-m", "cc_notification_listener", "--session-id", fake_hash ],
+                cwd=str( tmp_path ), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
 
         proc_a, proc_b = spawn_fake(), spawn_fake()
