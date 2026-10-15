@@ -228,3 +228,42 @@ def test_two_lookups_that_differ_only_in_their_shortlist_get_different_receipt_i
     assert a[ "receipt_id" ] != b[ "receipt_id" ] and receipt_of( env, a )[ "candidate_stage" ][ "ids" ] != receipt_of( env, b )[ "candidate_stage" ][ "ids" ]
     again = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ FEEDS_ID, MATH_ID ] ) ) )
     assert again[ "receipt_id" ] == a[ "receipt_id" ]                                          # the same shortlist in another order is the same receipt
+
+
+def test_two_lookups_with_shortlists_of_one_size_and_different_ids_get_different_receipt_ids( env ):
+    need = "read an RSS feed [cand-ids-same-size]"
+    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ MATH_ID, FEEDS_ID ] ) ) )
+    b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ MATH_ID, SERVE_ID ] ) ) )
+    assert len( receipt_of( env, a )[ "candidate_stage" ][ "ids" ] ) == len( receipt_of( env, b )[ "candidate_stage" ][ "ids" ] ) == 2
+    assert a[ "receipt_id" ] != b[ "receipt_id" ]                                              # a count-only hash would give the same id here
+
+
+def _stored( env, r, edit ):
+    """Ensures: returns the stored receipt dict, edited by `edit`, and the path it was read from."""
+    path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
+    rec  = json.loads( path.read_text( encoding="utf-8" ) )
+    edit( rec )
+    return rec, path
+
+
+def test_a_candidate_receipt_made_before_the_ids_hash_is_refused_by_name_and_not_loaded( env ):
+    need = "read an RSS feed [cand-old-id]"
+    ctx  = ctx_with( env, PackedFake( need ), FakeStage() )
+    r    = rt.check_exists_impl( need, ctx )
+    rec, path = _stored( env, r, lambda rec: None )
+    old = rt.receipt_id( rec[ "tool" ], rec[ "query" ], rec[ "index_sha" ], rec[ "model" ], rec[ "policy" ], rec[ "prompt_template_hash" ], rec[ "causes" ],
+                         rec[ "tool_version" ], rec[ "request_shape" ], False, None, None, None )     # the id before the ids hash: no candidate part at all
+    rec[ "id" ] = old
+    ( path.parent / f"{old}.json" ).write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
+    with pytest.raises( rt.ReuseError, match="RECEIPT_ID_MISMATCH" ): rt.load_receipt( ctx, old )
+    assert rt.replay_impl( old, ctx )[ "error" ] == "RECEIPT_ID_MISMATCH"
+
+
+def test_a_candidate_stage_block_with_no_ids_is_a_named_corrupt_receipt_not_a_crash( env ):
+    need = "read an RSS feed [cand-no-ids]"
+    ctx  = ctx_with( env, PackedFake( need ), FakeStage() )
+    r    = rt.check_exists_impl( need, ctx )
+    rec, path = _stored( env, r, lambda rec: rec[ "candidate_stage" ].pop( "ids" ) )
+    path.write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
+    with pytest.raises( rt.ReuseError, match="RECEIPT_CORRUPT" ): rt.load_receipt( ctx, r[ "receipt_id" ] )
+    assert rt.replay_impl( r[ "receipt_id" ], ctx )[ "error" ] == "RECEIPT_CORRUPT"
