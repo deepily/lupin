@@ -2,9 +2,9 @@
 capability: model-training
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.training.peft_trainer.PeftTrainer@afe7391f52
-  - cosa.training.xml_coordinator.XmlCoordinator@6e9e8417fa
-  - cosa.training.xml_prompt_generator.XmlPromptGenerator@83bc1702a4
+  - cosa.training.peft_trainer.PeftTrainer@310aeed65a
+  - cosa.training.xml_coordinator.XmlCoordinator@a32705732a
+  - cosa.training.xml_prompt_generator.XmlPromptGenerator@c1eebae41b
   - cosa.training.xml_response_validator.XmlResponseValidator@8b49086124
   - cosa.training.quantizer.Quantizer@c2a93ea741
   - cosa.training.hf_downloader.HuggingFaceDownloader@ec08549f99
@@ -17,7 +17,7 @@ This capability builds XML fine-tuning data from a command corpus and trains a L
 
 ## What it does
 - `XmlCoordinator` reads the command manifests, expands placeholders, and builds the prompt table. It splits the table into train, test and validate JSONL files.
-- `XmlPromptGenerator` loads the prompt templates and fills them with interjections, salutations and placeholder values.
+- `XmlPromptGenerator` loads the prompt templates and fills them with interjections, salutations and placeholder values. Both classes read the project root per instance when `path_prefix` is not given.
 - `XmlResponseValidator` checks a model reply against the XML schema and the expected command. It reports per-check rates.
 - `PeftTrainer` fine-tunes with LoRA, saves checkpoints, merges the adapter, and quantizes the merged model with `Quantizer`.
 - `Quantizer` runs AutoRound on a loaded model and saves it. `HuggingFaceDownloader` fetches a repo snapshot.

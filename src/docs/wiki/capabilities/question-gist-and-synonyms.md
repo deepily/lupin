@@ -10,7 +10,7 @@ pins:
   - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable.find_exact_verbatim@67b21097c6
   - cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository@d5abda0d75
   - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@7e7ebe0bb4
-  - cosa.rest.multimodal_munger.MultiModalMunger@5c5251c7e8
+  - cosa.rest.multimodal_munger.MultiModalMunger@053090eb91
 ---
 # Question gist and synonyms
 

@@ -10,7 +10,7 @@ pins:
   - lupin_mcp.reuse_tools.sendable@6d563314ce
   - lupin_mcp.reuse_tools.sweep@6b56c2af23
   - lupin_mcp.reuse_tools.LiveJevTransport.post@05ba74d3cf
-  - cosa.repo.symindex.verdict.decide@1d8b27ba16
+  - cosa.repo.symindex.verdict.decide@22df0ebc3b
   - lupin_mcp.reuse_call_log_middleware.ReuseCallLogMiddleware.on_call_tool@729af9d8d7
 ---
 # Reuse search tools

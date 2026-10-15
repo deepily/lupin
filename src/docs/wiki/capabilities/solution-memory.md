@@ -2,14 +2,14 @@
 capability: solution-memory
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.memory.solution_snapshot.SolutionSnapshot@665a0d4e25
+  - cosa.memory.solution_snapshot.SolutionSnapshot@0aad412255
   - cosa.memory.snapshot_manager_interface.SolutionSnapshotManagerInterface@4420372f1f
   - cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_from_config_manager@2e94505a85
   - cosa.memory.postgres_solution_manager.PostgresSolutionManager.save_snapshot@db62fbcce8
   - cosa.memory.two_tier_question_search.TwoTierQuestionSearch.lookup@2fbb24d57b
   - cosa.memory.two_tier_question_search.CacheLookup@ce53ddc2b7
   - cosa.memory.two_tier_question_search.pg_hierarchical_search@1c023a232c
-  - cosa.memory.input_and_output_table.InputAndOutputTable.insert_io_row@4a230f6918
+  - cosa.memory.input_and_output_table.InputAndOutputTable.insert_io_row@a0f8b99292
   - cosa.memory.query_log_table.QueryLogTable.log_query@b3ad025a7f
 ---
 # Solution memory
@@ -36,4 +36,5 @@ Solution memory stores answered questions as snapshots, finds a cached snapshot 
 - `save_snapshot` upserts by verbatim question. An existing row for that question keeps its `id_hash`. A database or upsert failure returns `False`. An uninitialized manager or an empty question still raises.
 - With async embedding on and an embedding missing, `insert_io_row` returns at once. The row is built on the shared bounded pool.
 - A failed async insert drops the row. `async_failure_count` counts the losses, and nothing retries them. A row refused by a full pool is counted in the pool's `dropped` instead.
+- A snapshot builds its own synonym, gist, code, stats and embedding containers when none is passed. `insert_io_row` reads the date and time per call.
 - `_orm_to_snapshot` pads or truncates a vector to the embedding dimension, and an empty one becomes zeros.
