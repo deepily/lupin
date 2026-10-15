@@ -56,6 +56,7 @@ import type {
   StripSession,
 } from "../shared/types";
 import { keyedListMerge } from "./dom";
+import { KEEP_PLACE_KEY } from "./keepPlace";
 import {
   renderSessionStripIcon,
   updateSessionStripIcon,
@@ -134,12 +135,15 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private iconsEl         : HTMLElement | null = null;
   private focusToggleEl   : HTMLElement | null = null;
   private hideToggleEl    : HTMLElement | null = null;
+  // Optional: a page without #cc-keep-place-toggle mounts fine, and Keep place still holds by default.
+  private keepPlaceToggleEl: HTMLElement | null = null;
 
   // Page UI state. Focus and hide-inactive are also persisted (row d04ff119);
   // everything here resets on unmount.
   private focusActive     : boolean = false;
   private focusedSenderId : string | null = null;
   private hideInactive    : boolean = false;
+  private keepPlace       : boolean = true;
   private mounted         : boolean = false;
   // Row d04ff119 — a persisted focus whose session is not in the strip yet. It is
   // applied the moment that session arrives (legacy `_maybeReapplyPersistedFocus`),
@@ -151,6 +155,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private iconsClickHandler : ((e: Event) => void) | null = null;
   private focusToggleHandler: (() => void) | null = null;
   private hideToggleHandler : (() => void) | null = null;
+  private keepPlaceHandler   : (() => void) | null = null;
 
   constructor(opts: SessionStripRendererOptions) {
     this.bus     = opts.eventBus;
@@ -190,6 +195,14 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     focusToggleEl.addEventListener("click", this.focusToggleHandler);
     hideToggleEl.addEventListener("click", this.hideToggleHandler);
 
+    const keepPlaceEl = root.querySelector<HTMLElement>("#cc-keep-place-toggle");
+    if (keepPlaceEl !== null) {
+      this.keepPlaceToggleEl = keepPlaceEl;
+      keepPlaceEl.removeAttribute("data-phase6-pending");
+      this.keepPlaceHandler = (): void => this.onKeepPlaceToggleClick();
+      keepPlaceEl.addEventListener("click", this.keepPlaceHandler);
+    }
+
     this.unsubscribers.push(
       this.bus.on<StoreSessionStripChangedPayload>(
         "store_session_strip_changed",
@@ -220,6 +233,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     if (this.hideToggleEl !== null && this.hideToggleHandler !== null) {
       this.hideToggleEl.removeEventListener("click", this.hideToggleHandler);
     }
+    if (this.keepPlaceToggleEl !== null && this.keepPlaceHandler !== null) {
+      this.keepPlaceToggleEl.removeEventListener("click", this.keepPlaceHandler);
+    }
+    this.keepPlaceHandler   = null;
+    this.keepPlaceToggleEl  = null;
+    this.keepPlace          = true;
     this.iconsClickHandler  = null;
     this.focusToggleHandler = null;
     this.hideToggleHandler  = null;
@@ -336,6 +355,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.enterFocus(sorted[0]!.sender_id);
   }
 
+  private onKeepPlaceToggleClick(): void {
+    this.keepPlace = !this.keepPlace;
+    this.writeStorage(KEEP_PLACE_KEY, String(this.keepPlace));
+    this.applyToggleVisuals();
+  }
+
   private onHideToggleClick(): void {
     this.hideInactive = !this.hideInactive;
     this.writeStorage(HIDE_INACTIVE_KEY, String(this.hideInactive));
@@ -388,6 +413,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
       }
     }
     this.hideInactive = this.readStorage(HIDE_INACTIVE_KEY) === "true";
+    this.keepPlace    = this.readStorage(KEEP_PLACE_KEY) !== "false";
   }
 
   private saveFocus(): void {
@@ -496,6 +522,11 @@ class SessionStripRendererImpl implements SessionStripRenderer {
 
     this.hideToggleEl!.setAttribute("data-hide-inactive", String(this.hideInactive));
     this.hideToggleEl!.textContent = this.hideInactive ? "👁 Active" : "👁 All";
+
+    if (this.keepPlaceToggleEl !== null) {
+      this.keepPlaceToggleEl.setAttribute("data-keep-place", String(this.keepPlace));
+      this.keepPlaceToggleEl.textContent = this.keepPlace ? "📌 Keep place" : "📌 Follow new";
+    }
   }
 
   private applyCardFocus(): void {

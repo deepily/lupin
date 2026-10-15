@@ -45,6 +45,7 @@ import type { TtsInteractionMode } from "./templates/senderCard";
 // A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
 // consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
 import { scrollRevealElement } from "./scrollReveal";
+import { captureKeepPlace, readKeepPlace, restoreKeepPlace } from "./keepPlace";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import * as debugSink from "../shared/debugSink";
@@ -638,6 +639,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // and its header is swapped. Legacy adds the row to the existing card; replacing
     // the whole card reset the date list's scroll and restarted its animations.
     const focusBefore = captureCardFocus(this.senderCardsMount);
+    // Keep place: remember which cards the reader is looking at, so a card arriving at the top does not
+    // shift them. Null when the reader is at the top or the preference is off.
+    const place = readKeepPlace(keepPlaceStorage()) ? captureKeepPlace(this.senderCardsMount, document, window) : null;
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
@@ -666,6 +670,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
       },
     });
+    if (place !== null) restoreKeepPlace(this.senderCardsMount, place, document, window);
     restoreCardFocus(this.senderCardsMount, focusBefore);
 
     // Re-mark expanded progress groups after the render (state preserved
@@ -1560,4 +1565,13 @@ function cssEscape(value: string): string {
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the function body is always entered when called).
 export function createNotificationsListRenderer(opts: NotificationsListRendererOptions): NotificationsListRenderer {
   return new NotificationsListRendererImpl(opts);
+}
+
+// The browser's localStorage, or null where reading the property throws (a blocked-storage browser).
+function keepPlaceStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
