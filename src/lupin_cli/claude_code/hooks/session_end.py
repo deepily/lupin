@@ -38,6 +38,8 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+from lupin_cli.claude_code.hooks.lib.listener_processes import LISTENER_MODULE_NAME
+from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
 from lupin_cli.claude_code.hooks.lib.main_tree import WORKTREE_LANE_MARK, main_tree_root
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, get_buffer_path
@@ -228,6 +230,9 @@ def _stop_listener( pid ):
     Args:
         pid: Listener process ID
     """
+    # A pid read from a bridge file may have been reused by another program.
+    if not process_runs( pid, LISTENER_MODULE_NAME ):
+        return
     try:
         os.kill( pid, signal.SIGTERM )
     except ProcessLookupError:

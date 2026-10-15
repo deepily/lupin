@@ -68,6 +68,12 @@ from unittest.mock import patch
 
 MODULE = "lupin_cli.claude_code.hooks.register_session"
 
+
+@pytest.fixture( autouse=True )
+def _the_pid_is_the_listener( monkeypatch ):
+    """These tests are about signalling. The identity check has its own tests below."""
+    monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: True )
+
 OLD_ID = "aaaaaaaa-1111-2222-3333-444444444444"
 NEW_ID = "bbbbbbbb-5555-6666-7777-888888888888"
 OLD_H  = OLD_ID[:8]
@@ -288,3 +294,20 @@ class TestTheTransitionLog:
         listener — the log is shared and the writers are told apart by it."""
         _log_session_transition( OLD_H, NEW_H, OLD_H )
         assert "[--------]" in ( isolated_sessions_dir / "cc-listeners.log" ).read_text()
+
+
+class TestTheKillChecksWhatTheProcessIs:
+    """A recorded listener pid that now names another program is left alone."""
+
+    def test_a_reused_pid_is_not_signalled( self, monkeypatch ):
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: False )
+        with patch( f"{MODULE}.os.kill" ) as kill, patch( f"{MODULE}.time.sleep" ):
+            _cleanup_old_listener( _bridge( pid=4242 ), NEW_ID )
+        assert [ c.args[ 1 ] for c in kill.call_args_list ] == [ 0 ]
+
+    def test_the_marker_asked_for_is_the_listener_module( self, monkeypatch ):
+        asked = []
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: asked.append( ( pid, marker ) ) or False )
+        with patch( f"{MODULE}.os.kill" ), patch( f"{MODULE}.time.sleep" ):
+            _cleanup_old_listener( _bridge( pid=4242 ), NEW_ID )
+        assert asked == [ ( 4242, "cc_notification_listener" ) ]

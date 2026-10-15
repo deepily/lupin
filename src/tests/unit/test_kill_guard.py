@@ -851,3 +851,107 @@ def test_hatch_in_prefix_on_the_empty_and_absent_cases():
     assert _hatch_in_prefix( "" )               is False
     assert _hatch_in_prefix( None )             is False
     assert _hatch_in_prefix( "pkill -f x" )     is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# GAPS LEFT OPEN WHEN THE FIRST KILL GUARD ROW CLOSED
+#
+# A redirection written before the command word. Bash runs the verb all the same
+# (`2>&1 pkill -f T` signals), so it is one more transparent prefix.
+# A heredoc marker inside a comment or a quoted span is text, not a heredoc.
+# It used to strip the next line, which is where the sweep sat.
+# The forms the guard cannot see are pinned below as allowed, so a change in
+# that list is a decision and not an accident.
+# ═════════════════════════════════════════════════════════════════════════════
+
+REDIRECT_PREFIXES = [
+    "2>&1 ", ">/dev/null ", "</dev/null ", "2>/dev/null ", "&>/dev/null ",
+    ">> out.log ", "> /dev/null ", "2> err.log ", "2>&1 sudo ", "FOO=1 2>&1 ",
+    "<<< hello ",
+]
+
+
+@pytest.mark.parametrize( "shape", sorted( SHAPES ) )
+@pytest.mark.parametrize( "prefix", REDIRECT_PREFIXES )
+def test_a_redirection_before_the_command_word_does_not_hide_any_shape( shape, prefix ):
+    """Each cell was allowed before the fix. The bare form of each shape denies."""
+    command, reader = SHAPES[ shape ]
+    assert _deny( prefix + command, comm_reader=reader ) is not None, (
+        f"{prefix!r} walked shape {shape} past the guard"
+    )
+
+
+def test_a_redirection_before_a_pattern_sweep_is_denied():
+    """Shape C with a live foreign process: `2>&1 pkill -f TOK` runs the pkill."""
+    probe = lambda selector: [ "4242" ]
+    for command in ( "2>&1 pkill -f TOK", ">/dev/null pkill -f TOK", "</dev/null sudo pkill -f TOK" ):
+        assert _deny( command, comm_reader=_all_claude, pgrep_probe=probe ) is not None, command
+
+
+def test_redirections_before_ordinary_commands_stay_allowed():
+
+    for command in ( "2>&1 ls -la", ">/dev/null echo hi", "2>&1 pkill -P $$ -f pytest", "> out.txt echo kill 123" ):
+        assert _deny( command, comm_reader=_all_claude ) is None, command
+
+
+def test_a_redirection_run_is_linear_time():
+    """A thousand redirections must not turn the prefix span quadratic."""
+    import time
+    timings = []
+    for count in ( 2000, 4000 ):
+        started = time.perf_counter()
+        _deny( "2>&1 " * count + "ls", comm_reader=_no_claude )
+        timings.append( time.perf_counter() - started )
+    assert timings[ 1 ] < max( timings[ 0 ] * 6, 0.5 )
+
+
+@pytest.mark.parametrize( "command", [
+    "# see <<EOF\npgrep -f pytest | xargs kill",
+    "echo hi # <<'E'\npgrep -f pytest | xargs kill",
+    "echo '<<EOF'\npgrep -f pytest | xargs kill",
+    'echo "<<EOF"\npgrep -f pytest | xargs kill',
+    "cat <<<EOF\npgrep -f pytest | xargs kill",
+] )
+def test_a_heredoc_marker_that_is_text_does_not_strip_the_next_line( command ):
+    """The sweep on the second line was dropped as heredoc body."""
+    assert _deny( command ) is not None
+    assert _strip_heredocs( command ) == command
+
+
+def test_a_real_heredoc_after_a_comment_with_a_marker_is_still_stripped():
+
+    command = "# note <<X\ncat <<'EOF'\nps -e | xargs kill\nEOF\necho done"
+    assert _deny( command ) is None
+
+
+def test_a_hash_inside_a_word_is_not_a_comment():
+    """`a#b <<EOF` has no comment: the heredoc is real and its body is data."""
+    assert _deny( "cat a#b <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+def test_an_escaped_hash_and_an_escaped_quote_do_not_open_a_comment_or_a_span():
+
+    assert _deny( "echo \\# <<EOF\nps -e | xargs kill\nEOF" ) is None
+    assert _deny( "echo \\\" <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    'bash -c "pkill -f TOK"', "sh -c 'pkill -f TOK'", "xargs pkill -f TOK", "ssh host pkill -f TOK",
+    "eval pkill -f TOK", "systemd-run --user pkill -f TOK",
+    "docker exec c pkill -f TOK", "watch pkill -f TOK", "find . -exec pkill -f TOK {} +",
+    "parallel pkill -f TOK ::: a", 'python3 -c "import os; os.system(\'pkill -f TOK\')"',
+    'p""kill -f TOK', "pk\\ill -f TOK", "$PKILL -f TOK", "$(which pkill) -f TOK",
+] )
+def test_the_forms_the_guard_documents_as_unseen_stay_unseen( command ):
+    """A form on this list is a known gap. Seeing one means moving it out of this list."""
+    assert _deny( command, comm_reader=_all_claude, pgrep_probe=lambda selector: [ "4242" ] ) is None
+
+
+def test_env_dash_s_is_seen_although_the_review_listed_it_as_unseen():
+    """`env -S 'pkill -f TOK'` is refused, though an earlier review listed it as unseen."""
+    assert _deny( "env -S 'pkill -f TOK'", comm_reader=_all_claude, pgrep_probe=lambda selector: [ "4242" ] ) is not None
+
+
+def test_a_marker_after_a_closed_quote_is_a_real_heredoc():
+    """A quote that closes before the marker must not hide it: its body is data."""
+    assert _deny( "echo 'a b' \"c\" <<EOF\nps -e | xargs kill\nEOF" ) is None

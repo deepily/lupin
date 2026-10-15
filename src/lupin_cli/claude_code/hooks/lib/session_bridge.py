@@ -43,7 +43,11 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
+from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
+
+# The module a spawned idle waiter runs as (`python -m ...`), so it is on its command line.
+_IDLE_WAITER_MODULE = "lupin_cli.claude_code.hooks.lib.idle_waiter"
 
 
 # Row 8ccc20ab: DERIVED from the one seam so LUPIN_SESSIONS_DIR governs any
@@ -1757,6 +1761,10 @@ def kill_idle_waiter( session_id, signal=None ):
         return False
 
     if not _is_pid_alive( pid ):
+        return False
+
+    # A live pid may be a reused number: signal only the idle waiter itself.
+    if not process_runs( pid, _IDLE_WAITER_MODULE ):
         return False
 
     try:

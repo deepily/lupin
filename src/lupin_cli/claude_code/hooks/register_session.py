@@ -46,7 +46,8 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, build_sender_id_for_cc
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
-from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
+from lupin_cli.claude_code.hooks.lib.listener_processes import LISTENER_MODULE_NAME, find_live_listener_pids, listener_spawn_lock
+from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
 from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain, pick_declared_managers_from_env
@@ -486,6 +487,9 @@ def _cleanup_old_listener( old_session_data, new_session_id ):
     if old_listener_pid:
         try:
             os.kill( old_listener_pid, 0 )  # Check if alive
+            # A live pid is not yet a listener: a reused pid names another program.
+            if not process_runs( old_listener_pid, LISTENER_MODULE_NAME ):
+                raise ProcessLookupError( old_listener_pid )
             os.kill( old_listener_pid, signal.SIGTERM )
 
             # Wait up to 3 seconds for graceful shutdown

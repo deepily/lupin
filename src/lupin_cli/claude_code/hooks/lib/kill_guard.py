@@ -50,6 +50,13 @@ from functools import lru_cache
 from typing import List, Optional, Tuple
 
 
+# What this guard does not see, kept as documented gaps. The test file pins each as allowed,
+# so a change to this list is a decision. Seeing them would mean parsing arbitrary shell.
+#   bash -c, sh -c, xargs, ssh, eval, env -S via a variable, systemd-run, docker exec, watch, find -exec,
+#   parallel, python -c, a quoted-split name (p""kill, pk\ill), a variable holding the command name
+#   ($PKILL, $(which pkill)), and an alias.
+# Handled: a redirection before the command word (`2>&1 pkill ...`) is a transparent
+# prefix, and a `<<` inside a comment or a quoted span opens no heredoc.
 # Bash tool name as it appears in the PreToolUse hook payload.
 BASH_TOOL_NAMES = ( "Bash", )
 
@@ -120,9 +127,16 @@ _ENV_QUOTED_ASSIGN = (
     rf"{_WORD_PRE}env{_WORD_POST}{_WRAPPER_OPERANDS}"
     rf"""(?:{_WS}+(?:"[A-Za-z_][A-Za-z0-9_]*=[^"]*"|'[A-Za-z_][A-Za-z0-9_]*=[^']*'))+"""
 )
-# One link of a prefix chain: an assignment, `timeout N`, or a transparent wrapper with its options.
+# A redirection written before the command word: `2>&1 pkill`, `>/dev/null pkill`, `<<< text pkill`.
+# Bash performs it and then runs the verb, so it is one more transparent prefix.
+# The target is required, which keeps every start unambiguous and linear.
+_REDIRECT_PREFIX = (
+    rf"(?:\d*|&)(?:>>?|<{{1,3}})&?{_WS}*(?:{_QUOTED_OR_ESCAPED}|[^\s;&|()`\"'\\<>])+"
+)
+# One link of a prefix chain: an assignment, a redirection, `timeout N`, or a transparent wrapper with its options.
 _PREFIX_ELEMENT = (
     rf"[A-Za-z_][A-Za-z0-9_]*={_ASSIGN_VALUE}(?=[\s;&|]|$)"
+    rf"|{_REDIRECT_PREFIX}"
     rf"|{_TIMEOUT_SPAN}|{_ENV_QUOTED_ASSIGN}"
     rf"|{_WORD_PRE}{_WRAPPERS}{_WORD_POST}{_WRAPPER_OPERANDS}"
 )
@@ -252,7 +266,49 @@ _KILL_VERB_RE = re.compile(
 # A heredoc body is DATA, not commands. Writing a file that documents a sweep —
 # this module's own test file does exactly that — must not read as running one.
 # Caught by the guard denying its own test file's heredoc on first wiring.
-_HEREDOC_RE = re.compile( r"<<-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
+_HEREDOC_RE = re.compile( r"(?<!<)<<(?!<)-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
+
+
+def _heredoc_marker_in( line: str ) -> Optional[ str ]:
+    """
+    The tag of the first real heredoc marker on one line, or None.
+
+    A marker inside a quoted span, or after a comment `#`, is text and opens no heredoc.
+    Treating it as one dropped the next line, which is where a sweep could sit.
+
+    Requires:
+        - line is one line of the command, without its newline
+
+    Ensures:
+        - quotes opened and closed on this line, and a backslash-escaped character, are skipped
+        - `#` starts a comment only at the start of a word
+        - returns None when every marker on the line is text
+    """
+    quote = None
+    index = 0
+    start_of_word = True
+    markers = [ match.start() for match in _HEREDOC_RE.finditer( line ) ]
+    position = 0
+    while position < len( line ) and index < len( markers ):
+        char = line[ position ]
+        if position == markers[ index ] and quote is None:
+            return _HEREDOC_RE.match( line, position ).group( "tag" )
+        if position == markers[ index ]:
+            index += 1
+            continue
+        if char == "\\" and quote != "'":
+            position += 2
+            start_of_word = False
+            continue
+        if quote is not None:
+            if char == quote: quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "#" and start_of_word:
+            return None
+        start_of_word = quote is None and char in " \t;&|(`{"
+        position += 1
+    return None
 
 
 def _strip_heredocs( command: str ) -> str:
@@ -269,8 +325,7 @@ def _strip_heredocs( command: str ) -> str:
           data no matter where it ends)
         - a command with no heredoc is returned unchanged
     """
-    match = _HEREDOC_RE.search( command )
-    if not match:
+    if not _HEREDOC_RE.search( command ):
         return command
     lines = command.split( "\n" )
     kept  = []
@@ -278,9 +333,7 @@ def _strip_heredocs( command: str ) -> str:
     for line in lines:
         if tag is None:
             kept.append( line )
-            found = _HEREDOC_RE.search( line )
-            if found:
-                tag = found.group( "tag" )
+            tag = _heredoc_marker_in( line )
         elif line.strip() == tag:
             kept.append( line )
             tag = None

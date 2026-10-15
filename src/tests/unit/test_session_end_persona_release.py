@@ -50,6 +50,12 @@ from lupin_cli.claude_code.hooks.session_end import (
 
 
 MODULE = "lupin_cli.claude_code.hooks.session_end"
+
+
+@pytest.fixture( autouse=True )
+def _the_pid_is_the_listener( monkeypatch ):
+    """These tests are about signalling. The identity check has its own tests below."""
+    monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: True )
 BRIDGE = "lupin_cli.claude_code.hooks.lib.session_bridge"
 CREDS  = "lupin_cli.claude_code.hooks.lib.hook_credentials"
 
@@ -210,3 +216,19 @@ class TestStopListener:
         with patch( f"{MODULE}.os.kill", side_effect=calls ), \
              patch( f"{MODULE}.time.sleep" ):
             _stop_listener( 4242 )   # must not raise
+
+
+class TestStopListenerChecksWhatTheProcessIs:
+    """A pid read from a bridge file may be a reused number."""
+
+    def test_a_process_that_is_not_a_listener_is_never_signalled( self, monkeypatch ):
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: False )
+        with patch( f"{MODULE}.os.kill" ) as kill, patch( f"{MODULE}.time.sleep" ):
+            _stop_listener( 4242 )
+        kill.assert_not_called()
+
+    def test_the_marker_asked_for_is_the_listener_module( self, monkeypatch ):
+        asked = []
+        monkeypatch.setattr( f"{MODULE}.process_runs", lambda pid, marker: asked.append( ( pid, marker ) ) or False )
+        _stop_listener( 4242 )
+        assert asked == [ ( 4242, "cc_notification_listener" ) ]
