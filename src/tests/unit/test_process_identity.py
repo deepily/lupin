@@ -4,16 +4,36 @@
 Real children are used for the live cases, and fabricated /proc entries for the argv shapes.
 The no-/proc case points `proc_root` at a path that does not exist.
 """
+import os
 import subprocess
 import sys
+import time
 
 from lupin_cli.claude_code.hooks.lib.process_identity import process_runs
+
+
+def _settled( child, seconds=5 ):
+    """
+    Wait until the kernel shows the child's command line, then return the child.
+
+    Popen returns as soon as the child has exec'd, and the command line is filled in a moment later.
+    Read in between, `/proc/<pid>/cmdline` is empty, which `process_runs` correctly calls "not the program".
+    Measured on this host: 17% of reads right after Popen were empty when idle, 23% under load.
+    """
+    path = f"/proc/{child.pid}/cmdline"
+    if not os.path.isdir( "/proc" ): return child
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        with open( path, "rb" ) as handle:
+            if handle.read(): return child
+        time.sleep( 0.001 )
+    raise AssertionError( f"{path} stayed empty for {seconds} seconds" )
 
 
 def _start( tmp_path, *arguments ):
     """A real child: `python -m identity_probe_module`, run in a folder holding that module."""
     ( tmp_path / "identity_probe_module.py" ).write_text( "import time\ntime.sleep( 30 )\n" )
-    return subprocess.Popen( [ sys.executable, "-m", "identity_probe_module", *arguments ], cwd=str( tmp_path ) )
+    return _settled( subprocess.Popen( [ sys.executable, "-m", "identity_probe_module", *arguments ], cwd=str( tmp_path ) ) )
 
 
 def _stop( child ):
@@ -30,9 +50,19 @@ def test_a_real_process_started_with_dash_m_is_the_program( tmp_path ):
         _stop( child )
 
 
+def test_a_child_read_right_after_it_starts_is_the_program_every_time( tmp_path ):
+    """Fifty starts; without the wait in `_start` about one in six reads an empty line."""
+    for _ in range( 50 ):
+        child = _start( tmp_path )
+        try:
+            assert process_runs( child.pid, "identity_probe_module" ) is True
+        finally:
+            _stop( child )
+
+
 def test_a_live_process_that_is_another_program_is_not_the_program():
     """The positive control above has the same shape; this one is the reused-number case."""
-    child = subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(30)" ] )
+    child = _settled( subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(30)" ] ) )
     try:
         assert process_runs( child.pid, "identity_probe_module" ) is False
     finally:
