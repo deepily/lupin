@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "ab3cff4c57dc33a1",
+  "rules_stamp": "e3415c1e3d1ea5e1",
   "files": {
     "src/conftest.py": 68,
     "src/cosa/agents/prediction_engine/tests/test_accuracy_comparators.py": 1,
@@ -431,7 +431,7 @@
     "src/lupin_mcp/reap_branch.py": 79,
     "src/lupin_mcp/reap_memento.py": 440,
     "src/lupin_mcp/reuse_call_log_middleware.py": 4,
-    "src/lupin_mcp/reuse_tools.py": 43,
+    "src/lupin_mcp/reuse_tools.py": 41,
     "src/lupin_mcp/self_respin_core.py": 397,
     "src/lupin_mcp/session_spawner.py": 505,
     "src/lupin_mcp/task_store_tools.py": 294,
@@ -1086,7 +1086,7 @@
     "src/tests/unit/test_cc_transcript_fixture_capture.py": 54,
     "src/tests/unit/test_cc_transcript_fixture_is_real.py": 36,
     "src/tests/unit/test_cc_transcript_mapper.py": 25,
-    "src/tests/unit/test_cc_transcript_registry_and_docs.py": 49,
+    "src/tests/unit/test_cc_transcript_registry_and_docs.py": 45,
     "src/tests/unit/test_cc_transcript_router.py": 71,
     "src/tests/unit/test_cc_transcript_tail_primitive.py": 38,
     "src/tests/unit/test_cc_transcript_tailer.py": 85,
