@@ -16,6 +16,26 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-15 day (Cheech 🌿 `a5779b32`)
+
+### Rick's rulings
+- 12:24, gate `32b71742`: yes to unfreezing the model server for the embeddings role field. It runs image 0.1.2, built from main `4e6e9a11b`.
+- 15:29 and 15:50, by voice: slim the crew and finish the work in progress (row `e02f05bc`). Then release the seats and run the session end with a push and a backup.
+
+### Not ruled, waiting on Rick
+- Row `78ec2079`: may the daily vector refresh be switched on? Two asks timed out, and a timeout is not a ruling. The switch stays off.
+- Row `19aea5ba`: should lookup refuse, or skip and count, when vectors name symbols deleted after the build? My recommendation is skip and count.
+- Held rows to admit: `3790cd32` (a crash in util_code_runner), `75c1524b` (the float16 setting is ignored), `cde008ce` (a flaky test fix), `25f53d5e` (the band fit). Drop `a45ccc1a`, a duplicate.
+
+### My rulings, which Rick may overturn
+- The vectors do not depend on batch size, and Sam measured cosine 1.0 for every text, so a copy before landing was allowed.
+- The band fit needs a new driver and two live runs. That is new work, so it moved to row `25f53d5e` instead of the close-out.
+- No folder is exempt from wiki pins; whether the three dead or experimental folders should be deleted is Rick's question.
+
+### Backlog from this session (no row)
+- Archive the TODO.md horizon with `/plan-todo archive`; the file is 5,193 lines against a signal near 200.
+- Rachel's seat tree keeps one untracked draft, `2026.10.14-reuse-lookup-candidate-stage-measured-inputs.md`, with no authorization; it dies with the tree.
+
 ## 📚 DECISIONS LOG 2026-10-14 night to 2026-10-15 noon (Mr. Radio 🦉 `5890f1ba`)
 
 - **Split seed 20261014** for the verdict-layer fit (row `8a8bca62`) (Rick, ask_yes_no, clean yes, about 09:25 EDT; row `27ae353d`). The shipped verdict threshold is now the fitted 0.3.
