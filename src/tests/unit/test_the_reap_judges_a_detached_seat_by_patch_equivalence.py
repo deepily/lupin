@@ -75,6 +75,18 @@ def test_a_detached_seat_whose_commits_were_cherry_picked_raises_no_alarm( world
     assert reap_branch.branch_alarm( { "seat": outcome } ) is None
 
 
+@pytest.mark.parametrize( "how", [ "fast-forward", "merge-commit" ] )
+def test_a_detached_seat_whose_tip_is_an_ancestor_of_the_line_raises_no_alarm( world, how ):
+    """A tip that is an ancestor of the line has left nothing behind."""
+    main = world[ "main" ]
+    if how == "fast-forward": _must( main, "reset", "-q", "--hard", "HEAD~1" )          # the line is moved back to the seat's fork point
+    _must( main, "merge", "-q", "--no-ff", "-m", "land the seat", world[ "shas" ][ -1 ] ) if how == "merge-commit" else _must( main, "merge", "-q", "--ff-only", world[ "shas" ][ -1 ] )
+    assert _git( main, "merge-base", "--is-ancestor", world[ "shas" ][ -1 ], "the-line" ).returncode == 0, "premise: the tip is merged"
+    outcome = _probe( world )
+    assert outcome[ "status" ] == "merged" and outcome[ "commits" ] == 0 and outcome[ "shas" ] == []
+    assert reap_branch.branch_alarm( { "seat": outcome } ) is None
+
+
 def test_a_detached_seat_with_one_commit_not_picked_alarms_and_names_it( world ):
     _must( world[ "main" ], "cherry-pick", world[ "shas" ][ 0 ] )
     outcome = _probe( world )
