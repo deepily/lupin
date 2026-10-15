@@ -1511,7 +1511,7 @@
     "src/tests/unit/test_outreach_ledger.py": 7,
     "src/tests/unit/test_pane_chrome_classes_reach_a_linked_sheet.py": 82,
     "src/tests/unit/test_parity_oracle.py": 1,
-    "src/tests/unit/test_parity_test_cites_its_legacy_source.py": 306,
+    "src/tests/unit/test_parity_test_cites_its_legacy_source.py": 305,
     "src/tests/unit/test_park_reason_staleness.py": 448,
     "src/tests/unit/test_peer_dm_header_shape.py": 26,
     "src/tests/unit/test_permission_request_hook.py": 27,
