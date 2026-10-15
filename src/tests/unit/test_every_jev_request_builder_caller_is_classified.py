@@ -23,7 +23,9 @@ PRODUCTION = { "src/lupin_mcp/reuse_tools.py": { "build_request" },
 
 # Measurement drivers. They replay answers cached under the raw need text, so they take raw needs by design (plan Phase 2).
 MEASUREMENT = { "src/lupin_mcp/reuse_stage1.py"         : { "pack_request" },
-                "src/lupin_mcp/reuse_stage1_analysis.py": { "build_request" } }
+                "src/lupin_mcp/reuse_stage1_analysis.py": { "build_request" },
+                # Only looks a key up in the cache of answers already given; it sends nothing, so a raw need never leaves the box.
+                "src/cosa/repo/symindex/candidates/arm_run.py": { "pair_key" } }
 
 
 def builders_called( source ):
