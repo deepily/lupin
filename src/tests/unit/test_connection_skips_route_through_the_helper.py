@@ -74,6 +74,7 @@ STATUS_SKIP_ALLOWED = {
     "src/tests/smoke/test_io_files_endpoint.py"             : "an io file the environment may not hold (404), not a login",
     "src/tests/smoke/test_model_server_smoke.py"            : "a health check on a model server that is not ready, not a login",
     "src/tests/smoke/test_voice_persona_allocation.py"      : "a 404 that means the test and the server read different bridge directories, not a login",
+    "src/tests/smoke/test_container_preflight.py"           : "`gh auth status` output inside a container, warn-only by design; GitHub CLI auth, not an app login",
     "src/tests/smoke/test_external_scopes.py"               : "an unauthenticated /api/docs/health check, read through a bare status name; not a login",
     "src/tests/smoke/test_notify_idempotency_midconnect_smoke.py" : "a websocket auth result that leaves the probe unproven; not an HTTP login, and the app_login helper does not cover that door",
     "src/tests/integration/test_commons_traffic_visibility_integration.py" : "a body field 'no-active-sessions' on a broadcast reply, not a login",
@@ -97,17 +98,17 @@ def _broad_skip_files( population, read ):
     return sorted( set( found ) )
 
 
-STATUS_WORDS = ( "status", "auth", "login", "token" )
+STATUS_WORDS = ( "status", "auth", "login", "logged", "token", "credential" )
 
 
 def _reads_a_status( test ):
-    """Return True when an `if` test names a status-like value."""
+    """Return True when an `if` test names a status-like value, by substring."""
     for sub in ast.walk( test ):
         if isinstance( sub, ast.Name ):                                         label = sub.id
         elif isinstance( sub, ast.Attribute ):                                  label = sub.attr
         elif isinstance( sub, ast.Constant ) and isinstance( sub.value, str ):  label = sub.value
         else: continue
-        if set( label.lower().replace( "-", "_" ).split( "_" ) ) & set( STATUS_WORDS ): return True
+        if any( word in label.lower() for word in STATUS_WORDS ): return True
     return False
 
 
@@ -233,6 +234,14 @@ def test_the_status_census_names_a_skip_on_an_auth_result_or_a_bare_status_name(
     other   = "import pytest\ndef f( n ):\n    if n > 3:\n        pytest.skip( 'too many' )\n"
     sources = { "a.py": ws_auth, "b.py": bare, "c.py": keyed, "d.py": other }
     assert _status_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "b.py", "c.py" ]
+
+
+def test_the_status_census_matches_a_status_word_inside_a_longer_name():
+    shapes  = { "a.py": "obs.authenticated", "b.py": "logged_in", "c.py": "state.authState", "d.py": "authn_result", "e.py": "credential" }
+    sources = { name: f"import pytest\ndef f( obs, state, logged_in, authn_result, credential ):\n    if not {expr}:\n        pytest.skip( 'x' )\n"
+                for name, expr in shapes.items() }
+    sources[ "f.py" ] = "import pytest\ndef f( n ):\n    if not n:\n        pytest.skip( 'x' )\n"
+    assert _status_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "b.py", "c.py", "d.py", "e.py" ]
 
 
 NINE_LOGIN_FILES = (
