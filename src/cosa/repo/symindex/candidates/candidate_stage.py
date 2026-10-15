@@ -95,10 +95,12 @@ def shortlist( need, stage, K, extra_lists=None ):
         - ranking is the same ids in fused order
         - lists holds each source's ranked ids, before fusion
         - scores holds the rounded BM25 scores of the code and prose lists, in list order
+        - the shortlist holds at most K ids: the top head ids of every list, then the best of the rest
         - the same need, stage and extra lists always give the same result
 
     Raises:
         - CandidateError SOURCE_CLASH when an extra source reuses a lexical source name
+        - CandidateError HEAD_EXCEEDS_LIMIT when the top head ids of all lists are more than K
     """
     scored = { "code": bm25.rank_scored( stage.code, need ), "prose": bm25.rank_scored( stage.prose, need ) }
     lists  = { name: [ doc_id for doc_id, _ in pairs ] for name, pairs in scored.items() }

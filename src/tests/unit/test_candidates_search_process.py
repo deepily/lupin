@@ -140,6 +140,98 @@ class TestAnswer:
         assert out[ 0 ] == out[ 1 ]
 
 
+class TestMalformedRequests:
+    """Each wrong shape answers BAD_SEARCH_REQUEST, never a traceback."""
+
+    @pytest.mark.parametrize( "more,detail", [
+        ( { "vectors_dir": "/v" },                                            "query_vectors" ),
+        ( { "vectors_dir": "/v", "query_vectors": {} },                       "query_vectors" ),
+        ( { "vectors_dir": "/v", "query_vectors": [ 1.0 ] },                  "query_vectors" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [] } },          "finite numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ "x" ] } },     "finite numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ True ] } },    "finite numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ float( "nan" ), 0.0 ] } }, "finite numbers" ),
+        ( { "vectors_dir": 3, "query_vectors": { "prose": [ 1.0 ] } },        "vectors_dir" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "nope": [ 1.0, 0.0 ] } }, "no matrix nope" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ 1.0, 0.0, 0.0 ] } }, "3 values" ),
+        ( { "K": "3" },                                                       "K" ),
+        ( { "K": 0 },                                                         "K" ),
+        ( { "K": True },                                                      "K" ),
+        ( { "need": 5 },                                                      "need" ),
+        ( { "index_dir": 5 },                                                 "index_dir" ),
+        ( { "purposes": 5 },                                                  "purposes" ),
+        ( { "wiki": "page" },                                                 "wiki" ),
+        ( { "wiki": [ 1 ] },                                                  "wiki" ),
+        ( { "fusion": { "k": 7 } },                                           "fusion" ),
+        ( { "fusion": "x" },                                                  "fusion" ),
+        ( { "fusion": { "k": 0, "depth": 9, "head": 2 } },                    "k and depth" ),
+        ( { "fusion": { "k": 7, "depth": "9", "head": 2 } },                  "k and depth" ),
+        ( { "fusion": { "k": 7, "depth": 9, "head": -1 } },                   "head" ),
+        ( { "fusion": { "k": 7, "depth": 9, "head": 10 } },                   "head" ),
+    ] )
+    def test_bad_shape( self, generation, more, detail ):
+        code, body = run_main( request_for( generation, **more ) )
+        assert code == 2
+        assert body[ "error" ] == search.REQUEST_ERROR and detail in body[ "detail" ]
+
+    def test_unreadable_index( self, tmp_path ):
+        code, body = run_main( { "need": "x", "K": 1, "index_dir": str( tmp_path / "nowhere" ) } )
+        assert code == 2 and body[ "error" ] == search.INDEX_UNREADABLE
+
+    def test_unreadable_purpose_file( self, generation, tmp_path ):
+        bad = tmp_path / "purpose.jsonl"
+        bad.write_text( json.dumps( { "pin": "pa" } ) + "\n" )
+        code, body = run_main( request_for( generation, purposes=str( bad ) ) )
+        assert code == 2 and body[ "error" ] == search.INDEX_UNREADABLE
+
+
+class TestIndexAgainstVectors:
+    """A vector set must belong to the index."""
+
+    def test_ids_outside_the_index_are_refused_by_name( self, generation ):
+        class Ghosty( FakeSet ):
+            def __init__( self ):
+                super().__init__()
+                self.ids = [ "py:a", "py:b", "gone::g" ]
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
+        code, body = run_main( request, lambda d: Ghosty() )
+        assert code == 2 and body[ "error" ] == search.VECTOR_IDS_NOT_INDEX and "gone::g" in body[ "detail" ]
+
+    def test_index_ids_without_a_vector_are_counted( self, generation ):
+        class Short( FakeSet ):
+            def __init__( self ):
+                super().__init__()
+                self.ids      = [ "py:a", "py:b" ]
+                self.matrices = { k: v[ :2 ] for k, v in self.matrices.items() }
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
+        code, body = run_main( request, lambda d: Short() )
+        assert code == 0 and body[ "index_ids_without_vectors" ] == 1
+
+    def test_full_set_counts_zero( self, generation ):
+        code, body = run_main( request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } ) )
+        assert code == 0 and body[ "index_ids_without_vectors" ] == 0
+
+
+class TestShortlistSize:
+    """K is a hard cap on the answer."""
+
+    def test_answer_never_exceeds_k( self, generation ):
+        request = request_for( generation, K=3, wiki=[ f"w:{i}" for i in range( 20 ) ], fusion={ "k": 60, "depth": 100, "head": 1 },
+                               vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ], "code": [ 1.0, 0.0 ], "concat": [ 0.0, 1.0 ] } )
+        code, body = run_main( request )
+        assert code == 0 and len( body[ "shortlist" ] ) == 3 and len( body[ "ranking" ] ) == 3
+
+    def test_heads_larger_than_k_are_refused( self, generation ):
+        request = request_for( generation, K=1, wiki=[ "w:1" ], fusion={ "k": 60, "depth": 100, "head": 1 } )
+        code, body = run_main( request )
+        assert code == 2 and body[ "error" ] == "HEAD_EXCEEDS_LIMIT"
+
+    def test_repeated_wiki_ids_count_once( self, generation ):
+        once  = run_main( request_for( generation, wiki=[ "w:1", "w:2" ] ) )[ 1 ]
+        twice = run_main( request_for( generation, wiki=[ "w:1", "w:1", "w:2" ] ) )[ 1 ]
+        assert once[ "ranking" ] == twice[ "ranking" ]
+
+
 class TestErrors:
     """Failures answer with a code and exit 2."""
 
@@ -157,7 +249,7 @@ class TestErrors:
 
     def test_loader_error_is_passed_through( self, generation ):
         def loader( folder ): raise CandidateError( "VECTOR_SET_UNAVAILABLE", "no manifest" )
-        code, body = run_main( request_for( generation, vectors_dir="/v", query_vectors={} ), loader )
+        code, body = run_main( request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } ), loader )
         assert code == 2 and body == { "error": "VECTOR_SET_UNAVAILABLE", "detail": "no manifest" }
 
 

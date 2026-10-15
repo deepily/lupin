@@ -150,13 +150,28 @@ class TestFuse:
         assert rf.fuse( [ [ "a", "b", "c", "d" ] ], head=0, limit=2 ) == [ "a", "b" ]
 
     def test_head_of_every_list_survives_the_limit( self ):
-        lists = [ [ "a", "b", "c" ], [ "a", "b", "z" ] ]
+        # without the head rule b outranks z and the limit of 2 would give a, b
+        lists = [ [ "a", "b", "c" ], [ "a", "b", "d" ], [ "z", "a" ] ]
         assert rf.fuse( lists, head=0, limit=2 ) == [ "a", "b" ]
-        assert rf.fuse( lists, head=3, limit=2 ) == [ "a", "b", "c", "z" ]
+        assert rf.fuse( lists, head=1, limit=2 ) == [ "a", "z" ]
+
+    def test_limit_is_a_hard_cap( self ):
+        lists = [ [ "a", "b", "c", "d" ], [ "e", "f", "g", "h" ], [ "i", "j", "k", "l" ] ]
+        assert len( rf.fuse( lists, head=2, limit=6 ) ) == 6
+        assert len( rf.fuse( lists, head=2, limit=7 ) ) == 7
+
+    def test_heads_that_do_not_fit_are_refused( self ):
+        lists = [ [ "a", "b" ], [ "c", "d" ] ]
+        with pytest.raises( CandidateError ) as caught: rf.fuse( lists, head=2, limit=3 )
+        assert caught.value.code == rf.HEAD_EXCEEDS_LIMIT
 
     def test_head_ids_stay_in_fused_order( self ):
         lists = [ [ "a", "b" ], [ "a", "b" ], [ "y", "x" ] ]
-        assert rf.fuse( lists, head=2, limit=1 ) == [ "a", "b", "y", "x" ]
+        assert rf.fuse( lists, head=1, limit=2 ) == [ "a", "y" ]
+
+    def test_a_repeated_id_counts_once( self ):
+        assert rf.fuse( [ [ "b", "b", "c" ], [ "c", "a" ] ] ) == rf.fuse( [ [ "b", "c" ], [ "c", "a" ] ] )
+        assert rf.fuse( [ [ "b", "b", "c" ] ], depth=2 ) == [ "b", "c" ]
 
     def test_score_never_enters( self ):
         # a list of ids carries no score, so two lists that differ only in a hidden score fuse alike
@@ -213,8 +228,19 @@ class TestStage:
 
     def test_head_keeps_the_top_of_a_vector_list( self ):
         stage  = cs.build_stage( ENTRIES, head=1 )
-        result = cs.shortlist( "get user profile", stage, 1, extra_lists={ "cosine": [ "py:b" ] } )
+        result = cs.shortlist( "get user profile", stage, 2, extra_lists={ "cosine": [ "py:b" ] } )
         assert "py:b" in result[ "shortlist" ]
+
+    def test_shortlist_never_exceeds_k( self ):
+        stage  = cs.build_stage( ENTRIES, head=2 )
+        extra  = { "v1": [ "js:c", "py:b", "py:a" ], "v2": [ "py:b", "js:c", "py:a" ], "wiki": [ "w:1", "w:2", "w:3" ] }
+        result = cs.shortlist( "user profile", stage, 5, extra_lists=extra )
+        assert len( result[ "shortlist" ] ) == 5 and len( result[ "ranking" ] ) == 5
+
+    def test_a_k_smaller_than_the_heads_is_refused( self ):
+        stage = cs.build_stage( ENTRIES, head=3 )
+        with pytest.raises( CandidateError ) as caught: cs.shortlist( "user profile", stage, 1, extra_lists={ "v": [ "js:c" ] } )
+        assert caught.value.code == rf.HEAD_EXCEEDS_LIMIT
 
     def test_manifest_records_parameters( self ):
         manifest = cs.build_stage( ENTRIES, k=30, depth=100, head=4 ).manifest()
