@@ -498,3 +498,125 @@ def test_mine_narrows_the_exit_code_to_this_seat( fleet, monkeypatch, capsys ):
     assert module.main( [ "--target", "target", "--mine", str( seat ) ] ) == 1
     capsys.readouterr()
     assert module.main( [ "--target", "target", "--mine", str( base ) ] ) == 0
+
+
+# ---------------------------------------------------------------- row 1ee338ae: unjudged is not clean
+
+def _run_with_seat_occupied( scan_path, seat, *argv ):
+    """
+    Run the installed scan as a process with one real process standing in `seat`.
+
+    Ensures:
+        - returns the CompletedProcess; the child is killed before returning
+    """
+    child = subprocess.Popen( [ sys.executable, "-c", "import time; time.sleep(60)" ], cwd=str( seat ) )
+    try:
+        return subprocess.run(
+            [ sys.executable, str( scan_path ), *argv ],
+            capture_output=True, text=True, timeout=300
+        )
+    finally:
+        child.kill()
+        child.wait()
+
+
+def _fleet_with_unjudged_tree( fleet, monkeypatch ):
+    """
+    Add a second occupied tree that cannot resolve `target`, and return the seat.
+
+    Ensures:
+        - the seat and the stranger are both occupied
+        - the stranger belongs to another repository, so `target` does not resolve there
+    """
+    module, base, seat = fleet
+    stranger = base.parent / "stranger"
+    stranger.mkdir()
+    _git( stranger, "init", "-q" )
+    monkeypatch.setattr(
+        module, "occupied_worktrees",
+        lambda _roots: { str( seat ): [ "1" ], str( stranger ): [ "2" ] }
+    )
+    monkeypatch.setattr(
+        module, "worktree_roots", lambda repo=None: [ str( base ), str( seat ), str( stranger ) ]
+    )
+    return module, seat
+
+
+def test_a_target_no_occupied_tree_resolves_exits_two_at_the_process_boundary( installed_fleet ):
+    """
+    Exit 2 when no occupied tree resolves the target.
+
+    Nothing was judged, and exit 0 told the session-start check "scanned, no overlap".
+    """
+    scan_path, _proj, seat = installed_fleet
+    done = _run_with_seat_occupied( scan_path, seat, "--target", "no-such-ref" )
+
+    assert done.returncode == 2, f"expected exit 2, got {done.returncode}: {done.stdout}{done.stderr}"
+    assert "not judged" in ( done.stdout + done.stderr ).lower()
+    assert "not read this as a clean run" in done.stderr
+
+
+def test_main_returns_two_when_any_occupied_tree_was_not_judged( fleet, monkeypatch, capsys ):
+    """
+    No hits plus one unresolved tree is a partial scan, so it cannot return the all-clear.
+    """
+    module, seat = _fleet_with_unjudged_tree( fleet, monkeypatch )
+    _write( seat, "other.py", "value = 99\n" )
+
+    code = module.main( [ "--target", "target" ] )
+    err  = capsys.readouterr().err
+
+    assert code == 2
+    assert "not judged" in err.lower()
+
+
+def test_a_hit_still_exits_one_when_another_tree_was_not_judged( fleet, monkeypatch, capsys ):
+    """
+    A real overlap is reported as a hit even when the scan was also partial.
+    """
+    module, seat = _fleet_with_unjudged_tree( fleet, monkeypatch )
+    _write( seat, "shared.py", "value = 99\n" )
+
+    assert module.main( [ "--target", "target" ] ) == 1
+    capsys.readouterr()
+
+
+def test_mine_exits_two_when_not_a_hit_and_another_tree_was_not_judged( fleet, monkeypatch, capsys ):
+    """
+    `--mine` narrows exit 1 to this seat and must not narrow exit 2 away.
+    """
+    module, seat = _fleet_with_unjudged_tree( fleet, monkeypatch )
+    _write( seat, "other.py", "value = 99\n" )
+
+    assert module.main( [ "--target", "target", "--mine", str( seat ) ] ) == 2
+    capsys.readouterr()
+
+
+def test_the_default_target_is_the_branch_the_scripts_tree_is_on( installed_fleet ):
+    """
+    With no --target the scan judges against the branch checked out in its own tree.
+
+    The old default named a v0.2.1 branch that does not exist in the installed project,
+    so every tree went unjudged. Here the project is on `target`. The seat is behind it
+    and dirty on the moved file, so the plain run must report the hit.
+    """
+    scan_path, _proj, seat = installed_fleet
+    done = _run_with_seat_occupied( scan_path, seat )
+
+    assert done.returncode == 1, f"expected a hit, got {done.returncode}: {done.stdout}{done.stderr}"
+    assert "shared.py" in done.stdout
+
+
+def test_a_detached_head_refuses_instead_of_guessing_a_target( installed_fleet ):
+    """
+    No --target and no branch to read refuses, naming why.
+
+    Guessing any branch would judge the fleet against a ref nobody chose.
+    """
+    scan_path, proj, seat = installed_fleet
+    _git( proj, "checkout", "-q", "--detach" )
+    done = _run_with_seat_occupied( scan_path, seat )
+
+    assert done.returncode == 2, f"expected exit 2, got {done.returncode}: {done.stdout}{done.stderr}"
+    assert "detached" in done.stderr
+    assert "--target" in done.stderr

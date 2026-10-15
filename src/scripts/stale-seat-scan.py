@@ -29,7 +29,7 @@ Exit codes are three, so failure modes wanting opposite remedies never share one
 
     0  scanned, no seat both behind and overlapping: a real all-clear.
     1  a live seat is editing a file that moved under it.
-    2  refused, nothing was scanned: say so, never report clean.
+    2  refused, or some occupied tree was not judged: say so, never report clean.
 
 What it cannot see:
   - It measures exposure, never damage. An overlap says two parties touched one file,
@@ -67,6 +67,27 @@ def _git( repo, *args ):
         [ "git", "-C", str( repo ), *args ], capture_output=True, text=True
     )
     return done.returncode, done.stdout
+
+
+def current_branch( repo=None ):
+    """
+    The branch checked out in `repo`, which is the default delivery target.
+
+    Ensures:
+        - returns the branch name
+
+    Raises:
+        - LookupError when HEAD is detached or git cannot answer, so the caller
+          refuses rather than judging the fleet against a ref nobody chose
+    """
+    code, out = _git( repo or REPO_ROOT, "rev-parse", "--abbrev-ref", "HEAD" )
+    name = out.strip()
+    if code != 0 or not name or name == "HEAD":
+        raise LookupError(
+            "no --target given and HEAD is detached, so there is no current branch to "
+            "default to. Pass --target <branch>."
+        )
+    return name
 
 
 def worktree_roots( repo=None ):
@@ -257,14 +278,16 @@ def main( argv=None ):
         - prints its denominators on every run, clean or not
     """
     parser = argparse.ArgumentParser( description="find live seats whose tree moved under them" )
-    parser.add_argument( "--target", default="wip-v0.2.1-2026.08.29-cjflow-v2-followup",
-                         help="the branch work is delivered INTO" )
+    parser.add_argument( "--target", default=None,
+                         help="the branch work is delivered INTO (default: the branch checked out "
+                              "in this script's tree; refuses on a detached HEAD)" )
     parser.add_argument( "--mine", default=None,
                          help="only exit 1 when THIS worktree path is one of the hits" )
     args = parser.parse_args( argv )
 
     try:
-        stale, stats = scan( args.target )
+        target = args.target if args.target is not None else current_branch()
+        stale, stats = scan( target )
     except LookupError as refusal:
         print( f"REFUSED: {refusal}", file=sys.stderr )
         print( "exit 2 — nothing was scanned. Do not read this as a clean run.", file=sys.stderr )
@@ -276,10 +299,18 @@ def main( argv=None ):
     print( "  worktrees {worktrees} · LIVE-OCCUPIED {occupied} · behind {behind} · "
            "AND overlapping {overlapping}".format( **stats ) )
     if stats[ "unresolved" ]:
-        print( f"  ⚠️ {stats[ 'unresolved' ]} occupied trees could not resolve '{args.target}' "
+        print( f"  ⚠️ {stats[ 'unresolved' ]} occupied trees could not resolve '{target}' "
                "and were NOT judged — not counted clean" )
 
-    if not stale: return 0
+    # A tree that was not judged is not a clean tree. Hits still win: a real overlap is
+    # true whatever else went unjudged.
+    unjudged = stats[ "unresolved" ] > 0
+    if not stale:
+        if unjudged:
+            print( "exit 2 — some occupied trees were NOT judged. Do not read this as a clean run.",
+                   file=sys.stderr )
+            return 2
+        return 0
 
     print()
     print( "🔴 LIVE SEATS EDITING FILES THAT MOVED UNDER THEM:" )
@@ -295,7 +326,12 @@ def main( argv=None ):
 
     if args.mine is not None:
         mine = str( Path( args.mine ).resolve() )
-        return 1 if mine in stale else 0
+        if mine in stale: return 1
+        if unjudged:
+            print( "exit 2 — some occupied trees were NOT judged. Do not read this as a clean run.",
+                   file=sys.stderr )
+            return 2
+        return 0
     return 1
 
 
