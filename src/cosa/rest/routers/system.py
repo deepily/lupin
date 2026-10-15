@@ -649,7 +649,9 @@ async def cleanup_stale_sessions(
     summary     = "Debug WebSocket state",
     description = "Expose complete internal WebSocket manager state for troubleshooting. Debug endpoint."
 )
-async def get_websocket_state():
+async def get_websocket_state(
+    admin_user: dict = Depends( require_admin )
+):
     """
     Get complete internal state of WebSocket manager for debugging.
 
@@ -658,6 +660,7 @@ async def get_websocket_state():
     or protected in production environments.
 
     Requires:
+        - caller holds the admin role (enforced by `require_admin`)
         - lupin_app.main module is accessible
         - WebSocketManager is initialized in main module
 
