@@ -309,15 +309,63 @@ def test_a_result_whose_sample_hash_differs_from_the_file_is_refused_by_the_next
     assert not ( scratch.data / "e2e-results" / "p5-run.json" ).exists()                          # nothing was spent
 
 
-def test_a_result_with_no_sample_hash_is_refused_the_same_way( scratch, capsys ):
-    canary_and_approve( scratch )
-    path   = scratch.data / "e2e-results" / "p5-canary.json"
+def unstamp( path ):
     record = json.loads( path.read_text( encoding="utf-8" ) )
     del record[ "sample_sha256" ]
     path.write_text( json.dumps( record ), encoding="utf-8" )
+
+
+def test_a_result_with_no_sample_hash_stops_a_step_that_spends_and_is_named_and_skipped_by_report( scratch, capsys ):
+    canary_and_approve( scratch )
+    unstamp( scratch.data / "e2e-results" / "p5-canary.json" )
     capsys.readouterr()
-    assert p5.cli( scratch.args( "report" ) ) == 2
-    assert "carries sample hash None" in capsys.readouterr().err
+    for step in ( ( "run", "--ceiling", "300000000" ), ( "sweep", "--ceiling", "36000000" ), ( "approve", "--by", "c", "--why", "w" ) ):
+        assert p5.cli( scratch.args( *step ) ) == 2
+        assert "carries no sample hash" in capsys.readouterr().err
+    assert p5.cli( scratch.args( "report" ) ) == 0                                                # not refused as a whole
+    out = capsys.readouterr().out
+    assert "skipped, no sample hash: p5-canary" in out and "no searches have run yet" in out
+
+
+def test_report_leaves_out_only_the_unstamped_result_and_reads_the_others( scratch, capsys ):
+    canary_and_approve( scratch )
+    assert p5.cli( scratch.args( "run", "--ceiling", "300000000" ) ) == 0
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36000000" ) ) == 0
+    unstamp( scratch.data / "e2e-results" / "p5-run.json" )
+    unstamp( scratch.data / "e2e-results" / "p5s-sample.json" )
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 0
+    out = capsys.readouterr().out
+    assert "skipped, no sample hash: p5-run, p5s-sample" in out
+    assert "0 of 5 needs flipped" in out                                                          # only the canary's 5 needs were read; the run's 25 were skipped
+
+
+def test_every_write_of_a_result_carries_the_stamp_so_a_crash_leaves_a_stamped_file( scratch, monkeypatch, capsys ):
+    from lupin_mcp import reuse_e2e_run as e2r
+    writes = []
+    real   = e2r._write_json
+    def spy( path, record ):
+        writes.append( ( path.name, dict( record ) ) )
+        return real( path, record )
+    monkeypatch.setattr( e2r, "_write_json", spy )
+    canary_and_approve( scratch )
+    want   = hashlib.sha256( ( scratch.data / p5.SAMPLE_FILE ).read_bytes() ).hexdigest()
+    parts  = [ r for n, r in writes if n == "p5-canary.json" ]
+    assert len( parts ) > 1 and all( r[ "sample_sha256" ] == want for r in parts )               # each member's write, not only the last
+    calls = { "n": 0 }
+    real_search = e2r._search
+    def crashing( *a, **k ):
+        calls[ "n" ] += 1
+        if calls[ "n" ] == 12: raise RuntimeError( "the process died" )
+        return real_search( *a, **k )
+    monkeypatch.setattr( e2r, "_search", crashing )
+    with pytest.raises( RuntimeError, match="died" ): p5.cli( scratch.args( "run", "--ceiling", "300000000" ) )
+    run_writes = [ r for n, r in writes if n == "p5-run.json" ]
+    assert len( run_writes ) >= 2 and all( r[ "sample_sha256" ] == want for r in run_writes )
+    assert json.loads( ( scratch.data / "e2e-results" / "p5-run.json" ).read_text( encoding="utf-8" ) )[ "state" ] == "error"
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 0                                                # a stamped partial result is read, not refused
+    assert "skipped" not in capsys.readouterr().out
 
 
 def test_a_changed_sample_file_makes_every_stamped_result_differ( scratch, capsys ):

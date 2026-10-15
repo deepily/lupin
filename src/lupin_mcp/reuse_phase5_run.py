@@ -176,38 +176,29 @@ def result_path( data, run_name ):
     return Path( data ) / "e2e-results" / f"{run_name}.json"
 
 
-def stamp_result( data, run_name, sha ):
+def check_stamps( data, sha, strict ):
     """
-    Put the sample file's hash on a run's result record.
-
-    Requires:
-        - the run's result file exists; sha is the sample file's sha256
-    Ensures:
-        - the record carries sample_sha256 and is otherwise unchanged
-    """
-    path   = result_path( data, run_name )
-    record = json.loads( path.read_text( encoding="utf-8" ) )
-    e2r._write_json( path, { **record, "sample_sha256": sha } )
-
-
-def check_stamps( data, sha ):
-    """
-    Refuse a result whose recorded sample hash is not the sample file's.
+    Refuse a result with another sample hash than the file's, and name the ones with none.
 
     Requires:
         - sha is the sample file's sha256
     Ensures:
-        - returns None when every result of the canary, the run and the sweep that exists carries sha
-        - a result that is missing the hash counts as differing
+        - returns the names of the existing results that carry no sample hash, in the order canary, run, sweep
+        - a result that carries a hash other than sha is refused
+        - with strict, a result that carries none is refused too
     Raises:
-        - DriverRefused naming the result and both hashes
+        - DriverRefused naming the result and the hashes
     """
+    missing = []
     for name in ( f"{PREFIX}-canary", f"{PREFIX}-run", f"{SAMPLE_PREFIX}-sample" ):
         path = result_path( data, name )
         if not path.exists(): continue
         record = json.loads( path.read_text( encoding="utf-8" ) )
-        got    = record[ "sample_sha256" ] if "sample_sha256" in record else None
-        if got != sha: raise s1.DriverRefused( f"result {name} carries sample hash {got}, but the sample file's is {sha}" )
+        if "sample_sha256" not in record:
+            if strict: raise s1.DriverRefused( f"result {name} carries no sample hash, so it cannot be tied to the recorded sample" )
+            missing.append( name )
+        elif record[ "sample_sha256" ] != sha: raise s1.DriverRefused( f"result {name} carries sample hash {record[ 'sample_sha256' ]}, but the sample file's is {sha}" )
+    return missing
 
 
 def canary_approved( data ):
@@ -279,8 +270,7 @@ def sweep( args, items, record, parts, sha ):
     chosen = [ i for i in items if i[ "member" ] in set( record[ "members" ] ) ]
     env    = e2r._open_env( args.root, args.data, args.ledger, args.live, frun.repeat_asks( 1, "full", frun.QUESTION_NAMES[ "new" ] ), args.pack_size )
     frun.check_excludes( chosen, env.root, env.data )
-    print( e2r.run_line( e2r.run_searches( env, f"{SAMPLE_PREFIX}-sample", chosen, {}, args.ceiling ) ) )
-    stamp_result( args.data, f"{SAMPLE_PREFIX}-sample", sha )
+    print( e2r.run_line( e2r.run_searches( env, f"{SAMPLE_PREFIX}-sample", chosen, {}, args.ceiling, stamp={ "sample_sha256": sha } ) ) )
     return 0
 
 
@@ -317,7 +307,8 @@ def main( argv=None ):
         - estimate prints the three parts for the file's own count of needs; sample records the seed, members, arm and index once and prints the record
         - sweep, canary, approve, run and report need the recorded sample first, so a step that spends is refused without it
         - canary, approve, run and report hand the flip driver the fixed settings and return its code, 2 after a refusal of its own
-        - each result of the canary, the run and the sweep carries the sample file's sha256; a result whose hash differs is refused by every later step
+        - each write of a canary, run or sweep result carries the sample file's sha256, so a run that stops partway still leaves a stamped file
+        - a result whose hash differs is refused by every later step; one that carries none is refused by a step that spends and is named and skipped by report
         - report also prints the recorded sample
     Raises:
         - the refusals of the pinned hash, the seed, the sample record and the sample size, before anything is sent
@@ -333,10 +324,11 @@ def main( argv=None ):
         return 0
     record = read_sample( args.data, args.needs_sha )
     sha    = sample_sha( args.data )
-    check_stamps( args.data, sha )
+    missing = check_stamps( args.data, sha, strict=args.command != "report" )
     if args.command == "sweep": return sweep( args, items, record, parts, sha )
-    code = frun.cli( flip_argv( args, parts ), allow_fresh=True )
-    if code == 0 and args.command in ( "canary", "run" ): stamp_result( args.data, f"{PREFIX}-{args.command}", sha )
+    skip = tuple( name[ len( PREFIX ) + 1: ] for name in missing if name.startswith( f"{PREFIX}-" ) )
+    if missing: print( f"skipped, no sample hash: {', '.join( missing )}" )
+    code = frun.cli( flip_argv( args, parts ), allow_fresh=True, stamp={ "sample_sha256": sha }, skip_results=skip )
     if args.command == "report": print( f"sample: seed {record[ 'seed' ]!r}, arm {record[ 'arm' ]!r}, index {record[ 'index_sha' ]}, members {', '.join( record[ 'members' ] )}" )
     return code
 

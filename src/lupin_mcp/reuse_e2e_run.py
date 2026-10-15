@@ -136,14 +136,16 @@ def _totals( searches, budget ):
              "requests": sum( s[ "requests" ] for s in searches ), "unasked": sum( s[ "unasked" ] for s in searches ) }
 
 
-def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior=(), canary_run=None ):
+def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior=(), canary_run=None, stamp=None ):
     """
     Run every member's searches in order, both questions, as one ledger run.
 
     Requires:
         - items are { member, need } in the frozen order; twins maps a member to its twins' ids
         - prior holds the search records of an earlier part of the same measurement, counted in the reliability window
+        - stamp is None or a dict of fields every write of the result file carries
     Ensures:
+        - the result file is written whole or not at all, and each write carries the stamp, so a run that stops partway leaves a stamped file
         - nothing is sent and no ledger run is opened when a check refuses: the ledger is read first, and a ceiling that with
           the ledger total passes the account limit is refused by the ledger
         - searches run member by member, the questions in the order of env.asks, and the result file is rewritten after each member
@@ -165,7 +167,7 @@ def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior
     except ValueError as e: raise s1.DriverRefused( str( e ) ) from e
     record = { "format": FORMAT, "run_name": run_name, "kind": kind, "canary_run": canary_run, "pack_size": env.pack_size, "ceiling_tokens": ceiling_tokens,
                "ledger_limit": ledger_limit, "ledger_total_before": ledger_total, "questions": list( env.asks ), "members": [ i[ "member" ] for i in items ],
-               "started_at": env.clock(), "state": "running", "stopped": None, "searches": [] }
+               "started_at": env.clock(), "state": "running", "stopped": None, "searches": [], **( {} if stamp is None else stamp ) }
     path, stop = env.results_dir / f"{run_name}.json", None
     try:
         ctx = _context( env, env.transport_factory( budget ), budget, cap )
@@ -191,6 +193,11 @@ def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior
     return { **record, "totals": _totals( record[ "searches" ], budget ) }
 
 
+def _stamp_of( spec ):
+    """Ensures: returns the spec's stamp, the fields its results carry, or None."""
+    return spec[ "stamp" ] if "stamp" in spec else None
+
+
 def _canary_path( env, spec ): return env.results_dir / f"{spec[ 'prefix' ]}-canary.canary.json"
 
 
@@ -214,7 +221,7 @@ def run_canary( env, items, twins, ceiling_tokens, spec=None ):
     limit, total = env.ledger.snapshot()
     if spec[ "estimate" ] > limit - total:
         raise s1.DriverRefused( f"the estimate of {spec[ 'estimate' ]} tokens is more than the {limit - total} tokens of room left on the account, so the run could not finish" )
-    run  = run_searches( env, name, items[ :spec[ "canary_members" ] ], twins, ceiling_tokens, kind="canary" )
+    run  = run_searches( env, name, items[ :spec[ "canary_members" ] ], twins, ceiling_tokens, kind="canary", stamp=_stamp_of( spec ) )
     limit, total = env.ledger.snapshot()
     tokens = run[ "totals" ][ "spent_tokens" ]
     asked  = len( run[ "members" ] )
@@ -295,7 +302,7 @@ def run_full( env, items, twins, ceiling_tokens, spec=None ):
     if not path.exists() or json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is None: raise s1.CanaryNotApproved( "the canary has not been approved" )
     canary = f"{spec[ 'prefix' ]}-canary"
     prior  = json.loads( ( env.results_dir / f"{canary}.json" ).read_text( encoding="utf-8" ) )[ "searches" ]
-    return run_searches( env, f"{spec[ 'prefix' ]}-run", items[ spec[ "canary_members" ]: ], twins, ceiling_tokens, prior=prior, canary_run=canary )
+    return run_searches( env, f"{spec[ 'prefix' ]}-run", items[ spec[ "canary_members" ]: ], twins, ceiling_tokens, prior=prior, canary_run=canary, stamp=_stamp_of( spec ) )
 
 
 def ask_old( ctx, item ):

@@ -201,12 +201,13 @@ def _parser():
     return ap
 
 
-def main( argv=None, *, allow_fresh=False ):
+def main( argv=None, *, allow_fresh=False, stamp=None, skip_results=() ):
     """
     Run one step of the flip-rate test.
 
     Requires:
         - allow_fresh is set in code by the confirmation driver; the command line has no flag for it
+        - stamp is None or fields every result file of the run carries; skip_results names the parts, canary or run, a report leaves out
     Ensures:
         - returns 0 after the step; prints how it ended
     Raises:
@@ -218,7 +219,7 @@ def main( argv=None, *, allow_fresh=False ):
     prefix = _check_options( args )
     rr.check_paths( root, args.data, args.ledger, args.live )                                    # a path refusal comes before the slow reads
     items = load_flip_needs( args.needs, args.needs_sha, allow_fresh=allow_fresh )
-    spec  = { "prefix": prefix, "members": len( items ), "estimate": args.estimate_tokens, "canary_members": e2r.CANARY_MEMBERS }
+    spec  = { "prefix": prefix, "members": len( items ), "estimate": args.estimate_tokens, "canary_members": e2r.CANARY_MEMBERS, "stamp": stamp }
     if args.question == "new" and args.route != "full": raise s1.DriverRefused( "the new question has no candidate stage; give --route full" )
     env   = e2r._open_env( root, args.data, args.ledger, args.live, repeat_asks( args.repeats, args.route, QUESTION_NAMES[ args.question ] ), args.pack_size )
     if args.command in ( "canary", "run" ): check_excludes( items, env.root, env.data )
@@ -228,14 +229,14 @@ def main( argv=None, *, allow_fresh=False ):
         print( f"canary approved by {args.by}" )
     elif args.command == "run": print( e2r.run_line( e2r.run_full( env, items, {}, args.ceiling, spec=spec ) ) )
     else:
-        runs = [ json.loads( path.read_text( encoding="utf-8" ) ) for path in ( env.results_dir / f"{prefix}-{part}.json" for part in ( "canary", "run" ) ) if path.exists() ]
+        runs = [ json.loads( path.read_text( encoding="utf-8" ) ) for path in ( env.results_dir / f"{prefix}-{part}.json" for part in ( "canary", "run" ) if part not in skip_results ) if path.exists() ]
         check_repeats( runs, args.repeats )
         searches = [ s for run in runs for s in run[ "searches" ] ]
         print( "\n".join( report_lines( searches, items, args.repeats ) ) )
     return 0
 
 
-def cli( argv=None, *, allow_fresh=False ):
+def cli( argv=None, *, allow_fresh=False, stamp=None, skip_results=() ):
     """
     Run main as a command line: a refusal is one line and exit code 2.
 
@@ -244,7 +245,7 @@ def cli( argv=None, *, allow_fresh=False ):
         - returns 2 after one line on the error stream for a refusal of the runner, the driver, the frozen needs or the ledger
         - any other error propagates untouched, so a crash is never read as a refusal
     """
-    try: return main( argv, allow_fresh=allow_fresh )
+    try: return main( argv, allow_fresh=allow_fresh, stamp=stamp, skip_results=skip_results )
     except ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
              e2e.FrozenInputRefused, rl.AccountLimitReached, rl.LedgerUnreadable ) as e:
         print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
