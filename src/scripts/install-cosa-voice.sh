@@ -473,18 +473,12 @@ else
     # The helper keeps the notifier's own status and message. Exit 0 delivered, 3 skipped
     # (server reached, nobody listening), 1 failed. No server to reach is also a skip.
     INSTALL_RC=0
+    # shellcheck source=lib/installer-notify-step.sh
+    . "$LUPIN_ROOT/src/scripts/lib/installer-notify-step.sh"
     if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
-        echo ""
-        echo "  Sending test notification..."
-        PROBE_RC=0
-        TEST_RESULT=$( LUPIN_ROOT="$LUPIN_ROOT" "$VENV_PYTHON" "$LUPIN_ROOT/src/scripts/lib/installer_notify_probe.py" "$SERVER_URL" 2>&1 ) || PROBE_RC=$?
-        case "$PROBE_RC" in
-            0) pass_check "Test notification delivered" ;;
-            3) warn_check "Test notification SKIPPED: server reached, no listener connected ($TEST_RESULT)" ;;
-            *) fail_check "Test notification failed ($TEST_RESULT)"; INSTALL_RC=1 ;;
-        esac
+        run_test_notification reachable
     else
-        warn_check "Test notification SKIPPED: no server to reach at $SERVER_URL"
+        run_test_notification unreachable
     fi
 
     # ── Summary ──────────────────────────────────────────────────────

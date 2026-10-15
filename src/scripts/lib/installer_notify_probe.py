@@ -33,9 +33,11 @@ def classify( resp ):
         - returns ( exit_code, line ); the line starts with ok, skipped or fail
     """
     if resp is None: return EXIT_FAILED, "fail: no response from the notifier"
-    if resp.success: return EXIT_OK, f"ok: {resp.status}"
+    # The server answers a no-listener send with success=True and this status, so the status
+    # is read first: checking success first reported "delivered" for a send nobody received.
     if resp.status == NO_LISTENER_STATUS:
         return EXIT_SKIPPED, f"skipped: {resp.status}: {resp.message}"
+    if resp.success: return EXIT_OK, f"ok: {resp.status}"
     return EXIT_FAILED, f"fail: {resp.status}: {resp.message}"
 
 
