@@ -50,6 +50,14 @@ The receipt's `candidate_stage.error` names the failure.
 The `candidate_stage` block holds the arm, manifest hash, embed models, list sizes and heads, K and the ids.
 It also holds `entries_total`, `entries_asked` and `entries_not_asked`, which add up.
 A receipt of the retired page routes (`pages`, `pages_then_full`) stays readable and replays to error `ROUTE_RETIRED`.
+
+A first sweep that sits near a cut-off is widened. The widening runs only when the stage ran, the sweeper is packed,
+and the causes are `NEAR_CUTOFF` with at most `LOW_CONFIDENCE`. It asks the stage again for 512 ids,
+sweeps the ids outside the first set in packs of their own, and decides over both sweeps.
+The receipt then holds `widened: true`, the wide `K`, `widened_ids` and a `widened` stage.
+A failed wide call keeps the first sweep, adds `CALL_FAILED` and records `candidate_stage.widen_error`.
+A replay sweeps the recorded `widened_ids` and never recomputes the widening.
+The shipped policy has no band, so nothing widens until a band is fitted.
 One call budget spans the sweep, so a spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
 `stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.
 `stats.tokens_in` and `stats.tokens_out` sum the `usage` that Jev reported on each live answered call, across
