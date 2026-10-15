@@ -524,6 +524,24 @@ class TestCopyAndSerialization( unittest.TestCase ):
 class TestRuntimeStatsAndReplay( unittest.TestCase ):
     """update_runtime_stats (first-run + subsequent) + record_replay."""
 
+    def test_default_runtime_stats_are_not_shared_between_snapshots( self ):
+        """Two snapshots built without runtime_stats each get their own dict."""
+        with _embed_mocked():
+            first, second = SolutionSnapshot( debug=False ), SolutionSnapshot( debug=False )
+        self.assertIsNot( first.runtime_stats, second.runtime_stats )
+        timer = Mock()
+        timer.get_delta_ms.return_value = 250
+        first.update_runtime_stats( timer )
+        first.update_runtime_stats( timer )
+        self.assertEqual( first.runtime_stats[ "run_count" ], 1 )
+        self.assertEqual( second.runtime_stats, SolutionSnapshot.get_default_stats_dict() )
+
+    def test_an_empty_runtime_stats_dict_is_kept_as_given( self ):
+        """Only None means default; a caller's empty dict is the caller's."""
+        with _embed_mocked():
+            snap = SolutionSnapshot( runtime_stats={}, debug=False )
+        self.assertEqual( snap.runtime_stats, {} )
+
     def test_update_runtime_stats_first_run( self ):
         """run_count == -1 → records first_run_ms and flips run_count to 0."""
         with _embed_mocked():

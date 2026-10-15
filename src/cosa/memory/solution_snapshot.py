@@ -188,7 +188,7 @@ class SolutionSnapshot( RunnableCode ):
     def __init__( self, push_counter: int=-1, question: str="", question_normalized: str="", question_gist: str="", synonymous_questions: OrderedDict=OrderedDict(), synonymous_question_gists: OrderedDict=OrderedDict(), non_synonymous_questions: list=[],
                   last_question_asked: str="", answer: str="", answer_conversational: str="", error: str="", routing_command: str="", agent_class_name: Optional[str]=None,
                   created_date: str=None, updated_date: str=None, run_date: str=None,
-                  runtime_stats: dict=get_default_stats_dict(),
+                  runtime_stats: dict=None,
                   id_hash: str="", solution_summary: str="", code: list[str]=[], solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
                   programming_language: str="Python", language_version: str="3.10",
                   question_embedding: list[float]=[ ], question_normalized_embedding: list[float]=[ ], question_gist_embedding: list[float]=[ ], solution_embedding: list[float]=[ ], code_embedding: list[float]=[ ], thoughts_embedding: list[float]=[ ], solution_gist_embedding: list[float]=[ ],
@@ -319,7 +319,7 @@ class SolutionSnapshot( RunnableCode ):
         self.updated_date          = updated_date if updated_date else self.get_timestamp()
         self.created_date          = created_date if created_date else self.get_timestamp()
         self.run_date              = run_date if run_date else self.get_timestamp( microseconds=True )
-        self.runtime_stats         = runtime_stats
+        self.runtime_stats         = runtime_stats if runtime_stats is not None else SolutionSnapshot.get_default_stats_dict()
         
         if id_hash == "":
             self.id_hash           = SolutionSnapshot.generate_id_hash( self.push_counter, self.run_date )
