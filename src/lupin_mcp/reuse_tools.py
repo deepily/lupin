@@ -784,11 +784,11 @@ def page_candidates( wiki_dir, symbols ):
     Requires:
         - symbols are the index's public symbol dicts, with id and file
     Ensures:
-        - returns [ { slug, text, scope } ] in the order of the wiki index file: one per bullet line whose page exists
+        - returns [ { slug, text, pins, scope } ] in the order of the wiki index file: one per bullet line whose page exists
           under capabilities/ and pins at least one symbol the index holds
         - text is the line after its link; scope is scope_of_line() of that text plus the path of each pinned file the line does not already cover
         - a line that names no package is scoped by its pins alone, so the web-client pages, whose files are TypeScript, are candidates
-        - a pin that names no indexed symbol is ignored
+        - a pin that names no indexed symbol is ignored, and pins lists the indexed ones sorted by id
         - a line the egress screen would drop is left out
     """
     wiki, files = pathlib.Path( wiki_dir ), { r[ "id" ]: r[ "file" ] for r in symbols }
@@ -804,7 +804,8 @@ def page_candidates( wiki_dir, symbols ):
         text   = m.group( 2 ).strip()
         scope  = scope_of_line( text )
         if ids and not c1_hits( { "id": m.group( 1 ), "sig": "", "doc": text } ):
-            out.append( { "slug": m.group( 1 ), "text": text, "scope": sorted( set( scope ) | { files[ sid ] for sid in ids if not in_scope( files[ sid ], scope ) } ) } )
+            out.append( { "slug": m.group( 1 ), "text": text, "pins": sorted( set( ids ) ),
+                          "scope": sorted( set( scope ) | { files[ sid ] for sid in ids if not in_scope( files[ sid ], scope ) } ) } )
     return out
 
 

@@ -114,8 +114,8 @@ def test_page_candidates_keeps_only_pages_that_exist_and_have_a_live_pin( env ):
     write_wiki( root, lines, pins, pages=( "good", "nopins", "dangling", "noscope", "leak" ) )                     # "nofile" has no page file
     symbols = [ { "id": "cosa.feeds.parse_feed", "file": "src/cosa/feeds.py" }, { "id": "cosa.mathx.add", "file": "src/cosa/mathx.py" } ]
     assert rt.page_candidates( root / "src" / "docs" / "wiki", symbols ) == [
-        { "slug": "good", "text": "fine. `cosa.feeds`", "scope": [ "cosa.feeds" ] },
-        { "slug": "noscope", "text": "no package named", "scope": [ "src/cosa/mathx.py" ] } ]                # a line that names no package is scoped by its pins alone
+        { "slug": "good", "text": "fine. `cosa.feeds`", "pins": [ "cosa.feeds.parse_feed" ], "scope": [ "cosa.feeds" ] },
+        { "slug": "noscope", "text": "no package named", "pins": [ "cosa.mathx.add" ], "scope": [ "src/cosa/mathx.py" ] } ]                # a line that names no package is scoped by its pins alone
     assert rt.page_candidates( root / "src" / "docs" / "nowiki", symbols ) == []
 
 
@@ -124,7 +124,7 @@ def test_a_page_scope_is_its_index_line_plus_the_files_it_pins( env ):
     write_wiki( root, { "wide": "x. `cosa.feeds`" }, { "wide": "cosa.mathx.add@bbbbbbbbbb" }, pages=( "wide", ) )
     symbols = [ { "id": "cosa.mathx.add", "file": "src/cosa/mathx.py" } ]
     got = rt.page_candidates( root / "src" / "docs" / "wiki", symbols )
-    assert got == [ { "slug": "wide", "text": "x. `cosa.feeds`", "scope": [ "cosa.feeds", "src/cosa/mathx.py" ] } ]
+    assert got == [ { "slug": "wide", "text": "x. `cosa.feeds`", "pins": [ "cosa.mathx.add" ], "scope": [ "cosa.feeds", "src/cosa/mathx.py" ] } ]
 
 
 def test_a_pinned_typescript_file_is_named_by_its_path_and_a_sibling_is_not_in_scope( env ):
