@@ -31,6 +31,6 @@ The model helpers and the DOM builders of the finished-tasks pane: three status 
 
 ## DOM (`finishedTasksTable`)
 - `pillIdFor( status )` gives `finished-pill-` plus the status with `_` as `-`. `statusFace` and `statusGlyph` read a status's icon and label from `PILL_FACES` by own key only. The glyph is an `aria-hidden` prefix in the when cell.
-- `renderFinishedControls( opts )` builds one pill per status in order with `aria-pressed` meaning shown, and the slider. A pill that was never measured keeps the em dash, and a zero pill is dimmed, not hidden.
+- `renderFinishedControls( opts )` builds one pill per status in order, with `aria-pressed` meaning shown, and the slider. Every count starts as the em dash. `FinishedTasksRenderer` adds `finished-pill-zero` to a pill measured at zero, so it is dimmed and stays shown.
 - `renderFinishedTasksTable( rows, nowMs )` renders the when, what, who and why columns, with `data-status` and a `task-status-` class on each row.
 - `renderFinishedSentinel( variant, text )` is a one-line notice whose test id ends in the variant.

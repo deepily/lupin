@@ -25,7 +25,7 @@ Text helpers and the panel for the create gate readout, closed against new ticke
 
 ## Text (`flowRatioModel`)
 - `isNum` is the shared number test. `flowRatioWindowDays( hours )` is whole days, at least 1, or null for an unusable window.
-- `flowRatioPercentText( payload )` is the rounded percent, `∞` when nothing closed but something was created, else a dash.
+- `flowRatioPercentText( payload )` is the rounded percent, `∞` when the ratio is not a number and created is above zero, else a dash.
 - `flowRatioRoomText( payload )` reads `close_needed`, then `room_for`, then `FULL` at zero room. It reads the payload and computes nothing.
 - `formatFlowRatio( payload, provisionalDays )` is the clause after the word Gate, or empty for an unusable payload. While a slider drags it says `recounting…` and withholds the old counts.
 - `flowRatioReadoutText` wraps that clause as a middle dot, `Gate:` and the clause, or empty. `flowRatioLongForm` adds the hover caveat that creation counts every project and priority.
