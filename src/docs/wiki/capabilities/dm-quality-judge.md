@@ -17,7 +17,7 @@ The DM quality judge grades a peer-DM body for length, directness and tone, and 
 - `get_dm_quality_judge` reads `dm quality judge version`. Version 2 builds `DmQualityJudgeV2`. Anything else, or an unreadable config, builds `DmQualityJudge`. Version 2 is imported only when chosen.
 - Both judges expose `judge( body_text )`. It returns a dict with `length`, `directness`, `tone` and `overall`, and never raises.
 - `length_bucket` puts the word count in one of five bands, weight 2 down to -2. It also returns `overage`, the count divided by the target, to one decimal. The emoji repeats once per fixed word interval.
-- `DmQualityJudge` skips the model when `dm quality qualitative enabled` is false, which is the default. Directness and tone are then withheld, and the overall grade is the length grade.
+- `DmQualityJudge` skips the model when `dm quality qualitative enabled` is false. That is the code default; the shipped INI turns it on. Directness and tone are then withheld, and the overall grade is the length grade.
 - Past the qualitative word ceiling the model is skipped as well, and both dimensions are marked too long.
 - Otherwise it makes up to 3 attempts, pausing 0.5 and then 1.0 seconds, with a nudge added on a retry. If all fail, both dimensions become unavailable.
 - `DmQualityJudgeV2` has the same shape. Its directness comes from a checked extraction (see [[dm-judge-directness-extraction]]), and its tone from the rubric in [[dm-judge-grade-scale]].
