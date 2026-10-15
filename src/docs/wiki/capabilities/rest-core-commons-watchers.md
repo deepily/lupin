@@ -13,7 +13,7 @@ Daemons that tail the commons store and turn entries into notifications, and the
 ## Ack watcher
 - `CommonsAckWatcher` tails `broadcast-acks` and saves and pushes a `commons_broadcast_ack` notification to the user who sent each broadcast.
 - `register_broadcast( id, user_id, expected )` starts tracking and raises `ValueError` on a repeat id; the endpoint turns that into 409. `unregister_broadcast` is silent for an unknown id. `is_in_flight` is false once the entry expires.
-- `tick` reads entries newer than its cursor, pushes for those whose broadcast is in flight and returns the count dispatched. Expired entries are pruned as it goes, and by `register_broadcast` and `is_in_flight`.
+- `tick` reads entries newer than its cursor, pushes for those whose broadcast is in flight and returns the count dispatched. It prunes expired entries only while handling an entry that has a `broadcast_id`. `register_broadcast` and `is_in_flight` prune too.
 
 ## Activity watcher
 - `CommonsActivityWatcher` tails every commons topic except the `commons traffic visibility exclude topics` list, default `presence` and `system-events`.

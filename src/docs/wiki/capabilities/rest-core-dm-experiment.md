@@ -21,7 +21,8 @@ The runtime object for the two-arm direct-message verbosity pilot. It loads the 
 - `assignment_at( arrival_utc )` is the same lookup through the process singleton. Neither reads the clock; the caller resolves the arrival once, so one send scores against one arm.
 
 ## Building and holding it
-- `load_default_policy` returns the no-slot policy when `is_suspended` is true, which is the default, and reads nothing then. Otherwise it reads the schedule JSON and the INI once. A missing or malformed schedule file also assigns nothing. A slot missing a required key raises `KeyError`.
+- `is_suspended` reads the INI key `dm experiment suspended`. It is true when the key is unset or unreadable.
+- `load_default_policy` returns the no-slot policy when `is_suspended` is true and reads nothing then. Otherwise it reads the schedule JSON and the INI once. A missing or malformed schedule file also assigns nothing. A slot missing a required key raises `KeyError`.
 - `get_policy` loads it on first use and returns the singleton. `reset_policy` drops it so the next call reloads; use it after editing the schedule or config and bouncing.
 - `set_policy` replaces the singleton, as a test or operator seam.
 - `make_policy( slots=..., override_arm=..., reject_threshold=... )` builds one from raw slots, for tests. An override arm outside the valid arms, `blind` and `rejecting`, becomes `None`.
