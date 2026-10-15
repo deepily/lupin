@@ -18,6 +18,11 @@ Nothing on this page exists in code yet. It records what the approved plan will 
 - The redactor goes in `lupin_mcp.reuse_redact`. The wiring goes in `lupin_mcp.reuse_tools`.
 - Vectors come from the existing `/api/embeddings` endpoints, which gain a `role` field and an `engines` block.
 
+## Offline comparison tooling
+- `arms.py` wires the five arms onto the candidate stage. They are BM25 alone, plus purpose lines, plus one vector list, plus two vector lists, plus the wiki list. `arm_metrics.py` holds recall of the full-sweep shortlist, twin rank and the verdict replay. It also holds the one-or-two-vectors rule. `arm_report.py` writes the results page. Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-plan.md`.
+- It measures nothing by itself. The caller brings the shortlists, rankings and cached answers.
+- `refuse_fresh_needs` stops a run that holds a need whose id starts with `fresh-`. Those needs are reserved for the confirmation phase.
+
 ## Don't
 - Don't treat a name here as importable. No module named above exists yet.
 - Don't use a page-first route. The plan removes it in its wiring phase.
