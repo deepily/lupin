@@ -74,6 +74,9 @@ export interface BroadcastWrapperOptions {
   whitelist?       : ReadonlySet<LupinEventType>;
 }
 
+/**
+ * Copies whitelisted bus events to other tabs and replays incoming ones locally.
+ */
 class BroadcastWrapperImpl implements BroadcastWrapper {
   private readonly bus       : EventBus;
   private readonly whitelist : ReadonlySet<LupinEventType>;
@@ -82,12 +85,18 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
   private unsubs  : Array<() => void> = [];
   private started = false;
 
+  /**
+   * Keeps the bus, whitelist and channel factory, with defaults for the last two.
+   */
   constructor(opts: BroadcastWrapperOptions) {
     this.bus            = opts.bus;
     this.whitelist      = opts.whitelist ?? BROADCAST_WHITELIST;
     this.channelFactory = opts.channelFactory ?? defaultChannelFactory;
   }
 
+  /**
+   * Opens the channel, replays incoming messages and forwards whitelisted bus events.
+   */
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -104,6 +113,11 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
     }
   }
 
+  /**
+   * Unsubscribes from the bus and closes the channel.
+   *
+   * Does nothing if not started.
+   */
   stop(): void {
     /* c8 ignore next */ // defensive: idempotency guard — calling stop() before start() or twice is a no-op; tests cover the started-then-stop path but not the never-started branch.
     if (!this.started) return;
@@ -142,6 +156,9 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
 }
 
 /* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + multi-clause type-guard predicate. Each predicate clause registers as a branch; the type-guard is exercised end-to-end (tests pass both valid and invalid LupinEvent shapes) but each individual short-circuit doesn't get its own dedicated test.
+/**
+ * Says whether a value has the shape of a bus event.
+ */
 function isLupinEvent(v: unknown): v is LupinEvent<unknown> {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
@@ -154,6 +171,9 @@ function isLupinEvent(v: unknown): v is LupinEvent<unknown> {
 }
 /* c8 ignore stop */
 
+/**
+ * Creates a browser broadcast channel with the given name.
+ */
 function defaultChannelFactory(name: string): BroadcastChannelLike {
   // Browser + Node 18+ both expose `BroadcastChannel` as a global.
   return new globalThis.BroadcastChannel(name) as unknown as BroadcastChannelLike;

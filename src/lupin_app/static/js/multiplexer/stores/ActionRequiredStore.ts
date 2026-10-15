@@ -394,6 +394,9 @@ interface ActorEntry {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks pending action-required prompts with countdowns and a response flow.
+ */
 class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly bus             : EventBus;
   private readonly api             : ActionRequiredApiClient;
@@ -414,6 +417,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus, an API client and optional runtime hooks.
+   */
   constructor(opts: ActionRequiredStoreOptions) {
     this.bus             = opts.bus;
     this.api             = opts.api;
@@ -434,19 +440,23 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.restore();
   }
 
+  /**
+   * Returns the data of every tracked prompt, in insertion order.
+   */
   list(): ReadonlyArray<ActionRequiredItem> {
     return Array.from(this.entries.values()).map(e => e.data);
   }
 
+  /**
+   * Returns the prompt with the given ID hash, or undefined when it is not tracked.
+   */
   getById(idHash: string): ActionRequiredItem | undefined {
     return this.entries.get(idHash)?.data;
   }
 
-  // Phase 6b — non-optimistic path (per Pass 2 A1). Lifecycle:
-  //   pending|failed → submitting → (POST) → responded (terminal) | failed (re-tryable)
-  // Failed entries can be re-driven through respondAndAwait() again. The interval
-  // is stopped when state leaves "pending" (existing tick guard); we do NOT restart
-  // it on failure (countdown is suspended for the duration of the user's retry).
+  /**
+   * Posts the user's answer for a prompt and waits for the server to accept it.
+   */
   async respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void> {
     const entry = this.entries.get(idHash);
     if (!entry) throw new Error(`Unknown action_required id: ${idHash}`);
@@ -483,6 +493,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops all listeners, timers and state machines, then clears the entries.
+   */
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
     for (const entry of this.entries.values()) {
@@ -684,6 +697,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.expireEntry(entry);
   }
 
+  /**
+   * Pauses or resumes the head prompt's countdown and returns true while paused.
+   */
   togglePause(idHash: string): boolean {
     const head  = this.entries.values().next().value;
     const entry = this.entries.get(idHash);
@@ -723,6 +739,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     return false;
   }
 
+  /**
+   * Stores the current step on a prompt and saves live prompts.
+   */
   recordStep(idHash: string, step: ActionRequiredStep): void {
     const entry = this.entries.get(idHash);
     if (entry === undefined) return;

@@ -97,6 +97,11 @@ function refusalText( verb: string, err: unknown ): string {
   return `${verb} (network)`;
 }
 
+/**
+ * Holds the flow ratio reading, its settings and the manager pull state for the page.
+ *
+ * It polls the server, saves operator changes, and emits a change event after each update.
+ */
 class FlowRatioStoreImpl implements FlowRatioStore {
   private readonly bus             : EventBus;
   private readonly api             : FlowRatioApiClient;
@@ -112,6 +117,9 @@ class FlowRatioStoreImpl implements FlowRatioStore {
   private inFlight     = false;
   private pollHandle   : number | null = null;
 
+  /**
+   * Sets up the store from the bus, API client and optional clock, timer and error sink.
+   */
   constructor( opts: FlowRatioStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -125,11 +133,28 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.errorFn         = opts.errorFn ?? ( ( m ) => console.error( `[FlowRatioStore] ${m}` ) );
   }
 
+  /**
+   * Returns the last flow ratio reading, or null if none has been read.
+   */
   ratio(): FlowRatioPayload | null { return this.lastRatio; }
+  /**
+   * Returns the last flow ratio settings read from the server, or null.
+   */
   settings(): FlowRatioSettings | null { return this.lastSettings; }
+  /**
+   * Returns the last manager pull state, or null if it has not been read.
+   */
   managerPull(): ManagerPullState | null { return this.lastPull; }
+  /**
+   * Returns the status message from the last save or reset, or null.
+   */
   controlsMessage(): string | null { return this.message; }
 
+  /**
+   * Re-reads the ratio from the server and emits a change event.
+   *
+   * Settings and manager pull state are re-read only while they are missing or unusable. Overlapping calls are ignored.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual refresh landing on a tick cannot double-fetch
     this.inFlight = true;
@@ -146,6 +171,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     }
   }
 
+  /**
+   * Sends a settings patch to the server and keeps the result.
+   *
+   * On failure it records a refusal message and re-reads the settings. It always re-reads the ratio afterwards.
+   */
   async saveSettings( patch: FlowRatioSettingsPatch ): Promise<void> {
     this.message = null;
     try {
@@ -158,6 +188,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Freezes or allows the manager pull on the server and records a status message.
+   *
+   * On failure it records a refusal and re-reads the state.
+   */
   async saveManagerPull( disabled: boolean ): Promise<void> {
     this.message = null;
     try {
@@ -170,6 +205,11 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Asks the server to delete the saved settings, then re-reads the ratio.
+   *
+   * A server refusal becomes a message. A network failure is only logged.
+   */
   async resetSettings(): Promise<void> {
     this.message = null;
     try {
@@ -183,12 +223,20 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     this.emit();
   }
 
+  /**
+   * Starts refreshing on a fixed interval, with one refresh right away.
+   *
+   * Any earlier polling is stopped first.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FLOW_RATIO_POLL_INTERVAL_MS );
   }
 
+  /**
+   * Stops the polling timer if one is running.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -197,6 +245,9 @@ class FlowRatioStoreImpl implements FlowRatioStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops polling so a test leaves no timer behind.
+   */
   disposeForTesting(): void {
     this.stopPolling();
   }

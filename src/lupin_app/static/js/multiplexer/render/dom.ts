@@ -126,13 +126,9 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
 // `Element.moveBefore` (Chrome 133+) is not in this TypeScript DOM lib yet.
 type MovableParent = Element & { moveBefore?: (node: Node, child: Node | null) => void };
 
-// Put `el` in front of `cursor`. Row 11793820: `insertBefore` detaches a child
-// before re-inserting it, so a card that moves to the top loses the scroll
-// position inside it (Chrome, bundle 3d959d529554: 100 → 0). `moveBefore` moves
-// an element that is ALREADY a child without detaching it, keeping scroll, focus
-// and running animations. It throws where such a move is not allowed (for
-// example a parent not in the document), and the plain insert still places the
-// element. A new element was never attached, so it is simply inserted.
+/**
+ * Puts an element before a cursor element, keeping scroll where possible.
+ */
 function placeBefore(parent: MovableParent, el: Element, cursor: Element | null): void {
   if (el.parentNode === parent && typeof parent.moveBefore === "function") {
     try {
@@ -145,11 +141,9 @@ function placeBefore(parent: MovableParent, el: Element, cursor: Element | null)
   parent.insertBefore(el, cursor);
 }
 
-// Run `update(el)` and return the element that now holds `el`'s place under
-// `parent`. An update that keeps its node returns `el`. An update that called
-// `el.replaceWith(fresh)` leaves `fresh` exactly where `el` stood, so it is read
-// off the neighbour captured beforehand — O(1). Anything else an update might do
-// (remove the node, insert elsewhere) falls back to the old keyed scan.
+/**
+ * Runs an update on an element and returns the element now in its place.
+ */
 function updateAndLocate<T extends KeyedEntry>(
   parent : Element,
   el     : Element,
@@ -168,6 +162,9 @@ function updateAndLocate<T extends KeyedEntry>(
 
 // CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.
 /* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
+/**
+ * Escapes a string for use inside a CSS selector.
+ */
 function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);

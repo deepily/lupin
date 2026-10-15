@@ -49,6 +49,9 @@ const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_WINDOW : CommonsActivityWindow = "today";
 const HISTORY_LIMIT  = 200;
 
+/**
+ * Returns the default commons filter with no direction or persona and all kinds.
+ */
 function defaultFilter(): CommonsActivityFilter {
   return { direction: null, kind: "all", persona: null };
 }
@@ -131,6 +134,9 @@ export interface CommonsStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Holds cached commons entries with their filter, window, and disabled flag.
+ */
 class CommonsStoreImpl implements CommonsStore {
   private readonly bus     : EventBus;
   private readonly storage : StorageService;
@@ -143,6 +149,9 @@ class CommonsStoreImpl implements CommonsStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Creates the store, restores the saved filter, and subscribes to live events.
+   */
   constructor(opts: CommonsStoreOptions) {
     this.bus     = opts.bus;
     this.storage = opts.storage;
@@ -156,22 +165,37 @@ class CommonsStoreImpl implements CommonsStore {
   // Read API
   // -------------------------------------------------------------------------
 
+  /**
+   * Returns the raw cached entries, newest first, with no filter applied.
+   */
   entries(): ReadonlyArray<CommonsActivityEntry> {
     return this.rawEntries;
   }
 
+  /**
+   * Returns the cached entries that pass the active filter.
+   */
   visibleEntries(): ReadonlyArray<CommonsActivityEntry> {
     return this.rawEntries.filter(e => this.matchesFilter(e));
   }
 
+  /**
+   * Returns a copy of the current filter.
+   */
   getFilter(): CommonsActivityFilter {
     return { ...this.filter };
   }
 
+  /**
+   * Returns the current time window selection.
+   */
   getWindow(): CommonsActivityWindow {
     return this.window;
   }
 
+  /**
+   * Returns true when any filter setting is away from its default.
+   */
   isFilterActive(): boolean {
     return (
       this.filter.direction !== null ||
@@ -180,6 +204,9 @@ class CommonsStoreImpl implements CommonsStore {
     );
   }
 
+  /**
+   * Returns true when the server reported commons as off on the last load.
+   */
   isDisabled(): boolean {
     return this.disabled;
   }
@@ -190,6 +217,9 @@ class CommonsStoreImpl implements CommonsStore {
   // contributes no constraint.
   // -------------------------------------------------------------------------
 
+  /**
+   * Tests whether an entry passes the kind, direction, and persona filter.
+   */
   matchesFilter(entry: CommonsActivityEntry): boolean {
     const topic       = entry.topic || "";
     const meta        = entry.metadata || {};
@@ -229,6 +259,9 @@ class CommonsStoreImpl implements CommonsStore {
   // Hydration from REST
   // -------------------------------------------------------------------------
 
+  /**
+   * Loads commons history for the window from the server and replaces the cache.
+   */
   async hydrate(api: CommonsHistoryApiClient, window?: CommonsActivityWindow): Promise<void> {
     if (window !== undefined) this.window = window;
 
@@ -269,18 +302,27 @@ class CommonsStoreImpl implements CommonsStore {
   // Filter mutators
   // -------------------------------------------------------------------------
 
+  /**
+   * Sets the direction filter, saves it, and emits a filter-changed event.
+   */
   setDirection(value: CommonsActivityDirection): void {
     this.filter.direction = value;
     this.persistFilter();
     this.emit({ changeKind: "filter-changed" });
   }
 
+  /**
+   * Sets the kind filter, saves it, and emits a filter-changed event.
+   */
   setKind(value: CommonsActivityKind): void {
     this.filter.kind = value;
     this.persistFilter();
     this.emit({ changeKind: "filter-changed" });
   }
 
+  /**
+   * Sets the persona filter, saves it, and emits a filter-changed event.
+   */
   setPersona(value: string | null): void {
     this.filter.persona = value ? value.toLowerCase() : null;
     this.persistFilter();
@@ -288,6 +330,9 @@ class CommonsStoreImpl implements CommonsStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Detaches the bus listeners so a test can clean up.
+   */
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }

@@ -119,6 +119,9 @@ export interface SubmitJobsChromeElements {
 // Small builders
 // ---------------------------------------------------------------------------
 
+/**
+ * Creates an element of the given tag with an optional class name and test ID.
+ */
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K, className?: string, testid?: string,
 ): HTMLElementTagNameMap[ K ] {
@@ -128,6 +131,9 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+/**
+ * Creates a checkbox input with the given ID, test ID and checked state.
+ */
 function checkbox( id: string, testid: string, checked: boolean ): HTMLInputElement {
   const box = document.createElement( "input" );
   box.type    = "checkbox";
@@ -137,15 +143,18 @@ function checkbox( id: string, testid: string, checked: boolean ): HTMLInputElem
   return box;
 }
 
-// No trailing-text parameter: the first cut had one and NOTHING passed it, so it was
-// a branch no caller could reach — and under a 100% gate an unreachable branch becomes
-// a pragma somebody has to justify. Deleted rather than tested.
+/**
+ * Wraps a control in a label that shows the given text after it.
+ */
 function labelled( text: string, control: HTMLElement ): HTMLLabelElement {
   const label = document.createElement( "label" );
   label.append( control, ` ${text}` );
   return label;
 }
 
+/**
+ * Creates the empty status div of a job submit card, with the given ID and test ID.
+ */
 function statusLine( id: string, testid: string ): HTMLDivElement {
   const div = el( "div", "job-submit-status", testid );
   div.id = id;
@@ -221,6 +230,9 @@ function scheduleRow( prefix: string, withMonopolize: boolean ): ScheduleEls {
   return { row, checkbox: check, time, monopolize };
 }
 
+/**
+ * Creates an option element with a value, label and optional selected and disabled flags.
+ */
 function option( value: string, label: string, selected = false, disabled = false ): HTMLOptionElement {
   const o = document.createElement( "option" );
   o.value       = value;
@@ -234,6 +246,11 @@ function option( value: string, label: string, selected = false, disabled = fals
 // Card 1 — Claude Code
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds the Claude Code task submit card with its project select and submit button.
+ *
+ * Returns the card and the elements callers wire up.
+ */
 function buildCcCard(): CcCardEls {
   const card = el( "div", "job-submit-card", "multiplexer-cc-card" );
   card.id = "claude-code-submit-card";
@@ -300,6 +317,11 @@ function buildCcCard(): CcCardEls {
 // Card 2 — Research
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds the research job submit card with its dictation button, text input and options.
+ *
+ * Returns the card and the elements callers wire up.
+ */
 function buildResearchCard(): ResearchCardEls {
   const card = el( "div", "job-submit-card", "multiplexer-research-card" );
   card.id = "research-submit-card";
@@ -386,6 +408,11 @@ const TEST_SUITE_GROUPS: ReadonlyArray<readonly [ string, ReadonlyArray<readonly
 
 const TEST_SUITE_DEFAULT = "integration,e2e";
 
+/**
+ * Builds the test suite submit card with its suite select and schedule controls.
+ *
+ * Returns the card and the elements callers wire up.
+ */
 function buildTestSuiteCard(): TestSuiteCardEls {
   const card = el( "div", "job-submit-card", "multiplexer-test-suite-card" );
   card.id = "test-suite-submit-card";
@@ -466,6 +493,11 @@ function buildTestSuiteCard(): TestSuiteCardEls {
 // Card 4 — TFE resume
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds the card for resuming a stalled TFE job. It has no toggle and is always open.
+ *
+ * Returns the card and the elements callers wire up.
+ */
 function buildTfeCard(): TfeCardEls {
   const card = el( "div", "job-submit-card", "multiplexer-tfe-resume-card" );
   card.id = "tfe-resume-submit-card";

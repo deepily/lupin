@@ -15,8 +15,11 @@
 import { html } from "../html";
 import type { ActionRequiredItem } from "../../shared/types";
 
-// A switch, not an object lookup: no_lookup_walks_the_prototype_chain.test.ts bans `obj[key]` on a
-// plain object, where a key like "constructor" would return Object.prototype's member.
+/**
+ * Returns the emoji icon for an action-required response type.
+ *
+ * Uses a switch rather than an object lookup, and gives a generic icon for unknown types.
+ */
 function typeIcon(responseType: ActionRequiredItem["response_type"]): string {
   switch (responseType) {
     case "yes_no":          return "❓";

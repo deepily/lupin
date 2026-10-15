@@ -79,6 +79,9 @@ export interface FinishedTasksStoreOptions {
   clearIntervalFn? : ( handle: number ) => void;
 }
 
+/**
+ * Holds finished-task events by terminal status for a chosen window of days.
+ */
 class FinishedTasksStoreImpl implements FinishedTasksStore {
   private readonly bus : EventBus;
   private readonly api : FinishedTasksApiClient;
@@ -94,6 +97,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   private pollHandle : number | null = null;
   private unsubscribePush : ( () => void ) | null = null;
 
+  /**
+   * Builds the store from a bus, an API client and optional clock and timer hooks.
+   */
   constructor( opts: FinishedTasksStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -105,26 +111,44 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
   }
 
+  /**
+   * Returns the cached finished-task events keyed by status.
+   */
   eventsByStatus(): FinishedEventsByStatus {
     return this.cache;
   }
 
+  /**
+   * Returns the statuses that have a cached result, in the fixed status order.
+   */
   measuredStatuses(): ReadonlyArray<string> {
     return FINISHED_STATUSES.filter( ( s ) => this.cache[ s ] !== undefined );
   }
 
+  /**
+   * Returns the first failure message from the last read, or null when it was clean.
+   */
   error(): string | null {
     return this.lastError;
   }
 
+  /**
+   * Returns the number of days of history the store reads.
+   */
   windowDays(): number {
     return this.days;
   }
 
+  /**
+   * Sets the history window in days, clamping it to the allowed range.
+   */
   setWindowDays( days: number ): void {
     this.days = clampWindowDays( days );
   }
 
+  /**
+   * Reads finished tasks for every status and emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // a manual ⟳ landing on a tick must not double-fetch
     this.inFlight = true;
@@ -138,6 +162,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     return run;
   }
 
+  /**
+   * Waits for any read in flight, then returns a read that began after the write.
+   */
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlightRun !== null ) await this.inFlightRun;
     // A run in flight now began after this call: join it rather than let refresh() skip it.
@@ -185,6 +212,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     }
   }
 
+  /**
+   * Refreshes now, then on an interval and on each task-store-changed event.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
@@ -194,6 +224,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
     this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
+  /**
+   * Cancels the poll timer and unsubscribes from the task-store-changed event.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -206,6 +239,9 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops polling so a test can finish cleanly.
+   */
   disposeForTesting(): void {
     this.stopPolling();
   }

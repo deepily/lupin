@@ -32,6 +32,9 @@ export interface ManagerPullState {
   source?   : string;
 }
 
+/**
+ * Tells whether a value is a finite number.
+ */
 const isNum = ( v: unknown ): v is number => typeof v === "number" && Number.isFinite( v );
 
 /** Whole days for a window in hours, never below 1; null for an unusable window. */

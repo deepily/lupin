@@ -730,6 +730,9 @@ export class TaskRowController {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+/**
+ * Turns an edit failure into a short message for display.
+ */
 function deriveEditErrorMessage( err: unknown ): string {
   if ( err instanceof ApiError ) return `Edit failed (HTTP ${err.status})`;
   if ( err instanceof Error )    return `Edit failed: ${err.message}`;

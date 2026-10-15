@@ -121,6 +121,9 @@ function estimateSize(meta: unknown, cap: number): number {
 }
 
 /* c8 ignore next */ // tsx template-literal interpolation reports a phantom branch on the multi-template return statements; all three size buckets are exercised by direct _formatBytesForTesting() tests.
+/**
+ * Formats a byte count as B, KB or MB with one decimal place for the larger units.
+ */
 function formatBytes(n: number): string {
   if (n < 1024) return `${n}B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;

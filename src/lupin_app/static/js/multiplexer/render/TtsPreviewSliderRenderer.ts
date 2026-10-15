@@ -176,6 +176,9 @@ export interface TtsPreviewSliderRendererOptions {
   sharedStorage?     : SharedFractionStorage | null;
 }
 
+/**
+ * Renders the slider that sets what fraction of a message a TTS preview speaks.
+ */
 class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   private readonly storage  : StorageService;
   private readonly onChange : ( ( fraction: number ) => void ) | null;
@@ -190,6 +193,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   // session — a late INI-default seed must NOT clobber the user's choice.
   private userOverride : boolean;
 
+  /**
+   * Creates the renderer and picks the starting fraction from stored values.
+   */
   constructor( opts: TtsPreviewSliderRendererOptions ) {
     this.storage  = opts.storage;
     this.onChange = opts.onChange ?? null;
@@ -207,6 +213,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     this.fraction = resolveInitialFraction( override, opts.iniDefaultFraction );
   }
 
+  /**
+   * Draws the slider into the root element and keeps its label and input.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "TtsPreviewSliderRenderer already mounted" );
@@ -223,6 +232,9 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     root.replaceChildren( control );
   }
 
+  /**
+   * Empties the root element and clears the slider label and input handles.
+   */
   unmount(): void {
     if ( this.root !== null ) {
       this.root.replaceChildren();
@@ -233,10 +245,16 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Returns the current preview fraction.
+   */
   getFraction(): number {
     return this.fraction;
   }
 
+  /**
+   * Applies an INI default fraction unless the user has already chosen a value.
+   */
   seedIniDefault( fraction: number ): void {
     if ( this.userOverride ) return;           // user choice wins over a late INI seed
     const f = clampFraction( fraction );

@@ -91,30 +91,48 @@ export interface BroadcastStoreOptions {
 
 const ACTIVE_SESSIONS_URL = "/api/commons/active-sessions";
 
+/**
+ * Holds the broadcast recipient list and the card's open or closed state.
+ */
 class BroadcastStoreImpl implements BroadcastStore {
   private readonly storage : StorageService;
 
   private recipientCache : BroadcastRecipient[] = [];
   private cardOpen       : boolean;
 
+  /**
+   * Builds the store from a storage service and loads the saved card-open state.
+   */
   constructor( opts: BroadcastStoreOptions ) {
     this.storage  = opts.storage;
     this.cardOpen = this.hydrateCardOpen();
   }
 
+  /**
+   * Returns a copy of the current broadcast recipient list.
+   */
   recipients(): ReadonlyArray<BroadcastRecipient> {
     return [ ...this.recipientCache ];   // defensive copy (Rachel nit-1) — callers never alias the cache
   }
 
+  /**
+   * Returns whether the broadcast card is open.
+   */
   isCardOpen(): boolean {
     return this.cardOpen;
   }
 
+  /**
+   * Sets the card-open flag and saves it to storage.
+   */
   setCardOpen( open: boolean ): void {
     this.cardOpen = open;
     this.storage.setJSON<CardOpenEnvelope>( STORAGE_KEY, { open }, STORAGE_SCHEMA_VERSION );
   }
 
+  /**
+   * Loads active sessions from the server into the recipient list.
+   */
   async hydrate( api: BroadcastSessionsApiClient ): Promise<void> {
     try {
       const resp = await api.get<ActiveSessionsResponse>( ACTIVE_SESSIONS_URL );

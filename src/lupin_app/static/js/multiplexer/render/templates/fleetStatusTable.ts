@@ -30,6 +30,9 @@ import {
 
 const FLEET_COLSPAN = 8;
 
+/**
+ * Builds a table cell with the given class name and text.
+ */
 function td( className: string, text: string ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
   cell.className = className;

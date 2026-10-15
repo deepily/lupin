@@ -67,6 +67,9 @@ interface Els {
   status         : HTMLSpanElement;
 }
 
+/**
+ * Create an output element with the given test id and a dash placeholder.
+ */
 function output( testid: string ): HTMLOutputElement {
   const o = document.createElement( "output" );
   o.setAttribute( "data-testid", testid );
@@ -74,6 +77,9 @@ function output( testid: string ): HTMLOutputElement {
   return o;
 }
 
+/**
+ * Create a range input with the given id, bounds, step and tooltip.
+ */
 function range( id: string, min: string, max: string, step: string, title: string ): HTMLInputElement {
   const r = document.createElement( "input" );
   r.type = "range";

@@ -122,6 +122,9 @@ export function fleetLivenessTooltip( liveness: FleetLiveness | null | undefined
 // Hierarchy grouping + liveness split (accept `unknown` for defensive parity)
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the value as a list of rows, or an empty list when not an array.
+ */
 function asRows( sessions: unknown ): Array<FleetSession | null | undefined> {
   return Array.isArray( sessions ) ? ( sessions as Array<FleetSession | null | undefined> ) : [];
 }

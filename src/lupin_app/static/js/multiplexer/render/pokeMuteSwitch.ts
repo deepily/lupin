@@ -52,6 +52,9 @@ export interface PokeMuteSwitchHandle {
 /** The endpoint that reads the stop-poke state (GET) and sets it (PUT). */
 export const POKE_MUTE_PATH = "/api/heartbeat/poke-mute";
 
+/**
+ * Checks whether a value is an object with a boolean muted field.
+ */
 function isState( value: unknown ): value is PokeMuteState {
   return typeof value === "object" && value !== null
       && typeof ( value as { muted?: unknown } ).muted === "boolean";

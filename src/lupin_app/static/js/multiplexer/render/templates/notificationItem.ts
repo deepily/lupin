@@ -147,6 +147,9 @@ export function renderNotificationItem(
   return root;
 }
 
+/**
+ * Returns a small badge labeled expired for an expired notification.
+ */
 function expiredBadge(): Value {
   return html`<span class="expired-badge">EXPIRED</span>` as DocumentFragment;
 }
@@ -155,6 +158,9 @@ function expiredBadge(): Value {
 // returned elements carry typed button/anchor semantics + dataset attrs the
 // delegated click handler reads, verbatim to legacy notifications.js:13869/:13919.
 
+/**
+ * Builds a notification's corner pause button, carrying its ID.
+ */
 function cornerPauseButton(idHash: string): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type                     = "button";
@@ -167,6 +173,9 @@ function cornerPauseButton(idHash: string): HTMLButtonElement {
   return btn;
 }
 
+/**
+ * Builds a notification's corner stop button, carrying its ID.
+ */
 function cornerStopButton(idHash: string): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.type                     = "button";
@@ -180,6 +189,9 @@ function cornerStopButton(idHash: string): HTMLButtonElement {
   return btn;
 }
 
+/**
+ * Builds the Open Ratification link for a progress group.
+ */
 function proxyRatifyLink(groupId: string): HTMLAnchorElement {
   const link = document.createElement("a");
   link.className       = "proxy-ratify-link";
@@ -190,6 +202,9 @@ function proxyRatifyLink(groupId: string): HTMLAnchorElement {
 }
 
 /* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + tagged-template literal interpolation phantom.
+/**
+ * Returns a clipboard icon that carries the notification abstract.
+ */
 function abstractIndicator(abstract: string): Value {
   // 📋 indicator with abstract stored on data-attribute — popover handler
   // attaches in Phase 6.

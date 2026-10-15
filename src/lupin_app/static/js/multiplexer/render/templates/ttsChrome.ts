@@ -133,10 +133,9 @@ interface ControlState {
   skipEnabled  : boolean;
 }
 
-// desync-fix: the empty panel is now QUEUE-driven (queueEmpty short-circuit), so
-// these helpers see the FULL AudioPlaybackState — `idle` is reachable here when
-// the queue is non-empty but nothing is speaking yet. idle → all three transport
-// controls disabled (matrix row idle = ✗✗✗✗).
+/**
+ * Maps an audio playback state to which transport buttons are enabled.
+ */
 function deriveControlState(state: AudioPlaybackState): ControlState {
   switch (state) {
     case "idle":
@@ -154,15 +153,18 @@ function deriveControlState(state: AudioPlaybackState): ControlState {
   }
 }
 
-// Apply one matrix cell to a transport button: the `disabled` property (which
-// makes it inert), legacy's `.disabled` class (notifications.js:23020-23031),
-// and the click listener only when enabled.
+/**
+ * Applies an enabled value to a transport button's state and click listener.
+ */
 function wireControl(btn: HTMLButtonElement, enabled: boolean, onClick: () => void): void {
   btn.disabled = !enabled;
   btn.classList.toggle("disabled", !enabled);
   if (enabled) btn.addEventListener("click", () => onClick());
 }
 
+/**
+ * Returns the chrome root class, with a modifier for playing or paused.
+ */
 function rootClass(state: AudioPlaybackState): string {
   // Per Q-B8 — port .is-playing-current / .is-paused-current verbatim.
   const base = "tts-chrome";

@@ -71,6 +71,9 @@ export interface MissedStoreOptions {
   nowFn? : () => number;
 }
 
+/**
+ * Holds the count of undelivered missed notifications.
+ */
 class MissedStoreImpl implements MissedStore {
   private readonly bus   : EventBus;
   private readonly api   : MissedApiClient;
@@ -79,6 +82,9 @@ class MissedStoreImpl implements MissedStore {
   private undeliveredCount = 0;
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus, an API client and an optional clock.
+   */
   constructor( opts: MissedStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -89,10 +95,16 @@ class MissedStoreImpl implements MissedStore {
     );
   }
 
+  /**
+   * Returns the current count of undelivered notifications.
+   */
   count(): number {
     return this.undeliveredCount;
   }
 
+  /**
+   * Asks the server to dismiss undelivered notifications and stores the count.
+   */
   async reset(): Promise<number> {
     if ( this.undeliveredCount <= 0 ) return 0;
     // POST with no body; ApiClient sends the Authorization header.
@@ -103,6 +115,9 @@ class MissedStoreImpl implements MissedStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Unsubscribes from bus events so a test can finish cleanly.
+   */
   disposeForTesting(): void {
     for ( const off of this.unsubscribers ) off();
   }

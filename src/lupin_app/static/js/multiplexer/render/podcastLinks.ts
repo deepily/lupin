@@ -109,6 +109,9 @@ export function showPodcastOverlay( embedUrl: string, title: string ): HTMLEleme
   return overlay;
 }
 
+/**
+ * Builds the real download helpers: stored token, fetch, alert and timer.
+ */
 function defaultDeps(): DownloadDeps {
   return {
     getToken : () => { try { return localStorage.getItem( TOKEN_KEY ); } catch { return null; } },

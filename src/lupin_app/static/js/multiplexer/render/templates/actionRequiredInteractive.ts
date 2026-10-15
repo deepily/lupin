@@ -107,11 +107,11 @@ export function renderActionRequiredInteractive(
 /** The three yes_no answers, in legacy's button order. */
 const YES_NO_ANSWERS = ["yes", "no", "neither"] as const;
 
-// Parity A-2 #2i — legacy renderActionRequiredNotification's yes_no block
-// (notifications.js:23236-23253): ✓ Yes (Y), ✗ No (N) and ⊘ Neither, whose title says the
-// question itself needs re-framing; the server's `response_default` wears `.default-value`
-// (legacy "Phase 2.2", Yes and No only — Neither is never a default there). Neither answers
-// "neither", the value the cosa-voice asker already reads as "re-frame the question".
+/**
+ * Fills the card with yes, no and neither buttons plus an optional comment row.
+ *
+ * The server's default answer is highlighted. A click submits the answer with any comment.
+ */
 function buildYesNo(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -149,11 +149,11 @@ export function withComment(answer: string, comment: string): string {
   return text.length > 0 ? `${answer} [comment: ${text}]` : answer;
 }
 
-// Parity A-2 #2j — the yes_no comment row, legacy renderActionRequiredNotification
-// (notifications.js:23254-23265) and its wiring (:23375-23396): a hint that toggles an
-// expandable row holding a 🎤 and a 300-character input; `display_qualifier_widget` swaps the
-// hint's wording and opens the row at once. Enter in the input leaves it (blur) rather than
-// submitting, so the Y / N / C keys work again (toggleYesNoComment :25978-25991).
+/**
+ * Adds the yes or no comment row with a hint, a mic button and a 300-character input.
+ *
+ * It returns the input. Enter leaves the field without submitting.
+ */
 function appendYesNoComment(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -188,6 +188,11 @@ function appendYesNoComment(
   return input;
 }
 
+/**
+ * Fills the card with a stepped multiple choice form, one question at a time.
+ *
+ * It collects answers across steps, reports progress through the step handler, and submits all answers at the end.
+ */
 function buildMultipleChoice(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -367,13 +372,11 @@ export const MC_OTHER_VALUE = "__other__";
 /** Legacy's placeholder for the "Other" text (notifications.js:23979). */
 export const MC_OTHER_PLACEHOLDER = "Type or speak custom answer...";
 
-// Parity A-2 #2k — legacy renderActionRequiredNotification, open_ended block
-// (notifications.js:23266-23284), and its wiring (:23397-23455). Voice first: the 🎤 comes
-// before the input and takes focus when the card appears (the renderer focuses
-// `[data-autofocus]` once the card is in the page), and Enter or Space on it records. The
-// input holds `response_default` as its VALUE, not a placeholder. Submit is disabled until the
-// input has text (validateInput), and Submit or Enter send the trimmed text. The mic context is
-// legacy's `response-input-<id>`.
+/**
+ * Fills the card with a free text question: a mic button, a text input and a Submit button.
+ *
+ * The input starts with the server default and Submit stays disabled until there is text.
+ */
 function buildOpenEnded(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -420,6 +423,11 @@ function buildOpenEnded(
   });
 }
 
+/**
+ * Fills the card with several free text questions and a Submit All button.
+ *
+ * It submits answers keyed by question header only once every row has an answer.
+ */
 function buildOpenEndedBatch(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -465,8 +473,11 @@ function buildOpenEndedBatch(
   });
 }
 
-// Legacy renderOpenEndedBatchUI shows "No questions provided." for an empty payload; with no
-// questions there is no header to key an answer by, so the card offers no controls at all.
+/**
+ * Adds a "No questions provided." notice when the item has no questions and returns true.
+ *
+ * It returns false and adds nothing otherwise.
+ */
 function appendNoQuestions(root: HTMLElement, item: ActionRequiredItem): boolean {
   if (item.questions.length > 0) return false;
   /* c8 ignore next 4 */ // tagged-template literal: c8's JSON puts a phantom arm on the ${item.prompt} interpolation (Phase 6a jobCard.ts:251 precedent); both paths of appendNoQuestions are tested.

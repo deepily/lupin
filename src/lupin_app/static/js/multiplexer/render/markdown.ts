@@ -71,6 +71,11 @@ export const DOMPURIFY_CONFIG = {
   RETURN_TRUSTED_TYPE     : false,
 };
 
+/**
+ * Returns the marked and DOMPurify globals from the window.
+ *
+ * Throws an error when either library has not been loaded.
+ */
 function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
   /* c8 ignore next */ // defensive: typeof window is "undefined" only in pre-DOM Node runtime; happy-dom's GlobalRegistrator (tests) AND every real browser provide window. The fallback to globalThis exists for non-browser contexts that don't apply to the multiplexer.
   const win = (typeof window !== "undefined" ? window : globalThis) as unknown as WindowGlobals;
@@ -85,6 +90,11 @@ function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
 // sanitized and quoted; an unquoted href is not a shape it emits.
 const HREF_ATTR_RE = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
 
+/**
+ * Adds a new-tab target and noopener rel to every anchor that has no target.
+ *
+ * In-app doc links are left unchanged.
+ */
 function postProcessAnchors(html: string): string {
   // Rewrite anchor target/rel — ported from `notifications.js:12203-12247`.
   //

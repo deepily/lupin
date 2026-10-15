@@ -72,12 +72,25 @@ export interface StorageService {
   clearTokens(): void;
 }
 
+/**
+ * Reads and writes versioned JSON envelopes in a storage backend under a key prefix.
+ *
+ * It also exposes session ID and auth token accessors, and reports corrupt entries on the bus.
+ */
 class StorageServiceImpl implements StorageService {
+  /**
+   * Keeps the event bus and the storage backend this service reads and writes through.
+   */
   constructor(
     private readonly bus: EventBus,
     private readonly backend: StorageBackend,
   ) {}
 
+  /**
+   * Reads a stored JSON envelope and returns its payload, or null if unusable.
+   *
+   * A missing key gives null quietly. Bad JSON, a malformed envelope or a schema version mismatch emits a corrupt event.
+   */
   getJSON<T>(key: string, expectedSchemaVersion: number): T | null {
     const fullKey = KEY_PREFIX + key;
     const raw = this.backend.getItem(fullKey);
@@ -108,6 +121,9 @@ class StorageServiceImpl implements StorageService {
     return parsed.payload as T;
   }
 
+  /**
+   * Stores a value as JSON inside an envelope with a schema version and timestamp.
+   */
   setJSON<T>(key: string, value: T, schemaVersion: number): void {
     const envelope: StorageEnvelope<T> = {
       schemaVersion,
@@ -117,10 +133,16 @@ class StorageServiceImpl implements StorageService {
     this.backend.setItem(KEY_PREFIX + key, JSON.stringify(envelope));
   }
 
+  /**
+   * Deletes the entry stored under the given key.
+   */
   remove(key: string): void {
     this.backend.removeItem(KEY_PREFIX + key);
   }
 
+  /**
+   * Lists stored keys without the service prefix, optionally filtered by a prefix.
+   */
   keys(prefix?: string): string[] {
     const out: string[] = [];
     const filter = prefix ?? "";
@@ -135,41 +157,65 @@ class StorageServiceImpl implements StorageService {
     return out;
   }
 
+  /**
+   * Returns the saved page session ID, or null when none is stored.
+   */
   getSessionId(): string | null {
     const env = this.getJSON<SessionIdEnvelope>(SESSION_ID_KEY, SESSION_ID_SCHEMA);
     return env ? env.sessionId : null;
   }
 
+  /**
+   * Saves a session ID with the time it was generated.
+   */
   setSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
   }
 
+  /**
+   * Returns the saved ID for the audio socket's own session, or null when none is stored.
+   */
   getAudioSessionId(): string | null {
     const env = this.getJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, SESSION_ID_SCHEMA);
     return env ? env.sessionId : null;
   }
 
+  /**
+   * Saves the ID for the audio socket's own session with the time it was generated.
+   */
   setAudioSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
   }
 
-  // Raw cross-client token accessors — read/write the unprefixed canonical
-  // `lupin_access_token` / `lupin_refresh_token` keys directly (no envelope).
+  /**
+   * Returns the raw access token from the shared cross-client key, or null.
+   *
+   * The token is stored without an envelope and without the service prefix.
+   */
   getAccessToken(): string | null {
     return this.backend.getItem(ACCESS_TOKEN_KEY);
   }
 
+  /**
+   * Returns the raw refresh token from the shared cross-client key, or null.
+   */
   getRefreshToken(): string | null {
     return this.backend.getItem(REFRESH_TOKEN_KEY);
   }
 
+  /**
+   * Stores the access and refresh tokens under the shared cross-client keys.
+   */
   setTokens(accessToken: string, refreshToken: string): void {
     this.backend.setItem(ACCESS_TOKEN_KEY, accessToken);
     this.backend.setItem(REFRESH_TOKEN_KEY, refreshToken);
   }
 
+  /**
+   * Removes both the access and refresh tokens from storage.
+   */
   clearTokens(): void {
     this.backend.removeItem(ACCESS_TOKEN_KEY);
     this.backend.removeItem(REFRESH_TOKEN_KEY);
@@ -189,6 +235,9 @@ class StorageServiceImpl implements StorageService {
   }
 }
 
+/**
+ * Tells whether a parsed value has the envelope shape of version, payload and time.
+ */
 function isEnvelope(v: unknown): v is StorageEnvelope<unknown> {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;

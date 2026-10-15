@@ -119,6 +119,9 @@ const TILES: ReadonlyArray<Tile> = Object.freeze( [
   { key: "total_replays_benefited",         label: "Cache Hits (You)",        testid: "multiplexer-replays-benefited",      numeric: true  },
 ] );
 
+/**
+ * Models the time saved dashboard with four tiles and a solutions list.
+ */
 class TimeSavedRendererImpl implements TimeSavedRenderer {
   private readonly api   : Pick<ApiClient, "get">;
   private readonly logFn : ( message: string ) => void;
@@ -130,12 +133,18 @@ class TimeSavedRendererImpl implements TimeSavedRenderer {
   private solutionsEl : HTMLElement | null = null;
   private mounted     = false;
 
+  /**
+   * Stores the API client and a log function that defaults to console warn.
+   */
   constructor( opts: TimeSavedRendererOptions ) {
     this.api = opts.api;
     /* c8 ignore next */ // production-default fallback: the console is the runtime sink; tests inject a recorder.
     this.logFn = opts.logFn ?? ( ( m ) => console.warn( m ) );
   }
 
+  /**
+   * Builds the dashboard in the root and fetches its figures once.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "TimeSavedRenderer already mounted" );
 
@@ -213,6 +222,9 @@ class TimeSavedRendererImpl implements TimeSavedRenderer {
     void this.refresh();
   }
 
+  /**
+   * Removes the collapse wiring, drops element references and empties the root.
+   */
   unmount(): void {
     if ( this.collapseOff !== null ) this.collapseOff();
     this.collapseOff = null;
@@ -224,6 +236,9 @@ class TimeSavedRendererImpl implements TimeSavedRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Runs a refresh and returns its promise; used by tests.
+   */
   refreshForTesting(): Promise<void> {
     return this.refresh();
   }

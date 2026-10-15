@@ -117,6 +117,9 @@ export interface FleetStatusStoreOptions {
   errorFn?        : ( message: string ) => void;
 }
 
+/**
+ * Holds fleet status, size cap and skeleton-crew state for the fleet pane.
+ */
 class FleetStatusStoreImpl implements FleetStatusStore {
   private readonly bus   : EventBus;
   private readonly api   : FleetApiClient;
@@ -133,6 +136,9 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   private savingCap     : number | null = null;
   private savingCrew    : boolean | null = null;
 
+  /**
+   * Builds the store from a bus, an API client and optional runtime hooks.
+   */
   constructor( opts: FleetStatusStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -146,14 +152,23 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.errorFn         = opts.errorFn ?? ( ( m ) => console.error( `[FleetStatusStore] ${m}` ) );
   }
 
+  /**
+   * Returns the latest fleet composite, or null before the first refresh.
+   */
   composite(): FleetComposite | null {
     return this.lastComposite;
   }
 
+  /**
+   * Returns whether offline entries are currently shown.
+   */
   showOfflineFlag(): boolean {
     return this.showOffline;
   }
 
+  /**
+   * Fetches the fleet state and the size cap, then emits a change event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual click landing on a tick can't double-fetch
     this.inFlight = true;
@@ -168,17 +183,26 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     }
   }
 
+  /**
+   * Flips the show-offline flag and emits a change event without a new timestamp.
+   */
   toggleShowOffline(): void {
     this.showOffline = !this.showOffline;
     this.emitChanged( false );
   }
 
+  /**
+   * Refreshes now and then again on a fixed interval, replacing any earlier polling.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), FLEET_STATUS_POLL_INTERVAL_MS );
   }
 
+  /**
+   * Cancels the polling timer if one is running.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -186,14 +210,23 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     }
   }
 
+  /**
+   * Returns the latest fleet size cap, or null when it is unknown or unavailable.
+   */
   sizeCap(): FleetSizeCap | null {
     return this.lastSizeCap;
   }
 
+  /**
+   * Returns the cap value being saved now, or null when no save is in flight.
+   */
   sizeCapSaving(): number | null {
     return this.savingCap;
   }
 
+  /**
+   * Reads the fleet size cap from the server and emits a size-cap change event.
+   */
   async refreshSizeCap(): Promise<void> {
     try {
       this.lastSizeCap = await this.api.get<FleetSizeCap>( FLEET_SIZE_CAP_ENDPOINT );
@@ -207,6 +240,9 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
+  /**
+   * Saves a new fleet size cap and adopts the value the server answers with.
+   */
   async setSizeCap( cap: number ): Promise<void> {
     this.savingCap = cap;
     this.emitSizeCapChanged();
@@ -234,10 +270,16 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
+  /**
+   * Returns the skeleton-crew value being saved now, or null if none is.
+   */
   skeletonCrewSaving(): boolean | null {
     return this.savingCrew;
   }
 
+  /**
+   * Saves the skeleton-crew switch and adopts the state the server answers with.
+   */
   async setSkeletonCrew( on: boolean ): Promise<void> {
     this.savingCrew = on;
     this.emitSizeCapChanged();
@@ -263,6 +305,9 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops polling so a test can finish cleanly.
+   */
   disposeForTesting(): void {
     this.stopPolling();
   }

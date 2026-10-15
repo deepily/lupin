@@ -78,6 +78,9 @@ export function holdingGroupChevron( expanded: boolean ): string {
   return expanded ? "▼" : "▶";
 }
 
+/**
+ * Builds a task action button carrying the filer name, class, label and tooltip.
+ */
 function batchButton( cls: string, filer: string, label: string, title: string ): HTMLButtonElement {
   const btn = document.createElement( "button" );
   btn.type      = "button";

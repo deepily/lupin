@@ -55,6 +55,9 @@ export interface RequestChipStoreLike {
   loadDetail( taskId: string, requestTs: string ): Promise<void>;
 }
 
+/**
+ * Creates a task action button with the given class, label and task ID data attribute.
+ */
 function button( cls: string, label: string, taskId: string ): HTMLButtonElement {
   const btn = document.createElement( "button" );
   btn.type        = "button";
@@ -187,8 +190,16 @@ class RequestChipControllerImpl implements RequestChipController {
   private readonly triageDays = new Map<string, string>();
   private readonly inFlight   = new Set<string>();
 
+  /**
+   * Keeps the store the chips read request details from and send verdicts to.
+   */
   constructor( private readonly store: RequestChipStoreLike ) {}
 
+  /**
+   * Handles a click on a chip's approve or deny button and sends the verdict.
+   *
+   * It returns true when the click was on such a button and false otherwise.
+   */
   handleClick( target: EventTarget | null ): boolean {
     const el = target as Element | null;
     if ( el === null || typeof el.closest !== "function" ) return false;
@@ -202,6 +213,11 @@ class RequestChipControllerImpl implements RequestChipController {
     return true;
   }
 
+  /**
+   * Remembers the triage date typed in a chip's input, or forgets it when emptied.
+   *
+   * It is keyed by task and request time.
+   */
   rememberInput( target: EventTarget | null ): void {
     const el = target as Element | null;
     if ( el === null || typeof el.closest !== "function" ) return;
@@ -212,6 +228,11 @@ class RequestChipControllerImpl implements RequestChipController {
     else this.triageDays.set( requestKey( chip ), input.value );
   }
 
+  /**
+   * Restores remembered refusals and dates onto the chips and fills in details.
+   *
+   * Details come from the cache or are loaded and painted when they arrive.
+   */
   hydrate( container: HTMLElement ): void {
     for ( const chip of Array.from( container.querySelectorAll<HTMLElement>( ".task-request-chip" ) ) ) {
       const taskId    = chip.dataset.taskId ?? "";

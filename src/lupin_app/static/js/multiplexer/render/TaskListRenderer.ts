@@ -166,6 +166,9 @@ export interface TaskListRendererOptions {
   getAuthToken? : () => string | null;
 }
 
+/**
+ * Creates a paragraph with the task list message class and the given text.
+ */
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
   p.className = `task-list-message ${className}`;
@@ -173,6 +176,12 @@ function messageEl( className: string, text: string ): HTMLParagraphElement {
   return p;
 }
 
+/**
+ * Paints the task list pane with tasks grouped by owner and row controls.
+ *
+ * Also offers a refresh button and, when wired, ticket lookup and New.
+ * Repaints when the task list store changes.
+ */
 class TaskListRendererImpl implements TaskListRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : TaskListRendererStores;
@@ -233,6 +242,11 @@ class TaskListRendererImpl implements TaskListRenderer {
   // same controller the holding area mounts. Null while unmounted.
   private rows : TaskRowController | null = null;
 
+  /**
+   * Stores the event bus and stores, and fills defaults for the clock and timer.
+   *
+   * Ticket lookup, ticket posting, request store, recorder and token getter are optional.
+   */
   constructor( opts: TaskListRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -247,6 +261,11 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.getAuthToken = opts.getAuthToken;
   }
 
+  /**
+   * Builds the pane's refresh button, optional lookup box and New button in the root.
+   *
+   * Wires row controls and store subscriptions. Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "TaskListRenderer already mounted" );
@@ -413,6 +432,9 @@ class TaskListRendererImpl implements TaskListRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, subscriptions, guards and request wiring, and clears the root.
+   */
   unmount(): void {
     this.rows?.dispose();   // tear down any open body overlay + its Esc listener
     this.rows = null;
@@ -437,6 +459,9 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the list from the store at once, stamping the updated time; used by tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }

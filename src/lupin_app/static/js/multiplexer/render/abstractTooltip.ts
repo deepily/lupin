@@ -72,6 +72,9 @@ export function computeTooltipPosition( indicator: Rect, tip: Size, viewport: Si
   return { top, left };
 }
 
+/**
+ * Shows a notification's abstract in a tooltip when its indicator is clicked.
+ */
 class AbstractTooltipImpl implements AbstractTooltip {
   private tooltip  : HTMLElement | null = null;
   private readonly schedule : ( fn: () => void ) => void;
@@ -81,10 +84,16 @@ class AbstractTooltipImpl implements AbstractTooltip {
     if ( ev.key === "Escape" ) this.hide();
   };
 
+  /**
+   * Creates the tooltip controller with its dependencies and a frame scheduler.
+   */
   constructor( private readonly deps: AbstractTooltipDeps ) {
     this.schedule = deps.schedule ?? ( ( fn ) => { requestAnimationFrame( fn ); } );
   }
 
+  /**
+   * Adds the tooltip to the page and listens for document clicks and Escape.
+   */
   mount(): void {
     if ( this.tooltip !== null ) return;
     const frag = html`<div id="${ABSTRACT_TOOLTIP_ID}" class="abstract-tooltip" role="dialog" aria-label="Notification details"><div class="abstract-tooltip-header"><span>📋 Details</span><button type="button" class="abstract-tooltip-close" title="Close">×</button></div><div class="abstract-tooltip-content"></div></div>`;
@@ -96,6 +105,9 @@ class AbstractTooltipImpl implements AbstractTooltip {
     document.addEventListener( "keydown", this.onKeyDown );
   }
 
+  /**
+   * Removes the document listeners and the tooltip element from the page.
+   */
   unmount(): void {
     if ( this.tooltip === null ) return;
     document.removeEventListener( "click", this.onDocClick );

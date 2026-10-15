@@ -278,6 +278,9 @@ export function taskBodyIsEmpty( task: TaskItem | null | undefined ): boolean {
 // Grouping
 // ---------------------------------------------------------------------------
 
+/**
+ * Returns the tasks as an array, or an empty array when the input is not an array.
+ */
 function asRows( tasks: unknown ): Array<TaskItem | null | undefined> {
   return Array.isArray( tasks ) ? ( tasks as Array<TaskItem | null | undefined> ) : [];
 }

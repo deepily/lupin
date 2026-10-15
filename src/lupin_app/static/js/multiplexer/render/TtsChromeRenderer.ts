@@ -127,6 +127,9 @@ export interface TtsChromeRendererOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Renders the Playing panel with transport controls for the TTS audio queue.
+ */
 class TtsChromeRendererImpl implements TtsChromeRenderer {
   private readonly bus    : EventBus;
   private readonly stores : TtsChromeRendererStores;
@@ -143,6 +146,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   private pendingRender = false;
   private rafHandle: number | null = null;
 
+  /**
+   * Creates the renderer from its bus and stores, with browser frame functions.
+   */
   constructor(opts: TtsChromeRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -152,6 +158,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.caf    = opts.cancelAnimationFrameFn  ?? ((h): void => globalThis.cancelAnimationFrame(h));
   }
 
+  /**
+   * Builds the Playing section inside the root, paints it, and subscribes to changes.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) {
       throw new Error("TtsChromeRenderer already mounted");
@@ -204,6 +213,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     );
   }
 
+  /**
+   * Removes subscriptions, cancels any pending frame, and empties the root element.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -226,6 +238,9 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the panel at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if (this.mounted) this.renderNow();
   }

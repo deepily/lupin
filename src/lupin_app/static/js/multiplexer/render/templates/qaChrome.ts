@@ -40,6 +40,9 @@ export interface QaChromeElements {
   response     : HTMLDivElement;
 }
 
+/**
+ * Creates a metric label and value span pair and returns the wrapper and value.
+ */
 function metricSpan( label: string, valueId: string, testid: string ): {
   wrapper: HTMLSpanElement;
   value  : HTMLSpanElement;

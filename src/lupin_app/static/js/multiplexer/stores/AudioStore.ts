@@ -288,6 +288,11 @@ export interface AudioStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Models TTS audio playback as a state machine fed by binary chunks from the audio socket.
+ *
+ * Decodes chunks, schedules them gaplessly on one audio context, and publishes state changes on the event bus.
+ */
 class AudioStoreImpl implements AudioStore {
   private readonly bus                 : EventBus;
   private readonly audioContextFactory : () => SchedulableAudioContext;
@@ -367,6 +372,11 @@ class AudioStoreImpl implements AudioStore {
   // audio scheduled at step N can never fire against step N+1's schedule.
   private stallTimer: unknown | null = null;
 
+  /**
+   * Builds the audio store from its options, with defaults for context, decoder and timers.
+   *
+   * Starts the playback state machine and creates the binary handler used by the audio transport.
+   */
   constructor(opts: AudioStoreOptions) {
     this.bus                 = opts.bus;
     /* c8 ignore next */ // production-default fallback: defaultAudioContextFactory wraps the browser-only `AudioContext`/`webkitAudioContext`; tests always inject a stub audioContextFactory.
@@ -426,18 +436,32 @@ class AudioStoreImpl implements AudioStore {
     };
   }
 
+  /**
+   * Returns the current playback state, such as idle, playing or paused.
+   */
   state(): AudioPlaybackState {
     return this.actor.getSnapshot().value as AudioPlaybackState;
   }
 
+  /**
+   * Returns how many chunks have arrived in the current burst of audio.
+   */
   burstLength(): number {
     return this.chunksInBurst;
   }
 
+  /**
+   * Returns the selected TTS mode.
+   */
   ttsMode(): TtsMode {
     return this.ttsModeValue;
   }
 
+  /**
+   * Sets the TTS mode and emits a mode-changed event.
+   *
+   * Setting the value it already has emits nothing.
+   */
   setTtsMode( mode: TtsMode ): void {
     // A no-op write emits nothing — a select fires `change` only on a real change,
     // but a restore path could write the same value and a repaint per identical
@@ -452,6 +476,11 @@ class AudioStoreImpl implements AudioStore {
     } );
   }
 
+  /**
+   * Pauses playback by suspending the audio context, only while playing.
+   *
+   * Disarms the stall watchdog so a manual pause is not reported as a stall.
+   */
   pause(): void {
     // P6-b — suspend() freezes the context clock, so currentTime and every
     // already-scheduled start(when) offset stay coherent; resume() does NOT
@@ -467,6 +496,11 @@ class AudioStoreImpl implements AudioStore {
     void this.audioContext!.suspend();
   }
 
+  /**
+   * Resumes a paused utterance by resuming the audio context.
+   *
+   * Re-arms the stall watchdog from the audio still scheduled. Does nothing unless paused.
+   */
   resume(): void {
     // P6-b — resume the (paused → suspended) context; same non-rebase invariant
     // as pause(). Invariant: state "paused" ⇒ audioContext is non-null.
@@ -479,6 +513,9 @@ class AudioStoreImpl implements AudioStore {
     void this.audioContext!.resume();
   }
 
+  /**
+   * Skips the current audio while playing or paused and resets the burst counter.
+   */
   skip(): void {
     const s = this.state();
     if (s === "playing" || s === "paused") {
@@ -487,9 +524,11 @@ class AudioStoreImpl implements AudioStore {
     }
   }
 
-  // Phase 6b — full halt (per Pass 2 A6). Reachable from playing/paused/ended/error;
-  // no-op from idle/decoding. State transitions to idle and queue counter clears.
-  // The state-change emission flows through the existing actor.subscribe() path.
+  /**
+   * Halts playback fully: silences scheduled audio, returns to idle, clears the burst.
+   *
+   * It does nothing when already idle or decoding.
+   */
   stop(): void {
     const s = this.state();
     if (s === "idle" || s === "decoding") return;
@@ -515,6 +554,9 @@ class AudioStoreImpl implements AudioStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops the state machine actor; used by tests for cleanup.
+   */
   disposeForTesting(): void {
     this.actor.stop();
   }
@@ -842,6 +884,11 @@ class AudioStoreImpl implements AudioStore {
 // ---------------------------------------------------------------------------
 
 /* c8 ignore start */ // Browser-only fallback; tests inject `audioContextFactory` directly.
+/**
+ * Creates a browser audio context at 24000 Hz for production use.
+ *
+ * Throws if the environment has no AudioContext.
+ */
 function defaultAudioContextFactory(): SchedulableAudioContext {
   // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor prefix.
   const Ctor = (globalThis as unknown as {

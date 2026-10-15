@@ -35,6 +35,11 @@ import { rowWidth } from "../rowSchema";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
 
+/**
+ * Builds the clickable header row for an owner group, with a chevron and a task count.
+ *
+ * It carries accessibility attributes showing whether the group is collapsed.
+ */
 function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: string ): HTMLTableRowElement {
   // Non-unassigned groups always carry a non-null ownerPersona (groupTasksByOwner
   // invariant); the Unassigned bucket takes the literal label.

@@ -28,6 +28,11 @@ export interface EventBus {
   emit<T>(event: LupinEvent<T>): void;
 }
 
+/**
+ * Delivers typed events to listeners through a DOM event target.
+ *
+ * A listener that throws is reported as a listener error event instead of breaking other listeners.
+ */
 class EventBusImpl implements EventBus {
   private readonly target = new EventTarget();
   // Map every (type, listener) pair to the wrapper actually registered on the
@@ -38,6 +43,11 @@ class EventBusImpl implements EventBus {
     Map<AnyListener, EventListener>
   >();
 
+  /**
+   * Subscribes a listener to an event type and returns a function that unsubscribes it.
+   *
+   * An error thrown by the listener is caught and re-emitted as a listener error event.
+   */
   on<T = unknown>(
     type: LupinEventType,
     listener: (e: LupinEvent<T>) => void,
@@ -62,6 +72,9 @@ class EventBusImpl implements EventBus {
     return () => this.off(type, listener as AnyListener);
   }
 
+  /**
+   * Removes a listener from an event type. Unknown listeners are ignored.
+   */
   off(type: LupinEventType, listener: AnyListener): void {
     const perType = this.wrappers.get(type);
     if (!perType) return;
@@ -72,6 +85,9 @@ class EventBusImpl implements EventBus {
     if (perType.size === 0) this.wrappers.delete(type);
   }
 
+  /**
+   * Dispatches an event to every listener subscribed to its type.
+   */
   emit<T>(event: LupinEvent<T>): void {
     this.target.dispatchEvent(
       new CustomEvent<LupinEvent<T>>(event.type, { detail: event }),

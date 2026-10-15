@@ -49,12 +49,18 @@ interface WindowWithTrustedTypes {
 
 let TT_POLICY: TrustedTypesPolicy | null = null;
 
+/**
+ * Returns the browser Trusted Types API when present, otherwise undefined.
+ */
 function getTrustedTypes(): TrustedTypesAPI | undefined {
   /* c8 ignore next */ // defensive: globalThis is part of the ECMAScript standard since ES2020 and is always defined in modern V8 / Node / browsers; the truthy "undefined" arm is a belt-and-suspenders guard against exotic embedded runtimes.
   if (typeof globalThis === "undefined") return undefined;
   return (globalThis as unknown as WindowWithTrustedTypes).trustedTypes;
 }
 
+/**
+ * Creates the Trusted Types policy once, if the browser supports it.
+ */
 function ensurePolicy(): void {
   if (TT_POLICY !== null) return;
   const tt = getTrustedTypes();
@@ -89,10 +95,16 @@ export function raw(s: string): RawValue {
   return { __raw: s };
 }
 
+/**
+ * Says whether a value is a raw HTML wrapper holding a string.
+ */
 function isRaw(v: unknown): v is RawValue {
   return typeof v === "object" && v !== null && "__raw" in v && typeof (v as { __raw: unknown }).__raw === "string";
 }
 
+/**
+ * Appends a template value to a node, as text, items, parsed HTML or a node.
+ */
 function appendValue(target: Node, value: Value): void {
   if (value === null || value === undefined || value === false || value === true) return;
   if (typeof value === "string" || typeof value === "number") {
@@ -119,6 +131,9 @@ function appendValue(target: Node, value: Value): void {
   }
 }
 
+/**
+ * Builds a template strings array around raw content and registers it as known.
+ */
 function makeRawTemplateStrings(s: string): TemplateStringsArray {
   // Synthesize a TemplateStringsArray for `raw()` content so the TT identity
   // check still passes. Keeps the policy's invariant tight: only TT-aware
@@ -141,6 +156,9 @@ interface Assembly {
   children  : Map<string, Value>;
 }
 
+/**
+ * Joins template strings into one HTML string with markers for values.
+ */
 function assemble(strings: TemplateStringsArray, values: readonly Value[]): Assembly {
   const attrs: AttrPlacement[] = [];
   const children = new Map<string, Value>();
@@ -182,6 +200,9 @@ function assemble(strings: TemplateStringsArray, values: readonly Value[]): Asse
   return { combined, attrs, children };
 }
 
+/**
+ * Sets each recorded attribute value on the element carrying its marker.
+ */
 function applyAttributes(fragment: DocumentFragment, attrs: ReadonlyArray<AttrPlacement>): void {
   for (const { marker, attrName, value } of attrs) {
     const el = fragment.querySelector(`[${marker}]`);
@@ -202,6 +223,9 @@ function applyAttributes(fragment: DocumentFragment, attrs: ReadonlyArray<AttrPl
   }
 }
 
+/**
+ * Replaces each child marker comment in a fragment with DOM built from its value.
+ */
 function applyChildren(fragment: DocumentFragment, children: ReadonlyMap<string, Value>): void {
   if (children.size === 0) return;
   const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_COMMENT);
