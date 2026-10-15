@@ -17,15 +17,15 @@ pins:
 The `/auth` router: sign-up, token rotation, logout, the signed-in user, password change and reset, and email verification. The services behind it are in [[auth-and-accounts]].
 
 ## What it does
-- `register` creates an account with the role `user` only and returns 201 with user info and a token pair. A request naming any other role is refused with 403 and an audit event.
-- `refresh` swaps a refresh token for a new pair and revokes the old one. An invalid, expired or revoked token answers 401.
-- `logout` revokes the refresh token and answers 400 for a token it cannot read. It does nothing to the access token.
-- `get_current_user` serves `/me` from a Bearer access token. A missing or bad header answers 401, and an unknown user 404.
-- `change_password` checks the current password and the strength of the new one, then writes an audit event.
-- `request_verification` sends a new verification email to a signed-in user, and answers 400 when the email is already verified.
-- `verify_email` marks the email verified with a one-use token.
-- `request_password_reset` answers 200 whether or not the email exists. The token expires in one hour.
-- `reset_password` checks strength before it spends the token, so a weak password leaves the link usable.
+- `register` (`POST /auth/register`) creates an account with the role `user` only and returns 201 with user info and a token pair. A request naming any other role is refused with 403 and an audit event.
+- `refresh` (`POST /auth/refresh`) swaps a refresh token for a new pair and revokes the old one. An invalid, expired or revoked token answers 401.
+- `logout` (`POST /auth/logout`) revokes the refresh token and answers 400 for a token it cannot read. It does nothing to the access token.
+- `get_current_user` serves `GET /auth/me` from a Bearer access token. A missing or bad header answers 401, and an unknown user 404.
+- `change_password` (`PUT /auth/change-password`) checks the current password and the strength of the new one, then writes an audit event.
+- `request_verification` (`POST /auth/request-verification`) sends a new verification email to a signed-in user, and answers 400 when the email is already verified.
+- `verify_email` (`POST /auth/verify-email`) marks the email verified with a one-use token.
+- `request_password_reset` (`POST /auth/request-password-reset`) answers 200 whether or not the email exists. The token expires in one hour.
+- `reset_password` (`POST /auth/reset-password`) checks strength before it spends the token, so a weak password leaves the link usable.
 
 ## Don't
 - Don't send `roles` on `register` expecting an admin. An admin is made through `/admin/users`.

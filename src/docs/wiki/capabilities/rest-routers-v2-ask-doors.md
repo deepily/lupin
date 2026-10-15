@@ -17,6 +17,7 @@ The handlers in `routers/v2_ask.py`. All need a signed-in user; bodies are on [[
 ## What it does
 - `v2_agents` (`GET /api/v2/agents`) lists every registry command once, with the CRUD fork applied to labels, plus the auto-route option.
 - `v2_ask` (`POST /api/v2/ask`) runs one question through the flow on a worker thread and returns an `AskResponse`. Agent, replay, router and extract failures degrade to the receptionist, not a 500.
+- A `parent_id_hash` claim is kept for an admin, the test account, the parent job's owner or a holder of a valid suite token. Any other claim is dropped, and the flow trace records `parent_id_hash_dropped`. A claim that names the test-suite job holding the monopoly slot is refused with 403 `parent_id_hash_refused`. `POST /api/v2/submit` applies the same check.
 - `ask_audio` (`POST /api/v2/ask-audio`) transcribes an uploaded file, then asks the text. The 200 body is NDJSON: a transcript line, then one ask or error line. The ask starts before the response, so a client that drops after line 1 does not cancel it.
 - `transcribe` (`POST /api/v2/transcribe`) returns only the words and asks nothing. It needs no flow, so the `v2 flow enabled` gate does not apply.
 - `v2_resume` (`POST /api/v2/resume`) answers a parked question. An unknown or expired `pending_id` returns status `expired`.

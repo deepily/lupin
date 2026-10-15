@@ -20,7 +20,8 @@ The `/api/cosa-voice` routes that read and change a session's voice persona and 
 ## What it does
 - `get_voice_persona_pool` (`GET /voice-persona/pool`) returns the configured pool, occupied names, free names and the active sessions holding a persona. A dead-PID bridge counts as free. It takes no session id.
 - `get_voice_persona_endpoint` (`GET /voice-persona/{session_id}`) returns a session's persona, or null.
-- `release_voice_persona_endpoint` (`POST /voice-persona/{session_id}/release`) clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set.
+- `release_voice_persona_endpoint` (`POST /voice-persona/{session_id}/release`) clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set, and 500 when the bridge write fails.
+- `allocate_voice_persona_endpoint` (`POST /voice-persona/{session_id}/allocate`, no pin here) takes the query fields `requested_persona_name`, `persona_chain`, `declared_managers` and `previous_persona_name`. With neither of the first two it returns an existing persona unchanged, or picks a free one. A requested name that is already held answers 409 and one outside the pool 422. A `persona_chain` (comma-separated, `*` for any free one) takes the first free name, and an exhausted chain is 409. Both fields together, or an empty chain, is 422. `declared_managers` keeps those names out of the random and `*` picks. An empty pool is 500, and so is a failed bridge write.
 - `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample` (`POST /voice-persona/sample`), which returns `audio/mpeg`. A voice outside the pool, or a blank `voice_id` or `text`, is 400. A missing ElevenLabs key or an upstream failure is 503.
 - `get_config_manager` builds a `ConfigurationManager` for these routes.
 - `get_notification_queue` (in both routers) hands the notification queue from the main module to a route.

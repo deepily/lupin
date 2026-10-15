@@ -15,11 +15,11 @@ pins:
 ---
 # Notification sender conversations
 
-The per-sender conversation doors of `routers/notifications.py`, under `/api/notifications`. All need an API key or a JWT. Those with `{user_email}` also need the caller to be that user, and an unknown email is 404. See [[rest-routers-notification-user-inbox]].
+The per-sender conversation doors of `routers/notifications.py`, under `/api/notifications`. All need an API key or a JWT. Those with `{user_email}` also need the caller to be that user, and any other email is 403, an unknown one included. See [[rest-routers-notification-user-inbox]].
 
 ## What it does
 - `get_senders_with_activity` answers `GET /senders/{user_email}` with `sender_id`, `last_activity` and `count`, newest first. `hours` narrows it.
-- `get_visible_senders` answers `GET /senders-visible/{user_email}`. It adds `new_count`, `voice_persona` and `manager_persona`, drops senders whose rows are all hidden unless `include_hidden`. It skips the user's own job rows when `exclude_own_jobs` is set. It runs off the event loop.
+- `get_visible_senders` answers `GET /senders-visible/{user_email}`. It adds `new_count`, `voice_persona` and `manager_persona`, drops senders whose rows are all hidden unless `include_hidden`. Always left out: rows of non-conversation types and senders with a persisted `session_reaped` row. With `exclude_own_jobs` it also drops the user's own job rows and every row with no job id. It runs off the event loop.
 - `get_sender_conversation` answers `GET /conversation/{sender_id}/{user_email}`: oldest first, within `hours` (default 24) of `anchor` or the sender's last activity. A malformed `anchor` is 400.
 - `delete_sender_conversation` answers `DELETE` on the same path and removes every row from that sender to the user, and answers `deleted_count`.
 - `get_sender_conversation_by_date` answers `GET /conversation-by-date/...` with a map of `YYYY-MM-DD` to rows over `hours` (default 168). Hidden rows need `include_hidden`.

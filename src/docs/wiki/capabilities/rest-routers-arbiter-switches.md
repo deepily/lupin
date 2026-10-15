@@ -17,7 +17,7 @@ pins:
 Three groups of `/api/arbiter` routes: the cached fleet snapshot, the fleet-size dial and the skeleton crew switch. The standalone arbiter itself is in [[heartbeat-arbiter]].
 
 ## What it does
-- `get_fleet_snapshot` returns the last pushed snapshot, or `{ status: "awaiting", session_count: 0, sessions: [] }` before any push. A cold start is therefore not a zero-session fleet.
+- `get_fleet_snapshot` returns the last pushed snapshot, or `{ status: "awaiting", generated_at: None, session_count: 0, sessions: [] }` before any push. A cold start is therefore not a zero-session fleet.
 - `push_fleet_snapshot` caches a body validated by `FleetSnapshotIn` (`generated_at`, `session_count` of 0 or more, `sessions`) and answers `{ status: "ok", session_count }`. Both routes take an API key or a JWT.
 - `get_fleet_size_cap` returns `{ cap, ceiling, live, skeleton_crew }`, read fresh on every call. The disk value of `cap` wins over the cached configuration.
 - `FleetSizeCapIn` is the PUT body: one `cap` of 1 or more. The upper bound is the live `cc session fleet size cap maximum`, so a value above it is a 422.

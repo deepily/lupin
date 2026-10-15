@@ -17,10 +17,10 @@ pins:
 Admin routes that let the dev server read and watch the queues of a peer Lupin server, usually the test server. All of them need the admin role.
 
 ## What it does
-- `get_peer_queue` serves `GET /api/admin/peer-queue/{queue_name}` for `todo`, `run`, `done` or `dead` and returns `PeerQueueResponse` (`peer_host`, `queue_name`, `fetched_at`, `total_jobs`, `upstream`).
-- `start_watcher` takes `WatchStartRequest` (`host`, `signal` of `run` or `run+todo`, `interval_seconds` 10 to 600, `stable_for` 1 to 10, `priority`). It starts one background task per admin and replaces a prior one.
-- `stop_watcher` cancels the caller's watcher. It answers `not_active` when none was running.
-- `get_watcher_status` returns `WatchStatusResponse`. A caller with no watcher gets `active: false`.
+- `get_peer_queue` serves `GET /api/admin/peer-queue/{queue_name}?host=<host:port>` for `todo`, `run`, `done` or `dead`. The `host` query is required. It returns `PeerQueueResponse` (`peer_host`, `queue_name`, `fetched_at`, `total_jobs`, `upstream`).
+- `start_watcher` is `POST /api/admin/peer-queue-watch/start` and takes `WatchStartRequest`. `host` is required. `signal` is `run` or `run+todo` (default `run+todo`). `interval_seconds` is 10 to 600 (default 60), `stable_for` is 1 to 10 (default 2) and `priority` defaults to `high`. It starts one background task per admin, replaces a prior one and answers `started`.
+- `stop_watcher` is `POST /api/admin/peer-queue-watch/stop`. It cancels the caller's watcher and answers `stopped`, or `not_active` when none was running.
+- `get_watcher_status` is `GET /api/admin/peer-queue-watch/status` and returns `WatchStatusResponse`. A caller with no watcher gets `active: false`.
 - `WatchActionResponse` is the `{ status, message }` answer of start and stop.
 - The watcher notifies once, after `stable_for` consecutive empty polls, then ends.
 - `cancel_all_watchers_on_shutdown` cancels every watcher. The main module calls it at shutdown.

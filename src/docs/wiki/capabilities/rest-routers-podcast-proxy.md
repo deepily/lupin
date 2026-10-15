@@ -17,11 +17,12 @@ pins:
 The `/api/podcast-proxy` routes. A seat asks, the operator answers yes on a card, and the seat starts the job. A signed-in person can start one from the doc viewer. Every refusal the doors raise themselves has the body `{ detail: { code, message } }`.
 
 ## What it does
-- `ask_for_a_podcast` takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id`. A live card for the same file and bytes answers 409 `waiting_card`.
-- `start_a_podcast` takes `StartIn` (`card_id`, `actor`). It re-reads the card and the file, spends the card once, and queues the job.
-- `podcast_card_status` describes a card: `state`, `spent` and `job_id`. A card this feature did not write answers 404 `no_card`.
-- `ViewerIn` carries a `path`. `check_a_viewer_file` says whether the viewer may offer a podcast, and returns `{ ok, name, size }`.
-- `start_a_podcast_from_viewer` treats the click as the yes and queues a job for the caller. It answers 409 `spent` or `claimed_no_job` for a repeat of the same file and bytes inside the card's maximum age.
+- `ask_for_a_podcast` is `POST /api/podcast-proxy/ask`. It takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id` with `name`, `size`, `sha256`, `asked_by`, `expires_at` and `pushed`. A live card for the same file and bytes answers 409 `waiting_card`.
+- `ask_for_a_podcast` and `start_a_podcast` need an `actor` that ends in the caller's session id, or they answer 400 `bad_actor`.
+- `start_a_podcast` is `POST /api/podcast-proxy/start`. It takes `StartIn` (`card_id`, `actor`), re-reads the card and the file, spends the card once, and queues the job.
+- `podcast_card_status` is `GET /api/podcast-proxy/card/{card_id}`. It describes a card: `state`, `spent` and `job_id`. A card this feature did not write answers 404 `no_card`.
+- `ViewerIn` carries a `path`. `check_a_viewer_file` is `GET /api/podcast-proxy/from-viewer/check?path=<scope>/<path>`. It says whether the viewer may offer a podcast, and returns `{ ok, name, size }`.
+- `start_a_podcast_from_viewer` is `POST /api/podcast-proxy/from-viewer`. It treats the click as the yes and queues a job for the caller. It answers 409 `spent` or `claimed_no_job` for a repeat of the same file and bytes inside the card's maximum age.
 - `copy_directory` is `io/podcast-proxy` under the project root, where the judged bytes are copied.
 
 ## Don't

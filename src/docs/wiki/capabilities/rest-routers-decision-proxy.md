@@ -22,12 +22,12 @@ pins:
 The `/api/proxy` routes that list, ratify and delete the decisions the proxy made for a user, show trust, and switch the trust mode. The proxy's own logic is on [[decision-proxy]].
 
 ## What it does
-- `get_pending_decisions` lists pending decisions, oldest first, with `domain`, `category` and `limit` filters and a summary. The path user must be the caller, but the query has no user filter, so it lists everyone's.
-- `ratify_decision` approves or rejects one pending decision and updates the trust counters. `delete_decision` hard-deletes a pending one. Both take `user_email` in the query, which must be the caller.
+- `get_pending_decisions` (`GET /pending/{user_email}`) lists pending decisions, oldest first, with `domain`, `category` and `limit` filters and a summary. The path user must be the caller, but the query has no user filter, so it lists everyone's.
+- `ratify_decision` (`POST /ratify/{decision_id}`) approves or rejects one pending decision and updates the trust counters. `delete_decision` (`DELETE /decision/{decision_id}`) hard-deletes a pending one. Both take `user_email` in the query, which must be the caller.
 - Both record `audit_identity`, the caller's account email from their credential, never the typed `user_email`.
-- `get_trust_state` returns a user's trust rows, with an optional `domain` filter. `get_decisions_by_domain_category` returns history, newest first, for any credentialed caller.
-- `get_current_batch_id` builds `pr-<8 hex>-<N>`. `acknowledge_batch` bumps N and returns `retired_batch` and `new_batch`. `get_proxy_batch_id` and `acknowledge_proxy_batch` serve them and need a credential.
-- `get_trust_mode` returns `ini_mode`, `running_mode` and `effective`. `update_trust_mode` takes a `TrustModeUpdateRequest` with `mode` of `disabled`, `shadow`, `suggest` or `active`. It calls `config_mgr.put`, which `ConfigurationManager` lacks, so the INI key `swe team trust mode` is never written. The error is caught and the route still answers 200. It does set the running SWE job's proxy at once, if there is one.
+- `get_trust_state` (`GET /trust/{user_email}`) returns a user's trust rows, with an optional `domain` filter. `get_decisions_by_domain_category` (`GET /decisions/{domain}/{category}`) returns history, newest first, for any credentialed caller.
+- `get_current_batch_id` builds `pr-<8 hex>-<N>`. `acknowledge_batch` bumps N and returns `retired_batch` and `new_batch`. `get_proxy_batch_id` (`GET /batch-id`) and `acknowledge_proxy_batch` (`POST /acknowledge`) serve them and need a credential.
+- `get_trust_mode` (`GET /mode`) returns `ini_mode`, `running_mode`, `effective` and `has_running_job`. `update_trust_mode` (`PUT /mode`) takes a `TrustModeUpdateRequest` with `mode` of `disabled`, `shadow`, `suggest` or `active`. It calls `config_mgr.put`, which `ConfigurationManager` lacks, so the INI key `swe team trust mode` is never written. The error is caught and the route still answers 200. It does set the running SWE job's proxy at once, if there is one. The reply is `status: updated` with `target: running` and `job_id`, or `status: queued` with `target: next_job`. Both `/mode` routes take any signed-in user, with no role check.
 - `get_run_queue` and `get_config_mgr` are the dependencies that fetch the run queue and config manager from the main module.
 
 ## Don't

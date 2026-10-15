@@ -20,8 +20,8 @@ pins:
 The routes of `cosa.rest.routers.tasks` that change an item, under `/api`. All take an API key or a Bearer token. Each body model forbids unknown fields, so a misspelt key is a 422, never a silent drop. Reads are in [[rest-routers-tasks-reads]]; the rules are in [[task-store]].
 
 ## What it does
-- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed, with the overflow moved into an empty body. The priority firewall answers 403 for a priority the caller may not set. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
-- `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`.
+- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed. The overflow becomes the body when the body is empty, and is appended to it after an overflow marker line when it is not. The priority firewall answers 403 for a priority the caller may not set. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
+- `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`. With `asynchronous: true` and the operator flag on, a promotion that needs the owner's answer writes only a promotion ticket. It returns 202 `{ status: "awaiting_human_approval", ticket_id, ... }`.
 - `correlate_task`, `.../correlate` (`TaskCorrelateIn`): re-stamps the `correlation_key`. A terminal row is 422.
 - `ask_to_unpark`, `.../unpark-ask` (`UnparkAskIn`): a manager seat asks the operator to un-park a row. The server makes a yes or no card and pushes it. It is 403 for a non-manager and 404 for no such row or no operator account. It is 409 for a row not parked, one with no recorded park time, or one with a card already waiting. It writes no task event.
 - `amend_task`, `.../amend` (`TaskAmendIn`): appends a stamped note to the body, and a blank note is 422. It is allowed on a closed row, where the note is marked a post-terminal addendum.
@@ -29,7 +29,7 @@ The routes of `cosa.rest.routers.tasks` that change an item, under `/api`. All t
 
 ## Don't
 - Don't send `asynchronous` as a string. The field is a strict boolean, and `"true"` is refused.
-- Don't PATCH a terminal row with anything but a title that starts `WITHDRAWN`, `SUPERSEDED` or `CORRECTED`, sent alone. Everything else is 422, as is a retitle past the cap.
+- Don't PATCH a terminal row with anything but a title that is exactly `WITHDRAWN — <existing title>` (or `SUPERSEDED`, `CORRECTED`), sent alone. A bare prefix and everything else is 422, as is a retitle past the cap.
 
 ## Invariants
-- Every write here except `ask_to_unpark` appends one audit event in the same transaction. Closed rows take `amend` and that title prefix, and nothing else.
+- Every write here appends one audit event in the same transaction. Two do not: `ask_to_unpark`, and an asynchronous transition, which writes a ticket and no event at request time. Closed rows take `amend` and that title prefix, and nothing else.

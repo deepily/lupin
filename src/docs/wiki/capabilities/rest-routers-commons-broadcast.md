@@ -21,7 +21,7 @@ The pieces of `routers/commons.py` that send one message to every live Claude Co
 - `validate_broadcast_body` refuses an empty message and one holding a system-reminder tag. `validate_broadcast_id` accepts `None` or a UUIDv4. Both return `( valid, error_detail )`.
 - `build_pseudo_sender_id` makes `broadcast-<8 hex of sha256( user_id )>` for the `broadcasts` topic. It has no `@`, so the store can read the header back.
 - `perform_fanout` writes one `broadcasts` entry per recipient, then pushes that recipient's `action:broadcast_received` notification. It returns the success count and the failed session ids. One failure does not stop the rest.
-- `post_broadcast_to_cc_sessions` runs the whole broadcast off the event loop. It answers 400 for a bad body or id and 409 for a repeated `broadcast_id`, but only when `require_ack` is true. It answers 429 with `Retry-After` when rate limited.
+- `post_broadcast_to_cc_sessions` runs the whole broadcast off the event loop. It answers 400 for a bad body or id and 409 for a repeated `broadcast_id`, but only when `require_ack` is true. It answers 429 with `Retry-After` when rate limited. A 200 body holds `broadcast_id`, `recipients`, `failed_recipients`, `filtered_out` and `status`. `status` is `queued`, or `no-active-sessions` when no seat qualifies. Zero recipients is still a 200, and `filtered_out` then says why each seat was dropped.
 - `get_notification_queue` fetches the notification queue the fan-out pushes onto.
 
 ## Don't

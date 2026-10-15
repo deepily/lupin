@@ -20,7 +20,7 @@ The typed bodies of the `/api/v2/*` doors on [[rest-routers-v2-ask-doors]]. The 
 
 ## What it does
 - `AskRequest`: `question` (1 to 4000 characters), `websocket_id`, `speak` (default true), `interactive` (default true) and `parent_id_hash`. When `interactive` is false a missing argument returns `needs_input` instead of parking, and a near-match cache hit is declined instead of confirmed.
-- `SubmitRequest`: `command` (required, up to 200 characters) and `args` carry work already decided, so no routing or extraction runs. `scheduled_at`, `monopolize` and `parent_id_hash` are queue directives, so they sit outside `args`.
+- `SubmitRequest`: `command` (required, up to 200 characters) and `args` carry work already decided, so no routing or extraction runs. `scheduled_at`, `monopolize` and `parent_id_hash` are queue directives, so they sit outside `args`. `question`, `websocket_id` and `speak` are also accepted.
 - `ResumeRequest`: `pending_id` from an earlier `needs_input` reply and the human's `answer`.
 - `AskResponse` is the one result shape for ask, submit and resume. `path` is replay, agent, needs_input or receptionist, `status` is done, waiting, parked, needs_input, expired or failed. It also carries `args_missing`, `pending_id`, `job_id`, `cache_hit`, `timings_ms`, `trace_id` and `queue_position`.
 - `AgentsResponse` holds an `AutoRouteOption`, the "let the router decide" entry, and a list of `AgentOption`, one per registry command. Each has `display_name`, `label`, `speakable`, `user_initiable`, `required_args` and `arg_questions`.
@@ -28,7 +28,7 @@ The typed bodies of the `/api/v2/*` doors on [[rest-routers-v2-ask-doors]]. The 
 - `ResumeJobRequest` takes `resume_from` plus optional lead and worker model overrides and a `thinking_effort` of low, medium, high, xhigh or max. `ResumeJobResponse` status is `resumed` or `ambiguous`; it carries the new `resumed_job_id` and the phase it restarts from.
 
 ## Don't
-- Don't put `scheduled_at` or `monopolize` inside `args`. `args` is checked against the command's argument contract, and no contract names them.
+- Don't put `scheduled_at` or `monopolize` inside `args`. The flow only checks that the command's required arguments are present and non-empty. An extra key is not refused: it reaches the job factory as an argument, and the job runs at once.
 - Don't read `queue_position` as live. It is the queue size at submit time.
 
 ## Invariants
