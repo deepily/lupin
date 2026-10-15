@@ -32,7 +32,7 @@ Four MCP tools ask whether a new definition already exists. They read the [[symb
 - A 401 or 403 stops later calls, but calls already in flight can finish. A 422 refuses only its own entry; five in a row with no answer between them stop the sweep. The key comes from `JEV_API_TOASTER`. `LUPIN_REUSE_JEV_PACK_SIZE`, with `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME`, sends entries in packs, and a ledger refusal answers `SPEND_LEDGER`. No INI key controls any of this.
 
 ## The verdict
-- Any flag beats the three outcomes below. `decide` then answers `UNCERTAIN_READ_SOURCE` with a cause: `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER` or `LOW_CONFIDENCE`.
+- Any flag beats the three outcomes below. `decide` then answers `UNCERTAIN_READ_SOURCE` with a cause: `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER`, `LOW_CONFIDENCE` or `NEAR_CUTOFF`. `NEAR_CUTOFF` holds only when the policy carries a `band` and the best symbol's overlap is inside it of a cut-off, with the edge outside.
 - `LOW_CONFIDENCE` holds when a symbol has 0.3 overlap or more and confidence under 0.9, unless a strong match exists. A strong match has overlap and confidence both at 0.9 or more, and the doubtful symbols are then listed as `doubtful`. `INDEX_STALE` means the index build raised any error. `CALL_FAILED` holds when any call failed or any entry was never asked, budget cut-offs included.
 - With no flag, `NEW` means no symbol reaches 0.5 overlap. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did. With a strong match, only the strong symbols are counted for that choice.
 
