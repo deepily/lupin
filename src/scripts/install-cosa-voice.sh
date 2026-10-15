@@ -469,34 +469,22 @@ else
     fi
 
     # ── End-to-end test notification ─────────────────────────────────
+    # Row 80535f46: a failed send used to be a warning and the installer still exited 0.
+    # The helper keeps the notifier's own status and message. Exit 0 delivered, 3 skipped
+    # (server reached, nobody listening), 1 failed. No server to reach is also a skip.
+    INSTALL_RC=0
     if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
         echo ""
         echo "  Sending test notification..."
-        TEST_RESULT=$("$VENV_PYTHON" -c "
-import sys, os
-sys.path.insert( 0, '$LUPIN_ROOT/src' )
-os.environ[ 'LUPIN_ROOT' ] = '$LUPIN_ROOT'
-from lupin_cli.notifications.notify_user_async import notify_user_async
-from lupin_cli.notifications.notification_models import AsyncNotificationRequest, NotificationType, NotificationPriority
-try:
-    req = AsyncNotificationRequest(
-        message='cosa-voice bootstrapper: test notification',
-        notification_type=NotificationType.PROGRESS,
-        priority=NotificationPriority.LOW,
-        sender_id='claude.code@installer.deepily.ai',
-        server_url='$SERVER_URL'
-    )
-    resp = notify_user_async( req )
-    print( 'ok' if resp and resp.success else 'fail' )
-except Exception as e:
-    print( f'fail: {e}' )
-" 2>/dev/null || echo "fail")
-
-        if echo "$TEST_RESULT" | grep -q "^ok"; then
-            pass_check "Test notification delivered"
-        else
-            warn_check "Test notification failed ($TEST_RESULT)"
-        fi
+        PROBE_RC=0
+        TEST_RESULT=$( LUPIN_ROOT="$LUPIN_ROOT" "$VENV_PYTHON" "$LUPIN_ROOT/src/scripts/lib/installer_notify_probe.py" "$SERVER_URL" 2>&1 ) || PROBE_RC=$?
+        case "$PROBE_RC" in
+            0) pass_check "Test notification delivered" ;;
+            3) warn_check "Test notification SKIPPED: server reached, no listener connected ($TEST_RESULT)" ;;
+            *) fail_check "Test notification failed ($TEST_RESULT)"; INSTALL_RC=1 ;;
+        esac
+    else
+        warn_check "Test notification SKIPPED: no server to reach at $SERVER_URL"
     fi
 
     # ── Summary ──────────────────────────────────────────────────────
@@ -515,5 +503,5 @@ except Exception as e:
     echo "  To verify, start Claude Code and run:"
     echo "    get_session_info()"
     echo ""
-    exit 0
+    exit "$INSTALL_RC"
 fi
