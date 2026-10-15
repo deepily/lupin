@@ -24,7 +24,7 @@ Builders for the bars that frame every multiplexer pane: the section header with
 - Sixteen renderers call `renderSectionHeader` and fifteen call `wireSectionCollapse`. `NotificationsHeaderRenderer` also calls the predicate and `setSectionCollapsed`, and `ActionRequiredRenderer` calls `setSectionCollapsed`.
 
 ## Toolbar and nav bar
-- `renderSectionToolbar( toggles = SECTION_TOGGLES )` returns `#section-toolbar` with one active `.toolbar-btn` per spec, keyed by `data-section`. `SectionToolbarRenderer` is its only caller in code. Each spec may name `sectionIds` and a `persistKey`.
+- `renderSectionToolbar( toggles = SECTION_TOGGLES )` returns `#section-toolbar` with one active `.toolbar-btn` per spec, keyed by `data-section`. `SectionToolbarRenderer` is its only caller in code. A spec may also name `sectionIds` and a `persistKey`. This function ignores both; `SectionToolbarRenderer` reads them.
 - `isActivePage( itemUrl, currentPath )` matches `/app` only against itself, with or without a slash. Every other link matches by path prefix. `lupin-nav.js` and `nav/lupinNav.ts` hold their own copies.
 - `renderNavBar( data, handlers )` returns `nav#lupin-nav`. Notifications and Profile links show only when authenticated. The right side shows email and a Logout button when authenticated with an email, otherwise a Login link. Logout calls `handlers.onLogout`. A hamburger toggles an open class on the links and right regions. `NavBarRenderer` calls it.
 
