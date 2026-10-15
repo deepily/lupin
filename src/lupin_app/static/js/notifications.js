@@ -773,7 +773,7 @@ class NotificationsUI {
         this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
         this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
         this.CC_HIDE_INACTIVE_KEY   = 'notifications_cc_hide_inactive_strip';  // Strip filter: hide icons for sessions with no allocated voice persona
-        this.KEEP_PLACE_KEY         = 'notifications_keep_place';              // Keep the reader's place when a card arrives at the top (absent = on)
+        this.KEEP_PLACE_KEY         = 'notifications_keep_place';              // Keep the reader's place when a card arrives at the top (absent = off)
         this.TTS_FRACTION_PREF_KEY  = 'notifications_tts_preview_fraction_runtime';  // Runtime override for the TTS preview fraction (0-1 float); layered on top of INI default
         // Recent Activity filter + accordion-state keys (2026-05-21 —
         // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
@@ -18448,15 +18448,15 @@ class NotificationsUI {
     }
 
     /**
-     * Read the "Keep place" preference: on unless the stored value is "false".
+     * Read the "Keep place" preference: off unless the stored value is "true".
      *
      * The multiplexer reads the same key, so one choice holds in both clients.
      */
     _readKeepPlace() {
         try {
-            return localStorage.getItem( this.KEEP_PLACE_KEY ) !== "false";
+            return localStorage.getItem( this.KEEP_PLACE_KEY ) === "true";
         } catch ( err ) {
-            return true;
+            return false;
         }
     }
 
@@ -18479,7 +18479,8 @@ class NotificationsUI {
         const toggle = document.getElementById( "cc-keep-place-toggle" );
         if ( !toggle ) return;
         toggle.setAttribute( "data-keep-place", String( this.keepPlace ) );
-        toggle.textContent = this.keepPlace ? "📌 Keep place" : "📌 Follow new";
+        toggle.setAttribute( "aria-checked", String( this.keepPlace ) );
+        toggle.textContent = this.keepPlace ? "📌 Place kept" : "📌 Keep place";
     }
 
     /**

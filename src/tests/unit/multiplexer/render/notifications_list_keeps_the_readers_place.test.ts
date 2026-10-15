@@ -2,9 +2,9 @@
 //
 // Rick's report: "an update inevitably arrives and the Notifications History is scrolled once again to
 // the top of the notification list." An arrival re-sorts the sender cards, so the arriving sender's card
-// goes to the top and every card the reader can see shifts down by its height. With Keep place on (the
-// default; the key is shared with the legacy client) the card the reader is looking at is pinned across
-// that merge.
+// goes to the top and every card the reader can see shifts down by its height. Rick wants auto-scroll as
+// the default and a switch to suspend it, so Keep place is off until it is turned on (the stored word
+// "true"; the key is shared with the legacy client). Turned on, the card the reader sees is pinned.
 //
 // happy-dom has no layout, so a card's rect is modelled: cards are stacked in DOM order, CARD_HEIGHT
 // apart, and the scroll offset moves them up. The renderer may scroll only through globalThis.scrollBy,
@@ -114,6 +114,7 @@ test("the newest sender is first, so the layout model below starts from a known 
 });
 
 test("an update from a card below the view moves it to the top and the reader keeps their place", async () => {
+  localStorage.setItem(KEEP_PLACE_KEY, "true");
   const h = setup(5);
   await settle();
   scrollY = 450;                                  // cards 2 (at 50) and 1 (at 250) are on screen
@@ -125,7 +126,8 @@ test("an update from a card below the view moves it to the top and the reader ke
   assert.equal(topOf(h, 1), before1);
 });
 
-test("at the top of the list nothing is compensated", async () => {
+test("at the top of the list nothing is compensated, even with Keep place on", async () => {
+  localStorage.setItem(KEEP_PLACE_KEY, "true");
   const h = setup(5);
   await settle();
   scrollY = 0;
@@ -134,8 +136,7 @@ test("at the top of the list nothing is compensated", async () => {
   assert.equal(topOf(h, 0), NAV_OFFSET);
 });
 
-test("with Keep place off the view is left to shift, as it always was", async () => {
-  localStorage.setItem(KEEP_PLACE_KEY, "false");
+test("by default the view is left to shift, as it always was", async () => {
   const h = setup(5);
   await settle();
   scrollY = 450;
@@ -146,6 +147,7 @@ test("with Keep place off the view is left to shift, as it always was", async ()
 });
 
 test("an update from the card the reader is looking at is not used as its own anchor", async () => {
+  localStorage.setItem(KEEP_PLACE_KEY, "true");
   const h = setup(5);
   await settle();
   scrollY = 450;                                  // card 1 is the first card at or below the strip
@@ -155,22 +157,24 @@ test("an update from the card the reader is looking at is not used as its own an
   assert.equal(topOf(h, 0), before0, "the first card that did not move is the anchor");
 });
 
-test("Keep place is on when nothing was stored, off only for the stored word false", () => {
-  assert.equal(readKeepPlace(localStorage), true);
-  localStorage.setItem(KEEP_PLACE_KEY, "true");
-  assert.equal(readKeepPlace(localStorage), true);
+test("Keep place is off when nothing was stored, on only for the stored word true", () => {
+  assert.equal(readKeepPlace(localStorage), false);
   localStorage.setItem(KEEP_PLACE_KEY, "false");
   assert.equal(readKeepPlace(localStorage), false);
-  assert.equal(readKeepPlace(null), true);
+  localStorage.setItem(KEEP_PLACE_KEY, "yes");
+  assert.equal(readKeepPlace(localStorage), false);
+  localStorage.setItem(KEEP_PLACE_KEY, "true");
+  assert.equal(readKeepPlace(localStorage), true);
+  assert.equal(readKeepPlace(null), false);
   assert.equal(KEEP_PLACE_KEY, "notifications_keep_place", "the legacy client reads the same key");
 });
 
-// A browser that blocks storage must not break the list: the preference reads as on.
+// A browser that blocks storage must not break the list: the preference reads as off.
 for (const [label, getter] of [
   ["throws on access", (): Storage => { throw new Error("blocked"); }],
   ["is absent", (): undefined => undefined],
 ] as const) {
-  test(`when localStorage ${label} the arrival still renders and the reader's place is kept`, async () => {
+  test(`when localStorage ${label} the arrival still renders and the default, off, applies`, async () => {
     const h = setup(5);
     await settle();
     scrollY = 450;
@@ -183,6 +187,6 @@ for (const [label, getter] of [
       if (original !== undefined) Object.defineProperty(globalThis, "localStorage", original);
     }
     assert.equal(order(h)[0], idFor(0));
-    assert.equal(topOf(h, 2), before2);
+    assert.equal(topOf(h, 2), before2 + CARD_HEIGHT);
   });
 }

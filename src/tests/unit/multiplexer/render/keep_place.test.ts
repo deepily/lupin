@@ -52,9 +52,9 @@ function shell(open: boolean, columnScrollTop: number | null): HTMLElement | nul
   return column;
 }
 
-test("readKeepPlace: a storage that throws counts as on", () => {
+test("readKeepPlace: a storage that throws counts as off", () => {
   const throwing = { getItem(): string | null { throw new Error("blocked"); } };
-  assert.equal(readKeepPlace(throwing), true);
+  assert.equal(readKeepPlace(throwing), false);
   assert.equal(KEEP_PLACE_KEY, "notifications_keep_place");
 });
 

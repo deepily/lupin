@@ -48,31 +48,34 @@ function mount(root: HTMLElement) {
   return r;
 }
 
-test("the pill starts on, shows its state and loses the pending marker", () => {
+test("the pill starts off, shows its state and loses the pending marker", () => {
   const { root, toggle } = makeRoot(true);
   mount(root);
-  assert.equal(toggle!.getAttribute("data-keep-place"), "true");
+  assert.equal(toggle!.getAttribute("data-keep-place"), "false");
+  assert.equal(toggle!.getAttribute("aria-checked"), "false");
   assert.equal(toggle!.textContent, "📌 Keep place");
   assert.equal(toggle!.getAttribute("data-phase6-pending"), null);
+  assert.equal(localStorage.getItem(KEEP_PLACE_KEY), null, "mounting stores nothing");
 });
 
-test("a click turns it off, stores the word false under the shared key, and a second click turns it on", () => {
+test("a click turns it on and stores the word true under the shared key; a second click turns it off", () => {
   const { root, toggle } = makeRoot(true);
   mount(root);
-  toggle!.dispatchEvent(new Event("click", { bubbles: true }));
-  assert.equal(toggle!.getAttribute("data-keep-place"), "false");
-  assert.equal(toggle!.textContent, "📌 Follow new");
-  assert.equal(localStorage.getItem(KEEP_PLACE_KEY), "false");
   toggle!.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(toggle!.getAttribute("data-keep-place"), "true");
+  assert.equal(toggle!.getAttribute("aria-checked"), "true");
+  assert.equal(toggle!.textContent, "📌 Place kept");
   assert.equal(localStorage.getItem(KEEP_PLACE_KEY), "true");
+  toggle!.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(toggle!.getAttribute("data-keep-place"), "false");
+  assert.equal(localStorage.getItem(KEEP_PLACE_KEY), "false");
 });
 
-test("a stored false is restored at mount", () => {
-  localStorage.setItem(KEEP_PLACE_KEY, "false");
+test("a stored true is restored at mount", () => {
+  localStorage.setItem(KEEP_PLACE_KEY, "true");
   const { root, toggle } = makeRoot(true);
   mount(root);
-  assert.equal(toggle!.getAttribute("data-keep-place"), "false");
+  assert.equal(toggle!.getAttribute("data-keep-place"), "true");
 });
 
 test("after unmount a click does nothing, and a second mount starts from the stored state", () => {

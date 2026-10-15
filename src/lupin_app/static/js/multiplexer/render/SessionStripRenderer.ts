@@ -135,7 +135,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private iconsEl         : HTMLElement | null = null;
   private focusToggleEl   : HTMLElement | null = null;
   private hideToggleEl    : HTMLElement | null = null;
-  // Optional: a page without #cc-keep-place-toggle mounts fine, and Keep place still holds by default.
+  // Optional: a page without #cc-keep-place-toggle mounts fine; Keep place is then off, the default.
   private keepPlaceToggleEl: HTMLElement | null = null;
 
   // Page UI state. Focus and hide-inactive are also persisted (row d04ff119);
@@ -143,7 +143,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private focusActive     : boolean = false;
   private focusedSenderId : string | null = null;
   private hideInactive    : boolean = false;
-  private keepPlace       : boolean = true;
+  private keepPlace       : boolean = false;
   private mounted         : boolean = false;
   // Row d04ff119 — a persisted focus whose session is not in the strip yet. It is
   // applied the moment that session arrives (legacy `_maybeReapplyPersistedFocus`),
@@ -238,7 +238,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     }
     this.keepPlaceHandler   = null;
     this.keepPlaceToggleEl  = null;
-    this.keepPlace          = true;
+    this.keepPlace          = false;
     this.iconsClickHandler  = null;
     this.focusToggleHandler = null;
     this.hideToggleHandler  = null;
@@ -413,7 +413,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
       }
     }
     this.hideInactive = this.readStorage(HIDE_INACTIVE_KEY) === "true";
-    this.keepPlace    = this.readStorage(KEEP_PLACE_KEY) !== "false";
+    this.keepPlace    = this.readStorage(KEEP_PLACE_KEY) === "true";
   }
 
   private saveFocus(): void {
@@ -525,7 +525,8 @@ class SessionStripRendererImpl implements SessionStripRenderer {
 
     if (this.keepPlaceToggleEl !== null) {
       this.keepPlaceToggleEl.setAttribute("data-keep-place", String(this.keepPlace));
-      this.keepPlaceToggleEl.textContent = this.keepPlace ? "📌 Keep place" : "📌 Follow new";
+      this.keepPlaceToggleEl.setAttribute("aria-checked", String(this.keepPlace));
+      this.keepPlaceToggleEl.textContent = this.keepPlace ? "📌 Place kept" : "📌 Keep place";
     }
   }
 

@@ -3,7 +3,7 @@
 // Keep place: a card arriving at the top must not move what the reader sees.
 //
 // The preference lives in localStorage under the key the legacy client reads, so one choice holds in both
-// clients. It is on unless the stored value is the word "false".
+// clients. Auto-scroll to the top is the default, so it is off unless the stored value is the word "true".
 
 /** The localStorage key shared with the legacy client (notifications.js KEEP_PLACE_KEY). */
 export const KEEP_PLACE_KEY = "notifications_keep_place";
@@ -20,15 +20,15 @@ export interface KeepPlaceStorage {
  *   - storage is a Storage-like object, or null when none is available
  *
  * Ensures:
- *   - returns false only for the stored word "false"
- *   - returns true for no value, any other value, a null storage, and a storage that throws
+ *   - returns true only for the stored word "true"
+ *   - returns false for no value, any other value, a null storage, and a storage that throws
  */
 export function readKeepPlace( storage: KeepPlaceStorage | null ): boolean {
-  if ( storage === null ) return true;
+  if ( storage === null ) return false;
   try {
-    return storage.getItem( KEEP_PLACE_KEY ) !== "false";
+    return storage.getItem( KEEP_PLACE_KEY ) === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 
