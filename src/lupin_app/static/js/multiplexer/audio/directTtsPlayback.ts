@@ -1,26 +1,23 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Parity B-7 — the cached-blob playback path, ported from legacy `playAudioBlob`
-// at notifications.js:5000.
+// in notifications.js.
 //
-// 🔴 :5000, NOT :4321 — THERE ARE TWO DEFINITIONS OF `playAudioBlob` IN ONE
-// CLASS BODY AND THE FIRST IS DEAD. Measured 2026-09-23. The later definition
-// wins in a JS class, so :4321 never runs. It matters because the two differ on
-// the one line that decides whether anything is audible:
+// 🔴 THE ARGUMENT IS A BLOB, NOT A URL. The legacy class once held a second,
+// dead `playAudioBlob` that assigned its argument straight to `audio.src`. Row
+// cfe30185 removed it, so the symbol now resolves once. The live definition wraps
+// the Blob in an object URL ("cache now returns Blobs, not URLs"):
 //
-//     :4321 (DEAD)  audio.src = audioUrl          // the argument is a Blob
-//     :5000 (LIVE)  URL.createObjectURL( blob )   // "cache now returns Blobs, not URLs"
+//     audio.src = audioUrl                  // dead, removed: the argument is a Blob
+//     URL.createObjectURL( blob )           // live
 //
 // `HTMLMediaElement.src` is a DOMString, so assigning a Blob stringifies it to
 // "[object Blob]", which resolves as a relative URL and fires `onerror`. A port
-// taken from :4321 would ship a cache-hit path that is SILENT on every hit —
-// and silent in the worst way, because the hit arm `return`s, so it never falls
+// that did that would ship a cache-hit path that is SILENT on every hit — and
+// silent in the worst way, because the hit arm `return`s, so it never falls
 // back to the server and the reject is swallowed by `playTTS`'s catch.
 //
-// ⚠️ THAT IS NOT A DEFECT IN LEGACY. Legacy runs :5000 and works. It is a trap
-// for whoever ports it, and grep hands you :4321 first because it is first.
-//
 // 🔴 THIS FILE IS ALSO THE MULTIPLEXER'S `currentAudio`. Legacy's `stopAudio`
-// (notifications.js:5067) tears down an HTMLAudioElement that `playAudioBlob`
+// in notifications.js tears down an HTMLAudioElement that `playAudioBlob`
 // parks on `this.currentAudio`. Nothing in the multiplexer had such an element,
 // because nothing had ever played a blob — `SequentialAudioManager` makes object
 // URLs but only for streamed chunks, and `AudioStore` owns Web Audio sources.

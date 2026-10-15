@@ -424,11 +424,10 @@ def symbol_citation_defects( header, bodies ):
     Why a header's symbol citations do NOT satisfy the guard, one reason per symbol.
 
     🔴 A SYMBOL IS ONLY A COORDINATE WHEN IT RESOLVES EXACTLY ONCE (Mr. Radio, 2026-09-27).
-    `notifications.js` defines `playAudioBlob` twice, at 4353-4383 and 5032-5097. A reader
-    handed that name cannot tell which body the test mirrors, and neither can this guard —
-    so a duplicate name is still a defect, exactly as a rotted line number is. Trading a
-    coordinate that points at the wrong place for a name that points at two places is not
-    an improvement.
+    `notifications.js` once defined `playAudioBlob` twice, and a reader handed that name could
+    not tell which body a test mirrors. The dead copy is removed, but the guard still treats a
+    duplicate name as a defect, exactly as a rotted line number is. Trading a coordinate
+    that points at the wrong place for a name that points at two places is not an improvement.
 
     Requires:
         - header is the file's first HEADER_LINES lines

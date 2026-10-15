@@ -2,27 +2,17 @@
 // Parity B-7 — the cached-blob playback path.
 //
 // LEGACY BEING MIRRORED, cited by symbol:
-//   - `playAudioBlob`  notifications.js THE LIVE ONE — see the warning below
+//   - `playAudioBlob`  notifications.js
 //   - `stopAudio`      notifications.js the `currentAudio` leg this file owns
 //
-// 🔴 THE LEGACY SYMBOL IS DEFINED TWICE AND THE FIRST IS DEAD. `playAudioBlob`
-// appears TWICE in one class body, so the LATER definition wins and the earlier one
-// never runs. ⚠️ The citation above therefore resolves to two places and names
-// neither, which the guard cannot fix for us and a stripped line number does not
-// mend — this paragraph is the disambiguation, and it is positional on purpose,
-// because the coordinates it used to carry (:4325 and :5004) had already rotted to
-// 4353 and 5032 by the time anyone read them. They differ on the one line that
-// decides whether anything is audible: the DEAD one assigns the Blob straight to
-// `audio.src`, the LIVE one wraps it in an object URL. `HTMLMediaElement.src` is a
-// DOMString, so the dead version
-// stringifies a Blob to "[object Blob]", resolves it as a relative URL and fires
-// `onerror`. A port taken from it would be SILENT on every cache hit, and silent
-// in the worst way: legacy's hit arm `return`s, so it never falls back to the
-// server, and the reject is swallowed by `playTTS`'s catch.
-//
-// ⚠️ LEGACY IS NOT BROKEN — it runs :5004. This is a trap for the porter, and it
-// is written here rather than in a commit message because the next person to
-// touch this file will grep the same name and be handed :4325 first.
+// 🔴 THE ARGUMENT IS A BLOB. The legacy class once held a second, dead
+// `playAudioBlob` that assigned its argument straight to `audio.src`. Row cfe30185
+// removed it, so the symbol resolves once and the citation above names one place.
+// The live definition wraps the Blob in an object URL. `HTMLMediaElement.src` is a
+// DOMString, so assigning a Blob stringifies it to "[object Blob]", resolves it as a
+// relative URL and fires `onerror`. A port that did that would be SILENT on every
+// cache hit, and silent in the worst way: legacy's hit arm `return`s, so it never
+// falls back to the server, and the reject is swallowed by `playTTS`'s catch.
 //
 // The object-URL round trip is therefore asserted directly, not implied.
 //

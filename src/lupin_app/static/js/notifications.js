@@ -5174,43 +5174,6 @@ class NotificationsUI {
     }
     
     /**
-     * Plays cached audio from a URL, resolving on end or blocked autoplay, rejecting on error.
-     *
-     * A later playAudioBlob( audioBlob ) in this class overrides this definition, so this one is not called.
-     */
-    async playAudioBlob( audioUrl ) {
-        return new Promise( ( resolve, reject ) => {
-            const audio = this.createAudioElement();
-            
-            audio.onloadeddata = () => {
-                this.log( "Cached audio loaded successfully" );
-            };
-            
-            audio.onended = () => {
-                this.log( "Cached audio playback completed" );
-                // Notify TTS queue that playback is complete
-                this.onTTSPlaybackComplete();
-                resolve();
-            };
-
-            audio.onerror = ( error ) => {
-                this.error( "Cached audio playback failed:", error );
-                // Notify TTS queue even on error (to advance queue)
-                this.onTTSPlaybackComplete();
-                reject( error );
-            };
-            
-            audio.src = audioUrl;
-            audio.style.display = 'block';
-            
-            audio.play().catch( error => {
-                this.log( "Auto-play prevented for cached audio, but audio is ready" );
-                resolve(); // Resolve anyway as audio is ready to play
-            });
-        });
-    }
-    
-    /**
      * Mint the utterance id for one speech request and make it the one expected.
      *
      * The server echoes `utterance_id` on that stream's status, complete and error
@@ -7267,18 +7230,6 @@ class NotificationsUI {
     // circuit-breaker milestone — each WSChannel owns its own per-channel
     // backoff schedule + 20-attempt circuit breaker, and the watchdog
     // delegates to channel._tickWatchdog() rather than scheduling externally.)
-
-    // ========================================
-    // AUTHENTICATION HELPERS (from original queue.js)
-    // ========================================
-    
-    /**
-     * Returns a fixed email address kept from the original queue page, not the signed-in user's.
-     */
-    getCurrentUserEmail() {
-        // Use the hardcoded email as per original queue.js pattern
-        return "ricardo.felipe.ruiz@gmail.com";
-    }
 
     /**
      * Read scheduling controls for a job submission form.
