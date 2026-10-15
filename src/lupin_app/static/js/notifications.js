@@ -1437,7 +1437,7 @@ class NotificationsUI {
      * Tells whether a JWT is expired or within 60 seconds of expiring.
      *
      * Returns true when the token has no exp claim or cannot be parsed.
-     * Returns false only when exp is more than 60 seconds ahead of the current time.
+     * Returns false only when exp is at least 60 seconds ahead of the current time.
      */
     isTokenExpired( token ) {
         try {
@@ -5174,7 +5174,7 @@ class NotificationsUI {
     }
     
     /**
-     * Plays cached audio from a URL, resolving when playback ends and rejecting on an error.
+     * Plays cached audio from a URL, resolving on end or blocked autoplay, rejecting on error.
      *
      * A later playAudioBlob( audioBlob ) in this class overrides this definition, so this one is not called.
      */
@@ -8023,8 +8023,9 @@ class NotificationsUI {
     /**
      * Deletes all jobs in a queue pane after the user confirms.
      *
-     * For the history pane only entries inside the selected time window are deleted, through the job-history endpoint.
-     * On success it resets the count and reloads the pane; on failure it shows an alert.
+     * For the history pane it deletes the entries in the selected time window, or all of them for all time, then reloads the history.
+     * For the other panes it deletes the whole queue, resets the count badge and reloads the cards.
+     * On failure it shows an alert.
      */
     async deleteAllQueueJobs( queueName ) {
         /**
@@ -8267,7 +8268,8 @@ class NotificationsUI {
      * Adds a notification to a job card's conversation pane, newest first.
      *
      * A notification whose progress group already has an entry updates that entry in place and returns without expanding or scrolling.
-     * Otherwise it inserts a new entry, then expands the card and pane and scrolls it into view.
+     * A user-initiated message inserts a chat bubble and expands only the job card.
+     * Any other notification inserts a new entry, then expands the card and pane and scrolls it into view.
      * It does nothing when the card's conversation pane is not in the page.
      */
     appendNotificationToJobCard( jobId, notification ) {
@@ -10588,7 +10590,7 @@ class NotificationsUI {
      * Paints the fleet panel from the fetched data and sets the session count.
      *
      * Shows a sign-in message, an offline message, an empty or live-only message, or the grouped table.
-     * It caches the data for the offline toggle and stamps the updated time only for a fleet state, and only when asked to.
+     * For a fleet state only, it caches the data for the offline toggle and, when asked to, stamps the updated time.
      */
     renderFleetStatus( composite, stampUpdated = true ) {
         /**
@@ -13851,7 +13853,7 @@ class NotificationsUI {
      * Deletes the saved override so the configured window and threshold apply again.
      *
      * On success repaints the sliders from the server's answer, refreshes the ratio clause and returns the settings.
-     * A refused request shows a not-reset status message and returns null without repainting.
+     * A refused request shows a not-reset status message when the controls are on the page, and returns null without repainting.
      * A network failure returns null and shows no message.
      */
     async resetFlowRatioSettings() {
@@ -17160,7 +17162,8 @@ class NotificationsUI {
     /**
      * Applies one status transition to every row in a filer's group, one at a time.
      *
-     * Shows the verb and an attempt count after each row, then a final line with done and refused counts.
+     * Shows the verb and an attempt count after each row, then a final line with the done count.
+     * The final line adds the refused count and first refusal only when a row failed.
      * Returns { ok, failed, firstError } and refreshes the pane once at the end.
      * An empty group shows a message and returns zero counts without a refresh.
      */
@@ -17499,7 +17502,7 @@ class NotificationsUI {
     /**
      * Wires the task list container's click, key, press and verb-select listeners once.
      *
-     * The press listeners set a flag that holds repaints while a mouse button is down.
+     * A mousedown sets a flag that holds repaints; mouseup, mouseleave and blur clear it.
      * Returns without doing anything when already wired or when the container is absent.
      */
     _wireTaskListAccordion() {
@@ -18036,7 +18039,7 @@ class NotificationsUI {
     /**
      * Builds the epic board table HTML from the grouped model and returns it as a string.
      *
-     * Sections run Waiting on Rick first, then each epic, then Drift, which renders even when empty.
+     * Sections run Waiting on Rick first, only when a row waits on Rick, then each epic, then Drift, which renders even when empty.
      * Rows use the shared row renderer, so each carries the same action controls as the task list.
      * The saved open or closed choices decide which groups start collapsed.
      */
@@ -18498,6 +18501,7 @@ class NotificationsUI {
      * Creates the abstract tooltip container once and adds document listeners each call.
      *
      * A click on a 📋 indicator shows the abstract in the tooltip, or in the reading pane in horizontal layout.
+     * Indicators inside the action-required area still use the tooltip, and a second click on one already shown in the pane closes the pane.
      * A click outside the tooltip, or Escape, hides it.
      */
     initAbstractTooltip() {
@@ -24721,7 +24725,7 @@ class NotificationsUI {
     }
     
     /**
-     * Loads the todo, run, done and dead queue lists on page start.
+     * Loads the todo, run, done and dead queue lists, then sets window.refreshQueues.
      */
     async loadInitialData() {
         this.log( "Loading initial data (queue lists and notifications)" );
@@ -28447,9 +28451,9 @@ class NotificationsUI {
     /**
      * Marks a notification expired when its countdown ends and routes it to its card.
      *
-     * With no card to route to, it shows the expired state in place.
-     *
+     * It returns without a visible change when the notification is unknown, already answered, or has no card on the page.
      * For open-ended input it submits the text already typed, if any. Otherwise the default is only shown, not sent.
+     * With a card but no destination to animate to, it shows the expired state in place.
      */
     handleLocalTimeout( notificationId ) {
         this.log( `Local timeout for notification ${notificationId}` );
