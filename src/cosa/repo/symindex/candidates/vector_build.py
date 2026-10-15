@@ -10,8 +10,9 @@ import time
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError, EMBEDDING_SHAPE, ENGINE_NOT_LOADED
 
-# 16, not 64: against model server 0.1.2 a code batch of 32 or 64 holding a text over about 2,000 characters
-# answered 500 (EmbeddingProviderUnreachable), and the same rows in batches of 16 answered 200.
+# 16, not 64: a code batch of 32 or 64 holding a text over about 2,000 characters made model server 0.1.2 answer
+# 500. Its log shows CUDA out of memory on GPU 0, where vLLM holds about 17 GB and leaves the server about 7 GB
+# at float32. The same rows in batches of 16 answered 200.
 BATCH_SIZE    = 16
 PAUSE_SECONDS = 0.5
 WARM_TEXT     = "warm up"
