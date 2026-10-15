@@ -493,3 +493,155 @@ def test_transcribe_oom_retry_decodes_with_the_same_kwargs( client ):
     assert pipeline.call_count == 2
     expected = { "chunk_length_s": 30, "stride_length_s": 5, "return_timestamps": True }
     assert [ c.kwargs for c in pipeline.call_args_list ] == [ expected, expected ]
+
+
+# ── role on /embeddings/{generate,batch} and the engines block of /embeddings/info ──────────────────
+
+
+import torch
+
+
+class FakeEncoder:
+    """A stand-in engine: records what it was asked, answers with fixed pooled vectors."""
+
+    def __init__( self, width=4, dtype=torch.float16, device="cpu" ):
+        self.calls  = []
+        self.width  = width
+        self.dtype  = dtype
+        self.device = device
+        self.auto_model = MagicMock()
+        self.auto_model.config._commit_hash = "abc123"
+
+    def __getitem__( self, i ):
+        return self
+
+    def parameters( self ):
+        yield torch.zeros( 1, dtype=self.dtype, device=self.device )
+
+    def encode( self, texts, convert_to_tensor=False, normalize_embeddings=False ):
+        self.calls.append( { "texts": list( texts ), "tensor": convert_to_tensor, "normalize": normalize_embeddings } )
+        rows = torch.tensor( [ [ float( i + 1 ), 2.0, 0.0, 4.0 ] for i in range( len( texts ) ) ] )
+        return rows if convert_to_tensor else MagicMock( tolist=lambda: rows.tolist() )
+
+
+def _loaded( code=None, prose=None ):
+    from lupin_model_server import main as ms
+    ms._state.code_engine  = code if code is not None else FakeEncoder()
+    ms._state.prose_engine = prose if prose is not None else FakeEncoder()
+    return ms
+
+
+def _post( client, path, plaintext, **body ):
+    return client.post( path, json=body, headers={ "X-API-Key": plaintext } )
+
+
+def test_batch_without_a_role_is_the_original_path_and_echoes_none( client ):
+    ms = _loaded()
+    key = _set_valid_api_key_hash()
+    resp = _post( client, "/embeddings/batch", key, texts=[ "a", "b" ], content_type="prose" )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[ "role" ] is None and body[ "count" ] == 2
+    assert ms._state.prose_engine.calls == [ { "texts": [ "a", "b" ], "tensor": False, "normalize": False } ]
+
+
+def test_batch_code_query_prefixes_the_text_and_document_does_not( client ):
+    ms = _loaded()
+    key = _set_valid_api_key_hash()
+    q = _post( client, "/embeddings/batch", key, texts=[ "find x" ], content_type="code", role="query" )
+    d = _post( client, "/embeddings/batch", key, texts=[ "def x" ], content_type="code", role="document" )
+    assert q.json()[ "role" ] == "query" and d.json()[ "role" ] == "document"
+    assert ms._state.code_engine.calls == [
+        { "texts": [ f"{ms.CODE_QUERY_PREFIX} find x" ], "tensor": False, "normalize": True },
+        { "texts": [ "def x" ], "tensor": False, "normalize": True } ]
+
+
+def test_batch_prose_roles_use_their_own_prefix_and_the_layer_norm_truncate_normalize_steps( client, monkeypatch ):
+    ms = _loaded()
+    monkeypatch.setattr( ms, "PROSE_MATRYOSHKA_DIM", 2 )
+    key = _set_valid_api_key_hash()
+    q = _post( client, "/embeddings/batch", key, texts=[ "t" ], content_type="prose", role="query" )
+    d = _post( client, "/embeddings/batch", key, texts=[ "t" ], content_type="prose", role="document" )
+    assert [ c[ "texts" ] for c in ms._state.prose_engine.calls ] == [ [ f"{ms.PROSE_QUERY_PREFIX} t" ], [ f"{ms.PROSE_DOCUMENT_PREFIX} t" ] ]
+    assert all( c[ "tensor" ] and not c[ "normalize" ] for c in ms._state.prose_engine.calls )
+    pooled = torch.tensor( [ [ 1.0, 2.0, 0.0, 4.0 ] ] )
+    expect = torch.nn.functional.normalize( torch.nn.functional.layer_norm( pooled, ( 4, ) )[ :, :2 ], p=2, dim=1 ).tolist()[ 0 ]
+    got = q.json()[ "embeddings" ][ 0 ]
+    assert len( got ) == 2 and got == pytest.approx( expect, abs=1e-6 )
+    assert abs( sum( v * v for v in got ) - 1.0 ) < 1e-6
+    assert d.json()[ "embeddings" ][ 0 ] == pytest.approx( expect, abs=1e-6 )
+
+
+def test_generate_carries_the_role_and_returns_one_vector( client ):
+    ms = _loaded()
+    key = _set_valid_api_key_hash()
+    resp = _post( client, "/embeddings/generate", key, text="hello", content_type="code", role="query" )
+    body = resp.json()
+    assert resp.status_code == 200 and body[ "role" ] == "query" and body[ "dim" ] == 4
+    assert ms._state.code_engine.calls[ 0 ][ "texts" ] == [ f"{ms.CODE_QUERY_PREFIX} hello" ]
+
+
+def test_generate_without_a_role_echoes_none( client ):
+    _loaded()
+    key = _set_valid_api_key_hash()
+    resp = _post( client, "/embeddings/generate", key, text="hello", content_type="prose" )
+    assert resp.status_code == 200 and resp.json()[ "role" ] is None
+
+
+def test_batch_refuses_empty_texts_and_an_unknown_role( client ):
+    _loaded()
+    key = _set_valid_api_key_hash()
+    assert _post( client, "/embeddings/batch", key, texts=[], content_type="prose" ).status_code == 400
+    assert _post( client, "/embeddings/batch", key, texts=[ "a" ], content_type="prose", role="other" ).status_code == 422
+
+
+def test_batch_answers_503_when_the_engine_is_not_loaded( client ):
+    from lupin_model_server import main as ms
+    key = _set_valid_api_key_hash()
+    resp = _post( client, "/embeddings/batch", key, texts=[ "a" ], content_type="code", role="query" )
+    assert resp.status_code == 503 and ms._state.code_engine is None
+
+
+def test_info_reports_engines_with_revision_dtype_device_prefixes_and_libraries( client, monkeypatch ):
+    ms = _loaded( code=FakeEncoder( dtype=torch.float16 ), prose=FakeEncoder( dtype=torch.float32 ) )
+    monkeypatch.setattr( ms, "_device_class", lambda d: f"class-of-{d}" )
+    key = _set_valid_api_key_hash()
+    body = client.get( "/embeddings/info", headers={ "X-API-Key": key } ).json()
+    eng = body[ "engines" ]
+    assert eng[ "code" ][ "revision" ] == "abc123" and eng[ "prose" ][ "revision" ] == "abc123"
+    assert eng[ "code" ][ "dtype" ] == "float16" and eng[ "prose" ][ "dtype" ] == "float32"
+    assert eng[ "code" ][ "query_prefix" ] == ms.CODE_QUERY_PREFIX and eng[ "code" ][ "document_prefix" ] == ""
+    assert eng[ "prose" ][ "document_prefix" ] == ms.PROSE_DOCUMENT_PREFIX
+    assert eng[ "prose" ][ "dimensions" ] == ms.PROSE_MATRYOSHKA_DIM
+    assert eng[ "code" ][ "loaded" ] is True and eng[ "device_class" ] == f"class-of-{ms.DEVICE}"
+    assert set( eng[ "libraries" ] ) == { "torch", "transformers", "sentence-transformers", "numpy" }
+
+
+def test_info_reports_a_null_revision_for_an_engine_that_is_not_loaded( client ):
+    key = _set_valid_api_key_hash()
+    body = client.get( "/embeddings/info", headers={ "X-API-Key": key } ).json()
+    assert body[ "engines" ][ "code" ][ "revision" ] is None and body[ "engines" ][ "code" ][ "loaded" ] is False
+    assert body[ "engines" ][ "code" ][ "dtype" ] is None
+
+
+def test_device_class_names_the_card_when_cuda_is_available_and_the_string_otherwise( monkeypatch ):
+    from lupin_model_server import main as ms
+    assert ms._device_class( "cpu" ) == "cpu"
+    monkeypatch.setattr( ms.torch.cuda, "is_available", lambda: False )
+    assert ms._device_class( "cuda:0" ) == "cuda:0"
+    monkeypatch.setattr( ms.torch.cuda, "is_available", lambda: True )
+    monkeypatch.setattr( ms.torch.cuda, "get_device_capability", lambda d: ( 8, 9 ) )
+    monkeypatch.setattr( ms.torch.cuda, "get_device_name", lambda d: "Card" )
+    assert ms._device_class( "cuda:1" ) == "Card, sm_89"
+
+
+def test_library_versions_returns_none_for_a_missing_package( monkeypatch ):
+    from importlib import metadata
+    from lupin_model_server import main as ms
+
+    def fake_version( name ):
+        if name == "numpy": raise metadata.PackageNotFoundError( name )
+        return "1.0"
+
+    monkeypatch.setattr( metadata, "version", fake_version )
+    assert ms._library_versions() == { "torch": "1.0", "transformers": "1.0", "sentence-transformers": "1.0", "numpy": None }

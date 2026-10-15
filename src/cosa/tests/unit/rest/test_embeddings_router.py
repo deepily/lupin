@@ -150,6 +150,22 @@ class TestEmbeddingsRouter( unittest.TestCase ):
 
     # ---- /info --------------------------------------------------------------
 
+    def test_get_info_answers_503_with_the_reason_when_the_engines_cannot_be_read( self ):
+        """A model server that is down is a 503 naming why, not a bare 500."""
+        provider = MagicMock()
+        provider.provider   = "local"
+        provider.dimensions = 768
+        provider.describe_engines.side_effect = RuntimeError( "returned 503 from http://lupin-model-server:7998/embeddings/info" )
+
+        with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
+            with self.assertRaises( HTTPException ) as ctx:
+                asyncio.run( get_info( authenticated_user_id="user_1" ) )
+
+        self.assertEqual( ctx.exception.status_code, 503 )
+        self.assertIn( "engines info unavailable", ctx.exception.detail )
+        self.assertIn( "returned 503 from http://lupin-model-server:7998/embeddings/info", ctx.exception.detail )
+
+
     def test_get_info_returns_provider_metadata( self ):
         """/info reports the provider, its status and the engines block."""
         provider = object.__new__( EmbeddingProvider )                    # the real class; only its config and engines are faked
@@ -162,6 +178,7 @@ class TestEmbeddingsRouter( unittest.TestCase ):
         provider._prose_engine.describe.return_value = { "model": "prose-model", "device": "cuda:1", "revision": None }
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ), \
+             patch.object( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) ), \
              patch( "cosa.memory.local_embedding_engine.device_class", return_value="TEST GPU, sm_00" ) as dev:
             resp = asyncio.run( get_info( authenticated_user_id="user_1" ) )
 

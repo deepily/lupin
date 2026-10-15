@@ -177,7 +177,7 @@ def test_a_run_whose_build_fails_leaves_the_live_set_alone( world, tmp_path ):
 def test_main_prints_the_report_and_returns_zero( capsys ):
     seen = {}
 
-    def fake_run( root, writer, client, environ=None, batch_size=25 ):
+    def fake_run( root, writer, client, environ=None, batch_size=25, index=None, out_dir=None ):
         seen.update( root=root, writer=writer, client=client, batch_size=batch_size )
         return { "rows": 3 }
 
@@ -198,7 +198,7 @@ def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, 
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
     seen = {}
 
-    def fake_run( root, writer, client, environ=None, batch_size=25 ):
+    def fake_run( root, writer, client, environ=None, batch_size=25, index=None, out_dir=None ):
         seen[ "writer" ] = writer
         writer.submit( { "x": 1 } )
         return { "rows": 0 }
@@ -221,7 +221,7 @@ def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, 
 def test_main_uses_the_server_url_variable_and_the_endpoint_client_by_default( monkeypatch, tmp_path ):
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
     seen = {}
-    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25: seen.update( client=client ) or { "rows": 0 } )
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25, index=None, out_dir=None: seen.update( client=client ) or { "rows": 0 } )
     monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path )
     monkeypatch.setattr( cb, "default_out_dir", lambda root: root / "src" / "docs" / "index" )
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
@@ -302,7 +302,7 @@ def test_run_passes_the_batch_size_through( world, tmp_path ):
 
 def test_main_hands_the_batch_size_to_run( monkeypatch ):
     seen = {}
-    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25: seen.update( batch_size=batch_size ) or { "rows": 0 } )
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25, index=None, out_dir=None: seen.update( batch_size=batch_size ) or { "rows": 0 } )
     assert cb.main( [ "--root", "/repo", "--batch-size", "7" ], environ={}, writer_factory=lambda a: "W", client="C" ) == 0
     assert seen == { "batch_size": 7 }
 
@@ -412,3 +412,127 @@ def test_a_live_manifest_that_is_not_a_sealed_manifest_is_rebuilt_in_full_with_n
     report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
     assert report[ "vectors" ] == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
     assert vs.load_vectors( tmp_path / "data" / "vec" ).row_texts is not None
+
+
+# ── a tree-local build: --index is read only and --out-dir stays out of the tracked tree ─────────
+
+
+@pytest.fixture
+def main_repo( tmp_path ):
+    """A real git repository with a tracked src/ folder and an ignored io/ folder."""
+    import subprocess
+    main = tmp_path / "main"
+    ( main / "src" / "docs" ).mkdir( parents=True )
+    ( main / "src" / "docs" / "a.txt" ).write_text( "x" )
+    ( main / ".gitignore" ).write_text( "io/\n.claude/worktrees/\n" )
+    subprocess.run( [ "git", "init", "-q", str( main ) ], check=True )
+    return main
+
+
+def test_tree_path_refusal_allows_an_ignored_folder_inside_main( main_repo, tmp_path ):
+    index = tmp_path / "idx" / "current" / "symbols.jsonl"
+    assert cb.tree_path_refusal( index, main_repo / ".claude" / "worktrees" / "seat" / "io" / "out", main_repo ) is None
+    assert cb.tree_path_refusal( index, main_repo / "io" / "out", main_repo ) is None
+
+
+def test_tree_path_refusal_names_a_folder_outside_main_because_the_container_cannot_see_it( main_repo, tmp_path ):
+    why = cb.tree_path_refusal( tmp_path / "idx" / "symbols.jsonl", tmp_path / "elsewhere", main_repo )
+    assert why is not None and "outside the main checkout" in why and "container mounts" in why
+
+
+def test_tree_path_refusal_refuses_when_git_cannot_answer( tmp_path ):
+    not_a_repo = tmp_path / "plain"
+    ( not_a_repo / "io" ).mkdir( parents=True )
+    why = cb.tree_path_refusal( tmp_path / "idx" / "symbols.jsonl", not_a_repo / "io", not_a_repo )      # git answers 128 here
+    assert why is not None and "tracked tree of the main checkout" in why
+
+
+@pytest.mark.parametrize( "where", [ "src/docs/out", "src", "." ] )
+def test_tree_path_refusal_names_a_tracked_folder_of_main( main_repo, tmp_path, where ):
+    why = cb.tree_path_refusal( tmp_path / "idx" / "symbols.jsonl", main_repo / where, main_repo )
+    assert why is not None and "tracked tree of the main checkout" in why and "--out-dir" in why
+
+
+@pytest.mark.parametrize( "out", [ "gen", "gen/sub", "" ] )
+def test_tree_path_refusal_names_an_out_dir_that_overlaps_the_index_folder( main_repo, tmp_path, out ):
+    gen = tmp_path / "gen"
+    why = cb.tree_path_refusal( gen / "symbols.jsonl", gen / out if out != "gen" else gen, main_repo ) if out != "" else cb.tree_path_refusal( gen / "symbols.jsonl", tmp_path, main_repo )
+    assert why is not None and "index is read only" in why
+
+
+def test_main_refuses_an_index_without_an_out_dir_and_the_reverse( capsys ):
+    for argv in ( [ "--root", "/r", "--index", "/i/symbols.jsonl" ], [ "--root", "/r", "--out-dir", "/o" ] ):
+        with pytest.raises( SystemExit ) as e:
+            cb.main( argv, environ={}, writer_factory=lambda a: pytest.fail( "no writer" ), client="C" )
+        assert e.value.code == 2
+        assert "--index and --out-dir are given together or not at all" in capsys.readouterr().err
+
+
+def test_main_refuses_an_out_dir_in_the_tracked_tree_and_builds_nothing( monkeypatch, main_repo, tmp_path, capsys ):
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: main_repo )
+    with pytest.raises( SystemExit ) as e:
+        cb.main( [ "--root", str( main_repo / ".claude" / "worktrees" / "s" ), "--index", str( tmp_path / "i" / "symbols.jsonl" ),
+                   "--out-dir", str( main_repo / "src" / "docs" / "out" ) ], environ={}, writer_factory=lambda a: pytest.fail( "no writer" ), client="C" )
+    assert e.value.code == 2
+    assert "tracked tree of the main checkout" in capsys.readouterr().err
+    assert not ( main_repo / "src" / "docs" / "out" ).exists()
+
+
+def test_main_builds_from_a_worktree_root_with_index_and_out_dir( monkeypatch, main_repo, tmp_path ):
+    wt   = main_repo / ".claude" / "worktrees" / "seat"
+    out  = wt / "io" / "build"
+    idx  = wt / "src" / "docs" / "index" / "current" / "symbols.jsonl"
+    seen = {}
+    monkeypatch.setattr( cb.harness_schedule, "submit", lambda *a: None )
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: main_repo )
+
+    def fake_run( root, writer, client, environ=None, batch_size=25, index=None, out_dir=None ):
+        seen.update( writer=writer, index=index, out_dir=out_dir )
+        return { "rows": 0 }
+
+    monkeypatch.setattr( cb, "run", fake_run )
+    env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
+            "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin", "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": "/shared/handoff" }
+    assert cb.main( [ "--root", str( wt ), "--index", str( idx ), "--out-dir", str( out ) ], environ=env, client="C" ) == 0
+    w = seen[ "writer" ]
+    assert seen[ "index" ] == str( idx ) and seen[ "out_dir" ] == str( out )
+    assert w.work_dir == out / "handoff"                                    # not the shared env override
+    assert w.index_path == "/var/lupin/.claude/worktrees/seat/src/docs/index/current/symbols.jsonl"
+
+
+def test_main_sample_mode_reads_the_named_index( monkeypatch, main_repo, tmp_path ):
+    seen = {}
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: main_repo )
+    monkeypatch.setattr( cb, "sample_purposes", lambda root, writer, store, count, batch_size=25, index=None: seen.update( index=index ) or { "ids": [] } )
+    out = main_repo / "io" / "out"
+    assert cb.main( [ "--root", str( tmp_path ), "--index", str( tmp_path / "i" / "symbols.jsonl" ), "--out-dir", str( out ),
+                      "--sample", "2", "--store", str( out / "p.jsonl" ) ], environ={}, writer_factory=lambda a: "W", client="C" ) == 0
+    assert seen[ "index" ] == str( tmp_path / "i" / "symbols.jsonl" )
+
+
+def test_run_reads_the_named_index_writes_only_under_out_dir_and_ignores_storage_overrides( world, tmp_path, monkeypatch ):
+    read = []
+    monkeypatch.setattr( cb.sx_build, "ensure", lambda root: pytest.fail( "the index must not be ensured or built" ) )
+    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: read.append( gen ) or world[ "symbols" ] )
+    monkeypatch.setattr( cb, "data_dir", lambda root: pytest.fail( "the shared data dir must not be used" ) )
+    out = tmp_path / "out"
+    idx = tmp_path / "gen" / "symbols.jsonl"
+    env = { "LUPIN_REUSE_CANDIDATE_VECTORS_DIR": str( tmp_path / "shared" / "vec" ),
+            "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": str( tmp_path / "shared" / "pl" ),
+            "LUPIN_REUSE_CANDIDATE_QUERY_CACHE_DIR": str( tmp_path / "shared" / "qc" ) }
+
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ=env, index=idx, out_dir=out )
+
+    assert read == [ tmp_path / "gen" ] and report[ "rows" ] == 2
+    assert vs.load_vectors( out / "vec" ).ids == [ "m.a", "m.b" ]
+    assert ( out / "pl" / "purpose.jsonl" ).is_file()
+    assert not ( tmp_path / "shared" ).exists()
+    assert list( ( tmp_path / "gen" ).glob( "*" ) ) == []                  # nothing written beside the index
+
+
+def test_sample_purposes_reads_the_named_index( world, tmp_path, monkeypatch ):
+    read = []
+    monkeypatch.setattr( cb.sx_build, "ensure", lambda root: pytest.fail( "no ensure" ) )
+    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: read.append( gen ) or world[ "symbols" ] )
+    report = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "s.jsonl", 2, index=tmp_path / "g" / "symbols.jsonl" )
+    assert read == [ tmp_path / "g" ] and len( report[ "ids" ] ) == 2
