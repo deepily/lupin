@@ -75,7 +75,7 @@ holds is also listed, in this order, in `causes`.
 | 5 | `CALL_FAILED` | a call failed, or some index entry id is neither answered, failed nor malformed (coverage is checked as set equality, never as a count; an entry the call budget left unasked counts as unanswered, so a spent budget gives this cause and never `NEW`) | UNCERTAIN_READ_SOURCE |
 | 6 | `MALFORMED_ANSWER` | at least one answer is malformed; every malformed answer is dropped and listed with its reason | UNCERTAIN_READ_SOURCE |
 | 7 | `LOW_CONFIDENCE` | at least one call is doubtful and no call is strong | UNCERTAIN_READ_SOURCE |
-| 7a | `NEAR_CUTOFF` | the policy has a `band` and the best entry's `p_overlap` is inside it of the threshold or the strong cut-off (the edge is outside); a policy with no `band` never has this cause | UNCERTAIN_READ_SOURCE |
+| 7a | `NEAR_CUTOFF` | the policy has a `band` and any answered entry's `p_overlap` is inside it of the threshold or the strong cut-off (the edge is outside); a policy with no `band` never has this cause | UNCERTAIN_READ_SOURCE |
 | 8 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |
 | 9 | none of the above, the shortlist is not empty, no entry has `choice = reuse` | | EXTEND |
 | 10 | none of the above, the shortlist is empty | | NEW |

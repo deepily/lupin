@@ -99,3 +99,29 @@ def test_the_distance_to_a_cut_off_is_rounded_to_the_named_number_of_places_befo
 def test_under_the_shipped_confidence_bar_a_score_near_the_threshold_holds_both_causes_in_table_order():
     got = _decide( 0.52, dict( vd.POLICY, band=BAND ) )
     assert got[ "causes" ] == [ "LOW_CONFIDENCE", "NEAR_CUTOFF" ] and got[ "cause" ] == "LOW_CONFIDENCE"
+
+
+def _two_rows( second ):
+    return vd.decide( [ { "id": "e0", "probabilities": { "reuse": 0.0, "extend": 0.8, "unrelated": 0.2 } },
+                        { "id": "e1", "probabilities": { "reuse": second, "extend": 0.0, "unrelated": round( 1.0 - second, 6 ) } } ], [ "e0", "e1" ], [], set(), BANDED )
+
+
+@pytest.mark.parametrize( "second", [ 0.5001, 0.4999, 0.5 ] )
+def test_a_second_entry_inside_the_band_of_the_threshold_makes_the_verdict_uncertain_near_cutoff( second ):
+    got = _two_rows( second )
+    assert ( got[ "verdict" ], got[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", [ "NEAR_CUTOFF" ] )
+
+
+def test_a_second_entry_outside_the_band_leaves_the_verdict_as_it_was():
+    assert _two_rows( 0.6 )[ "verdict" ] == "REUSE" and _two_rows( 0.4 )[ "verdict" ] == "EXTEND"
+
+
+def test_a_second_entry_inside_the_band_of_the_strong_cut_off_is_near_cutoff_too():
+    answers = [ { "id": "e0", "probabilities": { "reuse": 0.0, "extend": 0.7, "unrelated": 0.3 } }, { "id": "e1", "probabilities": _p( 0.91 ) } ]
+    assert vd.decide( answers, [ "e0", "e1" ], [], set(), BANDED )[ "causes" ] == [ "NEAR_CUTOFF" ]
+
+
+@pytest.mark.parametrize( "band", [ float( "nan" ), float( "inf" ), 0.5, 1, True, 0.6 ] )
+def test_the_record_step_refuses_a_band_that_is_not_a_number_below_one_half_and_at_least_the_floor( band ):
+    ls = importlib.import_module( "cosa.repo.symindex.labelled_set" )
+    with pytest.raises( ValueError, match="band" ): ls.check_band( band )

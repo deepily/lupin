@@ -67,10 +67,10 @@ def _order( rows ):
     return sorted( rows, key=lambda r: ( -r[ "p_overlap" ], r[ "id" ] ) )
 
 
-def _near_cutoff( top, policy ):
-    """Ensures: returns True when top is inside the band of a cut-off."""
+def _near_cutoff( rows, policy ):
+    """Ensures: returns True when any row is inside the band of a cut-off."""
     cuts = [ policy[ "threshold" ] ] + ( [ policy[ "strong" ] ] if "strong" in policy else [] )
-    return any( round( abs( top - cut ), BAND_DECIMALS ) < policy[ "band" ] for cut in cuts )
+    return any( round( abs( r[ "p_overlap" ] - cut ), BAND_DECIMALS ) < policy[ "band" ] for r in rows for cut in cuts )
 
 
 def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
@@ -101,9 +101,9 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
           `doubtful` instead; every other cause still holds, and the reuse-or-extend choice is decided from the strong entries only. A policy without "strong" (a receipt stored
           before the rule) never has a strong match, so it replays as it was stored
         - doubtful lists the doubtful entries best first, cut to policy["shortlist"], whether or not they cause uncertainty
-        - NEAR_CUTOFF holds when policy has a "band" and the best entry's p_overlap is inside it of policy["threshold"], or of
-          policy["strong"] when the policy has one; inside means the distance, rounded to BAND_DECIMALS places, is below the band,
-          so the edge is outside. A policy without "band" never has this cause, so it decides and replays as it did
+        - NEAR_CUTOFF holds when policy has a "band" and any answered entry's p_overlap is inside it of policy["threshold"], or of
+          policy["strong"] when the policy has one, since the verdict turns on every entry that crosses a cut-off; inside means the
+          distance, rounded to BAND_DECIMALS places, is below the band, so the edge is outside. A policy without "band" never has this cause, so it decides and replays as it did
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
           their value, each cut to policy["shortlist"], so a `NEW` verdict still names what to read
     """
@@ -129,7 +129,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
     doubtful = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "floor" ] and r[ "confidence" ] < policy[ "confidence" ] ]
     strong   = "strong" in policy and any( _is_strong( r, policy ) for r in rows )
     if doubtful and not strong: holds.add( "LOW_CONFIDENCE" )
-    if "band" in policy and ordered and _near_cutoff( ordered[ 0 ][ "p_overlap" ], policy ): holds.add( "NEAR_CUTOFF" )
+    if "band" in policy and _near_cutoff( rows, policy ): holds.add( "NEAR_CUTOFF" )
     relevant = [ r for r in ordered if r[ "p_overlap" ] >= policy[ "threshold" ] ]
     deciding = [ r for r in relevant if _is_strong( r, policy ) ] if strong else relevant
     causes   = [ c for c in CAUSES if c in holds ]
