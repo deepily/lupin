@@ -165,3 +165,10 @@ def test_only_this_driver_names_the_fresh_needs_file():
     assert len( files ) > 1000                                                                 # the population is the tree's python files, not an empty listing
     named = sorted( f for f in files if ( root / f ).exists() and p5.FRESH_NEEDS_NAME in ( root / f ).read_text( encoding="utf-8", errors="replace" ) )
     assert named == [ "src/lupin_mcp/reuse_phase5_run.py" ]
+
+
+def test_sample_refuses_another_file_at_the_path_even_when_its_own_hash_is_given( scratch, recorder, capsys ):
+    other = put( Path( p5.needs_path( scratch.projects_data ) ), { "format": frun.NEEDS_FORMAT, "needs": rows_of( 31 ) } )
+    assert other != scratch.sha
+    assert p5.cli( [ "sample", "--seed", "s", "--projects-data", scratch.projects_data, "--needs-sha", other ] ) == 2
+    assert "must start with" in capsys.readouterr().err
