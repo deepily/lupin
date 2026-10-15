@@ -18,6 +18,23 @@ from cosa.repo.symindex.candidates.errors import (
 MAX_STAGES      = 2
 MAX_VECTOR_SETS = 2
 MANIFEST_NAME   = "manifest.json"
+LIST_HEAD       = 20
+
+
+def trim_lists( result, head=LIST_HEAD ):
+    """
+    Cut the per-source lists of a search answer to their first ids.
+
+    Requires:
+        - result is what search.answer_for_stage returns
+
+    Ensures:
+        - returns a copy whose lists and scores hold the first head entries of each source
+        - list_sizes holds the full length of each source's list
+        - shortlist, ranking and every other field are unchanged
+    """
+    return dict( result, lists={ n: ids[ :head ] for n, ids in result[ "lists" ].items() }, scores={ n: v[ :head ] for n, v in result[ "scores" ].items() },
+                 list_sizes={ n: len( ids ) for n, ids in result[ "lists" ].items() } )
 
 
 class ResidentSearch:
@@ -123,7 +140,7 @@ class ResidentSearch:
             - request holds stage_key, need and K, and may hold vectors_dir with query_vectors, wiki and expect_manifest_hash
 
         Ensures:
-            - returns what search.answer_for_stage returns
+            - returns what search.answer_for_stage returns, with each source's list cut to its first LIST_HEAD ids and list_sizes added
             - a request with expect_manifest_hash is refused when the set it would read has another hash
 
         Raises:
@@ -148,4 +165,4 @@ class ResidentSearch:
                 raise CandidateError( VECTOR_SET_REPLACED, f"expected {expected[ :12 ]}, the set on disk is {vectors.manifest_hash[ :12 ]}" )
             return vectors
 
-        return search.answer_for_stage( request, stage, loader )
+        return trim_lists( search.answer_for_stage( request, stage, loader ) )

@@ -62,7 +62,17 @@ def test_a_held_stage_answers_what_the_folder_path_answers( held, tmp_path ):
     ( gen / "symbols.jsonl" ).write_text( "\n".join( json.dumps( e ) for e in ENTRIES ) + "\n", encoding="utf-8" )
     wanted = search.answer( { "need": "profile", "K": 3, "index_dir": str( gen ), "vectors_dir": str( root / "vectors" ), "query_vectors": QUERY, "wiki": [ "py:c" ] }, loader )
     got    = rs.search( with_vectors( root, wiki=[ "py:c" ] ) )
-    assert got == wanted and got[ "shortlist" ] == sorted( got[ "shortlist" ] )
+    assert got == resident.trim_lists( wanted ) and got[ "shortlist" ] == sorted( got[ "shortlist" ] )
+    assert got[ "shortlist" ] == wanted[ "shortlist" ] and got[ "ranking" ] == wanted[ "ranking" ]
+
+
+def test_the_lists_are_cut_to_their_head_and_their_sizes_are_kept():
+    full = { "shortlist": [ "a" ], "ranking": [ "a" ], "lists": { "code": [ f"id{i}" for i in range( 30 ) ], "wiki": [ "x" ] },
+             "scores": { "code": [ 1.0 ] * 30, "wiki": [] } }
+    cut  = resident.trim_lists( full, head=5 )
+    assert cut[ "lists" ] == { "code": [ f"id{i}" for i in range( 5 ) ], "wiki": [ "x" ] } and cut[ "scores" ][ "code" ] == [ 1.0 ] * 5
+    assert cut[ "list_sizes" ] == { "code": 30, "wiki": 1 } and cut[ "shortlist" ] == [ "a" ] and len( full[ "lists" ][ "code" ] ) == 30
+    assert len( resident.trim_lists( full )[ "lists" ][ "code" ] ) == resident.LIST_HEAD
 
 
 def test_a_search_with_no_vectors_is_bm25_only_and_loads_nothing( held ):
