@@ -96,6 +96,9 @@ export interface DirectTtsRenderer {
 
 interface Wiring { el: HTMLElement; type: string; fn: EventListener }
 
+/**
+ * Renders and wires the Direct TTS Test section of the multiplexer.
+ */
 class DirectTtsRendererImpl implements DirectTtsRenderer {
   private readonly opts : DirectTtsRendererOptions;
 
@@ -105,10 +108,16 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
   private collapseOff : ( () => void ) | null = null;
   private mounted     = false;
 
+  /**
+   * Stores the renderer options. The DOM is built later by mount.
+   */
   constructor( opts: DirectTtsRendererOptions ) {
     this.opts = opts;
   }
 
+  /**
+   * Builds the Direct TTS Test section in the root and attaches its listeners.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "DirectTtsRenderer already mounted" );
 
@@ -177,6 +186,9 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
     this.mounted = true;
   }
 
+  /**
+   * Removes listeners and empties the root, returning to the unmounted state.
+   */
   unmount(): void {
     for ( const w of this.wirings ) w.el.removeEventListener( w.type, w.fn );
     this.wirings = [];

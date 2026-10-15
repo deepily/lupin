@@ -87,6 +87,12 @@ function schedulingOf( s: ScheduleEls ): { scheduled: boolean; time: string; mon
     : { scheduled: s.checkbox.checked, time: s.time.value, monopolize: s.monopolize.checked };
 }
 
+/**
+ * Renders the Submit Agentic Jobs pane and wires its cards to the submit-jobs store.
+ *
+ * It owns the pane header, the collapsible job cards, microphone dictation and repaints on store changes.
+ * Implements the SubmitJobsPaneRenderer interface.
+ */
 class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
   private readonly bus        : EventBus;
   private readonly store      : SubmitJobsStore;
@@ -106,6 +112,11 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
   // arriving config from a redundant re-write. null until the first paint. See paint().
   private appliedAutoFix: boolean | null = null;
 
+  /**
+   * Stores the event bus, submit-jobs store, optional mic handler and alert function.
+   *
+   * The alert function defaults to the browser's window.alert when none is injected.
+   */
   constructor( opts: SubmitJobsPaneRendererOptions ) {
     this.bus        = opts.eventBus;
     this.store      = opts.stores.submitJobs;
@@ -114,6 +125,12 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     this.alertFn    = opts.alertFn ?? ( ( m ) => { window.alert( m ); } );
   }
 
+  /**
+   * Builds the pane header and body into the given root, wires the controls and paints once.
+   *
+   * Subscribes to store submit-jobs change events so the pane repaints.
+   * Throws if the renderer is already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "SubmitJobsPaneRenderer already mounted" );
     this.mounted = true;
@@ -142,6 +159,11 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     );
   }
 
+  /**
+   * Removes all subscriptions, listeners and pane DOM, and resets the renderer to unmounted.
+   *
+   * The next mount starts from a fresh box state.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;

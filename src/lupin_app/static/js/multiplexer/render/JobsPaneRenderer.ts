@@ -181,6 +181,9 @@ const UI_STATUS_TO_SERVER_QUEUE: Record<JobStatus, string> = {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Paints the CJ Flow jobs pane with its header, filter controls and job buckets.
+ */
 class JobsPaneRendererImpl implements JobsPaneRenderer {
   private readonly bus           : EventBus;
   private readonly stores        : JobsPaneRendererStores;
@@ -234,6 +237,9 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private bucketExpanded: Partial<Record<JobBucket, boolean>> = {};
   private readonly bucketStorage: BucketExpandStorage | null;
 
+  /**
+   * Builds the renderer from a bus, stores, an API client and optional hooks.
+   */
   constructor(opts: JobsPaneRendererOptions) {
     // Pass 2 F4: fail fast at construction if stores.jobs is missing.
     if (!opts.stores || !opts.stores.jobs) {
@@ -257,6 +263,9 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   // Lifecycle
   // -------------------------------------------------------------------------
 
+  /**
+   * Renders the pane header and buckets into the root and listens for store events.
+   */
   mount(root: HTMLElement): void {
     // Pass 2 F26: idempotency guard — second mount without intervening unmount
     // throws so duplicate-listener bugs surface at the call site that caused
@@ -393,6 +402,9 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.stores.jobs.hydrateHistory(this.api, withFilter).catch(fail);
   }
 
+  /**
+   * Removes listeners, subscriptions and rendered content, and returns to unmounted.
+   */
   unmount(): void {
     if (!this.mounted) return;   // idempotent
 
@@ -425,6 +437,9 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.mounted      = false;
   }
 
+  /**
+   * Repaints every bucket immediately so a test does not wait for a store event.
+   */
   forceRenderForTesting(): void {
     this.renderAll();
   }
@@ -968,6 +983,9 @@ function historyWindowLabel(days: number | undefined): string {
   return `last ${days} day${days === 1 ? "" : "s"}`;
 }
 
+/**
+ * Turns a delete failure into a short message, with the HTTP status when known.
+ */
 function deriveErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return `Delete failed (HTTP ${err.status})`;
   if (err instanceof Error)    return `Delete failed: ${err.message}`;

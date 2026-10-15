@@ -112,6 +112,9 @@ export interface EpicBoardRendererOptions {
   getAuthToken? : () => string | null;
 }
 
+/**
+ * Creates a paragraph with the task list message class and the given text.
+ */
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
   p.className = `task-list-message ${ className }`;
@@ -119,6 +122,11 @@ function messageEl( className: string, text: string ): HTMLParagraphElement {
   return p;
 }
 
+/**
+ * Paints the epic board pane: tasks grouped by epic, with row controls and a refresh button.
+ *
+ * Reads tasks from its store and repaints when the store changes.
+ */
 class EpicBoardRendererImpl implements EpicBoardRenderer {
   private readonly bus       : EventBus;
   private readonly store     : EpicBoardTaskStoreLike;
@@ -140,6 +148,11 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
+  /**
+   * Stores the event bus and task store plus the optional stories, clock and timer.
+   *
+   * Missing stories and clock options get defaults.
+   */
   constructor( opts: EpicBoardRendererOptions ) {
     this.bus   = opts.eventBus;
     this.store = opts.store;
@@ -152,6 +165,12 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     this.getAuthToken = opts.getAuthToken;
   }
 
+  /**
+   * Builds the board's refresh button and container inside the root.
+   *
+   * Wires row controls and subscribes to the store.
+   * Throws if already mounted. Paints the current store state.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "EpicBoardRenderer already mounted" );
@@ -252,6 +271,9 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, subscriptions and guards, and clears the root.
+   */
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
@@ -290,6 +312,9 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     if ( this.mounted ) this.renderFromStore( false );
   }
 
+  /**
+   * Repaints the board from the store at once, stamping the updated time; used by tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }

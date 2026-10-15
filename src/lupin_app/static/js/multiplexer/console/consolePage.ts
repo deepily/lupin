@@ -204,8 +204,11 @@ export function bootConsolePage( deps: ConsolePageDeps ): ConsolePageResult {
   return { status : "watching", seat : query.seat, sessionId, store, renderer };
 }
 
-// The queue transport's reconnect machine listens for these, as it does in the multiplexer:
-// a tab coming back into view or a network coming back reconnects now rather than on backoff.
+/**
+ * Forwards page visibility and network online or offline events onto the event bus.
+ *
+ * The queue transport's reconnect logic listens for these to reconnect sooner.
+ */
 function attachLifecycle( deps: ConsolePageDeps ): void {
   const emit = ( type: "page_hidden" | "page_visible" | "network_online" | "network_offline" ): void => {
     const ts = Date.now();
@@ -219,6 +222,11 @@ function attachLifecycle( deps: ConsolePageDeps ): void {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: the never-run CJS export annotation maps onto the last function.
+/**
+ * Returns the element with the given id from the document.
+ *
+ * Throws an error naming the id when no such element exists.
+ */
 function requireElement( doc: Document, id: string ): HTMLElement {
   const el = doc.getElementById( id );
   if ( el === null ) throw new Error( `console page: #${ id } not found` );

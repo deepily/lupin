@@ -125,10 +125,16 @@ export interface BroadcastAckTallyRendererOptions {
   nowFn            ?: () => number;
 }
 
+/**
+ * Returns the first eight characters of a session ID, or unknown when absent.
+ */
 function shortId( sessionId: string | null ): string {
   return sessionId ? sessionId.slice( 0, 8 ) : "unknown";
 }
 
+/**
+ * Creates a DOM element with a class and text content, set as text only.
+ */
 function el( tag: string, className: string, text: string ): HTMLElement {
   const node = document.createElement( tag );
   node.className   = className;
@@ -137,6 +143,9 @@ function el( tag: string, className: string, text: string ): HTMLElement {
   return node;
 }
 
+/**
+ * Renders the broadcast acknowledgement tally with its timeout and restore.
+ */
 class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   private readonly bus            : EventBus;
   private readonly ackStore       : AckStore;
@@ -168,6 +177,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   // here, and the roster's arrival settles it (time out, or dismiss if everyone answered).
   private deadlinePassed = false;
 
+  /**
+   * Creates the renderer from its bus, stores, timers, and optional storage and API.
+   */
   constructor( options: BroadcastAckTallyRendererOptions ) {
     this.bus            = options.eventBus;
     this.ackStore       = options.ackStore;
@@ -186,6 +198,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.nowFn          = options.nowFn ?? ( () => Date.now() );
   }
 
+  /**
+   * Attaches to a root element, listens for ack changes, and restores a broadcast.
+   */
   mount( root: HTMLElement ): void {
     if ( this.root ) throw new Error( "BroadcastAckTallyRenderer: already mounted" );
     this.root = root;
@@ -200,10 +215,16 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.render();
   }
 
+  /**
+   * Returns the ID of the broadcast being tracked, or null when none is.
+   */
   trackedBroadcastId(): string | null {
     return this.broadcastId;
   }
 
+  /**
+   * Records that the recipient list loaded or failed, then repaints.
+   */
   recipientsChanged( loaded: boolean = true ): void {
     if ( loaded ) {
       this.recipientsKnown = true;
@@ -220,6 +241,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.render();
   }
 
+  /**
+   * Starts tracking a broadcast by ID, saves it, starts the timer, and repaints.
+   */
   track( broadcastId: string ): void {
     this.broadcastId    = broadcastId;
     this.timedOut       = false;
@@ -231,6 +255,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.render();
   }
 
+  /**
+   * Stops tracking the broadcast, clears its saved ID and timer, and repaints.
+   */
   dismiss(): void {
     this.broadcastId    = null;
     this.timedOut       = false;
@@ -276,6 +303,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.render();
   }
 
+  /**
+   * Detaches from the bus, cancels the timer, and empties the root element.
+   */
   unmount(): void {
     this.cancelTimer();
     if ( this.unsubscribe ) {

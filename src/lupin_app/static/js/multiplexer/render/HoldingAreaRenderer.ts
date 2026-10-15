@@ -192,6 +192,9 @@ export interface HoldingAreaRendererOptions {
   flowRatio?    : FlowRatioStoreLike;
 }
 
+/**
+ * Builds a paragraph element with the holding area message class, an extra class and text.
+ */
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
   p.className = `holding-area-message ${ className }`;
@@ -204,6 +207,11 @@ function planButtonId( button: HTMLElement ): string {
   return holdingPlanId( button.dataset.filer ?? "", button.dataset.plan ?? "" );
 }
 
+/**
+ * Draws the holding area pane: pending requests, plans and per-filer groups.
+ *
+ * It repaints from the store and keeps open groups, plans and batch reports across repaints.
+ */
 class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly bus       : EventBus;
   private readonly store     : HoldingAreaStoreLike;
@@ -267,6 +275,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // an open group must survive the repaint or it would snap shut under the reader.
   private readonly expandedFilers = new Set<string>();
 
+  /**
+   * Stores the bus, store and optional request, recorder, token and ratio sources.
+   */
   constructor( opts: HoldingAreaRendererOptions ) {
     this.bus   = opts.eventBus;
     this.store = opts.store;
@@ -279,6 +290,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.flowRatio    = opts.flowRatio ?? null;
   }
 
+  /**
+   * Builds the pane header and container in the root and listens to the store.
+   *
+   * A second mount without unmount throws.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "HoldingAreaRenderer already mounted" );
@@ -403,6 +419,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     );
   }
 
+  /**
+   * Disposes row controls, unsubscribes, clears the root and resets all element references.
+   */
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
@@ -426,6 +445,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the pane from the store right away when mounted, for tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }

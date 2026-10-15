@@ -119,15 +119,9 @@ export interface NotificationsHeaderRenderer {
   unmount(): void;
 }
 
-// A-2 #4 — legacy names the COUNT and the WINDOW, not just the act
-// (notifications.js:20952). "Clear all notifications?" is true of every window, so the
-// operator cannot tell a 4-notification "Today" from a 900-notification "All time" — and
-// this button deletes on the SERVER, durably. The two facts that decide whether to press it
-// were the two the sentence left out.
-//
-// `n !== 1` rather than `n > 1`: legacy's own ternary, and the only n that reaches here is
-// ≥ 1 because onClearAll returns early on an empty scope. Written as legacy writes it so a
-// future zero-case does not silently read "0 notification".
+/**
+ * Builds the clear all confirmation naming the notification count and time window.
+ */
 function clearConfirmMessage( count: number, windowLabel: string ): string {
   return `Clear all ${count} notification${count !== 1 ? "s" : ""} (${windowLabel})? This cannot be undone.`;
 }
@@ -139,6 +133,9 @@ export const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: s
   { mode: "all",    icon: "👥", label: "All Users" },
 ];
 
+/**
+ * Draws the notifications header controls and keeps them current from store events.
+ */
 class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationsHeaderStoreLike;
@@ -176,6 +173,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
 
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Keeps the bus, store, API and options, filling defaults for missing ones.
+   */
   constructor(opts: NotificationsHeaderRendererOptions) {
     if (!opts.store) throw new Error("NotificationsHeaderRenderer requires a store");
     this.bus       = opts.eventBus;
@@ -193,6 +193,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.bounceGraceMs = opts.bounceGraceMs ?? 25000;
   }
 
+  /**
+   * Builds the header controls into the root and subscribes to store events.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) throw new Error("NotificationsHeaderRenderer already mounted");
     this.root    = root;
@@ -385,6 +388,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.refresh();
   }
 
+  /**
+   * Unsubscribes, removes handlers, empties the root and clears element references.
+   */
   unmount(): void {
     if (!this.mounted) return;
     for (const off of this.unsubscribers) off();

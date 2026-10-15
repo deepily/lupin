@@ -97,12 +97,9 @@ import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
-// Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
-// sender whose `conversation_mode_active === true` above the default
-// most-recent-activity-first ordering; ties within the same conversation-mode
-// state fall back to activity-based sort. Per F-Arnold-D3: sender-level
-// signature (NOT entry-level). The default sort (no opts override) preserves
-// Phase 5 behavior; this override only activates when wired here at boot.
+/**
+ * Orders senders with conversation mode active first, then by most recent activity.
+ */
 const phase6cSenderSort: SenderSortComparator = (a, b) =>
   (Number(b.conversation_mode_active) - Number(a.conversation_mode_active))
   || (b.last_active_ts - a.last_active_ts);
@@ -125,6 +122,9 @@ const SESSION_ID_ANIMALS = [
   "bear",    "lion",    "hawk",  "fox",   "owl",
 ];
 
+/**
+ * Returns a random element of a non-empty array.
+ */
 function pickRandom<T>(arr: ReadonlyArray<T>): T {
   // arr is non-empty by construction (ADJECTIVES / ANIMALS literal arrays).
   // The non-null assertion is justified: noUncheckedIndexedAccess returns
@@ -133,15 +133,24 @@ function pickRandom<T>(arr: ReadonlyArray<T>): T {
   return arr[Math.floor(Math.random() * arr.length)] as T;
 }
 
+/**
+ * Builds a fallback session ID from a random adjective and animal.
+ */
 function generateSessionId(): string {
   return `${pickRandom(SESSION_ID_ADJECTIVES)} ${pickRandom(SESSION_ID_ANIMALS)}`;
 }
 
+/**
+ * Returns this page's WebSocket base URL, using wss on HTTPS pages.
+ */
 function buildWebSocketBaseUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}`;
 }
 
+/**
+ * Emits a page or network lifecycle event on the event bus with the current time.
+ */
 function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" | "network_offline", extra?: { bfcache?: true }): void {
   const ts = Date.now();
   const payload: LifecyclePayload = { ts };
@@ -154,6 +163,9 @@ function emitLifecycle(type: "page_hidden" | "page_visible" | "network_online" |
   });
 }
 
+/**
+ * Turns visibility, online, offline and page restore events into lifecycle events.
+ */
 function attachLifecycleListeners(): void {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
@@ -173,6 +185,9 @@ function attachLifecycleListeners(): void {
   });
 }
 
+/**
+ * Starts the multiplexer page: login check, API client, transports and renderers.
+ */
 function bootMultiplexer(): void {
   document.title = "Multiplexer";
 

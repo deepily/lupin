@@ -77,6 +77,11 @@ export interface ConversationModePinRendererOptions {
 
 const DEFAULT_FLASH_DURATION_MS = 1200;
 
+/**
+ * Tags the pinned sender's notification card and flashes it when the pin moves.
+ *
+ * It reacts to sender store changes and list renders.
+ */
 class ConversationModePinRendererImpl implements ConversationModePinRenderer {
   private readonly bus             : EventBus;
   private readonly stores          : { senders: SenderStoreLike };
@@ -94,6 +99,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
   private lastPinned  : string | null = null;
   private mounted     : boolean = false;
 
+  /**
+   * Creates the renderer from its bus, sender store and options, with default timers.
+   */
   constructor( opts: ConversationModePinRendererOptions ) {
     this.bus             = opts.eventBus;
     this.stores          = opts.stores;
@@ -102,6 +110,11 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.clearTimeoutFn  = opts.clearTimeoutFn ?? ((id)     => globalThis.clearTimeout(id as ReturnType<typeof globalThis.setTimeout>));
   }
 
+  /**
+   * Subscribes to sender and list-render events and paints any existing pin.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) {
       throw new Error("ConversationModePinRenderer.mount: already mounted");
@@ -129,6 +142,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.reconcile();
   }
 
+  /**
+   * Removes subscriptions, cancels pending flash timers and clears the mounted state.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -143,6 +159,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     this.mounted    = false;
   }
 
+  /**
+   * Runs a reconcile pass of the pin tags; used by tests.
+   */
   forceRenderForTesting(): void {
     this.reconcile();
   }
@@ -228,10 +247,9 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
   }
 }
 
-// CSS.escape polyfill for selectors in legacy / Node / older browser contexts
-// (mirror of NotificationsListRenderer.ts:423-428 — same util locally scoped
-// rather than imported to keep this module self-contained; if a third copy
-// surfaces, hoist to a shared helper).
+/**
+ * Escapes a string for use in a CSS selector, using the built-in CSS.escape when it exists.
+ */
 function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);

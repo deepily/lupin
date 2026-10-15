@@ -75,6 +75,9 @@ export interface ListenerErrorRendererOptions {
   sink?    : ListenerErrorSink;
 }
 
+/**
+ * Models the pane that counts and shows errors thrown by event listeners.
+ */
 class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   private readonly bus  : EventBus;
   private readonly sink : ListenerErrorSink;
@@ -84,11 +87,17 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
   private mounted = false;
   private count   = 0;
 
+  /**
+   * Stores the event bus and the error sink, defaulting to the debug writer.
+   */
   constructor( opts: ListenerErrorRendererOptions ) {
     this.bus  = opts.eventBus;
     this.sink = opts.sink ?? debugError;
   }
 
+  /**
+   * Attaches to the root and subscribes to listener error events.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "ListenerErrorRenderer already mounted" );
@@ -104,6 +113,9 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
     );
   }
 
+  /**
+   * Unsubscribes, empties the root and resets the error count.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -115,6 +127,9 @@ class ListenerErrorRendererImpl implements ListenerErrorRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Returns the number of errors since the last dismiss; used by tests.
+   */
   countForTesting(): number {
     return this.count;
   }

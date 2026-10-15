@@ -124,6 +124,9 @@ interface StripEntry {
   readonly session: StripSession;
 }
 
+/**
+ * Renders the strip of session icons with focus and hide-inactive toggles.
+ */
 class SessionStripRendererImpl implements SessionStripRenderer {
   private readonly bus     : EventBus;
   private readonly stores  : { strip: SessionStripStoreLike; notifications?: NotificationLookupLike };
@@ -157,12 +160,18 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private hideToggleHandler : (() => void) | null = null;
   private keepPlaceHandler   : (() => void) | null = null;
 
+  /**
+   * Creates the renderer from its bus, stores, and storage (localStorage by default).
+   */
   constructor(opts: SessionStripRendererOptions) {
     this.bus     = opts.eventBus;
     this.stores  = opts.stores;
     this.storage = opts.storage === undefined ? defaultStorage() : opts.storage;
   }
 
+  /**
+   * Attaches to the strip elements under the root, wires clicks, and paints.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) throw new Error("SessionStripRenderer.mount: already mounted");
 
@@ -220,6 +229,9 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.reconcile();
   }
 
+  /**
+   * Removes listeners and subscriptions, clears card focus, and empties the strip.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -260,11 +272,16 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.unreadCounts.clear();
   }
 
+  /**
+   * Repaints the strip at once, for tests.
+   */
   forceRenderForTesting(): void {
     this.reconcile();
   }
 
-  // `null` = a card with no data-sender-id; it is not the focused card, so it hides.
+  /**
+   * Returns true when focus is on and the card is not the focused sender's.
+   */
   isCardFocusHidden(senderId: string | null): boolean {
     return this.focusActive && this.focusedSenderId !== null && senderId !== this.focusedSenderId;
   }
@@ -581,8 +598,9 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   }
 }
 
-// Row d04ff119 — the browser's localStorage, or null where reading the property
-// itself throws (some browsers do, with site data blocked).
+/**
+ * Returns the browser's localStorage, or null when reading it throws.
+ */
 function defaultStorage(): StorageLike | null {
   try {
     return globalThis.localStorage ?? null;

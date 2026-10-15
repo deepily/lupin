@@ -81,6 +81,9 @@ export interface SectionToolbarRendererOptions {
   toggles?: ReadonlyArray<SectionToggleSpec>;
 }
 
+/**
+ * Paints the section toggle toolbar and shows or hides each section pane.
+ */
 class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   private readonly stores : SectionToolbarRendererStores;
   private readonly doc    : Document;
@@ -91,6 +94,9 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   private clickHandler: ((e: Event) => void) | null = null;
   private mounted     = false;
 
+  /**
+   * Builds the renderer from a view-state store and optional document and toggles.
+   */
   constructor( opts: SectionToolbarRendererOptions ) {
     this.stores = opts.stores;
     /* c8 ignore next */ // defensive default: production always has ambient `document`; tests pass an explicit doc.
@@ -98,6 +104,9 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.toggles = opts.toggles ?? SECTION_TOGGLES;
   }
 
+  /**
+   * Renders the toolbar into the root and syncs section visibility.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "SectionToolbarRenderer already mounted" );
@@ -115,6 +124,9 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     toolbar.addEventListener( "click", this.clickHandler );
   }
 
+  /**
+   * Removes the click listener and toolbar content, and returns to unmounted.
+   */
   unmount(): void {
     if ( this.toolbar !== null && this.clickHandler !== null ) {
       this.toolbar.removeEventListener( "click", this.clickHandler );
@@ -146,6 +158,9 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.toggleSection( sectionId, btn );
   }
 
+  /**
+   * Makes a section visible and saves that choice.
+   */
   showSection( sectionId: string ): void {
     if ( this.stores.viewState.isSectionVisible( this.persistKeyFor( sectionId ) ) ) return;
     this.stores.viewState.setSectionVisible( this.persistKeyFor( sectionId ), true );

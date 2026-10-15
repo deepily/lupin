@@ -101,6 +101,11 @@ type ChipState =
   | { kind: "error"; message: string }
   | { kind: "list" };
 
+/**
+ * Draws the broadcast compose card with recipient chips, a mic button and a send button.
+ *
+ * It refreshes recipients on session events and shows a confirmation modal before sending.
+ */
 class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private readonly bus          : EventBus;
   private readonly store        : BroadcastStore;
@@ -136,6 +141,11 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private stash        : RerecordStash | undefined;
   private readonly unsubscribers : Array<() => void> = [];
 
+  /**
+   * Creates the renderer from its store, API client and options; throws without a store.
+   *
+   * Throws when no store is given.
+   */
   constructor( opts: BroadcastCardRendererOptions ) {
     if ( !opts.store ) {
       throw new Error( "BroadcastCardRenderer requires a store" );
@@ -157,6 +167,11 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   // Lifecycle
   // -------------------------------------------------------------------------
 
+  /**
+   * Draws the card into the root, wires clicks and bus events, and paints recipients.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "BroadcastCardRenderer already mounted" );
@@ -186,6 +201,11 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     this.performRefresh();   // immediate first paint (no debounce — initial mount)
   }
 
+  /**
+   * Tears down the card: cancels timers, removes listeners and the modal, empties the root.
+   *
+   * Safe to call when not mounted.
+   */
   unmount(): void {
     if ( !this.mounted ) return;   // idempotent
 
@@ -221,6 +241,9 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the recipient chips as a list and refreshes the send button; used by tests.
+   */
   forceRenderForTesting(): void {
     this.renderChips( { kind: "list" } );
     this.updateSendButton();
@@ -623,9 +646,11 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
 // Pure DOM helpers
 // ---------------------------------------------------------------------------
 
-// A clickable (or static) recipient chip. `token` rides on `data-token` for the
-// delegated injectMentionAtCursor lookup; non-clickable chips (confirm modal)
-// omit the type + title.
+/**
+ * Builds a recipient chip with an icon and label, as a button or a static span.
+ *
+ * The token rides on a data attribute; a non-empty color sets the border.
+ */
 function chipButton(
   token        : string,
   icon         : string,
@@ -652,7 +677,9 @@ function chipButton(
   return chip;
 }
 
-// A non-clickable status pill in the chip-row (loading / error / empty).
+/**
+ * Builds a non-clickable pill showing a loading, error or empty-recipients message.
+ */
 function buildStatusChip( text: string, isNoRecipients: boolean ): HTMLElement {
   const el = document.createElement( "span" );
   el.className   = isNoRecipients ? "broadcast-chip no-recipients" : "broadcast-chip";
@@ -660,8 +687,9 @@ function buildStatusChip( text: string, isNoRecipients: boolean ): HTMLElement {
   return el;
 }
 
-// Compose the post-send status line, surfacing the filtered_out fanout
-// receipts (F3) so a silent broadcast miss is visible (legacy postBroadcast).
+/**
+ * Builds the post-send status line with recipient count, short ID and filtered-out sessions.
+ */
 function formatSendStatus( result: BroadcastResult ): string {
   let filteredNote = "";
   if ( result.filtered_out.length > 0 ) {
@@ -676,6 +704,9 @@ function formatSendStatus( result: BroadcastResult ): string {
     filteredNote;
 }
 
+/**
+ * Returns the message of an Error, or the string form of any other thrown value.
+ */
 function errorMessage( err: unknown ): string {
   return err instanceof Error ? err.message : String( err );
 }

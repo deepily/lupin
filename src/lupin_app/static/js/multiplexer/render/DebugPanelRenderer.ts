@@ -62,6 +62,9 @@ export interface DebugPanelRendererOptions {
   nowDateFn? : () => Date;
 }
 
+/**
+ * Models the debug information pane: a header and a log of timestamped lines.
+ */
 class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private readonly nowDateFn : () => Date;
 
@@ -70,11 +73,17 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
   private collapseOff : ( () => void ) | null = null;
   private mounted     = false;
 
+  /**
+   * Stores the clock used to stamp each line, which defaults to the current time.
+   */
   constructor( opts: DebugPanelRendererOptions ) {
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
   }
 
+  /**
+   * Builds the debug log in the root and registers it as the debug panel.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "DebugPanelRenderer already mounted" );
 
@@ -128,6 +137,9 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     setDebugPanel( this );
   }
 
+  /**
+   * Deregisters the debug panel, removes the collapse wiring and empties the root.
+   */
   unmount(): void {
     // 🔴 DEREGISTER FIRST. A writer firing between the teardown of the DOM and
     // the clearing of the sink would paint into a detached node — invisible, and

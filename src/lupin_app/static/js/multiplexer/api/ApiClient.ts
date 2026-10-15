@@ -165,12 +165,22 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Sends authenticated JSON requests to the server's API with a timeout.
+ *
+ * It offers the HTTP verbs plus a few named calls for broadcast, proxy acknowledge and dev server bounce.
+ */
 class ApiClientImpl implements ApiClient {
   private readonly baseUrl          : string;
   private readonly defaultTimeoutMs : number;
   private readonly authManager      : AuthManager;
   private readonly fetcher          : typeof fetch;
 
+  /**
+   * Stores the base URL, default timeout, auth manager and fetch function.
+   *
+   * A trailing slash on the base URL is removed.
+   */
   constructor(opts: ApiClientOptions) {
     // Strip a trailing slash so callers can write `path` with a leading slash
     // and we never end up with a double `//`.
@@ -181,26 +191,46 @@ class ApiClientImpl implements ApiClient {
     this.fetcher          = opts.fetcher ?? globalThis.fetch.bind(globalThis);
   }
 
+  /**
+   * Sends a GET request to the path and resolves with the decoded response.
+   */
   get<T>(path: string, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("GET", path, undefined, opts);
   }
 
+  /**
+   * Sends a POST request with a body to the path and resolves with the decoded response.
+   */
   post<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("POST", path, body, opts);
   }
 
+  /**
+   * Sends a PUT request with a body to the path and resolves with the decoded response.
+   */
   put<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("PUT", path, body, opts);
   }
 
+  /**
+   * Sends a PATCH request with a body to the path and resolves with the decoded response.
+   */
   patch<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("PATCH", path, body, opts);
   }
 
+  /**
+   * Sends a DELETE request to the path and resolves with the decoded response.
+   */
   delete<T>(path: string, opts?: ApiCallOptions): Promise<T> {
     return this.request<T>("DELETE", path, undefined, opts);
   }
 
+  /**
+   * Posts a message to all Claude Code sessions through the commons broadcast endpoint.
+   *
+   * Acknowledgement and including the sender both default to true.
+   */
   broadcastToCcSessions(req: BroadcastRequest, opts?: ApiCallOptions): Promise<BroadcastResult> {
     const body: Record<string, unknown> = {
       message            : req.message,
@@ -211,12 +241,20 @@ class ApiClientImpl implements ApiClient {
     return this.post<BroadcastResult>("/api/commons/broadcast-to-cc-sessions", body, opts);
   }
 
+  /**
+   * Posts to the proxy acknowledge endpoint with no body to retire the current batch.
+   */
   acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult> {
     // Body-less POST — legacy parity (notifications.js:7176 sends only auth
     // headers). The server retires the current batch + mints the next.
     return this.post<ProxyAcknowledgeResult>("/api/proxy/acknowledge", undefined, opts);
   }
 
+  /**
+   * Posts to the system bounce endpoint to ask the host watcher to restart the dev server.
+   *
+   * A refusal comes back as an ApiError.
+   */
   bounceDevServer(opts?: ApiCallOptions): Promise<BounceResult> {
     // Body-less admin POST. On 202 the host-side watcher was handed the bounce;
     // a 409 (already bouncing) or 503 (watcher not running) surfaces as an

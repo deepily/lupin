@@ -67,6 +67,11 @@ export interface NavBarRenderer {
   forceRenderForTesting(): void;
 }
 
+/**
+ * Draws the navigation bar with the user's email, the active path and login or logout.
+ *
+ * It redraws when the auth state changes.
+ */
 class NavBarRendererImpl implements NavBarRenderer {
   private readonly bus           : EventBus;
   private readonly auth          : NavAuthPort;
@@ -76,12 +81,20 @@ class NavBarRendererImpl implements NavBarRenderer {
   private root    : HTMLElement | null = null;
   private mounted = false;
 
+  /**
+   * Stores the bus, the auth port and the function that returns the active path.
+   */
   constructor( opts: NavBarRendererOptions ) {
     this.bus           = opts.eventBus;
     this.auth          = opts.auth;
     this.getActivePath = opts.getActivePath;
   }
 
+  /**
+   * Draws the bar into the root and redraws on every auth state change.
+   *
+   * A second mount without unmount throws.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "NavBarRenderer already mounted" );
@@ -101,6 +114,9 @@ class NavBarRendererImpl implements NavBarRenderer {
     );
   }
 
+  /**
+   * Unsubscribes from the bus and clears the root. Safe to call more than once.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -111,6 +127,9 @@ class NavBarRendererImpl implements NavBarRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Redraws the bar right away when mounted, for tests.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderNow();
   }

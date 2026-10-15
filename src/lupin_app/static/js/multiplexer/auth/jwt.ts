@@ -23,8 +23,9 @@ export interface JwtClaims {
   [claim: string]: unknown;
 }
 
-// Decode one base64url segment to a UTF-8 string. Returns null on any malformed
-// input (invalid base64 length or non-base64 characters).
+/**
+ * Decodes one base64url segment to a UTF-8 string.
+ */
 function decodeSegment( segment: string ): string | null {
   const base64    = segment.replace( /-/g, "+" ).replace( /_/g, "/" );
   const remainder = base64.length % 4;

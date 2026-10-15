@@ -189,6 +189,9 @@ function buildSizeCapControls(): SizeCapEls {
   return { root, slider, value, status, crewField, crewToggle, crewState, crewWarning };
 }
 
+/**
+ * Creates a paragraph with the fleet status message class and the given text.
+ */
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
   p.className = `fleet-status-message ${className}`;
@@ -196,6 +199,9 @@ function messageEl( className: string, text: string ): HTMLParagraphElement {
   return p;
 }
 
+/**
+ * Renders the fleet status panel with a header, size cap controls, and sessions.
+ */
 class FleetStatusRendererImpl implements FleetStatusRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : FleetStatusRendererStores;
@@ -212,6 +218,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
   private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
 
+  /**
+   * Creates the renderer from its bus and stores, with a clock that defaults to now.
+   */
   constructor( opts: FleetStatusRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -219,6 +228,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
   }
 
+  /**
+   * Builds the header, size cap controls, and body inside the root and paints them.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "FleetStatusRenderer already mounted" );
@@ -282,6 +294,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     );
   }
 
+  /**
+   * Removes the subscriptions and collapse listener and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -301,6 +316,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the panel from the store at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }

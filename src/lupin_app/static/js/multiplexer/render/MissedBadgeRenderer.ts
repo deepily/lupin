@@ -49,6 +49,9 @@ export interface MissedBadgeRendererOptions {
   stores   : MissedBadgeRendererStores;
 }
 
+/**
+ * Renders the missed notification badge and reset button from the store's count.
+ */
 class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   private readonly bus    : EventBus;
   private readonly stores : MissedBadgeRendererStores;
@@ -57,11 +60,17 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
   private root    : HTMLElement | null = null;
   private mounted = false;
 
+  /**
+   * Creates the renderer from its bus and stores.
+   */
   constructor( opts: MissedBadgeRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
   }
 
+  /**
+   * Attaches to a root element, paints the badge, and listens for count changes.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) {
       throw new Error( "MissedBadgeRenderer already mounted" );
@@ -78,6 +87,9 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
     );
   }
 
+  /**
+   * Removes the subscriptions and empties the root element.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -88,6 +100,9 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the badge at once, for tests, when mounted.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderNow();
   }

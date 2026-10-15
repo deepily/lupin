@@ -154,6 +154,9 @@ function writeShown( storage: Pick<Storage, "getItem" | "setItem"> | null, shown
   }
 }
 
+/**
+ * Paints the Finished Tasks pane and repaints when the store changes.
+ */
 class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private readonly bus       : EventBus;
   private readonly store     : FinishedTasksStoreLike;
@@ -175,6 +178,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   /** True once a poll has resolved — gates the em dash on the count chip. */
   private measuredOnce = false;
 
+  /**
+   * Builds the renderer from a bus, a store and optional runtime hooks.
+   */
   constructor( opts: FinishedTasksRendererOptions ) {
     this.bus       = opts.eventBus;
     this.store     = opts.store;
@@ -188,6 +194,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     /* c8 ignore stop */
   }
 
+  /**
+   * Builds the header, controls and results in the root and renders from the store.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "FinishedTasksRenderer already mounted" );
     this.mounted = true;
@@ -259,6 +268,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     );
   }
 
+  /**
+   * Unsubscribes from events, runs the collapse teardown and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -278,6 +290,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     this.mounted   = false;
   }
 
+  /**
+   * Repaints from the store now when mounted, so a test need not wait for an event.
+   */
   forceRenderForTesting(): void {
     if ( this.mounted ) this.renderFromStore( true );
   }

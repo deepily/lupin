@@ -193,6 +193,9 @@ interface JobCacheAnalyticsState {
   topJobs        : Map<string, number>;
 }
 
+/**
+ * Returns the browser IndexedDB factory, or null when the environment has none.
+ */
 function defaultIndexedDBFactory(): MinimalIdbFactory | null {
   /* c8 ignore next */ // browser-only true-arm: node/SSR + the unit suite have no global `indexedDB`, so this arm never runs under test (tests inject `indexedDBFactory` or pass null). The `return null` false-arm below IS exercised.
   if ( typeof indexedDB !== "undefined" ) return indexedDB as unknown as MinimalIdbFactory;

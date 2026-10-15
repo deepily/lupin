@@ -89,6 +89,9 @@ export interface FilterSettingsRendererOptions {
   isAdmin       : () => boolean;
 }
 
+/**
+ * Draws the admin-only Queue Filter Settings pane with view mode buttons.
+ */
 class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationStore;
@@ -102,6 +105,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   private unsubscribes : Array<() => void> = [];
   private clickHandler : ( ( e: Event ) => void ) | null = null;
 
+  /**
+   * Keeps the event bus, notification store, view state store and the admin check.
+   */
   constructor( options: FilterSettingsRendererOptions ) {
     this.bus       = options.eventBus;
     this.store     = options.store;
@@ -109,6 +115,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.isAdmin   = options.isAdmin;
   }
 
+  /**
+   * Builds the pane with header, mode buttons and status line, and subscribes.
+   */
   mount( root: HTMLElement ): void {
     if ( this.root !== null ) throw new Error( "FilterSettingsRenderer: already mounted" );
     this.root = root;
@@ -180,6 +189,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.render();
   }
 
+  /**
+   * Makes the pane visible for an admin and saves that visibility.
+   */
   reveal(): void {
     // B1 — a non-admin reveal is a no-op, and the refusal is the gate's second layer:
     // the pane's own `display` already refuses, and this stops the PREFERENCE being
@@ -198,6 +210,9 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.applyVisibility();
   }
 
+  /**
+   * Unsubscribes, removes the click handler and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribes ) off();
     this.unsubscribes.length = 0;

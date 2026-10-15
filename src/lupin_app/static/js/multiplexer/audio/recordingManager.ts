@@ -50,6 +50,11 @@ interface ActiveRecording {
 const MAX_DURATION_MS    = 30_000;
 const TTS_RESUME_DELAY_MS = 750;
 
+/**
+ * Manages the one active voice recording at a time for a named context.
+ *
+ * It starts and cancels recordings, caps their length, and pauses and resumes TTS around them.
+ */
 class RecordingManager {
   private active                : ActiveRecording | null = null;
   private escListener           : ((e: KeyboardEvent) => void) | null = null;

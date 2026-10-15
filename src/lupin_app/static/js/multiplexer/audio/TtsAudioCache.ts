@@ -162,6 +162,9 @@ interface CacheStatsCounters {
 }
 
 /* c8 ignore start */ // production-default fallback: the browser's global `indexedDB`; node/SSR + the unit suite have no IndexedDB, so this arm is browser-only (tests always inject `indexedDBFactory` or pass null).
+/**
+ * Returns the browser's global IndexedDB when it exists, and null otherwise.
+ */
 function defaultIndexedDBFactory(): MinimalIdbFactory | null {
   return typeof indexedDB !== "undefined" ? ( indexedDB as unknown as MinimalIdbFactory ) : null;
 }

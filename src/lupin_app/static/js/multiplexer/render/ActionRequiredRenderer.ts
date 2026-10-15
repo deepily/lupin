@@ -177,6 +177,11 @@ export interface ActionRequiredRendererOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Draws the action-required section: one active card plus a queue of pending rows.
+ *
+ * It owns the typed drafts, keyboard shortcuts, microphone handler and collapse state.
+ */
 class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
@@ -209,6 +214,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // Escape asks it whether a card mic is recording (bug da15c818).
   private readonly recorder : ActionRequiredRecorderLike;
 
+  /**
+   * Creates the renderer from its bus and stores and wires the microphone handler.
+   */
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -226,6 +234,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     );
   }
 
+  /**
+   * Builds the header, active slot and queue in the root, then paints and subscribes.
+   *
+   * Throws if already mounted.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) {
       throw new Error("ActionRequiredRenderer already mounted");
@@ -278,6 +291,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     );
   }
 
+  /**
+   * Removes listeners and shortcuts and clears the root, leaving the empty message if idle.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -315,6 +331,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the whole section when mounted; used by tests.
+   */
   forceRenderForTesting(): void {
     if (this.mounted) this.renderAll();
   }
@@ -830,6 +849,11 @@ function applyPausedUi(widget: HTMLElement, paused: boolean): void {
   header.after(msg);
 }
 
+/**
+ * Turns a recorded response into display text.
+ *
+ * A string passes through; answer maps become header and value pairs joined by semicolons; missing responses read as none recorded.
+ */
 function formatResponse(response: ActionRequiredResponse | undefined): string {
   if (response === undefined) return "(no response recorded)";
   if (typeof response === "string") return response;
@@ -840,6 +864,9 @@ function formatResponse(response: ActionRequiredResponse | undefined): string {
 }
 
 /* c8 ignore start */ // CSS.escape polyfill — defensive cross-environment helper (production browsers + happy-dom + Node). c8 reports phantom branches inside the regex character class + the optional-chaining short-circuits which depend on the runtime CSS provider; the cssEscape-fallback test exercises both arms but c8's V8 instrumentation of regex/optional-chaining branches is implementation-dependent. Mirrors NotificationsListRenderer.ts:423 (same defensive helper, same ignore).
+/**
+ * Escapes a string for use in a CSS selector, using the built-in CSS.escape when it exists.
+ */
 function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);

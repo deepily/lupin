@@ -140,6 +140,11 @@ const BUSTOUT_BASE_CSS   =
 
 interface ScrollAnchor { el: Element; top: number; }
 
+/**
+ * Paints the reading pane and wires its buttons, splitter and scroll anchoring.
+ *
+ * Reads state from the reading pane store and the action-required count.
+ */
 class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly bus            : EventBus;
   private readonly store          : ReadingPaneStoreLike;
@@ -186,6 +191,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private onDragUp         : ( () => void ) | null = null;
   private dragging         : boolean = false;
 
+  /**
+   * Stores the event bus, reading pane store, action-required count and window.
+   */
   constructor( opts: ReadingPaneRendererOptions ) {
     this.bus            = opts.eventBus;
     this.store          = opts.stores.readingPane;
@@ -199,6 +207,12 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // Mount / unmount
   // -------------------------------------------------------------------------
 
+  /**
+   * Attaches the renderer to the content shell and subscribes to store changes.
+   *
+   * Finds its pane elements by selector and ID.
+   * Throws if already mounted or a required element is missing. Paints the initial state.
+   */
   mount( root: HTMLElement ): void {
     if (this.mounted) throw new Error("ReadingPaneRenderer.mount: already mounted");
 
@@ -262,6 +276,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.applyState();
   }
 
+  /**
+   * Removes every listener and subscription the renderer added and clears its root.
+   */
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
@@ -284,6 +301,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Repaints the pane from the store immediately; used by tests.
+   */
   forceRenderForTesting(): void {
     this.applyState();
   }
@@ -752,14 +772,19 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   }
 }
 
-// Mount-time element resolvers — throw with a clear message when the required
-// shell DOM is absent (mirrors the FocusTrayRenderer/PersonaModalRenderer
-// pattern; after these run, every field is non-null at every use site).
+/**
+ * Returns the descendant of root matching the selector, and throws if there is none.
+ *
+ * Used at mount time so every pane element is known to exist.
+ */
 function req<T extends HTMLElement>( root: HTMLElement, selector: string ): T {
   const el = root.querySelector<T>(selector);
   if (el === null) throw new Error(`ReadingPaneRenderer.mount: ${selector} not found`);
   return el;
 }
+/**
+ * Returns the element with the given ID, and throws if the page has none.
+ */
 function reqId<T extends HTMLElement = HTMLElement>( id: string ): T {
   const el = document.getElementById(id) as T | null;
   if (el === null) throw new Error(`ReadingPaneRenderer.mount: #${id} not found`);

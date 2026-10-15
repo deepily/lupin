@@ -103,6 +103,9 @@ export function refusalText( status: number, body: unknown ): string {
   return `Podcast failed (HTTP ${status})`;
 }
 
+/**
+ * Parses a response body as JSON and returns null if it is not valid JSON.
+ */
 async function readJson( response: Response ): Promise<unknown> {
   try { return await response.json(); } catch { return null; }
 }

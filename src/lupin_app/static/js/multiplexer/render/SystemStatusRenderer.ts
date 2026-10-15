@@ -153,6 +153,11 @@ export interface SystemStatusRendererOptions {
 
 interface Row { labelText: string; valueEl: HTMLElement; root: HTMLElement }
 
+/**
+ * Builds a status row with a bold label and a value span carrying a test ID and class.
+ *
+ * Returns the row root, the value element and the label text.
+ */
 function statusRow( label: string, testid: string, seeded: string, seededCls: string ): Row {
   const root = document.createElement( "div" );
   root.className = "status-item";
@@ -169,6 +174,11 @@ function statusRow( label: string, testid: string, seeded: string, seededCls: st
   return { labelText: label, valueEl: value, root };
 }
 
+/**
+ * Draws the System Status pane: socket pills, auth, user, sessions, health, config reload.
+ *
+ * It repaints on connection state events and a health timer.
+ */
 class SystemStatusRendererImpl implements SystemStatusRenderer {
   private readonly bus         : EventBus;
   private readonly auth        : SystemStatusRendererOptions[ "auth" ];
@@ -201,6 +211,9 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
   private healthTimer : number | null = null;
   private mounted     = false;
 
+  /**
+   * Creates the renderer from bus, auth, transports and session IDs, with default helpers.
+   */
   constructor( opts: SystemStatusRendererOptions ) {
     this.bus          = opts.eventBus;
     this.auth         = opts.auth;
@@ -218,6 +231,11 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     /* c8 ignore stop */
   }
 
+  /**
+   * Builds the pane's header and rows in the root, wires events and starts the health timer.
+   *
+   * Throws if already mounted.
+   */
   mount( root: HTMLElement ): void {
     if ( this.mounted ) throw new Error( "SystemStatusRenderer already mounted" );
 
@@ -336,6 +354,9 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     this.healthTimer = this.setIntervalFn( () => this.paintHealth(), HEALTH_INTERVAL_MS );
   }
 
+  /**
+   * Removes subscriptions and timers, marks the health line as stopped and empties the root.
+   */
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -357,6 +378,9 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Runs the full status refresh and returns its promise; used by tests.
+   */
   refreshForTesting(): Promise<void> {
     return this.refreshAll();
   }

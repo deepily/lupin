@@ -124,6 +124,11 @@ interface PersonaPoolResponse {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Draws the commons activity pane: filter controls and a list of entries.
+ *
+ * It follows the commons store and loads history through the API client.
+ */
 class CommonsActivityRendererImpl implements CommonsActivityRenderer {
   private readonly bus         : EventBus;
   private readonly store       : CommonsStore;
@@ -150,6 +155,11 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
   // Live ResizeObservers awaiting a layout pass; disconnected on unmount.
   private readonly observers : Set<ResizeObserverLike> = new Set();
 
+  /**
+   * Stores the bus, commons store, API client, time zone and frame scheduler.
+   *
+   * It throws when the commons store is missing.
+   */
   constructor(opts: CommonsActivityRendererOptions) {
     // Fail fast at construction if the store is missing (Pass 2 F4 pattern).
     if (!opts.stores || !opts.stores.commons) {
@@ -168,6 +178,11 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
   // Lifecycle
   // -------------------------------------------------------------------------
 
+  /**
+   * Finds the pane's elements inside the root, restores saved controls, and draws the entries.
+   *
+   * It starts loading history in the background. It throws if already mounted or the entries element is missing.
+   */
   mount(root: HTMLElement): void {
     if (this.mounted) {
       throw new Error("CommonsActivityRenderer already mounted");
@@ -207,6 +222,11 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
     this.populatePersonaDropdown();
   }
 
+  /**
+   * Removes listeners, subscriptions and observers, and clears the entries.
+   *
+   * Calling it when not mounted does nothing.
+   */
   unmount(): void {
     if (!this.mounted) return;   // idempotent
 
@@ -232,6 +252,9 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
     this.mounted = false;
   }
 
+  /**
+   * Redraws the whole pane right away, for tests.
+   */
   forceRenderForTesting(): void {
     this.renderAll();
   }

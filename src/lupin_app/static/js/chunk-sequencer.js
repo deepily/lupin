@@ -9,6 +9,9 @@
  */
 
 class ChunkSequencer {
+    /**
+     * Creates a sequencer that plays streamed TTS audio chunks in one of two methods.
+     */
     constructor(method = 'sequenced') {
         this.method = method;
         this.expectedSequence = 0;
@@ -46,6 +49,9 @@ class ChunkSequencer {
         this.initialize();
     }
     
+    /**
+     * Sets up the log, status elements, audio system and session ID.
+     */
     async initialize() {
         this.log(`🔧 Initializing ${this.method} method handler`, 'info');
         
@@ -62,6 +68,9 @@ class ChunkSequencer {
         this.log(`✅ ${this.method} method handler initialized successfully`, 'success');
     }
     
+    /**
+     * Looks up the status and chunk-display elements named by the method.
+     */
     setupStatusElements() {
         const prefix = this.method;
         this.statusElements = {
@@ -78,6 +87,9 @@ class ChunkSequencer {
         };
     }
     
+    /**
+     * Checks Web Audio support and builds the pool of hidden audio elements.
+     */
     async initializeAudioSystem() {
         try {
             // Check Web Audio API support
@@ -97,6 +109,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Creates a fixed pool of hidden audio elements and appends them to the page body.
+     */
     initializeAudioElementsPool() {
         this.log(`🔊 Creating ${this.maxAudioElements} audio elements for ${this.method} method`, 'info');
         
@@ -124,6 +139,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Fetches a session ID from the server and stores it for the WebSocket URL.
+     */
     async getSessionId() {
         try {
             const response = await fetch('/api/get-session-id');
@@ -136,6 +154,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Creates the shared Web Audio context and resumes it if the browser suspended it.
+     */
     async initializeWebAudioContext() {
         if (!this.useWebAudioAPI || this.audioContext) return;
         
@@ -159,6 +180,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Opens the audio WebSocket for the session and waits up to five seconds.
+     */
     async connectWebSocket() {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
             this.log(`⚠️ WebSocket already connected for ${this.method}`, 'warning');
@@ -203,6 +227,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Sends binary messages to chunk handling and parses text as a JSON status.
+     */
     async handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Binary audio chunk received
@@ -218,6 +245,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Numbers an incoming chunk, tracks first-audio latency, then plays or buffers it.
+     */
     async handleAudioChunk(audioBlob) {
         const sequence = this.chunksReceived; // Simple sequential numbering
         this.chunksReceived++;
@@ -249,6 +279,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Plays a chunk as soon as it arrives, by Web Audio or an audio element.
+     */
     async playChunkImmediately(audioBlob, sequence) {
         // This mimics the current experimental TTS behavior
         this.log(`🔶 ${this.method.toUpperCase()} - Playing chunk ${sequence} immediately`, 'info');
@@ -264,6 +297,9 @@ class ChunkSequencer {
         this.updateStatus('chunkCount', `${this.chunksReceived}/${this.chunksPlayed}`);
     }
     
+    /**
+     * Buffers a chunk by sequence number, arms its timeout and plays ready chunks.
+     */
     async bufferAndSequenceChunk(audioBlob, sequence) {
         this.log(`🔷 ${this.method.toUpperCase()} - Buffering chunk ${sequence} for sequenced playback`, 'info');
         
@@ -281,6 +317,9 @@ class ChunkSequencer {
         await this.processBufferedChunks();
     }
     
+    /**
+     * Starts a timer for one sequence number, replacing any earlier timer for it.
+     */
     setMissingChunkTimeout(sequence) {
         // Clear any existing timeout for this sequence
         if (this.timeouts.has(sequence)) {
@@ -296,6 +335,9 @@ class ChunkSequencer {
         this.timeouts.set(sequence, timeoutHandle);
     }
     
+    /**
+     * Plays buffered chunks in order from the expected sequence until a gap.
+     */
     async processBufferedChunks() {
         // Play consecutive chunks starting from expected sequence
         while (this.chunkBuffer.has(this.expectedSequence)) {
@@ -328,6 +370,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Counts a timed-out chunk as an order issue and updates the display.
+     */
     handleMissingChunk(sequence) {
         this.log(`❌ ${this.method.toUpperCase()} - Missing chunk ${sequence}, marking as order issue`, 'error');
         this.orderIssues++;
@@ -341,6 +386,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Decodes a chunk and schedules it on the Web Audio clock after the last one.
+     */
     async playChunkWithWebAudio(audioBlob, sequence) {
         try {
             const arrayBuffer = await audioBlob.arrayBuffer();
@@ -372,6 +420,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Plays a chunk through the next audio element in the pool using an object URL.
+     */
     async playChunkWithAudioElement(audioBlob, sequence) {
         try {
             const audio = this.audioElements[this.audioElementIndex % this.maxAudioElements];
@@ -400,6 +451,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Reacts to a server status message by logging it and updating the status display.
+     */
     handleStatusMessage(message) {
         const { type, text, status, provider } = message;
         
@@ -430,6 +484,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Marks streaming finished, shows the total elapsed time and logs completion.
+     */
     onStreamComplete() {
         this.isStreaming = false;
         this.updateStatus('status', `Complete (${this.method})`);
@@ -446,6 +503,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Checks that every received chunk was buffered and played, and logs the result.
+     */
     validateFinalOrder() {
         // Check if all chunks were played in order
         let orderCorrect = true;
@@ -463,14 +523,23 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Logs that the audio element at the given index started playing.
+     */
     onAudioChunkPlayStart(elementIndex) {
         this.log(`▶️ ${this.method.toUpperCase()} - Audio element ${elementIndex} started playing`, 'info');
     }
     
+    /**
+     * Logs that the audio element at the given index finished playing.
+     */
     onAudioChunkPlayEnd(elementIndex) {
         this.log(`⏹️ ${this.method.toUpperCase()} - Audio element ${elementIndex} finished playing`, 'info');
     }
     
+    /**
+     * Appends a numbered, timestamped marker to the received or played chunk display.
+     */
     addChunkIndicator(type, sequence) {
         const display = this.chunkDisplays[type];
         if (!display) return;
@@ -484,6 +553,9 @@ class ChunkSequencer {
         display.scrollTop = display.scrollHeight;
     }
     
+    /**
+     * Runs one test: connects the WebSocket and posts the text to the TTS endpoint.
+     */
     async testWithSettings(settings) {
         try {
             // Reset metrics
@@ -532,6 +604,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Clears counters, buffer, timeouts and timings, and blanks the displays.
+     */
     resetMetrics() {
         this.expectedSequence = 0;
         this.chunkBuffer.clear();
@@ -559,6 +634,9 @@ class ChunkSequencer {
         });
     }
     
+    /**
+     * Closes the WebSocket and pauses every playing audio element.
+     */
     stopStreaming() {
         this.log(`⏹️ ${this.method.toUpperCase()} - Stopping streaming...`, 'info');
         this.isStreaming = false;
@@ -578,6 +656,9 @@ class ChunkSequencer {
         this.updateStatus('status', `Stopped (${this.method})`);
     }
     
+    /**
+     * Writes a value into the named status element when that element exists.
+     */
     updateStatus(elementId, value) {
         const element = this.statusElements[elementId];
         if (element) {
@@ -585,6 +666,9 @@ class ChunkSequencer {
         }
     }
     
+    /**
+     * Appends a timestamped line to the on-page log and the browser console.
+     */
     log(message, type = 'info') {
         if (!this.logElement) return;
         
@@ -622,6 +706,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Test functions
+/**
+ * Runs the original and then the sequenced method on the same text.
+ */
 async function runComparisonTest() {
     const settings = getCurrentSettings();
     
@@ -652,6 +739,9 @@ async function runComparisonTest() {
     }
 }
 
+/**
+ * Runs one test with the play-on-arrival handler using the page settings.
+ */
 async function testOriginalMethod() {
     const settings = getCurrentSettings();
     
@@ -667,6 +757,9 @@ async function testOriginalMethod() {
     }
 }
 
+/**
+ * Runs a single test with the sequenced handler using the current page settings.
+ */
 async function testSequencedMethod() {
     const settings = getCurrentSettings();
     
@@ -682,6 +775,9 @@ async function testSequencedMethod() {
     }
 }
 
+/**
+ * Stops streaming on both the original and sequenced handlers.
+ */
 function stopAllTests() {
     if (originalHandler) {
         originalHandler.stopStreaming();
@@ -694,6 +790,9 @@ function stopAllTests() {
     console.log('⏹️ All tests stopped');
 }
 
+/**
+ * Empties the on-page console log and leaves a short cleared and ready message.
+ */
 function clearLogs() {
     const logElement = document.getElementById('console-log');
     if (logElement) {
@@ -705,6 +804,9 @@ function clearLogs() {
     }
 }
 
+/**
+ * Reads the test text, voice, model and quality profile from the page controls.
+ */
 function getCurrentSettings() {
     return {
         text: document.getElementById('test-text')?.value.trim() || '',

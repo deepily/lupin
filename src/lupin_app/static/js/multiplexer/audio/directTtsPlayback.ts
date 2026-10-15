@@ -73,6 +73,9 @@ export interface DirectTtsPlayer {
   isPlaying(): boolean;
 }
 
+/**
+ * Plays TTS audio blobs through an audio element and tracks the one playing.
+ */
 class DirectTtsPlayerImpl implements DirectTtsPlayer {
   private readonly audioFactory    : ( url: string ) => DirectAudioElement;
   private readonly createObjectURL : ( blob: Blob ) => string;
@@ -81,6 +84,9 @@ class DirectTtsPlayerImpl implements DirectTtsPlayer {
   private current    : DirectAudioElement | null = null;
   private currentUrl : string | null = null;
 
+  /**
+   * Creates the player from optional audio and object URL factories.
+   */
   constructor( opts: DirectTtsPlayerOptions ) {
     /* c8 ignore next 3 */ // production-default fallbacks: the real browser APIs; tests inject all three.
     this.audioFactory    = opts.audioFactory    ?? (( url ) => new Audio( url ) as unknown as DirectAudioElement);
@@ -88,6 +94,9 @@ class DirectTtsPlayerImpl implements DirectTtsPlayer {
     this.revokeObjectURL = opts.revokeObjectURL ?? (( url ) => { URL.revokeObjectURL( url ); });
   }
 
+  /**
+   * Plays a blob through a new audio element and resolves when it ends or errors.
+   */
   play( blob: Blob ): Promise<void> {
     // A second play with the first still running would leave the first element
     // audible AND unreachable — `stop()` only holds one handle. Legacy has the
@@ -125,6 +134,9 @@ class DirectTtsPlayerImpl implements DirectTtsPlayer {
     } );
   }
 
+  /**
+   * Pauses and rewinds the current audio and releases its object URL.
+   */
   stop(): void {
     if ( this.current === null ) return;
     this.current.pause();
@@ -134,6 +146,9 @@ class DirectTtsPlayerImpl implements DirectTtsPlayer {
     this.release( el, url );
   }
 
+  /**
+   * Returns true while an audio element is held as the current playback.
+   */
   isPlaying(): boolean {
     return this.current !== null;
   }
