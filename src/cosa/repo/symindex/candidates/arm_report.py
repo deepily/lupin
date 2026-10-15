@@ -60,12 +60,12 @@ def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable, redacto
                "## T1: recall of the full-sweep shortlist", "", "| arm | " + " | ".join( f"K={k}" for k in sorted( next( iter( t1.values() ) ) ) ) + " |",
                "|---|" + "---|" * len( next( iter( t1.values() ) ) ) ]
     for arm in sorted( t1 ): lines.append( f"| {arm} | " + " | ".join( _pct( t1[ arm ][ k ][ "mean" ] ) for k in sorted( t1[ arm ] ) ) + " |" )
-    lines += [ "", "## T3: where the known twin lands", "", "| arm | language | members | unranked | median | in top 10 | in top 50 | in top 128 |", "|---|---|---|---|---|---|---|---|" ]
+    lines += [ "", "## T3: where the known twin lands", "", "| arm | language | members | unranked | median of ranked | median of all | in top 10 | in top 50 | in top 128 |", "|---|---|---|---|---|---|---|---|---|" ]
     for arm in sorted( t3 ):
         for language in sorted( t3[ arm ] ):
             row = t3[ arm ][ language ]
-            lines.append( f"| {arm} | {language} | {row[ 'members' ]} | {row[ 'unranked' ]} | {row[ 'median' ]} | {row[ 'within' ][ 10 ]} | {row[ 'within' ][ 50 ]} | {row[ 'within' ][ 128 ]} |" )
-    lines += [ "", "## T2: replayed verdicts", "", "| arm | needs | flip rate | agreement | uncached answers |", "|---|---|---|---|---|" ]
+            lines.append( f"| {arm} | {language} | {row[ 'members' ]} | {row[ 'unranked' ]} | {row[ 'median' ]} | {row[ 'median_all' ]} | {row[ 'within' ][ 10 ]} | {row[ 'within' ][ 50 ]} | {row[ 'within' ][ 128 ]} |" )
+    lines += [ "", "## T2: replayed verdicts", "", "| arm | needs | verdict flip rate | agreement | uncached answers |", "|---|---|---|---|---|" ]
     for arm in sorted( t2 ):
         row = t2[ arm ]
         lines.append( f"| {arm} | {row[ 'needs' ]} | {_pct( row[ 'flip_rate' ] )} | {_pct( row[ 'agreement' ] )} | {row[ 'uncached' ]} |" )

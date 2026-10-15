@@ -76,10 +76,19 @@ class TestTwinRank:
 
     def test_summary_by_language( self ):
         out = am.t3_summary( { "py": [ 1, 4, 60, None ], "ts": [ 200, 130 ], "js": [ None ] } )
-        assert out[ "py" ] == { "members": 4, "unranked": 1, "median": 4, "within": { 10: 2, 50: 2, 128: 3 } }
-        assert out[ "ts" ] == { "members": 2, "unranked": 0, "median": 165.0, "within": { 10: 0, 50: 0, 128: 0 } }
+        assert out[ "py" ] == { "members": 4, "unranked": 1, "median": 4, "median_all": 32.0, "within": { 10: 2, 50: 2, 128: 3 } }
+        assert out[ "ts" ] == { "members": 2, "unranked": 0, "median": 165.0, "median_all": 165.0, "within": { 10: 0, 50: 0, 128: 0 } }
         assert out[ "js" ][ "median" ] is None
         assert out[ "js" ][ "unranked" ] == 1
+        assert out[ "js" ][ "median_all" ] == am.UNRANKED_RANK
+
+    def test_arm_that_loses_most_twins_does_not_win_the_vector_rule( self ):
+        out = am.t3_summary( { "x": [ 1, None, None, None ], "y": [ 20, 20, 20, 20 ] } )
+        assert out[ "x" ][ "median" ] == 1
+        assert out[ "x" ][ "median_all" ] == am.UNRANKED_RANK
+        one = { "recall_128": 0.5, "median_rank": out[ "y" ][ "median_all" ] }
+        two = { "recall_128": 0.4, "median_rank": out[ "x" ][ "median_all" ] }
+        assert am.choose_vectors( one, two ) == "B1"
 
 
 class TestT2Replay:
@@ -113,6 +122,12 @@ class TestT2Replay:
     def test_no_needs_gives_no_rates( self ):
         out = am.t2_replay( {}, {} )
         assert out[ "flip_rate" ] is None and out[ "agreement" ] is None and out[ "needs" ] == 0
+
+    def test_provides_shaped_answers_are_replayed_by_the_new_question_table( self ):
+        answers = { ( "n1", 1 ): { "a": { "provides": 0.99, "coverage": { "0": 0.0, "1": 0.0, "2": 0.0, "3": 1.0 } } } }
+        out = am.t2_replay( { "n1": [ "a" ] }, answers )
+        assert out[ "verdicts" ] == { "n1": [ "REUSE" ] }
+        assert out[ "agreement" ] == 1.0
 
     def test_decide_with_ids_returns_the_verdict_string( self ):
         assert am.decide_with_ids( [ { "id": "a", "probabilities": REUSE } ], [ "a" ] ) == "REUSE"

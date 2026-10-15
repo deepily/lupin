@@ -12,7 +12,7 @@ from cosa.repo.symindex.candidates.errors import CandidateError
 
 META  = { "run_id": "run-1", "code_sha": "c1", "index_sha": "i1", "manifest_hash": "m1", "needs_sha": "n1", "cache_sha": "k1" }
 T1    = { "C0": { 32: { "mean": 0.5 }, 128: { "mean": 0.75 } }, "B1": { 32: { "mean": None }, 128: { "mean": 1.0 } } }
-T3    = { "B1": { "py": { "members": 4, "unranked": 1, "median": 4, "within": { 10: 2, 50: 2, 128: 3 } } } }
+T3    = { "B1": { "py": { "members": 4, "unranked": 1, "median": 4, "median_all": 32.0, "within": { 10: 2, 50: 2, 128: 3 } } } }
 T2    = { "B1": { "needs": 2, "flip_rate": 0.5, "agreement": None, "uncached": 3 } }
 REDACT = { "count": 1, "of": 30, "ids": [ "f03" ] }
 
@@ -41,7 +41,7 @@ class TestRender:
 
     def test_t3_and_t2_rows( self ):
         text = self.page()
-        assert "| B1 | py | 4 | 1 | 4 | 2 | 2 | 3 |" in text
+        assert "| B1 | py | 4 | 1 | 4 | 32.0 | 2 | 2 | 3 |" in text
         assert "| B1 | 2 | 50.0% | - | 3 |" in text
 
     def test_states_it_is_in_sample( self ):

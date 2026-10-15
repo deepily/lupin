@@ -114,21 +114,26 @@ def cosine_sources( ids, matrices, query_vectors ):
              for name in sorted( query_vectors ) }
 
 
-def refuse_fresh_needs( need_ids, fresh_ids=() ):
+def refuse_fresh_needs( need_ids, fresh_ids=(), needs_sha=None, fresh_sha=None ):
     """
     Stop a run that holds a need reserved for the confirmation phase.
 
     Requires:
         - need_ids is the ids of the needs about to be used
         - fresh_ids is any extra ids that are reserved
+        - needs_sha and fresh_sha are the content hashes of the needs file in use and of the reserved file, both or neither
 
     Ensures:
         - returns None when no need is reserved
         - an id that starts with "fresh-" or is in fresh_ids counts as reserved
+        - the needs file counts as reserved when its hash equals the reserved file's hash
 
     Raises:
-        - CandidateError FRESH_NEEDS_REFUSED naming the reserved ids
+        - CandidateError FRESH_NEEDS_REFUSED naming the reserved ids, or the file
+        - ValueError when only one of the two hashes is given
     """
+    if ( needs_sha is None ) != ( fresh_sha is None ): raise ValueError( "give both file hashes or neither" )
+    if needs_sha is not None and needs_sha == fresh_sha: raise CandidateError( FRESH_NEEDS_REFUSED, "the needs file is the reserved file" )
     reserved = sorted( n for n in need_ids if n.startswith( FRESH_PREFIX ) or n in set( fresh_ids ) )
     if reserved: raise CandidateError( FRESH_NEEDS_REFUSED, ", ".join( reserved ) )
 

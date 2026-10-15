@@ -148,6 +148,18 @@ class TestRefuseFresh:
     def test_in_sample_needs_pass( self ):
         assert arms.refuse_fresh_needs( [ "f01", "f02" ], fresh_ids=[ "n9" ] ) is None
 
+    def test_the_reserved_file_itself_is_refused_whatever_its_ids_are( self ):
+        with pytest.raises( CandidateError ) as caught:
+            arms.refuse_fresh_needs( [ "wa-fresh-07" ], needs_sha="abc", fresh_sha="abc" )
+        assert caught.value.code == arms.FRESH_NEEDS_REFUSED
+
+    def test_a_different_file_passes_the_hash_check( self ):
+        assert arms.refuse_fresh_needs( [ "need-03" ], needs_sha="abc", fresh_sha="def" ) is None
+
+    def test_one_hash_without_the_other_is_an_error( self ):
+        with pytest.raises( ValueError ):
+            arms.refuse_fresh_needs( [ "need-03" ], needs_sha="abc" )
+
 
 class TestSelectFusion:
     """The constants come from in-sample recall, ties to the smaller values."""

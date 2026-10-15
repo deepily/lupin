@@ -8,7 +8,8 @@ import statistics
 
 from cosa.repo.symindex import verdict as vd
 
-TOP_CUTS = ( 10, 50, 128 )
+TOP_CUTS      = ( 10, 50, 128 )
+UNRANKED_RANK = 1000000
 
 
 def recall_at_k( shortlist, reference ):
@@ -80,7 +81,9 @@ def t3_summary( ranks_by_language ):
 
     Ensures:
         - returns, per language, the member count, the number not ranked, the median rank of the ranked ones,
-          and the count at or inside each of TOP_CUTS
+          the median over every member, and the count at or inside each of TOP_CUTS
+        - the median over every member counts a twin that was not ranked as worse than any rank, so an arm that
+          loses twins cannot look better for it
         - a language with no ranked twin has a median of None
     """
     out = {}
@@ -89,6 +92,7 @@ def t3_summary( ranks_by_language ):
         out[ language ] = { "members"  : len( ranks ),
                             "unranked" : len( ranks ) - len( ranked ),
                             "median"   : statistics.median( ranked ) if ranked else None,
+                            "median_all": statistics.median( UNRANKED_RANK if r is None else r for r in ranks ) if ranks else None,
                             "within"   : { cut: sum( 1 for r in ranked if r <= cut ) for cut in TOP_CUTS } }
     return out
 
@@ -98,13 +102,22 @@ def decide_with_ids( rows, ids ):
     Apply the verdict table to cached answers for a set of entries.
 
     Requires:
-        - rows is a list of { id, probabilities } for entries that have a cached answer
+        - rows is a list of { id, probabilities } or of { id, provides, coverage } for entries that have a cached answer
         - ids is every entry the sweep is taken to cover
 
     Ensures:
-        - returns the verdict string of verdict.decide, with no failed calls and no flags
+        - returns the verdict string of verdict.decide, or of verdict.decide_provides when any row carries provides
+        - no call is taken to have failed and no flag is set
     """
+    if any( "provides" in row for row in rows ): return vd.decide_provides( rows, ids, [], set() )[ "verdict" ]
     return vd.decide( rows, ids, [], set() )[ "verdict" ]
+
+
+def _answer_row( entry_id, answer ):
+    """Build the verdict row for one cached answer, whichever question shape it has."""
+    if isinstance( answer, dict ) and "provides" in answer:
+        return { "id": entry_id, "provides": answer[ "provides" ], "coverage": answer[ "coverage" ] }
+    return { "id": entry_id, "probabilities": answer }
 
 
 def t2_replay( shortlists, answers, decide_fn=decide_with_ids ):
@@ -113,7 +126,7 @@ def t2_replay( shortlists, answers, decide_fn=decide_with_ids ):
 
     Requires:
         - shortlists maps need id to the shortlisted ids
-        - answers maps ( need id, repeat ) to { entry id: probabilities } for every entry the full sweep judged
+        - answers maps ( need id, repeat ) to { entry id: probabilities or { provides, coverage } } for every entry the full sweep judged
         - decide_fn takes the rows and the id set, and returns a verdict string
 
     Ensures:
@@ -130,10 +143,10 @@ def t2_replay( shortlists, answers, decide_fn=decide_with_ids ):
         seen    = []
         for repeat in repeats:
             cached  = answers[ ( need_id, repeat ) ]
-            rows    = [ { "id": i, "probabilities": cached[ i ] } for i in sorted( ids ) if i in cached ]
+            rows    = [ _answer_row( i, cached[ i ] ) for i in sorted( ids ) if i in cached ]
             uncached += len( ids ) - len( rows )
             verdict = decide_fn( rows, [ r[ "id" ] for r in rows ] )
-            whole   = decide_fn( [ { "id": i, "probabilities": p } for i, p in sorted( cached.items() ) ], sorted( cached ) )
+            whole   = decide_fn( [ _answer_row( i, p ) for i, p in sorted( cached.items() ) ], sorted( cached ) )
             seen.append( verdict )
             pairs += 1
             agree += 1 if verdict == whole else 0
@@ -153,6 +166,7 @@ def choose_vectors( b1, b2 ):
 
     Requires:
         - b1 and b2 each hold "recall_128" and "median_rank", with None for a figure that was not measured
+        - median_rank is the median over every twin, so t3_summary's median_all and not its ranked-only median
 
     Ensures:
         - returns the two-vector arm only when it beats the one-vector arm on recall at 128 or on the median twin rank
