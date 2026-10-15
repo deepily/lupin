@@ -11,6 +11,8 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)
 - [[dataframe-crud]] — CRUD over DataFrames, storage, schemas and the intent dispatcher. `cosa.crud_for_dataframes`
+- [[dataframe-crud-operations]] — list, update, mark-done and query functions, the spoken answer for each result and the calendar agent. `cosa.crud_for_dataframes` (crud_operations, dispatcher, calendar_crud_agent)
+- [[dataframe-crud-schemas-and-intent]] — the todo, calendar and generic column definitions, the parsed `CRUDIntent` and the intent prompt. `cosa.crud_for_dataframes` (schemas, xml_models, intent_extractor)
 
 ## Notifications, decisions and voice
 

@@ -16,6 +16,7 @@ pins:
 # DataFrame CRUD
 
 A voice request such as "add milk to my groceries list" becomes a stored change to a per-user parquet table. `CrudForDataFramesAgent` is the entry point, and `TodoCrudAgent` and `CalendarCrudAgent` subclass it.
+The operations and voice answers are in [[dataframe-crud-operations]]; schemas and intent parsing are in [[dataframe-crud-schemas-and-intent]].
 
 ## What it does
 - `run_prompt` asks the configured LLM for an `<intent>` block. `extract_intent_xml` cuts it out of the reply and `CRUDIntent.from_xml` parses it.
@@ -28,7 +29,7 @@ A voice request such as "add milk to my groceries list" becomes a stored change 
 ## Don't
 - Don't match on `id`, `list_name` or `created_at` in `match_fields`. They are infrastructure columns and the match is refused.
 - Don't assume `update_item` guards against many matches. Only `delete_item` refuses a `match_fields` delete that hits more than one row.
-- Don't skip the confirmation for `delete`, `delete_list` or `update`. `needs_confirmation` is true for those exact lowercase names whatever the model says. `dispatch` lowercases and strips the operation, but `is_destructive` does not. So `Delete` runs unconfirmed unless the model also set `requires_confirmation` to true. It is tracked as the bug titled "CRUD voice confirmation is skipped when the operation is Delete or update".
+- Don't skip the confirmation for `delete`, `delete_list` or `update`. `needs_confirmation` is true for those operations whatever the model says. `is_destructive` lowercases and strips the name first, as `dispatch` does, so `Delete` and an operation with spaces around it are confirmed too.
 
 ## Invariants
 - A confirmation asks by voice with a 30 second wait. Denial, timeout or error all mean no. A job traced to a test suite takes no without asking.
