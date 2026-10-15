@@ -136,7 +136,7 @@ def reader_pin_digest():
     """Return the sha256 of the reader prompt, its reply parser and the fence pattern."""
     import hashlib
     import inspect
-    parts = [ rt.READER_SYSTEM, inspect.getsource( rt.parse_answer ), inspect.getsource( rt._parse_object ), rt._FENCE.pattern ]
+    parts = [ rt.READER_SYSTEM, inspect.getsource( rt.parse_answer ), inspect.getsource( rt._parse_object ), rt._FENCE.pattern, str( rt._FENCE.flags ) ]
     return hashlib.sha256( "\0".join( parts ).encode( "utf-8" ) ).hexdigest()
 
 
@@ -144,7 +144,7 @@ def reader_pin_digest():
 # key stood for. A reader-side edit changes the digest and fails the test below. Add a row and bump
 # reader_rig.PROMPT_VERSION together, knowing every ledger answer under the old key is then asked again.
 # _parse_object is shared with the grader, so an edit to it also needs a row here: that is intended.
-READER_PINS = { "reader-8e02a7acb1": "24383bcfdbf62683aea51c5b806a22695a91ef3d05cb132c3d57c0ee8862abb2" }
+READER_PINS = { "reader-8e02a7acb1": "a7d82a0bff53c5d90a50c2ef744aa97d4f9fa1f6e8f1956a6fc2d88b5ddb2857" }
 
 
 def test_the_reader_key_is_a_pinned_literal_and_names_what_it_was_pinned_for():
@@ -161,6 +161,9 @@ def test_each_piece_of_the_reader_pin_moves_the_digest( monkeypatch ):
     assert reader_pin_digest() != base
     monkeypatch.undo()
     monkeypatch.setattr( rt, "_FENCE", re.compile( rt._FENCE.pattern.replace( "(?:json)?", "(?:json|js)?" ), re.DOTALL ) )
+    assert reader_pin_digest() != base
+    monkeypatch.undo()
+    monkeypatch.setattr( rt, "_FENCE", re.compile( rt._FENCE.pattern, rt._FENCE.flags | re.IGNORECASE ) )
     assert reader_pin_digest() != base
     monkeypatch.undo()
     def parse_answer( raw ): return raw
@@ -180,18 +183,19 @@ def test_the_reader_key_does_not_move_when_the_grader_prompt_or_parser_changes( 
 def test_the_grader_version_is_derived_from_the_grader_prompt_and_parser():
     import inspect
     from cosa.repo.doc_lint import model_transport as mt
-    assert rt.GRADER_VERSION == mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), rt._FENCE.pattern )
+    assert rt.GRADER_VERSION == mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), rt._FENCE.pattern, str( rt._FENCE.flags ) )
     assert rt.GRADER_VERSION != rt.PROMPT_VERSION and rt.GRADER_VERSION.startswith( "grader-" )
 
 
-def test_changing_the_fence_pattern_moves_the_grader_version():
+def test_changing_the_fence_pattern_or_flags_moves_the_grader_version():
     import re
     from cosa.repo.doc_lint import model_transport as mt
     import inspect
-    def version( fence ):
-        return mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), fence )
-    assert version( rt._FENCE.pattern ) == rt.GRADER_VERSION
-    assert version( rt._FENCE.pattern.replace( "(?:json)?", "(?:json|js)?" ) ) != rt.GRADER_VERSION
+    def version( fence, flags ):
+        return mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ), fence, str( flags ) )
+    assert version( rt._FENCE.pattern, rt._FENCE.flags ) == rt.GRADER_VERSION
+    assert version( rt._FENCE.pattern.replace( "(?:json)?", "(?:json|js)?" ), rt._FENCE.flags ) != rt.GRADER_VERSION
+    assert version( rt._FENCE.pattern, rt._FENCE.flags | re.IGNORECASE ) != rt.GRADER_VERSION
 
 
 def test_only_the_grade_key_carries_the_grader_version( tmp_path ):
