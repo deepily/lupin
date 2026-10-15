@@ -105,9 +105,12 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
         - the whole run holds the build lock, so a manual build and the scheduled one cannot overlap
         - the new set carries its build info: the index manifest it was built from, built_at
           (the current UTC time when built_at is None), and the pins the writer left without a line
+        - a live set that loads and carries the row-texts sidecar lends its vectors for every row whose text is
+          unchanged and whose engines and roles still match; a set that does not load is rebuilt in full
+        - vectors reports, per matrix, how many rows were reused and how many embedded
         - the live vector set is replaced by rename only after the new one is sealed
         - query-cache files made under another set are cleared
-        - returns { purposes, manifest_hash, rows, stale_queries_cleared, seconds, index_manifest, built_at, unwritten_pins }
+        - returns { purposes, manifest_hash, rows, stale_queries_cleared, seconds, index_manifest, built_at, unwritten_pins, vectors }
 
     Raises:
         - CandidateError BUILD_LOCK_HELD when another build holds the lock; nothing is written
@@ -127,7 +130,13 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
         new_dir   = live.with_name( live.name + ".new" )
         if new_dir.exists(): shutil.rmtree( new_dir )
         stored    = pl.load_lines( purpose / "purpose.jsonl" )
-        manifest  = vb.build_vectors( entries, stored, client, new_dir )
+        try:
+            reuse = vs.load_vectors( live )
+        except CandidateError:
+            reuse = None
+        used      = {}
+        manifest  = vb.build_vectors( entries, stored, client, new_dir, reuse=reuse, stats=used )
+        reuse     = None
         unwritten = { e[ "pin" ] for e in screen.sendable( entries )[ 0 ] if e[ "pin" ] not in stored }
         info      = fr.write_build_info( new_dir, header, built_at if built_at is not None else fr.utc_now(), unwritten )
         vs.swap_in( new_dir, live )
@@ -135,7 +144,7 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
     return { "purposes": report, "manifest_hash": manifest[ "manifest_hash" ], "rows": manifest[ "rows" ],
              "stale_queries_cleared": cleared, "seconds": round( time.monotonic() - started, 1 ),
              "index_manifest": info[ "index_manifest" ], "built_at": info[ "built_at" ],
-             "unwritten_pins": info[ "unwritten_pins" ] }
+             "unwritten_pins": info[ "unwritten_pins" ], "vectors": used }
 
 
 def sample_purposes( root, writer, store_path, count, batch_size=pl.BATCH_SIZE, screen=None ):

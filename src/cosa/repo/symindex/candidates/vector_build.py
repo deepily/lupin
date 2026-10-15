@@ -111,7 +111,53 @@ def _embed_all( client, texts, content_type, role, batch_size, pause_seconds, sl
     return vectors
 
 
-def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pause_seconds=PAUSE_SECONDS, sleep=time.sleep ):
+def reuse_mismatches( old_manifest, info ):
+    """
+    Name the clauses of the reuse guard that a live set fails.
+
+    Requires:
+        - old_manifest is the sealed manifest of the live set
+        - info is the body of GET /api/embeddings/info, with its engines block
+
+    Ensures:
+        - returns [] only when the code engine, the prose engine, the device class, the libraries and the
+          document roles in old_manifest equal the ones a build made now would record
+        - otherwise returns the failing clause names: engines.code, engines.prose, device_class, libraries,
+          document_roles
+    """
+    engines = info[ "engines" ]
+    failed  = [ f"engines.{kind}" for kind in ( "code", "prose" ) if old_manifest[ "engines" ][ kind ] != engines[ kind ] ]
+    if old_manifest[ "device_class" ] != engines[ "device_class" ]: failed.append( "device_class" )
+    if old_manifest[ "libraries" ] != engines[ "libraries" ]: failed.append( "libraries" )
+    if { k: tuple( v ) for k, v in old_manifest[ "document_roles" ].items() } != vs.DOCUMENT_ROLES: failed.append( "document_roles" )
+    return failed
+
+
+def _matrix_rows( row_ids, texts, hashes, reusable, embed ):
+    """
+    Collect the rows of one matrix, embedding only the texts that are new.
+
+    Requires:
+        - row_ids, texts and hashes are in id order, one entry per row
+        - reusable is { id: ( text hash, vector ) } from the live set, or an empty dict
+        - embed takes a list of texts and returns one vector each, in order
+
+    Ensures:
+        - a row whose id and text hash both match the live set keeps the live vector
+        - every other row is embedded, in one pass in id order
+        - returns ( rows, embedded count )
+    """
+    rows, todo = [ None ] * len( texts ), []
+    for n, ( row_id, h ) in enumerate( zip( row_ids, hashes ) ):
+        old = reusable.get( row_id )
+        if old is not None and old[ 0 ] == h: rows[ n ] = old[ 1 ]
+        else: todo.append( n )
+    if todo:
+        for n, vector in zip( todo, embed( [ texts[ n ] for n in todo ] ) ): rows[ n ] = vector
+    return rows, len( todo )
+
+
+def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pause_seconds=PAUSE_SECONDS, sleep=time.sleep, reuse=None, stats=None ):
     """
     Embed every entry three ways and write a sealed set into out_dir.
 
@@ -120,9 +166,14 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
         - purposes is { pin: row } from load_lines
         - client has embed( texts, content_type, role ) and info()
         - out_dir is a new, empty folder beside the live set
+        - reuse is the live VectorSet loaded with its row texts, or None to embed everything
+        - stats is a dict that gains, per matrix, the counts of reused and embedded rows, or None
 
     Ensures:
         - rows are in id order, one per entry, as float32
+        - with reuse, a row is copied from the live set only when the guard passes and the row's id and text hash
+          match; any guard mismatch embeds every row
+        - the sidecar row_texts.jsonl is written and sealed, so the next build can reuse these rows
         - the engines are warmed once, then read from info, so the manifest records loaded revisions
         - document roles are the ones in vector_store.DOCUMENT_ROLES, and the manifest records them
         - returns the sealed manifest
@@ -147,10 +198,17 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
             raise CandidateError( ENGINE_NOT_LOADED, f"the {kind} engine reports no revision after the warm-up" )
     out = pathlib.Path( out_dir )
     out.mkdir( parents=True, exist_ok=True )
+    row_ids   = [ e[ "id" ] for e in rows ]
+    hashes    = { name: [ vs.text_hash( t ) for t in texts[ name ] ] for name in vs.MATRICES }
+    usable    = reuse is not None and reuse.row_texts is not None and not reuse_mismatches( reuse.manifest, info )
     dimension = None
     for name in vs.MATRICES:
         content_type, role = vs.DOCUMENT_ROLES[ name ]
-        vectors = _embed_all( client, texts[ name ], content_type, role, batch_size, pause_seconds, sleep )
+        reusable = { i: ( reuse.row_texts[ name ][ k ], reuse.matrices[ name ][ k ] ) for k, i in enumerate( reuse.ids ) } if usable else {}
+        embed    = lambda batch, ct=content_type, r=role: _embed_all( client, batch, ct, r, batch_size, pause_seconds, sleep )
+        vectors, embedded = _matrix_rows( row_ids, texts[ name ], hashes[ name ], reusable, embed )
+        if len( { len( v ) for v in vectors } ) > 1: raise CandidateError( EMBEDDING_SHAPE, f"{name} mixes reused and new vectors of different lengths" )
+        if stats is not None: stats[ name ] = { "reused": len( rows ) - embedded, "embedded": embedded }
         matrix  = np.asarray( vectors, dtype="<f4" )
         if dimension is None: dimension = matrix.shape[ 1 ]
         if matrix.shape[ 1 ] != dimension: raise CandidateError( EMBEDDING_SHAPE, f"{name} has {matrix.shape[ 1 ]} columns, expected {dimension}" )
@@ -165,4 +223,5 @@ def build_vectors( entries, purposes, client, out_dir, batch_size=BATCH_SIZE, pa
         "query_roles"    : { k: list( v ) for k, v in vs.QUERY_ROLES.items() },
         "purpose_writers": [ { "prompt_hash": p, "writer_version": w } for p, w in sorted( used ) ]
     }
-    return vs.seal( out, [ e[ "id" ] for e in rows ], manifest )
+    vs.write_row_texts( out, row_ids, hashes )
+    return vs.seal( out, row_ids, manifest )

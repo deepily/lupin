@@ -72,7 +72,7 @@ def built( tmp_path ):
 def test_seal_writes_ids_hashes_and_a_self_consistent_manifest_hash( built ):
     m = built[ "manifest" ]
     assert ( built[ "dir" ] / "ids.txt" ).read_text() == "m.a\nm.b\n"
-    assert set( m[ "files" ] ) == { "ids.txt", "prose.f32", "code.f32", "concat.f32" }
+    assert set( m[ "files" ] ) == { "ids.txt", "prose.f32", "code.f32", "concat.f32", "row_texts.jsonl" }
     assert m[ "manifest_hash" ] == vs.manifest_hash( m )
     on_disk = json.loads( ( built[ "dir" ] / "manifest.json" ).read_text() )
     assert on_disk == m
@@ -354,3 +354,75 @@ def test_clear_stale_queries_removes_other_hashes_and_unreadable_files( built, t
 
 def test_clear_stale_queries_of_a_missing_folder_is_zero( tmp_path ):
     assert vs.clear_stale_queries( tmp_path / "none", "h" ) == 0
+
+
+# ── the row-texts sidecar: sealed, checked on load, and a corrupt one is named ──
+
+
+def test_a_set_made_without_the_sidecar_seals_and_loads_with_no_row_texts( tmp_path ):
+    import numpy as np
+    out = tmp_path / "old"
+    out.mkdir()
+    for name in vs.MATRICES: np.zeros( ( 2, DIM ), dtype="<f4" ).tofile( out / vs.MATRIX_FILES[ name ] )
+    sealed = vs.seal( out, [ "m.a", "m.b" ], { "dimension": DIM } )
+    assert "row_texts.jsonl" not in sealed[ "files" ]
+    assert vs.load_vectors( out ).row_texts is None
+
+
+def test_the_sidecar_names_each_row_text_by_hash_and_loads_in_id_order( built ):
+    s = vs.load_vectors( built[ "dir" ] )
+    assert s.ids == [ "m.a", "m.b" ]
+    assert s.row_texts[ "code" ][ 0 ] == vs.text_hash( "m.py::a()" )
+    assert set( s.row_texts ) == set( vs.MATRICES ) and all( len( v ) == 2 for v in s.row_texts.values() )
+
+
+def test_the_sidecar_hash_is_in_the_manifest_hash_so_any_edit_is_corrupt( built ):
+    path = built[ "dir" ] / "row_texts.jsonl"
+    path.write_text( path.read_text().replace( "a", "b", 1 ) )
+    with pytest.raises( CandidateError ) as e:
+        vs.load_vectors( built[ "dir" ] )
+    assert e.value.code == VECTOR_SET_CORRUPT and "row_texts.jsonl" in e.value.detail
+
+
+def reseal_with_sidecar( built, text ):
+    """Replace the sidecar and reseal, so only the content check can refuse it."""
+    ( built[ "dir" ] / "row_texts.jsonl" ).write_text( text )
+    manifest = { k: v for k, v in built[ "manifest" ].items() if k not in ( "files", "manifest_hash" ) }
+    vs.seal( built[ "dir" ], [ "m.a", "m.b" ], manifest )
+
+
+GOOD = vs.text_hash( "x" )
+
+
+@pytest.mark.parametrize( "text, why", [
+    ( "{not json\n",                                                                                                     "not JSON lines" ),
+    ( '[1, 2]\n[3]\n',                                                                                                  "does not name the ids" ),
+    ( json.dumps( { "id": "m.b", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n" +
+      json.dumps( { "id": "m.a", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n",                                 "does not name the ids" ),
+    ( json.dumps( { "id": "m.a", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n",                                 "does not name the ids" ),
+    ( json.dumps( { "id": "m.a", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n" +
+      json.dumps( { "id": "m.b", "prose": GOOD, "code": GOOD } ) + "\n",                                                 "bad concat hash" ),
+    ( json.dumps( { "id": "m.a", "prose": "xyz", "code": GOOD, "concat": GOOD } ) + "\n" +
+      json.dumps( { "id": "m.b", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n",                                 "bad prose hash" ),
+    ( json.dumps( { "id": "m.a", "prose": GOOD[ :-1 ], "code": GOOD, "concat": GOOD } ) + "\n" +
+      json.dumps( { "id": "m.b", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n",                                 "bad prose hash" ),
+    ( json.dumps( { "id": "m.a", "prose": GOOD.upper(), "code": GOOD, "concat": GOOD } ) + "\n" +
+      json.dumps( { "id": "m.b", "prose": GOOD, "code": GOOD, "concat": GOOD } ) + "\n",                                 "bad prose hash" ),
+] )
+def test_a_sidecar_that_hashes_right_but_does_not_match_the_ids_or_holds_a_bad_hash_is_corrupt( built, text, why ):
+    reseal_with_sidecar( built, text )
+    with pytest.raises( CandidateError ) as e:
+        vs.load_vectors( built[ "dir" ] )
+    assert e.value.code == VECTOR_SET_CORRUPT and why in e.value.detail
+
+
+def test_a_manifest_that_is_not_json_is_corrupt_not_a_value_error( built ):
+    ( built[ "dir" ] / "manifest.json" ).write_text( "{bad" )
+    with pytest.raises( CandidateError ) as e:
+        vs.load_vectors( built[ "dir" ] )
+    assert e.value.code == VECTOR_SET_CORRUPT and "not JSON" in e.value.detail
+
+
+def test_text_hash_is_the_sha256_of_the_utf8_bytes():
+    import hashlib
+    assert vs.text_hash( "é" ) == hashlib.sha256( "é".encode( "utf-8" ) ).hexdigest()

@@ -376,3 +376,30 @@ def test_the_build_info_is_in_the_new_set_at_the_moment_of_the_swap( world, monk
     monkeypatch.setattr( cb.vs, "swap_in", watching )
     cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
     assert seen == { "info_in_new_set": True }
+
+
+# ── the run lends the live set's vectors to the next build ──────────────────
+
+
+def test_a_second_run_after_one_changed_docstring_reuses_the_other_rows( world, tmp_path ):
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    world[ "symbols" ][ 0 ][ "doc" ] = "Does b differently."
+    client = tvb.FakeClient()
+    report = cb.run( world[ "root" ], answering_writer( [] ), client, config=ConfigFor(), environ={} )
+    assert report[ "vectors" ][ "code" ] == { "reused": 2, "embedded": 0 }
+    assert report[ "vectors" ][ "prose" ] == { "reused": 1, "embedded": 1 }
+    assert sum( len( c[ 2 ] ) for c in client.calls if c[ 2 ] != [ tvb.vb.WARM_TEXT ] ) == 2
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == report[ "manifest_hash" ]
+
+
+def test_a_live_set_that_does_not_load_is_rebuilt_in_full_with_no_error( world, tmp_path ):
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    ( tmp_path / "data" / "vec" / "row_texts.jsonl" ).write_text( "{bad\n" )
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert report[ "vectors" ] == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).row_texts is not None
+
+
+def test_the_first_run_has_no_live_set_to_lend_and_embeds_everything( world ):
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert report[ "vectors" ] == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }

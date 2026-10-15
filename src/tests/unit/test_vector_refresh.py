@@ -434,3 +434,12 @@ def test_missing_purpose_lines_skips_settled_pins_and_counts_the_rest( tmp_path 
     assert vr.missing_purpose_lines( entries, store, screen ) == 2
     assert vr.missing_purpose_lines( entries, store, screen, [ "pb" ] ) == 1
     assert vr.missing_purpose_lines( entries, store, screen, [ "pb", "pc", "zz" ] ) == 0
+
+
+def test_a_rebuild_reports_how_many_vector_rows_were_reused_and_embedded( world ):
+    go( world )
+    world[ "symbols" ][ 0 ][ "doc" ] = "Does b differently."
+    world[ "header" ][ "manifest" ] = { "m.py": [ 8, 8 ] }
+    code, summary = go( world, now=TOMORROW )
+    assert summary[ "outcome" ] == "built"
+    assert summary[ "vectors" ][ "code" ] == { "reused": 2, "embedded": 0 } and summary[ "vectors" ][ "prose" ] == { "reused": 1, "embedded": 1 }

@@ -17,6 +17,7 @@ from cosa.repo.symindex.candidates.errors import (
 MATRICES       = ( "prose", "code", "concat" )
 MATRIX_FILES   = { "prose": "prose.f32", "code": "code.f32", "concat": "concat.f32" }
 IDS_FILE       = "ids.txt"
+ROW_TEXTS_FILE = "row_texts.jsonl"
 MANIFEST_FILE  = "manifest.json"
 DOCUMENT_ROLES = { "prose": ( "prose", "document" ), "code": ( "code", "document" ), "concat": ( "prose", "document" ) }
 QUERY_ROLES    = { "prose": ( "prose", "query" ),    "code": ( "code", "query" ),    "concat": ( "prose", "query" ) }
@@ -62,24 +63,79 @@ def manifest_hash( manifest ):
     return hashlib.sha256( canonical( body ).encode( "utf-8" ) ).hexdigest()
 
 
+def text_hash( text ):
+    """
+    Name one embedded text.
+
+    Ensures:
+        - returns the hex sha256 of the text's utf-8 bytes
+    """
+    return hashlib.sha256( text.encode( "utf-8" ) ).hexdigest()
+
+
+def write_row_texts( out_dir, ids, hashes ):
+    """
+    Write the sidecar that names the text each matrix row was embedded from.
+
+    Requires:
+        - ids is the sorted list of entry ids, one per matrix row
+        - hashes maps each matrix name (prose, code, concat) to the list of text_hash values, in id order
+
+    Ensures:
+        - writes one JSON line per id: { id, prose, code, concat }, each a text hash
+    """
+    lines = [ json.dumps( { "id": i, **{ name: hashes[ name ][ n ] for name in MATRICES } }, sort_keys=True ) for n, i in enumerate( ids ) ]
+    ( pathlib.Path( out_dir ) / ROW_TEXTS_FILE ).write_text( "\n".join( lines ) + "\n", encoding="utf-8" )
+
+
+def read_row_texts( live, ids ):
+    """
+    Read and check the sidecar of a set whose manifest lists it.
+
+    Requires:
+        - ids is the set's row ids, in order
+
+    Ensures:
+        - returns { name: [ hash, ... ] } in id order for each matrix name
+
+    Raises:
+        - CandidateError VECTOR_SET_CORRUPT when a line is not JSON, the ids differ from ids.txt in value or order,
+          or a hash is missing or is not a 64-character hex string
+    """
+    try:
+        rows = [ json.loads( line ) for line in ( live / ROW_TEXTS_FILE ).read_text( encoding="utf-8" ).splitlines() ]
+    except ValueError as e:
+        raise CandidateError( VECTOR_SET_CORRUPT, f"{ROW_TEXTS_FILE} is not JSON lines: {e}" )
+    if [ r.get( "id" ) if isinstance( r, dict ) else None for r in rows ] != ids:
+        raise CandidateError( VECTOR_SET_CORRUPT, f"{ROW_TEXTS_FILE} does not name the ids of {IDS_FILE} in order" )
+    hashes = { name: [ r.get( name ) for r in rows ] for name in MATRICES }
+    for name, values in hashes.items():
+        for value in values:
+            if not ( isinstance( value, str ) and len( value ) == 64 and all( c in "0123456789abcdef" for c in value ) ):
+                raise CandidateError( VECTOR_SET_CORRUPT, f"{ROW_TEXTS_FILE} holds a bad {name} hash: {value!r}" )
+    return hashes
+
+
 def seal( out_dir, ids, manifest ):
     """
     Write the ids file and the sealed manifest into a new set folder.
 
     Requires:
-        - out_dir holds the three matrix files
+        - out_dir holds the three matrix files, and may hold the row-texts sidecar
         - ids is the sorted list of entry ids, one per matrix row
         - manifest is the manifest without file hashes or manifest_hash
 
     Ensures:
         - ids.txt is written, one id per line
-        - manifest.json holds the manifest with the hash of every file and its own manifest_hash
+        - manifest.json holds the manifest with the hash of every file, the sidecar included when it is there,
+          and its own manifest_hash
         - returns the sealed manifest
     """
     out = pathlib.Path( out_dir )
     ( out / IDS_FILE ).write_text( "\n".join( ids ) + "\n", encoding="utf-8" )
     sealed          = dict( manifest )
-    sealed[ "files" ] = { name: file_sha256( out / name ) for name in sorted( [ IDS_FILE ] + list( MATRIX_FILES.values() ) ) }
+    names           = [ IDS_FILE ] + list( MATRIX_FILES.values() ) + ( [ ROW_TEXTS_FILE ] if ( out / ROW_TEXTS_FILE ).is_file() else [] )
+    sealed[ "files" ] = { name: file_sha256( out / name ) for name in sorted( names ) }
     sealed[ "manifest_hash" ] = manifest_hash( sealed )
     ( out / MANIFEST_FILE ).write_text( json.dumps( sealed, indent=2, sort_keys=True ) + "\n", encoding="utf-8" )
     return sealed
@@ -111,18 +167,20 @@ def swap_in( new_dir, live_dir ):
 
 
 class VectorSet:
-    """A loaded vector set: the manifest, the row ids and a memory map per matrix."""
+    """A loaded vector set: manifest, row ids, a memory map per matrix, and row-text hashes."""
 
-    def __init__( self, manifest, ids, matrices ):
+    def __init__( self, manifest, ids, matrices, row_texts=None ):
         """
         Hold a checked set.
 
         Requires:
             - matrices maps each matrix name to a numpy array of shape ( len( ids ), dimension )
+            - row_texts is { name: [ text hash, ... ] } in id order, or None for a set made without the sidecar
         """
         self.manifest      = manifest
         self.ids           = ids
         self.matrices      = matrices
+        self.row_texts     = row_texts
         self.manifest_hash = manifest[ "manifest_hash" ]
 
 
@@ -136,10 +194,12 @@ def load_vectors( live_dir ):
     Ensures:
         - returns a VectorSet whose manifest hash and every file hash were recomputed and matched
         - the matrices are memory maps of float32 rows, one per id, in id order
+        - row_texts is read and checked when the manifest lists the sidecar, and is None when it does not
 
     Raises:
         - CandidateError VECTOR_SET_UNAVAILABLE when there is no manifest
-        - CandidateError VECTOR_SET_CORRUPT when a hash or a size disagrees with the manifest
+        - CandidateError VECTOR_SET_CORRUPT when the manifest is not JSON, a hash or a size disagrees with it, or the sidecar
+          the manifest lists is unreadable or does not match the ids
         - CandidateError DEPENDENCY_MISSING when numpy is not importable here
     """
     live = pathlib.Path( live_dir )
@@ -149,7 +209,10 @@ def load_vectors( live_dir ):
         import numpy as np
     except ImportError as e:
         raise CandidateError( DEPENDENCY_MISSING, f"numpy is not importable in this process: {e}" )
-    manifest = json.loads( path.read_text( encoding="utf-8" ) )
+    try:
+        manifest = json.loads( path.read_text( encoding="utf-8" ) )
+    except ValueError as e:
+        raise CandidateError( VECTOR_SET_CORRUPT, f"{MANIFEST_FILE} is not JSON: {e}" )
     if manifest_hash( manifest ) != manifest[ "manifest_hash" ]:
         raise CandidateError( VECTOR_SET_CORRUPT, "the manifest does not hash to its manifest_hash" )
     for name, expected in manifest[ "files" ].items():
@@ -163,7 +226,8 @@ def load_vectors( live_dir ):
         if m.size != len( ids ) * dim:
             raise CandidateError( VECTOR_SET_CORRUPT, f"{MATRIX_FILES[ name ]} holds {m.size} values, expected {len( ids )} x {dim}" )
         matrices[ name ] = m.reshape( len( ids ), dim )
-    return VectorSet( manifest, ids, matrices )
+    row_texts = read_row_texts( live, ids ) if ROW_TEXTS_FILE in manifest[ "files" ] else None
+    return VectorSet( manifest, ids, matrices, row_texts )
 
 
 def check_engines( manifest, info ):

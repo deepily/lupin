@@ -226,3 +226,132 @@ def test_info_uses_requests_get_by_default( target, monkeypatch ):
     monkeypatch.setattr( requests, "get", fake_get )
     assert vb.EndpointClient().info() == { "engines": {} }
     assert seen[ "url" ].endswith( "/api/embeddings/info" )
+
+
+# ── incremental builds: copy the rows whose text did not change ─────────────
+
+import copy
+
+PURPOSE_A = { "pa": { "pin": "pa", "purpose": "Return a.", "prompt_hash": "ph", "writer_version": "w1" } }
+
+
+def first_build( tmp_path, entries_, name="first" ):
+    out = tmp_path / name
+    vb.build_vectors( entries_, PURPOSE_A, FakeClient(), out, pause_seconds=0, sleep=lambda s: None )
+    return out, vs.load_vectors( out )
+
+
+def embedded_texts( client ):
+    """The texts the fake client was asked to embed, warm-ups left out."""
+    return [ t for ( _, _, texts ) in client.calls for t in texts if t != vb.WARM_TEXT ]
+
+
+def rebuild( tmp_path, entries_, reuse, name="second", client=None ):
+    client = client or FakeClient()
+    stats  = {}
+    out    = tmp_path / name
+    m = vb.build_vectors( entries_, PURPOSE_A, client, out, pause_seconds=0, sleep=lambda s: None, reuse=reuse, stats=stats )
+    return m, out, client, stats
+
+
+def base_entries():
+    return [ entry( "b", "pb", doc="Does b." ), entry( "a", "pa" ) ]
+
+
+def test_an_unchanged_tree_embeds_nothing_and_writes_the_same_set( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    m, out2, client, stats = rebuild( tmp_path, base_entries(), live )
+    assert embedded_texts( client ) == []
+    assert stats == { n: { "reused": 2, "embedded": 0 } for n in vs.MATRICES }
+    assert m[ "manifest_hash" ] == vs.load_vectors( out1 ).manifest_hash
+
+
+def test_a_changed_docstring_embeds_only_the_prose_and_concat_rows_of_that_entry_and_equals_a_full_build( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    changed    = [ entry( "b", "pb", doc="Does b differently." ), entry( "a", "pa" ) ]
+    m, out2, client, stats = rebuild( tmp_path, changed, live )
+    assert stats[ "code" ] == { "reused": 2, "embedded": 0 }
+    assert stats[ "prose" ] == { "reused": 1, "embedded": 1 } and stats[ "concat" ] == { "reused": 1, "embedded": 1 }
+    assert sorted( embedded_texts( client ) ) == sorted( [ "b. Does b differently.", "m.py::b()\nb. Does b differently." ] )
+    full_dir = tmp_path / "full"
+    full     = vb.build_vectors( changed, PURPOSE_A, FakeClient(), full_dir, pause_seconds=0, sleep=lambda s: None )
+    assert m[ "manifest_hash" ] == full[ "manifest_hash" ]
+    for name in vs.MATRICES:
+        assert ( out2 / vs.MATRIX_FILES[ name ] ).read_bytes() == ( full_dir / vs.MATRIX_FILES[ name ] ).read_bytes()
+
+
+def test_a_new_entry_in_front_shifts_every_row_and_only_the_new_one_is_embedded( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    grown      = base_entries() + [ entry( "0first", "p0" ) ]
+    m, out2, client, stats = rebuild( tmp_path, grown, live )
+    assert stats == { n: { "reused": 2, "embedded": 1 } for n in vs.MATRICES }
+    full_dir = tmp_path / "full"
+    vb.build_vectors( grown, PURPOSE_A, FakeClient(), full_dir, pause_seconds=0, sleep=lambda s: None )
+    for name in vs.MATRICES:
+        assert ( out2 / vs.MATRIX_FILES[ name ] ).read_bytes() == ( full_dir / vs.MATRIX_FILES[ name ] ).read_bytes()
+
+
+def test_a_removed_entry_is_dropped_and_nothing_is_embedded( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    m, out2, client, stats = rebuild( tmp_path, base_entries()[ :1 ], live )
+    assert m[ "rows" ] == 1 and embedded_texts( client ) == []
+    assert vs.load_vectors( out2 ).ids == [ "m.b" ]
+
+
+def test_a_new_purpose_line_for_a_reused_entry_changes_its_text_and_is_embedded( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    purposes = { **PURPOSE_A, "pb": { "pin": "pb", "purpose": "Return b.", "prompt_hash": "ph", "writer_version": "w1" } }
+    client, stats = FakeClient(), {}
+    vb.build_vectors( base_entries(), purposes, client, tmp_path / "second", pause_seconds=0, sleep=lambda s: None, reuse=live, stats=stats )
+    assert stats[ "code" ][ "embedded" ] == 0 and stats[ "prose" ] == { "reused": 1, "embedded": 1 }
+
+
+def mutate_live( live, **changes ):
+    """A copy of the live set whose manifest differs; the matrices and sidecar are the live ones."""
+    manifest = copy.deepcopy( live.manifest )
+    for key, value in changes.items():
+        if key.startswith( "engines." ): manifest[ "engines" ][ key.split( "." )[ 1 ] ] = value
+        else: manifest[ key ] = value
+    return vs.VectorSet( manifest, live.ids, live.matrices, live.row_texts )
+
+
+@pytest.mark.parametrize( "change, clause", [
+    ( { "engines.code":  { **engines()[ "code" ],  "revision": "OLD" } },              "engines.code" ),
+    ( { "engines.prose": { **engines()[ "prose" ], "revision": "OLD" } },              "engines.prose" ),
+    ( { "device_class": "other gpu" },                                                 "device_class" ),
+    ( { "libraries": { "numpy": "1.0" } },                                             "libraries" ),
+    ( { "document_roles": { "prose": [ "prose", "query" ], "code": [ "code", "document" ], "concat": [ "prose", "document" ] } }, "document_roles" ),
+] )
+def test_each_reuse_guard_clause_alone_forces_a_full_embed_and_is_named( tmp_path, change, clause ):
+    out1, live = first_build( tmp_path, base_entries() )
+    stale      = mutate_live( live, **change )
+    assert vb.reuse_mismatches( stale.manifest, FakeClient().info() ) == [ clause ]
+    m, out2, client, stats = rebuild( tmp_path, base_entries(), stale )
+    assert stats == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+    assert len( embedded_texts( client ) ) == 6
+
+
+def test_the_guard_passes_for_the_set_a_build_just_wrote( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    assert vb.reuse_mismatches( live.manifest, FakeClient().info() ) == []
+
+
+def test_a_live_set_without_row_texts_is_never_reused( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    bare = vs.VectorSet( live.manifest, live.ids, live.matrices, None )
+    m, out2, client, stats = rebuild( tmp_path, base_entries(), bare )
+    assert stats == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+
+
+def test_reused_rows_of_one_length_and_new_rows_of_another_are_a_named_shape_error( tmp_path ):
+    out1, live = first_build( tmp_path, base_entries() )
+    changed    = [ entry( "b", "pb", doc="Does b differently." ), entry( "a", "pa" ) ]
+    with pytest.raises( CandidateError ) as e:
+        rebuild( tmp_path, changed, live, client=FakeClient( wide_for=( "prose", "document" ) ) )
+    assert e.value.code == EMBEDDING_SHAPE and "mixes" in e.value.detail
+
+
+def test_a_build_without_reuse_still_writes_the_sidecar_and_reports_every_row_embedded( tmp_path ):
+    m, out, client, stats = rebuild( tmp_path, base_entries(), None )
+    assert ( out / vs.ROW_TEXTS_FILE ).is_file() and vs.ROW_TEXTS_FILE in m[ "files" ]
+    assert stats == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }

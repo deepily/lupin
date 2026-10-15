@@ -175,7 +175,8 @@ def run_refresh( root, writer, client, state_path, now, force=False, log=print, 
     except ( RuntimeError, ValueError, OSError ) as e:
         return _fail( state_path, state, now, f"{type( e ).__name__}: {e}", log, EXIT_FAILED )
     summary = { "ran": True, "outcome": "built", "reason": why, "rows": report[ "rows" ], "manifest_hash": report[ "manifest_hash" ],
-                "purposes_written": report[ "purposes" ][ "written" ], "seconds": report[ "seconds" ], "built_at": report[ "built_at" ] }
+                "purposes_written": report[ "purposes" ][ "written" ], "seconds": report[ "seconds" ], "built_at": report[ "built_at" ],
+                "vectors": report[ "vectors" ] }
     _finish( state_path, { "last_run_date": now.date().isoformat(), "last_outcome": "built", "last_error": None, "built_at": report[ "built_at" ],
                            "last_seconds": report[ "seconds" ], "rows": report[ "rows" ], "manifest_hash": report[ "manifest_hash" ] }, now )
     log( "refresh finished: " + json.dumps( summary, sort_keys=True ) )
