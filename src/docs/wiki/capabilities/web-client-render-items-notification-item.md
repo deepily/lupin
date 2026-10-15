@@ -21,7 +21,7 @@ Builds one chat-bubble row for a notification, plus the thumbs vote buttons a pr
 - `expiredBadge()` returns the "EXPIRED" span nested after the message text.
 - `abstractIndicator( abstract )` returns a clipboard span whose `data-abstract` holds the text. The template attaches no listener; `ReadingPaneRenderer.ts` and `abstractTooltip.ts` read it on click.
 - `cornerPauseButton( idHash )` and `cornerStopButton( idHash )` return buttons carrying `data-notification-id`. They are added to incoming bubbles only and carry no listener.
-- `proxyRatifyLink( groupId )` returns an "Open Ratification" anchor with `data-batch-id`. It is added only when the progress group id starts with `pr-`.
+- `proxyRatifyLink( groupId )` returns an "Open Ratification →" anchor with `data-batch-id`. It is added only when the progress group id starts with `pr-`.
 
 ## Votes
 - `renderPredictionVoteControls( opts, handlers )` returns null when `notificationId` is empty or `confidencePct` is under `PREDICTION_VOTE_MIN_PCT`.

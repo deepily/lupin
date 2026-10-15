@@ -20,9 +20,9 @@ Small pieces under the multiplexer render folder: a persisted open/closed map fo
 
 ## Dialogs
 - `openSessionNameEditModal( { doc, currentName, onSave } )` appends a rename modal to `doc.body`, replacing any open one. It focuses and selects the prefilled input.
-- Save or Enter trims the name, calls `onSave` only when it is non-empty, and closes either way. Cancel, the close button or Escape close without saving. It returns an idempotent close function. `NotificationsListRenderer` is the only caller.
+- Save or Enter trims the name, calls `onSave` only when it is non-empty, and closes either way. Cancel and the close button close without saving; so does Escape, while the input has focus. It returns an idempotent close function. `NotificationsListRenderer` is the only caller.
 - `renderPersonaPopover( input )` builds a `div.persona-popover` with `popover="auto"` and an id slugged from `sender_id`. It shows an accent strip, the icon and name in the persona colour, and the voice id. A Borrowed line is hidden unless `borrowed` is true.
-- The display name row appears only when it is set, non-empty and differs from the name. Its close button uses the declarative popover hide attribute.
+- The display name row appears only when it is set, non-empty and differs from the name. `PersonaModalRenderer` never passes one, so it does not appear there. Its close button uses the declarative popover hide attribute.
 - `PersonaModalRenderer` appends the result to its portal. For an existing sender it copies the new children into the open popover instead.
 
 The bucket functions touch only the storage passed in. The rename modal uses the `doc` passed in. `renderPersonaPopover` creates its elements on the global `document`. See [[web-client-render-panes-section-chrome]] for the section headers.

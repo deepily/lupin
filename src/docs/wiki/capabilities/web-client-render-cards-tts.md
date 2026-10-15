@@ -20,7 +20,7 @@ pins:
 Builds the speech queue pane: transport controls, the card for the item being spoken, cards for waiting items, and the preview slider.
 
 ## Chrome
-- `renderTtsChrome( opts, handlers )` returns the control panel. When `queueEmpty` is true it returns the empty panel instead, whatever the audio state. `TtsChromeRenderer` is the only caller.
+- `renderTtsChrome( opts, handlers )` returns the control panel. When `queueEmpty` is true it returns the empty panel instead, whatever the audio state. It also draws a Clear all button, always enabled and shown, which acts only when `onClearAll` is given. A Resume button is present only in focus mode. `TtsChromeRenderer` is the only caller.
 - `ttsHeaderMode( state, focusMode, hasActive )` returns paused only when audio is paused with an active item, then focus, otherwise playing. It returns only that mode; the chrome and `TtsChromeRenderer` read it.
 - `deriveControlState` is private. Only playing enables Pause, only paused enables Play, and Stop is on for playing, paused, ended and error. Skip is on for playing and paused.
 - `wireControl` is private. It sets `disabled`, toggles the disabled class and attaches the click listener only when enabled.

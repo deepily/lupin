@@ -26,7 +26,7 @@ Small pieces that tell the operator something is off: poke mute, display errors,
 
 ## Truncation banner
 - `renderTruncationBanner( composite, queryString, headerCount )` returns paragraph elements, possibly none. It adds a cut-off line in three cases. Those are `has_more` set, a total above the count, or a full page with no total.
-- Server warnings follow in one line. A holding-area warning becomes "N waiting for your approval" and is dropped when N equals `headerCount`.
+- Ordinary server warnings are joined into one line. Each holding-area note keeps its own line. They follow the cut-off line, or stand alone when nothing was cut off. A holding-area warning becomes "N waiting for your approval" and is dropped when N equals `headerCount`.
 - `queryLimit( queryString )` returns the `limit=` value or NaN. `heldWarningCount( warning )` returns the held count or null. `line( text, extraClass )` builds one paragraph.
 
 Each template returns elements and leaves placement to its renderer. The truncation banner is called by the task list and holding area panes with their own query strings.

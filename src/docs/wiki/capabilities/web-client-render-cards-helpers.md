@@ -23,7 +23,7 @@ Small shared helpers for the multiplexer renderers: a press guard, a scroll reve
 - `scrollRevealElement( el )` resolves at once for null or an element fully in view. Otherwise it scrolls smoothly and resolves after 300 ms.
 
 ## Markdown
-- `renderMarkdown( text )` parses with the page's `marked`, sanitizes with the allowlist in `DOMPURIFY_CONFIG`, runs `postProcessAnchors` and returns a raw value. `renderMarkdownInline` also strips one wrapping paragraph.
+- `renderMarkdown( text )` parses with the page's `marked`, sanitizes with the allowlist in `DOMPURIFY_CONFIG`, runs `postProcessAnchors` and returns a raw value. `renderMarkdownInline` strips a leading `<p>` and a trailing `</p>`, so a text of several paragraphs keeps inner tags.
 - `ensureGlobals` is private and throws when either library is missing from the window.
 - `postProcessAnchors` is private. It adds a new-tab target and a noopener rel to links lacking a target, but leaves in-app doc links bare.
 

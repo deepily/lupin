@@ -18,7 +18,7 @@ Shows a manager's pending promote or demote request on a board row, with Approve
 
 ## Elements
 - `renderRequestChip( task, nowMs )` returns a `.task-request-chip` or null when the row has no pending ruled move. It holds text with age, a detail span, Approve and Deny buttons, and a status span.
-- A demote chip also carries a date input labelled `TRIAGE_DATE_LABEL`. `taskRowDisclosed.ts` calls `renderRequestChip`.
+- A demote chip also carries a date input labelled `TRIAGE_DATE_LABEL`. `taskRowDisclosed.ts` calls `renderRequestChip` and passes no chip for the epic board, so only the task list and holding area show one.
 - `button( cls, label, taskId )` builds one of those action buttons, and `requestKey( chip )` returns `taskId@requestTs`, the key for remembered state.
 - `renderRequestBadge( testid )` returns a hidden span. `paintRequestBadge( badge, counts, key )` sets its text and hides it when the text is empty.
 - `triageDayToIso( day )` turns a `YYYY-MM-DD` value into an ISO time at 09:00 local, or null when empty or unparseable.
