@@ -93,6 +93,17 @@ def test_run_check_fails_when_the_control_is_still_found():
     assert report[ "control" ][ "found" ] is True and report[ "ok" ] is False
 
 
+def test_run_check_fails_when_the_shortlist_is_not_the_size_the_stage_promises():
+    class Short( FakeStage ):
+        def shortlist( self, need, entries, index_sha, pages ):
+            got = super().shortlist( need, entries, index_sha, pages )
+            got[ "ids" ], got[ "ranking" ] = got[ "ids" ][ :-1 ], got[ "ranking" ][ :-1 ]
+            return got
+    report = chk.run_check( Short(), entries_of( TARGETS + OTHERS ), "sha", [], seeds=seeds_for_fake(), control=seeds_for_fake()[ 0 ] )
+    assert report[ "ok" ] is False
+    assert all( r[ "asked" ] < min( r[ "K" ], r[ "total" ] ) for r in report[ "seeds" ] )
+
+
 def test_run_check_fails_on_a_manifest_hash_the_stage_does_not_hold():
     class Drift( FakeStage ):
         def shortlist( self, need, entries, index_sha, pages ):

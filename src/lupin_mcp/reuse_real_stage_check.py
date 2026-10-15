@@ -30,7 +30,7 @@ SEEDS = ( ( "decide whether the test server is idle from a set of observed count
           ( "ask the server how busy it is without logging in",                                 "cosa.rest.venue_idle.read_signals" ),
           ( "work out which cache file name belongs to a search sentence",                      "cosa.repo.symindex.candidates.vector_store.query_key" ),
           ( "check that an environment variable holds something before calling the model",      "cosa.repo.doc_lint.jev_transport.has_key" ),
-          ( "sort wiki pages by how well they match a need and give back the entry ids they pin", "cosa.repo.symindex.candidates.wiki_list.wiki_ranked_ids" ) )
+          ( "rank the wiki pages against a request and return the symbols those pages cover", "cosa.repo.symindex.candidates.wiki_list.wiki_ranked_ids" ) )
 CONTROL_NEED   = SEEDS[ 0 ][ 0 ]
 CONTROL_TARGET = SEEDS[ 0 ][ 1 ]
 
@@ -94,7 +94,7 @@ def run_check( stage, entries, index_sha, pages, seeds=SEEDS, control=( CONTROL_
     rows    = [ check_need( stage, need, target, entries, index_sha, pages ) for need, target in seeds ]
     without = [ e for e in entries if e[ "id" ] != control[ 1 ] ]
     neg     = check_need( stage, control[ 0 ], control[ 1 ], without, index_sha + "-without-control", pages )
-    counts  = all( r[ "ids_in_entries" ] and r[ "ids_unique" ] and r[ "asked" ] + r[ "not_asked" ] == r[ "total" ] for r in rows + [ neg ] )
+    counts  = all( r[ "ids_in_entries" ] and r[ "ids_unique" ] and r[ "asked" ] <= r[ "K" ] and r[ "asked" ] == min( r[ "K" ], r[ "total" ] ) for r in rows + [ neg ] )
     manifest = stage.manifest()[ "manifest_hash" ]
     hashes   = all( r[ "manifest_hash" ] == manifest for r in rows + [ neg ] )
     return { "manifest_hash": manifest, "K": stage.K, "entries": len( entries ), "seeds": rows, "control": neg,
