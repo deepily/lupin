@@ -168,9 +168,9 @@ class TestFuse:
 
 
 ENTRIES = [
-    { "id": "py:a", "file": "src/cosa/users/profile.py", "module": "cosa.users.profile", "name": "get_user_profile", "sig": "(user_id: int) -> Profile", "doc": "Return the profile of one user." },
-    { "id": "py:b", "file": "src/cosa/users/other.py",   "module": "cosa.users.other",   "name": "load_settings",     "sig": "(path)",                   "doc": "Read the settings file." },
-    { "id": "js:c", "file": "src/static/js/profile.js",  "module": "",                   "name": "renderProfileCard", "sig": "(profile)",                "doc": "Draw a user card." },
+    { "id": "py:a", "pin": "pa", "file": "src/cosa/users/profile.py", "module": "cosa.users.profile", "name": "get_user_profile", "sig": "(user_id: int) -> Profile", "doc": "Return the profile of one user." },
+    { "id": "py:b", "pin": "pb", "file": "src/cosa/users/other.py",   "module": "cosa.users.other",   "name": "load_settings",     "sig": "(path)",                   "doc": "Read the settings file." },
+    { "id": "js:c", "pin": "pc", "file": "src/static/js/profile.js",  "module": "",                   "name": "renderProfileCard", "sig": "(profile)",                "doc": "Draw a user card." },
 ]
 
 
@@ -190,14 +190,14 @@ class TestStage:
         assert result[ "ranking" ] != result[ "shortlist" ]
 
     def test_purpose_line_is_searched_when_present( self ):
-        with_purpose = cs.build_stage( ENTRIES, purposes={ "py:b": "Parse configuration." } )
+        with_purpose = cs.build_stage( ENTRIES, purposes={ "pb": "Parse configuration." } )
         without      = cs.build_stage( ENTRIES )
         assert "py:b" in cs.shortlist( "parse configuration", with_purpose, 3 )[ "lists" ][ "prose" ]
         assert cs.shortlist( "parse configuration", without, 3 )[ "lists" ][ "prose" ] == []
 
     def test_entries_are_not_changed( self ):
         before = json.dumps( ENTRIES, sort_keys=True )
-        cs.build_stage( ENTRIES, purposes={ "py:b": "x" } )
+        cs.build_stage( ENTRIES, purposes={ "pb": "x" } )
         assert json.dumps( ENTRIES, sort_keys=True ) == before
 
     def test_extra_lists_are_fused_in_source_order_of_name( self ):
@@ -205,6 +205,11 @@ class TestStage:
         result = cs.shortlist( "zzz", stage, 3, extra_lists={ "wiki": [ "js:c" ], "cosine": [ "py:b", "js:c" ] } )
         assert list( result[ "lists" ] ) == [ "code", "cosine", "prose", "wiki" ]
         assert result[ "ranking" ] == [ "js:c", "py:b" ]
+
+    @pytest.mark.parametrize( "name", [ "code", "prose" ] )
+    def test_extra_source_may_not_reuse_a_lexical_name( self, name ):
+        with pytest.raises( CandidateError ) as caught: cs.shortlist( "user", cs.build_stage( ENTRIES ), 3, extra_lists={ name: [ "py:b" ] } )
+        assert caught.value.code == cs.SOURCE_CLASH
 
     def test_head_keeps_the_top_of_a_vector_list( self ):
         stage  = cs.build_stage( ENTRIES, head=1 )

@@ -13,6 +13,7 @@ from cosa.repo.symindex.candidates import rank_fusion as rf
 from cosa.repo.symindex.candidates.errors import CandidateError
 
 REPLAY_MISMATCH = "REPLAY_MISMATCH"
+SOURCE_CLASH    = "SOURCE_CLASH"
 FUSION_SOURCES  = ( "code", "prose" )
 
 
@@ -61,7 +62,7 @@ def build_stage( entries, purposes=None, k=rf.FUSION_K, depth=rf.FUSION_DEPTH, h
 
     Requires:
         - entries is a list of index records, each with an id
-        - purposes is None or a mapping of id to purpose line
+        - purposes is None or a mapping of pin to purpose line
 
     Ensures:
         - an entry with a purpose line carries it in the prose fields, and one without is left as is
@@ -69,7 +70,7 @@ def build_stage( entries, purposes=None, k=rf.FUSION_K, depth=rf.FUSION_DEPTH, h
         - the code index covers id, file, module, name and sig, the prose index covers doc and purpose
     """
     purposes = purposes or {}
-    merged   = [ dict( e, purpose=purposes.get( e[ "id" ], "" ) ) for e in entries ]
+    merged   = [ dict( e, purpose=purposes.get( e.get( "pin" ), "" ) ) for e in entries ]
     return Stage( tuple( sorted( e[ "id" ] for e in entries ) ),
                   bm25.build_bm25( merged, bm25.CODE_FIELDS ),
                   bm25.build_bm25( merged, bm25.PROSE_FIELDS ),
@@ -84,20 +85,29 @@ def shortlist( need, stage, K, extra_lists=None ):
         - need is the redacted need text, with the redacted spans removed
         - K is a positive integer
         - extra_lists is None or a mapping of source name to a ranked list of ids
+        - no extra source is named code or prose
 
     Ensures:
         - ranks the need with the code index and the prose index
         - fuses those lists and the extra lists, taken in sorted source-name order
-        - returns { shortlist, ranking, lists }
+        - returns { shortlist, ranking, lists, scores }
         - shortlist is the kept ids sorted by id, ready to pack
         - ranking is the same ids in fused order
         - lists holds each source's ranked ids, before fusion
+        - scores holds the rounded BM25 scores of the code and prose lists, in list order
         - the same need, stage and extra lists always give the same result
+
+    Raises:
+        - CandidateError SOURCE_CLASH when an extra source reuses a lexical source name
     """
-    lists = { "code": bm25.rank( stage.code, need ), "prose": bm25.rank( stage.prose, need ) }
-    for name, ranked in ( extra_lists or {} ).items(): lists[ name ] = list( ranked )
+    scored = { "code": bm25.rank_scored( stage.code, need ), "prose": bm25.rank_scored( stage.prose, need ) }
+    lists  = { name: [ doc_id for doc_id, _ in pairs ] for name, pairs in scored.items() }
+    for name, ranked in ( extra_lists or {} ).items():
+        if name in lists: raise CandidateError( SOURCE_CLASH, f"{name} is already a lexical source" )
+        lists[ name ] = list( ranked )
     order = rf.fuse( [ lists[ n ] for n in sorted( lists ) ], stage.fusion[ "k" ], stage.fusion[ "depth" ], stage.fusion[ "head" ], limit=K )
-    return { "shortlist": sorted( order ), "ranking": order, "lists": { n: lists[ n ] for n in sorted( lists ) } }
+    return { "shortlist": sorted( order ), "ranking": order, "lists": { n: lists[ n ] for n in sorted( lists ) },
+             "scores": { name: [ score for _, score in pairs ] for name, pairs in scored.items() } }
 
 
 def shortlist_bytes( result ):
