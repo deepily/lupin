@@ -289,6 +289,12 @@ class Gadget:
     def run( self ):
         return 1
 
+    def reset__init__( self ):
+        return 2
+
+    def init__( self ):
+        return 3
+
 
 class Outer:
     """Pinned by a page."""
@@ -303,6 +309,10 @@ class Outer:
 
 def quick_smoke_test():
     return 1
+
+
+def quick_smoke_test_two():
+    return 2
 '''
 
 
@@ -338,3 +348,10 @@ def test_a_method_of_a_pinned_class_is_covered_but_a_nested_class_is_not( tmp_pa
     assert "repo:pkg.util.Outer.Inner" in live and "repo:pkg.util.Outer.Inner" in found           # a class is not a method: it needs its own pin
     assert "repo:pkg.util.Outer.Inner.go" in found                                                # and its method waits on that class
     assert "repo:pkg.util.Gadget.run" in found                                                    # another class is still unpinned
+
+
+def test_a_name_near_an_exempt_name_stays_an_orphan( tmp_path, monkeypatch ):
+    found, live = _orphans_with_tail( tmp_path, monkeypatch, [ "repo:pkg.util.public_fn" ] )
+    near = [ "repo:pkg.util.Gadget.reset__init__", "repo:pkg.util.Gadget.init__", "repo:pkg.util.quick_smoke_test_two" ]
+    assert all( sid in live for sid in near ), "the index must hold each near name, or this test proves nothing"
+    assert all( sid in found for sid in near )
