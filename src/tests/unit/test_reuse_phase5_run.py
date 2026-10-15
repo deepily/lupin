@@ -193,6 +193,7 @@ def test_the_steps_run_end_to_end_on_the_stand_in_and_the_report_names_the_recor
     sweep = json.loads( ( scratch.data / "e2e-results" / "p5s-sample.json" ).read_text( encoding="utf-8" ) )
     assert sweep[ "members" ] == members and sweep[ "questions" ] == [ "r1" ] and len( sweep[ "searches" ] ) == 10
     assert all( s[ "status" ] == "complete" for s in sweep[ "searches" ] )
+    assert { s[ "rows" ][ 0 ][ "question" ] for s in sweep[ "searches" ] } == { "provides" }      # the new question, never the old one
     assert p5.cli( scratch.args( "canary", "--ceiling", "100000000" ) ) == 0
     canary = json.loads( ( scratch.data / "e2e-results" / "p5-canary.json" ).read_text( encoding="utf-8" ) )
     assert canary[ "questions" ] == [ "r1", "r2", "r3", "r4", "r5" ] and canary[ "pack_size" ] == 50
@@ -245,3 +246,16 @@ def test_only_this_driver_names_the_reserved_file_and_only_the_reader_and_this_t
     assert grep_tracked( root, p5.FRESH_NEEDS_NAME ) == sorted( [ driver, statement ] )         # positive control: the driver itself is found
     assert grep_tracked( root, p5.FRESH_NEEDS_DIR ) == sorted( [ driver, statement ] )
     assert grep_tracked( root, "0a0da7b7" ) == sorted( [ reader, here ] )
+
+
+def test_the_flip_drivers_main_refuses_the_reserved_hash_when_called_without_the_allow( scratch ):
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "canary",
+             "--needs", p5.needs_path( scratch.projects_data ), "--needs-sha", scratch.sha, "--ceiling", "1" ]
+    with pytest.raises( e2e.FrozenInputRefused, match="reserved" ): frun.main( argv )
+
+
+def test_the_estimate_follows_the_count_of_the_file_it_was_given( scratch, monkeypatch, capsys ):
+    other = put( Path( p5.needs_path( scratch.projects_data ) ), { "format": frun.NEEDS_FORMAT, "needs": rows_of( 31 ) } )
+    monkeypatch.setattr( e2e, "FRESH_SHA_PREFIX", other[ :8 ] )
+    assert p5.cli( scratch.args( "estimate", sha=other ) ) == 0
+    assert "run: 380.3 M tokens" in capsys.readouterr().out                                      # 31 x 5 x 2,453,600
