@@ -14,7 +14,7 @@ import subprocess
 import pytest
 
 import cosa.utils.util as cu
-from cosa.repo.doc_lint import changed_ranges as cr, cli, counts, gate, md_lint, tool_runners as tr, ts_counts, tsdoc_lint, word_list
+from cosa.repo.doc_lint import changed_ranges as cr, cli, counts, docstring_lint, gate, md_lint, tool_runners as tr, ts_counts, tsdoc_lint, word_list
 from cosa.repo.doc_lint.text_rules import Finding
 
 WORDS         = [ "not", "never", "the" ]
@@ -778,3 +778,29 @@ def test_a_ruff_that_fails_on_one_staged_text_still_refuses_the_commit( repo, mo
     _stage( repo, { "src/lupin_mcp/plain.py": "# BOOM\nx = 1\n" } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT and any( "ruff failed (exit 2), SKIPPED: crashed" in ln for ln in lines )
+
+
+# ---- content too deep for a parser to read is refused, not let through as a crash ---------------------
+
+DEEP_CHAIN = "x = " + "+".join( [ "1" ] * 100000 ) + "\n"
+
+
+def test_a_staged_python_file_nested_too_deeply_to_parse_is_refused_and_does_not_crash_the_gate( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/lupin_mcp/deep.py": DEEP_CHAIN } )
+    rc, lines = _blocking( repo )
+    assert _crashed( lines ) == []
+    assert rc == gate.REFUSAL_EXIT
+    assert any( ln.startswith( "[doc-lint] REFUSED src/lupin_mcp/deep.py:1: parse-error: does not parse: nested too deeply to read (RecursionError)" ) for ln in lines )
+
+
+def test_a_counted_python_file_nested_too_deeply_to_parse_counts_as_one_finding():
+    result = counts.file_count( "src/scripts/deep.py", DEEP_CHAIN )
+    assert result.count == 1 and result.findings[ 0 ].rule == "parse-error" and "RecursionError" in result.findings[ 0 ].message
+
+
+def test_a_parser_that_runs_out_of_memory_is_read_as_a_parse_error_too( monkeypatch ):
+    def boom( source ): raise MemoryError( "out of memory" )
+    monkeypatch.setattr( docstring_lint.ast, "parse", boom )
+    findings = docstring_lint.lint_source( "src/lupin_mcp/a.py", "x = 1\n" )
+    assert [ ( f.rule, f.line ) for f in findings ] == [ ( "parse-error", 1 ) ] and "MemoryError" in findings[ 0 ].message

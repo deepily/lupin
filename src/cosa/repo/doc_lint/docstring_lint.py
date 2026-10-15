@@ -94,6 +94,7 @@ def lint_source( path, source, root=None, stats=None ):
     Ensures:
         - returns a list of Finding, sorted by line
         - a file that does not parse yields one parse-error finding
+        - so does a file the parser cannot read for depth or memory, which is refused and never a crash
         - with root given, a Design: path inside the root that does not exist yields a dead-design finding
         - a Design: path outside the root is not judged, and goes to stats["not_checked"] when that list is there
         - a registered tool's docstring is exempt from the agent-imperative rule only; every other rule applies
@@ -105,8 +106,9 @@ def lint_source( path, source, root=None, stats=None ):
     """
     try:
         docstrings = list( _documented_nodes( source ) )
-    except SyntaxError as err:
-        return [ Finding( path, err.lineno or 1, "parse-error", f"does not parse: {err.msg}" ) ]
+    except ( SyntaxError, RecursionError, MemoryError ) as err:
+        line, why = ( err.lineno or 1, err.msg ) if isinstance( err, SyntaxError ) else ( 1, f"nested too deeply to read ({type( err ).__name__})" )
+        return [ Finding( path, line, "parse-error", f"does not parse: {why}" ) ]
     findings = []
     for node, first_line, text in docstrings:
         kind   = type( node ).__name__
