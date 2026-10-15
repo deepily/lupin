@@ -174,15 +174,26 @@ def test_data_dir_follows_the_override_variable( real_config, tmp_path, monkeypa
     assert paths.data_dir( tmp_path ) == pathlib.Path( fleet_data_root( tmp_path ) ) / "elsewhere"
 
 
+# "vectors" is also a key name and a word in prose, so it is matched only as a path segment:
+# a join such as / "vectors", or a quoted "vectors/..." string
+STORAGE_LITERAL = re.compile( r"""["'/](?:reuse-review|query-cache|purpose-lines)\b|/\s*["']vectors["']|["']vectors/""" )
+
+
+def test_the_storage_literal_guard_finds_each_folder_and_ignores_key_names():
+    found = [ 'base / "vectors"', 'p = "vectors/x"', 'd = "/reuse-review"', 'x = "query-cache"', "y = 'purpose-lines'" ]
+    quiet = [ '"vectors"      : ( "reuse candidate vectors subdir", "X" ),', "the reuse-review data folder", 'name == "vectors"' ]
+    assert all( STORAGE_LITERAL.search( l ) for l in found )
+    assert not any( STORAGE_LITERAL.search( l ) for l in quiet )
+
+
 def test_no_storage_literal_in_the_candidates_package_or_paths():
     src    = pathlib.Path( __file__ ).resolve().parents[ 2 ] / "cosa" / "repo" / "symindex"
     files  = sorted( ( src / "candidates" ).glob( "*.py" ) ) + [ src / "paths.py", src / "candidate_build.py" ]
     assert len( files ) >= 8
     # the key defaults live in the INI files, so no code line names one of the hyphenated folders
-    literal = re.compile( r"""["'/](?:reuse-review|query-cache|purpose-lines)\b""" )
     for f in files:
         code = [ l for l in f.read_text( encoding="utf-8" ).splitlines() if not l.lstrip().startswith( "#" ) ]
-        hits = [ l for l in code if literal.search( l ) ]
+        hits = [ l for l in code if STORAGE_LITERAL.search( l ) ]
         assert hits == [], f"{f.name} names a storage folder in code: {hits}"
 
 

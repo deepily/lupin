@@ -157,6 +157,15 @@ def test_manifest_hash_ignores_its_own_field_and_sees_every_other( built ):
     assert vs.manifest_hash( changed ) != m[ "manifest_hash" ]
 
 
+@pytest.mark.parametrize( "name", [ "ids.txt", "prose.f32", "code.f32", "concat.f32" ] )
+def test_manifest_hash_changes_when_any_file_hash_changes( built, name ):
+    m       = built[ "manifest" ]
+    changed = copy.deepcopy( m )
+    changed[ "files" ][ name ] = "0" * 64
+    assert changed[ "files" ][ name ] != m[ "files" ][ name ]
+    assert vs.manifest_hash( changed ) != m[ "manifest_hash" ]
+
+
 # ── the swap ────────────────────────────────────────────────────────────────
 
 
@@ -312,6 +321,17 @@ def test_query_vectors_check_the_engines_before_embedding( built, tmp_path ):
     assert e.value.code == ENGINE_MISMATCH
     assert client.calls == []
     assert not ( tmp_path / "qc" ).exists()
+
+
+def test_a_corrupt_cache_file_is_a_miss_and_is_replaced( built, tmp_path ):
+    cache = tmp_path / "qc"
+    cache.mkdir()
+    ( cache / f"{vs.query_key( 'need' )}.json" ).write_text( "{not json" )
+    client = FakeClient()
+    got    = vs.query_vectors( "need", client, cache, built[ "manifest" ] )
+    assert len( client.calls ) == 2
+    assert got[ "code" ] == vec( "code", "query", "need" )
+    assert json.loads( ( cache / f"{vs.query_key( 'need' )}.json" ).read_text() )[ "manifest_hash" ] == built[ "manifest" ][ "manifest_hash" ]
 
 
 def test_query_key_is_the_sha256_of_the_text():
