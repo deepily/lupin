@@ -26,8 +26,7 @@ arguments:
 - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
 
 **Paths**:
-- **Logs Directory**: src/tests/logs
-- **Reports Directory**: src/rnd/
+- **Reports Directory**: io/test-suite/
 
 **Test Types**: smoke, unit, integration, websocket
 
@@ -53,8 +52,7 @@ arguments:
    - **Project Name**: Lupin
    - **Working Directory**: /mnt/DATA01/include/www.deepily.ai/projects/lupin
    - **Paths**:
-     - Logs Directory: src/tests/logs
-     - Reports Directory: src/rnd/
+     - Reports Directory: io/test-suite/
    - **Test Types**: smoke, unit, integration, websocket
    - **Test Scripts**:
      - Lupin Smoke: ./src/tests/run-lupin-smoke-tests.sh

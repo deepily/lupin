@@ -33,14 +33,13 @@ arguments:
 - **Remediation Scope**: ${2:-FULL}
 
 **Baseline Auto-Detection**:
-- **Directory**: src/rnd/
+- **Directory**: io/test-suite/
 - **Pattern**: *baseline-*-report.md
 - **Sort**: Most recent timestamp
 
 **Test Configuration** (same as baseline):
 - **Test Types**: smoke, unit, integration, websocket
-- **Logs Directory**: src/tests/logs
-- **Reports Directory**: src/rnd/
+- **Reports Directory**: io/test-suite/
 
 ---
 
@@ -56,13 +55,12 @@ arguments:
      - Baseline Report: ${1:-auto}
      - Remediation Scope: ${2:-FULL}
    - **Baseline Auto-Detection**:
-     - Directory: src/rnd/
+     - Directory: io/test-suite/
      - Pattern: *baseline-*-report.md
      - Sort: Most recent timestamp
    - **Test Configuration**:
      - Test Types: smoke, unit, integration, websocket
-     - Logs Directory: src/tests/logs
-     - Reports Directory: src/rnd/
+     - Reports Directory: io/test-suite/
    - Never proceed without these parameters
 
 2. **Must read the canonical workflow document**:
