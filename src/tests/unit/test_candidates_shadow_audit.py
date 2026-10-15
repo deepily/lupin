@@ -171,7 +171,9 @@ class TestStore:
         assert "shadow-bad.json" in caught.value.detail
 
     def test_an_unknown_outcome_is_corrupt( self, tmp_path ):
-        sa.store_receipt( tmp_path, dict( receipt_for( "n", "NEW", [] ), outcome="maybe" ) )
+        planted = dict( receipt_for( "n", "NEW", [] ), outcome="maybe" )
+        ( tmp_path / "receipts" ).mkdir()
+        ( tmp_path / "receipts" / f"shadow-{planted[ 'id' ]}.json" ).write_text( json.dumps( planted ) )
         with pytest.raises( CandidateError ):
             sa.load_receipts( tmp_path )
 
@@ -286,14 +288,29 @@ class TestQueueAndRun:
         left = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
         assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "bad", 1 ) ]
 
-    def test_a_damaged_receipt_file_fails_its_item_and_the_run_goes_on( self, tmp_path ):
+    @pytest.mark.parametrize( "text", [ '{"id": "ab', json.dumps( [ 1 ] ), json.dumps( { "kind": "shadow_audit" } ) ] )
+    def test_a_damaged_receipt_file_fails_its_item_without_a_sweep_and_the_run_goes_on( self, tmp_path, text ):
         for need in ( "n1", "n2" ): sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
         damaged = sa.audit_receipt( "n1", "py", GEN, INDEX, LIVE, sweep_of( "NEW" ), "2026-10-15" )[ "id" ]
-        ( sa._folder( tmp_path, "receipts" ) / f"shadow-{damaged}.json" ).write_text( '{"id": "ab' )
-        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
-        assert ( out[ "audited" ], out[ "failed" ] ) == ( 1, 1 )
+        ( sa._folder( tmp_path, "receipts" ) / f"shadow-{damaged}.json" ).write_text( text )
+        swept = []
+        def transport( need ):
+            swept.append( need )
+            return sweep_of( "NEW" )
+        for _ in range( 2 ):
+            out = sa.run_pending( tmp_path, transport, "2026-10-15" )
+        assert swept == [ "n2" ]                                     # n1 was never swept, on either drain
+        assert ( out[ "audited" ], out[ "failed" ] ) == ( 0, 1 )
         left = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
-        assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "n1", 1 ) ]
+        assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "n1", 2 ) ]
+
+    def test_a_stored_file_that_parses_but_is_not_a_receipt_is_refused( self, tmp_path ):
+        receipt = receipt_for( "n", "NEW", [] )
+        ( tmp_path / "receipts" ).mkdir()
+        ( tmp_path / "receipts" / f"shadow-{receipt[ 'id' ]}.json" ).write_text( json.dumps( [ 1 ] ) )
+        with pytest.raises( CandidateError ) as caught:
+            sa.store_receipt( tmp_path, receipt )
+        assert caught.value.code == sa.AUDIT_RECEIPT_CORRUPT and "wrong shape" in caught.value.detail
 
     def test_a_write_in_progress_is_not_read_by_the_drain( self, tmp_path ):
         sa.enqueue_if_sampled( tmp_path, "good", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )

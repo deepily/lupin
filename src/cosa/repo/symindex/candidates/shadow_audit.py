@@ -103,6 +103,16 @@ def compare( live_verdict, full_verdict, causal_ids, candidate_ids ):
     return "ok"
 
 
+def _receipt_id( digest, generation, index_sha ):
+    """Return the 16 character receipt id of a need hash, generation and index sha."""
+    return hashlib.sha256( f"{digest}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
+
+
+def _receipt_shape_ok( receipt ):
+    """Return True when a parsed receipt holds every receipt field and a known outcome."""
+    return isinstance( receipt, dict ) and all( key in receipt for key in RECEIPT_FIELDS ) and receipt[ "outcome" ] in OUTCOMES
+
+
 def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
     """
     Build the receipt of one audit.
@@ -120,7 +130,7 @@ def audit_receipt( need, language, generation, index_sha, live, sweep, today ):
     candidates = set( live[ "candidate_ids" ] )
     outcome    = compare( live[ "verdict" ], sweep[ "verdict" ], sweep[ "causal_ids" ], candidates )
     digest     = need_hash( need )
-    rid        = hashlib.sha256( f"{digest}\n{generation}\n{index_sha}".encode( "utf-8" ) ).hexdigest()[ :16 ]
+    rid        = _receipt_id( digest, generation, index_sha )
     missed     = sorted( set( sweep[ "causal_ids" ] ) - candidates ) if outcome == "miss" else []
     return { "kind": KIND, "id": rid, "need_hash": digest, "language": language, "generation": generation, "index_sha": index_sha,
              "live_verdict": live[ "verdict" ], "full_verdict": sweep[ "verdict" ], "candidate_count": len( candidates ),
@@ -179,12 +189,24 @@ def store_receipt( data_dir, receipt ):
         - an existing receipt is kept and returned, so a repeat audit never rewrites history
 
     Raises:
-        - CandidateError AUDIT_RECEIPT_CORRUPT when the file already there is not JSON
+        - CandidateError AUDIT_RECEIPT_CORRUPT when the file already there is not JSON or is not a receipt
     """
     path = _folder( data_dir, "receipts" ) / f"shadow-{receipt[ 'id' ]}.json"
     _write_once( path, json.dumps( receipt, sort_keys=True ) + "\n" )
-    try: return json.loads( path.read_text( encoding="utf-8" ) )
+    return _read_receipt_file( path )
+
+
+def _read_receipt_file( path ):
+    """
+    Read one receipt file.
+
+    Raises:
+        - CandidateError AUDIT_RECEIPT_CORRUPT when the file is not JSON or is not a receipt
+    """
+    try: receipt = json.loads( path.read_text( encoding="utf-8" ) )
     except ValueError as exc: raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: {exc}" ) from exc
+    if not _receipt_shape_ok( receipt ): raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: wrong shape" )
+    return receipt
 
 
 def load_receipts( data_dir ):
@@ -200,11 +222,7 @@ def load_receipts( data_dir ):
     """
     out = []
     for path in sorted( ( pathlib.Path( data_dir ) / "receipts" ).glob( "shadow-*.json" ) ):
-        try: receipt = json.loads( path.read_text( encoding="utf-8" ) )
-        except ValueError as exc: raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: {exc}" ) from exc
-        if not isinstance( receipt, dict ) or any( key not in receipt for key in RECEIPT_FIELDS ) or receipt[ "outcome" ] not in OUTCOMES:
-            raise CandidateError( AUDIT_RECEIPT_CORRUPT, f"{path.name}: wrong shape" )
-        out.append( receipt )
+        out.append( _read_receipt_file( path ) )
     return out
 
 
@@ -285,6 +303,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         - an item whose sweep raises stays queued with its attempt count up by one, and counts as failed
         - a queue file that is not JSON, lacks a queue field, or holds an id or queued date that is not text, is renamed to <name>.corrupt and counted, and the run goes on
         - an item whose receipt file is already there and damaged counts as failed like a raised sweep, stays queued, and the run goes on
+        - that check comes before the sweep, so a damaged receipt file never spends a sweep
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
         - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
@@ -303,6 +322,8 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
     receipts, failed = [], 0
     for item, path in queued:
         try:
+            held = _folder( data_dir, "receipts" ) / f"shadow-{_receipt_id( need_hash( item[ 'need' ] ), item[ 'generation' ], item[ 'index_sha' ] )}.json"
+            if held.exists(): _read_receipt_file( held )                       # a damaged receipt file fails the item before any sweep is spent
             sweep   = sweep_fn( item[ "need" ] )
             receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today )
             stored  = store_receipt( data_dir, receipt )
