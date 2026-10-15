@@ -119,7 +119,7 @@ class TestRunAllArms:
         assert out[ "fusion" ] in GRID and sorted( out[ "recall_by_params" ] ) == sorted( GRID )
         assert out[ "vectors_choice" ] in ( "B1", "B2" )
         assert out[ "meta" ][ "manifest_hash" ] == "mh" * 32 and out[ "meta" ][ "code_sha" ] == "abc123"
-        assert out[ "needs" ] == 2 and out[ "misses" ] == 0
+        assert out[ "needs" ] == 2 and out[ "misses" ] == 0 and out[ "pages" ] == len( world( tmp_path )[ "pages" ] )
         assert out[ "snapshot_entries" ] == len( ENTRIES ) and out[ "vector_entries" ] == len( IDS )
 
     def test_the_vector_count_is_what_the_set_holds_of_the_snapshot( self, tmp_path ):
@@ -156,12 +156,12 @@ class TestRenderAllArmsPage:
         w = world( tmp_path )
         out = arm_run.run_all_arms( w[ "env" ], w[ "snaps" ], w[ "needs" ], "f" * 64, w[ "manifest" ], vset(), PURPOSE, w[ "pages" ], query,
                                     lambda text: text, "abc123", grid=GRID )
-        out[ "pages" ] = 1
         page = arm_run.render_all_arms_page( out, self.REDACT )
         for arm in arms.ARMS: assert f"| {arm} |" in page
         assert "## Fusion constants chosen on the in-sample needs" in page and "| 60 | 512 | 5 |" in page
+        assert out[ "vectors_choice" ] in ( "B1", "B2" ) and f"{out[ 'vectors_choice' ]} by the rule" in page and "so a tie is B1" in page
         assert f"holds {out[ 'snapshot_entries' ]} sendable entries" in page and "abc123" in page
-        assert "Capability pages offered to the wiki list: 1." in page
+        assert out[ "pages" ] == 1 and "Capability pages offered to the wiki list: 1." in page
 
     def test_a_run_without_vectors_says_the_choice_and_the_selection_were_not_made( self, tmp_path ):
         w = world( tmp_path )

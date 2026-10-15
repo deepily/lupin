@@ -390,7 +390,9 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
         - arm_names lists the arms to measure; with only arms that fuse no vector list, vset and query_for may be None
 
     Ensures:
-        - returns { meta, fusion, recall_by_params, measured, t3, absent, vectors_choice, redactable, misses, empty_purpose_hits, vector_entries, snapshot_entries }
+        - returns { meta, fusion, recall_by_params, measured, t3, absent, vectors_choice, misses, snapshot, needs, pages, twin_manifest_sha,
+          empty_purpose_entries, empty_purpose_in_references, vector_entries, snapshot_entries }
+        - pages is the number of capability pages offered to the wiki list; redactable is not in the result, the caller counts it
         - every arm ranks the same entries for the same ranking text, and the fusion constants come from select_fusion_constants
         - the page builder reads this dict and measures nothing
         - when no measured arm fuses a vector list, nothing is embedded, the fusion constants are the module defaults, and
@@ -434,7 +436,7 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
     return { "meta": meta, "fusion": fusion, "recall_by_params": recall, "measured": measured, "t3": t3, "absent": absent,
              "vectors_choice": am.choose_vectors( b1, b2 ) if b1 and b2 else None, "misses": misses, "snapshot": path,
              "empty_purpose_entries": len( empty_pins ), "empty_purpose_in_references": used,
-             "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": sha256_of( manifest_path ),
+             "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": sha256_of( manifest_path ), "pages": len( pages ),
              "needs": len( needs ) }
 
 
@@ -485,7 +487,7 @@ def render_all_arms_page( result, redactable ):
     measured = result[ "measured" ]
     t1 = { arm: measured[ arm ][ "t1_first" ] for arm in measured }
     t2 = { arm: measured[ arm ][ "t2" ][ "K=128" ] for arm in measured }
-    page = ar.render_report( result[ "meta" ], t1, result[ "t3" ], t2, result[ "vectors_choice" ] or "not decided: no vector arm was measured",
+    page = ar.render_report( result[ "meta" ], t1, result[ "t3" ], t2, ( f"{result[ 'vectors_choice' ]} by the rule, which keeps B1 unless B2 beats it on recall at K=128 or on median twin rank, so a tie is B1" if result[ "vectors_choice" ] else "not decided: no vector arm was measured" ),
                              result[ "fusion" ], redactable )
     lines = [ "", "## Fusion constants chosen on the in-sample needs", "" ]
     if result[ "recall_by_params" ]:
@@ -497,7 +499,7 @@ def render_all_arms_page( result, redactable ):
     lines += [ "", "## Entries and purpose lines", "",
                f"- The snapshot holds {result[ 'snapshot_entries' ]} sendable entries; the vector set holds rows for {result[ 'vector_entries' ]} of them.",
                f"- {result[ 'empty_purpose_entries' ]} snapshot entries carry an empty purpose line; {len( result[ 'empty_purpose_in_references' ] )} of them are in any need's reference.",
-               f"- Capability pages offered to the wiki list: {result.get( 'pages', 0 )}.",
+               f"- Capability pages offered to the wiki list: {result[ 'pages' ]}.",
                f"- Cached judge answers missing for the snapshot: {result[ 'misses' ]}.",
                "- The replay column is the verdict replay at K=128; the control row of each arm is in the run's JSON." ]
     return page + "\n".join( lines ) + "\n"
