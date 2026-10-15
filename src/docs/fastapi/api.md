@@ -3690,7 +3690,7 @@ Body { on: bool }. Writes `cc session skeleton crew enabled` to the configuratio
 
 > **Create a task-store item**
 
-Creates one obligation row (always status=queued) plus its '->queued' creation event. Auth: X-API-Key or Bearer JWT. Design §2.2 (v0.4, Rick-ruled F4: managers-first writes).
+Creates one obligation row with status queued, blocked or not_approved, plus its creation event. An omitted status takes the approval settings' default. Creation is managers-first. Auth: X-API-Key or Bearer JWT.
 
 
 
@@ -3761,7 +3761,7 @@ The deterministic owed-work query (R4): exact-match filters, AND semantics, newe
 
 > **Transition a task-store item**
 
-Applies one state change + appends one audit event. ->done REJECTS without valid receipt_refs (T3, §4.1 AC1); ->blocked REQUIRES next_chase_ts (I3) + typed blocked_by refs; done/dropped are terminal. Auth: X-API-Key or Bearer JWT.
+Applies one state change and appends one audit event. A move to done is rejected without valid receipt_refs. A move to blocked requires typed blocked_by refs, plus next_chase_ts when one is a persona ref. Done and dropped are terminal. Auth: X-API-Key or Bearer JWT.
 
 
 
@@ -6112,7 +6112,8 @@ re-keyed. It also validates the authority enum there, so the rules live in one p
 
 Create body for POST /api/tasks.
 
-Creation defaults to status=queued, and the creation event stamps "->queued". The handler
+An omitted status takes the approval settings' default: queued, or not_approved while the
+holding default is on. The creation event stamps "->" and that status. The handler
 validates enum membership for item_class, gate_class, priority and authority through
 `task_store_rules.validate_create`. The rules live in one place and are not duplicated
 per layer.
@@ -6121,8 +6122,8 @@ per layer.
 mint carries `blocked_by` (at least one typed ref) and `next_chase_ts`, which a persona
 blocker requires. `rules.validate_create_status` enforces both and reuses the same
 `->blocked` invariant a transition applies. A blocked mint is also manager-only, guarded in
-the handler through `is_manager_figure`. `status` is otherwise limited to queued or blocked.
-The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
+the handler through `is_manager_figure`. `status` is otherwise limited to queued or
+not_approved (`CREATE_ALLOWED_STATUSES`). The statuses done, dropped, parked, claimed, in_progress and review are not mintable.
 
 The create door narrows both paragraphs above. With the holding default on, an omitted
 status mints `not_approved`. An explicit live status (queued or blocked) is refused with 403
@@ -6502,4 +6503,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.10.12 20:55:55 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.10.14 21:55:53 by `src/scripts/generate-api-docs.sh`_

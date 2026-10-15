@@ -909,10 +909,9 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
     "/tasks",
     status_code = 201,
     summary     = "Create a task-store item",
-    description = "Creates one obligation row (status queued, blocked or not_approved; "
-                  "an omitted status takes the approval settings' default) plus its "
-                  "creation event. Auth: X-API-Key or Bearer JWT. "
-                  "Design §2.2 (v0.4, Rick-ruled F4: managers-first writes)."
+    description = "Creates one obligation row with status queued, blocked or not_approved, plus its creation event. "
+                  "An omitted status takes the approval settings' default. Creation is managers-first. "
+                  "Auth: X-API-Key or Bearer JWT."
 )
 def create_task(
     payload: TaskCreateIn,
@@ -1376,10 +1375,10 @@ def create_task(
 @router.post(
     "/tasks/{task_id}/transition",
     summary     = "Transition a task-store item",
-    description = "Applies one state change + appends one audit event. "
-                  "->done REJECTS without valid receipt_refs (T3, §4.1 AC1); "
-                  "->blocked REQUIRES typed blocked_by refs, plus next_chase_ts when one is a persona ref (I3); "
-                  "done/dropped are terminal. Auth: X-API-Key or Bearer JWT."
+    description = "Applies one state change and appends one audit event. "
+                  "A move to done is rejected without valid receipt_refs. "
+                  "A move to blocked requires typed blocked_by refs, plus next_chase_ts when one is a persona ref. "
+                  "Done and dropped are terminal. Auth: X-API-Key or Bearer JWT."
 )
 def transition_task(
     task_id: uuid.UUID,
