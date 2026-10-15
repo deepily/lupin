@@ -18,7 +18,7 @@ The one row template the task list, holding area and epic board all paint, and t
 The panes are in [[web-client-task-board-panes]]. The click handling is in [[web-client-render-task-row-controller]].
 
 ## What it does
-- `renderDisclosedRow( task, pane, zone, reassignTargets, nowMs )` returns three rows: the visible row, a hidden controls row and a hidden error stripe.
+- `renderDisclosedRow( task, pane, zone, reassignTargets, nowMs )` returns a `DocumentFragment` of three rows: the visible row, a hidden controls row and a hidden error stripe.
 - The visible row has one cell per line-one field in order, then the toggle cell. Its class carries `task-row`, `epic-row` on the epic board, the status class and `task-row-parked` when parked.
 - A row with a pending promote or demote request gets a request chip in its title cell. The task list and holding area show it; the epic board never does.
 - `renderVisibleCell` fills one line-one cell. The title cell keeps the full title as its `title` attribute, and the status cell adds a "parked" badge for a parked row. The id cell shows 8 characters and, when the id exists, is a "Click to copy ID" button.

@@ -27,7 +27,7 @@ The row it drives is in [[web-client-render-task-row-cells]]; the verb table is 
 - Submit refuses with the verb's own complaint when a reason or date is missing. A terminal verb arms on the first click ("Confirm …") and posts on the second, through `transitionExtras`.
 - Update PATCHes only `priority`, and only when it differs from `data-original`.
 - `reasonMicContextId( id )` is `task-reason-<id>`. The mic records into its own row's reason box; a second click stops it.
-- A 404 on a write counts as success with `gone` true. Any other failure restores the optimistic state and shows `deriveEditErrorMessage`: "Edit failed (HTTP n)" or "Edit failed: <message>".
+- A 404 on a write counts as success with `gone` true. Any other failure restores the optimistic state and shows `deriveEditErrorMessage`: "Edit failed (HTTP n)" or "Edit failed: <message>". A non-Error throw gets a bare "Edit failed".
 - `renderRowError( id, message )` paints or clears the stripe. `operatorStateHandlers` returns the verb, priority and error handlers. `dispose` closes the 📄 overlay.
 
 ## Don't
