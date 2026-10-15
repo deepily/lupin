@@ -52,13 +52,14 @@ def build( negatives, answered_rows ):
     Ensures:
         - returns { rows, uncovered, uncovered_counts, held_out, answered, ignored_rows }
         - rows are the answered rows whose pair the record lists, in the record's member order, then twins, lexical, random
+        - a row that was never asked, came back malformed or has no overlap is not answered: its pair is uncovered under its class
         - the label of a row is true exactly when its pair is a twin pair of the record
         - uncovered maps each class to the [ member, candidate ] pairs the record lists and no row answered
         - a held-out pair is in no class; held_out counts them
         - ignored_rows counts the answered rows whose pair is in none of the three classes, a held-out pair among them
 
     Raises:
-        - ValueError naming the pair when the record lists it twice, a row answers it twice, or a row's label disagrees with the record
+        - ValueError naming the pair when the record lists it twice, lists it as held out and in a class, a row answers it twice, or a row's label disagrees with the record
     """
     classed = {}
     for member, entry in negatives[ "members" ].items():
@@ -67,6 +68,8 @@ def build( negatives, answered_rows ):
                 pair = ( member, _id( item ) )
                 if pair in classed: raise ValueError( f"pair {pair} is listed twice in the record" )
                 classed[ pair ] = cls
+    held = { ( member, _id( item ) ) for member, entry in negatives[ "members" ].items() for item in entry[ "held_out" ] }
+    for pair in sorted( held & set( classed ) ): raise ValueError( f"pair {pair} is held out and also listed as {classed[ pair ]}" )
     seen = {}
     for row in answered_rows:
         pair = ( row[ "member" ], row[ "candidate" ] )
@@ -75,7 +78,7 @@ def build( negatives, answered_rows ):
     rows, uncovered = [], { cls: [] for cls in CLASSES }
     for pair, cls in classed.items():
         row = seen.get( pair )
-        if row is None:
+        if row is None or row[ "unasked" ] or row[ "malformed" ] is not None or row[ "p_overlap" ] is None:
             uncovered[ cls ].append( list( pair ) )
             continue
         if bool( row[ "label" ] ) != ( cls == "twins" ): raise ValueError( f"pair {pair} is labelled {row[ 'label' ]} but the record lists it as {cls}" )

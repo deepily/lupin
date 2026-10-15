@@ -125,3 +125,32 @@ def test_a_second_entry_inside_the_band_of_the_strong_cut_off_is_near_cutoff_too
 def test_the_record_step_refuses_a_band_that_is_not_a_number_below_one_half_and_at_least_the_floor( band ):
     ls = importlib.import_module( "cosa.repo.symindex.labelled_set" )
     with pytest.raises( ValueError, match="band" ): ls.check_band( band )
+
+
+def _strong_answer( top_probability ):
+    """Return a strong answer: overlap 0.96, the largest single probability top_probability."""
+    return { "reuse": top_probability, "extend": round( 0.96 - top_probability, 6 ), "unrelated": 0.04 }
+
+
+@pytest.mark.parametrize( "confidence", [ 0.9001, 0.8999, 0.9, 0.9499, 0.8501 ] )
+def test_a_confidence_inside_the_band_of_the_bar_is_near_cutoff_on_both_sides( confidence ):
+    got = vd.decide( [ { "id": "e0", "probabilities": _strong_answer( confidence ) } ], [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )
+    assert "NEAR_CUTOFF" in got[ "causes" ]
+
+
+@pytest.mark.parametrize( "confidence", [ 0.95, 0.85, 0.99 ] )
+def test_a_confidence_outside_the_band_of_the_bar_is_decided_as_today( confidence ):
+    policy = dict( vd.POLICY, band=BAND )
+    answers = [ { "id": "e0", "probabilities": _strong_answer( confidence ) } ]
+    assert vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ] == vd.decide( answers, [ "e0" ], [], set(), vd.POLICY )[ "causes" ]
+
+
+def test_a_confident_unrelated_entry_is_not_near_the_confidence_bar_whatever_its_confidence():
+    answers = [ { "id": "e0", "probabilities": { "reuse": 0.0, "extend": 0.0, "unrelated": 1.0 } }, { "id": "e1", "probabilities": { "reuse": 0.02, "extend": 0.02, "unrelated": 0.96 } } ]
+    assert vd.decide( answers, [ "e0", "e1" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ] == []
+
+
+def test_the_confidence_of_a_strong_candidate_is_banded_against_the_strong_cut_off_when_the_bar_differs():
+    policy = dict( vd.POLICY, confidence=0.5, strong=0.8, band=BAND )
+    answers = [ { "id": "e0", "probabilities": { "reuse": 0.81, "extend": 0.1, "unrelated": 0.09 } } ]
+    assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ]

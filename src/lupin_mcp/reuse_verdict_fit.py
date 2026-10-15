@@ -64,7 +64,7 @@ def main( argv=None ):
         - writes the receipt to --out and prints the threshold line, then returns 0
 
     Raises:
-        - FileExistsError when the output file exists, so a recorded fit is never overwritten
+        - FileExistsError when the output file exists, which the exclusive create decides at the moment of writing, so a recorded fit is never overwritten
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for flag in ( "--negatives", "--rows", "--split", "--out" ): ap.add_argument( flag, required=True )
@@ -72,12 +72,11 @@ def main( argv=None ):
     ap.add_argument( "--band", type=float, default=None, help="a band measured from repeat jitter elsewhere; refused under 0.05" )
     a   = ap.parse_args( argv )
     out = pathlib.Path( a.out )
-    if out.exists(): raise FileExistsError( f"{out} already exists; a recorded fit is never overwritten" )
     raw  = pathlib.Path( a.rows ).read_bytes()
     data = json.loads( raw )
     rec  = receipt( json.loads( pathlib.Path( a.negatives ).read_text() ), data[ "rows" ] if isinstance( data, dict ) else data,
                     json.loads( pathlib.Path( a.split ).read_text() ), a.rate, hashlib.sha256( raw ).hexdigest(), a.band )
-    out.write_text( json.dumps( rec, indent=1, sort_keys=True ) + "\n" )
+    with open( out, "x", encoding="utf-8" ) as handle: handle.write( json.dumps( rec, indent=1, sort_keys=True ) + "\n" )
     print( f"threshold={rec[ 'threshold' ][ 'value' ]} rate={a.rate} rows={rec[ 'set' ][ 'rows' ]} uncovered={rec[ 'uncovered_counts' ]}" )
     return 0
 

@@ -47,3 +47,18 @@ def test_a_pair_the_record_lists_twice_is_refused():
 
 def test_an_answered_pair_that_appears_twice_is_refused():
     with pytest.raises( ValueError, match="answered twice" ): ls.build( _record(), _answered() + [ _row( "m1", "t1", True ) ] )
+
+
+@pytest.mark.parametrize( "change", [ { "unasked": True, "p_overlap": None }, { "malformed": "sum_not_one" }, { "p_overlap": None } ] )
+def test_a_row_that_was_never_asked_or_came_back_unreadable_is_uncovered_not_answered( change ):
+    rows = [ { **r, **change } if ( r[ "member" ], r[ "candidate" ] ) == ( "m1", "t1" ) else r for r in _answered() ]
+    got = ls.build( _record(), rows )
+    assert got[ "uncovered_counts" ][ "twins" ] == 1 and got[ "uncovered" ][ "twins" ] == [ [ "m1", "t1" ] ]
+    assert ( "m1", "t1" ) not in [ ( r[ "member" ], r[ "candidate" ] ) for r in got[ "rows" ] ] and got[ "answered" ] == 4
+
+
+@pytest.mark.parametrize( "cls,pair_id", [ ( "twins", "t1" ), ( "lexical", "l1" ), ( "random", "r1" ) ] )
+def test_a_held_out_pair_that_is_also_listed_in_a_class_is_refused( cls, pair_id ):
+    rec = _record()
+    rec[ "members" ][ "m1" ][ "held_out" ].append( { "id": pair_id, "score": 0.97 } )
+    with pytest.raises( ValueError, match=f"m1.*{pair_id}.*held out" ): ls.build( rec, _answered() )

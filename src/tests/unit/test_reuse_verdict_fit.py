@@ -73,3 +73,22 @@ def test_main_refuses_a_band_under_the_floor_before_writing( tmp_path ):
     argv = [ "--negatives", str( tmp_path / "neg.json" ), "--rows", str( tmp_path / "rows.json" ), "--split", str( tmp_path / "split.json" ), "--rate", "0.05", "--out", str( tmp_path / "o.json" ), "--band", "0.02" ]
     with pytest.raises( ValueError, match="0.05" ): vf.main( argv )
     assert not ( tmp_path / "o.json" ).exists()
+
+
+@pytest.mark.parametrize( "change", [ { "unasked": True, "p_overlap": None }, { "malformed": "x", "p_overlap": 0.9 } ] )
+def test_a_twin_that_was_never_asked_or_came_back_unreadable_is_refused_not_scored_as_a_miss( change ):
+    rows = [ { **r, **change } if r[ "candidate" ] == "a-twin" else r for r in _rows() ]
+    with pytest.raises( ValueError, match="twin" ): vf.receipt( _record(), rows, _split(), 0.05, "r" * 64 )
+
+
+def test_the_receipt_is_created_exclusively_so_a_file_that_appears_after_the_check_is_never_overwritten( tmp_path, monkeypatch ):
+    for name, data in ( ( "neg", _record() ), ( "rows", { "rows": _rows() } ), ( "split", _split() ) ): ( tmp_path / f"{name}.json" ).write_text( json.dumps( data ) )
+    out  = tmp_path / "o.json"
+    real = vf.receipt
+    def appears( *a, **k ):
+        out.write_text( "someone else's receipt" )                 # a concurrent run lands its file between the check and the write
+        return real( *a, **k )
+    monkeypatch.setattr( vf, "receipt", appears )
+    argv = [ "--negatives", str( tmp_path / "neg.json" ), "--rows", str( tmp_path / "rows.json" ), "--split", str( tmp_path / "split.json" ), "--rate", "0.05", "--out", str( out ) ]
+    with pytest.raises( FileExistsError ): vf.main( argv )
+    assert out.read_text() == "someone else's receipt"
