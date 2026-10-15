@@ -392,6 +392,43 @@ def test_a_second_run_after_one_changed_docstring_reuses_the_other_rows( world, 
     assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == report[ "manifest_hash" ]
 
 
+def test_the_vector_ids_equal_the_ids_the_lookup_uploads_as_the_stage( world, tmp_path ):
+    from lupin_mcp import reuse_tools
+    leaky = tvb.entry( "leaky", "pl", doc="Mail ops@example.com." )
+    leaky.update( lang="py", kind="function", line=1, public=True )
+    world[ "symbols" ].append( leaky )
+
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+
+    staged = [ e[ "id" ] for e in reuse_tools.sendable( world[ "symbols" ], () )[ 0 ] ]     # the call prepare() makes
+    assert "m.leaky" in { e[ "id" ] for e in world[ "symbols" ] } and "m.leaky" not in staged
+    assert len( staged ) == 2
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).ids == sorted( staged )
+
+
+def test_unwritten_pins_come_from_the_staged_entries_only( world ):
+    leaky = tvb.entry( "leaky", "pl", doc="Mail ops@example.com." )
+    leaky.update( lang="py", kind="function", line=1, public=True )
+    world[ "symbols" ].append( leaky )
+
+    def skips_a( ids ): return { i: f"Return {i}." for i in ids if i != "m.a" }
+
+    report = cb.run( world[ "root" ], skips_a, tvb.FakeClient(), config=ConfigFor(), environ={} )
+
+    assert sorted( report[ "unwritten_pins" ] ) == [ "pa" ]       # pl is not sendable, so it is neither staged nor owed a line
+
+
+def test_the_vector_rows_carry_the_blanked_signature_the_stage_holds( world ):
+    world[ "symbols" ][ 0 ][ "sig" ] = "(token=\"SECRET_DEFAULT_VALUE\")"
+    client = tvb.FakeClient()
+
+    cb.run( world[ "root" ], answering_writer( [] ), client, config=ConfigFor(), environ={} )
+
+    sent = [ t for c in client.calls for t in c[ 2 ] ]
+    assert any( "m.py::b(" in t for t in sent )
+    assert not any( "SECRET_DEFAULT_VALUE" in t for t in sent )
+
+
 def test_a_live_set_that_does_not_load_is_rebuilt_in_full_with_no_error( world, tmp_path ):
     cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
     ( tmp_path / "data" / "vec" / "row_texts.jsonl" ).write_text( "{bad\n" )

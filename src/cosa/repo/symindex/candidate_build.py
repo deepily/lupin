@@ -127,7 +127,9 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
         - client has embed( texts, content_type, role ) and info()
 
     Ensures:
-        - the index is ensured, and its public entries are the rows of the set
+        - the index is ensured, and its public entries that pass screen.sendable are the rows of the set,
+          which is the list the lookup uploads as the stage, so the stage refuses no vector id as unknown
+        - purpose lines are written from every public entry, and the screen's drops are reported there
         - the whole run holds the build lock, so a manual build and the scheduled one cannot overlap
         - the new set carries its build info: the index manifest it was built from, built_at
           (the current UTC time when built_at is None), and the pins the writer left without a line
@@ -165,9 +167,10 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
         except CandidateError:
             reuse = None
         used      = {}
-        manifest  = vb.build_vectors( entries, stored, client, new_dir, reuse=reuse, stats=used )
+        staged    = screen.sendable( entries )[ 0 ]                          # the rows are the entries the stage will hold, so no vector id is a ghost to it
+        manifest  = vb.build_vectors( staged, stored, client, new_dir, reuse=reuse, stats=used )
         reuse     = None
-        unwritten = { e[ "pin" ] for e in screen.sendable( entries )[ 0 ] if e[ "pin" ] not in stored }
+        unwritten = { e[ "pin" ] for e in staged if e[ "pin" ] not in stored }
         info      = fr.write_build_info( new_dir, header, built_at if built_at is not None else fr.utc_now(), unwritten )
         vs.swap_in( new_dir, live )
         cleared   = vs.clear_stale_queries( cache, manifest[ "manifest_hash" ] )
