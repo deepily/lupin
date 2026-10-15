@@ -536,6 +536,45 @@ class TestRuntimeStatsAndReplay( unittest.TestCase ):
         self.assertEqual( first.runtime_stats[ "run_count" ], 1 )
         self.assertEqual( second.runtime_stats, SolutionSnapshot.get_default_stats_dict() )
 
+    def _pair( self ):
+        """Two snapshots built with only a question."""
+        with _embed_mocked():
+            return SolutionSnapshot( question="what is the weather", question_gist="weather", debug=False ), \
+                   SolutionSnapshot( question="how do I sort a list", question_gist="sorting", debug=False )
+
+    def test_synonymous_questions_are_not_shared_between_snapshots( self ):
+        """The second snapshot's synonym is its own question, not the first's."""
+        first, second = self._pair()
+        self.assertIsNot( first.synonymous_questions, second.synonymous_questions )
+        self.assertEqual( dict( second.synonymous_questions ), { "how do I sort a list": 100.0 } )
+
+    def test_synonymous_question_gists_are_not_shared_between_snapshots( self ):
+        """Same for the gists."""
+        first, second = self._pair()
+        self.assertIsNot( first.synonymous_question_gists, second.synonymous_question_gists )
+        self.assertEqual( dict( second.synonymous_question_gists ), { "sorting": 100.0 } )
+
+    def test_non_synonymous_questions_are_not_shared_between_snapshots( self ):
+        """A question added to one snapshot's non-synonyms is not in the other's."""
+        first, second = self._pair()
+        first.non_synonymous_questions.append( "x" )
+        self.assertEqual( second.non_synonymous_questions, [] )
+
+    def test_code_is_not_shared_between_snapshots( self ):
+        """A code line added to one snapshot is not in the other."""
+        first, second = self._pair()
+        first.code.append( "print( 1 )" )
+        self.assertEqual( second.code, [] )
+
+    def test_containers_a_caller_passes_are_kept_as_given( self ):
+        """Only None means default; a caller's own list and dict are used."""
+        mine = [ "print( 2 )" ]
+        with _embed_mocked():
+            snap = SolutionSnapshot( code=mine, non_synonymous_questions=[ "q" ], synonymous_questions=OrderedDict( { "a": 1.0 } ), debug=False )
+        self.assertIs( snap.code, mine )
+        self.assertEqual( snap.non_synonymous_questions, [ "q" ] )
+        self.assertEqual( dict( snap.synonymous_questions ), { "a": 1.0 } )
+
     def test_an_empty_runtime_stats_dict_is_kept_as_given( self ):
         """Only None means default; a caller's empty dict is the caller's."""
         with _embed_mocked():

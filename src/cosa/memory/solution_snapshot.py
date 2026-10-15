@@ -185,11 +185,11 @@ class SolutionSnapshot( RunnableCode ):
         """
         return np.dot( this_embedding, that_embedding ) * 100
     
-    def __init__( self, push_counter: int=-1, question: str="", question_normalized: str="", question_gist: str="", synonymous_questions: OrderedDict=OrderedDict(), synonymous_question_gists: OrderedDict=OrderedDict(), non_synonymous_questions: list=[],
+    def __init__( self, push_counter: int=-1, question: str="", question_normalized: str="", question_gist: str="", synonymous_questions: OrderedDict=None, synonymous_question_gists: OrderedDict=None, non_synonymous_questions: list=None,
                   last_question_asked: str="", answer: str="", answer_conversational: str="", error: str="", routing_command: str="", agent_class_name: Optional[str]=None,
                   created_date: str=None, updated_date: str=None, run_date: str=None,
                   runtime_stats: dict=None,
-                  id_hash: str="", solution_summary: str="", code: list[str]=[], solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
+                  id_hash: str="", solution_summary: str="", code: list[str]=None, solution_summary_gist: str="", code_returns: str="", code_example: str="", code_type: str="raw", thoughts: str="",
                   programming_language: str="Python", language_version: str="3.10",
                   question_embedding: list[float]=[ ], question_normalized_embedding: list[float]=[ ], question_gist_embedding: list[float]=[ ], solution_embedding: list[float]=[ ], code_embedding: list[float]=[ ], thoughts_embedding: list[float]=[ ], solution_gist_embedding: list[float]=[ ],
                   solution_directory: str="/src/conf/long-term-memory/solutions/", solution_file: Optional[str]=None, user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="", session_id: str="",
@@ -277,6 +277,9 @@ class SolutionSnapshot( RunnableCode ):
         self.brake_terminal_claimed = False
 
         # Is there is no synonymous questions to be found then just recycle the current question
+        # None means "not given": each snapshot builds its own containers, so none is shared through a signature default
+        if synonymous_questions is None: synonymous_questions = OrderedDict()
+        if synonymous_question_gists is None: synonymous_question_gists = OrderedDict()
         # Handle corrupted data: ensure synonymous_questions is a valid dict/OrderedDict
         if not isinstance( synonymous_questions, dict ):
             if self.debug: print( f"WARNING: synonymous_questions is invalid type {type(synonymous_questions)}, defaulting to empty OrderedDict" )
@@ -300,13 +303,13 @@ class SolutionSnapshot( RunnableCode ):
         else:
             self.synonymous_question_gists = synonymous_question_gists
             
-        self.non_synonymous_questions = non_synonymous_questions
+        self.non_synonymous_questions = non_synonymous_questions if non_synonymous_questions is not None else []
             
         self.last_question_asked   = last_question_asked
         
         self.solution_summary      = solution_summary
 
-        self.code                  = code
+        self.code                  = code if code is not None else []
         self.solution_summary_gist = solution_summary_gist  # Gist of solution_summary (generated after first successful execution)
         self.code_returns          = code_returns
         self.code_example          = code_example
