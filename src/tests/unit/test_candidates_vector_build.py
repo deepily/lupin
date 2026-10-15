@@ -372,3 +372,10 @@ def test_a_guard_field_of_the_wrong_shape_is_a_named_mismatch( tmp_path, field, 
     out1, live = first_build( tmp_path, base_entries() )
     manifest   = { **copy.deepcopy( live.manifest ), field: value }
     assert vb.reuse_mismatches( manifest, FakeClient().info() ) == [ "manifest" ]
+
+
+def test_the_default_batch_is_small_enough_for_the_model_servers_code_engine():
+    """Pin the batch ceiling the code engine was measured to hold."""
+    import inspect
+    assert vb.BATCH_SIZE == 16
+    assert inspect.signature( vb.build_vectors ).parameters[ "batch_size" ].default == vb.BATCH_SIZE
