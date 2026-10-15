@@ -323,15 +323,19 @@ def test_query_vectors_check_the_engines_before_embedding( built, tmp_path ):
     assert not ( tmp_path / "qc" ).exists()
 
 
-def test_a_corrupt_cache_file_is_a_miss_and_is_replaced( built, tmp_path ):
+@pytest.mark.parametrize( "content", [ "{not json", "{}" ] )
+def test_a_corrupt_cache_file_is_a_named_error_and_nothing_is_recomputed( built, tmp_path, content ):
     cache = tmp_path / "qc"
     cache.mkdir()
-    ( cache / f"{vs.query_key( 'need' )}.json" ).write_text( "{not json" )
+    path = cache / f"{vs.query_key( 'need' )}.json"
+    path.write_text( content )
     client = FakeClient()
-    got    = vs.query_vectors( "need", client, cache, built[ "manifest" ] )
-    assert len( client.calls ) == 2
-    assert got[ "code" ] == vec( "code", "query", "need" )
-    assert json.loads( ( cache / f"{vs.query_key( 'need' )}.json" ).read_text() )[ "manifest_hash" ] == built[ "manifest" ][ "manifest_hash" ]
+    with pytest.raises( CandidateError ) as e:
+        vs.query_vectors( "need", client, cache, built[ "manifest" ] )
+    assert e.value.code == vs.QUERY_CACHE_CORRUPT
+    assert path.name in e.value.detail
+    assert client.calls == [] and client.infos == 0
+    assert path.read_text() == content
 
 
 def test_query_key_is_the_sha256_of_the_text():

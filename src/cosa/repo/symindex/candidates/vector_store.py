@@ -20,6 +20,7 @@ IDS_FILE       = "ids.txt"
 MANIFEST_FILE  = "manifest.json"
 DOCUMENT_ROLES = { "prose": ( "prose", "document" ), "code": ( "code", "document" ), "concat": ( "prose", "document" ) }
 QUERY_ROLES    = { "prose": ( "prose", "query" ),    "code": ( "code", "query" ),    "concat": ( "prose", "query" ) }
+QUERY_CACHE_CORRUPT = "QUERY_CACHE_CORRUPT"
 ENGINE_FIELDS  = ( "model", "revision", "dtype", "device", "query_prefix", "document_prefix", "dimensions" )
 
 
@@ -218,12 +219,14 @@ def query_vectors( redacted_need, client, cache_dir, manifest ):
 
     Ensures:
         - a cache file made under this manifest hash is returned without any call
-        - a file made under another hash, or one that cannot be read, is a miss
+        - a file made under another hash is ignored
+        - a file that cannot be read is a named error, and is never silently recomputed
         - on a miss the engines are checked against the manifest first, then each distinct
           ( content type, role ) pair is embedded once with the roles the manifest records
         - the result is written to the cache and returned as { prose, code, concat }
 
     Raises:
+        - CandidateError QUERY_CACHE_CORRUPT when the need's cache file is not valid JSON or holds no hash
         - CandidateError ENGINE_MISMATCH or ENGINE_NOT_LOADED from check_engines
     """
     cache = pathlib.Path( cache_dir )
@@ -231,9 +234,10 @@ def query_vectors( redacted_need, client, cache_dir, manifest ):
     if path.is_file():
         try:
             stored = json.loads( path.read_text( encoding="utf-8" ) )
-            if stored[ "manifest_hash" ] == manifest[ "manifest_hash" ]: return stored[ "vectors" ]
-        except ( ValueError, KeyError ):
-            pass                                                         # an unreadable cache file is a miss
+            made_under = stored[ "manifest_hash" ]
+        except ( ValueError, KeyError ) as e:
+            raise CandidateError( QUERY_CACHE_CORRUPT, f"{path.name} cannot be read: {e!r}" )
+        if made_under == manifest[ "manifest_hash" ]: return stored[ "vectors" ]
     check_engines( manifest, client.info() )
     by_pair, vectors = {}, {}
     for name in MATRICES:
