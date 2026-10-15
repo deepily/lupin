@@ -49,8 +49,10 @@ class RankedStage:
 def wide_is_three( monkeypatch ): monkeypatch.setattr( rt, "WIDE_K", 3 )
 
 
-def ctx_with( env, fake, stage, policy=BAND, size=10 ):
+def ctx_with( env, fake, stage, policy="band", size=10 ):
+    """Build a packed context; "band" takes a fresh copy of the test band."""
     root, data, out = env
+    if policy == "band": policy = dict( BAND )
     return rt.ReuseContext( root, data, out_dir=out, transport=fake, sweeper=rp.packed_sweeper( size, shape=rp.SHAPE_WHOLE ), request_shape=rp.SHAPE_WHOLE,
                             pack_size=size, candidate_stage=stage, policy=policy )
 
