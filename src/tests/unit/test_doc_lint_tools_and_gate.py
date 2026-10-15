@@ -376,8 +376,9 @@ def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatc
 SEEDED    = "This is NOT fine.\n"
 CAPS      = "caps: ALL-CAPS word NOT"
 WARN_MARK = " (warn mode, commit allowed)"
-WARN_SET  = "history.md or TODO.md or bug-fix-queue.md or history/ or todo-history/"
-RECORDS   = [ "history.md", "TODO.md", "bug-fix-queue.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+WARN_SET  = "history/ or todo-history/"
+RECORDS   = [ "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ROOT_RECORDS = [ "history.md", "TODO.md", "bug-fix-queue.md" ]
 ALIKE     = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md", "src/cosa/history.md" ]
 REFUSE_1  = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
 
@@ -388,12 +389,13 @@ def _blocking( repo ):
     return rc, err.getvalue().split( "\n" )
 
 
-def test_the_warn_only_set_is_exactly_three_record_files_and_two_record_folders():
-    assert gate.WARN_ONLY_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md" )
+def test_the_warn_only_set_is_exactly_the_two_archive_folders_and_the_root_files_are_not_in_it():
+    assert gate.WARN_ONLY_PATHS == ()
     assert gate.WARN_ONLY_PREFIXES == ( "history/", "todo-history/" )
-    assert len( RECORDS ) == 5 and len( ALIKE ) == 9
+    assert gate.RECORD_PATHS == ( "history.md", "TODO.md", "bug-fix-queue.md" )
+    assert len( RECORDS ) == 2 and len( ALIKE ) == 9
     for path in RECORDS: assert gate.is_warn_only( path ), path
-    for path in ALIKE: assert not gate.is_warn_only( path ), path
+    for path in ALIKE + ROOT_RECORDS: assert not gate.is_warn_only( path ), path
     for path in ( "docs/history.md", "./history.md", "history.md.bak", "old-history.md", "todo.md", "history", "todo-history", "" ): assert not gate.is_warn_only( path ), path
 
 
@@ -420,13 +422,90 @@ def test_blocking_refuses_a_finding_in_a_file_that_only_looks_like_a_record_loca
 
 def test_blocking_refuses_for_the_other_file_when_a_warn_only_file_also_holds_a_finding( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _stage( repo, { "history.md": SEEDED, "TODO.md": SEEDED, "docs/p.md": SEEDED } )
+    _stage( repo, { "history/a.md": SEEDED, "todo-history/a.md": SEEDED, "docs/p.md": SEEDED } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT
     refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
     assert refused == [ f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" ]
-    assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] TODO.md:1: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] todo-history/a.md:1: {CAPS}{WARN_MARK}" in lines
     assert f"[doc-lint] 2 findings in {WARN_SET}{WARN_MARK}" in lines and REFUSE_1 in lines
+
+
+# ---- rule set B for the root record files (row 486cc499, Rick's ruling of 2026-10-14) ----------
+
+CONFORMING = "Moved the lint rule set into gate.py; commit subject first, row 8dbe659a last.\n"
+DATED      = "Measured 2026-10-14 at 0123abc4 (commit 0123abc4def5), row 8dbe659a.\n"
+SHOUTED    = "This is NOT fine and NEVER was.\n"
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_a_conforming_entry_added_to_a_root_record_file_passes_the_blocking_gate( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: CONFORMING } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and "[doc-lint] 0 findings on staged lines (blocking)" in lines
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+@pytest.mark.parametrize( "text,rule", [
+    ( "Fixed it, see [gone](nope.md).\n",             "dead-link" ),
+    ( "Kept it deliberately small.\n",                 "tic" ),
+    ( "Done \U0001f534 and shipped.\n",                 "glyph" ),
+] )
+def test_a_non_conforming_entry_added_to_a_root_record_file_is_refused( repo, monkeypatch, rel, text, rule ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: text } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] REFUSED {rel}:1: {rule}:" ) ], lines
+    assert not [ ln for ln in lines if "warn mode" in ln ]
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_an_added_date_sha_row_id_or_shouted_word_in_a_root_record_file_does_not_refuse( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: DATED + SHOUTED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0, lines
+    assert not [ ln for ln in lines if f"{rel}:" in ln ]
+
+
+def test_the_same_dated_and_shouted_text_in_an_ordinary_page_is_still_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( repo, { "docs/p.md": DATED + SHOUTED } )
+    rc, lines = _blocking( repo )
+    rules = { ln.split( ": " )[ 1 ] for ln in lines if ln.startswith( "[doc-lint] REFUSED docs/p.md:" ) }
+    assert rc == gate.REFUSAL_EXIT and { "iso-date", "bare-ref", "caps" } <= rules
+
+
+def test_a_section_or_label_bare_ref_in_a_record_file_still_blocks_while_a_row_id_does_not( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    labelled = Finding( "history.md", 1, "bare-ref", "bare reference 'AC3'" )
+    row_id   = Finding( "history.md", 1, "bare-ref", "bare reference '8dbe659a'" )
+    assert not gate.is_record_exempt( labelled ) and gate.is_record_exempt( row_id )
+    for rule in ( "iso-date", "dated-banner", "caps", "sentence-length" ): assert gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    for rule in ( "tic", "glyph", "dead-link", "agent-imperative", "dead-design" ): assert not gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    assert not gate.is_record_exempt( Finding( "docs/history.md", 1, "iso-date", "m" ) )
+
+
+def test_the_caps_and_sentence_length_switch_is_one_named_constant_that_turns_them_back_on( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    assert gate.RECORD_RULES_OFF == frozenset( { "caps", "sentence-length" } )
+    monkeypatch.setattr( gate, "RECORD_RULES_OFF", frozenset() )
+    _stage( repo, { "history.md": SEEDED } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED history.md:1: {CAPS}" in lines
+
+
+@pytest.mark.parametrize( "rel", RECORDS )
+def test_an_archive_folder_file_still_only_warns_for_every_rule_set_b_drops_and_for_the_rest( repo, monkeypatch, rel ):
+    _no_external( monkeypatch )
+    _stage( repo, { rel: DATED + SHOUTED + "Kept it deliberately small.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0
+    assert [ ln for ln in lines if ln.startswith( f"[doc-lint] {rel}:" ) and ln.endswith( WARN_MARK ) ]
+    assert not [ ln for ln in lines if "REFUSED" in ln ]
 
 
 def test_blocking_refuses_a_python_finding_on_a_touched_line_whichever_linter_reports_it( repo, monkeypatch ):
@@ -442,23 +521,23 @@ def test_blocking_refuses_a_python_finding_on_a_touched_line_whichever_linter_re
 
 def test_blocking_counts_a_swept_refusal_and_a_finding_on_a_staged_line_each_on_its_own_line( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine." ), "docs/p.md": SEEDED, "history.md": SEEDED } )
+    _stage( repo, { "src/pkg/a.py": _doc( "This is NOT fine." ), "docs/p.md": SEEDED, "history/a.md": SEEDED } )
     rc, lines = _blocking( repo )
     assert rc == gate.REFUSAL_EXIT
     assert "[doc-lint] 1 refusals, commit REFUSED" in lines and REFUSE_1 in lines
-    assert f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] REFUSED docs/p.md:1: {CAPS}" in lines and f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines
     assert f"[doc-lint] 1 findings in {WARN_SET}{WARN_MARK}" in lines
 
 
 def test_without_blocking_a_finding_in_a_warn_only_file_is_marked_and_nothing_is_refused( repo, monkeypatch ):
     _no_external( monkeypatch )
-    _stage( repo, { "history.md": SEEDED, "docs/p.md": SEEDED } )
+    _stage( repo, { "history/a.md": SEEDED, "docs/p.md": SEEDED } )
     err = io.StringIO()
     assert gate.main( [ "--repo-root", str( repo ) ], err ) == 0
     lines = err.getvalue().split( "\n" )
-    assert f"[doc-lint] history.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] docs/p.md:1: {CAPS}" in lines
+    assert f"[doc-lint] history/a.md:1: {CAPS}{WARN_MARK}" in lines and f"[doc-lint] docs/p.md:1: {CAPS}" in lines
     assert "[doc-lint] 2 findings on staged lines (warn mode, commit allowed)" in lines and not [ ln for ln in lines if "REFUSED" in ln ]
-    assert not [ ln for ln in lines if "findings in history.md or TODO.md" in ln ]            # that summary belongs to --blocking
+    assert not [ ln for ln in lines if "findings in history/ or todo-history/" in ln ]            # that summary belongs to --blocking
 
 
 def test_an_empty_prefix_tuple_excepts_nothing( monkeypatch ):
@@ -1162,12 +1241,12 @@ def test_the_chain_runs_the_gate_blocking_and_refuses_a_finding_on_a_staged_line
     assert "commit allowed" not in res.stderr and "ALLOWED" not in res.stderr
 
 
-def test_the_chain_allows_a_finding_in_the_root_history_file_and_prints_the_warn_marking( repo ):
+def test_the_chain_allows_a_finding_in_an_archive_file_and_prints_the_warn_marking( repo ):
     _install_real_doc_lint( repo )
-    _stage( repo, { "history.md": "This is NOT fine.\n" } )
+    _stage( repo, { "history/2026-08-history.md": "This is NOT fine.\n" } )
     res = _run_chain( repo )
     assert res.returncode == 0
-    assert "[doc-lint] history.md:1: caps: ALL-CAPS word NOT (warn mode, commit allowed)" in res.stderr.split( "\n" )
+    assert "[doc-lint] history/2026-08-history.md:1: caps: ALL-CAPS word NOT (warn mode, commit allowed)" in res.stderr.split( "\n" )
     assert "REFUSED" not in res.stderr and "[pre-commit-chain] doc-lint" not in res.stderr
 
 
@@ -1308,12 +1387,12 @@ def test_files_outside_the_swept_scope_are_warned_not_refused_and_the_tracking_f
         "src/tests/t.py"      : SWEPT_CAPS,
         "src/pkg/test_b.py"   : SWEPT_CAPS,
         "src/rnd/doc.py"      : SWEPT_CAPS,
-        "history.md"          : md,
-        "TODO.md"             : md,
+        "history/a.md"        : md,
+        "todo-history/a.md"   : md,
     } )
     rc, text = _gate( repo )
     assert rc == 0 and "REFUSED" not in text
-    assert "src/lupin_mcp/a.py:5: caps" in text and "history.md:1:" in text and "TODO.md:1:" in text
+    assert "src/lupin_mcp/a.py:5: caps" in text and "history/a.md:1:" in text and "todo-history/a.md:1:" in text
     assert "swept scope: 0 files checked, 0 docstrings checked, 0 findings, 0 waivers honoured, 0 unparsed" in text
 
 

@@ -643,7 +643,7 @@ def _merge_bringing( repo, ours, theirs ):
     _stage( repo, { "docs/ok.md": "Resolved text.\n" } )
 
 
-@pytest.mark.parametrize( "rel", [ "history.md", "TODO.md" ] )
+@pytest.mark.parametrize( "rel", [ "history/2026-08.md", "todo-history/2026-08.md" ] )
 def test_a_binary_warn_only_file_is_named_in_a_warning_and_the_same_name_in_a_folder_is_refused( repo, monkeypatch, rel ):
     _no_external( monkeypatch )
     assert gate.is_warn_only( rel ) and not gate.is_warn_only( f"docs/{rel}" )

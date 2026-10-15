@@ -19,6 +19,10 @@ WORD_REGEX       = re.compile( r"[A-Za-z0-9][\w'’\-]*" )
 CAPS_REGEX       = re.compile( r"\b[A-Z][A-Z0-9]+\b" )
 MEMBER_ACCESS    = re.compile( r"[A-Za-z_][A-Za-z0-9_]*\.$" )
 OPTION_ARGUMENT  = re.compile( r"(?<![A-Za-z0-9_-])-{1,2}[A-Za-z][A-Za-z0-9_-]*[ \t]+$" )
+# A bracketed project prefix at the start of an item, such as a project tag or a plan tag, read from the text before the word.
+# Rick ruled it an identifier, the way an acronym is (task-store row id=486cc499).
+PROJECT_PREFIX_HEAD = re.compile( r"[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+)?(?:\[[ xX]\][ \t]+)?(?:\[[A-Z0-9_]+\][ \t]*)*\[" )
+PROJECT_PREFIX_END  = re.compile( r"\](?:$|[ \t:])" )
 FRONTMATTER      = re.compile( r"\A---\n.*?\n---\n", re.DOTALL )
 FENCED_BLOCK     = re.compile( r"^(```|~~~).*?^\1[^\n]*$", re.DOTALL | re.MULTILINE )
 INLINE_CODE      = re.compile( r"`[^`\n]*`" )
@@ -162,6 +166,7 @@ def caps_words( text, words=None ):
         - both of those checks read only the text before the word on its own line, so the cost grows with line length and not with the page
         - a capitalised word after a period and a space is still read as prose
         - a word that follows a command-line option and a space, as in `--json OUT`, is the option's placeholder and is skipped
+        - a word inside square brackets at the start of an item, as in `- [LUPIN] Fix it`, is a project prefix and is skipped; `- PENDING item` is not
         - a word after a bare double dash and a space is still read as prose, and so is a capitalised word after a plain word
         - a prose sentence that puts a capitalised word right after an option name is skipped too; that is a chosen limit
 
@@ -178,6 +183,7 @@ def caps_words( text, words=None ):
         if before in ( "_", "-" ) or after in ( "_", "-" ): continue
         line_head = text[ text.rfind( "\n", 0, m.start() ) + 1 : m.start() ]
         if before == "." and MEMBER_ACCESS.search( line_head ) is not None: continue
+        if before == "[" and PROJECT_PREFIX_HEAD.fullmatch( line_head ) is not None and PROJECT_PREFIX_END.match( text, m.end() ) is not None: continue
         if before in ( " ", "\t" ) and OPTION_ARGUMENT.search( line_head ) is not None: continue
         if any( c.isdigit() for c in word ) or word in CAPS_WORD_EXCEPTIONS: continue
         if word.lower() in words: found.append( word )

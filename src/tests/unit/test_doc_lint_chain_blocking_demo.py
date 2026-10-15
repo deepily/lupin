@@ -31,9 +31,10 @@ CHAIN_REFUSE  = "[pre-commit-chain] doc-lint gate REFUSED the commit: fix each R
 CHAIN_ALLOW_1 = "[pre-commit-chain] doc-lint gate exited 1 without a refusal verdict, commit ALLOWED: findings above, if any, were NOT enforced. If this tree's gate.py predates blocking, rebase."
 GATE_CRASH    = "[doc-lint] GATE CRASHED, commit allowed: RuntimeError: injected linter crash"
 GATE_REFUSE   = "[doc-lint] 1 findings on staged lines, commit REFUSED: fix each REFUSED line above, stage the fix and commit again"
-WARN_SET      = "history.md or TODO.md or bug-fix-queue.md or history/ or todo-history/"
+WARN_SET      = "history/ or todo-history/"
 WARN_SUMMARY  = f"[doc-lint] 1 findings in {WARN_SET} (warn mode, commit allowed)"
-RECORDS       = [ "history.md", "TODO.md", "bug-fix-queue.md", "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+RECORDS       = [ "history/2026-08-history.md", "todo-history/2026-08-todo.md" ]
+ROOT_RECORDS  = [ "history.md", "TODO.md", "bug-fix-queue.md" ]
 ALIKE         = [ "x/history.md", "x/bug-fix-queue.md", "src/history.md", "historyx/a.md", "src/history/a.md", "x/todo-history/a.md", "src/cosa/history/a.md", "src/cosa/TODO.md", "src/cosa/history.md" ]
 CLEAN_LINE    = "[doc-lint] 0 findings on staged lines (blocking)"
 DOCSTRING_PY  = 'def f():\n    """\n    Return it.\n\n    This is NOT fine.\n    """\n'
@@ -248,22 +249,32 @@ def test_the_same_finding_in_a_look_alike_of_a_record_location_stops_a_real_comm
     assert _commit_count( scratch ) == 0
 
 
-def test_a_clean_file_beside_a_finding_in_the_root_history_file_is_committed( scratch ):
-    _stage( scratch, { "docs/p.md": CLEAN, "history.md": SEEDED } )
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_a_root_record_file_entry_with_a_date_a_row_id_and_a_shouted_word_is_committed_by_rule_set_b( scratch, rel ):
+    _stage( scratch, { "docs/p.md": CLEAN, rel: "# Log\n\nMeasured 2026-10-14 at 0123abc4, row 8dbe659a, this is NOT fine.\n" } )
     res = _commit( scratch )
     assert res.returncode == 0
-    assert f"[doc-lint] history.md:3: {CAPS}{WARN_MARK}" in res.stderr.split( "\n" ) and "REFUSED" not in res.stderr
-    assert _commit_count( scratch ) == 1 and _committed_paths( scratch ) == [ "docs/p.md", "history.md" ]
+    assert f"{rel}:" not in res.stderr and "REFUSED" not in res.stderr
+    assert _commit_count( scratch ) == 1 and _committed_paths( scratch ) == sorted( [ "docs/p.md", rel ] )
 
 
-def test_a_finding_in_the_root_history_file_does_not_excuse_a_finding_in_another_page( scratch ):
-    _stage( scratch, { "docs/p.md": SEEDED, "history.md": SEEDED } )
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_a_root_record_file_entry_with_a_dead_link_stops_a_real_commit( scratch, rel ):
+    _stage( scratch, { rel: "# Log\n\nFixed it, see [gone](nope.md).\n" } )
+    res = _commit( scratch )
+    assert res.returncode == 1
+    assert [ ln for ln in res.stderr.split( "\n" ) if ln.startswith( f"[doc-lint] REFUSED {rel}:3: dead-link:" ) ]
+    assert _commit_count( scratch ) == 0
+
+
+def test_a_finding_in_an_archive_file_does_not_excuse_a_finding_in_another_page( scratch ):
+    _stage( scratch, { "docs/p.md": SEEDED, "history/2026-08-history.md": SEEDED } )
     res   = _commit( scratch )
     lines = res.stderr.split( "\n" )
     assert res.returncode == 1
-    assert f"[doc-lint] REFUSED docs/p.md:3: {CAPS}" in lines and f"[doc-lint] history.md:3: {CAPS}{WARN_MARK}" in lines
+    assert f"[doc-lint] REFUSED docs/p.md:3: {CAPS}" in lines and f"[doc-lint] history/2026-08-history.md:3: {CAPS}{WARN_MARK}" in lines
     refused = [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED " ) ]
-    assert len( refused ) == 1 and "history.md" not in refused[ 0 ]
+    assert len( refused ) == 1 and "history/" not in refused[ 0 ]
     assert GATE_REFUSE in lines and WARN_SUMMARY in lines and CHAIN_REFUSE in lines
     assert _commit_count( scratch ) == 0
 

@@ -64,13 +64,22 @@ from .word_list import configure_root
 # Repo-relative directory prefixes, each ending in a slash, for example "src/cosa/agents/".
 BLOCKING_PACKAGES = ()
 REFUSAL_EXIT      = 3
-# The record locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
+# The locations --blocking leaves in warn mode. WARN_ONLY_PATHS holds exact repo-relative paths.
 # A file of the same name in any other folder, src/cosa/history.md among them, is held like every other page.
 # WARN_ONLY_PREFIXES holds folders, each ending in a slash and matched from the repo root.
 # So src/cosa/history/ is not among them, and neither is a history/ folder below the root.
-# Task-store row id=486cc499 gives the root history.md and TODO.md their own rule set and ends their exception.
-WARN_ONLY_PATHS    = ( "history.md", "TODO.md", "bug-fix-queue.md" )
+# Rick's ruling on the card "María: four rulings", task-store row id=486cc499: history/ and todo-history/ stay warn-only as a
+# standing exception ("Yes, standing exception"), because 18,649 findings sit on archive text nobody will rewrite.
+WARN_ONLY_PATHS    = ()
 WARN_ONLY_PREFIXES = ( "history/", "todo-history/" )
+# The root record files. They block, judged on added lines, under rule set B of the same ruling ("I'll go with your
+# recommended set B"): the rules in RECORD_RULES_OFF and RECORD_DATE_RULES, and a bare-ref of the row-id-or-sha kind,
+# do not apply to them, since a record is where dates, rows and commits are cited. Every other rule blocks.
+RECORD_PATHS       = ( "history.md", "TODO.md", "bug-fix-queue.md" )
+RECORD_DATE_RULES  = frozenset( { "iso-date", "dated-banner" } )
+# Rick ruled these two off for now, and said they come back once the writing rules are fixed (row 8188ff76).
+# To turn them back on, make this frozenset() and nothing else changes.
+RECORD_RULES_OFF   = frozenset( { "caps", "sentence-length" } )
 WARN_ONLY_MARK     = " (warn mode, commit allowed)"
 PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the commit)"
 MERGED_MARK        = " (warn mode, commit allowed: this line came in with the merged or picked commit)"
@@ -154,6 +163,27 @@ def is_warn_only( path ):
         - nothing
     """
     return path in WARN_ONLY_PATHS or path.startswith( WARN_ONLY_PREFIXES )
+
+
+def is_record_exempt( finding ):
+    """
+    Say whether rule set B drops a finding in a root record file.
+
+    Requires:
+        - finding is a Finding
+
+    Ensures:
+        - False for a file outside RECORD_PATHS, whatever the rule
+        - True for a rule in RECORD_DATE_RULES or RECORD_RULES_OFF
+        - True for a bare-ref whose quoted text is a row, ticket or commit id
+        - False for every other rule, a bare-ref of the section or label kind and agent-imperative included
+
+    Raises:
+        - nothing
+    """
+    if finding.path not in RECORD_PATHS: return False
+    if finding.rule in RECORD_DATE_RULES or finding.rule in RECORD_RULES_OFF: return True
+    return finding.rule == "bare-ref" and is_mechanical( finding )
 
 
 def page_condition( finding ):
@@ -876,6 +906,7 @@ def collect( root ):
     Ensures:
         - returns ( findings, warnings, refusal_lines, tally ); refusal_lines are the printable lines
         - findings are limited to lines the staged diff touched, minus anything already in refusals
+        - a finding is_record_exempt names is left out, so a root record file is judged under rule set B
         - a refused or waived finding is left out as that one finding; a finding of another linter with the same place and words stays
         - a docstring finding with an honoured waiver marker on its line is left out of findings, in a swept file and in any other Python file
         - refusals hold every mechanical finding anywhere in a staged file inside BLOCKING_PACKAGES
@@ -987,7 +1018,7 @@ def collect( root ):
         lines_out += exports_refusals
         warnings  += exports_warnings
     dropped  = { id( f ) for f in refusals + waived }
-    kept     = [ f for f in filter_findings( findings, ranges ) if id( f ) not in dropped ]
+    kept     = [ f for f in filter_findings( findings, ranges ) if id( f ) not in dropped and not is_record_exempt( f ) ]
     return kept, ruff_warnings + md_warnings + warnings, lines_out, tally
 
 

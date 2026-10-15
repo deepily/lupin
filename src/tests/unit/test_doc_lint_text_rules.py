@@ -488,3 +488,19 @@ def test_the_committed_api_md_footer_matches_the_exemption():
     root = subprocess.run( [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True, check=True ).stdout.strip()
     last = open( root + "/src/docs/fastapi/api.md", encoding="utf-8" ).read().rstrip( "\n" ).split( "\n" )[ -1 ]
     assert tr.GENERATED_FOOTER.match( last ) is not None
+
+
+# ---- a bracketed project prefix at the start of an item is an identifier (row 486cc499, Rick's ruling) ----
+
+def test_a_bracketed_project_prefix_at_the_start_of_an_item_is_not_a_caps_finding():
+    words = WORDS | frozenset( { "plan", "fix", "pending", "item", "the", "scanner" } )
+    for line in ( "- [LUPIN] Fix the scanner.", "- [PLAN] Fix the scanner.", "[PLAN] Fix the scanner.", "* [ ] [PLAN] Fix the scanner.", "1. [LUPIN] [PLAN] Fix", "## [PLAN] Fix the scanner" ):
+        assert mc.caps_words( line, words ) == [], line
+    assert mc.caps_words( "- PENDING item", words ) == [ "PENDING" ]
+
+
+def test_a_bracketed_caps_word_that_is_not_a_prefix_is_still_emphasis():
+    words = WORDS | frozenset( { "plan", "fix", "pending" } )
+    assert mc.caps_words( "- Fix the [PLAN] now", words ) == [ "PLAN" ]
+    assert mc.caps_words( "- [PENDING]x Fix", words ) == [ "PENDING" ]
+    assert mc.caps_words( "- [PLAN]: NOT done", words ) == [ "NOT" ]
