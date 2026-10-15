@@ -27,7 +27,7 @@ The text and arguments of the owner's yes/no card, the un-park card check, and t
 - `unpark_ask_text` and `unpark_ask_payload` build the un-park card and its `{ kind, task_id, move }` binding.
 - `approval_card_id( receipt_refs )` returns the cited `approval_card` as a UUID, or `None`.
 - `unpark_card_refusal( card, task_id, parked_since, used_card_ids )` returns `None` only when a person answered yes on the operator's login and the card names this row. The card must also be newer than the park and unused by any earlier transition.
-- `deadlines_for( requested_at, timeout_fn, grace_fn )` returns a `PromotionDeadlines` with `answer_by` (the ask timeout) and `resolves_by` (answer window plus notification grace plus apply margin). `resolves_by_for` gives the second alone, and `get_notification_grace_seconds` reads the grace.
+- `deadlines_for( requested_at, timeout_fn, grace_fn )` returns a `PromotionDeadlines` with `answer_by`, the request time plus the ask timeout. Its `resolves_by` is `answer_by` plus notification grace plus apply margin. `resolves_by_for` gives the second alone, and `get_notification_grace_seconds` reads the grace.
 - `TransitionIntent` is the stored shape of a caller's transition; `as_payload` and `from_payload` convert both ways. Account identity is not stored.
 - `sweep_stalled_tickets` marks pending tickets past their stored `resolves_by` as stalled and returns their ids.
 

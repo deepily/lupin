@@ -19,7 +19,7 @@ The pieces of the holding-area promotion gate that decide whether to ask the own
 ## What it does
 - `get_ask_timeout_seconds()` is how long the owner has to answer. It never decides whether the owner is asked. `get_asynchronous_enabled()` is the operator's switch for the asynchronous path and fails closed when absent.
 - `promotion_is_asynchronous( requested, enabled_fn )` is true only when that switch is on and the caller passed exactly `True`. Silence, or a non-bool, keeps the synchronous behaviour.
-- `promotion_precheck` runs everything decidable without asking. It returns a refusing `PromotionApproval` for a non-manager, an allowing one stamped `self` for an ask-exempt caller, or `None` when the ask must fire. It fires no ask itself.
+- `promotion_precheck` runs everything decidable without asking. It refuses a caller who is not a manager and has no login account mapped to an approver. It allows an ask-exempt caller, stamped `self`. It returns `None` when the ask must fire, and it fires no ask itself.
 - `approval_from_the_ask` asks the owner and reads the answer. Only an answer starting with `yes` allows; a real no, any other answer and a timed-out default all refuse.
 - `AskOutcome` carries one answer, a real boolean `default_used`, and `answered_by`, the stamp the server saw.
 - `PromotionApproval` is the decision. `authority_suffix` is the text added to the transition's `authority`, empty when nothing was blessed. `reason_with_suffix` appends it to the operator's own reason and never replaces it.
