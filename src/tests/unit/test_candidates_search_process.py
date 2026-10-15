@@ -147,10 +147,10 @@ class TestMalformedRequests:
         ( { "vectors_dir": "/v" },                                            "query_vectors" ),
         ( { "vectors_dir": "/v", "query_vectors": {} },                       "query_vectors" ),
         ( { "vectors_dir": "/v", "query_vectors": [ 1.0 ] },                  "query_vectors" ),
-        ( { "vectors_dir": "/v", "query_vectors": { "prose": [] } },          "finite numbers" ),
-        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ "x" ] } },     "finite numbers" ),
-        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ True ] } },    "finite numbers" ),
-        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ float( "nan" ), 0.0 ] } }, "finite numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [] } },          "list of numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ "x" ] } },     "list of numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ True ] } },    "list of numbers" ),
+        ( { "vectors_dir": "/v", "query_vectors": { "prose": [ float( "nan" ), 0.0 ] } }, "float32 range" ),
         ( { "vectors_dir": 3, "query_vectors": { "prose": [ 1.0 ] } },        "vectors_dir" ),
         ( { "vectors_dir": "/v", "query_vectors": { "nope": [ 1.0, 0.0 ] } }, "no matrix nope" ),
         ( { "vectors_dir": "/v", "query_vectors": { "prose": [ 1.0, 0.0, 0.0 ] } }, "3 values" ),
@@ -230,20 +230,28 @@ class TestLowNotes:
         code, body = run_main( request )
         assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "not finite" in body[ "detail" ]
 
+    @pytest.mark.parametrize( "value", [ 10 ** 400, -10 ** 400, 5e38, float( "inf" ), float( "-inf" ), float( "nan" ) ] )
+    def test_huge_integers_and_non_finite_numbers_are_refused( self, generation, value ):
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ value, 0.0 ] } )
+        code, body = run_main( request )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "float32 range" in body[ "detail" ]
+
     def test_loader_oserror_is_a_named_error( self, generation ):
         def loader( folder ): raise PermissionError( "denied" )
         request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
         code, body = run_main( request, loader )
         assert code == 2 and body[ "error" ] == "VECTOR_SET_UNAVAILABLE" and "denied" in body[ "detail" ]
 
-    def test_ids_and_rows_that_disagree_are_refused( self, generation ):
+    @pytest.mark.parametrize( "rows", [ 2, 4 ] )
+    def test_ids_and_rows_that_disagree_are_refused( self, generation, rows ):
         class Skewed( FakeSet ):
             def __init__( self ):
                 super().__init__()
-                self.matrices = { k: v[ :2 ] for k, v in self.matrices.items() }
+                pad           = np.zeros( ( 1, 2 ), dtype=np.float32 )
+                self.matrices = { k: np.vstack( [ v, pad ] ) if rows > 3 else v[ :rows ] for k, v in self.matrices.items() }
         request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
         code, body = run_main( request, lambda d: Skewed() )
-        assert code == 2 and body[ "error" ] == "VECTOR_SET_CORRUPT" and "2 rows" in body[ "detail" ]
+        assert code == 2 and body[ "error" ] == "VECTOR_SET_CORRUPT" and f"{rows} rows" in body[ "detail" ]
 
 
 class TestShortlistSize:

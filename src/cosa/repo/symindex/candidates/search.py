@@ -5,7 +5,6 @@ It reads one JSON request on standard input and writes one JSON answer on standa
 It holds no state between calls. This module imports numpy only when it ranks by cosine.
 """
 import json
-import math
 import pathlib
 import sys
 
@@ -43,7 +42,8 @@ def validate_request( request ):
         - returns None when need is a string, K a positive int, index_dir a string
         - checks fusion, when present, holds k and depth as positive ints and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
-        - checks query_vectors is a non-empty dict of lists of finite numbers within float32 range when vectors_dir is set
+        - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
+        - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
 
     Raises:
         - CandidateError BAD_SEARCH_REQUEST naming the first key that is wrong
@@ -67,9 +67,9 @@ def validate_request( request ):
     vectors = request.get( "query_vectors" )
     if not isinstance( vectors, dict ) or not vectors: bad( "query_vectors is missing or empty" )
     for name, vector in vectors.items():
-        numbers = isinstance( vector, list ) and vector and all( isinstance( v, ( int, float ) ) and not isinstance( v, bool ) and math.isfinite( v ) for v in vector )
-        if not numbers: bad( f"query vector {name} is not a non-empty list of finite numbers" )
-        if any( abs( v ) > FLOAT32_MAX for v in vector ): bad( f"query vector {name} holds a value beyond float32 range" )
+        numbers = isinstance( vector, list ) and vector and all( isinstance( v, ( int, float ) ) and not isinstance( v, bool ) for v in vector )
+        if not numbers: bad( f"query vector {name} is not a non-empty list of numbers" )
+        if not all( abs( v ) <= FLOAT32_MAX for v in vector ): bad( f"query vector {name} holds a value that is not finite or is beyond float32 range" )
 
 
 def cosine_ranked( ids, matrix, query ):
