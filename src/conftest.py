@@ -58,6 +58,7 @@ if os.environ.get( "PYTEST_XDIST_WORKER" ) is not None:
         _handed_off = { }
     for _key, _value in _handed_off.items():
         if os.environ.get( _key ) == _value: _dotenv_password._SEEDED[ _key ] = _value
+    _seed_db_password_from_dotenv()
 else:
     _seed_db_password_from_dotenv()
     if _dotenv_password._SEEDED: os.environ[ _SEEDED_LOGIN_HANDOFF ] = json.dumps( _dotenv_password._SEEDED )
