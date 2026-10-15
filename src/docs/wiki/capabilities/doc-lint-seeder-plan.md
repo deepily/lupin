@@ -23,7 +23,7 @@ pins:
 The plan phase of the labelled-set seeding script. It draws the dev, gate and reserve splits and the writer tasks, and makes no model call. Candidates come from [[doc-lint-seeder-candidates]].
 
 ## Drawing
-- `build_docs` returns the usable docstrings by kind with their candidates, and the sorted units. A docstring under 3 lines or in the exclude list is left out, and so is a kind with no candidate.
+- `build_docs` returns the usable docstrings by kind with their candidates, and the sorted units. A docstring under 3 lines or in the exclude list is left out. A docstring is kept under a kind only if it has a candidate of that kind.
 - `pick` picks docstrings for a kind with a candidate each, meeting the short, class and stratum quotas. A floor is never relaxed: it raises `Shortfall` naming what is missing.
 - `draw_split` draws one split's picks per kind from the units it owns. `seed_search` tries split seeds until dev, gate and reserve can each fill every kind and stratum.
 
