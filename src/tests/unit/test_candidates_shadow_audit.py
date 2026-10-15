@@ -304,10 +304,11 @@ class TestQueueAndRun:
         left = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
         assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "n1", 2 ) ]
 
-    def test_a_stored_file_that_parses_but_is_not_a_receipt_is_refused( self, tmp_path ):
+    @pytest.mark.parametrize( "text", [ json.dumps( [ 1 ] ), json.dumps( list( sa.RECEIPT_FIELDS ) ), json.dumps( "outcome" ) ] )
+    def test_a_stored_file_that_parses_but_is_not_a_receipt_is_refused( self, tmp_path, text ):
         receipt = receipt_for( "n", "NEW", [] )
         ( tmp_path / "receipts" ).mkdir()
-        ( tmp_path / "receipts" / f"shadow-{receipt[ 'id' ]}.json" ).write_text( json.dumps( [ 1 ] ) )
+        ( tmp_path / "receipts" / f"shadow-{receipt[ 'id' ]}.json" ).write_text( text )
         with pytest.raises( CandidateError ) as caught:
             sa.store_receipt( tmp_path, receipt )
         assert caught.value.code == sa.AUDIT_RECEIPT_CORRUPT and "wrong shape" in caught.value.detail
