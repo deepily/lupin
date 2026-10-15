@@ -61,4 +61,4 @@ def test_main_refuses_a_wrong_argument_count( capsys ):
 def test_the_generator_script_runs_the_repair_before_it_stamps_the_footer():
     text = ( pathlib.Path( cu.get_project_root() ) / "src" / "scripts" / "generate-api-docs.sh" ).read_text( encoding="utf-8" )
     call = '"$VENV_PYTHON" "$LUPIN_ROOT/src/scripts/fix_api_md_tables.py"'
-    assert text.count( call ) == 1 and text.index( call ) < text.index( "Inject timestamp footer" )
+    assert text.count( call ) == 1 and text.index( call ) < text.index( "Inject the footer" )
