@@ -955,3 +955,33 @@ def test_env_dash_s_is_seen_although_the_review_listed_it_as_unseen():
 def test_a_marker_after_a_closed_quote_is_a_real_heredoc():
     """A quote that closes before the marker must not hide it: its body is data."""
     assert _deny( "echo 'a b' \"c\" <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "echo $((1<<n))\npgrep -f pytest | xargs kill",
+    "echo ${x:-<<EOF}\npgrep -f pytest | xargs kill",
+    "(( a<<b ))\npgrep -f pytest | xargs kill",
+    "case x in <<EOF) :;; esac\npgrep -f pytest | xargs kill",
+    "echo $(( 1 << 3 )) $(( x<<EOF ))\npgrep -f pytest | xargs kill",
+    "x=$((a<<b)); echo ${y}\npgrep -f pytest | xargs kill",
+] )
+def test_a_shift_or_a_pattern_that_looks_like_a_heredoc_does_not_strip_the_next_line( command ):
+    """`<<` is a shift, or text, in these places. None of them opens a heredoc."""
+    assert _deny( command ) is not None
+    assert _strip_heredocs( command ) == command
+
+
+def test_a_real_heredoc_after_arithmetic_and_an_expansion_is_still_stripped():
+
+    command = "echo $((1<<2)) ${x}\ncat <<EOF\nps -e | xargs kill\nEOF\necho done"
+    assert _deny( command ) is None
+
+
+def test_a_closed_arithmetic_span_does_not_hide_a_later_marker_on_the_line():
+
+    assert _deny( "echo $((1+2)) ${x} <<EOF\nps -e | xargs kill\nEOF" ) is None
+
+
+def test_an_unclosed_expansion_is_text_to_the_end_of_the_line_and_the_next_line_is_read():
+    """`${x` never closes, so the marker is inside it. Reading the next line is the safe side."""
+    assert _deny( "echo ${x <<EOF\npgrep -f pytest | xargs kill" ) is not None

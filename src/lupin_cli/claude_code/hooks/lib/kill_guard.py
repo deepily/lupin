@@ -269,11 +269,15 @@ _KILL_VERB_RE = re.compile(
 _HEREDOC_RE = re.compile( r"(?<!<)<<(?!<)-?\s*(['\"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)\1" )
 
 
+# The head of a one-line `case WORD in`: what follows, up to the first `)`, is a pattern list and not a command.
+_CASE_HEAD_RE = re.compile( r"[ \t]*case\b.*?\bin\b" )
+
+
 def _heredoc_marker_in( line: str ) -> Optional[ str ]:
     """
     The tag of the first real heredoc marker on one line, or None.
 
-    A marker inside a quoted span, or after a comment `#`, is text and opens no heredoc.
+    A marker inside a quoted span, `$(( ))`, `(( ))`, `${ }`, a one-line case pattern list, or after a comment `#`, is text.
     Treating it as one dropped the next line, which is where a sweep could sit.
 
     Requires:
@@ -284,16 +288,21 @@ def _heredoc_marker_in( line: str ) -> Optional[ str ]:
         - `#` starts a comment only at the start of a word
         - returns None when every marker on the line is text
     """
-    quote = None
-    index = 0
+    quote         = None
+    index         = 0
     start_of_word = True
-    markers = [ match.start() for match in _HEREDOC_RE.finditer( line ) ]
-    position = 0
+    arith         = 0
+    braces        = 0
+    markers       = [ match.start() for match in _HEREDOC_RE.finditer( line ) ]
+    case_head     = _CASE_HEAD_RE.match( line )
+    case_text     = ( case_head.end(), line.find( ")", case_head.end() ) ) if case_head else ( 0, 0 )
+    position      = 0
     while position < len( line ) and index < len( markers ):
         char = line[ position ]
-        if position == markers[ index ] and quote is None:
-            return _HEREDOC_RE.match( line, position ).group( "tag" )
         if position == markers[ index ]:
+            is_text = quote is not None or arith > 0 or braces > 0 or case_text[ 0 ] <= position < case_text[ 1 ]
+            if not is_text:
+                return _HEREDOC_RE.match( line, position ).group( "tag" )
             index += 1
             continue
         if char == "\\" and quote != "'":
@@ -306,6 +315,22 @@ def _heredoc_marker_in( line: str ) -> Optional[ str ]:
             quote = char
         elif char == "#" and start_of_word:
             return None
+        elif line.startswith( "$((", position ) or ( start_of_word and line.startswith( "((", position ) ):
+            arith    += 1
+            position += 3 if char == "$" else 2
+            start_of_word = False
+            continue
+        elif arith > 0 and line.startswith( "))", position ):
+            arith    -= 1
+            position += 2
+            continue
+        elif line.startswith( "${", position ):
+            braces   += 1
+            position += 2
+            start_of_word = False
+            continue
+        elif char == "}" and braces > 0:
+            braces -= 1
         start_of_word = quote is None and char in " \t;&|(`{"
         position += 1
     return None
