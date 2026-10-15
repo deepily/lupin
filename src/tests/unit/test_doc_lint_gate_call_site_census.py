@@ -32,21 +32,30 @@ RANGE_MODULES = ( "range_gate", )
 
 # What the gate does when the place fails. CRASH is the loud line and exit 0, the top-level handler of gate.main.
 # SAID is a warning or a refusal that names the failure, with no crash. OFF is a place no commit reaches: a
-# command-line entry point of another tool, or a reader the gate replaces with its own.
+# command-line entry point of another tool, or a reader the gate replaces with its own. SAFE is a call that
+# answers False or swallows the failure by contract (os.path.exists, rmtree with ignore_errors), so there is no
+# failure to inject and no answer to compare.
 CRASH = "crash, commit allowed"
 SAID  = "said so, no crash"
 OFF   = "not on the gate's path"
 RANGE = "range gate entry point, not a commit's path"
+SAFE  = "cannot raise, nothing to inject"
 
 # A call is a place when its resolved name is one of these, however the module was imported, or when it is a
 # method of this name on any object. Resolving the name means `from subprocess import run as go` is still seen.
+# The claim is every spelling of a name in WATCHED and METHODS: a call the scanner cannot resolve to a name
+# (getattr, __import__, eval, exec) or a bare alias of a watched builtin is itself a place, so it needs a row.
 WATCHED = {
-    "subprocess" : { "run", "check_output", "check_call", "call", "Popen" },
-    "os"         : { "listdir", "scandir", "walk" },
+    "subprocess" : { "run", "check_output", "check_call", "call", "Popen", "getoutput", "getstatusoutput" },
+    "os"         : { "listdir", "scandir", "walk", "popen", "system", "stat", "fdopen" },
     "io"         : { "open" },
     "tempfile"   : { "mkdtemp", "mkstemp", "TemporaryDirectory", "NamedTemporaryFile" },
+    "shutil"     : { "copy", "copy2", "copyfile", "copytree", "move", "rmtree" },
+    "glob"       : { "glob", "iglob" },
 }
-METHODS = { "read_text", "read_bytes", "iterdir", "glob", "rglob" }
+METHODS    = { "read_text", "read_bytes", "iterdir", "glob", "rglob", "open", "write_text", "write_bytes", "stat", "exists" }
+UNRESOLVED = { "getattr", "__import__", "eval", "exec" }
+ALIASED    = { "open" }
 
 EXPECTED = {
     "changed_ranges.changed_line_ranges:subprocess.run#0" : ( CRASH, CRASH ),
@@ -102,6 +111,17 @@ EXPECTED = {
     "range_gate.main:subprocess.run#0"                       : RANGE,
     "ts_counts.extract:tempfile.mkdtemp#0"                   : ( CRASH, CRASH ),
     "ts_doc_exists.extract:tempfile.mkdtemp#0"               : ( CRASH, CRASH ),
+    "links.markdown_link_findings:.exists#0"              : SAFE,
+    "links.design_path_findings:.exists#0"                : SAFE,
+    "tool_runners.find_tool:.exists#0"                    : SAFE,
+    "tool_runners.find_tool:.exists#1"                    : SAFE,
+    "ts_counts.extract:shutil.rmtree#0"                   : SAFE,
+    "ts_doc_exists.extract:shutil.rmtree#0"               : SAFE,
+    "range_gate.working_epoch_text:.exists#0"                : RANGE,
+    "range_gate.check_commit:.exists#0"                      : RANGE,
+    "range_gate.sweep_stale:.exists#0"                       : RANGE,
+    "range_gate.sweep_stale:shutil.rmtree#0"                 : RANGE,
+    "range_gate.main:shutil.rmtree#0"                        : RANGE,
 }
 
 ERRORS = ( OSError( 13, "injected for the census" ), UnicodeDecodeError( "utf-8", b"\xff", 0, 1, "injected for the census" ) )
@@ -123,6 +143,7 @@ def _kind( call, aliases ):
     func = call.func
     if isinstance( func, ast.Name ):
         if func.id in ( "open", "runner" ): return func.id
+        if func.id in UNRESOLVED: return func.id
         resolved = aliases.get( func.id, "" )
     elif isinstance( func, ast.Attribute ) and isinstance( func.value, ast.Name ):
         resolved = f"{aliases.get( func.value.id, func.value.id )}.{func.attr}"
@@ -142,6 +163,8 @@ def _scan( module, path, tree ):
         for child in ast.iter_child_nodes( node ):
             inner = names + [ child.name ] if isinstance( child, ( ast.FunctionDef, ast.ClassDef ) ) else names
             kind  = _kind( child, aliases ) if isinstance( child, ast.Call ) else None
+            if kind is None and isinstance( child, ast.Name ) and child.id in ALIASED and not ( isinstance( node, ast.Call ) and node.func is child ):
+                kind = f"{child.id}-alias"
             if kind is not None:
                 key = ( ".".join( names ), kind )
                 found.append( ( f"{module}.{key[ 0 ]}:{key[ 1 ]}#{seen.get( key, 0 )}", path, child.lineno, child.end_lineno ) )
@@ -260,8 +283,10 @@ def _run( root, monkeypatch, target=None, error=None ):
 
 
 SPELLINGS = """
+import glob
 import io
 import os
+import shutil
 import subprocess as sp
 import tempfile
 from os import walk as tree_walk
@@ -283,6 +308,19 @@ def f( x ):
     runner( [ "git" ] )
     os.listdir( x )
     sp.run( [ "git" ] )
+    os.popen( x )
+    os.system( x )
+    os.stat( x )
+    os.fdopen( x )
+    sp.getoutput( x )
+    shutil.copy( x, x )
+    glob.glob( x )
+    Path( x ).open()
+    Path( x ).write_text( "" )
+    Path( x ).exists()
+    getattr( sp, "run" )( x )
+    __import__( "os" )
+    fn = open
 
 
 def g( x ):
@@ -295,7 +333,9 @@ def g( x ):
 def test_the_scanner_sees_every_spelling_of_a_place_and_nothing_else():
     found = [ ( site.split( ":" )[ 0 ], site.split( ":" )[ 1 ].split( "#" )[ 0 ] ) for site, _p, _a, _b in _scan( "m", "m.py", ast.parse( SPELLINGS ) ) ]
     assert found == [ ( "m.f", kind ) for kind in ( "subprocess.check_output", "subprocess.Popen", "subprocess.run", "os.scandir", "os.walk", "io.open",
-                                                    "tempfile.mkdtemp", ".read_text", ".iterdir", "open", "runner", "os.listdir", "subprocess.run" ) ]
+                                                    "tempfile.mkdtemp", ".read_text", ".iterdir", "open", "runner", "os.listdir", "subprocess.run",
+                                                    "os.popen", "os.system", "os.stat", "os.fdopen", "subprocess.getoutput", "shutil.copy", "glob.glob",
+                                                    ".open", ".write_text", ".exists", "getattr", "__import__", "open-alias" ) ]
 
 
 def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
@@ -309,17 +349,17 @@ def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
 
 def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     sites = [ site for site, _path, _first, _last in _sites() ]
-    assert len( sites ) == len( set( sites ) ) == 53 and sorted( sites ) == sorted( EXPECTED )
+    assert len( sites ) == len( set( sites ) ) == 64 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE ) ] == [ 12, 14 ]
-    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE ) ) == 27
+    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 12, 19, 6 ]
+    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 27
 
 
 def test_every_place_on_the_gates_path_answers_an_oserror_and_a_decode_error_as_its_row_says( scenarios, monkeypatch ):
     quiet   = [ _run( root, monkeypatch ) for root in scenarios ]
     reached = [ run[ 2 ] for run in quiet ]
-    on_path = sorted( site for site, row in EXPECTED.items() if row not in ( OFF, RANGE ) )
+    on_path = sorted( site for site, row in EXPECTED.items() if row not in ( OFF, RANGE, SAFE ) )
     assert sorted( reached[ 0 ] | reached[ 1 ] ) == on_path                                       # every row is reached by a scenario, and no place marked OFF is
     assert [ ( code, [ ln for ln in lines if "GATE CRASHED" in ln ] ) for code, lines, _reached in quiet ] == [ ( gate.REFUSAL_EXIT, [] ) ] * 2
     answers = {}
