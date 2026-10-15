@@ -1835,7 +1835,7 @@ def test_a_table_cut_under_other_rules_refuses_a_commit_that_stages_a_counted_fi
     assert rc == 0 and "REFUSED" not in text and "table stale" in text
 
 
-def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_only_warns( stamped, monkeypatch ):
+def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_refuses_unless_a_readable_one_is_staged( stamped, monkeypatch ):
     _no_external( monkeypatch )
     _stage( stamped, { "src/pkg/keep.py": CLEAN, TABLE: "garbage" } )
     rc, text = _gate( stamped )
@@ -1843,7 +1843,21 @@ def test_a_malformed_staged_table_is_refused_and_a_malformed_committed_table_onl
     _git( stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
     _stage( stamped, { "src/tests/t.py": ONE } )
     rc, text = _gate( stamped )
-    assert rc == 0 and "[doc-lint] WARNING: the count table at HEAD is malformed" in text and "table malformed" in text
+    assert rc == 3 and "table malformed" in text
+    assert f"[doc-lint] REFUSED {TABLE}: the count table at HEAD is malformed (table is not JSON" in text and "stage a regenerated one" in text
+    assert "python3 -m cosa.repo.doc_lint.counts --repo-root \"$PWD\" --write" in text
+    _table( stamped, { "src/tests/t.py": 1 } )                                          # a readable replacement under the current stamp
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
+
+
+def test_a_malformed_committed_table_does_not_stop_a_commit_that_stages_no_counted_file( stamped, monkeypatch ):
+    _no_external( monkeypatch )
+    _stage( stamped, { TABLE: "garbage" } )
+    _git( stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
+    _stage( stamped, { "notes.md": "A note.\n" } )
+    rc, text = _gate( stamped )
+    assert rc == 0 and "REFUSED" not in text and "[doc-lint] WARNING: the count table at HEAD is malformed" in text
 
 
 def test_a_staged_table_nested_too_deeply_to_read_is_refused_and_does_not_crash_the_gate( stamped, monkeypatch ):
@@ -2366,14 +2380,17 @@ def test_a_ts_table_cut_under_other_rules_refuses_a_commit_that_stages_a_ts_file
     assert rc == 0 and "REFUSED" not in text
 
 
-def test_a_malformed_staged_ts_table_is_refused_and_a_malformed_committed_one_only_warns( ts_stamped ):
+def test_a_malformed_staged_ts_table_is_refused_and_a_malformed_committed_one_refuses_unless_a_readable_one_is_staged( ts_stamped ):
     _stage( ts_stamped, { "src/keep.ts": TS_CLEAN, TS_TABLE: "garbage" } )
     rc, text = _gate( ts_stamped )
     assert rc == 3 and f"REFUSED {TS_TABLE}: the staged table is malformed: table is not JSON" in text
     _git( ts_stamped, "commit", "-q", "--no-verify", "-m", "bad table" )
     _stage( ts_stamped, { "src/a.ts": TS_ONE } )
     rc, text = _gate( ts_stamped )
-    assert rc == 0 and f"WARNING: the {TS_NAME} count table at HEAD is malformed" in text
+    assert rc == 3 and f"[doc-lint] REFUSED {TS_TABLE}: the {TS_NAME} count table at HEAD is malformed (table is not JSON" in text and "stage a regenerated one" in text
+    _ts_table( ts_stamped, { "src/a.ts": 1 } )
+    rc, text = _gate( ts_stamped )
+    assert rc == 0 and "REFUSED" not in text and "table regenerated" in text
 
 
 def test_the_python_and_ts_tables_are_independent( ts_stamped ):

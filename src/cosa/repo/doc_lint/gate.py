@@ -666,6 +666,9 @@ def scope_check( root, ranges, scope ):
         - returns ( refusals, warnings, stats ); each refusal is one printable string, stats is the denominator
         - stats holds files, at_or_below, over, waivers and table, where table is ok, stale, absent, regenerated or malformed
         - with no table at HEAD and none staged, nothing is refused and the scope is reported as not checked
+        - a table at HEAD that cannot be read refuses a commit that stages a counted file and names the fix
+        - the same commit passes when it stages a readable table, which is then judged as a regeneration
+        - with no counted file staged, an unreadable table at HEAD is a warning
         - a staged table that raises an entry above HEAD is refused, unless it carries a new stamp
         - a new stamp must equal the stamp of the rule files now and the table must equal a census of the index
         - the current stamp is that of the staged rule files, so a staged rule edit moves it and an unstaged one does not
@@ -683,16 +686,20 @@ def scope_check( root, ranges, scope ):
     refusals = []
     warnings = []
     head_text = head_table_text( root, scope.table_path )
+    unreadable = None
     try:
         head = counts.parse_table( head_text ) if head_text is not None else None
     except counts.TableError as err:
-        stats[ "table" ] = "malformed"
-        return [], [ f"[doc-lint] WARNING: the {noun}count table at HEAD is malformed ({err}), the {noun}counted scope was NOT checked" ], stats
+        head, unreadable = None, err
     try:
         staged = counts.parse_table( staged_source( root, scope.table_path ) ) if table_staged else None
     except counts.TableError as err:
         stats[ "table" ] = "malformed"
         return [ f"[doc-lint] REFUSED {scope.table_path}: the staged table is malformed: {err}" ], [], stats
+    if unreadable is not None and staged is None:
+        stats[ "table" ] = "malformed"
+        if not paths: return [], [ f"[doc-lint] WARNING: the {noun}count table at HEAD is malformed ({unreadable}), the {noun}counted scope was NOT checked" ], stats
+        return [ f"[doc-lint] REFUSED {scope.table_path}: the {noun}count table at HEAD is malformed ({unreadable}), so no staged file can be counted; stage a regenerated one: {scope.regenerate}" ], [], stats
     table = staged if staged is not None else head
     if table is None:
         if paths: warnings.append( f"[doc-lint] WARNING: there is no {noun}count table at HEAD or staged, so the {noun}counted scope was NOT checked" )
