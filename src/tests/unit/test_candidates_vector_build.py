@@ -387,6 +387,8 @@ class SizeClient:
     def __init__( self ): self.batches = []
 
     def embed( self, texts, content_type, role ):
+        assert texts, "an empty batch was sent"
+        assert len( self.batches ) < 100, "the batching did not advance"
         self.batches.append( [ len( t ) for t in texts ] )
         return [ [ float( len( t ) ), 0.0 ] for t in texts ]
 
@@ -415,3 +417,10 @@ def test_the_count_limit_still_applies_when_every_text_is_short():
 def test_the_budget_is_pinned_below_the_measured_failure():
     """16 rows with a 3,857-character text is 61,712 and failed; 44,960 passed."""
     assert vb.CHAR_BUDGET <= 44960
+
+
+def test_a_batch_that_lands_exactly_on_the_budget_is_kept_whole():
+    half   = vb.CHAR_BUDGET // 2
+    client = SizeClient()
+    vb._embed_all( client, [ "a" * half, "b" * half, "c" * half ], "code", "document", 16, 0, lambda s: None )
+    assert client.batches == [ [ half, half ], [ half ] ]
