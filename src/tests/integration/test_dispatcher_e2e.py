@@ -121,6 +121,25 @@ def verify_claude_cli():
 
 # ============================================================================
 # Unit Tests (No external dependencies)
+def _require_dispatch_success( result, what ):
+    """
+    Fail the calling test when the dispatcher returned a failed TaskResult.
+
+    A dispatcher failure is the thing these tests exist to catch, so it is never a skip.
+    A skip is for a precondition that is absent, and the fixtures above already do that.
+
+    Requires:
+        - result is a TaskResult
+        - what names the task, for the failure message
+
+    Ensures:
+        - returns None when result.success is True
+        - otherwise fails with the task id and the dispatcher's error text
+    """
+    if result.success: return
+    pytest.fail( f"{what} failed in the dispatcher (task {result.task_id}): {result.error}" )
+
+
 # ============================================================================
 
 class TestDispatcherUnit:
@@ -271,7 +290,7 @@ class TestDispatcherE2E:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"\n⚠ E2E simple task failed: {result.error}" )
-            pytest.skip( f"Task failed (may be config issue): {result.error}" )
+            _require_dispatch_success( result, "bounded simple task" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -417,8 +436,7 @@ class TestDispatcherInteractive:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"\n⚠ Interactive session failed: {result.error}" )
-            # Don't fail - may be infrastructure issue
-            pytest.skip( f"Interactive task failed (may be config issue): {result.error}" )
+            _require_dispatch_success( result, "interactive basic session" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -462,7 +480,7 @@ class TestDispatcherInteractive:
             assert len( messages_received ) > 0, "No messages received during streaming"
             print( f"\n✓ Streaming validation passed with {len( messages_received )} messages" )
         else:
-            pytest.skip( f"Task failed: {result.error}" )
+            _require_dispatch_success( result, "interactive streaming session" )
 
     @pytest.mark.e2e
     @pytest.mark.asyncio
@@ -514,7 +532,7 @@ class TestDispatcherInteractive:
                 print( f"  Cost: ${result.cost_usd:.4f}" )
         else:
             print( f"⚠ Error: {result.error}" )
-            pytest.skip( f"Task failed: {result.error}" )
+            _require_dispatch_success( result, "interactive notify session" )
 
     @pytest.mark.e2e
     @pytest.mark.manual
@@ -802,3 +820,4 @@ class TestDispatcherMocked:
 
 if __name__ == "__main__":
     pytest.main( [__file__, "-v", "-m", "not e2e and not manual"] )
+
