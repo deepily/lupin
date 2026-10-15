@@ -754,7 +754,7 @@ class HybridTTS {
      * Retries the text in the opposite mode after one mode failed.
      *
      * Reports the switch in the status line.
-     * Rethrows the error if the retry also fails.
+     * Throws a new error naming both modes if the retry also fails.
      */
     async fallbackSpeak(text, options, failedMode) {
         console.warn(`[HybridTTS] Attempting fallback after ${failedMode} mode failed`);
@@ -996,9 +996,9 @@ class HybridTTS {
     }
     
     /**
-     * Looks the text up in the memory cache, then in IndexedDB, and returns the entry or null.
+     * Looks the text up in memory, then in IndexedDB, and returns the entry or null.
      *
-     * Expired entries are dropped. Returns null when caching is off.
+     * An expired entry is removed from the in-memory map; an expired IndexedDB copy is skipped but left in place. Returns null when caching is off.
      */
     async checkCache(text) {
         if (!this.cacheEnabled) return null;
@@ -1102,9 +1102,9 @@ class HybridTTS {
     }
     
     /**
-     * Drops expired entries, then removes the oldest until the cache fits its size limit.
+     * Drops expired entries from memory, then removes the oldest until the size limit is met.
      *
-     * Frees each removed object URL and updates the size analytics.
+     * Expired entries stay in IndexedDB; only entries removed for size are also deleted there. Frees each removed object URL and updates the size analytics.
      */
     async evictOldEntries() {
         let totalSize = 0;

@@ -371,7 +371,9 @@ class ChunkSequencer {
     }
     
     /**
-     * Counts a timed-out chunk as an order issue and updates the display.
+     * Counts a timed-out chunk as an order issue, updates the display and logs an error.
+     *
+     * When the missing chunk is the one expected next, it skips that chunk and resumes playing buffered chunks. For any other sequence number it only counts the issue.
      */
     handleMissingChunk(sequence) {
         this.log(`❌ ${this.method.toUpperCase()} - Missing chunk ${sequence}, marking as order issue`, 'error');

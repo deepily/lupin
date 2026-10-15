@@ -291,9 +291,9 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   }
 
   /**
-   * Adds an item to the queue, making it active at once when nothing is speaking.
+   * Adds an item to the queue, active at once only if nothing speaks and no hold is set.
    *
-   * Drops automatic items when the live volume fraction is zero; user-initiated items still pass. Emits a change event.
+   * Drops automatic items when the live volume fraction is zero; user-initiated items still pass. While a restore hold is set, the item is appended to the pending queue even if nothing is active. Emits a change event unless the item was dropped.
    */
   enqueue(item: TtsQueueItem): void {
     // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE ONE PLACE THAT DECIDES IT.
@@ -332,7 +332,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   /**
    * Discards the spoken item and promotes the next pending one, then emits a change.
    *
-   * Does nothing in focus mode or when the queue is already empty.
+   * Does nothing in focus mode, or when nothing is active and nothing is pending.
+   * With an active item and none pending, it clears the active item.
    */
   advance(): void {
     // 70cbff3e — pause-the-ROLL belt: while focused, advance() is a hard no-op.

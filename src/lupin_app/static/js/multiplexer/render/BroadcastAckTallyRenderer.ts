@@ -224,6 +224,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
 
   /**
    * Records that the recipient list loaded or failed, then repaints.
+   *
+   * If the list loaded after the deadline passed for a tracked broadcast, it settles the tally at the deadline.
+   * In that case it returns without repainting itself. A failure is recorded only for later paints.
    */
   recipientsChanged( loaded: boolean = true ): void {
     if ( loaded ) {

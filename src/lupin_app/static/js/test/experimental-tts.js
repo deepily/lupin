@@ -60,6 +60,8 @@ class ExperimentalProgressiveTTS {
     
     /**
      * Prepares the test page for streaming and sets the status to Ready.
+     *
+     * If audio setup or the session ID lookup throws, it rejects before the Ready status is set. The constructor does not await it, so that failure is an unhandled rejection.
      */
     async initialize() {
         this.log('🦊 Initializing Firefox-First Progressive TTS', 'info');
@@ -256,6 +258,8 @@ class ExperimentalProgressiveTTS {
     
     /**
      * Creates and resumes the Web Audio context for chunk playback.
+     *
+     * Returns at once when Web Audio is turned off or a context already exists. On failure it turns Web Audio off, shows the audio element status and rethrows the error.
      */
     async initializeWebAudioContext() {
         if (!this.useWebAudioAPI || this.audioContext) return;
@@ -586,6 +590,8 @@ class ExperimentalProgressiveTTS {
     
     /**
      * Runs one streaming test with the entered text and current settings.
+     *
+     * Returns after logging when the text box or button is missing or the text is empty. Any failure, including a non-OK response, is caught and logged, then streaming is turned off and the button re-enabled. It never rejects; on success the button stays disabled until streaming finishes elsewhere.
      */
     async testProgressiveStreaming() {
         const textInput = document.getElementById('test-text');
@@ -841,6 +847,8 @@ class ExperimentalProgressiveTTS {
     
     /**
      * Appends a timestamped line to the page log and the console.
+     *
+     * Does nothing when the log element is not set, which also skips the console line. The message is inserted as HTML without escaping.
      */
     log(message, type = 'info') {
         if (!this.logElement) return;

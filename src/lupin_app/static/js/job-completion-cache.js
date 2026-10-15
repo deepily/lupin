@@ -284,9 +284,9 @@ class JobCompletionCache {
     }
     
     /**
-     * Drops expired entries, then removes the oldest until the size and entry limits are met.
+     * Drops expired entries from memory, then removes the oldest until limits are met.
      *
-     * Updates the cache size count.
+     * Expired entries stay in IndexedDB; only entries removed for size or count are also deleted there. Updates the cache size count.
      */
     async evictOldEntries() {
         let totalSize = 0;
@@ -374,7 +374,7 @@ class JobCompletionCache {
     /**
      * Returns the unexpired cached jobs, newest first, optionally only those of one user.
      *
-     * Merges entries from memory and IndexedDB.
+     * Reads IndexedDB only when fewer than 50 jobs are in memory.
      */
     async getAllJobs(userId = null) {
         const jobs = [];

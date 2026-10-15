@@ -132,6 +132,8 @@ class BroadcastStoreImpl implements BroadcastStore {
 
   /**
    * Loads active sessions from the server into the recipient list.
+   *
+   * When the request fails it empties the recipient list and rethrows the error, so the caller must handle the rejection. A response without a sessions array also gives an empty list.
    */
   async hydrate( api: BroadcastSessionsApiClient ): Promise<void> {
     try {

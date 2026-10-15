@@ -1434,7 +1434,10 @@ class NotificationsUI {
     }
 
     /**
-     * Tells whether a JWT is expired, using its exp claim.
+     * Tells whether a JWT is expired or within 60 seconds of expiring.
+     *
+     * Returns true when the token has no exp claim or cannot be parsed.
+     * Returns false only when exp is more than 60 seconds ahead of the current time.
      */
     isTokenExpired( token ) {
         /**
@@ -1465,7 +1468,10 @@ class NotificationsUI {
     }
 
     /**
-     * Fetches timing settings from the server for token refresh, with defaults.
+     * Fetches client settings from the server and applies them, using defaults on failure.
+     *
+     * It sets token refresh timings, timezone, environment label, TTS preview values and the auto-fix default, and updates the env label and auto-fix checkbox.
+     * On any failure it logs the error and applies defaults to the timings, timezone and TTS preview values, then returns without throwing.
      */
     async fetchClientConfig() {
         /**
@@ -1709,7 +1715,7 @@ class NotificationsUI {
     }
 
     /**
-     * Starts a periodic WebSocket health check, active during work hours.
+     * Starts the periodic WebSocket health check, replacing any check already running.
      */
     startWebSocketHealthMonitor() {
         /**
@@ -1738,7 +1744,10 @@ class NotificationsUI {
     }
 
     /**
-     * Stops the WebSocket health check timer and shows a stopped status.
+     * Stops the WebSocket health check timer when one is running.
+     *
+     * Only in that case does it clear the handle, show a Stopped status, and log.
+     * When no timer is running it does nothing.
      */
     stopWebSocketHealthMonitor() {
         /**
@@ -1822,7 +1831,10 @@ class NotificationsUI {
     }
 
     /**
-     * Makes sure the stored auth token is not expired before an API call.
+     * Refreshes the access token when it is missing or expired, before an API call.
+     *
+     * If the refresh fails it calls handleAuthFailure, which clears tokens and redirects to login, and throws an Error.
+     * It also copies the in-memory token into localStorage when the stored one differs.
      */
     async ensureValidToken() {
         /**
@@ -3136,7 +3148,10 @@ class NotificationsUI {
     }
 
     /**
-     * Records why a session ID could not be obtained and announces the failure.
+     * Records why a session ID could not be obtained and returns an Error describing it.
+     *
+     * It saves the reason to localStorage and logs it, but does not throw; the caller throws the returned Error.
+     * A failing localStorage write is logged and ignored.
      */
     failSessionIdAcquisition( sessionType, origin, error ) {
         /**
@@ -5113,6 +5128,9 @@ class NotificationsUI {
     
     /**
      * Speaks text in the given mode, using cached audio when available.
+     *
+     * Returns without speaking when the preview slider is at 0% and the call is not user initiated.
+     * An error during playback is logged, not thrown.
      */
     async playTTS( text, mode, voiceId = null, userInitiated = false ) {
         // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE SHARED POINT THAT DECIDES IT.
@@ -5175,7 +5193,9 @@ class NotificationsUI {
     }
     
     /**
-     * Plays cached audio from a URL and resolves when playback ends or fails.
+     * Plays cached audio from a URL, resolving when playback ends and rejecting on an error.
+     *
+     * A later playAudioBlob( audioBlob ) in this class overrides this definition, so this one is not called.
      */
     async playAudioBlob( audioUrl ) {
         return new Promise( ( resolve, reject ) => {
@@ -7272,7 +7292,7 @@ class NotificationsUI {
     // ========================================
     
     /**
-     * Returns the user email used by the queue pages.
+     * Returns a fixed email address kept from the original queue page, not the signed-in user's.
      */
     getCurrentUserEmail() {
         // Use the hardcoded email as per original queue.js pattern
@@ -8020,7 +8040,10 @@ class NotificationsUI {
     }
 
     /**
-     * Deletes every job in a queue pane after the user confirms.
+     * Deletes all jobs in a queue pane after the user confirms.
+     *
+     * For the history pane only entries inside the selected time window are deleted, through the job-history endpoint.
+     * On success it resets the count and reloads the pane; on failure it shows an alert.
      */
     async deleteAllQueueJobs( queueName ) {
         /**
@@ -8180,7 +8203,7 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Removes a job card from the run queue and stops its timer.
+     * Removes a job card from the run queue and shows the empty message when none is left.
      */
     cleanupRunQueueCard( jobId ) {
         /**
@@ -8262,7 +8285,9 @@ class NotificationsUI {
     /**
      * Adds a notification to a job card's conversation pane, newest first.
      *
-     * A notification with a progress group updates the existing entry in place. The card and pane are expanded and scrolled into view.
+     * A notification whose progress group already has an entry updates that entry in place and returns without expanding or scrolling.
+     * Otherwise it inserts a new entry, then expands the card and pane and scrolls it into view.
+     * It does nothing when the card's conversation pane is not in the page.
      */
     appendNotificationToJobCard( jobId, notification ) {
         /**
@@ -9997,7 +10022,7 @@ class NotificationsUI {
     /**
      * Formats a job timestamp as a short date and time in the app time zone.
      *
-     * Returns the original text when it cannot be parsed and an empty string when missing.
+     * Returns an empty string when the timestamp is missing and the text Invalid Date when it cannot be parsed.
      */
     formatJobTimestamp( timestamp ) {
         /**
@@ -10582,9 +10607,10 @@ class NotificationsUI {
     }
 
     /**
-     * Paints the fleet panel for the fetched data and updates the count and updated time.
+     * Paints the fleet panel from the fetched data and sets the session count.
      *
-     * Shows a sign-in, offline, empty or live-only message, or the grouped table. Caches the data for the offline toggle.
+     * Shows a sign-in message, an offline message, an empty or live-only message, or the grouped table.
+     * It caches the data for the offline toggle and stamps the updated time only for a fleet state, and only when asked to.
      */
     renderFleetStatus( composite, stampUpdated = true ) {
         /**
@@ -11280,7 +11306,8 @@ class NotificationsUI {
     /**
      * Turns a task lookup outcome into one sentence and a state name for display.
      *
-     * A found row shows its title, status, owner and priority. Missing fields show a dash.
+     * A found row shows its title, status, owner and priority.
+     * A missing title shows untitled, a missing owner shows unassigned, and a missing status or priority shows a dash.
      */
     describeTaskLookup( typed, outcome ) {
         /**
@@ -11670,7 +11697,8 @@ class NotificationsUI {
     /**
      * Maps a task status to the CSS class that colors its row and status dot.
      *
-     * Every known status has its own class, and anything else gets the unknown class.
+     * Each known status gets its own class, except in_progress and claimed, which share the active class.
+     * The status is trimmed and lowercased first. Anything else, including a non-string, gets the unknown class.
      */
     _taskStatusClass( status ) {
         /**
@@ -12877,9 +12905,11 @@ class NotificationsUI {
     }
 
     /**
-     * Builds and posts the verdict for a request chip, then refreshes the board.
+     * Posts a request chip's verdict and refreshes the board only when it lands.
      *
-     * Refuses a demote approval with no date, ignores repeat presses, and remembers refusals per request.
+     * Refuses a demote approval with no usable date in the page and sends nothing.
+     * Ignores a press while a verdict for that task is in flight, and remembers a refusal per request.
+     * A server refusal is shown on the chip and the board is not re-read.
      */
     async _sendRequestVerdict( chip, verdict ) {
         /**
@@ -13002,7 +13032,9 @@ class NotificationsUI {
     /**
      * Fills each request chip with its filer and reason and restores any saved refusal.
      *
-     * Reads each request's event trail once and caches it. Does nothing without a container.
+     * Reads a request's event trail once per filing and caches it, so a re-filed request is read again.
+     * A failed read is not cached and is retried on the next paint, leaving the loading text meanwhile.
+     * Does nothing without a container or the shared request module.
      */
     _hydrateRequestChips( container ) {
         /**
@@ -13839,8 +13871,9 @@ class NotificationsUI {
     /**
      * Deletes the saved override so the configured window and threshold apply again.
      *
-     * Repaints the sliders from the server's answer and refreshes the ratio clause.
-     * Returns the settings, or null with a status message on failure.
+     * On success repaints the sliders from the server's answer, refreshes the ratio clause and returns the settings.
+     * A refused request shows a not-reset status message and returns null without repainting.
+     * A network failure returns null and shows no message.
      */
     async resetFlowRatioSettings() {
         /**
@@ -14133,10 +14166,11 @@ class NotificationsUI {
     }
 
     /**
-     * Paints the task list pane from a fetched composite and stamps the update time.
+     * Paints the task list pane from a fetched composite, choosing one display state.
      *
-     * Shows sign-in, query-unavailable or store-unreachable messages, an empty message, or the grouped table.
-     * Holds the repaint during a press and re-renders a pinned lookup row when one is set.
+     * Shows a sign-in, query-unavailable or store-unreachable message, an empty message, or the grouped table of open rows.
+     * A pinned lookup row replaces the table, and a repaint is held while a press is in flight.
+     * Stamps the update time only after painting the empty message or table, and only when stampUpdated is true.
      */
     renderTaskList( composite, stampUpdated = true ) {
         /**
@@ -16058,8 +16092,8 @@ class NotificationsUI {
     /**
      * Updates a row's inline fields to match the chosen verb.
      *
-     * Sets the reason box placeholder and disabled state, adds or removes the date input, and disarms Submit.
-     * Does nothing when the select or its cell cannot be found.
+     * Sets the reason box placeholder and disabled state, clearing any typed reason when the verb takes none, and adds or removes the date input.
+     * It then disarms Submit, and does nothing when the select or its cell cannot be found.
      */
     _handleVerbSelectChange( select ) {
         /**
@@ -16898,9 +16932,10 @@ class NotificationsUI {
     }
 
     /**
-     * Installs the holding-area pane's single delegated click and keydown listeners.
+     * Installs the holding-area pane's delegated click, keydown and change listeners.
      *
      * Clicks go to request chips, id copy, detail icons, group toggles and row controls.
+     * The change listener keeps each row's fields in step with its chosen verb.
      * Attached once, and does nothing when the container is absent.
      */
     _wireHoldingAreaControls() {
@@ -17143,8 +17178,9 @@ class NotificationsUI {
     /**
      * Applies one status transition to every row in a filer's group, one at a time.
      *
-     * Repaints the group's status line after each row and ends with approved and refused counts.
-     * Returns the counts and first error, and refreshes the pane once at the end.
+     * Shows the verb and an attempt count after each row, then a final line with done and refused counts.
+     * Returns { ok, failed, firstError } and refreshes the pane once at the end.
+     * An empty group shows a message and returns zero counts without a refresh.
      */
     async _applyHoldingBatch( filer, toStatus, extras, verb ) {
         /**
@@ -17479,7 +17515,10 @@ class NotificationsUI {
     }
 
     /**
-     * Attach one delegated click and key listener to the task list container.
+     * Wires the task list container's click, key, press and verb-select listeners once.
+     *
+     * The press listeners set a flag that holds repaints while a mouse button is down.
+     * Returns without doing anything when already wired or when the container is absent.
      */
     _wireTaskListAccordion() {
         /**
@@ -17724,7 +17763,9 @@ class NotificationsUI {
     }
 
     /**
-     * Group a flat task array by epic, with waiting-on-Rick and drift rows split out.
+     * Groups a flat task array by epic.
+     *
+     * Rows blocked on Rick are also listed apart and stay in their epic. Rows with no epic key go to drift.
      */
     groupTasksByEpic( tasks ) {
         /**
@@ -18010,7 +18051,11 @@ class NotificationsUI {
     }
 
     /**
-     * Render the grouped model as a read-only epic board table and return its HTML.
+     * Builds the epic board table HTML from the grouped model and returns it as a string.
+     *
+     * Sections run Waiting on Rick first, then each epic, then Drift, which renders even when empty.
+     * Rows use the shared row renderer, so each carries the same action controls as the task list.
+     * The saved open or closed choices decide which groups start collapsed.
      */
     renderEpicBoardTable( model, state ) {
         /**
@@ -18078,7 +18123,11 @@ class NotificationsUI {
     }
 
     /**
-     * Draw the epic board from the shared task list result already fetched.
+     * Draws the epic board from the task list result that was already fetched.
+     *
+     * Shows a sign-in, deploy or unreachable message instead when the result is not usable, and does nothing without the container.
+     * Only open tasks are grouped, and the count shows epics, not rows.
+     * Stamps the updated time unless told not to.
      */
     renderEpicBoard( composite, stampUpdated = true ) {
         /**
@@ -18206,7 +18255,10 @@ class NotificationsUI {
     }
 
     /**
-     * Open the detail overlay when the clicked element is a row's detail emoji.
+     * Opens the detail overlay when the click landed on a row's detail emoji.
+     *
+     * Returns true for any detail emoji click, and false for anything else.
+     * An emoji marked empty opens nothing but still returns true, so the click is consumed.
      */
     _handleDetailEmojiClick( target ) {
         /**
@@ -18461,7 +18513,10 @@ class NotificationsUI {
     // ========================================
 
     /**
-     * Create the abstract tooltip container and its click handlers once.
+     * Creates the abstract tooltip container once and adds document listeners each call.
+     *
+     * A click on a 📋 indicator shows the abstract in the tooltip, or in the reading pane in horizontal layout.
+     * A click outside the tooltip, or Escape, hides it.
      */
     initAbstractTooltip() {
         /**
@@ -18932,7 +18987,10 @@ class NotificationsUI {
     }
     
     /**
-     * Return a job's HTML with replay and delete buttons styled for its audio state.
+     * Returns a job's HTML with replay and delete buttons placed before its closing tag.
+     *
+     * The replay button is dimmed when no cached audio exists.
+     * HTML that does not end with a closing list tag comes back unchanged.
      */
     generateEnhancedJobHtml( jobMetadata ) {
         /**
@@ -24383,7 +24441,10 @@ class NotificationsUI {
     }
 
     /**
-     * Delete all notifications from one sender after confirmation.
+     * Deletes all notifications from one sender on the server after the user confirms.
+     *
+     * Removes the sender card, strip icon and local group even when the server call fails.
+     * Returns without doing anything when the sender group is unknown or the user cancels.
      */
     async deleteSenderConversation( senderId ) {
         /**
@@ -24459,7 +24520,10 @@ class NotificationsUI {
     }
 
     /**
-     * Bulk delete all notifications in the current history window after confirmation.
+     * Deletes the history window's notifications on the server after confirmation.
+     *
+     * Clears the list and local state afterwards; an admin in the others filter mode keeps their own jobs.
+     * Does nothing when the list is empty, and on a server error shows an alert and keeps the list.
      */
     async clearAllNotifications() {
         /**
@@ -24674,7 +24738,7 @@ class NotificationsUI {
     }
     
     /**
-     * Load the queue lists and notifications on page start.
+     * Loads the todo, run, done and dead queue lists on page start.
      */
     async loadInitialData() {
         this.log( "Loading initial data (queue lists and notifications)" );
@@ -25017,7 +25081,10 @@ class NotificationsUI {
     }
 
     /**
-     * Dismiss missed notifications on the server and zero the badge.
+     * Dismisses missed notifications on the server and repaints the missed badge.
+     *
+     * The badge shows the server's remaining count, not necessarily zero.
+     * Returns 0 without a request when nothing is missed; on a failed request it alerts and returns the old count.
      */
     async resetMissedNotifications() {
         const n = this.notificationState.undeliveredCount || 0;
@@ -28395,7 +28462,11 @@ class NotificationsUI {
     }
 
     /**
-     * Mark a notification expired on countdown end and submit its default value.
+     * Marks a notification expired when its countdown ends and routes it to its card.
+     *
+     * With no card to route to, it shows the expired state in place.
+     *
+     * For open-ended input it submits the text already typed, if any. Otherwise the default is only shown, not sent.
      */
     handleLocalTimeout( notificationId ) {
         this.log( `Local timeout for notification ${notificationId}` );

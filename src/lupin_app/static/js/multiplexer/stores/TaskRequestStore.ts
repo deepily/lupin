@@ -140,6 +140,8 @@ class TaskRequestStoreImpl implements TaskRequestStore {
 
   /**
    * Reads the request badge counts and emits a badge changed event.
+   *
+   * When a read is already in flight it returns that read and starts none. A failed read clears the counts to null instead of keeping the old ones and never rejects; the event then reports the counts as unknown.
    */
   async refresh(): Promise<void> {
     if ( this.inFlight !== null ) return this.inFlight;

@@ -230,6 +230,8 @@ class WSChannelImpl implements WSChannel {
 
   /**
    * Sends a string as is, or any other value as JSON, over the open socket.
+   *
+   * Throws an Error when there is no socket or the channel state is not open, and nothing is sent. JSON.stringify and the socket send can also throw. Returns nothing.
    */
   send(envelope: unknown): void {
     if (!this.socket || this._state !== "open") {

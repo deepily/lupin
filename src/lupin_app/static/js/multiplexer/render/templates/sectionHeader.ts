@@ -148,7 +148,7 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
 /**
  * Builds the header title text from an icon and a title, with a trailing space.
  *
- * With no icon it returns the title alone.
+ * With no icon it returns the title followed by one space.
  */
 function formatTitle( icon: string, title: string ): string {
   return icon === "" ? `${title} ` : `${icon} ${title} `;
