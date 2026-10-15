@@ -1440,15 +1440,6 @@ class NotificationsUI {
      * Returns false only when exp is more than 60 seconds ahead of the current time.
      */
     isTokenExpired( token ) {
-        /**
-         * Check if JWT token is expired by examining exp claim.
-         *
-         * Args:
-         *     token: JWT token string
-         *
-         * Returns:
-         *     Boolean - true if expired or invalid, false otherwise
-         */
         try {
             const payload = this.parseJWTPayload( token );
 
@@ -1719,11 +1710,10 @@ class NotificationsUI {
      */
     startWebSocketHealthMonitor() {
         /**
-         * Start periodic WebSocket health monitoring during work hours.
+         * Start periodic WebSocket health monitoring.
          *
          * Purpose:
          *     - Automatically detect and reconnect disconnected WebSockets
-         *     - Only active during work hours (8 AM - Midnight)
          *     - Handles overnight server restarts gracefully
          *
          * Ensures:
@@ -1750,15 +1740,6 @@ class NotificationsUI {
      * When no timer is running it does nothing.
      */
     stopWebSocketHealthMonitor() {
-        /**
-         * Stop WebSocket health monitoring.
-         *
-         * Ensures:
-         *     - Clears setInterval if active
-         *     - Resets interval handle to null
-         *     - Updates UI status
-         */
-
         if ( this.healthCheckIntervalHandle ) {
             clearInterval( this.healthCheckIntervalHandle );
             this.healthCheckIntervalHandle = null;
@@ -8058,7 +8039,8 @@ class NotificationsUI {
          *       cancellation warning
          *     - Sends DELETE /api/queue/{queueName}/all  OR
          *              DELETE /api/job-history/all?days={N}
-         *     - Refreshes the pane and resets count badge on success
+         *     - On success reloads the pane; for the queue panes (not history) it
+         *       also resets the count badge to 0
          */
         let count, confirmMsg, url;
 
@@ -8207,8 +8189,7 @@ class NotificationsUI {
      */
     cleanupRunQueueCard( jobId ) {
         /**
-         * Remove a job card from the run queue and stop its timer.
-         * Called when job moves from run to done/dead queue.
+         * Remove a job card from the run queue.
          *
          * Requires:
          *     - jobId is a valid job ID string
@@ -8303,7 +8284,7 @@ class NotificationsUI {
          *     - Finds interactions-content container by ID
          *     - If progress_group_id: updates existing entry in-place (or creates first)
          *     - If no progress_group_id: inserts entry at top (newest first)
-         *     - Auto-expands job card if collapsed
+         *     - Auto-expands job card if collapsed (not on the in-place update path)
          */
         // Find the unified conversation container
         const contentEl = document.getElementById( `interactions-content-${jobId}` );
@@ -10025,9 +10006,6 @@ class NotificationsUI {
      * Returns an empty string when the timestamp is missing and the text Invalid Date when it cannot be parsed.
      */
     formatJobTimestamp( timestamp ) {
-        /**
-         * Format job timestamp for display.
-         */
         if ( !timestamp ) return '';
         try {
             // Handle "2026-01-14 @ 10:30:45 EST" format
@@ -11331,7 +11309,8 @@ class NotificationsUI {
          *     - returns { text, state } — `state` lands on data-state for tests
          *       and styling
          *     - a found row leads with its TITLE, then status, owner, priority
-         *     - a missing field degrades to a dash, never the word "undefined"
+         *     - a missing title reads "(untitled)", a missing owner "unassigned",
+         *       a missing status or priority a dash; never the word "undefined"
          *     - never throws
          */
         const state = outcome && outcome.state ? outcome.state : "unreachable";
@@ -14178,11 +14157,13 @@ class NotificationsUI {
          * last-updated time. DOM-touching orchestrator; the table-building
          * (renderTaskListTable) and model (groupTasksByOwner) stay pure.
          *
-         * Four states (mirroring fleet-status):
-         *     auth_required → "Sign-in required" (don't show stale rows on auth loss)
-         *     unreachable   → "Store unreachable" indicator + LAST-KNOWN rows (never blank)
-         *     empty         → "No open tasks"
-         *     table         → owner-grouped table of OPEN (non-terminal) work
+         * States:
+         *     - auth_required: shows "Sign-in required" and no stale rows.
+         *     - query_unavailable: shows a deploy-problem message naming the missing query module.
+         *     - unreachable: shows a "Store unreachable" indicator and the last-known rows, never blank.
+         *     - pinned lookup: the single pinned row replaces the table.
+         *     - empty: shows "No open tasks".
+         *     - table: shows the owner-grouped table of open, non-terminal work.
          *
          * Requires:
          *     - composite is the object returned by fetchTaskList()
@@ -14192,7 +14173,8 @@ class NotificationsUI {
          * Ensures:
          *     - count reflects the OPEN rows shown, SPLIT live vs park-active;
          *       last-known rows survive an outage
-         *     - never throws, never renders blank
+         *     - a repaint is held while a press is in flight
+         *     - the last-updated stamp is written only after the empty or table paint
          */
         const container = document.getElementById( "task-list-container" );
         const countEl   = document.getElementById( "task-list-count" );
@@ -16940,7 +16922,7 @@ class NotificationsUI {
      */
     _wireHoldingAreaControls() {
         /**
-         * Install this pane's single delegated click listener.
+         * Install this pane's delegated click and keydown listeners, and wire its verb selects.
          *
          * 🔴 THIS PANE HAD NONE AT ALL, AND SO EVERY CONTROL IN IT WAS DEAD — batch
          * approve, batch won't-fix, and all five per-row controls. Its two sibling panes
@@ -16961,7 +16943,7 @@ class NotificationsUI {
          * other unclaimed click is ignored.
          *
          * Ensures:
-         *     - listener attached at most once (guarded by _holdingAreaControlsWired)
+         *     - listeners attached at most once (guarded by _holdingAreaControlsWired)
          *     - no-op if the container is absent (degrade-safe)
          *     - row controls AND batch controls both reach their handlers
          */
@@ -17522,11 +17504,13 @@ class NotificationsUI {
      */
     _wireTaskListAccordion() {
         /**
-         * Install the single delegated click+keyboard listener for the accordion.
+         * Install the delegated listeners for the task-list accordion.
          *
-         * The listener lives on the persistent #task-list-container element (its
-         * innerHTML is replaced each render, the element itself is not), so one
-         * delegated listener survives every re-render — no per-row re-binding.
+         * They cover click and keyboard activation, the verb selects, and the press and release pair that holds repaints.
+         *
+         * The listeners live on the persistent #task-list-container element.
+         * Its innerHTML is replaced each render but the element is not, so they
+         * survive every re-render and no per-row re-binding is needed.
          *
          * Ensures:
          *     - listeners attached at most once (guarded by _taskListAccordionWired)
@@ -17789,8 +17773,7 @@ class NotificationsUI {
          *     - drift holds every row whose correlation_key is absent or does not
          *       start with "epic:" — never silently dropped
          *     - a row is in exactly one of groups / drift
-         *     - within a group, rows sort by status-rank then priority then title
-         *       (the same urgency order the task list uses)
+         *     - within a group, rows sort by priority then status-rank then title
          *     - Pure + degrade-safe (falsy rows collapse to {}, never throw)
          */
         const rows = Array.isArray( tasks ) ? tasks : [];
@@ -18059,7 +18042,7 @@ class NotificationsUI {
      */
     renderEpicBoardTable( model, state ) {
         /**
-         * Render the epic-grouped model as a read-only table.
+         * Render the epic-grouped model as a table.
          *
          * Section order mirrors the board generator: ⏳ Waiting on Rick FIRST (a
          * highlight — those rows ALSO appear under their own epic, deliberately),
@@ -18077,7 +18060,6 @@ class NotificationsUI {
          *
          * Ensures:
          *     - Returns an HTML string (caller assigns to innerHTML)
-         *     - Read-only: no action column, no mutating controls
          *     - Pure: no DOM access, no side effects
          */
         const choices = ( state && typeof state === "object" ) ? state : {};
@@ -24456,7 +24438,8 @@ class NotificationsUI {
          *
          * Ensures:
          *     - User confirmation before destructive action
-         *     - All notifications from sender deleted from server
+         *     - Deletion of all notifications from the sender is requested on the server
+         *       (UI cleanup proceeds even if that request fails)
          *     - Sender card removed from UI
          *     - Sender group removed from local state
          *     - Total count updated
