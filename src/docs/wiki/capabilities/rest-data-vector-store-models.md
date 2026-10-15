@@ -18,19 +18,19 @@ Eight SQLAlchemy models for the pgvector tables, registered on the same `Base` a
 ## What it does
 | Model | Table | Key | Holds |
 |---|---|---|---|
-| `InputAndOutput` | `input_and_output` | `id`, bigint | one question and answer with `input_embedding` and `output_final_embedding` |
+| `InputAndOutput` | `input_and_output` | `id`, bigint | one input with its `output_raw` and `output_final` text, and the vectors `input_embedding` and `output_final_embedding` |
 | `QuestionEmbedding` | `question_embeddings` | `id`, bigint | question text and one vector; btree on `question` |
 | `EmbeddingCache` | `embedding_cache` | `id`, bigint | `normalized_text` and one vector; btree on the text |
 | `GistCache` | `gist_cache` | `id`, bigint | verbatim, normalized and gist questions, no vector |
 | `CanonicalSynonym` | `canonical_synonyms` | `id`, string | three embeddings and a confidence for exact-match lookup |
-| `QueryLog` | `query_log` | `id`, string | write-only telemetry with three vectors and cache-hit flags |
+| `QueryLog` | `query_log` | `id`, string | query telemetry with three unsearched vectors and cache-hit flags |
 | `PredictionDecision` | `prediction_decisions` | `id`, string | the decision proxy's question, category, value and `question_embedding` |
 | `SolutionSnapshot` | `solution_snapshots` | `id_hash`, string | answer, code and summary text with seven vectors |
 
 ## Don't
-- Don't search with cosine. The vectors are built for dot product, so the index operator class is `vector_ip_ops` and the operator `<#>`.
+- Don't build an index for cosine. The HNSW indexes use `vector_ip_ops`, the class for the `<#>` inner-product operator, and the module rules out cosine `<=>`.
 - Don't expect an index on every vector. Only `prediction_decisions.question_embedding` and the snapshot `question_embedding` and `code_embedding` carry HNSW indexes (`HNSW_DOT_INDEXES`).
-- Don't assume date columns are timestamps. `GistCache.created_date`, `PredictionDecision.created_at` and the snapshot dates are text.
+- Don't assume date columns are timestamps. `GistCache.created_date` and `last_accessed`, `PredictionDecision.created_at` and the snapshot dates are text.
 
 ## Invariants
 - `input_and_output.input_embedding` has no vector index: most rows are duplicates, which gave wrong neighbours under HNSW, and an exact scan returns the right ones.

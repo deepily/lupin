@@ -17,19 +17,19 @@ The small functions the server uses to find its database, size its connection po
 
 ## What it does
 - `is_cloud_backed()` is true only when `LUPIN_CLOUD_BACKED` is `1`, `true`, `yes` or `on`, in any case. The environment name is never used to guess it.
-- `get_pool_config()` returns the engine arguments. Cloud-backed: 5 connections plus 10 overflow. `LUPIN_ENV=testing`: `NullPool`, so no connection is kept. Anything else: 10 plus 20. The pooled variants check a connection before use and force UTC.
-- `announce_empty_db_password_once( venue )` prints one warning that `DB_PASSWORD` is empty and returns `True`. Every later call returns `False`.
+- `get_pool_config()` returns the engine arguments. Cloud-backed: 5 connections plus 10 overflow. `LUPIN_ENV=testing`: `NullPool`, so no connection is kept. Anything else: 10 plus 20. Both pooled variants check a connection before use. All three force UTC.
+- `announce_empty_db_password_once( venue )` prints one warning that `DB_PASSWORD` is empty and returns `True`. Every later call returns `False`. It never tests the password itself. Only the development and testing branches of `get_database_url` call it, and only when the password is empty.
 - `swap_database( new_env )` sets `LUPIN_ENV` and re-picks any login that was filled in from `.env`. It then disposes the old engine and builds a new engine and sessions. It runs `SELECT 1` and returns the URL with the password replaced by `***`.
 - `resolve_database_url( database_url )` takes the argument, then `DATABASE_URL`, then `get_database_url()`.
 - `build_alembic_config( database_url )` builds the Alembic config in code, with `script_location` set to `src/migrations` under the project root. A given URL goes to `env.py` on `config.attributes["injected_db_url"]`.
 - `wait_for_database( probe )` calls `probe` until it succeeds. It sleeps 1 second, doubling up to 8 seconds, for at most 60 seconds, then re-raises the last error unchanged. `next_backoff` is the capped doubling.
 
 ## Don't
-- Don't expect `get_pool_config()` to read `LUPIN_ENV` before `is_cloud_backed()`: the cloud flag wins, even when `LUPIN_ENV=testing`.
-- Don't call `swap_database` while requests are in flight. It disposes the engine they hold.
+- Don't set `LUPIN_ENV=testing` to get `NullPool` on a cloud-backed deployment. The cloud flag is checked first and wins.
+- Don't call `swap_database` and expect open sessions to follow. It replaces the module's `engine`, `SessionLocal` and `ScopedSession`; a session already created stays bound to the old engine.
 - Don't look for `alembic.ini`. The container does not have one; the config is built in code.
 
 ## Invariants
-- An unset `DB_PASSWORD` warns and never raises at import time, so every importer keeps working.
+- An empty `DB_PASSWORD` in development or testing warns and never raises at import, so every importer keeps working. On the cloud path `get_database_url` raises `ValueError` when `DB_PASSWORD` or `CLOUD_SQL_CONNECTION_NAME` is missing, and the module builds its engine at import.
 - A spent wait budget re-raises the driver's own error, so a real outage still stops the boot.
 - A probe that succeeds first time costs no sleep.

@@ -17,7 +17,7 @@ pins:
 Run control is in [[rest-data-embedding-regen-run-control]] and batching in [[rest-data-embedding-regen-batching]]. The runtime embedding path is in [[embedding-pipeline]].
 
 ## What it does
-- A `RegenSpec` names one target: a table, its key, a text column, the live vector column, a shadow column and a content type. `REGEN_SPECS` lists three: `input_and_output.input`, `input_and_output.output_final` and `prediction_decisions.question`.
+- A `RegenSpec` names one target: a label, a table, its key, a text column, the live vector column, a shadow column and a content type. `REGEN_SPECS` lists three: `input_and_output.input`, `input_and_output.output_final` and `prediction_decisions.question`.
 - Scope is every row that has source text, not every row that looks stale. A norm cannot say which model made a vector.
 - `qualify` puts a table prefix such as `regen_probe.` in front of a table name, so a whole run can target a clone. A non-empty prefix must end in a dot or it raises `ValueError`.
 - `is_excluded` and `excluded_ids_clause` keep the deliberate bad fixture row `clamp-001` out of scope, in Python for `fill` and in SQL for `verify` and `plan`.
@@ -26,9 +26,9 @@ Run control is in [[rest-data-embedding-regen-run-control]] and batching in [[re
 - `summarize_verification` returns `ok` only when every in-scope row is filled and no vector has a bad norm or dimension.
 
 ## Don't
-- Don't pick rows by norm. The band only checks fresh vectors; a fresh vector outside it stops the run.
+- Don't pick rows by norm. The band only checks fresh vectors. `validate_fresh_vector` applies it, and `fill` prints `REJECTED` for a vector outside it, skips that row and carries on. `verify` then blocks `swap`, because the row is unfilled. An unreachable embedding service aborts the run.
 - Don't run `swap` before `verify` passes. `swap` repeats the check and refuses on its own.
-- Don't leave `clamp-001` in the verify count. It can never be filled, so the swap would be blocked forever.
+- Don't drop `clamp-001` from the exclusion list. Counted by `verify`, it can never be filled, so the swap would stay blocked.
 
 ## Invariants
 - `fill` never writes a live vector column. Only `swap` does.

@@ -23,8 +23,8 @@ How a v2 request turns a sentence into a command: the command table, the router 
 - `CommandClass` labels each row `conversational`, `agentic`, `control` or `none`. The template groups are derived from it.
 - `AgentSpec.required_args` is read in this order: the agent's own `declared_args()`, then `JOB_ARG_CONTRACTS`, then the spec's literal tuple.
 - `canonical_command( command )` maps an alias such as `math` to its full routing string. An unknown string or `None` comes back unchanged. It never raises.
-- `RouterClient( config_mgr )` builds only an `LlmClientFactory`. `route( question )` returns `( command, args )` by calling `get_routing_command`, and `( "unknown", "" )` when the router's XML cannot be parsed.
-- `render_router_prompt` returns the router prompt: fixed text plus one `<command>` line per `speakable` registry row. `write_router_prompt( path=None )` writes it and returns the path. `main` does that to the checked-in file and prints the command count.
+- `RouterClient( config_mgr )` builds only an `LlmClientFactory`. `route( question )` returns `( command, args )` by calling `get_routing_command`, and `( "unknown", "" )` when the router's XML cannot be parsed. A missing prompt template or an LLM error raises.
+- `render_router_prompt` returns the router prompt: fixed text plus one `<command>` line per `speakable` registry row. `write_router_prompt( path=None )` writes it and returns the path. `main` does that to the checked-in file and prints the path and the command count.
 - `speakable_commands` returns those commands in the served order, which a fixed tuple sets. Membership comes from the registry.
 - `set_bearer_token( token )` stores the caller's JWT for this request and returns a reset handle. `get_bearer_token` reads it, `reset_bearer_token( handle )` undoes it.
 
@@ -34,5 +34,5 @@ How a v2 request turns a sentence into a command: the command table, the router 
 
 ## Invariants
 - `speakable_commands` raises `ValueError` when the served order and the registry's speakable set disagree in either direction.
-- `get_bearer_token` returns `None` when nothing set it. It is scoped to one request and follows the call into a worker thread.
+- `get_bearer_token` returns `None` when nothing set it. It is scoped to one request. It follows the call into `run_in_threadpool`, because anyio copies the context.
 - The generated prompt leaves `{voice_command}` as a literal for the router to fill at serve time.

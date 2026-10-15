@@ -15,9 +15,10 @@ These functions decide whether a `fill` pass may start and let an interrupted pa
 
 ## What it does
 - `should_proceed( busy=, hour_edt=, force= )` returns `None` when a pass may start and a refusal sentence otherwise.
+- `fill` gets `busy` from a poll of the URL in the `BOUNCE_BUSY_URL` environment variable, default `http://localhost:7999/api/busy`. It is true when agentic jobs are in flight or the run queue is not empty. An error is `None`.
 - The busy flag is the real gate. `True` refuses, and `None` (the probe could not answer) also refuses, because the check exists so nobody guesses about a server in use.
-- The clock check runs only when `force` is false and an hour is given. `force` skips the clock and never the busy check.
-- `is_off_peak( hour_edt, end_hour )` is true for hours from 0 up to, not including, `end_hour`. The module default `OFF_PEAK_END_HOUR` is 24, so today every hour passes. Pass a smaller `end_hour` to bring a window back.
+- The clock check runs only when `force` is false and an hour is given. `fill` passes the current hour in `America/New_York`. `force` is the `--force` flag; it skips the clock and never the busy check.
+- `is_off_peak( hour_edt, end_hour )` is true for hours from 0 up to, not including, `end_hour`. The module default `OFF_PEAK_END_HOUR` is 24, so today every hour passes. A caller of `is_off_peak` can pass a smaller `end_hour`; `should_proceed` always uses the default.
 - `checkpoint_path( label, scratch_dir )` is `regen-checkpoint-<label>.json` under the scratch directory, one file per spec.
 - `load_checkpoint` returns `{"done_ids": []}` for a missing file and raises `ValueError` for a file that is not valid JSON.
 - `save_checkpoint` writes a temp file and renames it over the checkpoint, so a crash leaves the old one.
@@ -25,8 +26,8 @@ These functions decide whether a `fill` pass may start and let an interrupted pa
 
 ## Don't
 - Don't read a `None` busy answer as idle. It means unknown.
-- Don't delete a corrupt checkpoint to get past the error. It would restart a run of tens of thousands of rows from zero.
+- Don't delete a corrupt checkpoint to get past the error. It would restart the whole run from zero.
 
 ## Invariants
-- `fill` saves its checkpoint after every committed chunk, so a re-run redoes only what was not committed.
+- `fill` saves its checkpoint after each chunk commits, so a re-run skips the ids already recorded.
 - A `fill` aborts, with a message, when the embedding service is unreachable. It does not split the batch or record it as a size failure.
