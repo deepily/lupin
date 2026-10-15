@@ -148,6 +148,20 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             _get_compound_agent_function_mapping_commands = MagicMock( return_value={} ),
         )
 
+    def test_the_project_root_is_read_per_instance_not_at_import( self ):
+        """Two generators built without a path_prefix get the root as it is at each construction."""
+        seen = [ ]
+        class _Stop( Exception ): pass
+        def stop( this ):
+            seen.append( this.path_prefix )
+            raise _Stop()
+        with patch.object( XmlPromptGenerator, "_init_common_templates", autospec=True, side_effect=stop ), \
+             patch( "cosa.training.xml_prompt_generator.du.get_project_root", side_effect=[ "/A", "/B" ] ):
+            for _ in range( 2 ):
+                with self.assertRaises( _Stop ): XmlPromptGenerator()
+            with self.assertRaises( _Stop ): XmlPromptGenerator( path_prefix="/mine" )
+        self.assertEqual( seen, [ "/A", "/B", "/mine" ] )
+
     def test_initialization_success( self ):
         """
         Test successful XmlPromptGenerator initialization.
@@ -225,13 +239,12 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             mock_get_interjections.return_value = []
             mock_get_salutations.return_value = []
 
-            generator = XmlPromptGenerator()
+            with patch( "cosa.training.xml_prompt_generator.du.get_project_root", return_value="/the/root/now" ):
+                generator = XmlPromptGenerator()
 
-            # Live contract: the default path_prefix is `du.get_project_root()` evaluated
-            # at function-DEFINITION time ( eager default ), so it is bound once at import
-            # and cannot be overridden by patching get_project_root after import. Assert
-            # against that captured default rather than a runtime-patched value.
-            self.assertEqual( generator.path_prefix, XmlPromptGenerator.__init__.__defaults__[ 0 ] )
+            # Live contract: the default path_prefix is `du.get_project_root()` read at each construction,
+            # so patching it after import takes effect.
+            self.assertEqual( generator.path_prefix, "/the/root/now" )
             self.assertFalse( generator.debug )
             self.assertFalse( generator.verbose )
             self.assertFalse( generator.silent )

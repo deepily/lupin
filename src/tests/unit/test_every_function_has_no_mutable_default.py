@@ -12,8 +12,27 @@ import warnings
 
 import pytest
 
-MUTABLE_CALLS = ( "list", "dict", "set", "OrderedDict", "defaultdict", "deque", "Counter", "bytearray" )
 EXCLUDED      = ( "/.venv/", "node_modules", "site-packages" )
+
+# A call is allowed as a default only when it provably returns an immutable value, or is a framework marker.
+ALLOWED_CALLS = {
+    "Depends"   : "FastAPI marker, read once at route definition by design",
+    "Query"     : "FastAPI marker, read once at route definition by design",
+    "Header"    : "FastAPI marker, read once at route definition by design",
+    "Body"      : "FastAPI marker, read once at route definition by design",
+    "Form"      : "FastAPI marker, read once at route definition by design",
+    "File"      : "FastAPI marker, read once at route definition by design",
+    "frozenset" : "an immutable set",
+    "tuple"     : "an immutable sequence",
+    "str"       : "an immutable string",
+    "int"       : "an immutable number",
+    "float"     : "an immutable number",
+    "bool"      : "an immutable flag",
+    "bytes"     : "an immutable byte string",
+    "datetime"  : "an immutable timestamp built from literals",
+    "timedelta" : "an immutable duration built from literals",
+    "_dt"       : "an import alias of datetime.datetime in one unit test",
+}
 
 
 def _root():
@@ -36,12 +55,12 @@ def tracked_sources( root ):
 
 
 def is_mutable( default ):
-    """Return True for a list, dict or set literal or comprehension, or a call that builds one."""
+    """Return True for a container literal or a call not on ALLOWED_CALLS."""
     if isinstance( default, ( ast.List, ast.Dict, ast.Set, ast.ListComp, ast.DictComp, ast.SetComp ) ): return True
     if isinstance( default, ast.Call ):
         func = default.func
         name = func.id if isinstance( func, ast.Name ) else func.attr if isinstance( func, ast.Attribute ) else ""
-        return name in MUTABLE_CALLS
+        return name not in ALLOWED_CALLS
     return False
 
 
@@ -78,16 +97,21 @@ class TestScan:
         "class K:\n"
         "    def __init__( self, w=OrderedDict(), v=list() ): pass\n"
         "f = lambda q=[]: q\n"
-        "def fine( n=None, s='x', t=(), u=frozenset() ): pass\n"
+        "def g( p=get_default_stats_dict(), r=du.get_current_date(), m=np.zeros( 3 ) ): pass\n"
+        "def fine( n=None, s='x', t=(), u=frozenset(), v=Depends( f ) ): pass\n"
     )
 
     def test_a_planted_default_of_each_kind_is_found( self ):
         found = mutable_defaults( self.PLANTED )
         assert sorted( ( f[ 2 ], f[ 3 ] ) for f in found ) == [ ( "<lambda>", "q" ), ( "__init__", "v" ), ( "__init__", "w" ),
-                                                               ( "a", "x" ), ( "b", "y" ), ( "c", "z" ) ]
+                                                               ( "a", "x" ), ( "b", "y" ), ( "c", "z" ),
+                                                               ( "g", "m" ), ( "g", "p" ), ( "g", "r" ) ]
 
     def test_immutable_defaults_are_not_reported( self ):
-        assert mutable_defaults( "def fine( n=None, s='x', t=(), u=frozenset(), k=1 ): pass\n" ) == []
+        assert mutable_defaults( "def fine( n=None, s='x', t=(), u=frozenset(), k=1, d=Depends( f ), q=Query( 1 ) ): pass\n" ) == []
+
+    def test_every_allowed_call_names_its_reason( self ):
+        assert ALLOWED_CALLS and all( isinstance( why, str ) and why for why in ALLOWED_CALLS.values() )
 
 
 class TestTree:

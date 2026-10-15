@@ -111,11 +111,34 @@ class TestPeftTrainer( unittest.TestCase ):
         self.assertEqual( seen, [ { "": 0 }, { "": 0 } ] )
         self.assertIsNot( seen[ 0 ], seen[ 1 ] )
 
-    def test_run_validation_device_map_default_is_none( self ):
-        """The signature holds no dict, so no two calls share one."""
-        import inspect
-        self.assertIsNone( inspect.signature( PeftTrainer.run_validation ).parameters[ "device_map" ].default )
-        self.assertIsNone( inspect.signature( PeftTrainer.load_and_merge_adapter ).parameters[ "device_map" ].default )
+    def test_run_validation_builds_its_own_device_map_per_call( self ):
+        """The device map handed to the coordinator is { "": 0 }, a new dict on each call."""
+        import pandas as pd
+        trainer = PeftTrainer.__new__( PeftTrainer )
+        trainer.test_train_dir, trainer.model_name, trainer.debug, trainer.verbose = "/x", "m", False, False
+        frame   = pd.DataFrame( { "command": [ "a", "b" ], "instruction": [ "i", "j" ], "input": [ "x", "y" ] } )
+        seen    = [ ]
+        coord   = MagicMock()
+        coord.generate_responses.side_effect = lambda df, **kw: ( seen.append( kw[ "device" ] ), df )[ 1 ]
+        coord.validate_responses.side_effect = lambda df: df
+        coord.response_validator.get_validation_stats.return_value = { }
+        with patch( "cosa.training.peft_trainer.pd.read_json", return_value=frame ), \
+             patch( "cosa.training.peft_trainer.XmlCoordinator", return_value=coord ), \
+             patch.object( PeftTrainer, "get_prompt", return_value="p" ), \
+             patch( "cosa.training.peft_trainer.du.print_banner" ), patch( "builtins.print" ):
+            for _ in range( 2 ): trainer.run_validation( model=object() )
+        self.assertEqual( seen, [ { "": 0 }, { "": 0 } ] )
+        self.assertIsNot( seen[ 0 ], seen[ 1 ] )
+
+    def test_a_device_map_a_caller_passes_is_used_as_given( self ):
+        """Only None means default."""
+        trainer = PeftTrainer.__new__( PeftTrainer )
+        trainer.checkpoint_dir = None
+        mine, seen = { "": 1 }, [ ]
+        with patch.object( PeftTrainer, "_load_model_and_tokenizer", side_effect=lambda **kw: seen.append( kw[ "device_map" ] ) ), \
+             patch( "cosa.training.peft_trainer.du.print_banner" ):
+            with self.assertRaises( ValueError ): trainer.load_and_merge_adapter( device_map=mine )
+        self.assertIs( seen[ 0 ], mine )
 
     def test_initialization_success( self ):
         """

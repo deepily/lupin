@@ -25,7 +25,9 @@ class XmlCoordinator:
     - Generate training/testing data splits
     """
     
-    def __init__( self, path_prefix: str=du.get_project_root(), tgi_url: str="http://172.17.0.4:3000", debug: bool=False, verbose: bool=False, silent: bool=False, init_prompt_templates: bool=True ) -> None:
+    def __init__( self, path_prefix: str=None, tgi_url: str="http://172.17.0.4:3000", debug: bool=False, verbose: bool=False, silent: bool=False, init_prompt_templates: bool=True ) -> None:
+        # None means "not given": the project root is read per instance, not once at import
+        if path_prefix is None: path_prefix = du.get_project_root()
         self.debug                = debug
         self.verbose              = verbose
         self.silent               = silent

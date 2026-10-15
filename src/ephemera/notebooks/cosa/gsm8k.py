@@ -237,8 +237,10 @@ def compile_stats( max_rows, prefix, questions, responses, ground_truth ):
     }
     return responses_dict
 
-def get_file_name( model, current_date=du.get_current_date(), current_time=du.get_current_time( include_timezone=False ) ):
+def get_file_name( model, current_date=None, current_time=None ):
     
+    if current_date is None: current_date = du.get_current_date()
+    if current_time is None: current_time = du.get_current_time( include_timezone=False )
     file_name = f"results-{current_date}-at-{current_time}-{model.lower()}.csv"
     file_name = file_name.replace( ":", "-" ).replace( "/", "-" )
     
