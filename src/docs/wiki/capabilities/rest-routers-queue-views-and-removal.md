@@ -9,7 +9,7 @@ pins:
   - cosa.rest.routers.queues.get_notification_queue@419a0b0054
   - cosa.rest.routers.queues.get_pool_status@b2d3b51239
   - cosa.rest.routers.queues.get_queue@4841811c76
-  - cosa.rest.routers.queues.reset_queues@081b88f384
+  - cosa.rest.routers.queues.reset_queues@97ba5b8b89
   - cosa.rest.routers.queues.delete_all_queue_jobs@482669c82e
   - cosa.rest.routers.queues.delete_queue_job@88ffe92290
   - cosa.rest.routers.queues.pause_job@a1e917052a
@@ -29,7 +29,7 @@ The queue-reading and queue-clearing doors under `/api` in `routers/queues.py`. 
 - `reset_queues` answers `POST /api/reset-queues` and clears all five queues.
 
 ## Don't
-- Don't call `reset_queues` casually. It checks only that you are signed in, and it empties every user's queues.
+- Don't call `reset_queues` casually. It needs the admin role (401 anonymous, 403 otherwise), and it empties every user's queues.
 - Don't expect pause to work on a running job. Both doors look in `todo` only and answer 404 otherwise.
 
 ## Invariants

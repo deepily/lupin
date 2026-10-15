@@ -151,24 +151,28 @@ class LivePipelineTestBase:
 
         Requires:
             - headers contains valid auth token
+            - LUPIN_TEST_ADMIN_EMAIL and LUPIN_TEST_ADMIN_PASSWORD are set
 
         Ensures:
             - Returns session_id string on success
-            - Returns "smoke-test-session" as fallback
+            - Returns "smoke-test-session" when no session is registered
+
+        Raises:
+            - RuntimeError if the admin credentials are unset or the admin sign-in
+              or the state request is refused with 401 or 403
         """
-        # The debug route is admin-only (row 2288e442); the suite's own account is not admin.
+        # The debug route is admin-only; the suite's own account is not admin.
         from tests.smoke.utilities.embedded_proxy import admin_auth_headers
-        try:
-            admin_headers = admin_auth_headers( self.BASE_URL )
-        except RuntimeError as e:
-            print( f"  WebSocket state needs admin: {e}" )
-            return "smoke-test-session"
+        admin_headers = admin_auth_headers( self.BASE_URL )
 
         resp = requests.get(
             f"{self.BASE_URL}/api/debug/websocket-state",
             headers=admin_headers,
             timeout=10
         )
+
+        if resp.status_code in ( 401, 403 ):
+            raise RuntimeError( f"WebSocket state refused the admin account: {resp.status_code}" )
 
         if resp.status_code != 200:
             print( f"  WebSocket state endpoint failed: {resp.status_code}" )
