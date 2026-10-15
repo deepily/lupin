@@ -181,9 +181,15 @@ def verify_seat_memento_at_any_readable_slot(
     min_bytes      = DEFAULT_MIN_BYTES,
     merge_claim_fn = None,
     verify_fn      = None,
+    list_dir_fn    = None,
 ):
     """
-    Prove a reapable memento exists for this seat at EITHER readable location.
+    Prove a reapable memento exists for this seat at any readable location.
+
+    The third place is a record in the io directory whose own header names this
+    seat's session, whatever the file is called. Seats write `<name>-<session>.md`,
+    and `<name>` need not be the persona the reap derives. Only a header naming this
+    session is adopted, so a prior holder's record is never taken.
 
     THE DEFECT THIS CLOSES (row 8068c65e): the verb offers `--slot root` as an
     ordinary documented option and the reap read `--slot io` only, so a correct call
@@ -229,7 +235,49 @@ def verify_seat_memento_at_any_readable_slot(
                        f"({reason}) — usable, but write it with `--slot io` next time so the reap "
                        f"finds it first: {root_reason}" ), root_record
 
+    sibling = _find_record_by_header_session(
+        io_slot.parent, seat_sid8, read_text_fn,
+        list_dir_fn if list_dir_fn is not None else _default_list_dir )
+    if sibling is not None:
+        sib_usable, sib_reason = verify_fn( sibling, seat_sid8, now, read_text_fn=read_text_fn,
+                                            window_seconds=window_seconds, min_bytes=min_bytes,
+                                            repo_root=repo_root, merge_claim_fn=merge_claim_fn )
+        if sib_usable:
+            return True, ( f"found by header session_id at {sibling}, not the io slot {io_slot} "
+                           f"({reason}) — usable: {sib_reason}" ), sibling
+
     return False, reason, io_slot
+
+
+def _find_record_by_header_session( directory, seat_sid8, read_text_fn, list_dir_fn ):
+    """
+    Find the record in `directory` that names this seat's session.
+
+    Ensures:
+        - returns a `.md` file in `directory` whose header names this seat's session, or None
+        - files named `...-<sid8>.md` are tried first, then every other `.md`
+        - a pointer is resolved to its record, so a pointer and its record both match
+        - never raises
+    """
+    seat8 = ( seat_sid8 or "" )[ :8 ].lower()
+    if not seat8:
+        return None
+    names = sorted( n for n in list_dir_fn( directory ) if n.endswith( ".md" ) )
+    names.sort( key=lambda n: not n.endswith( f"-{seat8}.md" ) )
+    for name in names:
+        path   = Path( directory ) / name
+        header = slot_record_header( path, read_text_fn )
+        if ( header.get( "session_id" ) or "" )[ :8 ].lower() == seat8:
+            return path
+    return None
+
+
+def _default_list_dir( directory ):
+    """Return the file names in `directory`, or [] when it is missing."""
+    try:
+        return os.listdir( directory )
+    except OSError:
+        return []
 
 
 def _nearest_existing_ancestor( cwd, exists_fn ):
@@ -1002,14 +1050,14 @@ def coordinate_mementos(
         now = now_fn()
         for name in list( pending ):
             info           = pending[ name ]
-            usable, reason = verify_seat_memento( info[ "slot" ], info[ "session_id" ][ :8 ], now,
-                                                  read_text_fn=read_text_fn,
-                                                  window_seconds=window_seconds, min_bytes=min_bytes,
-                                                  repo_root=info[ "repo_root" ], merge_claim_fn=merge_claim_fn )
+            usable, reason, found = verify_seat_memento_at_any_readable_slot(
+                info[ "repo_root" ], info[ "persona" ], info[ "session_id" ][ :8 ], now,
+                read_text_fn=read_text_fn, window_seconds=window_seconds, min_bytes=min_bytes,
+                merge_claim_fn=merge_claim_fn )
             if usable:
                 outcomes[ name ] = { "status": "written", "reason": f"appeared after ask: {reason}",
                                      "persona": info[ "persona" ], "session_id": info[ "session_id" ],
-                                     "slot": str( info[ "slot" ] ) }
+                                     "slot": str( found ) }
                 del pending[ name ]
 
     # Pass 4 — anything still un-written failed VISIBLY, split by RECOVERABILITY. A file
