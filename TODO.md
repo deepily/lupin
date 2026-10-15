@@ -16,6 +16,18 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 DECISIONS LOG 2026-10-14 night to 2026-10-15 noon (Mr. Radio 🦉 `5890f1ba`)
+
+- **Split seed 20261014** for the verdict-layer fit (row `8a8bca62`) (Rick, ask_yes_no, clean yes, about 09:25 EDT; row `27ae353d`). The shipped verdict threshold is now the fitted 0.3.
+- **Promote the ten recommended rows** (Rick, yes, about 09:40). Of row `62777c82`, only the parallel-only test fixes were authorized; wiring a parallel lane into the gates is held as decision row `c8d4b539`.
+- **Dart gate parked until next week** (Rick, ask_multiple_choice, answered, about 09:59; row `3740dd5b`, chase 2026-10-20 10:30).
+- **Mine, reversible**:
+  - Kill-guard wrappers: refuse any wrapper whose literal argument text names kill, pkill or killall; no shell parser; variable, alias and quote-split verbs are documented gaps.
+  - The own-children exception is exactly `pgrep|ps -P $$ | xargs [-r] kill [-SIGNAL]`.
+  - Installer: an explicitly set server URL that cannot be reached fails the install; only the default may report SKIPPED.
+- **Unanswered, not rulings** (both timed out to their defaults): strong cut-off `4dc2c93e` and VM folder mode `867ab3a3`. Re-ask 2026-10-16 10:30.
+- **Practice adopted after my regression**: land a range only after a full unit tier on identical patches (range-diff "="), not after the changed files' tests alone.
+
 ## 📚 DECISIONS LOG 2026-10-13 day (Mr. Radio 🦉 `44c062fb`, skeleton crew, no seats)
 
 - **Finish the browser utterance id work** (Rick, voice card, "yes"; he then admitted row `281a7608`). Done and closed at `fe0a806a8`.

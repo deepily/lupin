@@ -8,6 +8,36 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.14 night to 2026.10.15 noon - Session 5890f1ba (Mr. Radio 🦉, manager; overnight SWE crew, then a day crew while Rick was AFK; self re-spin at about 02:40 EDT) | The candidate-stage plan's verdict layer finished with a fitted threshold of 0.3; kill guard and reap fixes landed
+
+- **Landed on the working branch by me**, all fast-forwards with `:8000` idle, not pushed:
+  - `a1092f071`: Extra 2's 37 commits.
+  - `d7bff4b11`: the verdict layer code.
+  - `44a74f55b`: two archived branches, rows `fc10ff23` and `3472db4e`.
+  - `09a1e0707`: threshold 0.3.
+  - `4abf5c205`: doc-lint rows `96bcaf35` and `296755dd`.
+  - `dc88b4acf`: the footer-test fix.
+  - `4a3860155`: kill guard, reap memento and hop-limit pin, rows `f94c27c1` and `6c14006e`.
+  - `56a65becd`: the installer test notification, row `80535f46`.
+- **Verdict layer of the candidate-stage plan (row `8a8bca62`, closed)**:
+  - Rick ruled split seed 20261014.
+  - The fit set `POLICY["threshold"]` from 0.5 to 0.3, with a held-out false-reuse rate of 0.047139 (target 0.05) and twin recall of 0.514.
+  - Receipt: `projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt.json`.
+  - Strong stays at 0.9: under the precision rule it reads 7 of 36 at 0.9 against 95 of 245 at 0.7, because twin confidence sits between 0.68 and 0.86. This is decision row `4dc2c93e`, still open.
+- **Reader-rig grader measured run (row `a9d12c86`, closed)**:
+  - 156 Sonnet grader calls and 0 reader calls.
+  - Unparseable replies fell from 64 to 1.
+  - 28 grades changed; adjudicated against the key (row `d13a98ba`): 20 corrections, 6 regressions, 2 unclear.
+- **Regression of mine**: `46a59171a` (the dated API-docs footer removed) turned the unit tier red for about an hour. `test_fix_api_md_tables.py` still searched for the old heading, and 3 tests in `test_coverage_file_guard.py` failed with it. The review had run only the files the commit changed. Fixed by `dc88b4acf`. From then on, each range landed only after a full unit tier on identical patches.
+- **Shared with María and Clayton** under Rick's broadcast 80f59b05: `24694065`, `b812b66c`, `62777c82`, `b1a3e75e`, `147ce846`, `0c695d2a`, `4c88947e`, `3b2514f0`.
+- **Open**:
+  - Blocked on Rick, re-ask 2026-10-16 10:30: `4dc2c93e` and `867ab3a3` (the VM is stopped).
+  - Parked to 2026-10-20: `3740dd5b` (Dart gate).
+  - Held decision: `c8d4b539` (wire a parallel unit lane into the gates).
+- **Files**: no source files by me. The seats' commits are listed above; this entry and the TODO.md decisions log are mine.
+
+---
+
 ### 2026.10.13 day - Session 44c062fb (Mr. Radio 🦉, manager, skeleton crew, no seats; three bounded reviewer jobs) | Both browser clients send and check the utterance id; row 281a7608 closed
 
 - **Landed on the working branch by me**, fast-forwards, not pushed: `66edf7d4d`, `e67848d74`, `cacfa82ab`, `82c43138c`, `fe0a806a8` (last at 11:22 EDT). The legacy page and the multiplexer each send an `utterance_id` with a speech request and drop a complete or error frame that names another utterance.
