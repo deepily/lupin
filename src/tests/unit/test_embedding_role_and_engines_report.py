@@ -132,10 +132,12 @@ def http( monkeypatch ):
     def fake_post( self, url, payload, api_key, timeout, label ):
         seen[ "url" ]     = url
         seen[ "payload" ] = payload
+        seen[ "key" ]     = api_key
         return FakeResponse( { "embedding" : [ 0.1 ], "embeddings" : [ [ 0.1 ] ] } )
 
     monkeypatch.setattr( EmbeddingProvider, "_post_with_retry", fake_post )
-    monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: "key" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: "model-server-key" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_fastapi_api_key", staticmethod( lambda: "fastapi-key" ) )
     monkeypatch.setattr( EmbeddingProvider, "_resolve_server_url", staticmethod( lambda: "http://fastapi:7999" ) )
     monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) )
     monkeypatch.setattr( EmbeddingProvider, "_is_in_process_engine_owner", False )
@@ -183,6 +185,7 @@ def test_pin_fastapi_beats_a_model_server_url( http, monkeypatch ):
     p.generate_embedding( "x", content_type="code", role="query", pin_fastapi=True )
     assert http[ "url" ] == "http://fastapi:7999/api/embeddings/generate"
     assert http[ "payload" ][ "role" ] == "query"
+    assert http[ "key" ] == "fastapi-key"
     p.generate_embeddings_batch( [ "x" ], content_type="code", role="document", pin_fastapi=True )
     assert http[ "url" ] == "http://fastapi:7999/api/embeddings/batch"
 
@@ -191,8 +194,34 @@ def test_resolve_http_target_pin_skips_the_model_server_lookup( monkeypatch ):
     monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://ms:1" ) )
     monkeypatch.setattr( EmbeddingProvider, "_resolve_server_url", staticmethod( lambda: "http://fa:2" ) )
     monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: "k" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_fastapi_api_key", staticmethod( lambda: "fk" ) )
     assert EmbeddingProvider._resolve_http_target() == ( "http://ms:1", "k", "/embeddings" )
-    assert EmbeddingProvider._resolve_http_target( pin_fastapi=True ) == ( "http://fa:2", "k", "/api/embeddings" )
+    assert EmbeddingProvider._resolve_http_target( pin_fastapi=True ) == ( "http://fa:2", "fk", "/api/embeddings" )
+
+
+def test_an_unpinned_call_with_no_model_server_keeps_the_model_server_key( monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) )
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_server_url", staticmethod( lambda: "http://fa:2" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: "k" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_fastapi_api_key", staticmethod( lambda: "fk" ) )
+    assert EmbeddingProvider._resolve_http_target() == ( "http://fa:2", "k", "/api/embeddings" )
+
+
+def test_fastapi_api_key_reads_the_default_name_or_the_override( monkeypatch ):
+    names = []
+    monkeypatch.setattr( ep.du, "get_api_key", lambda name: names.append( name ) or f"key-of-{name}" )
+    monkeypatch.delenv( "LUPIN_FASTAPI_API_KEY_NAME", raising=False )
+    assert EmbeddingProvider._fastapi_api_key() == "key-of-notification-api-claude-code-dev"
+    monkeypatch.setenv( "LUPIN_FASTAPI_API_KEY_NAME", "other-key" )
+    assert EmbeddingProvider._fastapi_api_key() == "key-of-other-key"
+    assert names == [ "notification-api-claude-code-dev", "other-key" ]
+
+
+def test_fastapi_api_key_is_none_when_the_lookup_raises( monkeypatch ):
+    def boom( name ): raise OSError( "unreadable" )
+
+    monkeypatch.setattr( ep.du, "get_api_key", boom )
+    assert EmbeddingProvider._fastapi_api_key() is None
 
 
 # ── describe_engines and the engines' describe ──────────────────────────────

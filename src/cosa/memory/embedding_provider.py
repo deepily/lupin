@@ -248,14 +248,33 @@ class EmbeddingProvider:
         except Exception:
             return None
 
+    @staticmethod
+    def _fastapi_api_key() -> Optional[str]:
+        """
+        Load the X-API-Key value the FastAPI server accepts.
+
+        The model server's key is a different one, and FastAPI answers it with 401.
+        The name comes from `LUPIN_FASTAPI_API_KEY_NAME`, and defaults to the key every
+        other host-side caller of the FastAPI routes already uses.
+
+        Ensures:
+            - Returns the key string if the file is present and readable
+            - Returns None if the file is missing or empty
+            - Never raises
+        """
+        try:
+            return du.get_api_key( os.environ.get( "LUPIN_FASTAPI_API_KEY_NAME", "notification-api-claude-code-dev" ) )
+        except Exception:
+            return None
+
     @classmethod
     def _resolve_http_target( cls, pin_fastapi=False ) -> tuple:
         """
         Pick the HTTP target for embedding fallback calls.
 
         Uses lupin-model-server when its URL resolves, else the FastAPI server.
-        Both branches call `_http_api_key()`. Only the URL and prefix differ.
-        pin_fastapi=True skips the model-server lookup, so no env var or INI value reroutes it.
+        pin_fastapi=True skips that lookup, so nothing reroutes the call.
+        It also sends the FastAPI key. The model server's key is not that key.
 
         Returns:
             tuple[str, Optional[str], str]: (base_url, api_key, endpoint_prefix)
@@ -268,7 +287,8 @@ class EmbeddingProvider:
         model_server_url = None if pin_fastapi else cls._resolve_model_server_url()
         if model_server_url:
             return ( model_server_url, cls._http_api_key(), "/embeddings" )
-        return ( cls._resolve_server_url(), cls._http_api_key(), "/api/embeddings" )
+        key = cls._fastapi_api_key() if pin_fastapi else cls._http_api_key()
+        return ( cls._resolve_server_url(), key, "/api/embeddings" )
 
     @classmethod
     def _check_role( cls, role, pin_fastapi ):
