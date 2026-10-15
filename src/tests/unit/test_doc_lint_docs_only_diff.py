@@ -277,7 +277,23 @@ def test_python_header_directive_survives_a_reworded_module_docstring():
     assert moved is None, "a directive moved across a docstring still points at the same code line"
     assert "removed" in dod.python_difference( '#!/usr/bin/env python3\n"""Doc."""\nimport os\n', '"""Doc."""\nimport os\n' )
     assert dod.python_directives( 'def f():  # noqa\n    """Doc."""\n    return 1\n' ) == [ ( "def f():", 1, "# noqa" ) ]
-    assert dod.python_directives( '"""Doc."""  # noqa\nx = 1\n' ) == [ ( "x = 1", 1, "# noqa" ) ]
+
+
+def test_python_directive_moved_onto_a_docstring_line_fails():
+    old = 'def f():\n    """Doc."""\n    return g()  # noqa\n'
+    new = 'def f():\n    """Doc."""  # noqa\n    return g()\n'
+    found = dod.python_difference( old, new )
+    assert found is not None and "moved from 'return g()' to '<docstring>'" in found
+    assert dod.python_directives( new ) == [ ( "<docstring>", 1, "# noqa" ) ]
+    # a docstring and code on one line: the directive on that line still counts as a docstring one
+    found = dod.python_difference( '"""d"""; x = 1  # noqa\ny = 2\n', '"""d"""; x = 1\ny = 2  # noqa\n' )
+    assert found is not None and "moved from '<docstring>' to 'y = 2'" in found
+    # the same directive on the same docstring, reworded, still passes
+    assert dod.python_difference( '"""Old."""  # noqa\nx = 1\n', '"""New\nwords."""  # noqa\nx = 1\n' ) is None
+    # a multi-line docstring numbers from its first row, and a second docstring is a different one
+    two = 'def f():\n    """a\n    b"""  # noqa\n\n\ndef g():\n    """c"""  # noqa\n'
+    assert dod.python_directives( two ) == [ ( "<docstring>", 1, "# noqa" ), ( "<docstring>", 2, "# noqa" ) ]
+    assert "directive comment" in dod.python_difference( two, 'def f():\n    """a\n    b"""\n\n\ndef g():\n    """c"""  # noqa\n' )
 
 
 def test_python_directive_moved_between_identical_code_lines_fails():
@@ -380,6 +396,10 @@ MUTANTS = [
     ( "found.append( ( text, nth, comment ) )", "found.append( ( text, 0, comment ) )", "test_python_directive_moved_between_identical_code_lines_fails" ),
     ( "at = row if row in code else next( ( r for r in sorted( code ) if r > row ), None )", "at = row if row in code else None", "test_python_standalone_directive_is_paired_with_the_next_code_line" ),
     ( "if row in docs or not text: continue", "if not text: continue", "test_python_header_directive_survives_a_reworded_module_docstring" ),
+    ( "        if row in docs:\n            found.append", "        if False:\n            found.append", "test_python_directive_moved_onto_a_docstring_line_fails" ),
+    ( "sum( 1 for r in docs if r <= row and r - 1 not in docs )", "1", "test_python_directive_moved_onto_a_docstring_line_fails" ),
+    ( "sum( 1 for r in docs if r <= row and r - 1 not in docs )", "sum( 1 for r in docs if r < row and r - 1 not in docs )", "test_python_directive_moved_onto_a_docstring_line_fails" ),
+    ( "sum( 1 for r in docs if r <= row and r - 1 not in docs )", "sum( 1 for r in docs if r <= row )", "test_python_directive_moved_onto_a_docstring_line_fails" ),
     ( "nosec\\b|", "", "test_python_nosec_directive_is_code" ),
     ( "skipcq\\b|", "", "test_python_skipcq_directive_is_code" ),
     ( "Markdown is exempt wholesale", "Markdown is checked wholesale", "test_module_docstring_says_markdown_is_exempt_including_agent_files" ),

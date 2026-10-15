@@ -21,7 +21,9 @@ What "docs-only" means here, and does not:
     - a Python directive is paired with the code on its line, or with the next line of code when
       it stands alone, and with which occurrence of that code text it is. Moving `# noqa` to
       another line fails, even to an identical line. A docstring is not code, so rewording one
-      next to a shebang or a coding line passes. Dart directives are compared as text only
+      next to a shebang or a coding line passes. A directive on a docstring line is paired with
+      that docstring, so moving one onto or off a docstring line fails. Dart directives are
+      compared as text only
 """
 
 import argparse
@@ -37,6 +39,8 @@ from .dartdoc_lint import QUOTES, _skip_string
 IDENT_REGEX = re.compile( r"[A-Za-z0-9_$]+" )
 SUFFIXES    = ( ".py", ".dart" )
 DOC_SUFFIX  = ".md"
+
+DOCSTRING_MARK = "<docstring>"
 
 PY_DIRECTIVE   = re.compile( r"^#(!|\s*(pragma\b|noqa\b|nosec\b|skipcq\b|type\s*:|fmt\s*:|pylint\s*:|mypy\s*:|pyright\s*:|isort\s*:|ruff\s*:|flake8\s*:|yapf\s*:|-\*-|.*coding[:=]))" )
 DART_DIRECTIVE = re.compile( r"^(//+|/\*+)\s*(@dart\b|ignore\s*:|ignore_for_file\s*:|coverage\s*:|dart\s+format\s+(off|on)\b)" )
@@ -190,6 +194,8 @@ def python_directives( source ):
           between identical lines changes it; it is 0 when there is no code line
         - docstring lines and comment-only lines are not code, so rewording a docstring changes
           neither field
+        - a directive on a docstring line is paired with DOCSTRING_MARK and the number of that
+          docstring, so moving it onto or off a docstring line changes the pair
         - a hash inside a string literal is not a comment
 
     Raises:
@@ -209,6 +215,9 @@ def python_directives( source ):
     found = []
     for row, _, comment in comments:
         if not PY_DIRECTIVE.match( comment ): continue
+        if row in docs:
+            found.append( ( DOCSTRING_MARK, sum( 1 for r in docs if r <= row and r - 1 not in docs ), comment ) )
+            continue
         at = row if row in code else next( ( r for r in sorted( code ) if r > row ), None )
         text, nth = code[ at ] if at is not None else ( "", 0 )
         found.append( ( text, nth, comment ) )
