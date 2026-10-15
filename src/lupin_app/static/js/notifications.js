@@ -773,6 +773,7 @@ class NotificationsUI {
         this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
         this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
         this.CC_HIDE_INACTIVE_KEY   = 'notifications_cc_hide_inactive_strip';  // Strip filter: hide icons for sessions with no allocated voice persona
+        this.KEEP_PLACE_KEY         = 'notifications_keep_place';              // Keep the reader's place when a card arrives at the top (absent = on)
         this.TTS_FRACTION_PREF_KEY  = 'notifications_tts_preview_fraction_runtime';  // Runtime override for the TTS preview fraction (0-1 float); layered on top of INI default
         // Recent Activity filter + accordion-state keys (2026-05-21 —
         // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
@@ -839,6 +840,10 @@ class NotificationsUI {
         // Design: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md
         this.ccHideInactiveStrip = localStorage.getItem( this.CC_HIDE_INACTIVE_KEY ) === "true";
         this._bindHideInactiveToggle();
+        // Keep place: a card arriving at the top must not move what the reader is looking at.
+        this.keepPlace = this._readKeepPlace();
+        this._bindKeepPlaceToggle();
+        this._paintKeepPlaceToggle();
         if ( this.ccHideInactiveStrip ) {
             const toggle = document.getElementById( "cc-hide-inactive-toggle" );
             if ( toggle ) {
@@ -18443,6 +18448,90 @@ class NotificationsUI {
     }
 
     /**
+     * Read the "Keep place" preference: on unless the stored value is "false".
+     *
+     * The multiplexer reads the same key, so one choice holds in both clients.
+     */
+    _readKeepPlace() {
+        try {
+            return localStorage.getItem( this.KEEP_PLACE_KEY ) !== "false";
+        } catch ( err ) {
+            return true;
+        }
+    }
+
+    /**
+     * Wire the keep-place toggle pill once. Mirrors _bindHideInactiveToggle.
+     */
+    _bindKeepPlaceToggle() {
+        const toggle = document.getElementById( "cc-keep-place-toggle" );
+        if ( !toggle ) return;
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._setKeepPlace( !this.keepPlace );
+        } );
+    }
+
+    /**
+     * Mirror the keep-place flag onto the toggle pill: its data attribute and its label.
+     */
+    _paintKeepPlaceToggle() {
+        const toggle = document.getElementById( "cc-keep-place-toggle" );
+        if ( !toggle ) return;
+        toggle.setAttribute( "data-keep-place", String( this.keepPlace ) );
+        toggle.textContent = this.keepPlace ? "📌 Keep place" : "📌 Follow new";
+    }
+
+    /**
+     * Set the keep-place flag, persist it and repaint the pill.
+     */
+    _setKeepPlace( enabled ) {
+        this.keepPlace = !!enabled;
+        try {
+            localStorage.setItem( this.KEEP_PLACE_KEY, String( this.keepPlace ) );
+        } catch ( err ) {
+            this.error( "Failed to persist keep-place state:", err );
+        }
+        this._paintKeepPlaceToggle();
+        this.log( `[KEEP-PLACE] → ${this.keepPlace ? "ON" : "OFF"}` );
+    }
+
+    /**
+     * Say whether the reader has scrolled away from the top of the list.
+     *
+     * Ensures:
+     *   - with the reading pane open, the left column owns the scroll; otherwise the window does
+     */
+    _readerIsScrolledAway() {
+        const shell = document.querySelector( ".content-shell" );
+        if ( shell && shell.classList.contains( "pane-open" ) ) {
+            const leftColumn = document.querySelector( ".left-column" );
+            return !!leftColumn && leftColumn.scrollTop > 0;
+        }
+        return window.scrollY > 0;
+    }
+
+    /**
+     * Run a change that puts a card at the top without moving what the reader sees.
+     *
+     * Requires:
+     *   - mutate is a function that moves or inserts one card
+     *   - moving is that card, or null when it is not in the list yet
+     *
+     * Ensures:
+     *   - with keep-place on and the reader scrolled away from the top, the first other card in view
+     *     is re-pinned to its viewport position after the change
+     *   - otherwise mutate runs alone, so the list behaves as it always did
+     */
+    _keepPlaceWhile( moving, mutate ) {
+        const anchor = this.keepPlace && this._readerIsScrolledAway()
+            ? this._captureCenterScrollAnchor( moving )
+            : null;
+        mutate();
+        if ( anchor ) this._restoreCenterScrollAnchor( anchor );
+    }
+
+    /**
      * Wire the hide-inactive toggle pill once. Mirrors _bindStripToggle.
      */
     _bindHideInactiveToggle() {
@@ -19525,8 +19614,9 @@ class NotificationsUI {
      *     or below the nav strip, and `top` is that viewport-relative top (px)
      *   - returns null when the center column or a visible card is absent (caller
      *     then skips restoration — e.g. an empty list)
+     *   - a card that is `exclude` is never the anchor: it is the one about to move
      */
-    _captureCenterScrollAnchor() {
+    _captureCenterScrollAnchor( exclude = null ) {
         const container = document.querySelector( ".left-column .container" );
         if ( !container ) return null;
         // Nav strip occupies the top ~100px (matches the CSS max-height offset);
@@ -19536,6 +19626,7 @@ class NotificationsUI {
             ".conversation-pair, .notification-message, .sender-card"
         );
         for ( const el of cards ) {
+            if ( exclude && el === exclude ) continue;
             const top = el.getBoundingClientRect().top;
             if ( top >= navOffset ) return { el, top };
         }
@@ -21082,9 +21173,9 @@ class NotificationsUI {
         if ( insertAtTop ) {
             const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
             if ( pinned && pinned !== card ) {
-                container.insertBefore( card, pinned.nextSibling );
+                this._keepPlaceWhile( card, () => container.insertBefore( card, pinned.nextSibling ) );
             } else {
-                container.insertBefore( card, container.firstChild );
+                this._keepPlaceWhile( card, () => container.insertBefore( card, container.firstChild ) );
             }
         } else {
             container.appendChild( card );
@@ -27693,13 +27784,13 @@ class NotificationsUI {
         if ( pinned && pinned !== card ) {
             const target = pinned.nextSibling;
             if ( target !== card ) {
-                container.insertBefore( card, target );
+                this._keepPlaceWhile( card, () => container.insertBefore( card, target ) );
             }
             return;
         }
 
         if ( container.firstChild !== card ) {
-            container.insertBefore( card, container.firstChild );
+            this._keepPlaceWhile( card, () => container.insertBefore( card, container.firstChild ) );
         }
     }
 
