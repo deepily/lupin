@@ -92,3 +92,38 @@ def test_an_unknown_seat_session_adopts_nothing():
     files = { f"{_DIR}/a.md": _record( "a", "d9d3c344" ) }
     assert reap_memento._find_record_by_header_session(
         _DIR, "", lambda p: files.get( str( p ) ), lambda d: [ "a.md" ] ) is None
+
+
+def test_a_name_carrying_this_seats_suffix_is_refused_when_its_header_names_another():
+    files = { f"{_DIR}/maya.md"            : _record( "maya", "b1188cac" ),
+              f"{_DIR}/aaa-d9d3c344.md"    : _record( "aaa", "c007a72f" ) }
+    usable, _reason, slot = _resolve( files )
+    assert usable is False and str( slot ) == f"{_DIR}/maya.md"
+
+
+def test_a_header_match_is_found_although_a_suffix_decoy_sorts_first():
+    files = { f"{_DIR}/aaa-d9d3c344.md": _record( "aaa", "c007a72f" ),
+              f"{_DIR}/zzz.md"          : _record( "zzz", "d9d3c344" ) }
+    usable, _reason, slot = _resolve( files )
+    assert usable is True and str( slot ) == f"{_DIR}/zzz.md"
+
+
+def test_two_fresh_records_of_one_session_resolve_to_the_newest():
+    files = { f"{_DIR}/a-d9d3c344.md": _record( "a", "d9d3c344", written_at="2026-10-14T22:20:00+00:00" ),
+              f"{_DIR}/b-d9d3c344.md": _record( "b", "d9d3c344", written_at="2026-10-14T22:27:00+00:00" ) }
+    usable, _reason, slot = _resolve( files )
+    assert usable is True and str( slot ) == f"{_DIR}/b-d9d3c344.md"
+
+
+def test_the_newest_record_wins_whichever_name_sorts_first():
+    files = { f"{_DIR}/a-d9d3c344.md": _record( "a", "d9d3c344", written_at="2026-10-14T22:27:00+00:00" ),
+              f"{_DIR}/b-d9d3c344.md": _record( "b", "d9d3c344", written_at="2026-10-14T22:20:00+00:00" ) }
+    _usable, _reason, slot = _resolve( files )
+    assert str( slot ) == f"{_DIR}/a-d9d3c344.md"
+
+
+def test_an_unparseable_stamp_counts_as_oldest():
+    files = { f"{_DIR}/a-d9d3c344.md": _record( "a", "d9d3c344", written_at="garbage" ),
+              f"{_DIR}/b-d9d3c344.md": _record( "b", "d9d3c344" ) }
+    _usable, _reason, slot = _resolve( files )
+    assert str( slot ) == f"{_DIR}/b-d9d3c344.md"

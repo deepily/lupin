@@ -255,21 +255,26 @@ def _find_record_by_header_session( directory, seat_sid8, read_text_fn, list_dir
 
     Ensures:
         - returns a `.md` file in `directory` whose header names this seat's session, or None
-        - files named `...-<sid8>.md` are tried first, then every other `.md`
+        - when several name it, returns the one with the newest `written_at`; a tie goes
+          to the first name in sorted order, and an unparseable stamp counts as oldest
         - a pointer is resolved to its record, so a pointer and its record both match
         - never raises
     """
     seat8 = ( seat_sid8 or "" )[ :8 ].lower()
     if not seat8:
         return None
-    names = sorted( n for n in list_dir_fn( directory ) if n.endswith( ".md" ) )
-    names.sort( key=lambda n: not n.endswith( f"-{seat8}.md" ) )
-    for name in names:
+    oldest = datetime.datetime.min.replace( tzinfo=datetime.timezone.utc )
+    best   = None
+    best_t = None
+    for name in sorted( n for n in list_dir_fn( directory ) if n.endswith( ".md" ) ):
         path   = Path( directory ) / name
         header = slot_record_header( path, read_text_fn )
-        if ( header.get( "session_id" ) or "" )[ :8 ].lower() == seat8:
-            return path
-    return None
+        if ( header.get( "session_id" ) or "" )[ :8 ].lower() != seat8:
+            continue
+        stamp = _parse_iso_aware( header.get( "written_at" ) ) or oldest
+        if best is None or stamp > best_t:
+            best, best_t = path, stamp
+    return best
 
 
 def _default_list_dir( directory ):
