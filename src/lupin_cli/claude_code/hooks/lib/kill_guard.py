@@ -806,6 +806,60 @@ def _shell_c_literals( command: str ) -> List[ str ]:
     return found
 
 
+# A wrapper runs the text it is given, so a kill verb in its arguments is a kill the
+# guard cannot place. The rule reads the literal argument text only; it parses no shell.
+_SHELL_WRAPPERS = ( "bash", "sh", "dash", "zsh", "ksh" )
+_WRAPPER_NAMES  = (
+    r"(?P<name>bash|sh|dash|zsh|ksh|eval|ssh|docker|podman|kubectl|systemd-run"
+    r"|python[\d.]*|perl|ruby|node|xargs|watch|parallel|find|su|flock)"
+)
+_WRAPPED_RE = re.compile(
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}{_WRAPPER_NAMES}{_WORD_POST}"
+    rf"(?P<args>(?:{_WS}+{_ARG_CHAR}+)*)"
+)
+_XARGS_WORD_RE = re.compile( r"\bxargs\b" )
+_KILL_WORD_RE  = re.compile( r"(?<![\w.-])(?:kill|pkill|killall)(?![\w-])" )
+
+
+def _segment_before( command: str, position: int ) -> str:
+    """The text between the last separator before `position` and `position`."""
+    head = command[ :position ]
+    cut  = max( head.rfind( ";" ), head.rfind( "\n" ), head.rfind( "&" ) )
+    return head[ cut + 1: ]
+
+
+def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]:
+    """
+    The name of a wrapper whose argument text names a kill verb as a word, or None.
+
+    Requires:
+        - command is the shell command string, heredoc bodies already removed
+        - nested is True when the command is a literal taken from a shell -c
+
+    Ensures:
+        - matches a wrapper in command position only; a quoted mention is skipped
+        - a top-level shell whose `-c` literal was extracted is skipped, because that
+          literal is judged on its own; inside a literal every shell is judged
+        - the argument text ends at the first unquoted separator
+        - an xargs fed by an own-children listing (`pgrep -P $$ | xargs kill`, the
+          guard's own recommended substitute) is skipped
+        - never raises
+    """
+    extracted = { match.start() for match in _SHELL_C_RE.finditer( command ) }
+    for match in _WRAPPED_RE.finditer( command ):
+        if _is_mention( command, match.start() ):
+            continue
+        before = command[ match.start():match.start( "name" ) ]
+        if match.group( "name" ) in _SHELL_WRAPPERS and not nested and match.start() in extracted \
+                and _XARGS_WORD_RE.search( before ) is None:
+            continue
+        if match.group( "name" ) == "xargs" and _OWN_CHILDREN_RE.search( _segment_before( command, match.start() ) ):
+            continue
+        if _KILL_WORD_RE.search( match.group( "args" ) ):
+            return match.group( "name" )
+    return None
+
+
 def _hatch_in_prefix( command ) -> bool:
     """
     True iff the hatch flag is assigned truthy in a command-position prefix.
@@ -1480,7 +1534,7 @@ def _deny_reason_for( claude_pids: list ) -> str:
     )
 
 
-def _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid ) -> Optional[ str ]:
+def _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid, nested=False ) -> Optional[ str ]:
     """
     The deny reason for one command line whose heredoc bodies are already removed, or None.
 
@@ -1518,7 +1572,23 @@ def _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid ) -
         return _deny_reason_for( sweep_hits )
     if _sweeps_unscoped( command ):
         return _deny_reason_for( [] )
+    wrapper = _wrapper_naming_a_kill_verb( command, nested )
+    if wrapper is not None:
+        return _wrapper_deny_reason( wrapper )
     return None
+
+
+def _wrapper_deny_reason( wrapper: str ) -> str:
+    """Compose the deny text for a wrapper whose arguments name a kill verb."""
+    return (
+        f"`{wrapper}` runs the text it is given, and that text names kill, pkill or "
+        "killall. The guard cannot tell which process it would signal, and a seat "
+        "killed this way loses its context with no memento.\n"
+        "USE INSTEAD: run the kill directly so the guard can judge it, on a PID whose "
+        "`/proc/<pid>/comm` you have read, or on your own children with `pkill -P $$`. "
+        "If you have confirmed none of the targets is a seat, re-run with "
+        "LUPIN_ALLOW_UNSCOPED_KILL=1."
+    )
 
 
 def kill_deny_reason(
@@ -1577,7 +1647,8 @@ def kill_deny_reason(
         if _hatch_in_prefix( command ):
             return None
         for literal in _shell_c_literals( command ):
-            reason = _judge_command( _strip_heredocs( literal ), comm_reader, pgrep_probe, cwd, proc, caller_pid )
+            reason = _judge_command( _strip_heredocs( literal ), comm_reader, pgrep_probe, cwd, proc, caller_pid,
+                                     nested=True )
             if reason is not None:
                 return reason
         return None

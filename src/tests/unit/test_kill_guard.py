@@ -201,8 +201,9 @@ def test_a_scoped_listing_does_not_excuse_a_later_unscoped_one():
 
 
 def test_ps_without_an_all_selector_is_not_a_fleet_wide_listing():
-    """A bare `ps` shows this terminal's processes, not the box's."""
-    assert _deny( "ps | xargs kill" ) is None
+    """A bare `ps` is not a fleet listing; the wrapper rule refuses the xargs."""
+    reason = _deny( "ps | xargs kill" )
+    assert reason is not None and "fleet-wide" not in reason and "`xargs` runs the text" in reason
 
 
 def test_the_word_kill_inside_a_quoted_argument_is_not_a_kill():
@@ -936,10 +937,6 @@ def test_an_escaped_hash_and_an_escaped_quote_do_not_open_a_comment_or_a_span():
 
 
 @pytest.mark.parametrize( "command", [
-    "ssh host pkill -f TOK",
-    "eval pkill -f TOK", "systemd-run --user pkill -f TOK",
-    "docker exec c pkill -f TOK", "watch pkill -f TOK", "find . -exec pkill -f TOK {} +",
-    "parallel pkill -f TOK ::: a", 'python3 -c "import os; os.system(\'pkill -f TOK\')"',
     'p""kill -f TOK', "pk\\ill -f TOK", "$PKILL -f TOK", "$(which pkill) -f TOK",
 ] )
 def test_the_forms_the_guard_documents_as_unseen_stay_unseen( command ):
@@ -1041,7 +1038,6 @@ def test_a_shell_c_after_a_separator_is_judged():
     "bash -c 'pkill -P $$ -f pytest'",
     "bash -c 'kill $!'",
     'bash -c "echo kill 4242"',
-    "sh -c 'cat pids.txt | xargs kill'",
     "bash -c ''",
     "bash -c",
     "bash -l",
@@ -1059,9 +1055,9 @@ def test_the_hatch_outside_a_shell_c_unlocks_it_and_the_hatch_inside_unlocks_tha
     assert _deny( "bash -c 'LUPIN_ALLOW_UNSCOPED_KILL=1 kill 4242'", comm_reader=_all_claude ) is None
 
 
-def test_a_second_level_of_shell_c_stays_unseen_by_design():
-    """One level only. A literal inside a literal is deeper parsing than this guard does."""
-    assert _deny( "bash -c \"bash -c 'kill 4242'\"", comm_reader=_all_claude ) is None
+def test_a_second_level_of_shell_c_is_refused_by_the_wrapper_rule():
+    """A shell inside a literal names kill, so it is refused."""
+    assert _deny( "bash -c \"bash -c 'kill 4242'\"", comm_reader=_no_claude ) is not None
 
 
 def test_an_heredoc_inside_a_shell_c_literal_is_data():
@@ -1082,10 +1078,10 @@ def test_xargs_in_front_of_kill_pkill_or_killall_is_judged_like_the_bare_verb( c
     assert _deny( command, comm_reader=_all_claude, pgrep_probe=_PROBE_ONE_SEAT ) is not None
 
 
-def test_xargs_with_a_stdin_pattern_or_an_unknowable_pid_list_stays_allowed():
-    """`cat pids.txt | xargs kill` and `echo TOK | xargs pkill -f` name nothing readable."""
+def test_xargs_with_a_stdin_pattern_or_an_unknowable_pid_list_is_refused():
+    """`cat pids.txt | xargs kill` names nothing readable, so the wrapper rule refuses it."""
     for command in ( "cat pids.txt | xargs kill", "echo TOK | xargs pkill -f", "xargs -r kill < pids.txt" ):
-        assert _deny( command, comm_reader=_all_claude, pgrep_probe=lambda selector: [] ) is None, command
+        assert _deny( command, comm_reader=_no_claude, pgrep_probe=lambda selector: [] ) is not None, command
 
 
 def test_xargs_in_front_of_an_ordinary_program_is_allowed():
@@ -1093,9 +1089,9 @@ def test_xargs_in_front_of_an_ordinary_program_is_allowed():
     assert _deny( "git ls-files | xargs wc -l", comm_reader=_all_claude ) is None
 
 
-def test_a_pid_typed_into_the_pipe_of_xargs_kill_stays_unseen_for_now():
-    """A literal pid piped into xargs kill is not seen yet. The fix is a separate row."""
+def test_a_pid_typed_into_the_pipe_of_xargs_kill_is_refused():
+    """A pid piped into xargs kill is refused with no /proc lookup."""
     seat = lambda selector: [ "4242" ]
     assert _deny( "kill 4242", comm_reader=_all_claude, pgrep_probe=seat ) is not None
     for command in ( "echo 4242 | xargs kill", "xargs -a pids.txt kill", "echo 4242 | xargs sh -c 'kill $0'" ):
-        assert _deny( command, comm_reader=_all_claude, pgrep_probe=seat ) is None, command
+        assert _deny( command, comm_reader=_no_claude, pgrep_probe=seat ) is not None, command
