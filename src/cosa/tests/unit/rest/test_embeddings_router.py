@@ -159,7 +159,7 @@ class TestEmbeddingsRouter( unittest.TestCase ):
         provider._code_engine  = MagicMock()
         provider._code_engine.describe.return_value  = { "model": "code-model", "device": "cuda:0", "revision": None }
         provider._prose_engine = MagicMock()
-        provider._prose_engine.describe.return_value = { "model": "prose-model", "device": "cuda:0", "revision": None }
+        provider._prose_engine.describe.return_value = { "model": "prose-model", "device": "cuda:1", "revision": None }
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ), \
              patch( "cosa.memory.local_embedding_engine.device_class", return_value="TEST GPU, sm_00" ) as dev:
