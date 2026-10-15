@@ -92,11 +92,11 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[lupin-cli-notifications]] — the command-line clients that send a notification to the Lupin server, and the sync one that waits for the user's answer. `lupin_cli.notifications` (notify_user_sync, notify_user_async, notify_user, human_ask_containment)
 - [[task-promotion-gate]] — the rules for moving a row out of the holding area onto a board, and for who may set a priority. `cosa.rest` (task_promotion_gate, task_promotion_resolver, task_request_lifecycle, task_request_pledge, task_priority_firewall, task_approval_settings)
 - [[web-client-audio-and-tts]] — how the browser records speech for transcription and plays server-made speech through a queue. `src/lupin_app/static/js/multiplexer` (audio, render, shared, stores, wireTtsIntent)
-- [[web-client-jobs-and-session-panes]] — the seven renderers that draw the jobs, submit, Q&A, session strip, persona modal, nav bar and reading panes. `src/lupin_app/static/js/multiplexer/render`
+- [[web-client-jobs-and-session-panes]] — the seven renderers that draw the jobs, submit, Q&A, session strip, persona modal, nav bar and reading panes. `src.lupin_app.static.js.multiplexer.render`
 - [[web-client-transport-and-auth]] — the multiplexer page's two WebSockets, refreshable login token and in-page event bus, wired by `bootMultiplexer`. `src/lupin_app/static/js/multiplexer` (auth, transport, boot, shared)
 - [[web-client-stores]] — the multiplexer page's state stores, each built by a `createXStore` function from the event bus and announcing change as a `store_*_changed` event. `src/lupin_app/static/js/multiplexer/stores`
 - [[db-repositories]] — the Postgres repository classes built on one generic base, mapped to the capability that uses each, and the vector search they share. `cosa.rest.db` (repositories, database)
-- [[web-client-task-board-panes]] — the four panes that show the task store: task list, epic board, holding area and finished tasks. `src/lupin_app/static/js/multiplexer/render`
+- [[web-client-task-board-panes]] — the four panes that show the task store: task list, epic board, holding area and finished tasks. `src.lupin_app.static.js.multiplexer.render`
 - [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
 - [[web-client-stores-notifications]] — the notification, sender, session strip, missed-count, acknowledgement and broadcast stores. `src/lupin_app/static/js`
 - [[web-client-stores-tasks-and-jobs]] — the job, task list, task request, holding area and finished-task stores and their helpers. `src/lupin_app/static/js`
@@ -407,6 +407,31 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[rest-core-persona-key-backfill]] — the sweep that canonicalizes persona keys on task-store rows. `cosa.rest` (persona_key_backfill)
 - [[rest-core-podcast-door]] — the podcast proxy's document check, refusals and judged copy. `cosa.rest` (podcast_proxy)
 - [[rest-core-podcast-cards]] — the podcast approval card, the start checks and the dry-run switch. `cosa.rest` (podcast_proxy)
+- [[web-client-render-abstract-tooltip]] — the floating popover that shows a card's abstract in vertical layout. `src.lupin_app.static.js.multiplexer.render` (abstractTooltip)
+- [[web-client-render-action-required-chrome]] — the badges, abstract and prediction hint that sit around an action-required card's prompt. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredChrome)
+- [[web-client-render-action-required-interactive]] — the answer forms of an action-required card, one per response type, and their shared microphone handler. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredInteractive, actionRequiredMic)
+- [[web-client-render-action-required-readonly-and-queue]] — the non-interactive card, the empty line and the minimized row for a queued card. `src.lupin_app.static.js.multiplexer.render` (templates/actionRequiredReadOnly, actionRequiredQueueRow)
+- [[web-client-render-broadcast-and-commons-cards]] — the broadcast compose card and one row of its recent-activity list. `src.lupin_app.static.js.multiplexer.render` (templates/broadcastCard, commonsActivityEntry)
+- [[web-client-render-dom-and-doc-links]] — the small dom-update primitives the renderers share and the one place that decides what a doc link is. `src.lupin_app.static.js.multiplexer.render` (dom, docLink)
+- [[web-client-render-html-tag]] — the html tagged template that builds a fragment and escapes every interpolated value as text. `src.lupin_app.static.js.multiplexer.render` (html)
+- [[web-client-render-job-bucket]] — one jobs bucket drawn as a section, its toggle, and the job card. `src.lupin_app.static.js.multiplexer.render` (templates/jobBucket, templates/jobCard)
+- [[web-client-render-job-meta]] — the size-capped fill of a job card's meta block so large json cannot freeze the page. `src.lupin_app.static.js.multiplexer.render` (templates/jobCard)
+- [[web-client-render-small-widgets]] — the date accordion, filter-settings reveal, history-window picker and caret splice. `src.lupin_app.static.js.multiplexer.render` (templates/dateAccordion, filterSettingsReveal, historyWindowDropdown, insertTranscriptionText)
+- [[web-client-render-task-list-formatters]] — the pure formatters behind a task row and the task list header. `src.lupin_app.static.js.multiplexer.render` (taskListModel)
+- [[web-client-render-task-list-model]] — the dom-free half of the task list: ranking, labels and owner grouping. `src.lupin_app.static.js.multiplexer.render` (taskListModel)
+- [[web-client-render-task-list-table]] — the row schema, per-owner collapse state and the table that lays out the grouped task list. `src.lupin_app.static.js.multiplexer.render` (rowSchema, taskListCollapse, templates/taskListTable)
+- [[web-client-render-task-lookup]] — the search box that finds one ticket by id and hands the row up. `src.lupin_app.static.js.multiplexer.render` (taskLookupBox)
+- [[web-client-render-task-row-cells]] — the one row template shared by the task list, holding area and epic board, and its toggle controls. `src.lupin_app.static.js.multiplexer.render` (templates/taskRowControls, templates/taskRowDisclosed)
+- [[web-client-render-task-row-controller]] — the click, change and key handling for the shared task row. `src.lupin_app.static.js.multiplexer.render` (taskRowController)
+- [[web-client-render-task-verbs]] — what each task verb asks the operator for, its label and the missing-field sentence. `src.lupin_app.static.js.multiplexer.render` (taskVerbs)
+- [[web-client-render-epic-board]] — the pure model, the saved open and closed choices, and the table builder of the epic board card. `src.lupin_app.static.js.multiplexer.render` (epicBoardCollapse, epicBoardModel, epicBoardTable)
+- [[web-client-render-finished-tasks]] — the finished-tasks pane: three status pills, a window slider and a four-column table of terminal events. `src.lupin_app.static.js.multiplexer.render` (finishedTasksModel, finishedTasksTable)
+- [[web-client-render-fleet-status]] — the fleet status card: sessions grouped under managers, split by liveness, in a read-only table. `src.lupin_app.static.js.multiplexer.render` (fleetModel, fleetStatusTable)
+- [[web-client-render-flow-ratio]] — the create gate readout, closed against new tickets over a window, with threshold and window sliders. `src.lupin_app.static.js.multiplexer.render` (flowRatioModel, flowRatioPanel)
+- [[web-client-render-holding-area-model]] — the status wording of the batch buttons, and the model that groups the holding area's tickets by who filed them. `src.lupin_app.static.js.multiplexer.render` (holdingAreaBatch, holdingAreaModel)
+- [[web-client-render-holding-area-table]] — the DOM builders of the holding area: one collapsible group per filer, with batch controls, plan sub-groups and a table of held rows. `src.lupin_app.static.js.multiplexer.render` (holdingAreaTable)
+- [[web-client-render-operator-state-and-keep-place]] — keeping the operator's typed input, open controls and scroll place across a repaint. `src.lupin_app.static.js.multiplexer.render` (operatorState, keepPlace)
+- [[web-client-render-row-disclosure-and-new-ticket]] — the shared disclosure parts of a task row, and the new-ticket button that opens the shared create card with dictation. `src.lupin_app.static.js.multiplexer.render` (rowDisclosure, newTicketCard)
 
 ## Draft slugs folded into written pages
 
