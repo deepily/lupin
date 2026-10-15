@@ -30,7 +30,7 @@ The model loader and background loops that `lifespan` starts, and the file helpe
 - `collect_refs` returns one `( source, url, token )` tuple per versioned reference in those files. `main` runs verify or stamp and returns 0, 1 on drift, or 2 when stamp cannot converge.
 
 ## Don't
-- Don't expect the sweep on a fresh install. Its key defaults to off, so a missing key never arms the one loop that can refuse a human answer.
+- Don't expect the sweep from the code default alone. The code reads a missing key as off, but `lupin-app.ini` sets it on in the baseline section, which every environment inherits.
 - Don't let a loop exit on an error. Each loop logs it and carries on, and only cancellation at shutdown ends it.
 
 ## Invariants
