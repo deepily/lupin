@@ -98,8 +98,25 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[db-repositories]] — the Postgres repository classes built on one generic base, mapped to the capability that uses each, and the vector search they share. `cosa.rest.db` (repositories, database)
 - [[web-client-task-board-panes]] — the four panes that show the task store: task list, epic board, holding area and finished tasks. `src/lupin_app/static/js/multiplexer/render`
 - [[web-client-notification-panes]] — the pane renderers that draw notifications, action-required cards, broadcasts, commons activity and fleet status. `src/lupin_app/static/js/multiplexer` (render, stores)
+- [[web-client-stores-notifications]] — the notification, sender, session strip, missed-count, acknowledgement and broadcast stores. `src/lupin_app/static/js`
+- [[web-client-stores-tasks-and-jobs]] — the job, task list, task request, holding area and finished-task stores and their helpers. `src/lupin_app/static/js`
+- [[web-client-stores-panes]] — the action-required, audio, TTS queue, Q and A, reading pane, view state and prediction vote stores. `src/lupin_app/static/js`
+- [[web-client-stores-fleet]] — the fleet status, flow ratio, submitted jobs, commons and epic stories stores. `src/lupin_app/static/js`
+- [[web-client-stores-transcripts-and-history]] — the session transcript store and roster, the history window helpers and the page-load hydrators. `src/lupin_app/static/js`
+- [[web-client-shared-services]] — the event bus, storage service, cross-tab broadcast, debug sink and small shared helpers. `src/lupin_app/static/js`
+- [[web-client-auth-and-api]] — token parsing, the auth manager and guard, and the API client. `src/lupin_app/static/js`
+- [[web-client-transport-channels]] — the audio and queue transports, the connection state machine and the channel helpers. `src/lupin_app/static/js`
+- [[web-client-audio-modules]] — TTS playback, its caches and decoder, and the audio recorder. `src/lupin_app/static/js`
+- [[web-client-boot-console-and-podcast]] — the page boot, the console page and the document podcast control. `src/lupin_app/static/js`
+- [[web-client-nav-and-diagnostics]] — the navigation bar and the WebSocket diagnostic pages. `src/lupin_app/static/js`
+- [[web-client-task-forms-create]] — the shared create, lookup and agent-select scripts. `src/lupin_app/static/js`
+- [[web-client-task-forms-request]] — the shared task-request and argument-interview scripts. `src/lupin_app/static/js`
+- [[web-client-notifications-script]] — the older notifications page script and the chunk sequencer. `src/lupin_app/static/js`
+- [[web-client-testkit]] — the accordion and parity harnesses and fixtures used by the multiplexer tests. `src/lupin_app/static/js`
+- [[web-client-experimental-tts]] — the experimental and failed-integration TTS scripts. `src/lupin_app/static/js`
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
+- [[app-startup-tasks-and-asset-tools]] — the speech model loader and background loops `lifespan` starts, and the static-file helpers of the asset token check. `lupin_app.main`, `lupin_app.asset_tokens`
 - [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task. It replays frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
 - [[dm-rewrite-study-freeze]] — the helpers that checksum, filter, sample and verify the frozen DM replay set. `cosa.research.phi4_flash_lite_study` (freeze_corpus)
 - [[dm-rewrite-study-replay]] — loading the snapshot, the per-arm guards, the outcome counts and latency, and the replay command line. `cosa.research.phi4_flash_lite_study` (replay_harness)
