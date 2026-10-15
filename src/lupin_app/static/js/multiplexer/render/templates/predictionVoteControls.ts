@@ -34,8 +34,12 @@ export interface PredictionVoteHandlers {
  * clicks to `onVote`. Absent in the storeless component-isolation parity harness
  * — there the action-required card (`predictionHintBox`) does NOT mount the
  * controls at all, because a button with no orchestrator behind it is a dead
- * control. The notification-item path always passes a handler to
- * `renderPredictionVoteControls`, so this applies to the card path only.
+ * control. The notification-item path (notificationItem.ts) still mounts the
+ * controls without an integration: its handler is `integration?.onVote`, so a
+ * click paints the local highlight and posts nothing. That behaviour is pinned
+ * by the notificationItem test "prediction_hint at/above the gate mounts the
+ * vote controls (pure-data, no integration)". This change covers the card path
+ * only.
  */
 export interface PredictionVoteIntegration {
   /** Authoritative cast vote for the notification id (for the `.selected` highlight on (re)render). */
