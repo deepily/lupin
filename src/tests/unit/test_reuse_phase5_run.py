@@ -4,6 +4,8 @@ The fresh-needs driver: reserved hash, estimate, recorded sample, sweep, fixed s
 Nothing here reaches Jev: the transport is the stand-in and the ledger is a scratch file.
 The reserved file of the run is never opened: the tests write a scratch file of their own under the same layout.
 """
+import ast
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -189,16 +191,19 @@ def test_flip_argv_fixes_the_settings_and_holds_the_estimate_to_the_run_and_the_
 def test_the_steps_run_end_to_end_on_the_stand_in_and_the_report_names_the_recorded_sample( scratch, capsys ):
     assert scratch.sample() == 0
     members = json.loads( capsys.readouterr().out )[ "members" ]
-    assert p5.cli( scratch.args( "sweep", "--ceiling", "100000000" ) ) == 0
-    sweep = json.loads( ( scratch.data / "e2e-results" / "p5s-sample.json" ).read_text( encoding="utf-8" ) )
-    assert sweep[ "members" ] == members and sweep[ "questions" ] == [ "r1" ] and len( sweep[ "searches" ] ) == 10
-    assert all( s[ "status" ] == "complete" for s in sweep[ "searches" ] )
-    assert { s[ "rows" ][ 0 ][ "question" ] for s in sweep[ "searches" ] } == { "provides" }      # the new question, never the old one
     assert p5.cli( scratch.args( "canary", "--ceiling", "100000000" ) ) == 0
     canary = json.loads( ( scratch.data / "e2e-results" / "p5-canary.json" ).read_text( encoding="utf-8" ) )
     assert canary[ "questions" ] == [ "r1", "r2", "r3", "r4", "r5" ] and canary[ "pack_size" ] == 50
     assert p5.cli( scratch.args( "approve", "--by", "cheech", "--why", "read it" ) ) == 0
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36000000" ) ) == 0
+    sweep = json.loads( ( scratch.data / "e2e-results" / "p5s-sample.json" ).read_text( encoding="utf-8" ) )
+    assert sweep[ "members" ] == members and sweep[ "questions" ] == [ "r1" ] and len( sweep[ "searches" ] ) == 10
+    assert all( s[ "status" ] == "complete" for s in sweep[ "searches" ] )
+    assert { s[ "rows" ][ 0 ][ "question" ] for s in sweep[ "searches" ] } == { "provides" }      # the new question, never the old one
     assert p5.cli( scratch.args( "run", "--ceiling", "300000000" ) ) == 0
+    want = hashlib.sha256( ( scratch.data / p5.SAMPLE_FILE ).read_bytes() ).hexdigest()
+    for name in ( "p5-canary", "p5-run", "p5s-sample" ):
+        assert json.loads( ( scratch.data / "e2e-results" / f"{name}.json" ).read_text( encoding="utf-8" ) )[ "sample_sha256" ] == want
     capsys.readouterr()
     assert p5.cli( scratch.args( "report" ) ) == 0
     out = capsys.readouterr().out
@@ -246,6 +251,8 @@ def test_only_this_driver_names_the_reserved_file_and_only_the_reader_and_this_t
     assert grep_tracked( root, p5.FRESH_NEEDS_NAME ) == sorted( [ driver, statement ] )         # positive control: the driver itself is found
     assert grep_tracked( root, p5.FRESH_NEEDS_DIR ) == sorted( [ driver, statement ] )
     assert grep_tracked( root, "0a0da7b7" ) == sorted( [ reader, here ] )
+    flip = "src/lupin_mcp/reuse_flip_run.py"
+    assert grep_tracked( root, "allow_fresh" ) == sorted( [ reader, flip, driver, here ] )         # the keyword appears nowhere else
 
 
 def test_the_flip_drivers_main_refuses_the_reserved_hash_when_called_without_the_allow( scratch ):
@@ -259,3 +266,95 @@ def test_the_estimate_follows_the_count_of_the_file_it_was_given( scratch, monke
     monkeypatch.setattr( e2e, "FRESH_SHA_PREFIX", other[ :8 ] )
     assert p5.cli( scratch.args( "estimate", sha=other ) ) == 0
     assert "run: 380.3 M tokens" in capsys.readouterr().out                                      # 31 x 5 x 2,453,600
+
+
+def canary_and_approve( scratch ):
+    assert scratch.sample() == 0
+    assert p5.cli( scratch.args( "canary", "--ceiling", "100000000" ) ) == 0
+    assert p5.cli( scratch.args( "approve", "--by", "cheech", "--why", "read it" ) ) == 0
+
+
+def test_the_sweep_refuses_before_the_canary_is_run_and_before_it_is_approved( scratch, capsys ):
+    assert scratch.sample() == 0
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36000000" ) ) == 2
+    assert "has not been approved" in capsys.readouterr().err
+    assert not ( scratch.data / "e2e-results" ).exists()
+    assert p5.cli( scratch.args( "canary", "--ceiling", "100000000" ) ) == 0
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36000000" ) ) == 2                       # run, not approved
+    assert "has not been approved" in capsys.readouterr().err
+    assert not ( scratch.data / "e2e-results" / "p5s-sample.json" ).exists()
+
+
+def test_the_sweep_refuses_a_ceiling_above_one_and_a_half_times_the_sample_estimate( scratch, capsys ):
+    canary_and_approve( scratch )
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36804001" ) ) == 2                       # 1.5 x 24,536,000 is 36,804,000
+    assert "36804000" in capsys.readouterr().err
+    assert not ( scratch.data / "e2e-results" / "p5s-sample.json" ).exists()
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "36804000" ) ) == 0
+
+
+def test_a_result_whose_sample_hash_differs_from_the_file_is_refused_by_the_next_step( scratch, capsys ):
+    canary_and_approve( scratch )
+    path   = scratch.data / "e2e-results" / "p5-canary.json"
+    record = json.loads( path.read_text( encoding="utf-8" ) )
+    record[ "sample_sha256" ] = "f" * 64
+    path.write_text( json.dumps( record ), encoding="utf-8" )
+    capsys.readouterr()
+    for step in ( ( "run", "--ceiling", "300000000" ), ( "sweep", "--ceiling", "36000000" ), ( "report", ) ):
+        assert p5.cli( scratch.args( *step ) ) == 2
+        assert "carries sample hash" in capsys.readouterr().err
+    assert not ( scratch.data / "e2e-results" / "p5-run.json" ).exists()                          # nothing was spent
+
+
+def test_a_result_with_no_sample_hash_is_refused_the_same_way( scratch, capsys ):
+    canary_and_approve( scratch )
+    path   = scratch.data / "e2e-results" / "p5-canary.json"
+    record = json.loads( path.read_text( encoding="utf-8" ) )
+    del record[ "sample_sha256" ]
+    path.write_text( json.dumps( record ), encoding="utf-8" )
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 2
+    assert "carries sample hash None" in capsys.readouterr().err
+
+
+def test_a_changed_sample_file_makes_every_stamped_result_differ( scratch, capsys ):
+    canary_and_approve( scratch )
+    path = scratch.data / p5.SAMPLE_FILE
+    path.write_text( path.read_text( encoding="utf-8" ) + " ", encoding="utf-8" )
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 2
+    assert "carries sample hash" in capsys.readouterr().err
+
+
+def test_an_unreadable_sample_record_is_a_refusal_not_a_traceback( scratch, capsys ):
+    scratch.data.mkdir()
+    ( scratch.data / p5.SAMPLE_FILE ).write_text( '{"seed": "cut off', encoding="utf-8" )
+    assert scratch.sample() == 2
+    assert "not readable" in capsys.readouterr().err
+    ( scratch.data / p5.SAMPLE_FILE ).write_text( "[1, 2]", encoding="utf-8" )
+    assert p5.cli( scratch.args( "report" ) ) == 2
+    assert "not a JSON object" in capsys.readouterr().err
+
+
+def test_allow_fresh_is_keyword_only_everywhere_it_is_taken( scratch ):
+    path = p5.needs_path( scratch.projects_data )
+    with pytest.raises( TypeError ): e2e._read_checked( path, scratch.sha, "x", True )
+    with pytest.raises( TypeError ): frun.load_flip_needs( path, scratch.sha, True )
+    with pytest.raises( TypeError ): frun.main( [], True )
+    with pytest.raises( TypeError ): frun.cli( [], True )
+
+
+def test_the_flip_driver_never_turns_allow_fresh_on_and_has_no_option_for_it():
+    tree = ast.parse( Path( frun.__file__ ).read_text( encoding="utf-8" ) )
+    turned_on = [ n.lineno for n in ast.walk( tree ) if isinstance( n, ast.keyword ) and n.arg == "allow_fresh" and isinstance( n.value, ast.Constant ) and n.value.value is True ]
+    assert turned_on == []                                                                        # it only passes its own parameter on
+    defaults = [ d for n in ast.walk( tree ) if isinstance( n, ast.FunctionDef ) for d in n.args.kw_defaults if isinstance( d, ast.Constant ) and d.value is True ]
+    assert defaults == []                                                                         # and no parameter of it defaults to true
+    passed = [ n for n in ast.walk( tree ) if isinstance( n, ast.keyword ) and n.arg == "allow_fresh" ]
+    assert len( passed ) == 3                                                                     # positive control: the three hand-offs the scan above saw
+    options = [ a.value for n in ast.walk( tree ) if isinstance( n, ast.Call ) and isinstance( n.func, ast.Attribute ) and n.func.attr == "add_argument"
+                for a in n.args if isinstance( a, ast.Constant ) ]
+    assert options and not any( "fresh" in str( o ) for o in options )

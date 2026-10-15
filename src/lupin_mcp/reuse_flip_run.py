@@ -28,7 +28,7 @@ PREFIX          = "fl"
 ESTIMATE_TOKENS = 319_000_000                         # 150 searches at 2,125,705 tokens each, rounded up, from the end-to-end run of 9 October
 
 
-def load_flip_needs( path, expected_sha, allow_fresh=False ):
+def load_flip_needs( path, expected_sha, *, allow_fresh=False ):
     """
     Read the frozen needs of the flip-rate test.
 
@@ -201,7 +201,7 @@ def _parser():
     return ap
 
 
-def main( argv=None, allow_fresh=False ):
+def main( argv=None, *, allow_fresh=False ):
     """
     Run one step of the flip-rate test.
 
@@ -235,7 +235,7 @@ def main( argv=None, allow_fresh=False ):
     return 0
 
 
-def cli( argv=None, allow_fresh=False ):
+def cli( argv=None, *, allow_fresh=False ):
     """
     Run main as a command line: a refusal is one line and exit code 2.
 

@@ -133,13 +133,92 @@ def write_sample( data, items, args ):
     record = { "format": "reuse-phase5-sample-1", "seed": args.seed, "members": pick_sample( items, args.seed ), "needs_sha": args.needs_sha,
                "arm": args.arm, "index_sha": args.index_sha }
     path = Path( data ) / SAMPLE_FILE
-    if path.exists():
-        held = json.loads( path.read_text( encoding="utf-8" ) )
-        if held != record: raise s1.DriverRefused( f"the sample is already recorded as {held[ 'seed' ]!r} for arm {held[ 'arm' ]!r}, index {held[ 'index_sha' ]}; a different seed, arm or index is refused" )
-        return held
     Path( data ).mkdir( parents=True, exist_ok=True )
-    path.write_text( json.dumps( record, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
+    try:
+        with open( path, "x", encoding="utf-8" ) as handle: handle.write( json.dumps( record, sort_keys=True, indent=1 ) + "\n" )
+        return record
+    except FileExistsError: held = load_record( path )                                           # exclusive create: two callers cannot both write
+    if held != record: raise s1.DriverRefused( f"the sample is already recorded as {held[ 'seed' ]!r} for arm {held[ 'arm' ]!r}, index {held[ 'index_sha' ]}; a different seed, arm or index is refused" )
+    return held
+
+
+def load_record( path ):
+    """
+    Read the sample record.
+
+    Requires:
+        - path names the record file
+    Ensures:
+        - returns the record as a dict
+    Raises:
+        - DriverRefused when the file is not a JSON object, so a cut-off write is a refusal and not a traceback
+    """
+    try: record = json.loads( Path( path ).read_text( encoding="utf-8" ) )
+    except ValueError as e: raise s1.DriverRefused( f"the sample record {path} is not readable: {e}" ) from e
+    if not isinstance( record, dict ): raise s1.DriverRefused( f"the sample record {path} is not a JSON object" )
     return record
+
+
+def sample_sha( data ):
+    """
+    Hash the sample record file.
+
+    Requires:
+        - the record exists in data
+    Ensures:
+        - returns the sha256 of the file's bytes, which each result carries
+    """
+    return hashlib.sha256( ( Path( data ) / SAMPLE_FILE ).read_bytes() ).hexdigest()
+
+
+def result_path( data, run_name ):
+    """Ensures: returns the path of the run's result file under the data directory."""
+    return Path( data ) / "e2e-results" / f"{run_name}.json"
+
+
+def stamp_result( data, run_name, sha ):
+    """
+    Put the sample file's hash on a run's result record.
+
+    Requires:
+        - the run's result file exists; sha is the sample file's sha256
+    Ensures:
+        - the record carries sample_sha256 and is otherwise unchanged
+    """
+    path   = result_path( data, run_name )
+    record = json.loads( path.read_text( encoding="utf-8" ) )
+    e2r._write_json( path, { **record, "sample_sha256": sha } )
+
+
+def check_stamps( data, sha ):
+    """
+    Refuse a result whose recorded sample hash is not the sample file's.
+
+    Requires:
+        - sha is the sample file's sha256
+    Ensures:
+        - returns None when every result of the canary, the run and the sweep that exists carries sha
+        - a result that is missing the hash counts as differing
+    Raises:
+        - DriverRefused naming the result and both hashes
+    """
+    for name in ( f"{PREFIX}-canary", f"{PREFIX}-run", f"{SAMPLE_PREFIX}-sample" ):
+        path = result_path( data, name )
+        if not path.exists(): continue
+        record = json.loads( path.read_text( encoding="utf-8" ) )
+        got    = record[ "sample_sha256" ] if "sample_sha256" in record else None
+        if got != sha: raise s1.DriverRefused( f"result {name} carries sample hash {got}, but the sample file's is {sha}" )
+
+
+def canary_approved( data ):
+    """
+    Say whether the confirmation's canary has been run and approved.
+
+    Ensures:
+        - returns true only when the canary's report exists and holds an approval
+    """
+    path = Path( data ) / "e2e-results" / f"{PREFIX}-canary.canary.json"
+    return path.exists() and json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is not None
 
 
 def read_sample( data, needs_sha ):
@@ -155,7 +234,7 @@ def read_sample( data, needs_sha ):
     """
     path = Path( data ) / SAMPLE_FILE
     if not path.exists(): raise s1.DriverRefused( f"no sample is recorded in {data}; run the sample step first, with the seed written down before the canary" )
-    record = json.loads( path.read_text( encoding="utf-8" ) )
+    record = load_record( path )
     if record[ "needs_sha" ] != needs_sha: raise s1.DriverRefused( f"the sample was recorded for needs file {record[ 'needs_sha' ]}, not {needs_sha}" )
     return record
 
@@ -181,20 +260,27 @@ def flip_argv( args, parts ):
     return argv
 
 
-def sweep( args, items, record ):
+def sweep( args, items, record, parts, sha ):
     """
     Run the sample's full sweeps: one new-question search per sampled need.
 
     Requires:
-        - record is the recorded sample; items are the needs file's items
+        - record is the recorded sample; items are the needs file's items; parts is the estimate; sha is the sample file's hash
     Ensures:
-        - returns 0 after printing how the run ended
+        - returns 0 after printing how the run ended, with the sample file's hash on the result
         - nothing is sent when a check refuses; the sample run is its own ledger run, p5s-sample, kept apart from the repeats
+        - the canary must be approved first, and the ceiling may not exceed the sample estimate times the estimate factor
+    Raises:
+        - CanaryNotApproved when the canary has not been approved; DriverRefused for a ceiling above the cap
     """
+    if not canary_approved( args.data ): raise s1.CanaryNotApproved( "the canary has not been approved, so the sample sweeps cannot spend" )
+    cap = int( e2r.ESTIMATE_FACTOR * parts[ "sample" ] )
+    if args.ceiling > cap: raise s1.DriverRefused( f"the sweep ceiling {args.ceiling} is above {cap}, the sample estimate times {e2r.ESTIMATE_FACTOR}" )
     chosen = [ i for i in items if i[ "member" ] in set( record[ "members" ] ) ]
     env    = e2r._open_env( args.root, args.data, args.ledger, args.live, frun.repeat_asks( 1, "full", frun.QUESTION_NAMES[ "new" ] ), args.pack_size )
     frun.check_excludes( chosen, env.root, env.data )
     print( e2r.run_line( e2r.run_searches( env, f"{SAMPLE_PREFIX}-sample", chosen, {}, args.ceiling ) ) )
+    stamp_result( args.data, f"{SAMPLE_PREFIX}-sample", sha )
     return 0
 
 
@@ -231,6 +317,7 @@ def main( argv=None ):
         - estimate prints the three parts for the file's own count of needs; sample records the seed, members, arm and index once and prints the record
         - sweep, canary, approve, run and report need the recorded sample first, so a step that spends is refused without it
         - canary, approve, run and report hand the flip driver the fixed settings and return its code, 2 after a refusal of its own
+        - each result of the canary, the run and the sweep carries the sample file's sha256; a result whose hash differs is refused by every later step
         - report also prints the recorded sample
     Raises:
         - the refusals of the pinned hash, the seed, the sample record and the sample size, before anything is sent
@@ -245,8 +332,11 @@ def main( argv=None ):
         print( json.dumps( write_sample( args.data, items, args ), sort_keys=True ) )
         return 0
     record = read_sample( args.data, args.needs_sha )
-    if args.command == "sweep": return sweep( args, items, record )
+    sha    = sample_sha( args.data )
+    check_stamps( args.data, sha )
+    if args.command == "sweep": return sweep( args, items, record, parts, sha )
     code = frun.cli( flip_argv( args, parts ), allow_fresh=True )
+    if code == 0 and args.command in ( "canary", "run" ): stamp_result( args.data, f"{PREFIX}-{args.command}", sha )
     if args.command == "report": print( f"sample: seed {record[ 'seed' ]!r}, arm {record[ 'arm' ]!r}, index {record[ 'index_sha' ]}, members {', '.join( record[ 'members' ] )}" )
     return code
 
@@ -261,7 +351,7 @@ def cli( argv=None ):
         - the flip driver's own refusals are returned as it returns them
     """
     try: return main( argv )
-    except ( s1.DriverRefused, s1.KeyMissing, e2e.FrozenInputRefused ) as e:
+    except ( s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, e2e.FrozenInputRefused ) as e:
         print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
         return 2
 

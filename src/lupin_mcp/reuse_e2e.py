@@ -26,7 +26,7 @@ class FrozenInputRefused( ValueError ):
     """A frozen input is not the one the run was written for."""
 
 
-def _read_checked( path, expected_sha, what, allow_fresh=False ):
+def _read_checked( path, expected_sha, what, *, allow_fresh=False ):
     """
     Read a JSON file whose hash must match.
 
