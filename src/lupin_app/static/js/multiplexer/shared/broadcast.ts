@@ -155,10 +155,10 @@ class BroadcastWrapperImpl implements BroadcastWrapper {
   }
 }
 
-/* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + multi-clause type-guard predicate. Each predicate clause registers as a branch; the type-guard is exercised end-to-end (tests pass both valid and invalid LupinEvent shapes) but each individual short-circuit doesn't get its own dedicated test.
 /**
  * Says whether a value has the shape of a bus event.
  */
+/* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + multi-clause type-guard predicate. Each predicate clause registers as a branch; the type-guard is exercised end-to-end (tests pass both valid and invalid LupinEvent shapes) but each individual short-circuit doesn't get its own dedicated test.
 function isLupinEvent(v: unknown): v is LupinEvent<unknown> {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;

@@ -114,10 +114,10 @@ class MissedStoreImpl implements MissedStore {
     return remaining;
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Unsubscribes from bus events so a test can finish cleanly.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for ( const off of this.unsubscribers ) off();
   }

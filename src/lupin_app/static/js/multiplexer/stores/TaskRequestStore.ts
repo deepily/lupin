@@ -194,10 +194,10 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     }
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops polling so tests can clean up.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
   }

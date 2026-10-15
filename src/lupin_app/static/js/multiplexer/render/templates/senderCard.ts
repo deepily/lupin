@@ -398,10 +398,10 @@ interface DateGroup {
   items   : Notification[];
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript optional-param + return-type erasure produces a fake branch).
 /**
  * Groups notifications by date key, newest group first and newest row first.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript optional-param + return-type erasure produces a fake branch).
 function groupByDateKey(notifications: ReadonlyArray<Notification>, appTimezone?: string): DateGroup[] {
   const buckets = new Map<string, Notification[]>();
   for (const n of notifications) {

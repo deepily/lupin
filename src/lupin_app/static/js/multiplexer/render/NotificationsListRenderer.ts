@@ -1366,10 +1366,10 @@ const COPY_FLASH_MS = 1200;
 // S2d — the project label in the delete-all confirm, verbatim to legacy
 // S2a–d / S3 — default failure surface: the console for the record, and an alert
 // so the operator actually sees it. Tests inject a recording reportFailure.
-/* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
 /**
  * Logs a failure message and raises an alert so the operator sees it.
  */
+/* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
 function defaultReportFailure(message: string): void {
   debugSink.error(`[NotificationsListRenderer] ${message}`);
   globalThis.alert(message);
@@ -1378,10 +1378,10 @@ function defaultReportFailure(message: string): void {
 // B4 (01-D) — default proxy-ratify page opener. Opens (or focuses) the single
 // ratify admin tab, verbatim to legacy notifications.js:7203. Tests inject a
 // recording opener via options.proxyRatifyOpener (mirrors ApiClient.fetcher).
-/* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
 /**
  * Opens, or focuses, the single proxy ratification admin tab.
  */
+/* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
 function defaultProxyRatifyOpener(): void {
   window.open("/app/admin/proxy-ratify", "lupin-proxy-ratify");
 }

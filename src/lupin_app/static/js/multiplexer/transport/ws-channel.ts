@@ -264,10 +264,10 @@ export function createWSChannel(opts: WSChannelOptions): WSChannel {
 // true branch via the "makeCloseEvent uses native CloseEvent" test which
 // polyfills globalThis.CloseEvent before invoking the constructor-failure
 // path. Production browsers always hit the true branch.
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; both real branches inside the body ARE covered — verified via lcov).
 /**
  * Returns a close event with the given code and reason.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; both real branches inside the body ARE covered — verified via lcov).
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") {
     return new CloseEvent("close", { code, reason });

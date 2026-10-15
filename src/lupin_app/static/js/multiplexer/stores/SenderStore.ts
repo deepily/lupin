@@ -288,10 +288,10 @@ class SenderStoreImpl implements SenderStore {
     this.emit("hydrated");
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Unsubscribes the store from the bus, for tests.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }

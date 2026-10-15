@@ -61,12 +61,12 @@ function toOption(raw: unknown): ActionRequiredOption[] {
   return [option];
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: c8's JSON puts the only uncovered arm on the function NAME, and null, array, scalar and record inputs all run the body (response_questions.test.ts).
 /**
  * Tells whether a value is a plain object, excluding null and arrays.
  *
  * Acts as a type guard for string-keyed records.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: c8's JSON puts the only uncovered arm on the function NAME, and null, array, scalar and record inputs all run the body (response_questions.test.ts).
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

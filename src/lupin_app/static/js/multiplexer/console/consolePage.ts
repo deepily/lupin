@@ -221,12 +221,12 @@ function attachLifecycle( deps: ConsolePageDeps ): void {
   deps.win.addEventListener( "offline", () => emit( "network_offline" ) );
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: the never-run CJS export annotation maps onto the last function.
 /**
  * Returns the element with the given id from the document.
  *
  * Throws an error naming the id when no such element exists.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: the never-run CJS export annotation maps onto the last function.
 function requireElement( doc: Document, id: string ): HTMLElement {
   const el = doc.getElementById( id );
   if ( el === null ) throw new Error( `console page: #${ id } not found` );

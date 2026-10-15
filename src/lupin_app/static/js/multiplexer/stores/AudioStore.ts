@@ -553,10 +553,10 @@ class AudioStoreImpl implements AudioStore {
     this.utteranceFailed  = false;
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops the state machine actor; used by tests for cleanup.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.actor.stop();
   }
@@ -883,12 +883,12 @@ class AudioStoreImpl implements AudioStore {
 // Default factory — `globalThis.AudioContext` (Chrome-only; no vendor prefix).
 // ---------------------------------------------------------------------------
 
-/* c8 ignore start */ // Browser-only fallback; tests inject `audioContextFactory` directly.
 /**
  * Creates a browser audio context at 24000 Hz for production use.
  *
  * Throws if the environment has no AudioContext.
  */
+/* c8 ignore start */ // Browser-only fallback; tests inject `audioContextFactory` directly.
 function defaultAudioContextFactory(): SchedulableAudioContext {
   // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor prefix.
   const Ctor = (globalThis as unknown as {

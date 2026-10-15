@@ -244,10 +244,10 @@ class FlowRatioStoreImpl implements FlowRatioStore {
     }
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops polling so a test leaves no timer behind.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
   }

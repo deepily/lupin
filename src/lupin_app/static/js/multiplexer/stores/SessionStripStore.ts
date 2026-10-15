@@ -184,10 +184,10 @@ class SessionStripStoreImpl implements SessionStripStore {
     return Array.from(this.sessions.values());
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Unsubscribes from all bus events so a test can finish cleanly.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }

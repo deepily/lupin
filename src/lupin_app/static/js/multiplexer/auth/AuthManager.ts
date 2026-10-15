@@ -39,12 +39,12 @@ export interface LockManager {
  * Lock manager backed by the browser's navigator.locks, shared across tabs.
  */
 class NavigatorLockManager implements LockManager {
-  /* c8 ignore start */
-  // Browser-only by design — wraps `navigator.locks` which is a Web API
-  // unavailable in Node. Tests use ChainMutexLockManager instead.
   /**
    * Runs the callback under an exclusive navigator.locks lock of the given name.
    */
+  /* c8 ignore start */
+  // Browser-only by design — wraps `navigator.locks` which is a Web API
+  // unavailable in Node. Tests use ChainMutexLockManager instead.
   async request<T>(name: string, callback: () => Promise<T>): Promise<T> {
     return navigator.locks.request(name, { mode: "exclusive" }, callback) as Promise<T>;
   }

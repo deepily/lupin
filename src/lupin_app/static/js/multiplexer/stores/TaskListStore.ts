@@ -301,10 +301,10 @@ class TaskListStoreImpl implements TaskListStore {
     }
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops polling; used by tests for cleanup.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
   }

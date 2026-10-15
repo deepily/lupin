@@ -304,10 +304,10 @@ class FleetStatusStoreImpl implements FleetStatusStore {
     this.emitSizeCapChanged();
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops polling so a test can finish cleanly.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.stopPolling();
   }

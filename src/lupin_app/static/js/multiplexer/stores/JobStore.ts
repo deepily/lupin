@@ -387,10 +387,10 @@ class JobStoreImpl implements JobStore {
     return { restoreState };
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Detaches the bus listeners so a test can clean up.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }

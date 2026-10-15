@@ -161,10 +161,10 @@ function updateAndLocate<T extends KeyedEntry>(
 }
 
 // CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.
-/* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
 /**
  * Escapes a string for use inside a CSS selector.
  */
+/* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
 function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);

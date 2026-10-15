@@ -404,10 +404,10 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.exitFocus();
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Unsubscribes every bus listener the store registered; used by tests for cleanup.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }

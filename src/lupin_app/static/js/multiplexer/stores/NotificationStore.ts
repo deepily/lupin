@@ -763,10 +763,10 @@ class NotificationStoreImpl implements NotificationStore {
     }
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Cancels the pending save timer and unsubscribes from the bus, for tests.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     if (this.persistTimer !== null) {
       this.clearTimeoutFn(this.persistTimer);

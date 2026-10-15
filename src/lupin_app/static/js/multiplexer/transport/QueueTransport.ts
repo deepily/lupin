@@ -520,10 +520,10 @@ export function createQueueTransport(opts: QueueTransportOptions): Transport {
   return new QueueTransportImpl(opts);
 }
 
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 /**
  * Removes any trailing slashes from a URL.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 function stripTrailingSlash(url: string): string {
   return url.replace(/\/+$/, "");
 }

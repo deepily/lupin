@@ -492,10 +492,10 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.retire(entry, RESPONDED_GRACE_MS);
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Stops all listeners, timers and state machines, then clears the entries.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
     for (const entry of this.entries.values()) {

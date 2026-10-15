@@ -34,10 +34,10 @@ const TRANSPORT_NAME = "AudioTransport";
 
 // Phase 3 default binary handler. Phase 4's AudioStore replaces this when
 // it calls audioTransport.start(sessionId, audioStore.handleChunk).
-/* c8 ignore start */ // Phase 3 default binary handler — replaced by Phase 4 AudioStore.handleChunk in production wiring; the debug-logger fallback runs only when AudioTransport is started without a binaryHandler arg, which Phase 3 boot.ts no longer does once Phase 4 lands. Tests cover the override path (audio_transport.test.ts), not this fallback.
 /**
  * Logs the size of a received binary audio frame to the console debug output.
  */
+/* c8 ignore start */ // Phase 3 default binary handler — replaced by Phase 4 AudioStore.handleChunk in production wiring; the debug-logger fallback runs only when AudioTransport is started without a binaryHandler arg, which Phase 3 boot.ts no longer does once Phase 4 lands. Tests cover the override path (audio_transport.test.ts), not this fallback.
 function defaultBinaryHandler(data: Blob | ArrayBuffer): void {
   const size = data instanceof Blob ? data.size : data.byteLength;
   console.debug("Audio chunk received", size);

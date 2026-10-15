@@ -201,10 +201,10 @@ function proxyRatifyLink(groupId: string): HTMLAnchorElement {
   return link;
 }
 
-/* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + tagged-template literal interpolation phantom.
 /**
  * Returns a clipboard icon that carries the notification abstract.
  */
+/* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + tagged-template literal interpolation phantom.
 function abstractIndicator(abstract: string): Value {
   // 📋 indicator with abstract stored on data-attribute — popover handler
   // attaches in Phase 6.

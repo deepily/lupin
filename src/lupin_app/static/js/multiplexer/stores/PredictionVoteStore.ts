@@ -130,10 +130,10 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
     return true;
   }
 
-  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   /**
    * Clears all saved contexts and votes; used by tests.
    */
+  /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
   disposeForTesting(): void {
     this.contexts.clear();
     this.votes.clear();
