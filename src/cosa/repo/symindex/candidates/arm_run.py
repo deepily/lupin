@@ -391,7 +391,9 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
 
     Ensures:
         - returns { meta, fusion, recall_by_params, measured, t3, absent, vectors_choice, misses, snapshot, needs, pages, twin_manifest_sha,
-          empty_purpose_entries, empty_purpose_in_references, vector_entries, snapshot_entries }
+          empty_purpose_entries, empty_purpose_in_references, vector_entries, snapshot_entries, reference }
+        - reference is { needs, items, per_need }: the needs whose repeat-1 reference is not empty, the items they hold together, and
+          each such need's item count, so a reader can see that one found item moves a need's recall by one over its count
         - pages is the number of capability pages offered to the wiki list; redactable is not in the result, the caller counts it
         - every arm ranks the same entries for the same ranking text, and the fusion constants come from select_fusion_constants
         - the page builder reads this dict and measures nothing
@@ -430,6 +432,7 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
     b1, b2 = [ { "recall_128": measured[ a ][ "t1_first" ][ 128 ][ "mean" ], "median_rank": t3[ a ][ "all" ][ "median_all" ] } if a in measured else None for a in ( "B1", "B2" ) ]
     empty_pins = { e[ "id" ] for e in entries if e.get( "pin" ) in purposes and not purposes[ e[ "pin" ] ] }
     first, union = references( answers, needs )
+    per_need = { n: len( ids ) for n, ids in sorted( first.items() ) if ids }
     used = sorted( empty_pins & ( set().union( *first.values() ) | set().union( *union.values() ) ) )
     meta = { "run_id": f"all-{hash_answers( answers )[ :8 ]}", "code_sha": code_sha, "index_sha": os.path.basename( path ).split( "." )[ 0 ],
              "manifest_hash": vset.manifest_hash if vset is not None else "none", "needs_sha": sha256_of( needs_path ), "cache_sha": hash_answers( answers ) }
@@ -437,6 +440,7 @@ def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vse
              "vectors_choice": am.choose_vectors( b1, b2 ) if b1 and b2 else None, "misses": misses, "snapshot": path,
              "empty_purpose_entries": len( empty_pins ), "empty_purpose_in_references": used,
              "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": sha256_of( manifest_path ), "pages": len( pages ),
+             "reference": { "needs": len( per_need ), "items": sum( per_need.values() ), "per_need": per_need },
              "needs": len( needs ) }
 
 
@@ -501,6 +505,9 @@ def render_all_arms_page( result, redactable ):
                f"- {result[ 'empty_purpose_entries' ]} snapshot entries carry an empty purpose line; {len( result[ 'empty_purpose_in_references' ] )} of them are in any need's reference.",
                f"- Capability pages offered to the wiki list: {result[ 'pages' ]}.",
                f"- Cached judge answers missing for the snapshot: {result[ 'misses' ]}.",
+               f"- Recall is the mean over the {result[ 'reference' ][ 'needs' ]} needs whose repeat-1 reference is not empty, which hold "
+               f"{result[ 'reference' ][ 'items' ]} reference items together. Items per need: "
+               + ", ".join( f"{n} {c}" for n, c in sorted( result[ "reference" ][ "per_need" ].items() ) ) + ".",
                "- The replay column is the verdict replay at K=128; the control row of each arm is in the run's JSON." ]
     return page + "\n".join( lines ) + "\n"
 

@@ -121,6 +121,9 @@ class TestRunAllArms:
         assert out[ "meta" ][ "manifest_hash" ] == "mh" * 32 and out[ "meta" ][ "code_sha" ] == "abc123"
         assert out[ "needs" ] == 2 and out[ "misses" ] == 0 and out[ "pages" ] == len( world( tmp_path )[ "pages" ] )
         assert out[ "snapshot_entries" ] == len( ENTRIES ) and out[ "vector_entries" ] == len( IDS )
+        ref = out[ "reference" ]
+        assert ref[ "needs" ] == len( ref[ "per_need" ] ) and ref[ "items" ] == sum( ref[ "per_need" ].values() )
+        assert set( ref[ "per_need" ] ) <= { "n1", "n2" } and all( c >= 1 for c in ref[ "per_need" ].values() )
 
     def test_the_vector_count_is_what_the_set_holds_of_the_snapshot( self, tmp_path ):
         out = self.run( tmp_path, vset=vset( IDS[ :4 ] + [ "not-in-the-index" ] ) )
@@ -162,6 +165,8 @@ class TestRenderAllArmsPage:
         assert out[ "vectors_choice" ] in ( "B1", "B2" ) and f"{out[ 'vectors_choice' ]} by the rule" in page and "so a tie is B1" in page
         assert f"holds {out[ 'snapshot_entries' ]} sendable entries" in page and "abc123" in page
         assert out[ "pages" ] == 1 and "Capability pages offered to the wiki list: 1." in page
+        ref = out[ "reference" ]
+        assert f"mean over the {ref[ 'needs' ]} needs whose repeat-1 reference is not empty, which hold {ref[ 'items' ]} reference items" in page
 
     def test_a_run_without_vectors_says_the_choice_and_the_selection_were_not_made( self, tmp_path ):
         w = world( tmp_path )
