@@ -73,7 +73,7 @@ def data_dir( root=None ):
     return os.path.join( str( fleet_data_root( root ) ), "reuse-review", "librarian" )
 
 
-def _disk_value( key, reader=None, errors=None ):
+def read_value( key, reader=None, errors=None ):
     """
     Read one value from the configuration file, fresh.
 
@@ -106,7 +106,7 @@ def read_create_cap( environ, reader=None ):
     """
     raw = environ.get( CAP_ENV, "" ).strip()
     if raw.isdigit() and int( raw ) > 0: return int( raw )
-    value = ( _disk_value( CAP_KEY, reader ) or "" ).strip()
+    value = ( read_value( CAP_KEY, reader ) or "" ).strip()
     return int( value ) if value.isdigit() and int( value ) > 0 else DEFAULT_CAP
 
 
@@ -123,7 +123,7 @@ def read_enabled( reader=None, errors=None, key=ENABLED_KEY ):
         - a read failure appends its message to errors when errors is a list
         - never raises
     """
-    return ( _disk_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+    return ( read_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
 
 
 def read_persona( key, reader=None ):
@@ -134,7 +134,7 @@ def read_persona( key, reader=None ):
         - returns the stripped value, or DEFAULT_PERSONA when the key is absent or blank
         - never raises
     """
-    return ( _disk_value( key, reader ) or "" ).strip() or DEFAULT_PERSONA
+    return ( read_value( key, reader ) or "" ).strip() or DEFAULT_PERSONA
 
 
 def due( now, state ):

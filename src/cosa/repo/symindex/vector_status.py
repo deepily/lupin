@@ -46,7 +46,7 @@ def read_stale_hours( reader=None ):
         - otherwise returns DEFAULT_STALE_HOURS
         - never raises
     """
-    raw = ( lt._disk_value( STALE_HOURS_KEY, reader ) or "" ).strip()
+    raw = ( lt.read_value( STALE_HOURS_KEY, reader ) or "" ).strip()
     try:
         hours = float( raw )
     except ValueError:

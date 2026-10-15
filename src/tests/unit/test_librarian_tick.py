@@ -382,7 +382,7 @@ def test_live_builders_wire_the_client_the_store_the_settings_and_the_exporter( 
     monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://x", "timeout_seconds": 1.0 } )
     monkeypatch.setattr( task_store_client, "read_api_key", lambda: "k" )
     values = { lt.OWNER_KEY: "tiffany", lt.MANAGER_KEY: "rio", lt.CAP_KEY: "4" }
-    monkeypatch.setattr( lt, "_disk_value", lambda key, reader=None: values.get( key ) )
+    monkeypatch.setattr( lt, "read_value", lambda key, reader=None: values.get( key ) )
     lib = lt._live_librarian( {}, str( tmp_path / "p.jsonl" ), lambda line: None )
     assert isinstance( lib, lq.Librarian ) and lib.owner == "tiffany" and lib.manager == "rio" and lib.max_creates == 4
     assert isinstance( lib.store, lt.LiveStore )
@@ -431,7 +431,7 @@ def test_read_persona_strips_and_falls_back_to_the_default():
 
 def test_a_reader_that_raises_reads_as_absent():
     def broken( key ): raise OSError( "unreadable" )
-    assert lt._disk_value( lt.CAP_KEY, reader=broken ) is None
+    assert lt.read_value( lt.CAP_KEY, reader=broken ) is None
     assert lt.read_enabled( reader=broken ) is False
 
 
@@ -608,3 +608,12 @@ def test_main_runs_the_vector_check_whether_or_not_the_vector_refresh_switch_is_
                              export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
     assert vector_refresh.ENABLED_KEY not in keys
     assert seen == [ lib ] and json.loads( out )[ "vector_status" ] == { "stale": True, "reasons": [ "old" ] }
+
+
+def test_read_value_is_the_public_reader_and_gives_the_raw_text_the_reader_returns_or_none():
+    seen = []
+    assert lt.read_value( "some key", reader=lambda k: seen.append( k ) or " raw text " ) == " raw text "
+    assert seen == [ "some key" ]
+    errors = []
+    def broken( key ): raise OSError( "ini gone" )
+    assert lt.read_value( "some key", reader=broken, errors=errors ) is None and errors == [ "ini gone" ]

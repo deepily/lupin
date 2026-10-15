@@ -318,7 +318,7 @@ def test_an_unreadable_switch_stays_off_and_says_why( world, monkeypatch ):
 
 def test_the_switch_is_read_from_this_jobs_own_key( world, monkeypatch ):
     seen = []
-    monkeypatch.setattr( lt, "_disk_value", lambda key, reader=None, errors=None: seen.append( key ) or "true" )
+    monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: seen.append( key ) or "true" )
     rc, _, _ = run_main( world, [], writer_factory=lambda a: answering_writer( [] ), client=tvb.FakeClient() )
     assert rc == 0 and seen == [ vr.ENABLED_KEY ] and vr.ENABLED_KEY != lt.ENABLED_KEY
 
