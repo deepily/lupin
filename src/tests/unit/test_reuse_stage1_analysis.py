@@ -603,10 +603,9 @@ def test_a_set_that_changes_between_the_two_single_runs_is_reported_as_noise_not
 
 
 def test_the_chosen_pages_are_the_floor_and_the_cap_of_the_tool_itself():
-    from lupin_mcp import reuse_tools as rt
-    base = { f"p{k:02d}": 0.9 - k / 100 for k in range( rt.MAX_PAGES + 3 ) }
+    base = { f"p{k:02d}": 0.9 - k / 100 for k in range( an.MAX_PAGES + 3 ) }
     r = an.analyze_pages( an.read_stage( _pages( base, base, base ) ) )[ 1 ]
-    assert len( r[ "chosen_single1" ] ) == rt.MAX_PAGES
+    assert len( r[ "chosen_single1" ] ) == an.MAX_PAGES
 
 
 def test_the_page_arm_is_inconclusive_or_invalid_with_its_arms_and_absent_questions_are_skipped():

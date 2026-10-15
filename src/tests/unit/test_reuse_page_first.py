@@ -144,55 +144,6 @@ def test_a_pinned_package_init_does_not_widen_scope_to_the_package( env ):
     assert rt.in_scope( "src/cosa/mathx/__init__.py", got[ 0 ][ "scope" ] ) and not rt.in_scope( "src/cosa/mathx/other.py", got[ 0 ][ "scope" ] )
 
 
-def test_a_chosen_page_covers_a_file_it_pins_that_its_line_does_not_name( env ):
-    write_wiki( env[ 0 ], { "feeds-page": FEEDS_LINE, "math-page": MATH_LINE }, { "feeds-page": "cosa.mathx.add@bbbbbbbbbb", "math-page": PINS[ "math-page" ] } )
-    need = "add two numbers [pin-scope]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN }, { MATHX_TEXT: HIT } )
-    r    = run( env, need, fake )
-    rec  = receipt_of( env, r )
-    assert r[ "verdict" ] == "REUSE" and rec[ "route" ] == "pages" and fake.unexpected == []
-    assert sorted( rec[ "pages" ][ "covered" ] ) == [ "cosa.feeds.parse_feed", "cosa.mathx.add" ]            # mathx.add is outside the feeds line, inside its pins
-
-
-def test_a_chosen_page_decides_when_its_scope_holds_an_entry_at_the_threshold( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [hit]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT } )
-    r    = run( env, need, fake )
-    assert ( r[ "status" ], r[ "verdict" ] ) == ( "ok", "REUSE" ) and fake.unexpected == []
-    assert sorted( fake.seen ) == sorted( [ FEEDS_PAGE, MATH_PAGE, FEEDS_TEXT ] )                               # the math page's module and serve() were never asked
-    rec = receipt_of( env, r )
-    assert rec[ "route" ] == "pages" and rec[ "pages" ][ "chosen" ] == [ { "slug": "feeds-page", "p_overlap": 0.8 } ]
-    assert rec[ "pages" ][ "covered" ] == [ "cosa.feeds.parse_feed" ] and [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "covered" ]
-
-
-def test_a_module_list_confines_a_page_to_its_listed_modules( env ):
-    write_wiki( env[ 0 ] )
-    need = "add two numbers [math]"
-    fake = PageFake( need, { MATH_PAGE: CHOSEN }, { MATHX_TEXT: HIT } )
-    r    = run( env, need, fake )
-    assert r[ "verdict" ] == "REUSE" and receipt_of( env, r )[ "pages" ][ "covered" ] == [ "cosa.mathx.add" ] and FEEDS_TEXT not in fake.seen
-
-
-def test_no_page_chosen_falls_back_to_every_entry( env ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [none]"
-    fake = PageFake( need )
-    r    = run( env, need, fake )
-    assert r[ "verdict" ] == "NEW" and receipt_of( env, r )[ "route" ] == "pages_then_full"
-    assert len( fake.seen ) == 2 + 3 and sorted( s for s in fake.seen if s in ALL_TEXTS ) == sorted( ALL_TEXTS )
-
-
-def test_a_chosen_page_with_no_match_falls_back_and_its_cached_answers_cost_nothing( env ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [nomatch]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )                                                        # chosen, but its entry is unrelated
-    r    = run( env, need, fake )
-    rec  = receipt_of( env, r )
-    assert r[ "verdict" ] == "NEW" and rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "covered" ] == [ "cosa.feeds.parse_feed" ]
-    assert len( fake.seen ) == 2 + 1 + 2 and fake.seen.count( FEEDS_TEXT ) == 1                                # feeds asked once, in the covered stage
-    assert [ ( s[ "stage" ], s[ "entries" ] ) for s in r[ "stats" ][ "stages" ] ] == [ ( "pages", 2 ), ( "covered", 1 ), ( "all", 3 ) ]
-
 
 def test_no_pages_at_all_is_a_plain_sweep_with_route_full( env ):
     need = "something unrelated [nopages]"
@@ -201,19 +152,6 @@ def test_no_pages_at_all_is_a_plain_sweep_with_route_full( env ):
     assert r[ "verdict" ] == "NEW" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
     assert len( fake.seen ) == 3
 
-
-def test_one_budget_covers_the_page_stage_the_covered_stage_and_the_fallback( env, monkeypatch ):
-    write_wiki( env[ 0 ] )
-    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
-    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
-    need = "something unrelated [budget]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )
-    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
-    root, data, out = env
-    r = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, call_budget=4 ) )                # 2 pages + 1 covered + 1 of the 2 remaining entries
-    st = r[ "stats" ]
-    assert st[ "attempts_total" ] == 4 and len( fake.seen ) == 4 and st[ "not_checked" ] == 1                  # attempts_total spans the stages; attempts is the last stage's
-    assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "CALL_FAILED" )                      # an unasked entry is never read as NEW
 
 
 def test_the_index_sha_follows_which_pages_can_be_asked( env ):
@@ -225,17 +163,6 @@ def test_the_index_sha_follows_which_pages_can_be_asked( env ):
     ctx2 = rt.ReuseContext( root, data, out_dir=out, transport=PageFake( "n" ) ); after = rt.prepare( ctx2 )
     assert [ p[ "slug" ] for p in ctx2.pages ] == [ "feeds-page" ] and after[ 2 ] != before[ 2 ]
 
-
-def test_replay_frozen_reproduces_a_page_receipt_and_a_fallback_receipt( env ):
-    write_wiki( env[ 0 ] )
-    for tag, pages, entries, route in ( ( "hit", { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT }, "pages" ), ( "miss", { FEEDS_PAGE: CHOSEN }, {}, "pages_then_full" ),
-                                         ( "nopage", {}, {}, "pages_then_full" ) ):
-        need = f"replay me [{tag}]"
-        ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, pages, entries ) )
-        r    = rt.check_exists_impl( need, ctx )
-        assert receipt_of( env, r )[ "route" ] == route
-        rep  = rt.replay_impl( r[ "receipt_id" ], ctx )
-        assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == r[ "verdict" ] and rep[ "differences" ][ "frozen" ] == []
 
 
 def test_replay_frozen_treats_a_receipt_with_no_route_as_a_plain_sweep( env ):
@@ -250,73 +177,6 @@ def test_replay_frozen_treats_a_receipt_with_no_route_as_a_plain_sweep( env ):
     rep = rt.replay_impl( r[ "receipt_id" ], ctx )
     assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []
 
-
-def test_a_malformed_page_answer_is_never_chosen_and_the_sweep_falls_back( env ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [malformed]"
-    bad  = { "answers": { "fit": { "probabilities": { "reuse": 1, "extend": 1, "unrelated": 1 } } } }
-    r    = run( env, need, PageFake( need, { FEEDS_PAGE: bad } ) )
-    rec  = receipt_of( env, r )
-    assert rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "chosen" ] == []
-
-
-def test_choose_pages_keeps_the_best_five_at_the_floor_and_breaks_ties_by_slug():
-    def ans( slug, reuse ): return { "id": slug, "probabilities": { "reuse": reuse, "extend": 0.0, "unrelated": round( 1 - reuse, 6 ) } }
-    answers = [ ans( "g", 0.9 ), ans( "b", 0.5 ), ans( "a", 0.5 ), ans( "c", 0.4 ), ans( "d", 0.3 ), ans( "e", 0.29 ), ans( "f", 0.35 ) ]
-    chosen  = rt._choose_pages( answers, rt.vd.POLICY )
-    assert [ c[ "slug" ] for c in chosen ] == [ "g", "a", "b", "c", "f" ] and len( chosen ) == rt.MAX_PAGES      # d sits at the floor but is sixth; e is below it
-    assert [ c[ "slug" ] for c in rt._choose_pages( [ ans( "d", 0.3 ), ans( "e", 0.29 ) ], rt.vd.POLICY ) ] == [ "d" ]
-
-
-def test_a_chosen_page_that_covers_no_indexed_entry_adds_no_covered_stage( env ):
-    empty_line = "a package with nothing indexed. `cosa.nothing`"
-    write_wiki( env[ 0 ], { "empty-page": empty_line }, { "empty-page": "cosa.feeds.parse_feed@aaaaaaaaaa" }, pages=( "empty-page", ) )
-    need  = "something unrelated [emptycover]"
-    table = PageFake( need ); table.table = {}
-    for text, ans in ( ( f"empty-page — {empty_line}", CHOSEN ), *( ( t, UNREL ) for t in ALL_TEXTS ) ):
-        body = literal_body( need, text, *( ( PAGE_INSTR, PAGE_CRIT ) if text.startswith( "empty-page" ) else () ) )
-        table.table[ key_of( body ) ] = ans
-    r   = run( env, need, table, exclude_prefixes=( "cosa.feeds", ) )                # the one pinned file is held back, so the page's scope holds no sendable entry
-    rec = receipt_of( env, r )
-    assert rec[ "route" ] == "pages_then_full" and rec[ "pages" ][ "chosen" ][ 0 ][ "slug" ] == "empty-page" and rec[ "pages" ][ "covered" ] == []
-    assert [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "all" ]
-
-
-def test_frozen_replay_asks_with_the_stored_page_template_not_the_current_one( env ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [tamper]"
-    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN } ) )
-    r    = rt.check_exists_impl( need, ctx )
-    path = next( ( env[ 1 ] / "receipts" ).glob( f"{r[ 'receipt_id' ]}*.json" ) )
-    rec  = json.loads( path.read_text( encoding="utf-8" ) )
-    rec[ "page_prompt_template" ] = { **rec[ "page_prompt_template" ], "instructions": "a different stored instruction" }
-    path.write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "error" and rep[ "error" ] == "CACHE_MISSING"                                     # the stored text was never asked, so nothing is cached for it
-
-
-def test_the_page_template_is_part_of_the_receipt_id( env, monkeypatch ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [pageid]"
-    first = run( env, need, PageFake( need ) )
-    monkeypatch.setattr( rt, "PAGE_TEMPLATE", { **rt.PAGE_TEMPLATE, "instructions": "a changed page instruction" } )
-    second = run( env, need, PageFake( need, page_instr="a changed page instruction" ) )
-    assert first[ "cause" ] is None and second[ "cause" ] is None and first[ "verdict" ] == second[ "verdict" ] == "NEW"
-    assert first[ "receipt_id" ] != second[ "receipt_id" ]
-
-
-def test_a_receipt_cut_short_by_the_budget_replays_to_the_same_uncertain_verdict( env, monkeypatch ):
-    write_wiki( env[ 0 ] )
-    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
-    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
-    need = "something unrelated [cutshort]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )
-    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
-    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], call_budget=4 )
-    r   = rt.check_exists_impl( need, ctx )
-    assert r[ "stats" ][ "not_checked" ] == 1 and r[ "cause" ] == "CALL_FAILED"
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
 
 
 class FailsOnServe( PageFake ):
@@ -347,36 +207,6 @@ def test_fetch_similar_sweeps_every_entry_and_never_asks_a_page( env ):
     assert r[ "status" ] == "ok" and receipt_of( env, r )[ "route" ] == "full" and receipt_of( env, r )[ "pages" ] is None
     assert sorted( fake.seen ) == sorted( [ MATHX_TEXT, SERVE_TEXT ] ) and fake.unexpected == []
 
-
-def test_a_receipt_cut_short_inside_the_page_stage_replays_without_the_unasked_page( env, monkeypatch ):
-    write_wiki( env[ 0 ] )
-    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
-    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
-    need = "something unrelated [pagecut]"
-    fake = PageFake( need )
-    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
-    ctx = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], call_budget=1 )                                # one attempt: one page asked, the other never
-    r   = rt.check_exists_impl( need, ctx )
-    rec = receipt_of( env, r )
-    assert len( rec[ "pages" ][ "skipped" ] ) == 1 and r[ "cause" ] == "CALL_FAILED"
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
-
-
-def test_a_cut_short_receipt_still_replays_to_uncertain_after_a_later_run_fills_the_cache( env, monkeypatch ):
-    write_wiki( env[ 0 ] )
-    monkeypatch.setenv( jev_transport.KEY_VARIABLE, "fake-key-for-page-first-tests" )
-    monkeypatch.setattr( jev_transport.time, "sleep", lambda s: None )
-    need = "something unrelated [laterfill]"
-    fake = PageFake( need, { FEEDS_PAGE: CHOSEN } )
-    monkeypatch.setattr( jev_transport, "_post", lambda url, headers, body, timeout: ( 200, json.dumps( fake.answer( json.loads( body ) ) ) ) )
-    root, data, out = env
-    cut = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out, call_budget=4 ) )
-    assert cut[ "cause" ] == "CALL_FAILED"
-    full = rt.check_exists_impl( need, rt.ReuseContext( root, data, out_dir=out ) )                             # a complete run now fills the entry the first run never asked
-    assert full[ "verdict" ] == "NEW" and full[ "receipt_id" ] != cut[ "receipt_id" ]
-    rep = rt.replay_impl( cut[ "receipt_id" ], rt.ReuseContext( root, data, out_dir=out ) )
-    assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "differences" ][ "frozen" ] == []
 
 
 def test_a_failed_call_receipt_still_replays_to_uncertain_after_a_later_run_answers_the_call( env ):
@@ -409,16 +239,6 @@ def test_a_receipt_with_malformed_answers_replays_to_the_same_verdict( env ):
     assert rep[ "frozen" ][ "verdict" ] == "UNCERTAIN_READ_SOURCE" and rep[ "frozen" ][ "cause" ] == "MALFORMED_ANSWER" and rep[ "differences" ][ "frozen" ] == []
 
 
-def test_a_page_receipt_replays_the_same_after_the_wiki_changes( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [wikichanged]"
-    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=PageFake( need, { FEEDS_PAGE: CHOSEN }, { FEEDS_TEXT: HIT } ) )
-    r    = rt.check_exists_impl( need, ctx )
-    assert receipt_of( env, r )[ "route" ] == "pages"
-    write_wiki( env[ 0 ], { "other-page": "something else. `cosa.mathx`" }, { "other-page": "cosa.mathx.add@bbbbbbbbbb" }, pages=( "other-page", ) )   # the wiki the receipt used is gone
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "REUSE" and rep[ "differences" ][ "frozen" ] == []
-
 
 class FailsOnMathPage( PageFake ):
     """A fake whose call for the math page always fails, as a dropped connection would."""
@@ -430,12 +250,3 @@ class FailsOnMathPage( PageFake ):
     post = answer
 
 
-def test_a_receipt_with_a_failed_page_call_replays_without_that_page( env ):
-    write_wiki( env[ 0 ] )
-    need = "something unrelated [pagefailed]"
-    ctx  = rt.ReuseContext( env[ 0 ], env[ 1 ], out_dir=env[ 2 ], transport=FailsOnMathPage( need, { FEEDS_PAGE: CHOSEN } ) )
-    r    = rt.check_exists_impl( need, ctx )
-    rec  = receipt_of( env, r )
-    assert rec[ "pages" ][ "skipped" ] == [ "math-page" ] and rec[ "route" ] == "pages_then_full" and r[ "verdict" ] == "NEW"      # the full sweep still decides, so a lost page call hides nothing
-    rep = rt.replay_impl( r[ "receipt_id" ], ctx )
-    assert rep[ "status" ] == "ok" and rep[ "frozen" ][ "verdict" ] == "NEW" and rep[ "differences" ][ "frozen" ] == []

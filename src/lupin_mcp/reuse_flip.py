@@ -19,7 +19,7 @@ from lupin_mcp import reuse_tools as rt
 MIN_NEEDS   = 30
 MIN_REPEATS = 5
 PASS_LIMIT  = 0.05
-ROUTES      = ( "full", "pages" )
+ROUTES      = ( "full", "candidates" )
 QUESTIONS   = ( "choice", "provides" )                 # the old question and the new one, by the name run_question takes
 
 
@@ -118,25 +118,25 @@ def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route=
     Requires:
         - ctx is a packed context: it has a sweeper and a pack size
         - need is a non-empty description; member is None or a symbol id of the index
-        - route is "full" (every entry is asked) or "pages" (the page route: pages, then their entries, then every entry)
-        - question is "choice" (the old question) or "provides" (the new one); the new question has no page route, so it takes route "full" only
+        - route is "full" (every entry is asked) or "candidates" (the candidate stage: the shortlist's entries only, on a context that holds a candidate stage)
+        - question is "choice" (the old question) or "provides" (the new one); the new question has no candidate stage, so it takes route "full" only
     Ensures:
         - returns the public result of that route, as sweep_need_impl does
         - the page questions carry the repeat number as the entry questions do
         - no receipt is written, so repeat two cannot be handed repeat one's receipt
         - the caller's context is not changed
     Raises:
-        - ValueError for a context that is not packed, a route that is neither full nor pages, a question that is neither choice nor provides,
-          the new question by the pages route, or a run_index out of range
+        - ValueError for a context that is not packed, a route that is neither full nor candidates, a question that is neither choice nor provides,
+          the new question by the candidates route, or a run_index out of range
     """
     if route not in ROUTES: raise ValueError( f"route must be one of {ROUTES}, got {route!r}" )
     if question not in QUESTIONS: raise ValueError( f"question must be one of {QUESTIONS}, got {question!r}" )
-    if question == "provides" and route != "full": raise ValueError( f"the provides question has no page route, got route {route!r}" )
+    if question == "provides" and route != "full": raise ValueError( f"the provides question has no candidate stage, got route {route!r}" )
     if ctx.sweeper is None or ctx.pack_size is None: raise ValueError( "a repeat is asked on a packed context only" )
     repeat         = copy.copy( ctx )
     repeat.sweeper = repeat_sweeper( ctx.pack_size, workers, run_index )
     if question == "provides": repeat.pair_sweeper = repeat_pair_sweeper( ctx.pack_size, workers, run_index )
-    return rt.unstored_need_impl( need, member, repeat, page_route=route == "pages", question=question )
+    return rt.unstored_need_impl( need, member, repeat, candidates=route == "candidates", question=question )
 
 
 def signature( result ):

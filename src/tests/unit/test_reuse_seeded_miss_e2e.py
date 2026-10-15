@@ -37,15 +37,15 @@ def test_candidate_of_reads_the_quoted_text_whatever_follows_and_none_when_absen
 
 
 def test_answer_for_is_relevant_at_half_the_need_and_unrelated_below():
-    assert sm.answer_for( sm.NEED_PAGE, "read articles, feed" ) == sm.RELEVANT
-    assert sm.answer_for( sm.NEED_PAGE, "serve the tools" ) == sm.UNRELATED
+    assert sm.answer_for( sm.NEED_FULL, "list episodes, podcast" ) == sm.RELEVANT
+    assert sm.answer_for( sm.NEED_FULL, "serve the tools" ) == sm.UNRELATED
     assert sm.answer_for( "the of an", "anything" ) == sm.UNRELATED
 
 
 def test_the_stand_in_answers_each_question_from_its_own_candidate_and_counts_bodies():
     jev  = sm.StandInJev()
-    body = { "model": "m", "state": { "need": sm.NEED_PAGE },
-             "questions": { "a": { "instructions": "from the candidate 'read articles of an RSS feed', x" },
+    body = { "model": "m", "state": { "need": sm.NEED_FULL },
+             "questions": { "a": { "instructions": "from the candidate 'list episodes of a podcast', x" },
                             "b": { "instructions": "from the candidate 'serve tools', x" } } }
     response, meta = jev.post_with_meta( body )
     assert response[ "answers" ][ "a" ][ "probabilities" ] == sm.RELEVANT and response[ "answers" ][ "b" ][ "probabilities" ] == sm.UNRELATED
@@ -55,8 +55,8 @@ def test_the_stand_in_answers_each_question_from_its_own_candidate_and_counts_bo
 
 def test_the_no_call_transport_refuses_and_remembers_the_need():
     transport = sm.NoCallTransport()
-    with pytest.raises( sm.SavedAnswerMissing, match = "read the articles" ): transport.post_with_meta( { "state": { "need": sm.NEED_PAGE } } )
-    assert transport.refused == [ sm.NEED_PAGE ] and transport.calls == 0
+    with pytest.raises( sm.SavedAnswerMissing, match = "list the episodes" ): transport.post_with_meta( { "state": { "need": sm.NEED_FULL } } )
+    assert transport.refused == [ sm.NEED_FULL ] and transport.calls == 0
 
 
 def test_the_fake_store_creates_amends_and_moves_the_clock_on():
@@ -73,24 +73,20 @@ def test_the_sandbox_has_the_wrong_page_matching_and_the_right_page_terse( tmp_p
     root  = sm.build_sandbox( tmp_path )
     index = ( root / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
     assert sm.TERSE_LINE in index and sm.WRONG_LINE in index and ( root / "src" / "lupin_mcp" ).is_dir()
-    assert len( sm.words( sm.NEED_PAGE ) & sm.words( f"{sm.RIGHT_PAGE} {sm.TERSE_LINE}" ) ) == 0
     sm.write_index( root, sm.REPAIRED_LINE )
     assert sm.REPAIRED_LINE in ( root / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
 
 
-def test_a_dry_run_on_the_stand_in_repairs_the_page_miss_and_the_full_sweep_miss( tmp_path ):
+def test_a_dry_run_on_the_stand_in_repairs_the_full_sweep_miss( tmp_path ):
     code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     assert code == 0 and report[ "ok"] and report[ "mode" ] == "dry-stand-in" and report[ "calls" ] > 0
-    page, full = report[ "page" ], report[ "full" ]
-    assert page[ "route" ] == "pages" and page[ "shortlist_before" ] == [ "cosa.newsx.read_articles" ]
-    assert page[ "repair" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5, "replay_routes": [ "pages" ] }
+    full = report[ "full" ]
     assert full[ "route" ] == "full" and full[ "shortlist_before" ] == []
     assert full[ "repair" ][ "no_change" ][ "verdict" ] == "NO_INPUT_CHANGE" and full[ "repair" ][ "docstring" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5 }
-    assert report[ "exported" ] == { sm.SYMBOL_PAGE: True, sm.SYMBOL_FULL: True }
+    assert report[ "exported" ] == { sm.SYMBOL_FULL: True }
     assert sm.NEW_DOC in ( tmp_path / "w" / "sandbox" / "src" / "cosa" / "fetchers.py" ).read_text()
     lines = ( tmp_path / "w" / "misses.jsonl" ).read_text().splitlines()
-    assert len( lines ) == 2 and json.loads( ( tmp_path / "w" / "report.json" ).read_text() )[ "ok" ] is True
-    assert sm.REPAIRED_LINE in ( tmp_path / "w" / "sandbox" / "src" / "docs" / "wiki" / "INDEX.md" ).read_text()
+    assert len( lines ) == 1 and json.loads( ( tmp_path / "w" / "report.json" ).read_text() )[ "ok" ] is True
 
 
 def test_a_dry_run_on_saved_answers_makes_no_call_and_a_run_missing_answers_stops_loudly( tmp_path ):
@@ -134,17 +130,6 @@ class EverythingRelevant( sm.StandInJev ):
         return response, meta
 
 
-class NewsOnly( sm.StandInJev ):
-    """Answers only the news page and its entry as relevant, so a rewrite changes nothing."""
-
-    def post_with_meta( self, body ):
-        response, meta = super().post_with_meta( body )
-        for key, question in body[ "questions" ].items():
-            relevant = "news" in sm.candidate_of( question[ "instructions" ] )
-            response[ "answers" ][ key ][ "probabilities" ] = sm.RELEVANT if relevant else sm.UNRELATED
-        return response, meta
-
-
 def scenario_parts( tmp_path, transport ):
     root, data, out = sm.build_sandbox( tmp_path ), tmp_path / "data", tmp_path / "out"
     ctx   = sm.make_context( root, data, out, transport=transport )
@@ -155,23 +140,14 @@ def scenario_parts( tmp_path, transport ):
 
 def test_a_seed_that_finds_the_symbol_is_reported_and_no_row_is_written( tmp_path ):
     ctx, root, lib, store = scenario_parts( tmp_path, EverythingRelevant() )
-    page = sm.page_scenario( ctx, root, lib, store, 5 )
-    assert page[ "ok" ] is False and "did not produce a page-route miss" in page[ "reason" ]
     full = sm.full_scenario( ctx, root, lib, store, 5 )
     assert full[ "ok" ] is False and "did not produce a full-sweep miss" in full[ "reason" ] and store.rows == []
 
 
-def test_a_rewrite_that_does_not_help_is_not_repaired_and_no_repaired_note_is_written( tmp_path ):
-    ctx, root, lib, store = scenario_parts( tmp_path, NewsOnly() )
-    page = sm.page_scenario( ctx, root, lib, store, 5 )
-    assert page[ "ok" ] is False and page[ "repair" ][ "verdict" ] == repair_check.NOT_REPAIRED and "repaired_noted" not in page[ "row" ]
 
-
-def test_a_failed_seed_ask_is_reported_for_both_scenarios( tmp_path, monkeypatch ):
+def test_a_failed_seed_ask_is_reported( tmp_path, monkeypatch ):
     ctx, root, lib, store = scenario_parts( tmp_path, sm.StandInJev() )
-    monkeypatch.setattr( rt, "page_route_need_impl", lambda need, exclude, c: { "status": "error", "error": "NO" } )
     monkeypatch.setattr( rt, "sweep_need_impl", lambda need, exclude, c: { "status": "error", "error": "NO" } )
-    assert sm.page_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
     assert sm.full_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
 
 
@@ -207,7 +183,7 @@ def test_a_live_run_goes_through_the_ledger_and_closes_its_run( tmp_path, monkey
     assert held == 0 and '"kind": "end"' in ledger.read_text()          # closed at its spend (the stand-in sends no tokens), not held at the 5,000,000 ceiling
 
 
-def test_the_summary_names_both_scenarios_and_the_verdict( tmp_path ):
+def test_the_summary_names_the_scenario_and_the_verdict( tmp_path ):
     _, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     text = "\n".join( sm.summary_lines( report ) )
     assert "dry-stand-in" in text and "REPAIRED" in text and "NO_INPUT_CHANGE" in text and "PASS" in text
@@ -258,11 +234,10 @@ def test_a_folder_exactly_at_the_limit_is_accepted_and_copied( tmp_path, monkeyp
 
 
 def test_a_run_where_no_seeded_miss_occurs_exits_one_and_prints_fail( tmp_path, monkeypatch, capsys ):
-    """A model that finds both symbols leaves nothing to repair, so the run must fail."""
+    """A model that finds the symbol leaves nothing to repair, so the run must fail."""
     monkeypatch.setattr( sm, "StandInJev", EverythingRelevant )
     code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     assert code == 1 and report[ "ok" ] is False and report[ "exported" ] == { }
-    assert "did not produce a page-route miss" in report[ "page" ][ "reason" ]
     assert "did not produce a full-sweep miss" in report[ "full" ][ "reason" ]
     assert sm.main( [ "--work", str( tmp_path / "w2" ) ] ) == 1
     assert "overall FAIL" in capsys.readouterr().out

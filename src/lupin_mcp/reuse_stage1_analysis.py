@@ -41,6 +41,18 @@ LOST_ONE_IN   = 200                                           # an arm may lose 
 REQUIRED_ARMS = ( "single1", "canary", "single2", "pack10", "pack50", "pack200", "page-single1", "page-single2", "page-pack",
                   "probe-first-random", "probe-first-near", "probe-middle-random", "probe-middle-near", "probe-last-random", "probe-last-near" )
 
+MAX_PAGES = 5                                                  # the most pages a page arm chose; the lookup that used the rule is gone
+
+
+def _choose_pages( answers, policy ):
+    """Ensures: returns the best MAX_PAGES pages at the policy floor, as { slug, p_overlap }."""
+    chosen = []
+    for a in answers:
+        if vd.malformed_reason( a[ "probabilities" ], policy ) is None:
+            p = vd.call_facts( a[ "probabilities" ] )[ 0 ]
+            if p >= policy[ "floor" ]: chosen.append( { "slug": a[ "id" ], "p_overlap": round( p, 6 ) } )
+    return sorted( chosen, key=lambda c: ( -c[ "p_overlap" ], c[ "slug" ] ) )[ :MAX_PAGES ]
+
 
 def lost_limit( n ):
     """
@@ -499,7 +511,7 @@ def analyze_pages( stage ):
         bad = _arms_state( [ s1, s2, pack ] )
         if bad is not None: out[ q ] = { "state": bad }; continue
         common = [ i for i in s1[ "entry_ids" ] if all( i in a[ "probabilities" ] for a in ( s1, s2, pack ) ) ]
-        chosen = [ [ c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) ] for a in ( s1, s2, pack ) ]
+        chosen = [ [ c[ "slug" ] for c in _choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) ] for a in ( s1, s2, pack ) ]
         pk, nz = list( differences( s1, pack ).values() ), list( differences( s1, s2 ).values() )
         changed = set( chosen[ 0 ] ) != set( chosen[ 2 ] )
         out[ q ] = { "state": "fail" if changed else "pass", "chosen_single1": chosen[ 0 ], "chosen_single2": chosen[ 1 ], "chosen_pack": chosen[ 2 ],
@@ -535,7 +547,7 @@ def page_arm( stage ):
     for q in qs:
         s1, s2, pack = ( stage[ q ][ n ] for n in PAGE_ARMS )
         common = [ i for i in s1[ "entry_ids" ] if all( i in a[ "probabilities" ] for a in ( s1, s2, pack ) ) ]
-        sets   = [ { c[ "slug" ] for c in rt._choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) } for a in ( s1, s2, pack ) ]
+        sets   = [ { c[ "slug" ] for c in _choose_pages( [ { "id": i, "probabilities": a[ "probabilities" ][ i ] } for i in common ], vd.POLICY ) } for a in ( s1, s2, pack ) ]
         pack_changes += 1 if sets[ 0 ] != sets[ 2 ] else 0
         noise_changes += 1 if sets[ 0 ] != sets[ 1 ] else 0
         pack_diffs += [ round( abs( s1[ "overlaps" ][ i ] - pack[ "overlaps" ][ i ] ), 6 ) for i in common ]

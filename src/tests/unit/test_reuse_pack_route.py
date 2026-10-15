@@ -107,27 +107,6 @@ def test_the_receipt_id_of_an_old_question_is_unchanged():
     assert rid == "53fcc3f891479602"
 
 
-def test_page_asks_travel_in_one_packed_request_and_so_do_the_covered_entries( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [pages]"
-    fake = PackedFake( need, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } )
-    r    = rt.check_exists_impl( need, packed_ctx( env, fake ) )
-    assert ( r[ "status" ], r[ "verdict" ] ) == ( "ok", "REUSE" ) and fake.unexpected == []
-    assert fake.sizes() == [ 2, 1 ]                                                       # both page asks in one request, then the one covered entry
-    rec = receipt_of( env, r )
-    assert rec[ "route" ] == "pages" and [ q[ "stage" ] for q in rec[ "requests" ] ] == [ "pages", "covered" ]
-    assert rec[ "pages" ][ "chosen" ] == [ { "slug": "feeds-page", "p_overlap": 0.8 } ]
-
-
-def test_the_page_questions_carry_the_page_template_and_the_entry_questions_the_entry_template( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [templates]"
-    fake = PackedFake( need, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } )
-    rt.check_exists_impl( need, packed_ctx( env, fake ) )
-    page_q  = next( iter( fake.bodies[ 0 ][ "questions" ].values() ) )
-    entry_q = next( iter( fake.bodies[ 1 ][ "questions" ].values() ) )
-    assert page_q[ "criteria" ] == rt.PAGE_TEMPLATE[ "criteria" ] and entry_q[ "criteria" ] == rt.PROMPT_TEMPLATE[ "criteria" ]
-
 
 def test_replay_frozen_reproduces_a_packed_receipt_from_the_cache_with_no_transport( env ):
     write_wiki( env[ 0 ] )
@@ -186,7 +165,7 @@ def test_the_environment_switches_the_packed_path_on_with_a_pack_size( monkeypat
     monkeypatch.setenv( "LUPIN_REUSE_JEV_PACK_SIZE", "50" )
     monkeypatch.setenv( "LUPIN_REUSE_JEV_TOKEN_CEILING", "71000000" ); monkeypatch.setenv( "LUPIN_REUSE_JEV_RUN_NAME", "stage1-a" )
     ctx = rt.context_from_environment( env[ 0 ] )
-    assert ctx.pack_size == 50 and ctx.sweeper is not None and ctx.request_shape == rp.SHAPE and ctx.token_ceiling == 71_000_000 and ctx.run_name == "stage1-a"
+    assert ctx.pack_size == 50 and ctx.sweeper is not None and ctx.request_shape == rp.SHAPE_WHOLE and ctx.candidate_stage is not None and ctx.token_ceiling == 71_000_000 and ctx.run_name == "stage1-a"
 
 
 @pytest.mark.parametrize( "value", [ "0", "-3", "ten", "1.5", "10001" ] )

@@ -369,9 +369,9 @@ def test_the_page_arms_ask_the_page_template_each_under_its_own_index( env ):
     for arm, index, size in ( ( "page-single1", 6, 1 ), ( "page-single2", 7, 1 ), ( "page-pack", 8, 200 ) ):
         st.run_arm( env, 1, arm, NEED, PAGES, 2_000_000 )
         out = read( env, 1, arm )
-        assert out[ "template_hash" ] == rt.prompt_template_hash( rt.PAGE_TEMPLATE ) and out[ "run_index" ] == index and out[ "size" ] == size
+        assert out[ "template_hash" ] == rt.prompt_template_hash( st.PAGE_TEMPLATE ) and out[ "run_index" ] == index and out[ "size" ] == size
         assert out[ "entry_ids" ] == [ p[ "id" ] for p in PAGES ] and out[ "cache_hits" ] == 0
-    first_words = rt.PAGE_TEMPLATE[ "instructions" ].split( "CANDIDATE" )[ 0 ]
+    first_words = st.PAGE_TEMPLATE[ "instructions" ].split( "CANDIDATE" )[ 0 ]
     assert all( first_words in q[ "instructions" ] for q in bodies( env )[ -1 ][ "questions" ].values() )
 
 

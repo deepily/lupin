@@ -103,28 +103,11 @@ def test_a_repeat_runs_the_full_sweep_and_never_asks_a_page( env ):
 def page_asks( fake ): return [ q[ "instructions" ] for body in fake.bodies for q in body[ "questions" ].values() if any( page in q[ "instructions" ] for page in PAGE_TEXTS ) ]
 
 
-def test_a_repeat_by_the_page_route_asks_pages_first_keys_them_by_repeat_and_stores_nothing( env ):
-    write_wiki( env[ 0 ] )
-    fake = PackedFake( NEED, { FEEDS_PAGE: CHOSEN, FEEDS_TEXT: HIT } )
-    ctx  = packed_ctx( env, fake )
-    one  = rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1, route="pages" )
-    assert one[ "stats" ][ "route" ] == "pages" and one[ "verdict" ] == "REUSE" and len( page_asks( fake ) ) == 2
-    rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 2, route="pages" )
-    assert len( page_asks( fake ) ) == 4                                                       # the page questions carry the repeat number too
-    rf.ask_repeat( ctx, NEED, "cosa.mathx.add", 1, route="pages" )
-    assert len( page_asks( fake ) ) == 4 and not ( env[ 1 ] / "receipts" ).exists()           # repeat 1 again is a cache hit
 
-
-def test_a_repeat_by_the_page_route_falls_back_to_every_entry_when_no_page_is_chosen( env ):
-    write_wiki( env[ 0 ] )
-    r = rf.ask_repeat( packed_ctx( env, PackedFake( NEED ) ), NEED, "cosa.mathx.add", 1, route="pages" )
-    assert r[ "stats" ][ "route" ] == "pages_then_full"
-
-
-def test_a_route_other_than_full_or_pages_is_refused_before_anything_is_sent( env ):
+def test_a_route_other_than_full_or_candidates_is_refused_before_anything_is_sent( env ):
     fake = PackedFake( NEED )
     with pytest.raises( ValueError, match="route" ): rf.ask_repeat( packed_ctx( env, fake ), NEED, "cosa.mathx.add", 1, route="both" )
-    assert fake.bodies == [] and rf.ROUTES == ( "full", "pages" )
+    assert fake.bodies == [] and rf.ROUTES == ( "full", "candidates" )
 
 
 def test_asking_a_repeat_leaves_the_callers_context_as_it_was( env ):
@@ -220,9 +203,9 @@ def test_a_repeat_of_the_new_question_never_meets_the_production_answers( env ):
     assert len( ctx.transport.bodies ) == 2 * sent
 
 
-def test_the_new_question_has_no_page_route_and_an_unknown_question_is_refused_before_anything_is_sent( env ):
+def test_the_new_question_has_no_candidate_stage_and_an_unknown_question_is_refused_before_anything_is_sent( env ):
     ctx = pair_ctx( env )
-    with pytest.raises( ValueError, match="page route" ): rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, route="pages", question="provides" )
+    with pytest.raises( ValueError, match="candidate stage" ): rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, route="candidates", question="provides" )
     with pytest.raises( ValueError, match="question" ): rf.ask_repeat( ctx, PAIR_NEED, "cosa.mathx.add", 1, question="other" )
     assert ctx.transport.bodies == [] and rf.QUESTIONS == ( "choice", "provides" )
 

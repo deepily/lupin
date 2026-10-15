@@ -1,15 +1,13 @@
 """
-The seeded-miss end-to-end run: seed a miss, repair the page, prove it by replay.
+The seeded-miss end-to-end run: seed a miss, repair a docstring, prove it by replay.
 
 A throwaway repository holds five public functions and two capability pages.
-The question is "read the articles of an RSS feed".
-The wrong page is chosen and decides alone, so the right symbol is never asked.
-That is the seeded miss, and its receipt takes the page route.
-The run records the miss as a store row and rewrites the right page's index line.
-It replays the receipt five times before and five times after, each repeat its own draw.
-A second miss comes from a full-sweep receipt, which reads no wiki page, only the symbols' own docstrings.
+The question is "list the episodes of a podcast".
+A full sweep asks every entry, and the symbol's own docstring does not match the need, so it is missed.
+The run records the miss as a store row and replays the receipt five times before and five times after, each repeat its own draw.
 A rewrite that changes nothing must return `NO_INPUT_CHANGE`.
 Rewriting the missed symbol's first docstring line must reach `REPAIRED`.
+The page route this run once seeded a second miss on is gone, so the pages no longer decide anything.
 
 What this run does not prove:
     The miss row is made by the script, not by a seat that was missed.
@@ -50,11 +48,8 @@ from cosa.repo.symindex.repair_check import NO_INPUT_CHANGE, R, REPAIRED, replay
 from lupin_mcp import reuse_pack as rp
 from lupin_mcp import reuse_tools as rt
 
-PAGE_ROUTES    = ( "pages", "pages_then_full" )
 CAUGHT_BY      = "seeded-miss-e2e"
 PACK_SIZE      = 10
-NEED_PAGE      = "read the articles of an RSS feed"
-SYMBOL_PAGE    = "cosa.fetchers.parse_feed"
 NEED_FULL      = "list the episodes of a podcast"
 SYMBOL_FULL    = "cosa.fetchers.pull"
 WRONG_PAGE     = "news-page"
@@ -300,42 +295,6 @@ def mark_repaired( store, title, receipt_id, symbol ):
     return store.amend( row[ "id" ], note )[ 0 ]
 
 
-def page_scenario( ctx, root, librarian, store, runs ):
-    """
-    Seed, detect, repair and verify a miss from a page-route receipt.
-
-    Ensures:
-        - returns a report dict; "ok" is True only when the receipt took a page route and lacked the symbol,
-          the repair check gave its fixed verdict with no hit before and every run a hit after, and every replay's
-          stored receipt took a page route
-        - the right page's index line is rewritten only inside the repair check, after a clean before-phase
-    """
-    seed   = rt.page_route_need_impl( NEED_PAGE, None, ctx )
-    report = { "need": NEED_PAGE, "symbol": SYMBOL_PAGE, "status": seed[ "status" ], "ok": False }
-    if seed[ "status" ] != "ok": return { **report, "reason": f"seed ask failed: {seed.get( 'error' )}" }
-    rid = seed[ "receipt_id" ]
-    receipt = json.loads( next( ( pathlib.Path( ctx.data ) / "receipts" ).glob( f"{rid}*.json" ) ).read_text( encoding="utf-8" ) )
-    report.update( { "receipt_id": rid, "route": receipt[ "route" ], "shortlist_before": shortlist_of( seed ) } )
-    if receipt[ "route" ] not in PAGE_ROUTES or SYMBOL_PAGE in report[ "shortlist_before" ]:
-        return { **report, "reason": "the seed did not produce a page-route miss" }
-    title, outcome = record_miss( librarian, store, rid, SYMBOL_PAGE, NEED_PAGE )
-    report[ "row" ] = { "title": title, "outcome": outcome }
-    routes = []
-
-    def replay_tool( receipt_id, repeat ):
-        result = rt.replay_impl( receipt_id, ctx, repeat=repeat )
-        if result[ "status" ] == "ok": routes.append( result[ "stored" ][ "route" ] )
-        return result
-
-    check = run_repair_check( replayer_over( replay_tool ), lambda: write_index( root, REPAIRED_LINE ), rid, SYMBOL_PAGE, runs=runs )
-    report[ "repair" ] = { "verdict": check.verdict, "before": check.before, "after": check.after, "runs": check.runs, "replay_routes": sorted( set( routes ) ) }
-    if check.verdict != REPAIRED or check.before != 0 or check.after != runs or not set( routes ) <= set( PAGE_ROUTES ):
-        return { **report, "reason": f"repair check gave {check.verdict}" }
-    report[ "row" ][ "repaired_noted" ] = mark_repaired( store, title, rid, SYMBOL_PAGE )
-    report[ "ok" ] = outcome == "created" and report[ "row" ][ "repaired_noted" ]
-    return report
-
-
 def full_scenario( ctx, root, librarian, store, runs ):
     """
     Detect a miss from a full-sweep receipt and repair it through the symbol's own docstring.
@@ -372,14 +331,14 @@ def full_scenario( ctx, root, librarian, store, runs ):
 
 def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="fake", runs=R, environ=None, log=print ):
     """
-    Run both scenarios and write the report and the misses file.
+    Run the full-sweep scenario and write the report and the misses file.
 
     Requires:
         - work is an empty or absent folder; mode is "dry" or "live"
         - live needs ceiling and ledger_path, and the key in the environment
 
     Ensures:
-        - returns ( exit_code, report ); 0 when both scenarios held and the exported misses read as expected
+        - returns ( exit_code, report ); 0 when the scenario held and the exported misses read as expected
         - the report is also written to work/report.json and the misses to work/misses.jsonl
         - calls is the count of stand-in requests, 0 on saved answers, and None for a live run
         - nothing outside work is written in dry mode, and a dry run makes no HTTP call
@@ -408,7 +367,6 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     store     = FakeStore()
     librarian = Librarian( store, str( work / "pending.jsonl" ), log )
     try:
-        page   = page_scenario( ctx, root, librarian, store, runs )
         full   = full_scenario( ctx, root, librarian, store, runs )
     finally:
         if mode == "live" and ctx.transport is not None: ctx.transport.budget.end()
@@ -416,20 +374,19 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
         raise SavedAnswerMissing( f"{len( stand_in.refused )} requests were not in the saved answers; first need: {stand_in.refused[ 0 ]!r}" )
     export = miss_record.export_report( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ], str( work / "misses.jsonl" ), allow_empty=True )
     exported = { m[ "symbol" ]: m[ "repaired" ] for m in miss_record.collect( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ] ) }
-    expected = { SYMBOL_PAGE: True, SYMBOL_FULL: True }
+    expected = { SYMBOL_FULL: True }
     report   = { "mode": mode if mode == "live" else ( "dry-saved" if answers is not None else "dry-stand-in" ), "store": store_kind, "runs": runs,
-                 "page": page, "full": full, "exported": exported, "exported_skipped": export.skipped,
+                 "full": full, "exported": exported, "exported_skipped": export.skipped,
                  "calls": stand_in.calls if stand_in is not None else None }
-    report[ "ok" ] = bool( page[ "ok" ] and full[ "ok" ] and exported == expected and not export.skipped )
+    report[ "ok" ] = bool( full[ "ok" ] and exported == expected and not export.skipped )
     ( work / "report.json" ).write_text( json.dumps( report, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
     return ( 0 if report[ "ok" ] else 1 ), report
 
 
 def summary_lines( report ):
     """Ensures: returns a short table of the report as text lines."""
-    page, full = report[ "page" ], report[ "full" ]
+    full = report[ "full" ]
     rows = [ f"mode {report[ 'mode' ]}  store {report[ 'store' ]}  calls {report[ 'calls' ]}",
-             f"page  route {page.get( 'route' )}  before {page.get( 'shortlist_before' )}  repair {page.get( 'repair' )}  ok {page[ 'ok' ]}",
              f"full  route {full.get( 'route' )}  before {full.get( 'shortlist_before' )}  repair {full.get( 'repair' )}  ok {full[ 'ok' ]}",
              f"exported {report[ 'exported' ]}  overall {'PASS' if report[ 'ok' ] else 'FAIL'}" ]
     return rows

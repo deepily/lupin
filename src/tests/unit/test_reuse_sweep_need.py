@@ -33,14 +33,6 @@ def test_a_free_text_need_sweeps_every_entry_and_asks_no_page( env ):
     assert rec[ "route" ] == "full" and rec[ "pages" ] is None and rec[ "sweep_only" ] is True and rec[ "tool" ] == "check_exists"
 
 
-def test_check_exists_still_asks_the_pages_first_on_the_same_wiki( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [default]"
-    fake = PageFake( need )
-    r    = rt.check_exists_impl( need, ctx_of( env, fake ) )
-    assert FEEDS_PAGE in fake.seen and MATH_PAGE in fake.seen                                    # the guard: the default path did not change
-    assert "sweep_only" not in receipt_of( env, r ) and "exclude_id" not in receipt_of( env, r )
-
 
 def test_the_excluded_entry_is_never_asked_and_the_receipt_names_it( env ):
     write_wiki( env[ 0 ] )

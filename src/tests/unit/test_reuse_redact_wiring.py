@@ -127,8 +127,8 @@ def test_a_need_the_redactor_leaves_alone_keeps_the_receipt_it_had_before( env )
     assert r[ "need_redactions" ] == []
 
 
-@pytest.mark.parametrize( "call", [ lambda c: rt.sweep_need_impl( RAW_NEED, None, c ), lambda c: rt.page_route_need_impl( RAW_NEED, None, c ),
-                                    lambda c: rt.unstored_need_impl( RAW_NEED, None, c ), lambda c: rt.unstored_need_impl( RAW_NEED, None, c, page_route=True ) ] )
+@pytest.mark.parametrize( "call", [ lambda c: rt.sweep_need_impl( RAW_NEED, None, c ),
+                                    lambda c: rt.unstored_need_impl( RAW_NEED, None, c ), lambda c: rt.unstored_need_impl( RAW_NEED, None, c, candidates=True ) ] )
 def test_every_entry_that_takes_a_free_text_need_redacts_it( env, call ):
     fake = Recording()
     r    = call( plain_ctx( env, fake ) )

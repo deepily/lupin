@@ -131,7 +131,7 @@ class CandidateStage:
         return hashlib.sha256( canonical( { "v": STAGE_VERSION, "index_sha": index_sha, "entries": len( entries ),
                                             "purposes": hashlib.sha256( canonical( purposes ).encode( "utf-8" ) ).hexdigest(), "fusion": self.fusion } ).encode( "utf-8" ) ).hexdigest()[ :32 ]
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None ):
         """
         Choose the candidates for a need.
 
@@ -139,9 +139,10 @@ class CandidateStage:
             - ranking_text is the redacted need with its redacted spans removed
             - entries are the sendable index entries, each with an id and a pin
             - index_sha identifies those entries, and pages is the list page_candidates returns
+            - wiki_ids is None, or the wiki list a receipt recorded, which then replaces the one built from pages
 
         Ensures:
-            - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, ranking_hash }
+            - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, wiki_ids, ranking_hash }
             - ids are the shortlist sorted by id, without exclude_id, at most K of them
             - ranking is the fused order of those ids
             - lists names each list that fed the fusion with its size and its first ids
@@ -158,7 +159,7 @@ class CandidateStage:
         if not ranking_text.strip(): raise CandidateError( EMPTY_NEED, "the need holds no word once the redacted spans are removed" )
         manifest = self.manifest()
         vectors  = self._vectors( ranking_text, manifest, cache_only )
-        wiki     = wiki_list.wiki_ranked_ids( ranking_text, pages ) if self.arm in WIKI_ARMS else []
+        wiki     = ( wiki_list.wiki_ranked_ids( ranking_text, pages ) if wiki_ids is None else list( wiki_ids ) ) if self.arm in WIKI_ARMS else []
         purposes = cs_search.read_purposes( self.purposes_path ) if self.purposes_path is not None and pathlib.Path( self.purposes_path ).is_file() else {}
         key      = self._stage_key( index_sha, entries, purposes )
         asked    = self.K + ( 1 if exclude_id is not None else 0 )
@@ -177,5 +178,5 @@ class CandidateStage:
         lists   = { name: { "size": answer[ "list_sizes" ][ name ], "head": answer[ "lists" ][ name ] } for name in sorted( answer[ "lists" ] ) }
         return { "ids": sorted( ranking ), "ranking": ranking, "lists": lists, "manifest_hash": answer[ "manifest_hash" ],
                  "embed_models": { kind: manifest[ "engines" ][ kind ][ "model" ] for kind in ( "code", "prose" ) },
-                 "arm": self.arm, "K": self.K, "widened": False, "stage_key": key, "wiki": len( wiki ),
+                 "arm": self.arm, "K": self.K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
                  "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest() }

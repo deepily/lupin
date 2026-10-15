@@ -150,11 +150,11 @@ def test_the_route_option_reaches_every_repeat_and_is_named_in_the_report( setup
     seen = []
     real = rf.ask_repeat
     monkeypatch.setattr( rf, "ask_repeat", lambda ctx, need, member, run_index, **kw: seen.append( ( run_index, kw[ "route" ] ) ) or real( ctx, need, member, run_index, **kw ) )
-    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--route", "pages" ] ) ) == 0
-    assert sorted( set( seen ) ) == [ ( i, "pages" ) for i in range( 1, 6 ) ]
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--route", "candidates" ] ) ) == 0
+    assert sorted( set( seen ) ) == [ ( i, "candidates" ) for i in range( 1, 6 ) ]
     capsys.readouterr()
-    assert frun.cli( setup.args( "report", extra=[ "--route", "pages" ] ) ) == 0
-    assert "route pages" in capsys.readouterr().out
+    assert frun.cli( setup.args( "report", extra=[ "--route", "candidates" ] ) ) == 0
+    assert "route candidates" in capsys.readouterr().out
 
 
 def test_a_route_that_is_neither_full_nor_pages_is_refused_by_the_parser( setup ):
@@ -308,9 +308,9 @@ def test_a_question_that_is_neither_old_nor_new_is_refused_by_the_parser( setup 
     with pytest.raises( SystemExit ): frun.cli( setup.args( "canary", "--ceiling", "1", extra=[ "--question", "other" ] ) )
 
 
-def test_the_new_question_by_the_page_route_is_refused_before_anything_is_opened( setup, capsys ):
-    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--question", "new", "--route", "pages" ] ) ) == 2
-    assert "no page route" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()
+def test_the_new_question_by_the_candidates_route_is_refused_before_anything_is_opened( setup, capsys ):
+    assert frun.cli( setup.args( "canary", "--ceiling", "100000000", extra=[ "--question", "new", "--route", "candidates" ] ) ) == 2
+    assert "no candidate stage" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()
 
 
 def test_a_need_whose_excluded_symbol_is_not_an_entry_is_refused_before_any_spend( setup, capsys ):

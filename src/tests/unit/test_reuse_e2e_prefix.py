@@ -27,13 +27,13 @@ def test_a_second_measurement_under_another_prefix_opens_its_own_run_and_files( 
     assert run.cli( prefixed( setup, "canary" ) ) == 0
     assert run.cli( prefixed( setup, "canary" ) ) == 2                                          # the control: the same prefix is a run name used before
     capsys.readouterr()
-    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "pages" ] ) ) == 0
+    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "candidates" ] ) ) == 0
     assert sorted( p.name for p in results( setup ).iterdir() ) == [ "e2e-canary.canary.json", "e2e-canary.json", "pg-canary.canary.json", "pg-canary.json" ]
-    assert read( setup, "pg-canary.json" )[ "run_name" ] == "pg-canary" and read( setup, "pg-canary.json" )[ "questions" ] == [ "pages" ]
+    assert read( setup, "pg-canary.json" )[ "run_name" ] == "pg-canary" and read( setup, "pg-canary.json" )[ "questions" ] == [ "candidates" ]
 
 
 def test_approving_and_running_under_a_prefix_touches_only_that_prefixs_files( setup, capsys ):
-    pg = [ "--prefix", "pg", "--questions", "pages" ]
+    pg = [ "--prefix", "pg", "--questions", "candidates" ]
     assert run.cli( prefixed( setup, "canary" ) ) == 0
     assert run.cli( prefixed( setup, "canary", pg ) ) == 0
     assert run.cli( prefixed( setup, "run", pg ) ) == 2                                          # pg's canary is not approved yet
@@ -46,7 +46,7 @@ def test_approving_and_running_under_a_prefix_touches_only_that_prefixs_files( s
 
 
 def test_the_estimate_option_sets_the_allowance_and_the_default_is_unchanged( setup ):
-    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "pages", "--estimate-tokens", "1000000" ] ) ) == 0
+    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "candidates", "--estimate-tokens", "1000000" ] ) ) == 0
     assert read( setup, "pg-canary.canary.json" )[ "allowance_tokens" ] == 1_500_000
     assert run.cli( prefixed( setup, "canary" ) ) == 0
     assert read( setup, "e2e-canary.canary.json" )[ "allowance_tokens" ] == 630_000_000          # 1.5 times the 420,000,000 default
@@ -68,29 +68,29 @@ def test_an_estimate_that_is_not_a_positive_number_is_refused_before_a_run_is_op
 
 
 def test_the_report_reads_every_prefix_and_pairs_the_two_questions( setup, capsys ):
-    both = [ "--questions", "old,pages", "--prefix", "e2e,pg" ]
+    both = [ "--questions", "old,candidates", "--prefix", "e2e,pg" ]
     assert run.cli( prefixed( setup, "canary" ) ) == 0
-    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "pages" ] ) ) == 0
+    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "candidates" ] ) ) == 0
     capsys.readouterr()
     assert run.cli( setup.args( "report", extra=both ) ) == 0
     out = capsys.readouterr().out
-    assert "old: n run: 5 of 100" in out and "pages: n run: 5 of 100" in out and "paired on_shortlist" in out
+    assert "old: n run: 5 of 100" in out and "candidates: n run: 5 of 100" in out and "paired on_shortlist" in out
 
 
 def test_the_report_of_a_prefix_with_no_result_file_is_refused_and_names_it( setup, capsys ):
     """Once pinned as "none ran, no failure"; that hid a misspelt prefix."""
     assert run.cli( prefixed( setup, "canary" ) ) == 0
     capsys.readouterr()
-    assert run.cli( setup.args( "report", extra=[ "--questions", "old,pages", "--prefix", "e2e,pgg" ] ) ) == 2
+    assert run.cli( setup.args( "report", extra=[ "--questions", "old,candidates", "--prefix", "e2e,pgg" ] ) ) == 2
     err = capsys.readouterr().err
     assert "pgg" in err and "no result file" in err
 
 
 def test_the_report_of_a_prefix_with_only_its_canary_still_reads_it( setup, capsys ):
-    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "pages" ] ) ) == 0
+    assert run.cli( prefixed( setup, "canary", [ "--prefix", "pg", "--questions", "candidates" ] ) ) == 0
     capsys.readouterr()
-    assert run.cli( setup.args( "report", extra=[ "--questions", "pages", "--prefix", "pg" ] ) ) == 0
-    assert "pages: n run: 5 of 100" in capsys.readouterr().out
+    assert run.cli( setup.args( "report", extra=[ "--questions", "candidates", "--prefix", "pg" ] ) ) == 0
+    assert "candidates: n run: 5 of 100" in capsys.readouterr().out
 
 
 def test_an_estimate_above_the_room_left_is_refused_before_the_first_send( setup, capsys ):

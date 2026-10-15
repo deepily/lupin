@@ -231,17 +231,6 @@ def test_a_response_with_no_model_is_counted_under_none_and_a_non_object_too( en
     assert rt.transport_summary( [ call( 1, model=[ "x" ] ) ] )[ "models" ] == { "['x']": 1 }                 # counted by its text, never dropped
 
 
-def test_page_first_summarises_every_stage( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [stages-t]"
-    fake = PageFake( need, { FEEDS_PAGE: with_usage( CHOSEN ), MATH_PAGE: with_usage( UNREL ) }, { FEEDS_TEXT: with_usage( UNREL ), MATHX_TEXT: with_usage( UNREL ), SERVE_TEXT: with_usage( UNREL ) } )
-    def post( url, headers, body, timeout ): return 200, json.dumps( fake.answer( json.loads( body ) ) )
-    root, data, out = env
-    ctx = rt.ReuseContext( root, data, out_dir=out, transport=rt.LiveJevTransport( post_fn=post, sleep_fn=lambda s: None, environ=ENV, random_fn=lambda: 0.5 ) )
-    r   = rt.check_exists_impl( need, ctx )
-    assert [ s[ "stage" ] for s in r[ "stats" ][ "stages" ] ] == [ "pages", "covered", "all" ]
-    assert r[ "stats" ][ "transport" ][ "responses" ] == 2 + 1 + 2                                          # the full sweep's feeds answer was cached
-
 
 def test_a_response_lost_to_a_failed_cache_write_is_still_summarised( env, monkeypatch ):
     need = N( "lost" )

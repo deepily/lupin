@@ -64,7 +64,7 @@ def repeat_asks( repeats, route, question="choice" ):
 
     Ensures:
         - ask rN asks the need as repeat N by the route, leaving the item's excluded symbol out
-        - question is "choice" (the old question) or "provides" (the new one, which has no page route)
+        - question is "choice" (the old question) or "provides" (the new one, which has no candidate stage)
         - the result carries rows: the repeat, the route, the question, the verdict and the sorted shortlist ids, so the report needs no receipt
         - an error result is returned as it is
     """
@@ -216,7 +216,7 @@ def main( argv=None ):
     rr.check_paths( root, args.data, args.ledger, args.live )                                    # a path refusal comes before the slow reads
     items = load_flip_needs( args.needs, args.needs_sha )
     spec  = { "prefix": prefix, "members": len( items ), "estimate": args.estimate_tokens, "canary_members": e2r.CANARY_MEMBERS }
-    if args.question == "new" and args.route != "full": raise s1.DriverRefused( "the new question has no page route; give --route full" )
+    if args.question == "new" and args.route != "full": raise s1.DriverRefused( "the new question has no candidate stage; give --route full" )
     env   = e2r._open_env( root, args.data, args.ledger, args.live, repeat_asks( args.repeats, args.route, QUESTION_NAMES[ args.question ] ), args.pack_size )
     if args.command in ( "canary", "run" ): check_excludes( items, env.root, env.data )
     if args.command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )

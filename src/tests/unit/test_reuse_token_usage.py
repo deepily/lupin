@@ -95,17 +95,6 @@ def test_a_failed_call_has_no_response_to_read_and_is_not_a_missing_usage( env )
     assert tokens( r[ "stats" ] ) == ( 548, 52, 0 )
 
 
-def test_page_first_sums_every_stage_and_a_cached_answer_is_not_counted_twice( env ):
-    write_wiki( env[ 0 ] )
-    need = "read an RSS feed [stages]"
-    pages = { FEEDS_PAGE: U( CHOSEN, 50, 5 ), MATH_PAGE: U( resp( 0.1, 0.1, 0.8 ), 40, 4 ) }
-    fake  = PageFake( need, pages, { FEEDS_TEXT: U( resp( 0.45, 0.0, 0.55 ), 300, 30 ), MATHX_TEXT: U( UNREL, 200, 20 ), SERVE_TEXT: U( UNREL, 100, 10 ) } )
-    r     = run( env, need, fake )                                                          # the covered stage finds nothing at the threshold: the full sweep follows
-    st    = r[ "stats" ]
-    assert [ s[ "stage" ] for s in st[ "stages" ] ] == [ "pages", "covered", "all" ]
-    assert [ ( s[ "tokens_in" ], s[ "tokens_out" ] ) for s in st[ "stages" ] ] == [ ( 90, 9 ), ( 300, 30 ), ( 300, 30 ) ]       # the full sweep's feeds answer was cached
-    assert tokens( st ) == ( 690, 69, 0 )
-
 
 def test_a_question_that_asks_nothing_reports_zero_tokens( env ):
     r = rt.check_exists_impl( N( "nokey" ), ctx_for( env, None ) )                         # no transport and no key: nothing is asked
@@ -173,11 +162,3 @@ def test_responses_that_never_reached_the_cache_count_their_tokens_when_the_entr
     assert tokens( r[ "stats" ] ) == ( 555 * ( rt.RETRIES + 1 ), 55 * ( rt.RETRIES + 1 ), 0 )              # Jev answered every attempt
 
 
-def test_missing_usage_in_a_later_stage_is_counted_in_the_total( env ):
-    write_wiki( env[ 0 ] )
-    need  = "read an RSS feed [late-missing]"
-    pages = { FEEDS_PAGE: U( CHOSEN, 50, 5 ), MATH_PAGE: U( resp( 0.1, 0.1, 0.8 ), 40, 4 ) }
-    fake  = PageFake( need, pages, { FEEDS_TEXT: U( resp( 0.45, 0.0, 0.55 ), 300, 30 ), MATHX_TEXT: UNREL, SERVE_TEXT: U( UNREL, 100, 10 ) } )
-    st    = run( env, need, fake )[ "stats" ]                                                       # the full sweep's math answer has no usage
-    assert [ s[ "usage_missing" ] for s in st[ "stages" ] ] == [ 0, 0, 1 ] and st[ "usage_missing" ] == 1
-    assert ( st[ "tokens_in" ], st[ "tokens_out" ] ) == ( 490, 49 )

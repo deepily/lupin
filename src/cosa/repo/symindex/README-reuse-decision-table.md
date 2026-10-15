@@ -32,24 +32,25 @@ A call is **strong** when `p_overlap >= S` and `confidence >= S`. When any call 
 no longer cause `LOW_CONFIDENCE`; they are listed in `doubtful` beside the verdict instead (Rick's ruling).
 Every other cause still holds. The reuse-or-extend choice is then decided from the strong calls only; the shortlist is unchanged. A receipt stored before this rule has no `strong` in its policy and replays as it was.
 
-## Which entries are asked (page-first)
+## Which entries are asked (candidate stage)
 
-When the wiki holds capability pages, a question is routed before the full sweep. A page can be asked
-about when its `INDEX.md` line names a package and its page file exists. At least one of its pins
-must name an indexed symbol. The receipt records the `route`:
+A `check_exists` question on a context that holds a candidate stage asks the shortlist's entries only.
+The stage embeds the redacted need and ranks the index by its vectors and the wiki page list.
+It returns at most K entry ids, sorted by id, and the whole shortlist is packed in id order.
+The receipt records the `route`:
 
-| `route` | What ran | When it decides |
+| `route` | What ran | When |
 | --- | --- | --- |
-| `full` | one sweep of every entry | no page can be asked about |
-| `pages` | page stage, then the covered stage | the covered stage finds an entry with `p_overlap >= T` |
-| `pages_then_full` | page stage, covered stage if any, then the full sweep | no page was chosen, or the covered stage found no entry at `T`; answers already cached cost nothing |
+| `full` | one sweep of every entry | no candidate stage, or the question is sweep-only, `fetch_similar` or the pair question |
+| `candidates` | one sweep of the shortlist's entries | the candidate stage answered |
+| `none` | no sweep | a hard flag, an empty index, or a failed candidate stage |
 
-The page stage asks one question per page, about the line text after its link. A page is chosen at
-`p_overlap >= F`, at most five of them, best first and ties by slug. A chosen page **covers** every public
-Python entry in the modules its line lists, or in the whole package when the line lists none. JavaScript,
-TypeScript and Dart entries are never covered, so only the full sweep reaches them. Pins only decide
-that a page can be asked about; they do not shape its coverage. One call budget spans every stage, so a
-spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
+A failed candidate stage answers `UNCERTAIN_READ_SOURCE` with cause `CALL_FAILED` and never falls back to a silent sweep.
+The receipt's `candidate_stage.error` names the failure.
+The `candidate_stage` block holds the arm, manifest hash, embed models, list sizes and heads, K and the ids.
+It also holds `entries_total`, `entries_asked` and `entries_not_asked`, which add up.
+A receipt of the retired page routes (`pages`, `pages_then_full`) stays readable and replays to error `ROUTE_RETIRED`.
+One call budget spans the sweep, so a spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
 `stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.
 `stats.tokens_in` and `stats.tokens_out` sum the `usage` that Jev reported on each live answered call, across
 every stage; each stage entry carries its own pair. A cache hit adds nothing, and a failed call has no response
@@ -140,6 +141,6 @@ receipt file and each writes its own log line, so no process ever rewrites a rec
 | --- | --- | --- |
 | verdict, causes, precedence, coverage, malformed answers | `verdict.py` | `test_symindex_verdict.py` |
 | sweep, cache by request hash, receipts, snapshots, replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_tools.py` |
-| page routing: scope of a page, page stage, covered stage, fallback, frozen replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_page_first.py` |
+| candidate routing: the shortlist sweep, the failed-stage verdict, the receipt block, frozen replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_candidate_route.py` |
 | server-side call log | `src/lupin_mcp/reuse_call_log_middleware.py` | `test_reuse_mcp_mount.py` |
 | replay gate (ii), (iii) by mutation | `reuse_tools.py` mutated one line per arm; record in `reuse-gates-mutation-evidence.md` | `test_gate_ii_the_id_recomputes_from_the_stored_inputs_and_an_edited_input_is_named`, `test_gate_iii_a_corrupt_or_missing_input_is_a_named_error_never_a_verdict`, and the other named killers in that file |
