@@ -821,20 +821,22 @@ _XARGS_WORD_RE = re.compile( r"\bxargs\b" )
 _KILL_WORD_RE  = re.compile( r"(?<![\w.-])(?:kill|pkill|killall)(?![\w-])" )
 
 
-def _segment_before( command: str, position: int ) -> str:
-    """The text between the last separator before `position` and `position`."""
-    head = command[ :position ]
-    cut  = max( head.rfind( ";" ), head.rfind( "\n" ), head.rfind( "&" ) )
-    return head[ cut + 1: ]
+_TWO_STAGE_RE = re.compile(
+    r"^[ \t]*(?:\w+=\S*[ \t]+)*(?:pgrep|ps)(?![\w./-])(?P<first>[^|;&\n]*)"
+    r"\|[ \t]*xargs(?![\w./-])[^|;&\n]*$"
+)
 
 
-_LISTING_STAGE_RE = re.compile( r"^[ \t]*(?:\w+=\S*[ \t]+)*(?:pgrep|ps)(?![\w./-])" )
+def _is_own_children_pipe( command: str ) -> bool:
+    """
+    True iff the whole command is an own-children `pgrep` or `ps` piped into xargs.
 
-
-def _fed_by_own_children_listing( segment: str ) -> bool:
-    """True iff the pipeline's first stage is a pgrep or ps command scoped to own children."""
-    first = segment.split( "|", 1 )[ 0 ]
-    return _LISTING_STAGE_RE.search( first ) is not None and _OWN_CHILDREN_RE.search( first ) is not None
+    Ensures:
+        - exactly two stages; any other `|`, `||`, `&&`, `;`, `&` or newline refuses
+        - the first stage carries -P, --parent or --ppid with the caller's own pid
+    """
+    found = _TWO_STAGE_RE.match( command.strip() )
+    return found is not None and _OWN_CHILDREN_RE.search( found.group( "first" ) ) is not None
 
 
 def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]:
@@ -850,9 +852,9 @@ def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]
         - a top-level shell whose `-c` literal was extracted is skipped, because that
           literal is judged on its own; inside a literal every shell is judged
         - the argument text ends at the first unquoted separator
-        - an xargs whose pipeline starts with a pgrep or ps command scoped to own
-          children (`pgrep -P $$ | xargs kill`, the guard's recommended substitute)
-          is skipped; an echo carrying the same flags is not
+        - an xargs is skipped only when the whole command is exactly two stages,
+          a pgrep or ps scoped to own children piped into xargs
+          (`pgrep -P $$ | xargs kill`, the guard's recommended substitute)
         - never raises
     """
     extracted = { match.start() for match in _SHELL_C_RE.finditer( command ) }
@@ -863,7 +865,7 @@ def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]
         if match.group( "name" ) in _SHELL_WRAPPERS and not nested and match.start() in extracted \
                 and _XARGS_WORD_RE.search( before ) is None:
             continue
-        if match.group( "name" ) == "xargs" and _fed_by_own_children_listing( _segment_before( command, match.start() ) ):
+        if match.group( "name" ) == "xargs" and _is_own_children_pipe( command ):
             continue
         if _KILL_WORD_RE.search( match.group( "args" ) ):
             return match.group( "name" )

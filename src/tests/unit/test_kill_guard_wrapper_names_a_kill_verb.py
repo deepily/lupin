@@ -36,6 +36,12 @@ def _wrapped( command ):
     "echo -P $$ | xargs kill 12345",
     "echo pgrep -P $$ | xargs kill",
     "cat ps --ppid $$ | xargs kill",
+    "pgrep -P $$ | echo 123 | xargs kill",
+    "pgrep -P $$ || echo 123 | xargs kill",
+    "pgrep -P $$ && echo 123 | xargs kill",
+    "pgrep -P $$; echo 123 | xargs kill",
+    "pgrep -P $$ & echo 123 | xargs kill",
+    "echo 123 | xargs kill; pgrep -P $$ | xargs kill",
 ] )
 def test_a_wrapper_naming_a_kill_verb_is_denied( command ):
     assert _wrapped( command ) is not None, command
@@ -54,7 +60,7 @@ def test_a_wrapper_naming_a_kill_verb_is_denied( command ):
     "bash -c 'pkill -P $$ -f pytest'",
     "bash -c 'kill $!'",
     "pgrep -P $$ -f pytest | xargs -r kill",
-    "FOO=1 pgrep -P $$ | grep x | xargs kill",
+    "FOO=1 pgrep -P $$ -f pytest | xargs -r kill",
     "ps --ppid $$ -o pid | xargs kill",
     'bash -c "echo kill 4242"',
     "LUPIN_ALLOW_UNSCOPED_KILL=1 ssh host pkill -f TOK",
