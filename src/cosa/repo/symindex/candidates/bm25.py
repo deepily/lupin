@@ -120,7 +120,7 @@ def rank_scored( index, query ):
         - each distinct query word counts once, taken in sorted order so the float sum is fixed
         - a score is rounded to SCORE_DIGITS places before any sort
         - returns ( id, rounded score ) pairs ordered by ( -rounded score, id )
-        - lists only documents with a score above zero
+        - lists only documents that share a word with the query, each with a score above zero
     """
     scores = {}
     for term in sorted( set( split_identifier( query ) ) ):
@@ -131,7 +131,7 @@ def rank_scored( index, query ):
             norm = freq + index.k1 * ( 1.0 - index.b + index.b * index.lengths[ position ] / index.average )
             scores[ position ] = scores.get( position, 0.0 ) + weight * freq * ( index.k1 + 1.0 ) / norm
     rounded = [ ( index.ids[ p ], round( s, SCORE_DIGITS ) ) for p, s in scores.items() ]
-    return sorted( ( r for r in rounded if r[ 1 ] > 0 ), key=lambda r: ( -r[ 1 ], r[ 0 ] ) )
+    return sorted( rounded, key=lambda r: ( -r[ 1 ], r[ 0 ] ) )
 
 
 def rank( index, query ):

@@ -82,6 +82,11 @@ class TestBm25:
         index   = bm25.build_bm25( entries, ( "name", ) )
         assert bm25.rank( index, "alpha" ) == [ "k", "m", "z" ]
 
+    def test_equal_scores_from_different_terms_break_on_id( self ):
+        # z is met first through alpha and a through beta, so only the id key puts a first.
+        index = bm25.build_bm25( [ doc( "z", "alpha" ), doc( "a", "beta" ) ], ( "name", ) )
+        assert bm25.rank( index, "alpha beta" ) == [ "a", "z" ]
+
     def test_entry_order_does_not_matter( self ):
         forward  = bm25.build_bm25( CORPUS, ( "name", ) )
         backward = bm25.build_bm25( list( reversed( CORPUS ) ), ( "name", ) )
