@@ -1,5 +1,5 @@
 ---
-capability: multiplexer-render-holding-area-table
+capability: web-client-render-holding-area-table
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.holdingAreaTable.holdingApproveAllTitle@be681a42b3
@@ -17,7 +17,7 @@ pins:
 ---
 # Multiplexer holding-area table render
 
-The DOM builders of the holding area: one collapsible group per filer, with batch controls, plan sub-groups and a table of held rows. The grouping model is in [[multiplexer-render-holding-area-model]].
+The DOM builders of the holding area: one collapsible group per filer, with batch controls, plan sub-groups and a table of held rows. The grouping model is in [[web-client-render-holding-area-model]].
 
 ## Wording and controls
 - `holdingApproveAllTitle( filer )` and `holdingWontFixAllTitle( filer )` are the batch tooltips. The approve one says it is reversible. The won't-fix one says it is terminal and every row gets the same reason.

@@ -1,5 +1,5 @@
 ---
-capability: multiplexer-render-row-disclosure-and-new-ticket
+capability: web-client-render-row-disclosure-and-new-ticket
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.templates.rowDisclosure.renderDiscloseToggle@cd030bd498

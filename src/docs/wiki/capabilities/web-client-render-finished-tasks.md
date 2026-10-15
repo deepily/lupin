@@ -1,5 +1,5 @@
 ---
-capability: multiplexer-render-finished-tasks
+capability: web-client-render-finished-tasks
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.finishedTasksModel.clampWindowDays@fc77028985

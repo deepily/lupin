@@ -1,5 +1,5 @@
 ---
-capability: multiplexer-render-flow-ratio
+capability: web-client-render-flow-ratio
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - src.lupin_app.static.js.multiplexer.render.flowRatioModel.isNum@8a48bbe97e
