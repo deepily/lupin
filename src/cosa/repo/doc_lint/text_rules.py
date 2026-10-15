@@ -26,6 +26,7 @@ FIELD_HEADER    = re.compile( r"^\s*(?:Attributes|Parameters|Params|Examples?)\s
 SENTENCE_SPLIT  = re.compile( r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(])" )
 CONFIG_KEY_LINE = re.compile( r"^[ \t]*([a-z][a-z0-9 _.:-]*?)[ \t]=[ \t]" )
 CODE_SPAN       = re.compile( r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)" )
+GENERATED_FOOTER = re.compile( r"^_Auto-generated on \d{4}\.\d{2}\.\d{2} \d{2}:\d{2}:\d{2} by `src/scripts/generate-api-docs\.sh`_$", re.MULTILINE )
 
 
 def line_of_offset( text, offset ):
@@ -395,7 +396,8 @@ def history_findings( text, path, first_line, agent_rule=True ):
     findings = []
     for m in DATED_BANNER_REGEX.finditer( text ):
         findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "dated-banner", f"dated banner {m.group( 0 ).strip()!r}" ) )
-    unquoted = QUOTED_SPAN_REGEX.sub( lambda q: " " * len( q.group( 0 ) ), text )
+    unquoted = GENERATED_FOOTER.sub( lambda q: " " * len( q.group( 0 ) ), text )     # the footer the api-docs generator writes is its own stamp, not prose
+    unquoted = QUOTED_SPAN_REGEX.sub( lambda q: " " * len( q.group( 0 ) ), unquoted )
     for m in ISO_DATE_REGEX.finditer( unquoted ):
         findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "iso-date", f"date {m.group( 0 )} in prose belongs in history" ) )
     orders = [ ( m.start(), m.group( 0 ) ) for m in AGENT_IMPERATIVE_REGEX.finditer( text ) ] + do_not_starts( text ) if agent_rule else []

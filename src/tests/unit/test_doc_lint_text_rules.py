@@ -464,3 +464,27 @@ def test_caps_words_judges_a_word_the_same_with_any_number_of_lines_above_it():
     for above in ( 0, 1, 10, 10000 ):
         assert mc.caps_words( "ok --json \n" * above + "NOT", WORDS ) == [ "NOT" ]
         assert mc.caps_words( "ok --json \n" * above + "pass --json NOT", WORDS ) == []
+
+GENERATED_FOOTER_LINE = "_Auto-generated on 2026.10.14 21:55:53 by `src/scripts/generate-api-docs.sh`_"
+
+
+def test_the_api_docs_generator_footer_is_not_an_iso_date_finding():
+    assert tr.history_findings( "Body text.\n\n---\n" + GENERATED_FOOTER_LINE + "\n", "api.md", 1 ) == []
+
+
+@pytest.mark.parametrize( "line", [
+    "_Auto-generated on 2026.10.14 21:55:53 by `src/scripts/other-script.sh`_",
+    "Auto-generated on 2026.10.14 21:55:53 by `src/scripts/generate-api-docs.sh`",
+    "_Auto-generated on 2026.10.14 21:55:53 by `src/scripts/generate-api-docs.sh`_ and fixed 2026.10.15",
+    "Shipped 2026.10.14 21:55:53 by hand",
+] )
+def test_a_near_miss_of_the_generator_footer_is_still_an_iso_date_finding( line ):
+    found = tr.history_findings( line, "a.md", 1 )
+    assert "iso-date" in [ f.rule for f in found ]
+
+
+def test_the_committed_api_md_footer_matches_the_exemption():
+    import subprocess
+    root = subprocess.run( [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True, check=True ).stdout.strip()
+    last = open( root + "/src/docs/fastapi/api.md", encoding="utf-8" ).read().rstrip( "\n" ).split( "\n" )[ -1 ]
+    assert tr.GENERATED_FOOTER.match( last ) is not None
