@@ -1091,3 +1091,11 @@ def test_xargs_with_a_stdin_pattern_or_an_unknowable_pid_list_stays_allowed():
 def test_xargs_in_front_of_an_ordinary_program_is_allowed():
 
     assert _deny( "git ls-files | xargs wc -l", comm_reader=_all_claude ) is None
+
+
+def test_a_pid_typed_into_the_pipe_of_xargs_kill_stays_unseen_for_now():
+    """A literal pid piped into xargs kill is not seen yet. The fix is a separate row."""
+    seat = lambda selector: [ "4242" ]
+    assert _deny( "kill 4242", comm_reader=_all_claude, pgrep_probe=seat ) is not None
+    for command in ( "echo 4242 | xargs kill", "xargs -a pids.txt kill", "echo 4242 | xargs sh -c 'kill $0'" ):
+        assert _deny( command, comm_reader=_all_claude, pgrep_probe=seat ) is None, command
