@@ -36,7 +36,7 @@ class RankedStage:
 
     def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None ):
         K = self.K if K is None else K
-        self.calls.append( { "K": K, "cache_only": cache_only, "wiki_ids": wiki_ids } )
+        self.calls.append( { "K": K, "cache_only": cache_only, "wiki_ids": wiki_ids, "exclude_id": exclude_id } )
         if self.fail_wide and K > self.K: raise CandidateError( "CANDIDATE_SEARCH_FAILED", "stand-in failure" )
         ids = [ i for i in self.ranking if i != exclude_id ][ :K ]
         return { "ids": sorted( ids ), "ranking": ids, "lists": { "code": { "size": len( ids ), "head": ids } }, "manifest_hash": MANIFEST,
@@ -181,3 +181,31 @@ def test_the_receipt_id_of_a_widened_run_differs_from_an_unwidened_one_of_the_sa
     a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=None ) )
     b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage() ) )
     assert a[ "receipt_id" ] != b[ "receipt_id" ] and rt._candidate_of( receipt_of( env, b )[ "candidate_stage" ] )[ "widened_ids" ] != ""
+
+
+def test_the_rule_widens_on_near_cutoff_with_low_confidence_only():
+    assert rt._should_widen( { "causes": [ "NEAR_CUTOFF" ] } ) and rt._should_widen( { "causes": [ "NEAR_CUTOFF", "LOW_CONFIDENCE" ] } )
+    assert not rt._should_widen( { "causes": [ "NEAR_CUTOFF", "CALL_FAILED" ] } ) and not rt._should_widen( { "causes": [ "LOW_CONFIDENCE" ] } )
+
+
+def test_the_wide_call_leaves_out_the_same_entry_as_the_first_call( env ):
+    need  = "read an RSS feed [wide-exclude]"
+    stage = RankedStage()
+    rec   = rt.run_question( ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage ), "check_exists", need, need, exclude_id=SERVE_ID, write=False )
+    assert [ ( c[ "K" ], c[ "exclude_id" ] ) for c in stage.calls ] == [ ( 1, SERVE_ID ), ( 3, SERVE_ID ) ]
+    assert rec[ "candidate_stage" ][ "widened_ids" ] == [ MATH_ID ]
+
+
+def test_a_replay_decides_over_the_widened_entries_too( env ):
+    need  = "read an RSS feed [wide-replay-verdict]"
+    stage = RankedStage()
+    ctx   = ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR, rt_math_text(): resp( 0.9, 0.05, 0.05 ) } ), stage )
+    r     = rt.check_exists_impl( need, ctx )
+    out   = rt.replay_impl( r[ "receipt_id" ], ctx )
+    assert r[ "widened" ] is True and MATH_ID in [ e[ "id" ] for e in r[ "shortlist" ] ]                 # the widened entry is on the shortlist
+    assert [ e[ "id" ] for e in out[ "frozen" ][ "shortlist" ] ] == [ e[ "id" ] for e in r[ "shortlist" ] ] and out[ "differences" ][ "frozen" ] == []
+
+
+def rt_math_text():
+    from tests.unit.test_reuse_tools import MATHX_TEXT
+    return MATHX_TEXT
