@@ -132,7 +132,8 @@ def receipt_id( tool, query, index_sha, model, policy, template_hash, causes=(),
         - a sweep-only question carries that mark and its excluded id in the id
         - a check_exists question that leaves one symbol out without being sweep-only carries the excluded id and not the mark
         - a question carrying need_text (a fetch_similar of a definition the public snapshot does not hold) has it in the id
-        - a question that ran the candidate stage carries its manifest hash and K, so a different stage is a different receipt
+        - a question that ran the candidate stage carries its manifest hash, K and a hash of its shortlist ids, so a different stage
+          or a different shortlist is a different receipt
         - any other question's id is unchanged
     """
     fields = { "tool": tool, "tool_version": TOOL_VERSION if tool_version is None else tool_version, "query": query, "index_sha": index_sha,
@@ -915,7 +916,7 @@ def _receipt_shape_ok( r ):
 
 def _candidate_of( stage ):
     """Ensures: returns the part of a candidate_stage block that a receipt id holds."""
-    return { "manifest_hash": stage[ "manifest_hash" ], "K": stage[ "K" ] }
+    return { "manifest_hash": stage[ "manifest_hash" ], "K": stage[ "K" ], "ids": sha( canonical( stage[ "ids" ] ), 16 ) }
 
 
 def load_receipt( ctx, rid ):

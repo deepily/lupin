@@ -219,3 +219,12 @@ def test_a_replay_reads_the_cached_answer_a_resent_pack_left_out( env ):
     assert r[ "verdict" ] == "REUSE" and receipt_of( env, r )[ "stats" ][ "failed_attempts" ] == []
     out = rt.replay_impl( r[ "receipt_id" ], resent )
     assert out[ "status" ] == "ok" and out[ "frozen" ][ "verdict" ] == "REUSE" and out[ "differences" ][ "frozen" ] == []
+
+
+def test_two_lookups_that_differ_only_in_their_shortlist_get_different_receipt_ids( env ):
+    need = "read an RSS feed [cand-ids]"
+    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ MATH_ID, FEEDS_ID ] ) ) )
+    b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ MATH_ID, FEEDS_ID, SERVE_ID ] ) ) )
+    assert a[ "receipt_id" ] != b[ "receipt_id" ] and receipt_of( env, a )[ "candidate_stage" ][ "ids" ] != receipt_of( env, b )[ "candidate_stage" ][ "ids" ]
+    again = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage( ids=[ FEEDS_ID, MATH_ID ] ) ) )
+    assert again[ "receipt_id" ] == a[ "receipt_id" ]                                          # the same shortlist in another order is the same receipt
