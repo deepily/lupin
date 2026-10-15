@@ -10,14 +10,18 @@ import gzip
 import hashlib
 import json
 import os
+import pathlib
 import types
 
 from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex.candidates import arm_metrics as am
 from cosa.repo.symindex.candidates import arm_report as ar
 from cosa.repo.symindex.candidates import arms
+from cosa.repo.symindex.candidates import rank_fusion as rf
+from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates.errors import CandidateError
 
+QUERY_VECTOR_MISSING = "QUERY_VECTOR_MISSING"
 REPEATS          = ( 1, 2, 3, 4, 5 )
 REPLAY_KS        = ( 128, 512 )
 TWIN_SOURCE_KEYS = ( "exact", "near" )
@@ -145,12 +149,25 @@ def references( answers, needs ):
     return first, union
 
 
+def lists_for( available, text ):
+    """
+    Resolve the extra lists for one query.
+
+    Requires:
+        - available is a mapping of source name to ranked ids, or a callable taking the query text and returning one
+
+    Ensures:
+        - returns the mapping, so an arm whose vectors depend on the query text and an arm with fixed lists run the same code
+    """
+    return available( text ) if callable( available ) else available
+
+
 def measure_arm( arm, needs, stages, available, answers, ks=arms.KS ):
     """
     Measure one arm on the in-sample needs, by recall and by verdict replay.
 
     Requires:
-        - available holds every list the arm fuses
+        - available holds every list the arm fuses, or is a callable that takes a need's text and returns them
         - answers is load_answers's mapping
 
     Ensures:
@@ -160,7 +177,7 @@ def measure_arm( arm, needs, stages, available, answers, ks=arms.KS ):
         - the control replays the whole answered set, so its agreement is 1.0 whatever the arm
     """
     first, union = references( answers, needs )
-    short = { k: { n: arms.run_arm( arm, needs[ n ][ "need" ], stages, available, k )[ "shortlist" ] for n in needs } for k in sorted( set( ks ) | set( REPLAY_KS ) ) }
+    short = { k: { n: arms.run_arm( arm, needs[ n ][ "need" ], stages, lists_for( available, needs[ n ][ "need" ] ), k )[ "shortlist" ] for n in needs } for k in sorted( set( ks ) | set( REPLAY_KS ) ) }
     cuts  = { k: short[ k ] for k in ks }
     t2    = { "control": am.t2_replay( { n: sorted( answers[ ( n, 1 ) ] ) for n in needs }, answers ) }
     for k in REPLAY_KS: t2[ f"K={k}" ] = am.t2_replay( short[ k ], answers )
@@ -207,6 +224,7 @@ def measure_twins( arm, entries, twins, stages, available ):
     Requires:
         - entries is the snapshot's entries
         - twins is twin_map's result
+        - available is a mapping of lists, or a callable that takes the query text and returns one
 
     Ensures:
         - returns ( ranks_by_language, absent ): the best twin rank per member grouped by file suffix, and the members not in the index
@@ -217,7 +235,8 @@ def measure_twins( arm, entries, twins, stages, available ):
     ranks  = collections.defaultdict( list )
     for member in sorted( twins ):
         if member not in by_id: continue
-        ranking = [ d for d in arms.full_ranking( arm, query_text( by_id[ member ] ), stages, available ) if d != member ]
+        text    = query_text( by_id[ member ] )
+        ranking = [ d for d in arms.full_ranking( arm, text, stages, lists_for( available, text ) ) if d != member ]
         found   = [ r for r in ( am.twin_rank( ranking, t ) for t in sorted( twins[ member ] ) if t in by_id ) if r is not None ]
         suffix  = os.path.splitext( by_id[ member ][ "file" ] )[ 1 ].lstrip( "." ) or "other"
         ranks[ suffix ].append( min( found ) if found else None )
@@ -311,6 +330,177 @@ def run_arm_report( env, snapshot_paths, needs_path, fresh_sha, manifest_path, o
                 "Every arm uses the same query." )
     page = render_partial_page( meta, arm, measured, t3, absent, pending, ruling )
     return { "page_sha": ar.write_report( out_path, page ), "misses": misses, "snapshot": path, "needs": len( needs ), "members": len( twin_map( manifest ) ) }
+
+
+FUSION_GRID    = tuple( ( k, depth, head ) for k in ( 10, 30, 60, 100 ) for depth in ( 128, 256, 512 ) for head in ( 5, 10 ) )
+SELECTION_ARM  = "B2"
+SELECTION_K    = 128
+VECTOR_NAMES   = ( "concat", "prose", "code" )
+
+
+def vector_source( entry_ids, vset, query_for ):
+    """
+    Build the callable that gives an arm its vector lists for one query text.
+
+    Requires:
+        - entry_ids is the list of entry ids the arms rank, and vset is a loaded VectorSet
+        - query_for takes a text and returns { concat, prose, code } query vectors
+
+    Ensures:
+        - returns a callable text -> { vector_concat, vector_prose, vector_code } ranked ids
+        - only entries that the vector set holds are ranked; the rest are absent from every vector list
+        - the matrices are cut to those rows once, not for every query
+    """
+    row   = { i: n for n, i in enumerate( vset.ids ) }
+    held  = [ i for i in entry_ids if i in row ]
+    index = [ row[ i ] for i in held ]
+    cut   = { name: vset.matrices[ name ][ index ] for name in VECTOR_NAMES }
+    return lambda text: arms.cosine_sources( held, cut, query_for( text ) )
+
+
+def select_fusion_constants( needs, entries, purposes, answers, available, grid=FUSION_GRID ):
+    """
+    Pick the fusion constants on the in-sample needs.
+
+    Requires:
+        - the arguments are those of measure_arm and arms.build_arm_stages
+        - grid is a collection of ( k, depth, head ) triples
+
+    Ensures:
+        - returns ( chosen, recall_by_params ); chosen is arms.select_fusion's pick
+        - recall is the mean repeat-1 recall of arm SELECTION_ARM at K=SELECTION_K, so one measure picks for every arm
+    """
+    first, _ = references( answers, needs )
+    recall   = {}
+    for params in grid:
+        stages = arms.build_arm_stages( entries, purposes, *params )
+        cut    = { n: arms.run_arm( SELECTION_ARM, needs[ n ][ "need" ], stages, lists_for( available, needs[ n ][ "need" ] ), SELECTION_K )[ "shortlist" ] for n in needs }
+        recall[ params ] = am.t1_table( { SELECTION_ARM: { SELECTION_K: cut } }, first )[ SELECTION_ARM ][ SELECTION_K ][ "mean" ] or 0.0
+    return arms.select_fusion( recall ), recall
+
+
+def run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vset, purposes, pages, query_for, redactor, code_sha, grid=FUSION_GRID, arm_names=arms.ARMS ):
+    """
+    Measure all five arms on one index, one needs file and one vector set.
+
+    Requires:
+        - env, snapshot_paths, needs_path, fresh_sha and manifest_path are as for run_arm_report
+        - vset is a loaded VectorSet, purposes maps pin to purpose line, pages is page_candidates' list
+        - query_for takes a text and returns { concat, prose, code } query vectors, redactor takes a text and returns its ranking text
+        - arm_names lists the arms to measure; with only arms that fuse no vector list, vset and query_for may be None
+
+    Ensures:
+        - returns { meta, fusion, recall_by_params, measured, t3, absent, vectors_choice, redactable, misses, empty_purpose_hits, vector_entries, snapshot_entries }
+        - every arm ranks the same entries for the same ranking text, and the fusion constants come from select_fusion_constants
+        - the page builder reads this dict and measures nothing
+        - when no measured arm fuses a vector list, nothing is embedded, the fusion constants are the module defaults, and
+          vectors_choice and the selection table are None and empty, so a page cannot claim a choice that was not made
+
+    Raises:
+        - CandidateError FRESH_NEEDS_REFUSED from load_needs
+    """
+    from cosa.repo.symindex.candidates import wiki_list
+    needs  = load_needs( needs_path, fresh_sha )
+    probe  = needs[ sorted( needs )[ 0 ] ]
+    def hits_for( path ):
+        held = snapshot_entries( path, env.sendable )
+        return sum( 1 for e in held if env.cache.get( env.pair_key( probe[ "need" ], env.entry_text( e ), env.model, 1 ) ) is not None )
+    hits, path = pick_snapshot( snapshot_paths, hits_for )
+    entries    = snapshot_entries( path, env.sendable )
+    answers, misses = load_answers( needs, entries, env )
+    ranked_needs = { n: dict( rec, need=redactor( rec[ "need" ] ) ) for n, rec in needs.items() }
+    entry_ids  = sorted( e[ "id" ] for e in entries )
+    with_vectors = any( arms.ARM_SOURCES[ a ] for a in arm_names )
+    source     = vector_source( entry_ids, vset, query_for ) if with_vectors else None
+    wiki_for   = lambda text: wiki_list.wiki_ranked_ids( text, pages )
+    def available( text ): return { **source( text ), "wiki": wiki_for( text ) }
+    if with_vectors: fusion, recall = select_fusion_constants( ranked_needs, entries, purposes, answers, available, grid )
+    else: available, fusion, recall = ( lambda text: {} ), ( rf.FUSION_K, rf.FUSION_DEPTH, rf.FUSION_HEAD ), {}
+    stages   = arms.build_arm_stages( entries, purposes, *fusion )
+    manifest = json.load( open( manifest_path ) )
+    twins    = twin_map( manifest )
+    measured, t3 = {}, {}
+    for arm in arm_names:
+        measured[ arm ] = measure_arm( arm, ranked_needs, stages, available, answers )
+        ranks, absent   = measure_twins( arm, entries, twins, stages, available )
+        t3[ arm ]       = am.t3_summary( dict( ranks, all=[ r for held in ranks.values() for r in held ] ) )
+    held_ids = set( entry_ids ) & set( vset.ids ) if vset is not None else set()
+    b1, b2 = [ { "recall_128": measured[ a ][ "t1_first" ][ 128 ][ "mean" ], "median_rank": t3[ a ][ "all" ][ "median_all" ] } if a in measured else None for a in ( "B1", "B2" ) ]
+    empty_pins = { e[ "id" ] for e in entries if e.get( "pin" ) in purposes and not purposes[ e[ "pin" ] ] }
+    first, union = references( answers, needs )
+    used = sorted( empty_pins & ( set().union( *first.values() ) | set().union( *union.values() ) ) )
+    meta = { "run_id": f"all-{hash_answers( answers )[ :8 ]}", "code_sha": code_sha, "index_sha": os.path.basename( path ).split( "." )[ 0 ],
+             "manifest_hash": vset.manifest_hash if vset is not None else "none", "needs_sha": sha256_of( needs_path ), "cache_sha": hash_answers( answers ) }
+    return { "meta": meta, "fusion": fusion, "recall_by_params": recall, "measured": measured, "t3": t3, "absent": absent,
+             "vectors_choice": am.choose_vectors( b1, b2 ) if b1 and b2 else None, "misses": misses, "snapshot": path,
+             "empty_purpose_entries": len( empty_pins ), "empty_purpose_in_references": used,
+             "vector_entries": len( held_ids ), "snapshot_entries": len( entry_ids ), "twin_manifest_sha": sha256_of( manifest_path ),
+             "needs": len( needs ) }
+
+
+def cached_query_vectors( cache_dir, manifest_hash ):
+    """
+    Build a read-only source of query vectors from a cache another process filled.
+
+    Requires:
+        - cache_dir holds files named <sha256 of the text>.json, as vector_store.query_vectors writes them
+        - manifest_hash is the hash of the vector set the vectors must have been made under
+
+    Ensures:
+        - returns a callable text -> { concat, prose, code } that never embeds and never writes
+        - a text with no file, an unreadable file, or a file made under another set is a named error, not a recomputation
+
+    Raises:
+        - CandidateError QUERY_VECTOR_MISSING from the returned callable
+    """
+    def read( text ):
+        path = pathlib.Path( cache_dir ) / f"{vs.query_key( text )}.json"
+        try:
+            stored = json.loads( path.read_text( encoding="utf-8" ) )
+            made_under, vectors = stored[ "manifest_hash" ], stored[ "vectors" ]
+        except ( OSError, ValueError, KeyError ) as e:
+            raise CandidateError( QUERY_VECTOR_MISSING, f"no readable cached query vector for {vs.query_key( text )[ :12 ]}: {type( e ).__name__}" )
+        if made_under != manifest_hash:
+            raise CandidateError( QUERY_VECTOR_MISSING, f"the cached vector for {vs.query_key( text )[ :12 ]} was made under another set" )
+        return vectors
+    return read
+
+
+def render_all_arms_page( result, redactable ):
+    """
+    Build the results page for a run_all_arms result.
+
+    Requires:
+        - result is run_all_arms's dict, with every arm measured for the page to be complete
+        - redactable is arm_report.count_redactable's result
+
+    Ensures:
+        - returns the page text: the shared report, then the fusion selection, the entry counts and the empty-purpose finding
+        - the replay column is the verdict replay at K=128, and the page says so
+        - a run that fused no vector list says the vector choice and the fusion selection were not made
+
+    Raises:
+        - CandidateError REPORT_META_MISSING from arm_report.render_report
+    """
+    measured = result[ "measured" ]
+    t1 = { arm: measured[ arm ][ "t1_first" ] for arm in measured }
+    t2 = { arm: measured[ arm ][ "t2" ][ "K=128" ] for arm in measured }
+    page = ar.render_report( result[ "meta" ], t1, result[ "t3" ], t2, result[ "vectors_choice" ] or "not decided: no vector arm was measured",
+                             result[ "fusion" ], redactable )
+    lines = [ "", "## Fusion constants chosen on the in-sample needs", "" ]
+    if result[ "recall_by_params" ]:
+        lines += [ f"Chosen by arms.select_fusion on {SELECTION_ARM} recall at K={SELECTION_K}, repeat-1 reference. Ties go to the smaller k, then depth, then head.", "",
+                   "| k | depth | head | recall |", "|---|---|---|---|" ]
+        lines += [ f"| {k[ 0 ]} | {k[ 1 ]} | {k[ 2 ]} | {ar.percent( v )} |" for k, v in sorted( result[ "recall_by_params" ].items() ) ]
+    else:
+        lines += [ "Not selected: no vector arm was measured, so the module defaults were used for every arm." ]
+    lines += [ "", "## Entries and purpose lines", "",
+               f"- The snapshot holds {result[ 'snapshot_entries' ]} sendable entries; the vector set holds rows for {result[ 'vector_entries' ]} of them.",
+               f"- {result[ 'empty_purpose_entries' ]} snapshot entries carry an empty purpose line; {len( result[ 'empty_purpose_in_references' ] )} of them are in any need's reference.",
+               f"- Capability pages offered to the wiki list: {result.get( 'pages', 0 )}.",
+               f"- Cached judge answers missing for the snapshot: {result[ 'misses' ]}.",
+               "- The replay column is the verdict replay at K=128; the control row of each arm is in the run's JSON." ]
+    return page + "\n".join( lines ) + "\n"
 
 
 def main( argv=None ):
