@@ -1,4 +1,4 @@
-// Keep place: a card that is spoken must not move the view (row 45f29f42, review finding 1).
+// Keep place: a spoken card holds the view; an action-required card still scrolls.
 //
 // Speaking a notification expands what hides it and then scrolls it into view. With Keep place on the
 // expansion still happens, because the reader asked to hear the card, but the scroll does not.
@@ -114,9 +114,9 @@ for ( const kind of [ "added", "activated" ] as const ) {
   test( `instrument check: with Keep place off an action-required card scrolls on ${kind}`, () => {
     assert.equal( actionRequiredScrolls( kind ), 1 );
   } );
-  test( `🔴 with Keep place on, an action-required card does not move the view on ${kind}`, () => {
+  test( `🔴 with Keep place on, an action-required card still scrolls into view on ${kind}`, () => {
     localStorage.setItem( KEEP_PLACE_KEY, "true" );
-    assert.equal( actionRequiredScrolls( kind ), 0 );
+    assert.equal( actionRequiredScrolls( kind ), 1, "the card needs the reader's attention, so Keep place must not hold it" );
   } );
 }
 
