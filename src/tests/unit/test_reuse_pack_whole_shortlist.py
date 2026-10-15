@@ -4,6 +4,7 @@ Whole-shortlist packing: the packs of the new shape do not move with the cache.
 The stand-in transport is the one the send tests use. Eight entries and a pack size of three
 give packs of three, three and two when the list is sorted by id.
 """
+import copy
 import json
 
 import pytest
@@ -32,7 +33,9 @@ def ctx_for( tmp_path ):
     return make
 
 
-def whole( ctx, entries=ENTRIES, size=3, **kw ): return rp.sweep_packed( ctx, NEED, entries, size, shape=rp.SHAPE_WHOLE, **kw )
+def whole( ctx, entries=None, size=3, **kw ):
+    if entries is None: entries = copy.deepcopy( ENTRIES )
+    return rp.sweep_packed( ctx, NEED, entries, size, shape=rp.SHAPE_WHOLE, **kw )
 def sent_ids( fake ): return sorted( sorted( rp.question_key( i ) for i in pack ) for pack in PACKS )
 def bodies_of( fake ): return sorted( json.dumps( b, sort_keys=True ) for b in fake.bodies )
 
