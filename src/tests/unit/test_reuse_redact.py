@@ -255,3 +255,40 @@ def test_an_address_whose_local_part_follows_another_address_is_redacted_too():
     assert red( "pq@x.y.z+@w.vv" ) == "[email][email]"                              # the second local part is "+", as a left-to-right scan reads it
     assert red( "see b.wwww.@a.b. now" ) == "see [email]. now"
     assert red( "a@b.co,c@d.org" ) == "[email],[email]"
+
+
+def _reference_redact( text, routes ):
+    """Ensures: returns the text redacted with the first version's overlap rule."""
+    finders = { "url": rr._urls, "path": rr._paths, "email": rr._emails, "secret": rr._secrets, "ip": rr._ips }
+    cand = []
+    for rank, kind in enumerate( rr.ORDER ):
+        for s, e in finders[ kind ]( text ):
+            if kind == "path" and text[ s ] == "/" and rr.re.search( r"[?#]", text[ s:e ] ) is None and rr._is_known_route( text[ s:e ], routes ): continue
+            cand.append( ( rank, s, e, kind ) )
+    taken = []
+    for rank, s, e, kind in sorted( cand ):
+        if not any( s < te and ts < e for ts, te, _ in taken ): taken.append( ( s, e, kind ) )
+    taken.sort()
+    out, at = [], 0
+    for s, e, kind in taken:
+        out.append( text[ at:s ] + rr.PLACEHOLDERS[ kind ] )
+        at = e
+    return "".join( out ) + text[ at: ]
+
+
+@pytest.mark.parametrize( "text, expected", [
+    ( ":// ::1a@b.c",              ":// ::[email]" ),
+    ( "@b.c@www.x@y.com~/::1@",    "@b.c@[url]" ),
+    ( "~/www.x@y.comb.c~/://",     "~/[url]" ),
+] )
+def test_a_later_span_that_reaches_back_into_a_taken_span_is_dropped( text, expected ):
+    assert red( text ) == expected == _reference_redact( text, () )
+
+
+def test_the_overlap_resolution_matches_the_first_versions_rule_on_random_text():
+    import random
+    pieces = list( "ab1_.+-@:/ ~\\n" ) + [ "://", "www.", "@", "a.b", "::1", "~/", "http", "a@b.c", "/a/b", "1.2.3.4", "sk-abcdefghij", "x.y.com" ]
+    rng    = random.Random( 5 )
+    for _ in range( 8000 ):
+        text = "".join( rng.choice( pieces ) for _ in range( rng.randint( 0, 14 ) ) )
+        assert red( text, ROUTES ) == _reference_redact( text, ROUTES ), repr( text )
