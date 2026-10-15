@@ -107,6 +107,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[prediction-engine]] — guessing how the user will answer a notification, showing the guess as a hint, and logging the real answer to measure accuracy. `cosa.agents.prediction_engine`
 - [[tfe-to-cc-prompt-bundles]] — the prompt builders and reply parsers for running the test-fix expediter's diagnose and fix steps on Claude Code. `cosa.agents.tfe_to_cc` (prompts)
 - [[bug-injector]] — a test aid: an LLM breaks working generated code with one fatal edit, so the auto-debug path has work. `cosa.agents` (bug_injector), `cosa.utils` (util_code_runner)
+- [[candidate-stage]] — planned, not built: the ranked first stage that picks which index entries Jev judges, with its redactor and stored vectors. `cosa.repo.symindex.candidates` (planned), `lupin_mcp` (reuse_redact, reuse_tools)
 
 ## Draft slugs folded into written pages
 
