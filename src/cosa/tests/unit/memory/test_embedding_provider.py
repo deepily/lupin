@@ -269,6 +269,16 @@ class TestHttpFallbacks( unittest.TestCase ):
             with self.assertRaises( RuntimeError ):
                 self.provider._generate_embeddings_batch_via_http( [ "a" ], "prose" )
 
+    def test_batch_non_retryable_status_raises_with_the_status_and_url( self ):
+        """A 400 is not retried, so the batch path's own non-200 check is the one that answers."""
+        bad = Mock(); bad.status_code = 400; bad.text = "bad request body"
+        with patch.object( self.provider, "_resolve_http_target", return_value=( "http://h", "k", "/api/embeddings" ) ), \
+             patch( "requests.post", return_value=bad ):
+            with self.assertRaises( RuntimeError ) as ctx:
+                self.provider._generate_embeddings_batch_via_http( [ "a" ], "prose" )
+        self.assertIn( "batch fallback returned 400 from http://h/api/embeddings/batch", str( ctx.exception ) )
+        self.assertIn( "bad request body", str( ctx.exception ) )
+
     def test_batch_success( self ):
         ok = Mock(); ok.status_code = 200; ok.json.return_value = { "embeddings": [ _VEC, _VEC ] }
         with patch.object( self.provider, "_resolve_http_target", return_value=( "http://h", "k", "/api/embeddings" ) ), \
@@ -334,7 +344,14 @@ class TestGenerateEmbeddingRouting( unittest.TestCase ):
         with patch.object( provider, "_generate_embedding_via_http", return_value=_VEC ) as mock_http:
             result = provider.generate_embedding( "hello", content_type="prose" )
         self.assertEqual( result, _VEC )
-        mock_http.assert_called_once_with( "hello", "prose" )
+        mock_http.assert_called_once_with( "hello", "prose", role=None, pin_fastapi=False )
+
+    def test_non_owner_passes_role_and_pin_to_http( self ):
+        """A role and the FastAPI pin reach the HTTP call unchanged."""
+        provider = _build_provider( provider_value="local", owner=False )
+        with patch.object( provider, "_generate_embedding_via_http", return_value=_VEC ) as mock_http:
+            provider.generate_embedding( "hello", content_type="code", role="query", pin_fastapi=True )
+        mock_http.assert_called_once_with( "hello", "code", role="query", pin_fastapi=True )
 
     def test_empty_embedding_records_zero_dims( self ):
         """An empty embedding result → metric records 0 dims (falsy-embedding arm)."""
@@ -392,7 +409,14 @@ class TestGenerateEmbeddingsBatchRouting( unittest.TestCase ):
         with patch.object( provider, "_generate_embeddings_batch_via_http", return_value=[ _VEC ] ) as mock_http:
             result = provider.generate_embeddings_batch( [ "hi" ], content_type="prose" )
         self.assertEqual( result, [ _VEC ] )
-        mock_http.assert_called_once_with( [ "hi" ], "prose" )
+        mock_http.assert_called_once_with( [ "hi" ], "prose", role=None, pin_fastapi=False )
+
+    def test_non_owner_batch_passes_role_and_pin_to_http( self ):
+        """A batch role and the FastAPI pin reach the HTTP call unchanged."""
+        provider = _build_provider( provider_value="local", owner=False )
+        with patch.object( provider, "_generate_embeddings_batch_via_http", return_value=[ _VEC ] ) as mock_http:
+            provider.generate_embeddings_batch( [ "hi" ], content_type="code", role="document", pin_fastapi=True )
+        mock_http.assert_called_once_with( [ "hi" ], "code", role="document", pin_fastapi=True )
 
     def test_empty_batch_records_zero_dims( self ):
         """Empty batch result → metric records 0 dims (falsy-embeddings arm)."""

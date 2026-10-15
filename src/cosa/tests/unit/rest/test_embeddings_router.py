@@ -62,14 +62,24 @@ class TestEmbeddingsRouter( unittest.TestCase ):
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
             resp = asyncio.run( generate_embedding(
-                request               = EmbedRequest( text="hello", content_type="code" ),
+                request               = EmbedRequest( text="hello", content_type="code", role="query" ),
                 authenticated_user_id = "user_1",
             ) )
 
         self.assertIsInstance( resp, EmbedResponse )
         self.assertEqual( resp.embedding, [ 0.1, 0.2, 0.3 ] )
         self.assertEqual( resp.dimensions, 3 )
-        provider.generate_embedding.assert_called_once_with( "hello", content_type="code" )
+        provider.generate_embedding.assert_called_once_with( "hello", content_type="code", role="query" )
+
+    def test_generate_embedding_without_a_role_passes_none( self ):
+        """An omitted role reaches the provider as None."""
+        provider = MagicMock()
+        provider.generate_embedding.return_value = [ 0.5 ]
+
+        with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
+            asyncio.run( generate_embedding( request=EmbedRequest( text="hi" ), authenticated_user_id="user_1" ) )
+
+        provider.generate_embedding.assert_called_once_with( "hi", content_type="prose", role=None )
 
     # ---- /batch -------------------------------------------------------------
 
@@ -99,7 +109,7 @@ class TestEmbeddingsRouter( unittest.TestCase ):
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
             resp = asyncio.run( generate_embeddings_batch(
-                request               = EmbedBatchRequest( texts=[ "a", "b" ], content_type="prose" ),
+                request               = EmbedBatchRequest( texts=[ "a", "b" ], content_type="prose", role="document" ),
                 authenticated_user_id = "user_1",
             ) )
 
@@ -107,7 +117,17 @@ class TestEmbeddingsRouter( unittest.TestCase ):
         self.assertEqual( resp.embeddings, [ [ 1.0, 2.0 ], [ 3.0, 4.0 ] ] )
         self.assertEqual( resp.dimensions, 2 )
         self.assertEqual( resp.count, 2 )
-        provider.generate_embeddings_batch.assert_called_once_with( [ "a", "b" ], content_type="prose" )
+        provider.generate_embeddings_batch.assert_called_once_with( [ "a", "b" ], content_type="prose", role="document" )
+
+    def test_batch_without_a_role_passes_none( self ):
+        """An omitted batch role reaches the provider as None."""
+        provider = MagicMock()
+        provider.generate_embeddings_batch.return_value = [ [ 1.0 ] ]
+
+        with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
+            asyncio.run( generate_embeddings_batch( request=EmbedBatchRequest( texts=[ "a" ] ), authenticated_user_id="user_1" ) )
+
+        provider.generate_embeddings_batch.assert_called_once_with( [ "a" ], content_type="prose", role=None )
 
     def test_batch_provider_returns_empty_dims_zero( self ):
         """
@@ -131,22 +151,29 @@ class TestEmbeddingsRouter( unittest.TestCase ):
     # ---- /info --------------------------------------------------------------
 
     def test_get_info_returns_provider_metadata( self ):
-        """
-        Ensures:
-            - /info reports the provider name, dimensions, and 'ready' status
-        """
-        provider = object.__new__( EmbeddingProvider )                    # the real class; only its config boundary is faked
+        """/info reports the provider, its status and the engines block."""
+        provider = object.__new__( EmbeddingProvider )                    # the real class; only its config and engines are faked
         provider._provider   = "local"
         provider._config_mgr = MagicMock()
         provider._config_mgr.get.return_value = "768"
+        provider._code_engine  = MagicMock()
+        provider._code_engine.describe.return_value  = { "model": "code-model", "device": "cuda:0", "revision": None }
+        provider._prose_engine = MagicMock()
+        provider._prose_engine.describe.return_value = { "model": "prose-model", "device": "cuda:0", "revision": None }
 
-        with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ):
+        with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ), \
+             patch( "cosa.memory.local_embedding_engine.device_class", return_value="TEST GPU, sm_00" ) as dev:
             resp = asyncio.run( get_info( authenticated_user_id="user_1" ) )
 
         self.assertIsInstance( resp, EmbedInfoResponse )
         self.assertEqual( resp.provider, "local" )
         self.assertEqual( resp.dimensions, 768 )
         self.assertEqual( resp.status, "ready" )
+        self.assertEqual( resp.engines[ "code" ][ "model" ], "code-model" )
+        self.assertEqual( resp.engines[ "prose" ][ "model" ], "prose-model" )
+        self.assertEqual( resp.engines[ "device_class" ], "TEST GPU, sm_00" )
+        dev.assert_called_once_with( "cuda:0" )
+        self.assertEqual( set( resp.engines[ "libraries" ] ), { "torch", "transformers", "sentence-transformers", "numpy" } )
 
     # ---- models / registration ----------------------------------------------
 
