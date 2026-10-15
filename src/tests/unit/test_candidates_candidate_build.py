@@ -1,0 +1,228 @@
+"""
+Unit tests for the manual build driver: the job writer, the run and the command line.
+
+The index, the job transport and the embeddings client are fakes. The run is checked end to end
+against a real sealed set in a temporary folder.
+"""
+import json
+
+import pytest
+
+from cosa.repo.symindex import candidate_build as cb
+from cosa.repo.symindex.candidates import purpose_lines as pl
+from cosa.repo.symindex.candidates import vector_store as vs
+from cosa.repo.symindex.candidates.errors import CandidateError, STORAGE_KEY_MISSING
+
+import test_candidates_vector_build as tvb
+
+
+# ── the bounded-job writer ──────────────────────────────────────────────────
+
+
+class Clock:
+    def __init__( self ): self.now = 0.0
+    def __call__( self ):   return self.now
+    def sleep( self, s ):   self.now += s
+
+
+def test_writer_sends_ids_and_two_file_names_then_reads_the_response( tmp_path ):
+    sent = []
+
+    def submit( payload ):
+        sent.append( payload )
+        resp = [ p for p in payload[ "args" ][ "prompt" ].split() if "response-" in p ][ 0 ].rstrip( "," ).rstrip( "." )
+        pathlib_write( resp, [ { "id": "m.a", "purpose": "Return a." }, { "id": "m.b", "purpose": "Return b." } ] )
+
+    w = cb.BoundedJobWriter( tmp_path / "work", submit )
+    assert w( [ "m.a", "m.b" ] ) == { "m.a": "Return a.", "m.b": "Return b." }
+    assert sent[ 0 ][ "command" ] == "agent router go to claude code"
+    assert sent[ 0 ][ "args" ][ "task_type" ] == "BOUNDED"
+    prompt = sent[ 0 ][ "args" ][ "prompt" ]
+    assert prompt.startswith( pl.PROMPT_TEXT )
+    request = next( tmp_path.glob( "work/request-*.json" ) )
+    assert json.loads( request.read_text() ) == { "ids": [ "m.a", "m.b" ] }
+    assert str( request ) in prompt
+
+
+def pathlib_write( path, obj ):
+    import pathlib
+    pathlib.Path( path ).write_text( json.dumps( obj ), encoding="utf-8" )
+
+
+def test_writer_removes_a_stale_response_before_it_submits( tmp_path ):
+    work = tmp_path / "work"
+    work.mkdir()
+    ids  = [ "m.a" ]
+    import hashlib
+    key  = hashlib.sha256( "m.a".encode() ).hexdigest()[ :12 ]
+    ( work / f"response-{key}.json" ).write_text( json.dumps( [ { "id": "m.a", "purpose": "STALE." } ] ) )
+    seen = {}
+
+    def submit( payload ):
+        seen[ "stale_gone" ] = not ( work / f"response-{key}.json" ).exists()
+        pathlib_write( work / f"response-{key}.json", [ { "id": "m.a", "purpose": "Fresh." } ] )
+
+    assert cb.BoundedJobWriter( work, submit )( ids ) == { "m.a": "Fresh." }
+    assert seen[ "stale_gone" ] is True
+
+
+def test_writer_waits_by_polling_until_the_file_appears( tmp_path ):
+    clock = Clock()
+    state = { "n": 0 }
+
+    def submit( payload ): pass
+
+    def sleep( s ):
+        clock.sleep( s )
+        state[ "n" ] += 1
+        if state[ "n" ] == 3:
+            import hashlib
+            key = hashlib.sha256( b"m.a" ).hexdigest()[ :12 ]
+            pathlib_write( tmp_path / "work" / f"response-{key}.json", [ { "id": "m.a", "purpose": "Done." } ] )
+
+    w = cb.BoundedJobWriter( tmp_path / "work", submit, timeout=100, poll=5, sleep=sleep, clock=clock )
+    assert w( [ "m.a" ] ) == { "m.a": "Done." }
+    assert state[ "n" ] == 3 and clock.now == 15
+
+
+def test_writer_times_out_when_no_response_comes( tmp_path ):
+    clock = Clock()
+    w = cb.BoundedJobWriter( tmp_path / "work", lambda p: None, timeout=20, poll=10, sleep=clock.sleep, clock=clock )
+    with pytest.raises( TimeoutError, match="no response file" ):
+        w( [ "m.a" ] )
+
+
+@pytest.mark.parametrize( "body", [ { "id": "m.a" }, [ { "id": "m.a" } ], [ "m.a" ] ] )
+def test_writer_refuses_a_response_that_is_not_a_list_of_id_purpose_objects( tmp_path, body ):
+    import hashlib
+    key = hashlib.sha256( b"m.a" ).hexdigest()[ :12 ]
+    w = cb.BoundedJobWriter( tmp_path / "work", lambda p: pathlib_write( tmp_path / "work" / f"response-{key}.json", body ) )
+    with pytest.raises( ValueError, match="not a list" ):
+        w( [ "m.a" ] )
+
+
+# ── the run ─────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def world( tmp_path, monkeypatch ):
+    """A fake index of two public entries, and a data directory inside tmp_path."""
+    symbols = [ tvb.entry( "b", "pb", doc="Does b." ), tvb.entry( "a", "pa" ) ]
+    for s in symbols: s.update( lang="py", kind="function", line=1, public=True )
+    monkeypatch.setattr( cb.sx_build, "ensure", lambda root: "gen" )
+    monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: symbols )
+    monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path / "data" )
+    environ = {}
+    return { "root": tmp_path / "repo", "data": tmp_path / "data", "environ": environ, "symbols": symbols }
+
+
+class ConfigFor:
+    def get( self, key, default=None, silent=False, return_type="string" ):
+        return { "reuse candidate vectors subdir": "vec", "reuse candidate query cache subdir": "qc",
+                 "reuse candidate purpose lines subdir": "pl" }.get( key, default )
+
+
+def answering_writer( calls ):
+    def w( ids ):
+        calls.append( list( ids ) )
+        return { i: f"Return {i}." for i in ids }
+    return w
+
+
+def test_run_writes_lines_builds_the_set_swaps_it_in_and_clears_stale_queries( world, tmp_path, screen_fixture=None ):
+    calls, client = [], tvb.FakeClient()
+    stale = tmp_path / "data" / "qc"
+    stale.mkdir( parents=True )
+    ( stale / "old.json" ).write_text( json.dumps( { "manifest_hash": "gone", "vectors": {} } ) )
+
+    report = cb.run( world[ "root" ], answering_writer( calls ), client, config=ConfigFor(), environ={} )
+
+    assert calls == [ [ "m.a", "m.b" ] ] or sorted( calls[ 0 ] ) == [ "m.a", "m.b" ]
+    assert report[ "purposes" ][ "written" ] == 2
+    assert report[ "rows" ] == 2
+    assert report[ "stale_queries_cleared" ] == 1
+    live = tmp_path / "data" / "vec"
+    s    = vs.load_vectors( live )
+    assert s.ids == [ "m.a", "m.b" ] and s.manifest_hash == report[ "manifest_hash" ]
+    assert not ( tmp_path / "data" / "vec.new" ).exists()
+    rows = pl.load_lines( tmp_path / "data" / "pl" / "purpose.jsonl" )
+    assert { r[ "writer_version" ] for r in rows.values() } == { cb.WRITER_VERSION }
+    assert any( "Return m.a." in t for c in client.calls for t in c[ 2 ] )     # the stored line reached the embedded text
+
+
+def test_a_second_run_sends_no_ids_to_the_writer_and_replaces_a_leftover_new_folder( world, tmp_path ):
+    calls = []
+    cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    leftover = tmp_path / "data" / "vec.new"
+    leftover.mkdir()
+    ( leftover / "junk" ).write_text( "x" )
+    r2 = cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert len( calls ) == 1
+    assert r2[ "purposes" ][ "kept" ] == 2 and r2[ "purposes" ][ "written" ] == 0
+    assert not leftover.exists()
+
+
+def test_a_run_whose_build_fails_leaves_the_live_set_alone( world, tmp_path ):
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    before = vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash
+    with pytest.raises( CandidateError ):
+        cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient( revision=None ), config=ConfigFor(), environ={} )
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == before
+
+
+# ── the command line ────────────────────────────────────────────────────────
+
+
+def test_main_prints_the_report_and_returns_zero( capsys ):
+    seen = {}
+
+    def fake_run( root, writer, client, environ=None ):
+        seen.update( root=root, writer=writer, client=client )
+        return { "rows": 3 }
+
+    import cosa.repo.symindex.candidate_build as mod
+    orig, mod.run = mod.run, fake_run
+    try:
+        rc = cb.main( [ "--root", "/repo" ], environ={}, writer_factory=lambda args: "WRITER", client="CLIENT" )
+    finally:
+        mod.run = orig
+    assert rc == 0
+    assert json.loads( capsys.readouterr().out ) == { "rows": 3 }
+    assert seen == { "root": "/repo", "writer": "WRITER", "client": "CLIENT" }
+
+
+def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, tmp_path, capsys ):
+    submitted = []
+    monkeypatch.setattr( cb.harness_schedule, "submit", lambda payload, url, email, pw: submitted.append( ( payload, url, email, pw ) ) )
+    monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
+    seen = {}
+
+    def fake_run( root, writer, client, environ=None ):
+        seen[ "writer" ] = writer
+        writer.submit( { "x": 1 } )
+        return { "rows": 0 }
+
+    monkeypatch.setattr( cb, "run", fake_run )
+    env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e@x", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "pw",
+            "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": str( tmp_path / "pl" ) }
+    assert cb.main( [ "--root", "/repo" ], environ=env, client="C" ) == 0
+    assert isinstance( seen[ "writer" ], cb.BoundedJobWriter )
+    assert seen[ "writer" ].work_dir == tmp_path / "pl"
+    assert submitted == [ ( { "x": 1 }, "http://localhost:7999", "e@x", "pw" ) ]
+
+
+def test_main_uses_the_server_url_variable_and_the_endpoint_client_by_default( monkeypatch, tmp_path ):
+    monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
+    seen = {}
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None: seen.update( client=client ) or { "rows": 0 } )
+    env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
+            "LUPIN_APP_SERVER_URL": "http://test:8000", "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": str( tmp_path / "pl" ) }
+    assert cb.main( [ "--root", "/repo" ], environ=env ) == 0
+    assert isinstance( seen[ "client" ], cb.vb.EndpointClient )
+
+
+def test_main_reports_a_named_error_and_returns_two( capsys ):
+    def factory( args ): raise CandidateError( STORAGE_KEY_MISSING, "no key" )
+
+    assert cb.main( [ "--root", "/repo" ], environ={}, writer_factory=factory, client="C" ) == 2
+    assert json.loads( capsys.readouterr().out ) == { "error": "STORAGE_KEY_MISSING", "detail": "no key" }

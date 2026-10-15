@@ -2,12 +2,13 @@
 Where the index and the reuse-review data live.
 
 The index root is the git working tree being asked about (never LUPIN_ROOT). The data
-directory is per repository: fleet_data_root( index_root ) / "reuse-review". A worktree
+directory is per repository: fleet_data_root( index_root ) / the `reuse review data subdir` key. A worktree
 resolves to its parent checkout, so every seat of one repository shares one data directory
 and a reap never deletes it.
 """
 import pathlib
 
+from cosa.repo.symindex.candidates import storage_paths
 from cosa.repo.symindex.spec import is_lupin_tree
 
 
@@ -18,10 +19,13 @@ def data_dir( index_root ):
     Requires:
         - index_root is a repository root
     Ensures:
-        - returns <fleet data root of that repo>/reuse-review as a pathlib.Path (not created)
+        - returns <fleet data root of that repo>/<data subdir key> as a pathlib.Path (not created)
+        - the INI default of the key is today's folder name, so existing receipts stay where they are
+    Raises:
+        - CandidateError STORAGE_KEY_MISSING when the key and its override variable are both absent
     """
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-    return pathlib.Path( fleet_data_root( pathlib.Path( index_root ) ) ) / "reuse-review"
+    return pathlib.Path( fleet_data_root( pathlib.Path( index_root ) ) ) / storage_paths.data_subdir()
 
 
 def default_out_dir( index_root ):
