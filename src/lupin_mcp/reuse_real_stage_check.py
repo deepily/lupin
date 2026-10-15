@@ -4,8 +4,9 @@ The real-stage check: where does the candidate stage rank a known target?
 It runs on the real index and the live vector set.
 
 Each seeded need names one symbol that answers it. The check asks the real stage for the need's shortlist and reports the
-target's rank in it, or `absent`. One negative control removes its target from the entries the stage is given, so the
-check is shown able to fail. The Jev sweep is not run: this measures the stage, not the verdict.
+target's rank in it, or `absent`. One negative control has the stage leave its target out of the answer, so the
+check is shown able to fail.
+The stage refuses entries that lack a vector id, so the target cannot be dropped from the entries themselves. The Jev sweep is not run: this measures the stage, not the verdict.
 
 What this check does not prove:
     The needs are written by hand from the targets' docstrings, so they are easier than a seat's own wording.
@@ -49,25 +50,27 @@ def rank_of( target, ranking ):
     return ranking.index( target ) + 1 if target in ranking else None
 
 
-def check_need( stage, need, target, entries, index_sha, pages ):
+def check_need( stage, need, target, entries, index_sha, pages, exclude_id=None ):
     """
     Ask the stage for one need's shortlist and describe it.
 
     Requires:
         - entries are the sendable index entries the stage is given; index_sha identifies them
+        - exclude_id is None, or the one id the stage leaves out of its answer
 
     Ensures:
         - returns { need, target, rank, found, asked, total, not_asked, manifest_hash, K, ids_in_entries, ids_unique }
         - rank is the target's 1-based place in the fused ranking, or None
-        - asked is the shortlist size, total the entries given, and not_asked their difference
+        - asked is the shortlist size, total the entries given less the excluded one, and not_asked their difference
         - ids_in_entries is True only when every shortlisted id is an entry given, and ids_unique when none repeats
     """
-    got      = stage.shortlist( need, entries, index_sha, pages )
+    got      = stage.shortlist( need, entries, index_sha, pages, exclude_id=exclude_id )
+    total    = len( entries ) - ( 1 if exclude_id is not None else 0 )
     held     = { e[ "id" ] for e in entries }
     ranking  = got[ "ranking" ]
     rank     = rank_of( target, ranking )
-    return { "need": need, "target": target, "rank": rank, "found": rank is not None, "asked": len( got[ "ids" ] ), "total": len( entries ),
-             "not_asked": len( entries ) - len( got[ "ids" ] ), "manifest_hash": got[ "manifest_hash" ], "K": got[ "K" ],
+    return { "need": need, "target": target, "rank": rank, "found": rank is not None, "asked": len( got[ "ids" ] ), "total": total,
+             "not_asked": total - len( got[ "ids" ] ), "manifest_hash": got[ "manifest_hash" ], "K": got[ "K" ],
              "ids_in_entries": all( i in held for i in got[ "ids" ] ), "ids_unique": len( set( got[ "ids" ] ) ) == len( got[ "ids" ] ) }
 
 
@@ -81,7 +84,7 @@ def run_check( stage, entries, index_sha, pages, seeds=SEEDS, control=( CONTROL_
 
     Ensures:
         - returns the report: { manifest_hash, K, entries, seeds, control, ok }
-        - the control is asked on a copy of the entries without its target
+        - the control is asked with its target as the stage's exclude_id, so the stage leaves it out of the answer
         - ok is True only when every seed was found, the control was absent, and every row's counts hold
 
     Raises:
@@ -92,8 +95,7 @@ def run_check( stage, entries, index_sha, pages, seeds=SEEDS, control=( CONTROL_
     for _need, target in list( seeds ) + [ control ]:
         if target not in ids: raise RunRefused( f"target {target} is not in the entries, so the check could not find it even on a good stage" )
     rows    = [ check_need( stage, need, target, entries, index_sha, pages ) for need, target in seeds ]
-    without = [ e for e in entries if e[ "id" ] != control[ 1 ] ]
-    neg     = check_need( stage, control[ 0 ], control[ 1 ], without, index_sha + "-without-control", pages )
+    neg     = check_need( stage, control[ 0 ], control[ 1 ], entries, index_sha, pages, exclude_id=control[ 1 ] )
     counts  = all( r[ "ids_in_entries" ] and r[ "ids_unique" ] and r[ "asked" ] <= r[ "K" ] and r[ "asked" ] == min( r[ "K" ], r[ "total" ] ) for r in rows + [ neg ] )
     manifest = stage.manifest()[ "manifest_hash" ]
     hashes   = all( r[ "manifest_hash" ] == manifest for r in rows + [ neg ] )

@@ -35,10 +35,10 @@ class FakeStage:
     def manifest( self ):
         return { "manifest_hash": self.hash }
 
-    def shortlist( self, need, entries, index_sha, pages ):
-        self.calls.append( ( need, len( entries ), index_sha ) )
+    def shortlist( self, need, entries, index_sha, pages, exclude_id=None ):
+        self.calls.append( ( need, len( entries ), index_sha, exclude_id ) )
         words   = set( need.split() )
-        ids     = [ e[ "id" ] for e in entries if e[ "id" ] not in self.hide ]
+        ids     = [ e[ "id" ] for e in entries if e[ "id" ] not in self.hide and e[ "id" ] != exclude_id ]
         ranking = sorted( ids, key=lambda i: ( -len( words & set( i.replace( ".", " " ).replace( "_", " " ).split() ) ), i ) )[ :self.K ]
         return { "ids": sorted( ranking ), "ranking": ranking, "manifest_hash": self.hash, "K": self.K }
 
@@ -63,7 +63,7 @@ def test_check_need_reports_rank_counts_and_membership():
 
 def test_check_need_flags_ids_outside_the_entries_and_repeats():
     class Bad( FakeStage ):
-        def shortlist( self, need, entries, index_sha, pages ):
+        def shortlist( self, need, entries, index_sha, pages, exclude_id=None ):
             return { "ids": [ "x", "x" ], "ranking": [ "x", "x" ], "manifest_hash": self.hash, "K": 128 }
     row = chk.check_need( Bad(), "n", "t", entries_of( [ "t" ] ), "sha", [] )
     assert row[ "ids_in_entries" ] is False and row[ "ids_unique" ] is False and row[ "found" ] is False
@@ -84,9 +84,9 @@ def test_run_check_fails_when_a_target_is_not_shortlisted():
 
 def test_run_check_fails_when_the_control_is_still_found():
     class Sticky( FakeStage ):
-        def shortlist( self, need, entries, index_sha, pages ):
-            got = super().shortlist( need, entries, index_sha, pages )
-            if index_sha.endswith( "-without-control" ):
+        def shortlist( self, need, entries, index_sha, pages, exclude_id=None ):
+            got = super().shortlist( need, entries, index_sha, pages, exclude_id )
+            if exclude_id is not None:
                 got[ "ranking" ] = [ TARGETS[ 0 ] ] + got[ "ranking" ]
             return got
     report = chk.run_check( Sticky(), entries_of( TARGETS + OTHERS ), "sha", [], seeds=seeds_for_fake(), control=seeds_for_fake()[ 0 ] )
@@ -95,8 +95,8 @@ def test_run_check_fails_when_the_control_is_still_found():
 
 def test_run_check_fails_when_the_shortlist_is_not_the_size_the_stage_promises():
     class Short( FakeStage ):
-        def shortlist( self, need, entries, index_sha, pages ):
-            got = super().shortlist( need, entries, index_sha, pages )
+        def shortlist( self, need, entries, index_sha, pages, exclude_id=None ):
+            got = super().shortlist( need, entries, index_sha, pages, exclude_id )
             got[ "ids" ], got[ "ranking" ] = got[ "ids" ][ :-1 ], got[ "ranking" ][ :-1 ]
             return got
     report = chk.run_check( Short(), entries_of( TARGETS + OTHERS ), "sha", [], seeds=seeds_for_fake(), control=seeds_for_fake()[ 0 ] )
@@ -106,8 +106,8 @@ def test_run_check_fails_when_the_shortlist_is_not_the_size_the_stage_promises()
 
 def test_run_check_fails_on_a_manifest_hash_the_stage_does_not_hold():
     class Drift( FakeStage ):
-        def shortlist( self, need, entries, index_sha, pages ):
-            got = super().shortlist( need, entries, index_sha, pages )
+        def shortlist( self, need, entries, index_sha, pages, exclude_id=None ):
+            got = super().shortlist( need, entries, index_sha, pages, exclude_id )
             got[ "manifest_hash" ] = "b" * 64
             return got
     report = chk.run_check( Drift(), entries_of( TARGETS + OTHERS ), "sha", [], seeds=seeds_for_fake(), control=seeds_for_fake()[ 0 ] )
