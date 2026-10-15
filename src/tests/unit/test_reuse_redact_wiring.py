@@ -197,3 +197,11 @@ def test_the_counter_skips_a_known_route_and_counts_each_entry_once():
     assert rt.unscreened_path_count( entries, routes ) == 1
     assert rt.unscreened_path_count( [], routes ) == 0
     assert rt.unscreened_path_count( entries, () ) == 2                          # with no routes, the route is a path too
+
+
+def test_a_second_count_over_the_same_entries_does_not_redact_them_again( monkeypatch ):
+    routes  = ( "/api/queue/{id}", )
+    entries = [ { "id": "c.one", "sig": "()", "doc": "Reads /projects/acme/zz.py." }, { "id": "c.two", "sig": "()", "doc": "Plain words." } ]
+    assert rt.unscreened_path_count( entries, routes ) == 1
+    monkeypatch.setattr( rt.reuse_redact, "redact_need", lambda *a, **k: pytest.fail( "the second count redacted an entry it had already judged" ) )
+    assert rt.unscreened_path_count( entries, routes ) == 1

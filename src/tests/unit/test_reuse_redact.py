@@ -209,3 +209,49 @@ def test_an_identifier_with_an_acronym_run_is_kept_and_a_bare_capital_run_is_not
     assert rr._is_word_shaped( "getHTTPResponseHeader2" ) is True
     assert rr._is_word_shaped( "ZZ" ) is False
     assert red( "tok 9aB3dE7fG1hJ5kL8mN2pQ4rS6tU0vW9xY3zA" ) == "tok [secret]"
+
+
+# --- the finders stay linear, and stay the same finders ---
+
+N_WORST = 200000
+WORST_SHAPES = {
+    "a run of word characters"   : "a" * N_WORST,
+    "dotted labels"              : "a." * ( N_WORST // 2 ),
+    "dashed labels"              : "a-" * ( N_WORST // 2 ),
+    "scheme characters"          : "ab+" * ( N_WORST // 3 ),
+    "at signs and domains"       : "a@b." * ( N_WORST // 4 ),
+    "bare scheme separators"     : "://" * ( N_WORST // 3 ),
+    "short schemes"              : "a://" * ( N_WORST // 4 ),
+    "secret prefixes"            : "sk-" * ( N_WORST // 3 ),
+    "many short emails"          : "a@b.co " * ( N_WORST // 7 ),
+    "many short paths"           : "/a/b " * ( N_WORST // 5 ),
+}
+
+
+@pytest.mark.parametrize( "shape", sorted( WORST_SHAPES ) )
+def test_two_hundred_thousand_characters_of_a_worst_case_shape_finish_well_under_a_second( shape ):
+    import time
+    start = time.perf_counter()
+    rr.redact_need( WORST_SHAPES[ shape ], ROUTES )
+    assert time.perf_counter() - start < 1.0, shape      # measured 0.2 s or less; a quadratic finder takes 8 to 18 s here
+
+
+def test_the_email_and_url_finders_return_what_the_original_patterns_returned():
+    import random, re
+    url_old   = re.compile( r"(?:\b[A-Za-z][A-Za-z0-9+.-]*://|\bwww\.)\S+" )
+    email_old = re.compile( r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+" )
+    pieces    = list( "ab1_.+-@:/ www.http://\u00e9 ,;)\n" ) + [ "://", "www.", "@", "a.b", "http", "\u00df", "a://", "@b.c" ]
+    rng       = random.Random( 31 )
+    checked   = 0
+    for _ in range( 6000 ):
+        text = "".join( rng.choice( pieces ) for _ in range( rng.randint( 0, 22 ) ) )
+        assert rr._urls( text )   == [ ( m.start(), rr._trim( text, m.start(), m.end() ) ) for m in url_old.finditer( text ) ], repr( text )
+        assert rr._emails( text ) == [ ( m.start(), m.end() ) for m in email_old.finditer( text ) ], repr( text )
+        checked += 1
+    assert checked == 6000
+
+
+def test_an_address_whose_local_part_follows_another_address_is_redacted_too():
+    assert red( "pq@x.y.z+@w.vv" ) == "[email][email]"                              # the second local part is "+", as a left-to-right scan reads it
+    assert red( "see b.wwww.@a.b. now" ) == "see [email]. now"
+    assert red( "a@b.co,c@d.org" ) == "[email],[email]"

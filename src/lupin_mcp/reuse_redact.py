@@ -8,6 +8,7 @@ The five kinds are an email, a URL, an IP address, an absolute path and a creden
 is a known lupin route is kept. A kept route is still screened: a segment that holds one of the other kinds
 makes the whole path redactable.
 """
+import bisect
 import ipaddress
 import re
 
@@ -15,8 +16,9 @@ PLACEHOLDERS = { "email": "[email]", "url": "[url]", "ip": "[ip]", "path": "[pat
 ORDER        = ( "url", "path", "email", "secret", "ip" )                    # an earlier kind wins an overlap
 TRAILING     = ".,;:!?)]}>'\"`"                                              # sentence punctuation that is not part of a token
 
-URL_RE      = re.compile( r"(?:\b[A-Za-z][A-Za-z0-9+.-]*://|\bwww\.)\S+" )
-EMAIL_RE    = re.compile( r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+" )
+WWW_RE      = re.compile( r"\bwww\.\S+" )
+EMAIL_DOMAIN = re.compile( r"[\w-]+(?:\.[\w-]+)+" )                          # what follows the @; the local part is read leftwards from it
+EMAIL_LOCAL  = "_.+-"                                                       # besides letters and digits, what a local part may hold
 IPV4_RE     = re.compile( r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w)(?!\.\d)" )
 IPV6_RE     = re.compile( r"(?<![\w:.])[0-9A-Fa-f:]{2,}(?![\w:])" )
 POSIX_RE    = re.compile( r"(?<![\w/.\-])/(?=[^\s/])[^\s/]+(?:/[^\s/]+)+" )
@@ -43,13 +45,51 @@ def _trim( text, start, end ):
 
 
 def _urls( text ):
-    """Ensures: returns ( start, end ) of each URL, trailing punctuation left out."""
-    return [ ( m.start(), _trim( text, m.start(), m.end() ) ) for m in URL_RE.finditer( text ) ]
+    """
+    Find URLs by starting at each `://` and each `www.`, so the cost is linear in the text.
+
+    Ensures:
+        - a URL is a scheme (a letter, then letters, digits, `+`, `.` and `-`, starting at a word boundary), `://`, then one or more non-space characters
+        - a `www.` that starts at a word boundary and is followed by one or more non-space characters is a URL
+        - the scheme is read leftwards from `://`, so no start position is retried
+        - returns ( start, end ) pairs in text order, none overlapping, trailing punctuation left out
+    """
+    found, at = [], text.find( "://" )
+    while at != -1:
+        lo = at
+        while lo > 0 and ( ( text[ lo - 1 ].isascii() and text[ lo - 1 ].isalnum() ) or text[ lo - 1 ] in "+.-" ): lo -= 1
+        start = next( ( i for i in range( lo, at ) if text[ i ].isascii() and text[ i ].isalpha() and ( i == 0 or not ( text[ i - 1 ].isalnum() or text[ i - 1 ] == "_" ) ) ), None )
+        nxt = at + 3
+        if start is not None:
+            end = at + 3
+            while end < len( text ) and not text[ end ].isspace(): end += 1
+            if end > at + 3: found.append( ( start, end ) ); nxt = end              # the match holds every later `://` up to the space, so the scan resumes after it
+        at = text.find( "://", nxt )
+    for m in WWW_RE.finditer( text ): found.append( ( m.start(), m.end() ) )
+    out, last = [], 0
+    for s, e in sorted( found ):
+        if s < last: continue
+        out.append( ( s, _trim( text, s, e ) ) ); last = e
+    return out
 
 
 def _emails( text ):
-    """Ensures: returns ( start, end ) of each email address."""
-    return [ ( m.start(), m.end() ) for m in EMAIL_RE.finditer( text ) ]
+    """
+    Find email addresses by starting at each `@`, so the cost is linear in the text.
+
+    Ensures:
+        - an address is a run of one or more of letters, digits, `_`, `.`, `+` and `-`, then `@`, then dotted domain labels
+        - the local part is read leftwards from the `@` and the domain rightwards, so no start position is retried
+        - returns ( start, end ) pairs in text order, none overlapping
+    """
+    out, floor, at = [], 0, text.find( "@" )
+    while at != -1:
+        start = at
+        while start > floor and ( text[ start - 1 ].isalnum() or text[ start - 1 ] in EMAIL_LOCAL ): start -= 1
+        dom = EMAIL_DOMAIN.match( text, at + 1 )
+        if start < at and dom is not None: out.append( ( start, dom.end() ) ); floor = dom.end()      # the next local part starts after this address, as a left-to-right scan would
+        at = text.find( "@", at + 1 )
+    return out
 
 
 def _ips( text ):
@@ -186,10 +226,12 @@ def redact_need( text, known_routes=() ):
         for s, e in finders[ kind ]( text ):
             if kind == "path" and text[ s ] == "/" and re.search( r"[?#]", text[ s:e ] ) is None and _is_known_route( text[ s:e ], known_routes ): continue     # a query or fragment is data, so the whole token goes
             cand.append( ( rank, s, e, kind ) )
-    taken = []
+    taken, starts = [], []                                                    # taken stays sorted by start and its spans never overlap, so only the two neighbours can
     for rank, s, e, kind in sorted( cand ):
-        if not any( s < te and ts < e for ts, te, _ in taken ): taken.append( ( s, e, kind ) )
-    taken.sort()
+        at = bisect.bisect_left( starts, s )
+        if at > 0 and taken[ at - 1 ][ 1 ] > s: continue
+        if at < len( taken ) and taken[ at ][ 0 ] < e: continue
+        starts.insert( at, s ); taken.insert( at, ( s, e, kind ) )
     out, rank_out, at, counts = [], [], 0, {}
     for s, e, kind in taken:
         out.append( text[ at:s ] + PLACEHOLDERS[ kind ] )

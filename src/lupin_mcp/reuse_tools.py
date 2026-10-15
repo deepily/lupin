@@ -949,6 +949,10 @@ def known_routes_of( gen ):
         return (), "none"
 
 
+_PATH_VERDICTS    = {}                                                          # ( routes, entry text ) -> holds a path, so a lookup does not redact the whole index again
+PATH_VERDICTS_MAX = 100000
+
+
 def unscreened_path_count( entries, routes ):
     """
     Count the index entries that reach Jev holding a path sendable() did not screen.
@@ -961,7 +965,13 @@ def unscreened_path_count( entries, routes ):
         - returns the number of entries whose id, signature and first docstring line hold an absolute path that is not a known route
         - an entry with no such path is not counted, and an empty list gives 0
     """
-    return sum( 1 for e in entries if any( h[ "kind" ] == "path" for h in reuse_redact.redact_need( entry_text( e ), routes )[ 2 ] ) )
+    if len( _PATH_VERDICTS ) > PATH_VERDICTS_MAX: _PATH_VERDICTS.clear()
+    count = 0
+    for e in entries:
+        key = ( routes, entry_text( e ) )
+        if key not in _PATH_VERDICTS: _PATH_VERDICTS[ key ] = any( h[ "kind" ] == "path" for h in reuse_redact.redact_need( key[ 1 ], routes )[ 2 ] )
+        count += _PATH_VERDICTS[ key ]
+    return count
 
 
 def prepare( ctx ):
