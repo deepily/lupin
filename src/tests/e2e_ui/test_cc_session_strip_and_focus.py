@@ -1232,7 +1232,7 @@ def _card_top( page, sender_id ):
 
 def _speak_card_below( page, sender_id ):
     """
-    Reveal a spoken notification in the given card, as starting its audio does.
+    Start the audio indicator on a notification in the card, as starting audio does.
 
     Chromium's scroll anchoring holds the view when a card is inserted above it. So a plain
     card move never shifts the view, and the reveal is the scroll the reader sees.
@@ -1243,7 +1243,7 @@ def _speak_card_below( page, sender_id ):
             const spoken = document.createElement( "div" );
             spoken.id = "kp-spoken-notification";
             document.getElementById( args.cardId ).appendChild( spoken );
-            window.notificationsUI.expandAccordionsForNotification( spoken.id );
+            window.notificationsUI.startTTSPlayingIndicator( spoken.id );
         }""",
         { "cardId": f"sender-card-{sanitized}" }
     )
