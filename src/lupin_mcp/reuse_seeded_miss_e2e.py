@@ -3,7 +3,8 @@ The seeded-miss end-to-end run: seed a miss, repair a docstring, prove it by rep
 
 A throwaway repository holds five public functions and two capability pages.
 The question is "list the episodes of a podcast".
-A full sweep asks every entry, and the symbol's own docstring does not match the need, so it is missed.
+The lookup runs the candidate stage and then Jev, and the symbol's own docstring does not match the need, so it is missed.
+The stage here is a stand-in that returns every entry, as the real one does when the index is smaller than K.
 The run records the miss as a store row and replays the receipt five times before and five times after, each repeat its own draw.
 A rewrite that changes nothing must return `NO_INPUT_CHANGE`.
 Rewriting the missed symbol's first docstring line must reach `REPAIRED`.
@@ -50,8 +51,8 @@ from lupin_mcp import reuse_tools as rt
 
 CAUGHT_BY      = "seeded-miss-e2e"
 PACK_SIZE      = 10
-NEED_FULL      = "list the episodes of a podcast"
-SYMBOL_FULL    = "cosa.fetchers.pull"
+NEED_MISS      = "list the episodes of a podcast"
+SYMBOL_MISS    = "cosa.fetchers.pull"
 WRONG_PAGE     = "news-page"
 RIGHT_PAGE     = "fetchers-page"
 WRONG_LINE     = "reading articles from any source, news or feed items. `cosa` (newsx)"
@@ -233,16 +234,31 @@ def write_index( root, right_line ):
 
 
 def write_docstring( root ):
-    """Ensures: rewrites the full-sweep symbol's first docstring line to hold the need's words."""
+    """Ensures: rewrites the missed symbol's first docstring line to hold the need's words."""
     path = pathlib.Path( root ) / "src" / "cosa" / "fetchers.py"
     text = path.read_text( encoding="utf-8" )
     path.write_text( text.replace( OLD_DOC, NEW_DOC ), encoding="utf-8" )
 
 
+class StandInStage:
+    """The candidate stage's interface, answering every entry but the excluded one, sorted by id."""
+
+    arm, K = "B2w", 128
+
+    def manifest( self ): return { "manifest_hash": "0" * 64 }
+
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None ):
+        """Ensures: returns the client's answer shape with every entry's id except exclude_id."""
+        ids = sorted( e[ "id" ] for e in entries if e[ "id" ] != exclude_id )
+        return { "ids": ids, "ranking": ids, "lists": { "stand-in": { "size": len( ids ), "head": ids[ :20 ] } }, "manifest_hash": "0" * 64,
+                 "embed_models": { "code": "stand-in", "prose": "stand-in" }, "arm": self.arm, "K": self.K, "widened": False, "stage_key": "0" * 32,
+                 "wiki": 0, "wiki_ids": [], "ranking_hash": "0" * 64 }
+
+
 def make_context( root, data, out, transport=None, ceiling=None, run_name=None, ledger=None ):
-    """Ensures: returns a packed ReuseContext; with no transport the live one is built later."""
-    return rt.ReuseContext( root, data, out_dir=out, transport=transport, sweeper=rp.packed_sweeper( PACK_SIZE ), request_shape=rp.SHAPE, pack_size=PACK_SIZE,
-                            token_ceiling=ceiling, run_name=run_name, ledger=ledger )
+    """Ensures: returns a packed context with the stand-in stage and the given transport."""
+    return rt.ReuseContext( root, data, out_dir=out, transport=transport, sweeper=rp.packed_sweeper( PACK_SIZE, shape=rp.SHAPE_WHOLE ), request_shape=rp.SHAPE_WHOLE,
+                            pack_size=PACK_SIZE, token_ceiling=ceiling, run_name=run_name, ledger=ledger, candidate_stage=StandInStage() )
 
 
 def seed_cache( answers, data ):
@@ -295,43 +311,47 @@ def mark_repaired( store, title, receipt_id, symbol ):
     return store.amend( row[ "id" ], note )[ 0 ]
 
 
-def full_scenario( ctx, root, librarian, store, runs ):
+def candidate_scenario( ctx, root, librarian, store, runs ):
     """
-    Detect a miss from a full-sweep receipt and repair it through the symbol's own docstring.
+    Detect a miss from a candidate-route receipt and repair the symbol's docstring.
 
     Ensures:
-        - returns a report dict; "ok" is True only when the receipt took the full route without the symbol,
+        - returns a report dict; "ok" is True only when the receipt took the candidates route without the symbol,
           a rewrite that changed nothing returned `NO_INPUT_CHANGE`, and a rewrite of the symbol's first
           docstring line returned `REPAIRED` with no hit before and every run a hit after
         - the second check takes new draws, so it does not read the first check's cached answers
     """
-    seed   = rt.sweep_need_impl( NEED_FULL, None, ctx )
-    report = { "need": NEED_FULL, "symbol": SYMBOL_FULL, "status": seed[ "status" ], "ok": False }
+    seed   = rt.check_exists_impl( NEED_MISS, ctx )
+    report = { "need": NEED_MISS, "symbol": SYMBOL_MISS, "status": seed[ "status" ], "ok": False }
     if seed[ "status" ] != "ok": return { **report, "reason": f"seed ask failed: {seed.get( 'error' )}" }
     rid = seed[ "receipt_id" ]
     receipt = json.loads( next( ( pathlib.Path( ctx.data ) / "receipts" ).glob( f"{rid}*.json" ) ).read_text( encoding="utf-8" ) )
     report.update( { "receipt_id": rid, "route": receipt[ "route" ], "shortlist_before": shortlist_of( seed ) } )
-    if receipt[ "route" ] != "full" or SYMBOL_FULL in report[ "shortlist_before" ]:
-        return { **report, "reason": "the seed did not produce a full-sweep miss" }
-    title, outcome = record_miss( librarian, store, rid, SYMBOL_FULL, NEED_FULL )
+    counts = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
+    report[ "entries" ] = None if counts is None else { k: counts[ k ] for k in ( "entries_total", "entries_asked", "entries_not_asked" ) }
+    if counts is None or counts[ "entries_asked" ] + counts[ "entries_not_asked" ] != counts[ "entries_total" ]:
+        return { **report, "reason": "the receipt's entry counts do not add up" }
+    if receipt[ "route" ] != "candidates" or SYMBOL_MISS in report[ "shortlist_before" ]:
+        return { **report, "reason": "the seed did not produce a candidate-route miss" }
+    title, outcome = record_miss( librarian, store, rid, SYMBOL_MISS, NEED_MISS )
     report[ "row" ] = { "title": title, "outcome": outcome }
 
     def replay_tool( receipt_id, repeat ): return rt.replay_impl( receipt_id, ctx, repeat=repeat )
 
-    same = run_repair_check( replayer_over( replay_tool, first_repeat=1 ), lambda: None, rid, SYMBOL_FULL, runs=runs )
-    real = run_repair_check( replayer_over( replay_tool, first_repeat=runs + 2 ), lambda: write_docstring( root ), rid, SYMBOL_FULL, runs=runs )
+    same = run_repair_check( replayer_over( replay_tool, first_repeat=1 ), lambda: None, rid, SYMBOL_MISS, runs=runs )
+    real = run_repair_check( replayer_over( replay_tool, first_repeat=runs + 2 ), lambda: write_docstring( root ), rid, SYMBOL_MISS, runs=runs )
     report[ "repair" ] = { "no_change": { "verdict": same.verdict, "before": same.before, "after": same.after },
                            "docstring": { "verdict": real.verdict, "before": real.before, "after": real.after, "runs": real.runs } }
     if same.verdict != NO_INPUT_CHANGE or real.verdict != REPAIRED or real.before != 0 or real.after != runs:
         return { **report, "reason": f"checks gave {same.verdict} and {real.verdict}" }
-    report[ "row" ][ "repaired_noted" ] = mark_repaired( store, title, rid, SYMBOL_FULL )
+    report[ "row" ][ "repaired_noted" ] = mark_repaired( store, title, rid, SYMBOL_MISS )
     report[ "ok" ] = outcome == "created" and report[ "row" ][ "repaired_noted" ]
     return report
 
 
 def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="fake", runs=R, environ=None, log=print ):
     """
-    Run the full-sweep scenario and write the report and the misses file.
+    Run the candidate-route scenario and write the report and the misses file.
 
     Requires:
         - work is an empty or absent folder; mode is "dry" or "live"
@@ -367,27 +387,27 @@ def run( work, mode, answers=None, ceiling=None, ledger_path=None, store_kind="f
     store     = FakeStore()
     librarian = Librarian( store, str( work / "pending.jsonl" ), log )
     try:
-        full   = full_scenario( ctx, root, librarian, store, runs )
+        found  = candidate_scenario( ctx, root, librarian, store, runs )
     finally:
         if mode == "live" and ctx.transport is not None: ctx.transport.budget.end()
     if isinstance( stand_in, NoCallTransport ) and stand_in.refused:
         raise SavedAnswerMissing( f"{len( stand_in.refused )} requests were not in the saved answers; first need: {stand_in.refused[ 0 ]!r}" )
     export = miss_record.export_report( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ], str( work / "misses.jsonl" ), allow_empty=True )
     exported = { m[ "symbol" ]: m[ "repaired" ] for m in miss_record.collect( store.query_all( CORRELATION_KEY )[ 2 ][ "tasks" ] ) }
-    expected = { SYMBOL_FULL: True }
+    expected = { SYMBOL_MISS: True }
     report   = { "mode": mode if mode == "live" else ( "dry-saved" if answers is not None else "dry-stand-in" ), "store": store_kind, "runs": runs,
-                 "full": full, "exported": exported, "exported_skipped": export.skipped,
+                 "candidates": found, "exported": exported, "exported_skipped": export.skipped,
                  "calls": stand_in.calls if stand_in is not None else None }
-    report[ "ok" ] = bool( full[ "ok" ] and exported == expected and not export.skipped )
+    report[ "ok" ] = bool( found[ "ok" ] and exported == expected and not export.skipped )
     ( work / "report.json" ).write_text( json.dumps( report, sort_keys=True, indent=1 ) + "\n", encoding="utf-8" )
     return ( 0 if report[ "ok" ] else 1 ), report
 
 
 def summary_lines( report ):
     """Ensures: returns a short table of the report as text lines."""
-    full = report[ "full" ]
+    found = report[ "candidates" ]
     rows = [ f"mode {report[ 'mode' ]}  store {report[ 'store' ]}  calls {report[ 'calls' ]}",
-             f"full  route {full.get( 'route' )}  before {full.get( 'shortlist_before' )}  repair {full.get( 'repair' )}  ok {full[ 'ok' ]}",
+             f"candidates  route {found.get( 'route' )}  before {found.get( 'shortlist_before' )}  repair {found.get( 'repair' )}  ok {found[ 'ok' ]}",
              f"exported {report[ 'exported' ]}  overall {'PASS' if report[ 'ok' ] else 'FAIL'}" ]
     return rows
 

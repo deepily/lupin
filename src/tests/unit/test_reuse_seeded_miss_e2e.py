@@ -37,14 +37,14 @@ def test_candidate_of_reads_the_quoted_text_whatever_follows_and_none_when_absen
 
 
 def test_answer_for_is_relevant_at_half_the_need_and_unrelated_below():
-    assert sm.answer_for( sm.NEED_FULL, "list episodes, podcast" ) == sm.RELEVANT
-    assert sm.answer_for( sm.NEED_FULL, "serve the tools" ) == sm.UNRELATED
+    assert sm.answer_for( sm.NEED_MISS, "list episodes, podcast" ) == sm.RELEVANT
+    assert sm.answer_for( sm.NEED_MISS, "serve the tools" ) == sm.UNRELATED
     assert sm.answer_for( "the of an", "anything" ) == sm.UNRELATED
 
 
 def test_the_stand_in_answers_each_question_from_its_own_candidate_and_counts_bodies():
     jev  = sm.StandInJev()
-    body = { "model": "m", "state": { "need": sm.NEED_FULL },
+    body = { "model": "m", "state": { "need": sm.NEED_MISS },
              "questions": { "a": { "instructions": "from the candidate 'list episodes of a podcast', x" },
                             "b": { "instructions": "from the candidate 'serve tools', x" } } }
     response, meta = jev.post_with_meta( body )
@@ -55,8 +55,8 @@ def test_the_stand_in_answers_each_question_from_its_own_candidate_and_counts_bo
 
 def test_the_no_call_transport_refuses_and_remembers_the_need():
     transport = sm.NoCallTransport()
-    with pytest.raises( sm.SavedAnswerMissing, match = "list the episodes" ): transport.post_with_meta( { "state": { "need": sm.NEED_FULL } } )
-    assert transport.refused == [ sm.NEED_FULL ] and transport.calls == 0
+    with pytest.raises( sm.SavedAnswerMissing, match = "list the episodes" ): transport.post_with_meta( { "state": { "need": sm.NEED_MISS } } )
+    assert transport.refused == [ sm.NEED_MISS ] and transport.calls == 0
 
 
 def test_the_fake_store_creates_amends_and_moves_the_clock_on():
@@ -80,10 +80,11 @@ def test_the_sandbox_has_the_wrong_page_matching_and_the_right_page_terse( tmp_p
 def test_a_dry_run_on_the_stand_in_repairs_the_full_sweep_miss( tmp_path ):
     code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     assert code == 0 and report[ "ok"] and report[ "mode" ] == "dry-stand-in" and report[ "calls" ] > 0
-    full = report[ "full" ]
-    assert full[ "route" ] == "full" and full[ "shortlist_before" ] == []
+    full = report[ "candidates" ]
+    assert full[ "route" ] == "candidates" and full[ "shortlist_before" ] == []
+    assert full[ "entries" ] == { "entries_total": 4, "entries_asked": 4, "entries_not_asked": 0 }       # no silent gap: asked plus not asked is the whole index
     assert full[ "repair" ][ "no_change" ][ "verdict" ] == "NO_INPUT_CHANGE" and full[ "repair" ][ "docstring" ] == { "verdict": "REPAIRED", "before": 0, "after": 5, "runs": 5 }
-    assert report[ "exported" ] == { sm.SYMBOL_FULL: True }
+    assert report[ "exported" ] == { sm.SYMBOL_MISS: True }
     assert sm.NEW_DOC in ( tmp_path / "w" / "sandbox" / "src" / "cosa" / "fetchers.py" ).read_text()
     lines = ( tmp_path / "w" / "misses.jsonl" ).read_text().splitlines()
     assert len( lines ) == 1 and json.loads( ( tmp_path / "w" / "report.json" ).read_text() )[ "ok" ] is True
@@ -140,15 +141,22 @@ def scenario_parts( tmp_path, transport ):
 
 def test_a_seed_that_finds_the_symbol_is_reported_and_no_row_is_written( tmp_path ):
     ctx, root, lib, store = scenario_parts( tmp_path, EverythingRelevant() )
-    full = sm.full_scenario( ctx, root, lib, store, 5 )
-    assert full[ "ok" ] is False and "did not produce a full-sweep miss" in full[ "reason" ] and store.rows == []
+    full = sm.candidate_scenario( ctx, root, lib, store, 5 )
+    assert full[ "ok" ] is False and "did not produce a candidate-route miss" in full[ "reason" ] and store.rows == []
 
+
+
+def test_a_context_with_no_candidate_stage_is_refused_by_the_gate_scenario( tmp_path ):
+    ctx, root, lib, store = scenario_parts( tmp_path, sm.StandInJev() )
+    ctx.candidate_stage = None                                                                # the seed would then take the full route, which is not the lookup
+    out = sm.candidate_scenario( ctx, root, lib, store, 5 )
+    assert out[ "ok" ] is False and out[ "entries" ] is None and "entry counts do not add up" in out[ "reason" ] and store.rows == []
 
 
 def test_a_failed_seed_ask_is_reported( tmp_path, monkeypatch ):
     ctx, root, lib, store = scenario_parts( tmp_path, sm.StandInJev() )
-    monkeypatch.setattr( rt, "sweep_need_impl", lambda need, exclude, c: { "status": "error", "error": "NO" } )
-    assert sm.full_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
+    monkeypatch.setattr( rt, "check_exists_impl", lambda need, c: { "status": "error", "error": "NO" } )
+    assert sm.candidate_scenario( ctx, root, lib, store, 5 )[ "reason" ] == "seed ask failed: NO"
 
 
 class NothingRelevant( sm.StandInJev ):
@@ -162,7 +170,7 @@ class NothingRelevant( sm.StandInJev ):
 
 def test_a_docstring_rewrite_that_the_model_does_not_accept_leaves_the_full_sweep_miss_open( tmp_path ):
     ctx, root, lib, store = scenario_parts( tmp_path, NothingRelevant() )
-    full = sm.full_scenario( ctx, root, lib, store, 5 )
+    full = sm.candidate_scenario( ctx, root, lib, store, 5 )
     assert full[ "ok" ] is False and "checks gave NO_INPUT_CHANGE and NOT_REPAIRED" in full[ "reason" ] and "repaired_noted" not in full[ "row" ]
 
 
@@ -238,6 +246,6 @@ def test_a_run_where_no_seeded_miss_occurs_exits_one_and_prints_fail( tmp_path, 
     monkeypatch.setattr( sm, "StandInJev", EverythingRelevant )
     code, report = sm.run( tmp_path / "w", "dry", log=lambda line: None )
     assert code == 1 and report[ "ok" ] is False and report[ "exported" ] == { }
-    assert "did not produce a full-sweep miss" in report[ "full" ][ "reason" ]
+    assert "did not produce a candidate-route miss" in report[ "candidates" ][ "reason" ]
     assert sm.main( [ "--work", str( tmp_path / "w2" ) ] ) == 1
     assert "overall FAIL" in capsys.readouterr().out
