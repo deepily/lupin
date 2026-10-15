@@ -961,6 +961,7 @@ def collect( root ):
         - every line of such a file counts as touched when the commit touches any of it
         - a page moved without an edit keeps its page-level findings, since the diff reader gives a move its entry
         - a page moved without an edit from a folder the gate does not judge is judged like a new file: every line counts as touched
+        - such a move also counts as created for the not-UTF-8 and binary warnings, so a page the gate cannot read is refused as a new file is
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
 
     Raises:
@@ -970,8 +971,11 @@ def collect( root ):
     paths    = staged_paths( root )
     gitlinks = [ p for p in staged_entries( root )[ 2 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     ranges   = changed_line_ranges( root, None, cached=True )
+    moved_in = set()
     for new, old in staged_changes( root )[ 1 ].items():
-        if not in_scope( old ) and in_scope( new ): ranges[ new ] = [ ( 1, UNBOUNDED ) ]
+        if not in_scope( old ) and in_scope( new ):
+            ranges[ new ] = [ ( 1, UNBOUNDED ) ]
+            moved_in.add( new )
     findings = []
     py_sources = {}
     swept      = []
@@ -982,7 +986,7 @@ def collect( root ):
     warnings  += [ f"[doc-lint] WARNING: {shown( p )} is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" for p in staged_entries( root )[ 4 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     binary     = set( staged_binary( root ) )
     incoming   = incoming_commits( root )[ 0 ]
-    created    = staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ] & set( paths )
+    created    = ( staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ] & set( paths ) ) | moved_in
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
     decode_out = []

@@ -1716,6 +1716,19 @@ def test_a_page_the_gate_cannot_read_but_the_commit_does_not_change_is_only_warn
     assert "[doc-lint] WARNING: docs/l1.md is not UTF-8, it was NOT checked" in lines and "[doc-lint] WARNING: docs/u16.md is not UTF-8, it was NOT checked" in lines
 
 
+@pytest.mark.parametrize( "name,data", [ ( "l1.md", b"# T\n\nSome caf\xe9 text. NOT fine.\n" ), ( "u16.md", "# T\n\nSome text.\n".encode( "utf-16" ) ),
+                                         ( "bin.md", b"# T\n\x00\nSome text.\n" ) ] )
+def test_a_page_the_gate_cannot_read_moved_unedited_out_of_an_unjudged_folder_is_refused_like_a_new_file( repo, monkeypatch, name, data ):
+    _no_external( monkeypatch )
+    _stage_bytes( repo, "docs/keep.md", b"# K\n\nFine.\n" )
+    _stage_bytes( repo, f"src/rnd/{name}", data )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", f"src/rnd/{name}", f"docs/{name}" )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( name, lines )
+    assert [ ln for ln in lines if f"docs/{name}" in ln and ( "NOT checked" in ln or "could NOT be checked" in ln or "REFUSED" in ln ) ]
+
+
 def test_staged_source_raises_the_decode_error_for_non_utf8_bytes( repo ):
     _stage_bytes( repo, "src/pkg/a.py", LATIN_1 )
     with pytest.raises( UnicodeDecodeError ):
