@@ -162,14 +162,35 @@ def test_http_payload_carries_the_role( http ):
     assert http[ "url" ] == "http://fastapi:7999/api/embeddings/batch"
 
 
-def test_role_against_the_model_server_is_refused_by_name( http, monkeypatch ):
+def test_role_against_a_model_server_that_echoes_it_is_accepted( http, monkeypatch ):
     monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    answers = iter( [ { "embedding" : [ 0.5 ], "role" : "query" }, { "embeddings" : [ [ 0.5 ] ], "role" : "document" } ] )
+    monkeypatch.setattr( EmbeddingProvider, "_post_with_retry", lambda self, url, payload, key, timeout, label: FakeResponse( next( answers ) ) )
     p = make_provider()
-    with pytest.raises( EmbeddingRoleUnsupported, match="ROLE_UNSUPPORTED_ON_MODEL_SERVER" ):
+    assert p.generate_embedding( "x", content_type="code", role="query" ) == [ 0.5 ]
+    assert p.generate_embeddings_batch( [ "x" ], content_type="code", role="document" ) == [ [ 0.5 ] ]
+
+
+def test_role_against_a_model_server_that_did_not_apply_it_is_refused_by_name( http, monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    p = make_provider()                  # the fixture's fake answer has no role key, as a frozen server's would not
+    with pytest.raises( EmbeddingRoleUnsupported, match="ROLE_UNSUPPORTED_ON_MODEL_SERVER.*named None" ):
         p.generate_embedding( "x", content_type="code", role="query" )
-    with pytest.raises( EmbeddingRoleUnsupported, match="ROLE_UNSUPPORTED_ON_MODEL_SERVER" ):
+    with pytest.raises( EmbeddingRoleUnsupported, match="did not apply role 'document'" ):
         p.generate_embeddings_batch( [ "x" ], content_type="code", role="document" )
-    assert "url" not in http
+
+
+def test_a_model_server_that_answers_a_different_role_is_refused( http, monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_post_with_retry",
+                         lambda self, url, payload, key, timeout, label: FakeResponse( { "embedding" : [ 0.1 ], "role" : "query" } ) )
+    with pytest.raises( EmbeddingRoleUnsupported, match="named 'query'" ):
+        make_provider().generate_embedding( "x", content_type="code", role="document" )
+
+
+def test_the_fastapi_router_answer_needs_no_role_echo( http ):
+    p = make_provider()                  # FastAPI target; the fake answer has no role key
+    assert p.generate_embedding( "x", content_type="code", role="query" ) == [ 0.1 ]
 
 
 def test_no_role_against_the_model_server_is_unchanged( http, monkeypatch ):

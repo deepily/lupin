@@ -293,27 +293,46 @@ class EmbeddingProvider:
     @classmethod
     def _check_role( cls, role, pin_fastapi ):
         """
-        Refuse a role the chosen service cannot honour.
+        Refuse a role that is not one of the two the services know.
 
         Requires:
             - role is None, "query" or "document"
 
         Ensures:
-            - returns None when role is None, or the target is the FastAPI router
-            - raises EmbeddingRoleUnsupported when role is set and the target
-              resolves to lupin-model-server, which has no role field
+            - returns None when role is None or a known role
 
         Raises:
-            - EmbeddingRoleUnsupported: ROLE_UNSUPPORTED_ON_MODEL_SERVER
             - ValueError: role is not one of EMBEDDING_ROLES
         """
         if role is None: return
         if role not in EMBEDDING_ROLES:
             raise ValueError( f"role must be one of {EMBEDDING_ROLES}, got {role!r}" )
-        if not pin_fastapi and cls._resolve_model_server_url():
+
+    @classmethod
+    def _require_role_echo( cls, role, prefix, body, url ):
+        """
+        Refuse an answer from lupin-model-server that did not apply the role asked for.
+
+        A model server older than role support ignores the field.
+        Its vectors would be of the wrong kind, so the answer must name the role it applied.
+
+        Requires:
+            - role is None, "query" or "document"
+            - prefix is the endpoint prefix the call went to
+            - body is the decoded JSON answer
+
+        Ensures:
+            - returns None when role is None, or the call went to the FastAPI router
+            - returns None when the model server's answer names the same role
+
+        Raises:
+            - EmbeddingRoleUnsupported: ROLE_UNSUPPORTED_ON_MODEL_SERVER
+        """
+        if role is None or prefix != "/embeddings": return
+        if body.get( "role" ) != role:
             raise EmbeddingRoleUnsupported(
-                "ROLE_UNSUPPORTED_ON_MODEL_SERVER: lupin-model-server has no role field. "
-                "Pass pin_fastapi=True to use the FastAPI embeddings router."
+                f"ROLE_UNSUPPORTED_ON_MODEL_SERVER: {url} did not apply role {role!r}; "
+                f"its answer named {body.get( 'role' )!r}. It predates role support."
             )
 
     # HTTP status codes worth a second attempt. A 5xx is the server failing to
@@ -457,11 +476,14 @@ class EmbeddingProvider:
             )
 
         try:
-            return response.json()[ "embedding" ]
+            body   = response.json()
+            vector = body[ "embedding" ]
         except ( KeyError, ValueError ) as e:
             raise RuntimeError(
                 f"EmbeddingProvider HTTP fallback: malformed response from {url}: {e}"
             )
+        self._require_role_echo( role, prefix, body, url )
+        return vector
 
     def _generate_embeddings_batch_via_http( self, texts: List[str], content_type: str, role=None, pin_fastapi=False ) -> List[List[float]]:
         """
@@ -511,11 +533,14 @@ class EmbeddingProvider:
             )
 
         try:
-            return response.json()[ "embeddings" ]
+            body    = response.json()
+            vectors = body[ "embeddings" ]
         except ( KeyError, ValueError ) as e:
             raise RuntimeError(
                 f"EmbeddingProvider HTTP batch fallback: malformed response from {url}: {e}"
             )
+        self._require_role_echo( role, prefix, body, url )
+        return vectors
 
     def _encode_local( self, texts, content_type, role ):
         """
