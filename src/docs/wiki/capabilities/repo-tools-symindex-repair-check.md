@@ -13,7 +13,7 @@ pins:
 Replays a missed reuse receipt several times before and after a summary rewrite, to show whether the rewrite fixed the miss. The unit tier covers it over cached answers only.
 
 ## `run_repair_check( replay, rewrite, receipt_id, symbol, runs=5 )`
-- Replays the receipt `runs` times. It calls `rewrite()` only when every before-run lacked the symbol, then replays `runs` more times. A `runs` that is not a positive int raises `ValueError`.
+- Replays the receipt `runs` times. It calls `rewrite()` only when every before-run lacked the symbol, then replays `runs` more times, unless the first after-run shows the index unchanged. A `runs` that is not a positive int raises `ValueError`.
 - It returns a `RepairResult( verdict, before, after, runs )`, where before and after count the runs that held the symbol, or None when not reached.
 - `REPAIRED`: 0 before and all after. `ALREADY_MATCHED`: the symbol was in every before-run, so no miss was reproduced. `NOT_REPAIRED`: absent in every after-run.
 - `FLIPPY_BEFORE` and `FLIPPY_AFTER`: a mixed count, which is no evidence either way.

@@ -10,7 +10,7 @@ pins:
 ---
 # Candidate purpose lines
 
-A purpose line is one sentence, at most 25 words and starting with a verb, that says what an index entry is for. It is written once per pin by a bounded Claude Code job and never regenerated on read. The prose index and the prose vectors use it.
+A purpose line is one sentence that says what an index entry is for. The writer is asked for at most 25 words, starting with a verb. It is written once per pin by a bounded Claude Code job and never regenerated on read. The prose index and the prose vectors use it.
 
 ## Store
 - Rows are JSON lines in `purpose.jsonl`: `pin`, `purpose`, `prompt_hash` and `writer_version`.
@@ -19,5 +19,5 @@ A purpose line is one sentence, at most 25 words and starting with a verb, that 
 
 ## Writing
 - `write_purpose_lines( entries, writer, store_path, writer_version, screen, batch_size=25 )` sends only entries that pass the sendable screen and have no stored line. The writer receives ids only, never source text. It returns `written`, `kept`, `dropped_screen`, `dropped_output` and `missing`. Stored rows are never rewritten; a changed pin gets a new row.
-- `judge_purpose( purpose, hits )` returns None for an acceptable line, else `not_text`, `empty`, `too_long` or `screen:<kinds>`. A rejected line is listed, never stored.
+- `judge_purpose( purpose, hits )` returns None for an acceptable line, else `not_text`, `empty`, `too_long` (over 25 words) or `screen:<kinds>`. The verb start is not checked. A rejected line is listed, never stored.
 - `default_screen()` returns the index's own `sendable` and `c1_hits` from `lupin_mcp.reuse_tools`, imported on first use.

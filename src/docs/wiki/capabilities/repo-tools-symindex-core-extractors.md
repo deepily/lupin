@@ -23,7 +23,7 @@ What a symbol record is and how the Python and TypeScript extractors produce one
 
 ## Python
 - `extract_python( spec, path, include_all=False )` parses one file and returns its records. A file that does not parse raises `SyntaxError` (an unreadable one, `UnicodeDecodeError`), and the caller lists it as unparsed.
-- Without `include_all` only public names are returned. With it, private names, every dunder and helpers nested inside functions come back too, and `public` still marks which are public.
+- Without `include_all` only names with no leading underscore come back, plus a class's `__init__`. With it, private names and helpers nested inside functions come back too, and `public` marks which are public.
 - `module_name( spec, path )` gives the dotted name relative to `spec.module_base`; a package `__init__.py` is named after the package.
 - `strip_docs( node )` returns a deep copy with every docstring removed, an emptied body holding `pass`. `first_doc_line( node )` returns the first non-empty docstring line, or an empty string.
 

@@ -24,4 +24,4 @@ The second half of `git_loc_delta` (see [[repo-tools-git-loc-delta-read-and-buck
 
 ## Plot
 - `plot_summary( daily, summary, output_path, group_by="file_type", title_meta=None )` writes a two-panel PNG. The top panel has aggregate insertions, deletions and a net line; the bottom has one signed net line per group. `group_by` is `file_type` or `repo`.
-- It raises `ValueError` for any other `group_by` or for fewer than two dates, and `KeyError` when a day lacks the `by_<group_by>` list. It returns the path and closes the figure.
+- It raises `ValueError` for any other `group_by` or for fewer than two dates, and `KeyError` when a day lacks the `by_<group_by>` list. It creates the parent folder, returns the absolute path and closes the figure.

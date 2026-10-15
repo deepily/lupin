@@ -16,10 +16,10 @@ pins:
 `cosa.repo.symindex.candidates.search` reads one JSON request on standard input and writes one JSON answer on standard output. It holds no state between calls. Run it with `python -m cosa.repo.symindex.candidates.search`.
 
 ## Request and answer
-- A request holds `need`, `K` and `index_dir`, and may hold `purposes` (a purpose file path), `fusion` ( `k`, `depth`, `head` ) and `wiki` (ids). `vectors_dir` comes with `query_vectors`.
+- A request holds `need`, `K` and `index_dir`, and may hold `purposes` (a purpose file path), `fusion` (exactly `k`, `depth` and `head`) and `wiki` (ids). `vectors_dir` comes with `query_vectors`.
 - `validate_request( request, with_index=True )` checks the shape first and raises `BAD_SEARCH_REQUEST` naming the first wrong key. `is_count( value, minimum )` is its integer test and refuses a bool.
 - `answer( request, load_vectors )` reads the index folder and purpose file, builds the stage, then calls `answer_for_stage`. An unreadable folder or file is `INDEX_UNREADABLE`.
-- `answer_for_stage( request, stage, load_vectors )` ranks by BM25 over code and prose, and by cosine over each stored matrix (`vector_prose`, `vector_code`, `vector_concat`). The wiki list joins them. It returns `shortlist`, `ranking`, `lists`, `scores`, `K`, `manifest_hash`, `bm25` and `index_ids_without_vectors`. A vector id missing from the index raises `VECTOR_IDS_NOT_IN_INDEX`.
+- `answer_for_stage( request, stage, load_vectors )` ranks by BM25 over code and prose. It also ranks by cosine over each matrix named in `query_vectors`, listed as `vector_<name>`. A `wiki` list in the request joins them. It returns `shortlist`, `ranking`, `lists`, `scores`, `K`, `manifest_hash`, `bm25` and `index_ids_without_vectors`. A vector id missing from the index raises `VECTOR_IDS_NOT_IN_INDEX`.
 
 ## Helpers
 - `cosine_ranked( ids, matrix, query )` returns `( id, score )` pairs rounded to 6 places, ties by id. A zero row or query scores 0.0.

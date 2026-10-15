@@ -10,16 +10,16 @@ pins:
 ---
 # Candidate arms: the results page
 
-`arm_report.py` builds the final comparison page from numbers the caller measured. It reads no cache, needs file or index.
+`arm_report.py` builds the final comparison page from numbers the caller measured. It reads no cache, no needs file and no index.
 
 ## Building the page
-- `render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable )` returns the markdown. It opens with the run id, five shas, the winning vector arm and the fusion constants, then gives four tables.
+- `render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable )` returns the markdown. It opens with the run id, five shas, the winning vector arm and the fusion constants, then gives three tables and a redaction line.
 - T1: recall of the full-sweep shortlist.
 - T3: where the known twin lands.
 - T2: replayed verdicts.
 - Redaction: how many needs hold a redactable token.
 - The page says every figure is in-sample and is not a flip rate.
-- `meta` must hold every key in `META_KEYS`: `run_id`, `code_sha`, `index_sha`, `manifest_hash`, `needs_sha`, `cache_sha`. A missing one raises `REPORT_META_MISSING` naming the keys.
+- `meta` must hold every key in `META_KEYS`: `run_id`, `code_sha`, `index_sha`, `manifest_hash`, `needs_sha`, `cache_sha`. A missing or empty one raises `REPORT_META_MISSING` naming the keys.
 - `write_report( path, text )` makes the folder if needed, writes UTF-8 and returns the sha256 of the bytes written.
 
 ## Helpers

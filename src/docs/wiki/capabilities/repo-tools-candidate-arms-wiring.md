@@ -26,9 +26,9 @@ pins:
 ## Building and ranking
 - `build_arm_stages( entries, purposes )` returns `{ "plain", "purposed" }`, two stages over the same entries with the same fusion constants.
 - `lists_for_arm( arm, available )` returns only the ranked lists the arm names. It raises `ARM_UNKNOWN` for a name outside `ARMS`. It raises `ARM_LIST_MISSING` when a needed list is absent.
-- `run_arm( arm, need, stages, available, K )` shortlists one need through the candidate stage. A K below the stage's head size raises `K_BELOW_HEAD`.
-- `full_ranking( arm, need, stages, available )` returns the whole fused order with no cut, so a twin's rank can be read. It cuts at the head size for a small index. An entry in no list within the fusion depth is absent.
-- `cosine_sources( ids, matrices, query_vectors )` ranks the ids by each stored matrix that has a query vector, and names the lists `vector_<name>`.
+- `run_arm( arm, need, stages, available, K )` shortlists one need through the candidate stage and returns its `shortlist`, `ranking`, `lists` and `scores`. A K below the stage's head size raises `K_BELOW_HEAD`.
+- `full_ranking( arm, need, stages, available )` returns the fused order with K set to the index size, so a twin's rank can be read. An index smaller than the head size uses the head size. An entry in no list within the fusion depth is absent.
+- `cosine_sources( ids, matrices, query_vectors )` ranks the ids by cosine against each matrix named in `query_vectors`, and names the lists `vector_<name>`. The result goes into `available`.
 
 ## Guards and choices
 - `refuse_fresh_needs( need_ids, needs_sha, fresh_sha, fresh_ids=() )` raises `FRESH_NEEDS_REFUSED` in three cases.

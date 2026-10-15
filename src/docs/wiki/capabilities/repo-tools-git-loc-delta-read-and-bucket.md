@@ -11,12 +11,12 @@ pins:
 ---
 # Daily LoC delta: reading git and bucketing by day
 
-The first half of `git_loc_delta` (see [[branch-and-directory-loc-analysis]]). `GitLogLocDeltaAnalyzer` wires these four parts together.
+The first half of `git_loc_delta` (see [[branch-and-directory-loc-analysis]]). `GitLogLocDeltaAnalyzer` calls the parser and the aggregator.
 
 ## `GitLogParser`
 - `GitLogParser( repo_path=".", since=None, until=None, rev_range=None, all_branches=False, include_merges=False, author=None, timeout=60 )`. `iter_changes()` runs one `git log --numstat` and yields a dict per file row: `date`, `sha`, `author`, `path`, `added`, `deleted`.
 - The date is the committer date, because `--since` and `--until` filter on it too. Binary rows (`-` counts) and malformed rows are skipped.
-- Without `include_merges` the command carries `--no-merges`. With it, `--diff-merges=first-parent`, which git older than 2.31 rejects. `all_branches` adds `--branches`; `rev_range` is appended last.
+- Without `include_merges` the command carries `--no-merges`. With it, `--diff-merges=first-parent`. `all_branches` adds `--branches`; `rev_range` is appended last.
 - Any git failure, a timeout included, raises `GitCommandError`, which the package re-exports from `branch_analyzer`.
 
 ## `DailyAggregator`
@@ -26,7 +26,7 @@ The first half of `git_loc_delta` (see [[branch-and-directory-loc-analysis]]). `
 
 ## Date bounds
 - `normalize_since( value )` turns a bare `YYYY-MM-DD` into `YYYY-MM-DD 00:00:00`. Git otherwise reads a bare date as that day at the current time, so `--since=<today>` selects nothing. Other values pass through.
-- `normalize_until( value )` returns its argument unchanged, because a bare date already ends that day. Both are called at every site so the pair stays symmetric.
+- `normalize_until( value )` returns its argument unchanged, because a bare date already ends that day. `GitLogParser` calls both bounds through these functions.
 
 ## Errors
 - `GitLocDeltaError( message, context=None )` is the base.

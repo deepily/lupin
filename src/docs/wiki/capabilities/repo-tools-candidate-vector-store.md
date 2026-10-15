@@ -24,8 +24,8 @@ One vector set holds the current state of the repo: three float32 matrices (`pro
 ## Writing a set
 - `write_row_texts( out_dir, ids, hashes )` writes one line per id naming the text hash of each matrix row. The next build uses it to reuse rows.
 - `seal( out_dir, ids, manifest )` writes `ids.txt`, then `manifest.json` with every file's hash and its own `manifest_hash`. It returns the sealed manifest.
-- `swap_in( new_dir, live_dir )` renames the live folder aside, renames the new one in, then removes the old. A lookup between the renames finds no set, never half of one. If the second rename fails, the old set is renamed back.
+- `swap_in( new_dir, live_dir )` renames the live folder aside, renames the new one in, then removes the old. A lookup between the renames finds no set, never half of one. If the second rename fails, the old set is renamed back and the error is raised.
 
 ## Reading a set
 - `load_vectors( live_dir )` rechecks the manifest hash and every file hash, then returns a `VectorSet` with `manifest`, `ids`, `matrices` (memory maps) and `row_texts`. It raises `VECTOR_SET_UNAVAILABLE` without a manifest, `VECTOR_SET_CORRUPT` for a hash or size that disagrees, and `DEPENDENCY_MISSING` without numpy.
-- `read_row_texts( live, ids )` reads the sidecar and raises `VECTOR_SET_CORRUPT` when its ids differ from `ids.txt` or a hash is not 64 hex characters.
+- `read_row_texts( live, ids )` reads the sidecar. It raises `VECTOR_SET_CORRUPT` for a line that is not JSON, ids that differ from `ids.txt`, or a hash that is not 64 hex characters.

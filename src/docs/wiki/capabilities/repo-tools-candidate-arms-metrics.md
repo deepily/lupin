@@ -19,7 +19,7 @@ The offline comparison scores each arm (a choice of ranked lists to fuse) with t
 - `recall_at_k( shortlist, reference )` returns the share of the reference ids that the shortlist holds, 0.0 to 1.0. An empty reference raises `ValueError`, because recall is undefined there.
 - `reference_ids( decision )` reads the full sweep's shortlist out of a `verdict.decide` result: the ids of its shortlist rows, sorted.
 - `t1_table( shortlists, references )` takes arm, then K, then need id. It returns mean recall, mean shortlist size and per-need recall for each arm and K.
-- A need with an empty reference is left out of the mean.
+- A need with an empty reference is left out of the mean and the per-need map. `mean_size` still counts it.
 
 ## Twin rank
 - `twin_rank( ranking, twin_id )` returns the 1-based position of a known twin, or `None` when it is not in the ranking.

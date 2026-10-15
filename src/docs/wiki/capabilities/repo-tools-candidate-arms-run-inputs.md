@@ -12,7 +12,7 @@ pins:
 ---
 # Candidate arms: run inputs
 
-`arm_run.py` reads what a measurement needs: the needs, the stored snapshot and the cached judge answers. Every reader is passed in, so a test can hand it small cases. The measuring half is on [[repo-tools-candidate-arms-measure]].
+`arm_run.py` reads what a measurement needs: the needs, the stored snapshot and the cached judge answers. The index and cache readers are passed in as an environment, so a test can hand it small cases. The measuring half is on [[repo-tools-candidate-arms-measure]].
 
 ## Environment and files
 - `real_env( data_dir )` builds the real readers as a namespace: `sendable`, `entry_text`, `pair_key`, `model` and a `JevCache` over `data_dir`.
@@ -21,7 +21,7 @@ pins:
 
 ## Snapshot
 - `snapshot_entries( path, sendable )` reads a gzip snapshot, parses its `symbols_jsonl` lines and returns the entries the sweep would send.
-- `pick_snapshot( paths, hits_for )` returns `( hits, path )` for the snapshot with most cached answers. The first path in sorted order wins a tie.
+- `pick_snapshot( paths, hits_for )` returns `( hits, path )` for the snapshot where `hits_for` counts most cached answers. The first path in sorted order wins a tie.
 
 ## Cached answers
 - `load_answers( needs, entries, env )` reads, for every need and each of five repeats, the cached `provides` and `coverage` of every entry. It returns `( answers, misses )`. The entry a need excludes is not asked, and an entry with no cached answer counts as a miss.

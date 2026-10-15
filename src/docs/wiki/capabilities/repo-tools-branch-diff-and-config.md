@@ -28,8 +28,8 @@ The input side of `BranchChangeAnalyzer` (see [[branch-and-directory-loc-analysi
 - `get_extension`, `is_binary` (true when the category is `binary`), `get_all_extensions` (a copy) and `get_categories` (always holds `other`) are read helpers.
 
 ## `GitDiffParser` and `DiffLine`
-- `GitDiffParser( config, repo_path=".", ... )` checks that git runs, then reads `git.diff_algorithm`, `git.extra_diff_options` and `performance.git_timeout` (60 seconds).
-- `get_diff( base, head )` runs `git diff --diff-algorithm=<algo> base...head` and returns a list of `DiffLine( content, operation, file_path, line_number )`. The operation is `add`, `remove`, `context` or `meta`.
+- `GitDiffParser( config, repo_path=".", ... )` reads `git.diff_algorithm` (default histogram), `git.extra_diff_options` and `performance.git_timeout` (60 seconds), then checks that git runs.
+- `get_diff( base, head )` runs `git diff --diff-algorithm=<algo> base...head` plus the extra options. It returns a list of `DiffLine( content, operation, file_path, line_number )`. The operation is `add`, `remove`, `context` or `meta`.
 - Inside a hunk the first character decides, so an added line that begins with `++` is still an add.
 - `get_changed_files( base, head )` returns `--name-only` paths. `get_branch_name( ref )` gives the abbreviated name, or the ref itself when git cannot resolve it or answers `HEAD`.
 

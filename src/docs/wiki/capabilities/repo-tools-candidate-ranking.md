@@ -22,7 +22,7 @@ The candidate stage cuts the symbol index to a shortlist before the Jev judge se
 - `rank_scored( index, query )` returns `( id, score )` pairs, scores rounded to 6 places, best first, ties by id. Only documents sharing a word appear. `rank( index, query )` returns the ids alone.
 
 ## Fusion and the wiki list
-- `fuse( lists, k=60, depth=512, head=5, limit=None )` adds 1 / ( k + position ) per list and never reads a score. With `limit` it keeps the top `head` ids of every list first, then the best of the rest. It raises `HEAD_EXCEEDS_LIMIT` when the heads alone do not fit.
+- `fuse( lists, k=60, depth=512, head=5, limit=None )` adds 1 / ( k + position ) per list for each id inside `depth`. It never reads a score. With `limit` it keeps the top `head` ids of every list first, then the best of the rest. It raises `HEAD_EXCEEDS_LIMIT` when the heads alone do not fit.
 - `wiki_ranked_ids( need, pages )` ranks capability pages ( `slug`, `text`, `pins` ) by BM25 over their text. Each page's pinned ids follow it in id order, an id once. It is a ranking input, never a gate.
 
 ## Errors

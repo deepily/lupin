@@ -25,5 +25,5 @@ Every location of the candidate stage comes from an INI key, and an environment 
 
 ## Handoff to a container
 - `main_checkout( root )` resolves a worktree to its parent checkout, which the containers mount.
-- `handoff_dir( root )` is where the purpose-line job's request and response files are exchanged, relative to the main checkout.
+- `handoff_dir( root )` is where the purpose-line job's request and response files are exchanged. An INI value is relative to the main checkout; an override must be absolute.
 - `container_path( host_path, root )` translates a host path under the main checkout to the container's path, or raises `HANDOFF_NOT_IN_CONTAINER`.

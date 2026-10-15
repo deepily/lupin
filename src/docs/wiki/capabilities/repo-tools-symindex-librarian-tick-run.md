@@ -17,13 +17,13 @@ pins:
 The daily job that lints the wiki, queues the findings and exports the reuse misses. Rows are made by [[repo-tools-symindex-librarian-queue]]; the switches and cron lines are in [[repo-tools-symindex-librarian-tick-config]].
 
 ## Running it
-- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything.
+- `python -m cosa.repo.symindex.librarian_tick [--force] [--root R] [--misses-out P]`. The tick is off until the configuration key `wiki librarian tick enabled` is true, and an off tick exits 3 before building anything. `main` prints the run summary as JSON.
 - Exit 0: nothing due, or the run finished and nothing is held. Exit 1: the run could not finish. Exit 2: it finished and some rows sit in the pending file. Exit 3: switched off.
 
 ## What `run_tick` does
 - It is due when the local hour is 10 or later and the last finished run was on another day (`due`). `--force` skips that check.
 - It refuses with exit 1 when the wiki has no capability page or the index holds no symbols. An empty lint read would clear every open rollup.
-- Otherwise it ensures the index, lints, calls `librarian.sync` with the index header's `symbols_sha`, reads every row including done and dropped, and writes the misses file. The state file gets today's date only after the sync finished.
+- Otherwise it ensures the index, lints, calls `librarian.sync` with the index header's `symbols_sha`, reads every row including done and dropped, and writes the misses file. The state file gets today's date only after the sync and the miss export both finished.
 - A vector status check, if given, puts its stale flag and reasons in the summary. An `OSError` or `ValueError` from it is logged and does not fail the tick.
 
 ## Files and helpers

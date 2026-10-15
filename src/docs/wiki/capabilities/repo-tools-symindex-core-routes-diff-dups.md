@@ -18,15 +18,15 @@ Three smaller readers over the same tree. `routes.md` comes from the first, `dif
 
 ## Routes (`routes.py`)
 - `route_decorators( node )` lists `( receiver, method, path )` for each `@x.get/post/put/patch/delete/websocket( "literal" )` on a def. A first argument that is not a string literal is skipped.
-- `scan_file( tree )` returns `( routers, includes, imports )`. Those are the prefix of each `APIRouter` or `FastAPI` variable, each `include_router` call as `( base, attr, prefix )`, and import aliases.
+- `scan_file( tree )` returns `( routers, includes, imports )`. Those are the prefix of each `APIRouter` or `FastAPI` variable, the `include_router` calls as `( base, attr, prefix )`, and import aliases. A call whose first argument is not a name or `name.attr` is skipped.
 - `resolve( per_file )` returns sorted lines `METHOD /path -> symbol  (file)`. An include prefix applies only to the router it names, and a receiver that is not a known router makes no route. The live app is never imported.
 
 ## Diff (`diff.py`)
 - `diff_symbols( old, new )` compares two record lists by id and returns `added`, `removed` and `changed` (`id`, `was`, `now`). A symbol is changed when its pin differs.
-- `diff_generations( old_gen, new_gen, all_symbols=False )` reads two folders. If their pin algorithms differ it returns only `algorithm_changed` with `was` and `now`.
+- `diff_generations( old_gen, new_gen, all_symbols=False )` reads two folders. If their pin algorithms differ it returns only `algorithm_changed` with `was` and `now`. With `all_symbols` it also compares private and nested definitions.
 
 ## Duplicates (`dups.py`)
 - `find_duplicates( spec, paths, min_nodes=25, threshold=0.85, js_files=(), include_private=True )` returns `provenance`, `exact` and `near`. Definitions under `min_nodes` AST nodes are left out.
-- `normalised( node )` erases docstrings, names, constants and decorators; two defs with equal normalised trees are an exact group.
+- `normalised( node )` erases docstrings, names, constants and decorators; two defs of the same language with equal normalised trees are an exact group.
 - `shingles( node )` and `shingles_of( seq )` hash 5-long windows over the pre-order node-type list. A near pair is two defs whose shingle sets reach the Jaccard threshold and whose trees differ. Only pairs that share one of each definition's rarest shingles are compared, so a pair above the threshold can be missed.
 - Python and script definitions are never grouped or paired together. A repeated id is numbered `~2`, `~3`.

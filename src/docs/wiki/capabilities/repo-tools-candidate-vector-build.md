@@ -18,10 +18,10 @@ The build embeds every index entry three ways by posting batches to the FastAPI 
 ## Build
 - `EndpointClient( provider=None, get=None )` has `embed( texts, content_type, role )` and `info()`. `info()` reads `GET /api/embeddings/info` and raises `RuntimeError` for no key or a non-200 answer. Calls are pinned to FastAPI.
 - `entry_texts( entry, purpose )` returns `code` (path, name, signature), `prose` (name, purpose, docstring) and `concat` (code, then prose).
-- `build_vectors( entries, purposes, client, out_dir, ..., reuse=None, stats=None )` sorts entries by id and warms both engines. It embeds in batches of 64 with a 0.5 s pause, writes the sidecar and returns the sealed manifest. It raises `ENGINE_NOT_LOADED` when a revision is still null and `EMBEDDING_SHAPE` for a wrong count or ragged row. The caller swaps the folder in.
+- `build_vectors( entries, purposes, client, out_dir, ..., reuse=None, stats=None )` sorts entries by id and warms both engines. It embeds in batches of 64 with a 0.5 s pause, writes three matrices and a row-text sidecar, and returns the sealed manifest. It raises `ENGINE_NOT_LOADED` when a revision is still null and `EMBEDDING_SHAPE` for a wrong count or ragged row. The caller swaps the folder in.
 - `reuse_mismatches( old_manifest, info )` returns `[]` when the live set's engines, device class, libraries and roles match a build made now. Otherwise it names the failing clauses, or `[ "manifest" ]` for a malformed manifest. Only on `[]` are rows with an equal id and text hash copied.
 
 ## Query vectors
-- `check_engines( manifest, info )` returns None when the server's engines match the set's, or raises `ENGINE_NOT_LOADED` or `ENGINE_MISMATCH` naming each field that differs.
-- `query_vectors( redacted_need, client, cache_dir, manifest )` returns `{ prose, code, concat }`. A cache file named by `query_key( need )` serves only under the same manifest hash; on a miss the engines are checked first. An unreadable cache file raises `QUERY_CACHE_CORRUPT`.
+- `check_engines( manifest, info )` returns None when the server's engines and roles match the set's. It raises `ENGINE_NOT_LOADED` when an engine reports no revision, or `ENGINE_MISMATCH` naming each field that differs.
+- `query_vectors( redacted_need, client, cache_dir, manifest )` returns `{ prose, code, concat }`. `query_key( need )` is the sha256 that names the cache file. A cache file serves only under the same manifest hash. On a miss the engines are checked, then the vectors are embedded and cached. An unreadable cache file raises `QUERY_CACHE_CORRUPT`.
 - `clear_stale_queries( cache_dir, current_hash )` deletes cache files made under another set, or unreadable, and returns the count.
