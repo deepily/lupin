@@ -124,12 +124,16 @@ def reuse_mismatches( old_manifest, info ):
           document roles in old_manifest equal the ones a build made now would record
         - otherwise returns the failing clause names: engines.code, engines.prose, device_class, libraries,
           document_roles
+        - a manifest that lacks one of those fields, or holds one of the wrong shape, returns [ "manifest" ]
     """
     engines = info[ "engines" ]
-    failed  = [ f"engines.{kind}" for kind in ( "code", "prose" ) if old_manifest[ "engines" ][ kind ] != engines[ kind ] ]
-    if old_manifest[ "device_class" ] != engines[ "device_class" ]: failed.append( "device_class" )
-    if old_manifest[ "libraries" ] != engines[ "libraries" ]: failed.append( "libraries" )
-    if { k: tuple( v ) for k, v in old_manifest[ "document_roles" ].items() } != vs.DOCUMENT_ROLES: failed.append( "document_roles" )
+    try:
+        failed = [ f"engines.{kind}" for kind in ( "code", "prose" ) if old_manifest[ "engines" ][ kind ] != engines[ kind ] ]
+        if old_manifest[ "device_class" ] != engines[ "device_class" ]: failed.append( "device_class" )
+        if old_manifest[ "libraries" ] != engines[ "libraries" ]: failed.append( "libraries" )
+        if { k: tuple( v ) for k, v in old_manifest[ "document_roles" ].items() } != vs.DOCUMENT_ROLES: failed.append( "document_roles" )
+    except ( KeyError, TypeError, AttributeError ):
+        return [ "manifest" ]
     return failed
 
 

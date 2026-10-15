@@ -355,3 +355,20 @@ def test_a_build_without_reuse_still_writes_the_sidecar_and_reports_every_row_em
     m, out, client, stats = rebuild( tmp_path, base_entries(), None )
     assert ( out / vs.ROW_TEXTS_FILE ).is_file() and vs.ROW_TEXTS_FILE in m[ "files" ]
     assert stats == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+
+
+@pytest.mark.parametrize( "drop", [ "engines", "device_class", "libraries", "document_roles" ] )
+def test_a_live_manifest_missing_a_guard_field_is_a_named_mismatch_and_a_full_embed( tmp_path, drop ):
+    out1, live = first_build( tmp_path, base_entries() )
+    manifest   = { k: v for k, v in copy.deepcopy( live.manifest ).items() if k != drop }
+    stale      = vs.VectorSet( manifest, live.ids, live.matrices, live.row_texts )
+    assert vb.reuse_mismatches( manifest, FakeClient().info() ) == [ "manifest" ]
+    m, out2, client, stats = rebuild( tmp_path, base_entries(), stale )
+    assert stats == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+
+
+@pytest.mark.parametrize( "field, value", [ ( "document_roles", [ 1 ] ), ( "engines", 5 ), ( "document_roles", { "prose": 7 } ) ] )
+def test_a_guard_field_of_the_wrong_shape_is_a_named_mismatch( tmp_path, field, value ):
+    out1, live = first_build( tmp_path, base_entries() )
+    manifest   = { **copy.deepcopy( live.manifest ), field: value }
+    assert vb.reuse_mismatches( manifest, FakeClient().info() ) == [ "manifest" ]

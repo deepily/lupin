@@ -403,3 +403,12 @@ def test_a_live_set_that_does_not_load_is_rebuilt_in_full_with_no_error( world, 
 def test_the_first_run_has_no_live_set_to_lend_and_embeds_everything( world ):
     report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
     assert report[ "vectors" ] == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+
+
+@pytest.mark.parametrize( "text", [ "{}", "[]", "null" ] )
+def test_a_live_manifest_that_is_not_a_sealed_manifest_is_rebuilt_in_full_with_no_error( world, tmp_path, text ):
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    ( tmp_path / "data" / "vec" / "manifest.json" ).write_text( text )
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert report[ "vectors" ] == { n: { "reused": 0, "embedded": 2 } for n in vs.MATRICES }
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).row_texts is not None

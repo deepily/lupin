@@ -426,3 +426,14 @@ def test_a_manifest_that_is_not_json_is_corrupt_not_a_value_error( built ):
 def test_text_hash_is_the_sha256_of_the_utf8_bytes():
     import hashlib
     assert vs.text_hash( "é" ) == hashlib.sha256( "é".encode( "utf-8" ) ).hexdigest()
+
+
+@pytest.mark.parametrize( "text", [ "{}", "[]", "5", "null", json.dumps( { "manifest_hash": "x" } ),
+                                    json.dumps( { "manifest_hash": 1, "files": {}, "dimension": 4 } ),
+                                    json.dumps( { "manifest_hash": "x", "files": [], "dimension": 4 } ),
+                                    json.dumps( { "manifest_hash": "x", "files": {}, "dimension": "4" } ) ] )
+def test_a_manifest_that_is_json_but_not_a_sealed_manifest_is_corrupt_not_a_key_error( built, text ):
+    ( built[ "dir" ] / "manifest.json" ).write_text( text )
+    with pytest.raises( CandidateError ) as e:
+        vs.load_vectors( built[ "dir" ] )
+    assert e.value.code == VECTOR_SET_CORRUPT and "not a sealed manifest" in e.value.detail

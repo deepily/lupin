@@ -198,7 +198,7 @@ def load_vectors( live_dir ):
 
     Raises:
         - CandidateError VECTOR_SET_UNAVAILABLE when there is no manifest
-        - CandidateError VECTOR_SET_CORRUPT when the manifest is not JSON, a hash or a size disagrees with it, or the sidecar
+        - CandidateError VECTOR_SET_CORRUPT when the manifest is not JSON or not a sealed manifest, a hash or a size disagrees with it, or the sidecar
           the manifest lists is unreadable or does not match the ids
         - CandidateError DEPENDENCY_MISSING when numpy is not importable here
     """
@@ -213,6 +213,9 @@ def load_vectors( live_dir ):
         manifest = json.loads( path.read_text( encoding="utf-8" ) )
     except ValueError as e:
         raise CandidateError( VECTOR_SET_CORRUPT, f"{MANIFEST_FILE} is not JSON: {e}" )
+    shape = { "manifest_hash": str, "files": dict, "dimension": int }
+    if not isinstance( manifest, dict ) or any( not isinstance( manifest.get( k ), t ) for k, t in shape.items() ):
+        raise CandidateError( VECTOR_SET_CORRUPT, f"{MANIFEST_FILE} is not a sealed manifest: it needs manifest_hash, files and dimension" )
     if manifest_hash( manifest ) != manifest[ "manifest_hash" ]:
         raise CandidateError( VECTOR_SET_CORRUPT, "the manifest does not hash to its manifest_hash" )
     for name, expected in manifest[ "files" ].items():
