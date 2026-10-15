@@ -23,7 +23,7 @@ Which task rows count as owed, and which waits can never end. Each rule has a Py
 - `holding_is_active` and `holding_is_active_clause` do the same for a `not_approved` row. On expiry such a row becomes visible but is not poked, since nobody approved it.
 - `owed_clause( model, now )` is true for every row that is not park-active. `owed_status_row( status, next_chase_ts, now )` is the dict-level form of the owed-only set: queued, in_progress, and parked rows. A parked row counts when its park has expired or its chase is missing or unreadable. Its SQL form is `owed_status_clause`, not `owed_clause`.
 - `is_owed` is the general rule (non-terminal and not park-active). No reader uses it as its owed definition yet, because it would also count blocked, claimed and review rows.
-- `park_reason_is_stale` and its clause are true when the body changed after the park reason was captured. They compare `body_changed_ts`, not `updated_ts`, and a NULL on either side reads as not stale.
+- `park_reason_is_stale` and its clause are true only for a parked row whose body changed after the park reason was captured. They compare `body_changed_ts`, not `updated_ts`, and a NULL on either side reads as not stale.
 - `item_blocker_ids( blocked_by )` returns the `{kind: item}` ids, skipping malformed entries. Persona and user refs are left out because nothing can say they are gone.
 - `is_canonical_uuid` is true only for a 36-character dashed UUID.
 - `blocker_is_terminal( status, blocked_by, status_by_id )` flags a `blocked` row waiting on a blocker that can never move again. It is advisory and changes no status.
@@ -33,4 +33,4 @@ Which task rows count as owed, and which waits can never end. Each rule has a Py
 - Don't expect an id missing from `status_by_id` to be flagged. An id is flagged only when it resolved to a terminal status, or was looked up, not found, and is a full UUID.
 
 ## Invariants
-- Each predicate and its SQL twin must agree. A NULL chase lands on the owed side in both.
+- Each predicate and its SQL twin must agree. For `park_is_active` and `owed_status_row` a NULL chase counts as owed. `holding_is_active` gives False on NULL, so the row shows but is not owed.

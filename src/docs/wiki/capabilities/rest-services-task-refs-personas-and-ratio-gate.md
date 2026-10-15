@@ -16,7 +16,7 @@ pins:
 ---
 # Task refs, persona fields and the ratio gate
 
-Pure helpers in `task_store_rules` for naming a row, naming its owner, and limiting how fast new rows arrive. See [[task-store]].
+Helpers in `task_store_rules` for naming a row, naming its owner, and limiting how fast new rows arrive. `ratio_gate_advisory` with `allow_below=None` reads the live threshold, and `build_persona_advisory` with `known_keys=None` reads the roster from config. See [[task-store]].
 
 ## What it does
 - `classify_task_ref( ref )` returns `( "full", UUID )`, `( "prefix", lowercase hex )` for 4 or more hex characters, or `( "invalid", None )`. Hyphens are allowed in a prefix. Junk is never a prefix, so caller text never builds a `LIKE` pattern.

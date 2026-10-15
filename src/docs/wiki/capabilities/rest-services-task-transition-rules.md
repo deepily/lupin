@@ -15,7 +15,7 @@ pins:
 ---
 # Task transition rules: receipts, blockers and parking
 
-The pure rules the task store applies to a status change. Each returns data and never raises on bad input. See [[task-store]] and [[mcp-task-store-tools]].
+The rules the task store applies to a status change. Each returns data and never raises on bad input. `validate_receipt_refs` also reads files and, for a done transition, runs `git branch --all --contains` with a 15 second timeout. See [[task-store]] and [[mcp-task-store-tools]].
 
 ## What it does
 - `validate_receipt_refs( receipt_refs, scope_roots, require_checkable )` checks keys against a whitelist and each value's shape. A `commit` is 7 to 40 hex, a `test_run` is `ts-` plus 8 hex, and a `qid` is a UUID. A `doc_path` or `log_line` names an existing file, and an attestation is 1 to 255 characters.
