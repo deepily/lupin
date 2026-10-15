@@ -42,6 +42,8 @@ TOOL_VERSION = "1"                                              # receipts of th
 PACKED_TOOL_VERSION = "2"                                       # receipts of the packed path; both load until the old path is removed
 TOOL_VERSIONS = ( TOOL_VERSION, PACKED_TOOL_VERSION )
 QUESTIONS     = ( "choice", "provides" )                         # the three-way Choice, or the Noul and Score question
+WIDE_K         = 512                                              # the shortlist size of a widened lookup, against the stage's own 128
+WIDEN_CAUSES   = ( "NEAR_CUTOFF", "LOW_CONFIDENCE" )                  # a first sweep widens when NEAR_CUTOFF holds and no cause beyond these does
 RETIRED_ROUTES = ( "pages", "pages_then_full" )                  # the page route was removed; a receipt of it stays readable and replays to ROUTE_RETIRED
 MAX_PACK_SIZE = 10_000                                          # more than the catalogue holds; the bound only refuses nonsense
 PACK_SIZE_VARIABLE    = "LUPIN_REUSE_JEV_PACK_SIZE"
@@ -195,13 +197,14 @@ class ReuseContext:
         - run_budget is the run's TokenBudget when a driver holds it for asks that do not go through the sweeper, else None
         - pair_sweeper is None for the pair question's own candidate-keyed packed sweeper, or a function with sweep's signature that replaces it
         - candidate_stage is None for a full sweep, or a lupin_mcp.reuse_candidates.CandidateStage that picks the entries a check_exists question asks
+        - policy is None for the shipped decision policy, or a policy mapping; one with a band widens a candidate lookup whose first sweep is near a cut-off
 
     Raises:
         - ReuseError BAD_BUDGET for a call_budget outside that range or not an integer, or a call_budget_cap below CALL_BUDGET_CAP
     """
 
     def __init__( self, root, data, out_dir=None, wiki_dir=None, transport=None, exclude_prefixes=(), template=None, model=JEV_MODEL, call_budget=DEFAULT_CALL_BUDGET,
-                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None ):
+                  pack_size=None, sweeper=None, request_shape=None, token_ceiling=None, run_name=None, ledger=None, single_use=False, call_budget_cap=CALL_BUDGET_CAP, run_budget=None, pair_sweeper=None, candidate_stage=None, policy=None ):
         if type( call_budget_cap ) is not int or call_budget_cap < CALL_BUDGET_CAP:
             raise ReuseError( "BAD_BUDGET", f"call budget cap must be an integer of at least {CALL_BUDGET_CAP}, got {call_budget_cap!r}" )
         if type( call_budget ) is not int or not 1 <= call_budget <= call_budget_cap:
@@ -226,6 +229,7 @@ class ReuseContext:
         self.run_budget       = run_budget
         self.pair_sweeper     = pair_sweeper
         self.candidate_stage  = candidate_stage
+        self.policy           = policy
 
 
 def context_from_environment( root=None ):
@@ -916,7 +920,9 @@ def _receipt_shape_ok( r ):
 
 def _candidate_of( stage ):
     """Ensures: returns the part of a candidate_stage block that a receipt id holds."""
-    return { "manifest_hash": stage[ "manifest_hash" ], "K": stage[ "K" ], "ids": sha( canonical( stage[ "ids" ] ), 16 ) }
+    out = { "manifest_hash": stage[ "manifest_hash" ], "K": stage[ "K" ], "ids": sha( canonical( stage[ "ids" ] ), 16 ) }
+    if "widened_ids" in stage and stage[ "widened_ids" ]: out[ "widened_ids" ] = sha( canonical( stage[ "widened_ids" ] ), 16 )       # only a widened run has the key, so no other id moves
+    return out
 
 
 def load_receipt( ctx, rid ):
@@ -1130,7 +1136,72 @@ def _route_pair( ctx, need, entries, flags, frozen=False, model=None, policy=Non
     return { "route": "full", "sw": sw, "d": d, "deciding": entries, "stages": [ _stage( "all", sw, len( entries ) ) ], "plan": None, "sweeps": [ sw ] }
 
 
-def _candidate_receipt( stage, error, client, ranking_text, redactions, total, routed ):
+def _should_widen( d ):
+    """Ensures: returns True when NEAR_CUTOFF holds and no cause beyond the WIDEN_CAUSES does."""
+    return "NEAR_CUTOFF" in d[ "causes" ] and all( c in WIDEN_CAUSES for c in d[ "causes" ] )
+
+
+def _merge_sweeps( a, b ):
+    """
+    Join two packed sweeps of one question into one.
+
+    Ensures:
+        - lists are concatenated, counts are summed, and stopped_by is the first one set
+        - the rows of b are renumbered after those of a
+    """
+    out = {}
+    for k in a:
+        if isinstance( a[ k ], list ): out[ k ] = a[ k ] + b[ k ]
+        elif isinstance( a[ k ], int ): out[ k ] = a[ k ] + b[ k ]
+        else: out[ k ] = a[ k ] or b[ k ]
+    for n, row in enumerate( out[ "rows" ] ): row[ "index" ] = n
+    return out
+
+
+def _widened_route( ctx, first, need, entries, flags, extra_ids, frozen=False, template=None, model=None, policy=vd.POLICY, gaps=None ):
+    """
+    Sweep the extra entries of a widened shortlist and decide over both sweeps.
+
+    Requires:
+        - first is the routed dict of the first sweep, and extra_ids the ids outside it
+        - the extra entries are packed apart from the first set, so no judged entry is re-sent or re-packed
+
+    Ensures:
+        - returns the routed shape, with the sweep of the extra entries as a second stage named widened
+        - the decision is over the union of both sweeps, so the cause list is the one a single sweep of them all would give
+    """
+    more = sorted( ( e for e in entries if e[ "id" ] in set( extra_ids ) ), key=lambda e: e[ "id" ] )
+    sw2  = _sweeper( ctx )( ctx, need, more, frozen=frozen, template=template, model=model, gaps=gaps )
+    sw   = _merge_sweeps( first[ "sw" ], sw2 )
+    asked = first[ "deciding" ] + more
+    d    = vd.decide( sw[ "answers" ], [ e[ "id" ] for e in asked ], sw[ "failed" ], flags, policy )
+    return { "route": "candidates", "sw": sw, "d": d, "deciding": asked, "stages": first[ "stages" ] + [ _stage( "widened", sw2, len( more ) ) ],
+             "plan": None, "sweeps": first[ "sweeps" ] + [ sw2 ] }
+
+
+def _widen( ctx, client, stage, routed, need, entries, every, flags, policy, ranking_text, index_sha, exclude_id ):
+    """
+    Widen a lookup whose first sweep sat near a cut-off.
+
+    Ensures:
+        - returns ( routed, stage, error )
+        - asks the stage for WIDE_K with the first call's wiki list, so the first set is the head of the wider one
+        - a stage that fails answers the first sweep's decision with CALL_FAILED added, and error names the failure
+        - no extra entries leaves routed and stage as they were
+        - otherwise the stage dict gains K, widened and widened_ids, and routed holds both sweeps
+    """
+    try:
+        wide = client.shortlist( ranking_text, every, index_sha, ctx.pages, exclude_id=exclude_id, K=WIDE_K, wiki_ids=stage[ "wiki_ids" ] )
+    except CandidateError as x:
+        d = vd.decide( routed[ "sw" ][ "answers" ], [ e[ "id" ] for e in routed[ "deciding" ] ], routed[ "sw" ][ "failed" ], flags | { "CALL_FAILED" }, policy )
+        return { **routed, "d": d }, stage, { "code": x.code, "detail": x.detail }
+    first = set( stage[ "ids" ] )
+    extra = [ i for i in wide[ "ids" ] if i not in first ]
+    if not extra: return routed, stage, None
+    return _widened_route( ctx, routed, need, entries, flags, extra, policy=policy ), { **stage, "K": wide[ "K" ], "widened": True, "widened_ids": extra }, None
+
+
+def _candidate_receipt( stage, error, client, ranking_text, redactions, total, routed, widen_error=None ):
     """
     Build the receipt's candidate_stage block.
 
@@ -1142,13 +1213,17 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
         - entries_asked plus entries_not_asked equals entries_total
         - an error block names it and holds no manifest hash, so a failed stage never claims a vector set
         - ranking_text and wiki_ids are the two inputs a replay cannot rebuild from the snapshot
+        - a widened run records K as the wide size, the extra ids as widened_ids, and a failed widening as widen_error
     """
     asked = len( routed[ "deciding" ] ) if error is None else 0
     base  = { "arm": client.arm, "K": client.K, "ranking_text": ranking_text, "redactions": len( redactions ), "entries_total": total, "entries_asked": asked, "entries_not_asked": total - asked }
     if error is not None: return { **base, "manifest_hash": None, "embed_models": None, "lists": None, "widened": False, "ids": [], "ranking_hash": None,
                                    "stage_key": None, "wiki": 0, "wiki_ids": [], "error": error }
-    return { **base, "manifest_hash": stage[ "manifest_hash" ], "embed_models": stage[ "embed_models" ], "lists": stage[ "lists" ], "widened": stage[ "widened" ],
-             "ids": stage[ "ids" ], "ranking_hash": stage[ "ranking_hash" ], "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
+    out = { **base, "K": stage[ "K" ], "manifest_hash": stage[ "manifest_hash" ], "embed_models": stage[ "embed_models" ], "lists": stage[ "lists" ], "widened": stage[ "widened" ],
+            "ids": stage[ "ids" ], "widened_ids": stage[ "widened_ids" ] if "widened_ids" in stage else [], "ranking_hash": stage[ "ranking_hash" ],
+            "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
+    if widen_error is not None: out[ "widen_error" ] = widen_error
+    return out
 
 
 def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_only=False, question="choice" ):
@@ -1191,7 +1266,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
     by_id = { e[ "id" ]: e for e in entries }
     hard = flags & { "NOT_LUPIN_TREE", "INDEX_STALE", "KEY_UNREADABLE" }
-    stage, stage_error = None, None
+    base_policy = ctx.policy if ctx.policy is not None else vd.POLICY
+    stage, stage_error, widen_error = None, None, None
     if staged is not None and entries and not hard:
         try:
             stage = staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id )
@@ -1199,7 +1275,11 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
             stage_error = { "code": e.code, "detail": e.detail }
             flags       = flags | { "CALL_FAILED" }
     if entries and not hard and stage_error is None:
-        routed = _route_pair( ctx, need, entries, flags ) if pair else _route( ctx, need, entries, flags, candidate_ids=stage[ "ids" ] if stage is not None else None )
+        if pair: routed = _route_pair( ctx, need, entries, flags )
+        else:
+            routed = _route( ctx, need, entries, flags, policy=base_policy, candidate_ids=stage[ "ids" ] if stage is not None else None )
+            if stage is not None and ctx.sweeper is not None and _should_widen( routed[ "d" ] ):
+                routed, stage, widen_error = _widen( ctx, staged, stage, routed, need, entries, every, flags, base_policy, _ranking, sha_, exclude_id )
     else:
         none   = { "answers": [], "failed": [], "not_reached": [ e[ "id" ] for e in entries ], "calls": 0, "cache_hits": 0,
                    "attempts_answered": 0, "attempts_failed": 0, "failed_attempts": [] }
@@ -1207,12 +1287,12 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     sw, d = routed[ "sw" ], routed[ "d" ]
     from lupin_mcp import reuse_pair_request as rpr                            # imported here: it imports this module
     template      = rpr.PAIR_TEMPLATE if pair else ctx.template
-    policy        = vd.POLICY_PROVIDES if pair else vd.POLICY
+    policy        = vd.POLICY_PROVIDES if pair else base_policy
     shape         = rpr.SHAPE if pair else ctx.request_shape
     template_hash = rpr.template_hash() if pair else prompt_template_hash( ctx.template )
     packed        = ctx.sweeper is not None
     version       = PACKED_TOOL_VERSION if packed else TOOL_VERSION
-    cstage        = _candidate_receipt( stage, stage_error, staged, _ranking, redactions, len( entries ), routed ) if staged is not None and entries and not hard else None
+    cstage        = _candidate_receipt( stage, stage_error, staged, _ranking, redactions, len( entries ), routed, widen_error ) if staged is not None and entries and not hard else None
     rec = { "id": receipt_id( tool, query, sha_, ctx.model, policy, template_hash, d[ "causes" ], version, shape if packed else None, sweep_only, exclude_id, need_text,
                               _candidate_of( cstage ) if cstage is not None else None ),
             "tool": tool, "tool_version": version, "query": query, "index_sha": sha_, "model": ctx.model,
@@ -1267,6 +1347,7 @@ def _public( receipt, extra=None ):
     out[ "unscreened_entry_paths" ] = receipt[ "unscreened_entry_paths" ] if "unscreened_entry_paths" in receipt else 0
     counts = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
     for k in ( "entries_total", "entries_asked", "entries_not_asked" ): out[ k ] = counts[ k ] if counts is not None else None
+    out[ "widened" ] = counts[ "widened" ] if counts is not None else None
     if extra: out.update( extra )
     return out
 
@@ -1414,13 +1495,15 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out ):
         - entries are the sendable entries of the receipt's own snapshot, before exclude_id was left out
 
     Ensures:
-        - returns the receipt's ids when the vector set on disk is the one it names, the cached query vector gives the same ids
-          under the recorded arm, K and wiki list, and every recorded top-level pack is a cut of the sorted ids
+        - returns ( ids, widened_ids ) as the receipt recorded them, when the vector set on disk is the one it names, the cached
+          query vector gives the same ids under the recorded arm, K and wiki list, and every recorded top-level pack is a cut of
+          the sorted ids of its own set
+        - a widened receipt is rebuilt at its recorded K, so the widening is followed and never decided again
 
     Raises:
         - ReuseError CANDIDATE_STAGE_UNAVAILABLE when the context has no candidate stage
         - ReuseError VECTOR_SET_REPLACED when the vector set on disk has another manifest hash
-        - ReuseError CANDIDATES_CHANGED when the rebuilt ids differ from the recorded ones
+        - ReuseError CANDIDATES_CHANGED when the rebuilt ids differ from the recorded ones, the widened ones included
         - ReuseError PACKS_CHANGED when a recorded pack is not a cut of the sorted ids
         - ReuseError CANDIDATE_STAGE_FAILED naming the stage's own error code, such as QUERY_VECTOR_MISSING
     """
@@ -1435,13 +1518,15 @@ def _frozen_candidate_ids( ctx, stored, entries, left_out ):
         fresh = client.shortlist( cs[ "ranking_text" ], entries, stored[ "index_sha" ], [], exclude_id=left_out, cache_only=True, wiki_ids=cs[ "wiki_ids" ] )
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_FAILED", str( e ) ) from e
-    if fresh[ "ids" ] != cs[ "ids" ]: raise ReuseError( "CANDIDATES_CHANGED", f"{len( fresh[ 'ids' ] )} ids now, {len( cs[ 'ids' ] )} recorded" )
+    wide = cs[ "widened_ids" ] if "widened_ids" in cs else []
+    if fresh[ "ids" ] != sorted( cs[ "ids" ] + wide ):
+        raise ReuseError( "CANDIDATES_CHANGED", f"{len( fresh[ 'ids' ] )} ids now, {len( cs[ 'ids' ] ) + len( wide )} recorded" )
     size = stored[ "pack_size" ]                                                  # the stage runs on a packed context only, so the receipt has both
-    cuts = { tuple( cs[ "ids" ][ i:i + size ] ) for i in range( 0, len( cs[ "ids" ] ), size ) }
+    cuts = { name: { tuple( ids[ i:i + size ] ) for i in range( 0, len( ids ), size ) } for name, ids in ( ( "candidates", cs[ "ids" ] ), ( "widened", wide ) ) }
     for row in stored[ "requests" ]:
-        if row[ "split_from" ] is None and tuple( row[ "ids" ] ) not in cuts:
+        if row[ "split_from" ] is None and tuple( row[ "ids" ] ) not in cuts[ row[ "stage" ] ]:
             raise ReuseError( "PACKS_CHANGED", f"request {row[ 'request_hash' ][ :12 ]} is not a pack of the recorded ids" )
-    return list( cs[ "ids" ] )
+    return list( cs[ "ids" ] ), list( wide )
 
 
 def replay_impl( rid, ctx, repeat=0 ):
@@ -1499,7 +1584,7 @@ def replay_impl( rid, ctx, repeat=0 ):
         if hard or not entries or stage_failed:
             fz = { "verdict": stored[ "verdict" ], "cause": stored[ "cause" ], "shortlist": stored[ "shortlist" ] }
         else:
-            ids_of_stage = _frozen_candidate_ids( ctx, stored, whole, left_out ) if "candidate_stage" in stored else None
+            ids_of_stage, wide_ids = _frozen_candidate_ids( ctx, stored, whole, left_out ) if "candidate_stage" in stored else ( None, [] )
             lost  = stored[ "stats" ][ "failed_attempts" ] if "failed_attempts" in stored[ "stats" ] else []         # a receipt from before the call budget lacks it
             ids   = [ i for f in lost for i in ( f[ "ids" ] if "ids" in f else [ f[ "id" ] ] ) ]              # the packed shape lists ids; the old shape names one id
             gaps  = { **{ i: "not_reached" for i in stored[ "missing" ] }, **{ i: "failed" for i in ids } }
@@ -1511,8 +1596,12 @@ def replay_impl( rid, ctx, repeat=0 ):
             if question == "provides":
                 d = _route_pair( frozen_ctx, need, entries, set( stored[ "flags" ] ), frozen=True, model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )[ "d" ]
             else:
-                d = _route( frozen_ctx, need, entries, set( stored[ "flags" ] ), frozen=True, template=stored[ "prompt_template" ], model=stored[ "model" ],
-                            policy=stored[ "policy" ], gaps=gaps, candidate_ids=ids_of_stage )[ "d" ]
+                routed = _route( frozen_ctx, need, entries, set( stored[ "flags" ] ), frozen=True, template=stored[ "prompt_template" ], model=stored[ "model" ],
+                                 policy=stored[ "policy" ], gaps=gaps, candidate_ids=ids_of_stage )
+                if wide_ids:
+                    routed = _widened_route( frozen_ctx, routed, need, entries, set( stored[ "flags" ] ), wide_ids, frozen=True, template=stored[ "prompt_template" ],
+                                             model=stored[ "model" ], policy=stored[ "policy" ], gaps=gaps )
+                d = routed[ "d" ]
             fz    = { "verdict": d[ "verdict" ], "cause": d[ "cause" ], "shortlist": d[ "shortlist" ] }
         exclude = stored[ "query" ] if stored[ "tool" ] == "fetch_similar" else left_out
         head_ctx = ctx

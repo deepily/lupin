@@ -131,7 +131,7 @@ class CandidateStage:
         return hashlib.sha256( canonical( { "v": STAGE_VERSION, "index_sha": index_sha, "entries": len( entries ),
                                             "purposes": hashlib.sha256( canonical( purposes ).encode( "utf-8" ) ).hexdigest(), "fusion": self.fusion } ).encode( "utf-8" ) ).hexdigest()[ :32 ]
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None ):
         """
         Choose the candidates for a need.
 
@@ -140,6 +140,7 @@ class CandidateStage:
             - entries are the sendable index entries, each with an id and a pin
             - index_sha identifies those entries, and pages is the list page_candidates returns
             - wiki_ids is None, or the wiki list a receipt recorded, which then replaces the one built from pages
+            - K is None for the client's own K, or the size of this one shortlist, such as the widened size when the first set sat inside the band
 
         Ensures:
             - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, wiki_ids, ranking_hash }
@@ -162,7 +163,8 @@ class CandidateStage:
         wiki     = ( wiki_list.wiki_ranked_ids( ranking_text, pages ) if wiki_ids is None else list( wiki_ids ) ) if self.arm in WIKI_ARMS else []
         purposes = cs_search.read_purposes( self.purposes_path ) if self.purposes_path is not None and pathlib.Path( self.purposes_path ).is_file() else {}
         key      = self._stage_key( index_sha, entries, purposes )
-        asked    = self.K + ( 1 if exclude_id is not None else 0 )
+        K        = self.K if K is None else K
+        asked    = K + ( 1 if exclude_id is not None else 0 )
         body     = { "stage_key": key, "need": ranking_text, "K": asked, "vectors_dir": self.vectors_dir, "query_vectors": vectors, "wiki": wiki,
                      "expect_manifest_hash": manifest[ "manifest_hash" ] }
         status, answer = self._call( "POST", "/api/reuse-candidates/search", body )
@@ -174,9 +176,9 @@ class CandidateStage:
         if status == 409 and answer.get( "error" ) == VECTOR_SET_REPLACED:
             raise CandidateError( VECTOR_SET_REPLACED, answer.get( "detail", "" ) )
         if status != 200: raise CandidateError( CANDIDATE_SEARCH_FAILED, f"{answer.get( 'error' )}: {answer.get( 'detail' )}" )
-        ranking = [ i for i in answer[ "ranking" ] if i != exclude_id ][ :self.K ]
+        ranking = [ i for i in answer[ "ranking" ] if i != exclude_id ][ :K ]
         lists   = { name: { "size": answer[ "list_sizes" ][ name ], "head": answer[ "lists" ][ name ] } for name in sorted( answer[ "lists" ] ) }
         return { "ids": sorted( ranking ), "ranking": ranking, "lists": lists, "manifest_hash": answer[ "manifest_hash" ],
                  "embed_models": { kind: manifest[ "engines" ][ kind ][ "model" ] for kind in ( "code", "prose" ) },
-                 "arm": self.arm, "K": self.K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
+                 "arm": self.arm, "K": K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
                  "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest() }
