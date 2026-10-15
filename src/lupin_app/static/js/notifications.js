@@ -27424,6 +27424,9 @@ class NotificationsUI {
             }
         }
 
+        // Keep place: the card is open for the reader to find, but the view stays where they put it.
+        if ( this.keepPlace ) return;
+
         // Scroll notification into view
         this.scrollIntoViewIfNeeded( notificationElement );
     }

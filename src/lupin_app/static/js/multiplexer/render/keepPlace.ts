@@ -32,6 +32,21 @@ export function readKeepPlace( storage: KeepPlaceStorage | null ): boolean {
   }
 }
 
+/**
+ * Whether Keep place is on in this browser, read at the moment of asking.
+ *
+ * Ensures:
+ *   - returns true only for the stored word "true"
+ *   - returns false when the storage is unavailable or throws
+ */
+export function keepPlaceIsOn(): boolean {
+  try {
+    return readKeepPlace( globalThis.localStorage ?? null );
+  } catch {
+    return false;
+  }
+}
+
 /** The strip's height; a card above it is scrolled off and a poor anchor. */
 const NAV_OFFSET_PX = 100;
 

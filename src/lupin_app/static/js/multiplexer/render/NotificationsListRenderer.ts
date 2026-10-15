@@ -45,7 +45,7 @@ import type { TtsInteractionMode } from "./templates/senderCard";
 // A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
 // consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
 import { scrollRevealElement } from "./scrollReveal";
-import { captureKeepPlace, readKeepPlace, restoreKeepPlace } from "./keepPlace";
+import { captureKeepPlace, keepPlaceIsOn, restoreKeepPlace } from "./keepPlace";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import * as debugSink from "../shared/debugSink";
@@ -641,7 +641,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     const focusBefore = captureCardFocus(this.senderCardsMount);
     // Keep place: remember which cards the reader is looking at, so a card arriving at the top does not
     // shift them. Null when the reader is at the top or the preference is off.
-    const place = readKeepPlace(keepPlaceStorage()) ? captureKeepPlace(this.senderCardsMount, document, window) : null;
+    const place = keepPlaceIsOn() ? captureKeepPlace(this.senderCardsMount, document, window) : null;
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
@@ -1162,7 +1162,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, false);
     }
 
-    void scrollRevealElement(bubble);
+    // Keep place: the card is open for the reader to find, but the view stays where they put it.
+    if (!keepPlaceIsOn()) void scrollRevealElement(bubble);
   }
 
   // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
@@ -1565,13 +1566,4 @@ function cssEscape(value: string): string {
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the function body is always entered when called).
 export function createNotificationsListRenderer(opts: NotificationsListRendererOptions): NotificationsListRenderer {
   return new NotificationsListRendererImpl(opts);
-}
-
-// The browser's localStorage, or null where reading the property throws (a blocked-storage browser).
-function keepPlaceStorage(): Storage | null {
-  try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
 }

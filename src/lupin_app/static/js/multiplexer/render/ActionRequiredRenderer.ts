@@ -63,6 +63,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
+import { keepPlaceIsOn } from "./keepPlace";
 import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequiredRecorderLike } from "./actionRequiredMic";
 import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
@@ -628,7 +629,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // item that left the store took it along, and the same id arriving again starts at question 1.
     this.reconcile(id_hash);
     if (changeKind === "added") this.autoReveal(id_hash);
-    else if (changeKind === "activated") void scrollRevealElement(this.root);
+    else if (changeKind === "activated" && !keepPlaceIsOn()) void scrollRevealElement(this.root);
   }
 
   // Parity A-2 #2b (Phase 2 A3 B6). Legacy's ensureActionRequiredExpanded
@@ -642,7 +643,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     setSectionCollapsed(this.root!, this.header!, false);
     // A-2 #2d — a card waiting for TTS is not the active card yet; its "activated" scrolls.
     const head = this.stores.actionRequired.list()[0];
-    if (head?.id_hash === idHash && !isAwaitingActivation(head)) void scrollRevealElement(this.root);
+    if (head?.id_hash === idHash && !isAwaitingActivation(head) && !keepPlaceIsOn()) void scrollRevealElement(this.root);
   }
 
   // A-2 #2h — legacy's document-level shortcuts (notifications.js:25892-25947).
