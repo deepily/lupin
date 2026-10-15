@@ -204,6 +204,7 @@ def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, 
 
     monkeypatch.setattr( cb, "run", fake_run )
     monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path / "main" )
+    monkeypatch.setattr( cb, "default_out_dir", lambda root: root / "src" / "docs" / "index" )
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e@x", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "pw",
             "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "main" / "io" / "h" ),
             "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
@@ -221,6 +222,7 @@ def test_main_uses_the_server_url_variable_and_the_endpoint_client_by_default( m
     seen = {}
     monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25: seen.update( client=client ) or { "rows": 0 } )
     monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path )
+    monkeypatch.setattr( cb, "default_out_dir", lambda root: root / "src" / "docs" / "index" )
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
             "LUPIN_APP_SERVER_URL": "http://test:8000", "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "io" ),
             "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
@@ -260,7 +262,9 @@ def test_the_prompt_names_the_container_paths_and_the_index( tmp_path ):
 def test_sample_purposes_takes_every_kth_entry_into_its_own_store( world, tmp_path, screen_for_sample=None ):
     symbols = world[ "symbols" ]
     for i in range( 6 ): symbols.append( { **tvb.entry( f"z{i}", f"pz{i}" ), "lang": "py", "kind": "function", "line": 1, "public": True } )
-    # the index holds m.b, m.a, m.z0..m.z5; sorted that is a, b, z0..z5 (8 entries), count 4 gives step 2
+    # the index holds m.b, m.a, m.z0..m.z5; sorted that is a, b, z0..z5 (8 entries), count 4 gives step 2.
+    # The pins run in the reverse of the id order, so a sort by pin would choose other entries.
+    for rank, sym in enumerate( sorted( symbols, key=lambda e: e[ "id" ] ) ): sym[ "pin" ] = f"p{len( symbols ) - rank:02d}"
     calls = []
     report = cb.sample_purposes( world[ "root" ], answering_writer( calls ), tmp_path / "s" / "sample.jsonl", 4, batch_size=2 )
     assert report[ "ids" ] == [ "m.a", "m.z0", "m.z2", "m.z4" ]

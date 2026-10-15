@@ -19,7 +19,7 @@ from cosa.repo.symindex.candidates import purpose_lines as pl
 from cosa.repo.symindex.candidates import storage_paths as sp
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
-from cosa.repo.symindex.paths import data_dir
+from cosa.repo.symindex.paths import data_dir, default_out_dir
 
 WRITER_VERSION = "bounded-cc-1"
 JOB_TIMEOUT    = 1800
@@ -177,7 +177,7 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
             email, password = environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ], environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]
             submit  = lambda payload: harness_schedule.submit( payload, args.base_url, email, password )
             to_c    = lambda path: sp.container_path( path, args.root, environ=environ )
-            index   = to_c( main_tree / "src" / "docs" / "index" / "current" / "symbols.jsonl" )
+            index   = to_c( default_out_dir( main_tree ) / "current" / "symbols.jsonl" )
             writer  = BoundedJobWriter( sp.handoff_dir( args.root, environ=environ ), submit, to_container=to_c, index_path=index )
         else:
             writer = writer_factory( args )
