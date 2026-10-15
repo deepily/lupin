@@ -20,7 +20,7 @@ The handlers in `routers/v2_ask.py`. All need a signed-in user; bodies are on [[
 - `ask_audio` (`POST /api/v2/ask-audio`) transcribes an uploaded file, then asks the text. The 200 body is NDJSON: a transcript line, then one ask or error line. The ask starts before the response, so a client that drops after line 1 does not cancel it.
 - `transcribe` (`POST /api/v2/transcribe`) returns only the words and asks nothing. It needs no flow, so the `v2 flow enabled` gate does not apply.
 - `v2_resume` (`POST /api/v2/resume`) answers a parked question. An unknown or expired `pending_id` returns status `expired`.
-- `v2_resume_job` (`POST /api/v2/resume-job`) resumes a stalled job from its checkpoint and pushes the new job. A job id shape goes straight to the factory; anything else goes through the resume resolver and may answer `ambiguous` with candidates.
+- `v2_resume_job` (`POST /api/v2/resume-job`) resumes a stalled job from its checkpoint and pushes the new job. A job id shape (not `tfe-`) goes straight to the factory, and a non-admin must own that job. Anything else goes through the resume resolver and may answer `ambiguous` with candidates.
 - `get_todo_queue` hands the live todo queue to `v2_resume_job`.
 
 ## Don't

@@ -29,5 +29,5 @@ Three groups of `/api/arbiter` routes: the cached fleet snapshot, the fleet-size
 - Don't read the cap response as an echo. It is re-read from the file, so it shows what was persisted.
 
 ## Invariants
-- A key missing or defined twice in the configuration file answers 409 with the writer's own message.
+- The cap route answers 409 with the writer's own message for a key missing or defined twice. The skeleton crew route inserts a missing key and answers 409 only for one defined twice.
 - A failed broadcast never fails a skeleton crew flip.

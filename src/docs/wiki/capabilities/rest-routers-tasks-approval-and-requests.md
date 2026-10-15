@@ -22,13 +22,13 @@ The operator controls and the manager request flow in `cosa.rest.routers.tasks`,
 - `get_approval_settings`, `GET /tasks/approval-settings`: the effective settings and where each came from. Any authenticated caller may read them.
 - `patch_approval_settings`, `PATCH`, body `ApprovalSettingsRequest`: only the operator's login may write, 403 for anyone else. An empty body or a bad value is 422 and writes nothing. The reply is the settings read back.
 - `get_manager_pull` and `set_manager_pull`, `/tasks/manager-pull`: read or flip the switch that stops pulling work into in_progress. The write needs an admin and a real boolean in `ManagerPullRequest`.
-- `file_request`, `POST /tasks/{id}/request` (`RequestFileIn`): a manager asks the operator to `admit` or `demote` one row. The row's status does not move.
-- `record_request_verdict`, `.../request-verdict` (`RequestVerdictIn`): the operator answers `approved` or `denied`. Approval performs the move.
+- `file_request`, `POST /tasks/{id}/request` (`RequestFileIn`): a manager asks the operator to `admit` or `demote` one row. The row's status does not move. A non-manager is 403, a move the row's status cannot make is 409, and a blank reason is 422.
+- `record_request_verdict`, `.../request-verdict` (`RequestVerdictIn`): the operator answers `approved` or `denied`. Approval performs the move. A row with no request is 409, and a caller who is not the operator is 403.
 - `get_request_badges`: `{ task_area, holding_area }`, the pending demote and promote counts, never summed.
 
 ## Don't
 - Don't send a boolean setting as the string `"false"`. The strict fields refuse it.
-- Don't file more than one request per row. A second is 409 while one is pending.
+- Don't file a second request on a row while one is pending. It is 409, except an admit whose pledged ticket has since died, which may be re-filed.
 
 ## Invariants
 - A denial changes nothing on the row. A refused approval rolls back the verdict.

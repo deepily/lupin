@@ -17,11 +17,11 @@ The pieces of `routers/commons.py` that send one message to every live Claude Co
 
 ## What it does
 - `init_commons_state` hands the router its commons store, rate limiter, ack watcher and the active-session age limit at startup. It can be called again, and the routes answer 503 until it has run.
-- `BroadcastRequestBody` is the body of `POST /api/commons/broadcast-to-cc-sessions`: `message`, optional `broadcast_id`, `require_ack` (default true) and `include_originator` (default true).
+- `BroadcastRequestBody` is the body of `POST /api/commons/broadcast-to-cc-sessions`: `message`, optional `broadcast_id`, `require_ack` (default true) and `include_originator` (default true, no effect: the route passes no originator seat).
 - `validate_broadcast_body` refuses an empty message and one holding a system-reminder tag. `validate_broadcast_id` accepts `None` or a UUIDv4. Both return `( valid, error_detail )`.
 - `build_pseudo_sender_id` makes `broadcast-<8 hex of sha256( user_id )>` for the `broadcasts` topic. It has no `@`, so the store can read the header back.
-- `perform_fanout` writes one `broadcasts` entry and pushes one `action:broadcast_received` notification per recipient. It returns the success count and the session ids that failed. One failure does not stop the rest.
-- `post_broadcast_to_cc_sessions` runs the whole broadcast off the event loop. It answers 400 for a bad body or id, 409 for a repeated `broadcast_id`, and 429 with `Retry-After` when rate limited.
+- `perform_fanout` writes one `broadcasts` entry per recipient, then pushes that recipient's `action:broadcast_received` notification. It returns the success count and the failed session ids. One failure does not stop the rest.
+- `post_broadcast_to_cc_sessions` runs the whole broadcast off the event loop. It answers 400 for a bad body or id and 409 for a repeated `broadcast_id`, but only when `require_ack` is true. It answers 429 with `Retry-After` when rate limited.
 - `get_notification_queue` fetches the notification queue the fan-out pushes onto.
 
 ## Don't

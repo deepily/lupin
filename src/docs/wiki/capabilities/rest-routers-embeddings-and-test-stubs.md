@@ -23,7 +23,7 @@ The `/api/embeddings` HTTP door to the server's embedding provider, plus three s
 - `generate_embedding` takes `EmbedRequest` (`text`, `content_type` of `prose` or `code`, optional `role` of `query` or `document`) and returns `EmbedResponse` (`embedding`, `dimensions`).
 - `generate_embeddings_batch` takes `EmbedBatchRequest` and returns `EmbedBatchResponse` (`embeddings`, `dimensions`, `count`). An empty `texts` list answers 400.
 - `get_info` returns `EmbedInfoResponse`: `provider`, `dimensions`, `status` and the `engines` block. It loads no model.
-- All three accept an API key or a JWT. A role the provider cannot honour answers 422. Inference runs off the event loop.
+- All three accept an API key or a JWT. Inference runs off the event loop. On generate and batch, a role the provider cannot honour answers 422. `get_info` takes no role.
 - `mock_job_health` returns `{ status: "ok", available: true }` for the mock job endpoint.
 - `get_static_dir` gives the main module's static directory to a route.
 - `delete_snapshot` and `get_answer` are stubs. The first reports a deletion and answers 404 for an id starting with `invalid`. The second serves `gentle-gong.mp3` as the answer audio.

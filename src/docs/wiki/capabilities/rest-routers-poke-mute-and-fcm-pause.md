@@ -21,11 +21,11 @@ The fleet switch for the heartbeat Stop poke (`/api/heartbeat`) and the mobile w
 ## What it does
 - `get_poke_mute` returns the derived state from `derived_poke_mute_state`, for an API key or a JWT.
 - `derived_poke_mute_state` reads the switch file and skeleton crew. `muted` is true when either is on, and `source` is `file`, `skeleton_crew`, `both` or `none`. It writes nothing.
-- `PokeMuteRequest` carries one strict boolean, `muted`. `refuse_api_key_writer` answers 403 to an API-key-only caller before the admin check.
+- `PokeMuteRequest` is the body of `PUT /api/heartbeat/poke-mute` (`put_poke_mute`, on [[heartbeat-arbiter]]): one strict boolean, `muted`. `refuse_api_key_writer` answers 403 to an API-key-only caller before the admin check.
 - `register_fcm_token` upserts a device token for the authenticated user. `RegisterTokenRequest` holds `token`, `platform` (only `android`) and `user_email`.
 - `unregister_fcm_token` removes a token and answers 200 even when none existed. `UnregisterTokenRequest` holds the `token`.
-- `set_push_pause` is admin only. `PushPauseRequest` holds `paused` and `minutes`. A pause lasts until the timer, a resume or a restart.
-- `get_push_pause` reports the state, including the live `push_enabled` key.
+- `set_push_pause` (POST) is admin only. `PushPauseRequest` holds `paused` and `minutes`. A pause lasts until the timer, a resume or a restart.
+- `get_push_pause` (GET, also admin only) reports the state, including the live `push_enabled` key.
 
 ## Don't
 - Don't pass `minutes` outside 1 to 1440 with `paused: true`. The handler answers 400.

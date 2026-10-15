@@ -28,7 +28,7 @@ The solution-snapshot routes of `cosa.rest.routers.admin`, all behind `require_a
 - `delete_snapshot`, `DELETE /admin/snapshots/{id_hash}`, removes it physically, 404 when absent.
 - `get_snapshot_preview`, `.../preview`, returns the first 300 characters of the code and the solution gist. With no gist it falls back to the full solution summary. Reply: `SnapshotPreviewResponse`.
 - `get_similar_snapshots`, `.../similar`, returns two lists of `CodeSimilarityResult`, one by code and one by explanation, in a `SimilarSnapshotsResponse`. Thresholds default to 85, `limit` to 20, and `ensure_top_result` keeps the best match even below threshold. A failure in one list leaves it empty.
-- `refresh_source` re-executes the server process after a 0.2 second delay and answers 202 with a `RefreshSourceResponse` of status, pid and env.
+- `refresh_source`, `POST /admin/admin/refresh-source`, because the route's own path sits under the router prefix. It re-executes the server process after 0.2 seconds and answers 202 with a `RefreshSourceResponse` of status, pid and env.
 
 ## Don't
 - Don't call `refresh_source` outside the test server. It answers 403 unless `LUPIN_ENV` is `test` or `testing` and the key `admin refresh source enabled` is true.

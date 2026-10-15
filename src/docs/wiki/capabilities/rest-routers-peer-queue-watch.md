@@ -26,8 +26,10 @@ Admin routes that let the dev server read and watch the queues of a peer Lupin s
 - `cancel_all_watchers_on_shutdown` cancels every watcher. The main module calls it at shutdown.
 
 ## Don't
-- Don't use a host outside `peer queue allowed hosts`. The answer is 400.
-- Don't expect the caller's JWT to reach the peer. A service-account login is used.
+- Don't use a host outside `peer queue allowed hosts`, a queue name other than the four above, or a `signal` other than the two above. Each answers 400.
+- Don't expect the caller's JWT to reach the peer, whatever the route description says. A service-account login is used.
 
 ## Invariants
-- A peer failure answers 502.
+- `get_peer_queue` answers 502 when the peer rejects the login, is unreachable or answers badly.
+- It answers 500 when `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` or `_PASSWORD` is missing.
+- A failed poll inside the watcher does not end it. It is written to `last_error` and the next poll runs.

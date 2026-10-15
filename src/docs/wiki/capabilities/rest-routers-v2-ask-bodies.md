@@ -28,7 +28,7 @@ The typed bodies of the `/api/v2/*` doors on [[rest-routers-v2-ask-doors]]. The 
 - `ResumeJobRequest` takes `resume_from` plus optional lead and worker model overrides and a `thinking_effort` of low, medium, high, xhigh or max. `ResumeJobResponse` status is `resumed` or `ambiguous`; it carries the new `resumed_job_id` and the phase it restarts from.
 
 ## Don't
-- Don't put `scheduled_at` or `monopolize` inside `args`. They are checked against nothing there.
+- Don't put `scheduled_at` or `monopolize` inside `args`. `args` is checked against the command's argument contract, and no contract names them.
 - Don't read `queue_position` as live. It is the queue size at submit time.
 
 ## Invariants

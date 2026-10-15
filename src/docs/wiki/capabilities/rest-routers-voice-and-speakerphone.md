@@ -15,19 +15,21 @@ pins:
 ---
 # Voice persona and speakerphone routes
 
-The `/api/cosa-voice` routes that read and change a session's voice persona and speakerphone flag, both kept on the session bridge file. See [[voice-persona-allocation]].
+The `/api/cosa-voice` routes that read and change a session's voice persona and speakerphone flag, both kept on the session bridge file. Every route takes an API key or a JWT. See [[voice-persona-allocation]].
 
 ## What it does
-- `get_voice_persona_pool` returns the configured pool, occupied names and free names. A dead-PID bridge counts as free.
-- `get_voice_persona_endpoint` returns a session's persona, or null.
-- `release_voice_persona_endpoint` clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set.
-- `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample`, which returns `audio/mpeg`. A voice outside the pool is 400, and an upstream failure 503.
+- `get_voice_persona_pool` (`GET /voice-persona/pool`) returns the configured pool, occupied names and free names. A dead-PID bridge counts as free. It takes no session id.
+- `get_voice_persona_endpoint` (`GET /voice-persona/{session_id}`) returns a session's persona, or null.
+- `release_voice_persona_endpoint` (`POST /voice-persona/{session_id}/release`) clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set.
+- `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample` (`POST /voice-persona/sample`), which returns `audio/mpeg`. A voice outside the pool is 400, and an upstream failure 503.
 - `get_config_manager` builds a `ConfigurationManager` for these routes.
 - `get_notification_queue` (in both routers) hands the notification queue from the main module to a route.
-- `SpeakerphoneBody` carries `on`. `get_speakerphone_endpoint` returns `{ session_id, on }`, and 404 when no bridge matches.
+- `get_speakerphone_endpoint` (`GET /speakerphone/{session_id}`) returns `{ session_id, on }`. A bridge with no flag gets the mode default: false in solo, true in chorus.
+- `POST /speakerphone/{session_id}` takes a `SpeakerphoneBody` (`on`) and writes the flag to the bridge. It broadcasts `speakerphone_changed` and returns `broadcast_delivered` and `displaced_sessions`. In solo mode, turning it on first turns it off on every other active session. In chorus mode nothing is displaced.
 
 ## Don't
 - Don't pass an arbitrary `voice_id` to the sample route. Only pool voices and the overflow persona's voice are served.
+- Don't treat a failed broadcast as a failed write. The bridge write is the state, and a push failure is only logged.
 
 ## Invariants
-- A session id with no bridge answers 404 on every route here.
+- A session id with no bridge answers 404 on the per-session routes. The pool and sample routes take no session id.

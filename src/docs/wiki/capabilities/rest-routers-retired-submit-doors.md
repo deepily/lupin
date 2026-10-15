@@ -15,7 +15,7 @@ pins:
 ---
 # Retired submit doors
 
-Ten tombstone handlers. Each one answers 410 Gone and names `/api/v2/submit` as the replacement. The shared refusal is in [[retired-queue-doors]].
+Ten tombstone handlers. Each one answers 410 Gone. Nine name `/api/v2/submit` as the replacement; `submit_podcast_job` names `/api/v2/ask`. The shared refusal is in [[retired-queue-doors]].
 
 ## What it does
 - `submit_bug_fix` stands for `/api/bug-fix-expediter/submit`.
@@ -23,7 +23,7 @@ Ten tombstone handlers. Each one answers 410 Gone and names `/api/v2/submit` as 
 - `submit_research_to_podcast` and `submit_research_to_presentation` stand for the two `/api/deep-research-to-*/submit` paths.
 - `submit_podcast_job`, `submit_presentation_job`, `submit_swe_team_task`, `submit_test_suite` and `submit_mock_job` stand for the `/submit` path of their feature.
 - Each handler calls `gone( path )`, which raises `HTTPException( 410 )` with the replacement door and the `REMOVE BY` date.
-- A caller moves to `POST /api/v2/submit` with the command as a string and its old fields as `args`.
+- A caller moves to `POST /api/v2/submit` with the command as a string and its old fields as `args`. The podcast door's caller asks through `POST /api/v2/ask` instead.
 
 ## Don't
 - Don't add an auth dependency to a tombstone. A stale client must see the 410, not a 401.

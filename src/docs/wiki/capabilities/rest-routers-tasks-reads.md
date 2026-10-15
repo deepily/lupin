@@ -20,7 +20,7 @@ pins:
 The read routes of `cosa.rest.routers.tasks`, under `/api`, plus the flow-ratio settings. Writes are in [[rest-routers-tasks-writes]].
 
 ## What it does
-- `query_tasks`, `GET /tasks`: exact-match filters, newest first, `limit` up to 500. It returns `tasks`, `count`, `total`, `has_more`, `truncated` and `warnings`. `count_only=true` returns a true count with a per-status `breakdown`.
+- `query_tasks`, `GET /tasks`: exact-match filters, newest first, `limit` up to 500. It returns `tasks`, `count`, `total`, `has_more`, `truncated` and `warnings`. `count_only=true` returns a true count with a per-status `breakdown` and a `priority_breakdown`. Without `unscoped_audit=true`, a query with no filter that would return over 50 live rows is 400.
 - `query_event_stream`, `GET /tasks/events`: the audit trail across all items, filtered by actor, transition, `to_status`, project and `since` and `until`. An unknown `to_status` is 422.
 - `get_task`, `GET /tasks/{id}`: one item by full UUID or a hex prefix of 4 or more characters. An ambiguous prefix is 422 naming the candidates.
 - `get_task_events`: one item's events, oldest first. 404 for an unknown item.
