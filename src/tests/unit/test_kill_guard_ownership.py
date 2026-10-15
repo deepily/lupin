@@ -799,6 +799,7 @@ def _run_real( command, cwd, spy ):
 
 # ( command, outcome, the selectors pgrep must have been handed )
 _NONE = "none-of-these-match-" + uuid.uuid4().hex
+_VAR  = uuid.uuid4().hex[ :6 ]     # random value, but never part of a parametrize id
 _OPTION_TABLE = [
     # selecting options are translated, output-only ones are dropped
     ( f"pkill -e -f {_NONE}",              "resolved", [ [ "-f", _NONE ] ] ),
@@ -842,7 +843,7 @@ _OPTION_TABLE = [
     ( f"killall -r {_NONE}.*",             "resolved", [ [ f"{_NONE}.*" ] ] ),
     ( "killall kgnone-a kgnone-b",         "resolved", [ [ "-x", "kgnone-a" ], [ "-x", "kgnone-b" ] ] ),
     # what cannot become a valid selector is refused, with the remedy
-    ( "pkill -f ${VAR_" + uuid.uuid4().hex[ :6 ] + "}", "refused", None ),
+    ( "pkill -f ${VAR_" + _VAR + "}", "refused", None ),
     ( f"pkill -f `echo {_NONE}`",          "refused", None ),
     ( f"pkill -f 'a b' {_NONE}",           "refused", None ),
     ( f"pkill -f {_NONE} second",          "refused", None ),
@@ -855,7 +856,7 @@ _OPTION_TABLE = [
 ]
 
 
-@pytest.mark.parametrize( "command, outcome, selectors", _OPTION_TABLE, ids=[ row[ 0 ].replace( _NONE, "NONE" ) for row in _OPTION_TABLE ] )
+@pytest.mark.parametrize( "command, outcome, selectors", _OPTION_TABLE, ids=[ row[ 0 ].replace( _NONE, "NONE" ).replace( _VAR, "VAR" ) for row in _OPTION_TABLE ] )
 def test_every_option_form_is_resolved_refused_or_allowed_on_purpose( command, outcome, selectors, worktree ):
     spy    = _Spy()
     reason = _run_real( command, worktree, spy )
@@ -1085,7 +1086,7 @@ _READABLE_DOLLARS = [
 ]
 
 
-@pytest.mark.parametrize( "command, selectors", _READABLE_DOLLARS )
+@pytest.mark.parametrize( "command, selectors", _READABLE_DOLLARS, ids=[ row[ 0 ].replace( _NONE, "NONE" ) for row in _READABLE_DOLLARS ] )
 def test_a_dollar_that_is_not_an_expansion_is_a_pattern( command, selectors, worktree ):
     spy = _Spy()
     assert _run_real( command, worktree, spy ) is None

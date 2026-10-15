@@ -40,10 +40,47 @@ import pytest
 # calls for EVERY consumer. This delegation keeps the name and the signature so
 # src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
 # PATH and reaches in for this attribute — still guards it.
+from cosa.utils import dotenv_password as _dotenv_password
 from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
 
 
 _seed_db_password_from_dotenv()
+
+
+# Under xdist a worker inherits the controller's seeded DB_USER / DB_PASSWORD, so its own seeder
+# returns early and its `_SEEDED` stays empty. reselect_seeded_login then reads the inherited login
+# as one the operator exported (row 62777c82). The controller hands what it seeded to each worker
+# through xdist's workerinput, never through os.environ, so no child process inherits it. A worker
+# restores a key only while its environment still holds the handed-off value.
+@pytest.hookimpl( optionalhook=True )
+def pytest_configure_node( node ):
+    """
+    Hand the controller's seeded login to an xdist worker.
+
+    Requires:
+        - node is the xdist WorkerController being configured
+
+    Ensures:
+        - node.workerinput carries a copy of the seeder's record under "lupin_seeded_login"
+        - os.environ is not touched
+    """
+    node.workerinput[ "lupin_seeded_login" ] = dict( _dotenv_password._SEEDED )
+
+
+def _restore_seeded_login( config ):
+    """
+    Restore the seeder's record in an xdist worker from the controller's workerinput.
+
+    Requires:
+        - config is the pytest Config for this session
+
+    Ensures:
+        - does nothing outside an xdist worker
+        - records a handed-off key only while os.environ still holds the handed-off value
+    """
+    handed_off = config.workerinput.get( "lupin_seeded_login", { } ) if hasattr( config, "workerinput" ) else { }
+    for key, value in handed_off.items():
+        if os.environ.get( key ) == value: _dotenv_password._SEEDED[ key ] = value
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -263,6 +300,7 @@ def pytest_configure( config ):
         - returns silently when --cov is inactive, when COVERAGE_FILE is exported,
           or when LUPIN_ALLOW_SHARED_COVERAGE is set
     """
+    _restore_seeded_login( config )
     cov_active = bool( getattr( config.option, "cov_source", None ) ) and \
                  not getattr( config.option, "no_cov", False )
     if not cov_active: return
