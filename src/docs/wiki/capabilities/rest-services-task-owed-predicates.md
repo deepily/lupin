@@ -16,7 +16,7 @@ pins:
 ---
 # Task store owed-work predicates
 
-Which task rows count as owed, and which waits can never end. Each rule has a Python form for plain dicts and a SQLAlchemy twin for queries; see [[task-store]] for the statuses.
+Which task rows count as owed, and which waits can never end. The park, holding and stale-reason rules and the owed-only set have a Python form for plain dicts and a SQLAlchemy twin for queries. The blocker helpers and `is_owed` are Python only. See [[task-store]] for the statuses.
 
 ## What it does
 - A parked row is park-active while its `next_chase_ts` is in the future. Expiry is computed at read time and never written back. `park_is_active_clause( model, now )` is the SQL twin and treats a NULL chase as not active.

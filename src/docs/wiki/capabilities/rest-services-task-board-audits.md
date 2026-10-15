@@ -16,7 +16,7 @@ pins:
 ---
 # Task board audits: prose refs, rejoin and epic keys
 
-Read-only scanners for the task store, each paired with a disclosure of what it could not see. The rules they check are in [[task-store]].
+Scanners and helpers for the task store, each paired with a disclosure of what it could not see. The prose-ref and epic-key functions only read. The rejoin helpers belong to a pass whose verdict licenses a write, dry-run by default. The rules they check are in [[task-store]].
 
 ## What it does
 - `strip_amendment_stamps( body )` removes amendment header stamps and returns `( text, count )`, so a shrinking result can be told from a working filter.
