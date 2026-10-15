@@ -15,26 +15,26 @@ pins:
 ---
 # Reuse search tools
 
-Four MCP tools ask whether a new definition already exists. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which reads every source file and writes `src/docs/index`.
+Four MCP tools ask whether a new definition already exists. They read the [[symbol-index]] and the wiki, and send short symbol descriptions to the Jev model. They never edit code, but a stale index is rebuilt first, which writes `src/docs/index`.
 
 ## The four tools
-- `check_exists( need )` asks about capability pages first, then sweeps the symbols they cover, then every indexed symbol if that finds nothing. It returns a verdict, a shortlist capped at 10, and a receipt id. An empty need answers `EMPTY_NEED`.
-- `fetch_similar( entry )` uses one indexed symbol as the need and leaves that symbol out. It returns the same shape without a verdict. The id is looked up among every definition, `_private` and nested ones included. `UNKNOWN_ENTRY` comes back for an id in no definition, only while the index is healthy. A definition the tool may not send answers `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX`, with no receipt.
-- `read_capability( names )` reads `capabilities/<name>.md` from the wiki and makes no Jev call. A bad or missing name is reported per name, and a receipt is written regardless.
-- `replay( receipt_id )` checks the receipt, re-runs a search receipt against the stored snapshot (cache only), then again at the current tree. A receipt stored with a hard flag is copied, not re-run, for the snapshot step. A `read_capability` receipt has no re-run. It returns both results and the differences.
-- The search tools write a receipt, a snapshot and Jev cache entries. `read_capability` writes only a receipt. Nothing is overwritten. By default all live under the fleet data root's `reuse-review` folder; `LUPIN_REUSE_DATA_DIR` moves them.
+- `check_exists( need )` redacts the need, then asks Jev about index entries. It returns a verdict, a shortlist capped at 10, the nearest entries and a receipt id. An empty need answers `EMPTY_NEED`.
+- `fetch_similar( entry )` uses one indexed symbol as the need and asks about every other entry. It returns the same shape with `uncertain` in place of a verdict.
+- Its id is looked up among all definitions, private ones included. `UNKNOWN_ENTRY` means no definition, only while the index is healthy. `EXCLUDED_SENSITIVE_CONTENT` or `EXCLUDED_PREFIX` means it may not be sent.
+- `read_capability( names )` reads `capabilities/<name>.md` and makes no Jev call. A bad or missing name is `BAD_NAME` or `NOT_FOUND` per name.
+- `replay( receipt_id )` re-runs a receipt on cached answers only, then at the current tree, and returns both results and the differences. A receipt of the removed page route answers `ROUTE_RETIRED`.
+- Receipts, snapshots, Jev cache entries and the per-session call log live under the fleet data root's reuse-review folder, never overwritten. `LUPIN_REUSE_DATA_DIR` moves them. A call-log middleware appends one line per tool call and never fails the call.
+- Without pack settings, `check_exists` sends one request per sendable entry, route `full`. With `LUPIN_REUSE_JEV_PACK_SIZE`, `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME` set, requests are packed and the [[candidate-stage]] picks the entries, route `candidates`.
+- A failed candidate stage answers `UNCERTAIN_READ_SOURCE` with cause `CALL_FAILED` and asks nothing. A policy with a band can widen the shortlist to 512; the shipped policy has none.
 
 ## What is sent to Jev
-- `check_exists` first sends one POST per wiki page listed in `INDEX.md` that is pinned and names a package. It sweeps the symbols in up to 5 pages scoring 0.3 overlap or more, and a symbol at 0.3 decides. If none does, every symbol is swept; `fetch_similar` always sweeps all. The receipt records the route.
-- Each symbol POST holds the need and the symbol's id, signature and first docstring line. A repeated question is answered from the cache and sends nothing. Source bodies are never sent.
-- `sendable` blanks string defaults in signatures. It then drops any symbol whose id, signature or docstring line holds an email, URL, IP address, path or credential-shaped token. Dropped ids are not reported, so `NEW` means new among the sendable symbols.
-- The one-request sweep runs 32 workers and tries each symbol up to three times. A 429 or 529 is retried inside a try, and each call times out at 60 seconds. One call spends at most 9,000 HTTP attempts, retries included, across all workers. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it, and a value that is not a whole number from 1 to 9,000 is refused with `BAD_BUDGET` in the error detail. Once it is spent, cached answers still serve, and entries never attempted are counted as `not_checked` in the receipt.
-- A 401 or 403 stops later calls, but calls already in flight can finish. A 422 refuses only its own entry; five in a row with no answer between them stop the sweep. The key comes from `JEV_API_TOASTER`. `LUPIN_REUSE_JEV_PACK_SIZE`, with `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME`, sends entries in packs, and a ledger refusal answers `SPEND_LEDGER`. No INI key controls any of this.
+- Each request holds the redacted need and one symbol's id, signature and first docstring line. Source bodies are never sent. A repeated question is answered from the cache.
+- `sendable` blanks string defaults, then drops any symbol whose id, signature or docstring line holds an email, URL, IP address, path or credential-shaped token. Dropped ids are not reported. So `NEW` means new among sendable symbols.
+- A sweep runs 32 workers and tries each entry up to three times. A 429 or 529 is retried, and each call times out at 60 seconds.
+- One call spends at most 9,000 HTTP attempts. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it; a value outside 1 to 9,000 is refused with `BAD_BUDGET`. Once spent, cached answers still serve and unasked entries count as `not_checked`.
+- A 401 or 403 stops later calls. A 422 refuses only its own entry, and five distinct refusals in a row stop the sweep. The key comes from `JEV_API_TOASTER`.
 
 ## The verdict
-- Any flag beats the three outcomes below. `decide` then answers `UNCERTAIN_READ_SOURCE` with a cause: `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER`, `LOW_CONFIDENCE` or `NEAR_CUTOFF`. `NEAR_CUTOFF` holds only when the policy carries a `band` and any answered symbol's overlap is inside it of a cut-off, with the edge outside.
-- `LOW_CONFIDENCE` holds when a symbol has 0.3 overlap or more and confidence under 0.9, unless a strong match exists. A strong match has overlap and confidence both at 0.9 or more, and the doubtful symbols are then listed as `doubtful`. `INDEX_STALE` means the index build raised any error. `CALL_FAILED` holds when any call failed or any entry was never asked, budget cut-offs included.
-- With no flag, `NEW` means no symbol reaches 0.3 overlap. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did. With a strong match, only the strong symbols are counted for that choice.
-
-## Logging
-- The call-log middleware appends a line per call of these tools to `call-log/<session id>.jsonl`. It holds the time, tool, caller, session, receipt id, error and the first 300 characters of the arguments. Logging failures are swallowed.
+- Any cause beats the three outcomes. The verdict is then `UNCERTAIN_READ_SOURCE`, with a cause from `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER`, `LOW_CONFIDENCE` or `NEAR_CUTOFF`.
+- `LOW_CONFIDENCE` holds when a symbol has 0.3 overlap or more and confidence under 0.9, unless a strong match (both at 0.9 or more) exists. `CALL_FAILED` holds when any call failed or any entry was never asked.
+- With no cause, `NEW` means no symbol reaches 0.3 overlap. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did.
