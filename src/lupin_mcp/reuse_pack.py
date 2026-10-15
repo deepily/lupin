@@ -325,6 +325,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - answered entries are in entry order; a cache hit costs no request and the misses are packed together
         - every answered entry is cached on its own, with the pack it came from
         - failed_attempts holds one { request, ids, attempts } for each request that left entries without an answer
+          an entry whose cached answer was kept is in no failed_attempts or unasked list, so a replay reads the answer the live run used
         - attempts_answered and attempts_failed split the rows' attempts by whether the request was answered
         - under SHAPE_WHOLE an entry that already has a cached answer keeps it, whatever its pack's response says, and is not counted as a call
         - a pack the budget refuses is not reached and no HTTP is made for it
@@ -397,6 +398,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
     failed_attempts = []
     for r in rows:
         left = r[ "unasked" ] + [ m[ "id" ] for m in _malformed_of( r ) ] if r[ "status" ] == "answered" else ( r[ "ids" ] if r[ "status" ] == "failed" or ( r[ "status" ] == "refused" and r[ "size" ] == 1 ) else [] )
+        left = [ i for i in left if i not in cached ]                          # a cached answer was kept, so a replay must read it too
         if left: failed_attempts.append( { "request": r[ "request_hash" ], "ids": left, "attempts": r[ "attempts" ] } )
     return { "answers": answers,
              "failed": [ rec[ "id" ] for rec in entries if state[ rec[ "id" ] ] == "failed" ],
@@ -410,7 +412,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
              "usage_missing": sum( 1 for r in rows if r[ "status" ] == "answered" and r[ "tokens_in" ] is None ),
              "transport_calls": [ { **r[ "http" ], "model": r[ "model" ] } for r in rows if r[ "http" ] is not None ],
              "attempt_logs": [ r[ "attempt_log" ] for r in rows if r[ "attempt_log" ] ],
-             "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] ],
+             "rows": rows, "requests": len( rows ), "unasked": [ i for r in rows if r[ "status" ] == "answered" for i in r[ "unasked" ] if i not in cached ],
              "malformed": [ m for r in rows for m in _malformed_of( r ) ], "oversize": oversize,
              "cache_write_failed": unwritten, "refused_422": breaker.refusals,
              "stopped_by": "model_mismatch" if breaker.model_mismatch is not None else ( "consecutive_422" if breaker.stopped else None ) }

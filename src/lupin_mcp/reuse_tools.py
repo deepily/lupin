@@ -239,6 +239,8 @@ def context_from_environment( root=None ):
         - a directory that is not a git working tree is used as it is, and the tools then answer
           NOT_LUPIN_TREE
         - LUPIN_REUSE_JEV_CALL_BUDGET sets the call budget; unset or empty means DEFAULT_CALL_BUDGET
+        - a packed context builds its candidate stage here, so a missing storage key refuses every packed run,
+          sweep-only runs included
 
     Raises:
         - ReuseError BAD_BUDGET when that variable is not an integer from 1 to CALL_BUDGET_CAP; a budget
@@ -1248,12 +1250,22 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
 
 
 def _public( receipt, extra=None ):
-    """Ensures: returns the caller-facing result: the receipt under the name receipt_id plus its verdict fields."""
+    """
+    Return the caller-facing result of one receipt.
+
+    Ensures:
+        - returns the receipt under the name receipt_id plus its verdict fields
+        - entries_total, entries_asked and entries_not_asked are the candidate stage's counts
+        - a verdict of no match therefore says how many entries were not asked
+        - all three counts are None when no candidate stage ran
+    """
     keep = ( "verdict", "cause", "causes", "shortlist", "shortlist_total", "nearest", "doubtful", "malformed", "missing", "index_sha", "stats" )
     out  = { "status": "ok", "tool": receipt[ "tool" ], "receipt_id": receipt[ "id" ] }
     out.update( { k: receipt[ k ] for k in keep } )
     out[ "need_redactions" ] = receipt[ "need_redactions" ] if "need_redactions" in receipt else []
     out[ "unscreened_entry_paths" ] = receipt[ "unscreened_entry_paths" ] if "unscreened_entry_paths" in receipt else 0
+    counts = receipt[ "candidate_stage" ] if "candidate_stage" in receipt else None
+    for k in ( "entries_total", "entries_asked", "entries_not_asked" ): out[ k ] = counts[ k ] if counts is not None else None
     if extra: out.update( extra )
     return out
 

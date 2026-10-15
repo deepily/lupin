@@ -138,3 +138,17 @@ def test_a_measurement_arm_of_the_new_shape_has_its_own_keys_and_asks_once( ctx_
     whole( ctx, key_mode="stage1", run_index=1 )
     assert len( fake.bodies ) == n
     assert rt.JevCache( ctx.data ).get( rp.candidate_key( NEED, rt.entry_text( ENTRIES[ 0 ] ), shape=rp.SHAPE_WHOLE ) ) is None
+
+
+def test_a_cached_entry_the_response_leaves_out_stays_answered_and_is_not_a_gap_for_replay( ctx_for ):
+    """Pocholo's probe: the live run keeps the cached answer, so a frozen replay reads it too."""
+    ctx = ctx_for( Fake() )
+    whole( ctx, [ e for e in ENTRIES if e[ "id" ] != BY_ID[ 4 ][ "id" ] ] )                       # warm: every entry but fn4
+    ctx.transport = Fake( omit={ BY_ID[ 3 ][ "id" ] } )                                          # the resent middle pack: fn4 is new, Jev omits the cached fn3
+    live = whole( ctx )
+    gap_ids = [ i for f in live[ "failed_attempts" ] for i in f[ "ids" ] ]
+    assert BY_ID[ 3 ][ "id" ] in [ a[ "id" ] for a in live[ "answers" ] ]
+    assert BY_ID[ 3 ][ "id" ] not in gap_ids and BY_ID[ 3 ][ "id" ] not in live[ "unasked" ] and live[ "failed" ] == []
+    gaps   = { i: "failed" for i in gap_ids }                                                    # what replay_impl builds from stats.failed_attempts
+    frozen = whole( ctx, frozen=True, gaps=gaps )
+    assert sorted( a[ "id" ] for a in frozen[ "answers" ] ) == sorted( a[ "id" ] for a in live[ "answers" ] ) and frozen[ "failed" ] == []

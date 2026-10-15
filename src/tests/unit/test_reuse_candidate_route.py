@@ -198,3 +198,24 @@ def test_the_environment_builds_the_candidate_stage_and_a_missing_storage_key_is
     assert stage.vectors_dir == "/vec" and stage.query_cache_dir == "/qc" and str( stage.purposes_path ) == "/pp/purpose.jsonl" and stage.arm == "B2w" and stage.K == 128
     monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", "relative" )
     with pytest.raises( rt.ReuseError, match="CANDIDATE_STAGE_UNCONFIGURED" ): rt.context_from_environment( env[ 0 ] )
+
+
+def test_the_caller_sees_how_many_entries_were_not_asked_and_a_full_sweep_says_none( env ):
+    need = "read an RSS feed [cand-public]"
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need ), FakeStage() ) )
+    assert r[ "verdict" ] == "NEW" and ( r[ "entries_total" ], r[ "entries_asked" ], r[ "entries_not_asked" ] ) == ( 3, 2, 1 )
+    full = rt.sweep_need_impl( need, None, ctx_with( env, PackedFake( need ), FakeStage() ) )
+    assert ( full[ "entries_total" ], full[ "entries_asked" ], full[ "entries_not_asked" ] ) == ( None, None, None )
+
+
+def test_a_replay_reads_the_cached_answer_a_resent_pack_left_out( env ):
+    """Pocholo's probe at the replay door: the frozen run reads the answer the live run kept."""
+    need = "read an RSS feed [cand-cached-gap]"
+    small = FakeStage( ids=[ MATH_ID, FEEDS_ID ] )
+    small.K = 64                                                                              # another K, so the second lookup gets a receipt of its own
+    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT } ), small ) )          # warm: the feeds and math answers are cached
+    resent = ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT }, omit=[ FEEDS_TEXT ] ), FakeStage( ids=[ MATH_ID, FEEDS_ID, SERVE_ID ] ) )
+    r      = rt.check_exists_impl( need, resent )                                             # the serve entry is new, so the whole pack goes again, without feeds
+    assert r[ "verdict" ] == "REUSE" and receipt_of( env, r )[ "stats" ][ "failed_attempts" ] == []
+    out = rt.replay_impl( r[ "receipt_id" ], resent )
+    assert out[ "status" ] == "ok" and out[ "frozen" ][ "verdict" ] == "REUSE" and out[ "differences" ][ "frozen" ] == []
