@@ -1154,30 +1154,32 @@ def test_a_symlink_named_like_a_swept_source_file_is_refused_when_the_commit_add
     assert [ ln for ln in lines if link in ln and "symbolic link" in ln and "NOT checked" in ln ]
 
 
-@pytest.mark.parametrize( "link,target", [ ( "src/cosa/pkg", "../rnd/pkg" ), ( "src/pkg/sub", "../../rnd/pkg" ), ( "src/web/dir", "../rnd/dir" ) ] )
-def test_a_symlink_to_a_directory_inside_the_swept_scope_is_refused_when_the_commit_adds_it( repo, monkeypatch, link, target ):
-    _no_external( monkeypatch )
-    _stage( repo, { "src/rnd/pkg/impl.py": "def f( x ):\n    return x\n", "docs/keep.md": "# K\n\nFine.\n" } )
+def _link_case( repo, link, target ):
+    """Stage a symlink to target at link over a source folder, and return the gate's answer."""
+    _stage( repo, { "src/rnd/pkg/impl.py": "def f( x ):\n    return x\n", "src/rnd/pkg/impl.ts": "export const x = 1;\n", "src/rnd/notes/a.md": "# A\n\nFine.\n", "docs/keep.md": "# K\n\nFine.\n" } )
     _git( repo, "commit", "-q", "-m", "base" )
     ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
     os.symlink( target, repo / link )
     _git( repo, "add", link )
     assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
-    rc, lines = _blocking( repo )
+    return _blocking( repo )
+
+
+@pytest.mark.parametrize( "link,target", [ ( "src/cosa/pkg", "../rnd/pkg" ), ( "src/web/dir", "../rnd/pkg" ), ( "tools/pkg", "../src/rnd/pkg" ), ( "scripts/dir", "../src/rnd/pkg" ),
+                                           ( "pkg", "src/rnd/pkg" ), ( "tools/up", "../src/rnd" ), ( "tools/root", ".." ),
+                                           ( "src/cosa/ghost", "../nowhere" ), ( "tools/out", "../../elsewhere" ), ( "tools/abs", "/etc" ) ] )
+def test_a_symlink_that_stands_for_source_files_or_for_nothing_the_index_knows_is_refused_when_the_commit_adds_it( repo, monkeypatch, link, target ):
+    _no_external( monkeypatch )
+    rc, lines = _link_case( repo, link, target )
     assert rc == gate.REFUSAL_EXIT, ( link, lines )
     assert [ ln for ln in lines if link in ln and "symbolic link" in ln and "NOT checked" in ln ]
 
 
-@pytest.mark.parametrize( "link", [ "src/rnd/dirlink", "src/tests/dirlink", "docs/dirlink", "docs/link.txt" ] )
-def test_a_symlink_to_a_directory_outside_src_or_in_unjudged_folders_is_not_refused( repo, monkeypatch, link ):
+@pytest.mark.parametrize( "link,target", [ ( "docs/dirlink", "." ), ( "docs/link.txt", "keep.md" ), ( "src/cosa/ref", "../rnd/pkg/impl.py" ), ( "tools/notes", "../src/rnd/notes" ), ( "src/rnd/dirlink", "pkg" ), ( "src/tests/dirlink", "../rnd/pkg" ) ] )
+def test_a_symlink_to_a_folder_with_no_source_file_or_in_an_unjudged_folder_is_not_refused( repo, monkeypatch, link, target ):
     _no_external( monkeypatch )
-    _stage( repo, { "docs/keep.md": "# K\n\nFine.\n" } )
-    _git( repo, "commit", "-q", "-m", "base" )
-    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
-    os.symlink( "../../docs", repo / link )
-    _git( repo, "add", link )
-    rc, lines = _blocking( repo )
-    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    rc, lines = _link_case( repo, link, target )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], ( link, lines )
 
 
 def test_a_symlink_in_the_swept_scope_that_the_commit_only_moves_is_a_plain_warning( repo, monkeypatch ):

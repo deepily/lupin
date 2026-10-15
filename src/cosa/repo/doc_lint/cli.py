@@ -134,16 +134,17 @@ def in_scope( path ):
     return not ( name.startswith( "test_" ) or name == "conftest.py" )
 
 
-def tracked_files( repo_root, suffixes ):
+def tracked_files( repo_root, suffixes, scoped=True ):
     """
     List the git-tracked files with one of the suffixes.
 
     Requires:
         - repo_root is a git working tree
-        - suffixes is a tuple of strings such as ( ".py", )
+        - suffixes is a tuple of strings such as ( ".py", ); ( "", ) lists every file
+        - scoped is a bool
 
     Ensures:
-        - returns sorted repo-relative posix paths that are in_scope
+        - returns sorted repo-relative posix paths that are in_scope; with scoped False, every path with a suffix, in scope or not
         - the population comes from git, never from a disk walk
         - names are read apart at the NUL byte, so a name git would quote is listed as it is
 
@@ -152,7 +153,7 @@ def tracked_files( repo_root, suffixes ):
     """
     res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "-z", "--", ":/" ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
-    return sorted( p for p in split_names( res.stdout ) if p.endswith( suffixes ) and in_scope( p ) )
+    return sorted( p for p in split_names( res.stdout ) if p.endswith( suffixes ) and ( in_scope( p ) or not scoped ) )
 
 
 def build_parser( description ):

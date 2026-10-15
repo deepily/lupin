@@ -60,7 +60,7 @@ ALIASED    = { "open" }
 EXPECTED = {
     "changed_ranges.changed_line_ranges:subprocess.run#0" : ( CRASH, CRASH ),
     "cli.run_linter:open#0"                               : OFF,
-    "cli.tracked_files:subprocess.run#0"                  : OFF,
+    "cli.tracked_files:subprocess.run#0"                  : ( CRASH, CRASH ),
     "counts._read_disk.read:open#0"                       : OFF,
     "counts.counted_paths:subprocess.run#0"               : ( CRASH, CRASH ),
     "counts.differing_rule_files:subprocess.run#0"        : ( CRASH, CRASH ),
@@ -228,6 +228,8 @@ def _build( root, new_stamp ):
     _git( root, "commit", "-q", "--no-verify", "-m", "base" )
     ( root / ".git" / "MERGE_HEAD" ).write_text( _git( root, "rev-parse", "HEAD" ), encoding="utf-8" )
     _stage( root, { "src/pkg/a.py": _doc( "This is NOT fine." ), "src/tests/t.py": _doc( "This is NOT fine." ), "src/web/a.ts": "/** Fine. */\n", "docs/split/02-b.md": SEEDED } )
+    os.symlink( "../nowhere", root / "src" / "pkg" / "lnk" )                                                    # a staged link with no source name: judged by its target through tracked_files
+    _git( root, "add", "-f", "src/pkg/lnk" )
     if new_stamp:
         _stage( root, { counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ), ts_counts.TABLE_PATH: counts.table_text( {}, "another-stamp" ), ts_doc_exists.TABLE_PATH: counts.table_text( {}, "another-stamp" ) } )
     return root
@@ -352,8 +354,8 @@ def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     assert len( sites ) == len( set( sites ) ) == 64 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 12, 19, 6 ]
-    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 27
+    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 11, 19, 6 ]
+    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 28
 
 
 def test_every_place_on_the_gates_path_answers_an_oserror_and_a_decode_error_as_its_row_says( scenarios, monkeypatch ):

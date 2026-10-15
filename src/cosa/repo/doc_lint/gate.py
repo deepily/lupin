@@ -44,6 +44,7 @@ Without --blocking, every other finding on a staged line is printed and the comm
 import argparse
 import ast
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -54,7 +55,7 @@ from collections import namedtuple
 
 from . import counts, ts_counts, ts_doc_exists, tsdoc_lint
 from .changed_ranges import PAGE_LEVEL_RULES, changed_line_ranges, filter_findings
-from .cli import SURROGATE, in_scope, line_text, shown, split_lines, split_names
+from .cli import SURROGATE, in_scope, line_text, shown, split_lines, split_names, tracked_files
 from .rule_lists import BARE_SHA_REGEX, ID_REF_EXTENDED_REGEX
 from .swept_scope import is_swept
 from .tool_runners import Unchecked, markdownlint_unnamed, run_markdownlint, run_ruff
@@ -929,6 +930,31 @@ def refusal_line( finding ):
     return f"[doc-lint] REFUSED {shown( finding.path )}:{finding.line}: {finding.rule}: {finding.message}; this history belongs in {HISTORY_HOME[ finding.rule ]}"
 
 
+def link_stands_for_source( root, link ):
+    """
+    Say whether a staged link that is not named like a source file can stand for source.
+
+    Requires:
+        - root is a git working tree
+        - link is the repo-relative path of a staged symbolic link
+
+    Ensures:
+        - True when the target text resolves outside the repository, or to nothing the index holds
+        - True when the target is a file or a folder whose files, named through the link, are a swept Python file or a TypeScript file
+        - False when the target is a folder in the index that holds no such file
+
+    Raises:
+        - OSError when the link's blob cannot be read
+        - RuntimeError from git when the listing fails
+    """
+    target   = os.fsdecode( staged_bytes( root, link ) ).strip()
+    resolved = posixpath.normpath( posixpath.join( posixpath.dirname( link ), target ) )
+    if target.startswith( "/" ) or resolved == ".." or resolved.startswith( "../" ): return True
+    below = [ f for f in tracked_files( root, ( "", ), scoped=False ) if resolved == "." or f == resolved or f.startswith( f"{resolved}/" ) ]
+    named = [ link + f[ len( resolved ): ] if resolved != "." else f"{link}/{f}" for f in below ]
+    return not below or any( ( n.endswith( ".py" ) and is_swept( n ) ) or tsdoc_lint.in_scope( n ) for n in named )
+
+
 def collect( root ):
     """
     Gather the findings, warnings and refusals for the staged files.
@@ -952,7 +978,8 @@ def collect( root ):
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
         - a staged symbolic link whose name a linter would read adds one warning the same way: its blob is a target path, not a page
         - that warning is an Unchecked when the link's name is a swept Python file or a TypeScript file and the commit adds the link or changes its target, since the language imports it as source
-        - a link whose name is no source file but sits under src/ where a swept Python or TypeScript file would, is treated the same, since it can stand for a whole directory of them
+        - a link whose name is no source file is judged by its target: Unchecked when it resolves outside the repository or to nothing the index holds, or to files that are swept Python or TypeScript named through the link
+        - a link whose target is a folder with no such file, and a link in a folder the gate does not judge, is not refused
         - it stays a plain warning for a link named like a page, whose target is judged as itself, and for a link the commit only moves
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
         - a staged Python or markdown file that staged_binary lists adds one warning, since the diff gives no touched line for it
@@ -992,9 +1019,9 @@ def collect( root ):
     created    = ( changed & set( paths ) ) | moved_in
     for p in staged_entries( root )[ 4 ]:
         named_file = p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p )
-        if not named_file and not ( p.startswith( "src/" ) and ( is_swept( f"{p}/_.py" ) or ( in_scope( f"{p}/_.ts" ) and tsdoc_lint.in_scope( f"{p}/_.ts" ) ) ) ): continue
+        if not named_file and not ( is_swept( f"{p}/_.py" ) or ( in_scope( f"{p}/_.ts" ) and tsdoc_lint.in_scope( f"{p}/_.ts" ) ) ): continue
         line = f"[doc-lint] WARNING: {shown( p )} is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked"
-        executable = not named_file or ( p.endswith( ".py" ) and is_swept( p ) ) or tsdoc_lint.in_scope( p )
+        executable = ( p.endswith( ".py" ) and is_swept( p ) ) or tsdoc_lint.in_scope( p ) if named_file else link_stands_for_source( root, p )
         warnings.append( Unchecked( line ) if executable and ( p in changed or p in moved_in ) and not is_warn_only( p ) else line )
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
