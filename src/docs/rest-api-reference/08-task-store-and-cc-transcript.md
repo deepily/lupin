@@ -115,6 +115,7 @@ Two carry Rick's ruled values. Three are defaults chosen by the implementer, to 
 
 The resident search of the reuse-lookup candidate stage. It keeps the BM25 indexes and the memory-mapped vector matrices between lookups.
 Callers authenticate with `X-API-Key` or a JWT. A vectors folder must sit under this server's reuse-review data directory.
+A container that mounts the host's folder at the host's own path names that path in `LUPIN_REUSE_REVIEW_DATA_ROOT`.
 
 | Method | Path | Auth | Summary |
 |---|---|---|---|

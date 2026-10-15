@@ -24,6 +24,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 router = APIRouter( prefix="/api/reuse-candidates", tags=[ "reuse-candidates" ] )
 
+ROOT_VARIABLE = "LUPIN_REUSE_REVIEW_DATA_ROOT"
 STATUS_OF = { ce.BAD_STAGE_UPLOAD: 422, "BAD_SEARCH_REQUEST": 422, ce.STAGE_UNKNOWN: 409, ce.VECTOR_SET_REPLACED: 409, ce.PATH_REFUSED: 403 }
 SERVICE_UNAVAILABLE = 503
 
@@ -45,8 +46,12 @@ def data_root():
     Name the folder a vectors folder must sit under.
 
     Ensures:
-        - returns the reuse-review data directory of this server's repository, as a string
+        - returns the value of LUPIN_REUSE_REVIEW_DATA_ROOT when it is set, so a container that mounts the host's folder
+          at the host's own path can name that path, which is the one a client sends
+        - otherwise returns the reuse-review data directory of this server's repository, as a string
     """
+    import os
+    if os.environ.get( ROOT_VARIABLE, "" ).strip(): return os.environ[ ROOT_VARIABLE ].strip()
     import cosa.utils.util as du
     from cosa.repo.symindex.paths import data_dir
     return str( data_dir( du.get_project_root() ) )

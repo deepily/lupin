@@ -106,3 +106,14 @@ def test_data_root_is_the_reuse_review_directory_of_this_repository( monkeypatch
     monkeypatch.setattr( du, "get_project_root", lambda: "/repo" )
     monkeypatch.setattr( paths, "data_dir", lambda root: f"{root}/data/reuse-review" )
     assert rc.data_root() == "/repo/data/reuse-review"
+
+
+def test_the_root_variable_names_the_root_a_container_mounted_at_the_hosts_own_path( monkeypatch ):
+    import cosa.repo.symindex.paths as paths
+    import cosa.utils.util as du
+    monkeypatch.setattr( du, "get_project_root", lambda: "/repo" )
+    monkeypatch.setattr( paths, "data_dir", lambda root: f"{root}/data/reuse-review" )
+    monkeypatch.setenv( rc.ROOT_VARIABLE, "  /host/projects-data/lupin/reuse-review  " )
+    assert rc.data_root() == "/host/projects-data/lupin/reuse-review"
+    monkeypatch.setenv( rc.ROOT_VARIABLE, "   " )
+    assert rc.data_root() == "/repo/data/reuse-review"
