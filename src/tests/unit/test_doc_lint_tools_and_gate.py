@@ -1227,6 +1227,20 @@ def test_a_symlink_to_a_tracked_symlink_that_ends_at_a_folder_with_no_source_fil
     assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], lines
 
 
+def _notes_chain( count ):
+    """Hops for a chain of count links with tools/a included, ending at notes."""
+    names = [ "b", "c", "d", "e", "f", "g", "h", "i" ][ : count - 1 ]
+    return [ ( f"tools/{n}", nxt ) for n, nxt in zip( names, names[ 1: ] + [ "../src/rnd/notes" ] ) ]
+
+
+@pytest.mark.parametrize( "links,refused", [ ( 8, False ), ( 9, True ) ] )
+def test_a_chain_of_eight_links_is_judged_and_a_chain_of_nine_is_refused( repo, monkeypatch, links, refused ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, _notes_chain( links ) )
+    assert ( rc == gate.REFUSAL_EXIT ) is refused, lines
+    assert bool( [ ln for ln in lines if "REFUSED" in ln ] ) is refused, lines
+
+
 def test_a_symlink_in_the_swept_scope_that_the_commit_only_moves_is_a_plain_warning( repo, monkeypatch ):
     _no_external( monkeypatch )
     ( repo / "src" / "cosa" ).mkdir( parents=True )
