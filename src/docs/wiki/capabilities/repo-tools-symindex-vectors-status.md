@@ -15,7 +15,7 @@ Says whether the stored vector set is stale, and files one store row when it is.
 
 ## Running it
 - `python -m cosa.repo.symindex.vector_status [--root R]` prints the status as JSON and exits 0 when fresh, 1 when stale. The command line files no row.
-- The librarian tick runs the same check on every tick, whether or not the refresh job is switched on. It carries the verdict in its summary.
+- The librarian tick runs the same check whether or not the refresh job is switched on. It runs it only on a tick that is due, passes its guards and finishes the sync and export. The verdict goes in its summary.
 
 ## How it decides
 - `read_stale_hours` reads the key `reuse vector stale hours` and falls back to 36 when it is absent, unparsable or not above zero.

@@ -11,7 +11,7 @@ pins:
 ---
 # Daily LoC delta: console, JSON, CSV and plot output
 
-The second half of `git_loc_delta` (see [[repo-tools-git-loc-delta-read-and-bucket]]). Each function takes the `daily`, `summary` and `by_type` dicts that `DailyAggregator` produces. None of them reads git.
+The second half of `git_loc_delta` (see [[repo-tools-git-loc-delta-read-and-bucket]]). `format_console` and `format_json` take the `daily` and `summary` dicts, and `write_csv` takes `by_type`, all from `DailyAggregator`. None of them reads git.
 
 ## Console and JSON
 - `format_console( daily, summary, since, until, branch, rev_range )` returns a string with two tables. The first is daily totals with a closing total row; the second is date by file type. An empty `daily` gives the banner and "No commits in range."

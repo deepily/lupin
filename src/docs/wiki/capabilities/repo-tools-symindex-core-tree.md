@@ -25,7 +25,7 @@ pins:
 ## Which files count
 - `skipped( rel_path, skip_parts )` is true when a directory part of the path is in `skip_parts`. It is also true when the name ends in `.d.ts`, `.min.js`, `.g.dart` or `.freezed.dart`. The file's own name is never matched against the directory names.
 - `iter_files( spec, roots, suffixes )` returns the sorted, de-duplicated absolute paths under `roots` with one of the suffixes that are not skipped relative to `spec.root`.
-- `all_files( spec )` is the union of the Python, JavaScript and TypeScript, and Dart lists. `manifest` reads it, and so do the build and the freshness check, so they cannot disagree about the population.
+- `all_files( spec )` is the union of the Python, JavaScript and TypeScript, and Dart lists. `manifest` reads it. The build makes its own three `iter_files` calls, so the two populations are not tied by one shared function.
 - `manifest( spec )` is a sha1 over each indexed file's relative path, mtime in nanoseconds and size. An added, deleted, resized or touched file changes it.
 
 ## Output and failures

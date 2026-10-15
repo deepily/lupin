@@ -25,7 +25,7 @@ The parts around `DirectoryScanner` and `DirectoryAnalyzer` (see [[branch-and-di
 
 ## `DirectoryReportFormatter`
 - `format_console( stats, directory_path, scan_stats=None )`, `format_json( ... )` and `format_markdown( ... )` return strings and never print.
-- When `scan_stats` from `DirectoryScanner.get_scan_stats()` is passed, the console report adds the skipped-file and skipped-directory counts if any is above zero.
+- When `scan_stats` from `DirectoryScanner.get_scan_stats()` is passed, the console report adds a scan summary when any skip count is above zero. It prints skipped files, binary files, large files and directories, but never the unreadable-file count.
 - JSON adds `metadata` unless `json_output.include_metadata` is false. Markdown adds its Directory and Generated lines unless `markdown_output.include_timestamp` is false.
 
 ## Errors

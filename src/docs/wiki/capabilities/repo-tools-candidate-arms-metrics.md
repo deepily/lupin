@@ -27,7 +27,7 @@ The offline comparison scores each arm (a choice of ranked lists to fuse) with t
 - It also gives `median_all`, which counts an unranked twin as worse than any rank, and the twins inside the top 10, 50 and 128 (`TOP_CUTS`).
 
 ## Verdict replay
-- `decide_with_ids( rows, ids )` runs the verdict table on cached answers and returns the verdict string. Rows carrying `provides` go through `decide_provides`, the others through `decide`. No flag is set and no call counts as failed.
+- `decide_with_ids( rows, ids )` runs the verdict table on cached answers and returns the verdict string. If any row carries `provides`, all rows go through `decide_provides`; otherwise they go through `decide`. No flag is set and no call counts as failed.
 - `t2_replay( shortlists, answers )` replays every repeat of a need twice. One replay uses the shortlisted entries that have a cached answer. The other uses every answered entry as the reference. It returns `flip_rate` (needs whose repeats disagree), `agreement`, `uncached`, `needs` and the verdicts.
 - Pass `decide_fn` to `t2_replay` to swap the decider.
 

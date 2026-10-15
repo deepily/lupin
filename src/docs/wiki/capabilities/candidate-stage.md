@@ -19,7 +19,7 @@ The candidate stage ranks the symbol index so that `check_exists` asks Jev about
 - The client reads the live vector set from the INI storage folders. It asks the Lupin server's resident search for the shortlist, because the cosa-voice process cannot import numpy.
 - It defaults to arm `B2w` and K 128. When the first sweep sits near a cut-off the lookup asks again at K 512 and sweeps the extra entries.
 - `check_exists` sweeps only the shortlist, route `candidates`. `fetch_similar` always sweeps every entry, route `full`.
-- A failed stage answers `UNCERTAIN_READ_SOURCE` with cause `CALL_FAILED`, and nothing is swept. The receipt's `candidate_stage` block names the error.
+- A stage that fails on its first call answers `UNCERTAIN_READ_SOURCE` with `CALL_FAILED` in its causes, and nothing is swept. If only the widening call fails, the first sweep's decision stands with `CALL_FAILED` added. The receipt's `candidate_stage` block names the error.
 - `lupin_mcp.reuse_redact` blanks emails, URLs, IP addresses, absolute paths and credential-shaped tokens in the need before anything is asked. Known lupin routes are kept.
 - `page_candidates` in `reuse_tools` lists the wiki pages that feed the wiki list of arm `B2w`.
 

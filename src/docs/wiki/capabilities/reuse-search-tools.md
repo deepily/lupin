@@ -25,16 +25,16 @@ Four MCP tools ask whether a new definition already exists. They read the [[symb
 - `replay( receipt_id )` re-runs a receipt on cached answers only, then at the current tree, and returns both results and the differences. A receipt of the removed page route answers `ROUTE_RETIRED`.
 - Receipts, snapshots, Jev cache entries and the per-session call log live under the fleet data root's reuse-review folder, never overwritten. `LUPIN_REUSE_DATA_DIR` moves them. A call-log middleware appends one line per tool call and never fails the call.
 - Without pack settings, `check_exists` sends one request per sendable entry, route `full`. With `LUPIN_REUSE_JEV_PACK_SIZE`, `LUPIN_REUSE_JEV_TOKEN_CEILING` and `LUPIN_REUSE_JEV_RUN_NAME` set, requests are packed and the [[candidate-stage]] picks the entries, route `candidates`.
-- A failed candidate stage answers `UNCERTAIN_READ_SOURCE` with cause `CALL_FAILED` and asks nothing. A policy with a band can widen the shortlist to 512; the shipped policy has none.
+- A candidate stage that fails on its first call answers `UNCERTAIN_READ_SOURCE` with `CALL_FAILED` in its causes and asks nothing. The `cause` field is the first cause in the fixed order, so `DEPENDENCY_MISSING` outranks it. A policy with a band can widen the shortlist to 512; the shipped policy has none. If the widening call fails, the first sweep's decision stands with `CALL_FAILED` added and `widen_error` set.
 
 ## What is sent to Jev
-- Each request holds the redacted need and one symbol's id, signature and first docstring line. Source bodies are never sent. A repeated question is answered from the cache.
+- On route `full`, each request holds the redacted need and one symbol's id, signature and first docstring line. On route `candidates`, a pack holds the need once and one question per entry. Source bodies are never sent. A repeated question is answered from the cache.
 - `sendable` blanks string defaults, then drops any symbol whose id, signature or docstring line holds an email, URL, IP address, path or credential-shaped token. Dropped ids are not reported. So `NEW` means new among sendable symbols.
-- A sweep runs 32 workers and tries each entry up to three times. A 429 or 529 is retried, and each call times out at 60 seconds.
-- One call spends at most 9,000 HTTP attempts. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it; a value outside 1 to 9,000 is refused with `BAD_BUDGET`. Once spent, cached answers still serve and unasked entries count as `not_checked`.
-- A 401 or 403 stops later calls. A 422 refuses only its own entry, and five distinct refusals in a row stop the sweep. The key comes from `JEV_API_TOASTER`.
+- The `full` sweep runs 32 workers and tries each entry up to three times. A 429 or 529 is retried. The packed sweep runs 6 workers (4 to 8) and posts each pack once. Its transport sends up to four times, and also retries 408, 500, 502, 503 and 504. Each call times out at 60 seconds.
+- One call spends at most 9,000 HTTP attempts. `LUPIN_REUSE_JEV_CALL_BUDGET` can lower it; a value outside 1 to 9,000 is refused, and the tool answers `REUSE_TOOLS_UNAVAILABLE` with `BAD_BUDGET` in `detail`. Once spent, cached answers still serve and unasked entries count as `not_checked`.
+- A 401 or 403 stops later calls. On `full`, a 422 refuses only its own entry. On a pack, a 422 splits the pack in half and resends; only a one-entry pack fails an entry. Five refusals in a row stop the sweep. A pack and its halves count as one. The key comes from `JEV_API_TOASTER`.
 
 ## The verdict
 - Any cause beats the three outcomes. The verdict is then `UNCERTAIN_READ_SOURCE`, with a cause from `NOT_LUPIN_TREE`, `INDEX_STALE`, `DEPENDENCY_MISSING`, `KEY_UNREADABLE`, `CALL_FAILED`, `MALFORMED_ANSWER`, `LOW_CONFIDENCE` or `NEAR_CUTOFF`.
 - `LOW_CONFIDENCE` holds when a symbol has 0.3 overlap or more and confidence under 0.9, unless a strong match (both at 0.9 or more) exists. `CALL_FAILED` holds when any call failed or any entry was never asked.
-- With no cause, `NEW` means no symbol reaches 0.3 overlap. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did.
+- With no cause, `NEW` means no symbol reaches 0.3 overlap. Otherwise `REUSE` means one of those symbols chose reuse, and `EXTEND` means none did. With a strong match, only the strong entries decide.
