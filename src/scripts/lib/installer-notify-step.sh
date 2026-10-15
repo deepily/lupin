@@ -5,11 +5,19 @@
 # Needs: pass_check, warn_check, fail_check, SERVER_URL, LUPIN_ROOT, VENV_PYTHON.
 # NOTIFY_PROBE overrides the probe path (tests). Sets INSTALL_RC=1 on a failure.
 #
-# run_test_notification reachable|unreachable
-#   probe exit 0 -> delivered, 3 -> SKIPPED (no listener), anything else -> failed.
+# run_test_notification
+#   Decides reachability itself (curl --head on $SERVER_URL/docs).
+#   Unreachable: SKIPPED when the URL is the default; a failure naming the URL when the
+#   operator set it (SERVER_URL_EXPLICIT=1), since an explicit target that is down is a
+#   deployment error. Reachable: probe exit 0 delivered, 3 SKIPPED (no listener), else failed.
 run_test_notification() {
-    if [ "$1" != "reachable" ]; then
-        warn_check "Test notification SKIPPED: no server to reach at $SERVER_URL"
+    if ! curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
+        if [ "${SERVER_URL_EXPLICIT:-0}" = "1" ]; then
+            fail_check "Test notification failed: the server at $SERVER_URL (set explicitly) cannot be reached"
+            INSTALL_RC=1
+        else
+            warn_check "Test notification SKIPPED: no server to reach at $SERVER_URL"
+        fi
         return 0
     fi
     local probe="${NOTIFY_PROBE:-$LUPIN_ROOT/src/scripts/lib/installer_notify_probe.py}"

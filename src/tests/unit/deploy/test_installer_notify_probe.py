@@ -6,6 +6,7 @@ The installer must exit non-zero on a failure.
 """
 import http.server
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -92,19 +93,40 @@ def test_probe_process_reports_ok_for_a_queued_reply():
 
 
 # ── the installer's notify step, run for real with a stubbed probe ──────────────────────
+class _Head( http.server.BaseHTTPRequestHandler ):
+    def do_HEAD( self ):
+        self.send_response( 200 ); self.end_headers()
+
+    def log_message( self, *a ): pass
+
+
 STEP = os.path.join( ROOT, "src/scripts/lib/installer-notify-step.sh" )
 
 
-def _step( tmp_path, probe_body, arg="reachable" ):
+def _step( tmp_path, probe_body, url=None, explicit="0" ):
     stub = tmp_path / "probe.sh"
     stub.write_text( "#!/bin/sh\n" + probe_body + "\n" )
     harness = (
         'set -e\n'
         'pass_check() { echo "PASS|$1"; }\nwarn_check() { echo "WARN|$1"; }\nfail_check() { echo "FAIL|$1"; }\n'
-        f'. "{STEP}"\nINSTALL_RC=0\nrun_test_notification {arg}\necho "RC|$INSTALL_RC"\n'
+        f'. "{STEP}"\nINSTALL_RC=0\nrun_test_notification\necho "RC|$INSTALL_RC"\n'
     )
-    env = dict( os.environ, LUPIN_ROOT=ROOT, SERVER_URL="http://x", VENV_PYTHON="/bin/sh", NOTIFY_PROBE=str( stub ) )
-    return subprocess.run( [ "bash", "-c", harness ], env=env, capture_output=True, text=True, timeout=30 ).stdout
+    srv = None
+    if url is None:                                            # a real server that answers HEAD /docs
+        srv = http.server.HTTPServer( ( "127.0.0.1", 0 ), _Head )
+        threading.Thread( target=srv.serve_forever, daemon=True ).start()
+        url = f"http://127.0.0.1:{srv.server_port}"
+    env = dict( os.environ, LUPIN_ROOT=ROOT, SERVER_URL=url, SERVER_URL_EXPLICIT=explicit,
+                VENV_PYTHON="/bin/sh", NOTIFY_PROBE=str( stub ) )
+    try:
+        return subprocess.run( [ "bash", "-c", harness ], env=env, capture_output=True, text=True, timeout=30 ).stdout
+    finally:
+        if srv is not None: srv.shutdown()
+
+
+def _closed_url():
+    s = socket.socket(); s.bind( ( "127.0.0.1", 0 ) ); port = s.getsockname()[ 1 ]; s.close()
+    return f"http://127.0.0.1:{port}"
 
 
 def test_step_delivered_passes_and_leaves_rc_zero( tmp_path ):
@@ -128,13 +150,24 @@ def test_step_any_other_exit_code_is_a_failure( tmp_path ):
     assert "FAIL|Test notification failed" in out and "RC|1" in out
 
 
-def test_step_unreachable_server_is_skipped_and_never_runs_the_probe( tmp_path ):
-    out = _step( tmp_path, 'echo PROBE-RAN; exit 1', arg="unreachable" )
+def test_step_reachable_server_runs_the_probe( tmp_path ):
+    out = _step( tmp_path, 'echo PROBE-RAN; exit 3' )          # exit 3 echoes the probe output into the line
+    assert "PROBE-RAN" in out and "no listener connected" in out and "no server to reach" not in out
+
+
+def test_step_unreachable_default_server_is_skipped_and_never_runs_the_probe( tmp_path ):
+    out = _step( tmp_path, 'echo PROBE-RAN; exit 1', url=_closed_url(), explicit="0" )
     assert "WARN|Test notification SKIPPED: no server" in out and "RC|0" in out and "PROBE-RAN" not in out
+
+
+def test_step_unreachable_explicit_server_fails_naming_the_url( tmp_path ):
+    url = _closed_url()
+    out = _step( tmp_path, 'echo PROBE-RAN; exit 0', url=url, explicit="1" )
+    assert "FAIL|" in out and url in out and "RC|1" in out and "PROBE-RAN" not in out
 
 
 def test_installer_sources_the_step_and_exits_with_its_code():
     text = open( SCRIPT, encoding="utf-8" ).read()
     tail = text[ text.index( "End-to-end test notification" ): ]
-    assert "installer-notify-step.sh" in tail and "run_test_notification reachable" in tail
+    assert "installer-notify-step.sh" in tail and "run_test_notification" in tail and "SERVER_URL_EXPLICIT=1" in text
     assert 'exit "$INSTALL_RC"' in tail

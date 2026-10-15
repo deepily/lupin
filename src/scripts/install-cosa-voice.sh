@@ -247,6 +247,7 @@ fi
 
 # 6. Server reachable (soft check)
 SERVER_URL="${LUPIN_APP_SERVER_URL:-http://localhost:7999}"
+SERVER_URL_EXPLICIT=0; [ -n "${LUPIN_APP_SERVER_URL:-}" ] && SERVER_URL_EXPLICIT=1
 if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
     pass_check "Lupin server reachable at $SERVER_URL"
     SERVER_REACHABLE=1
@@ -475,11 +476,7 @@ else
     INSTALL_RC=0
     # shellcheck source=lib/installer-notify-step.sh
     . "$LUPIN_ROOT/src/scripts/lib/installer-notify-step.sh"
-    if curl -s --head --max-time 2 "$SERVER_URL/docs" > /dev/null 2>&1; then
-        run_test_notification reachable
-    else
-        run_test_notification unreachable
-    fi
+    run_test_notification
 
     # ── Summary ──────────────────────────────────────────────────────
     echo ""
