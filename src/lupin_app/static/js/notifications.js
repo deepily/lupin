@@ -614,10 +614,22 @@ function ccConsoleApplyState( frame ) {
 }
 
 
+/**
+ * Models the notifications page: auth, WebSocket channels, TTS, and job cards.
+ */
 class NotificationsUI {
+    /**
+     * Exposes the shared row schema used when rendering task and job rows.
+     */
     get ROW_SCHEMA()       { return ROW_SCHEMA; }
+    /**
+     * Exposes the shared display labels for row fields.
+     */
     get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
 
+    /**
+     * Sets up page state: TTS modes, WebSocket channels, auth timers, and filters.
+     */
     constructor() {
         // Configuration
         this.debug = true;
@@ -1066,6 +1078,9 @@ class NotificationsUI {
     // INITIALIZATION
     // ========================================
     
+    /**
+     * Starts the page: validates cache, authenticates, builds filter UI, and connects.
+     */
     async init() {
         this.log( "NotificationsUI initializing..." );
 
@@ -1200,6 +1215,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Switches TTS to reliable mode when the browser is Firefox.
+     */
     applyFirefoxCompatibilityHack() {
         /**
          * Firefox Runtime Compatibility Hack
@@ -1240,6 +1258,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Clears malformed or version-mismatched session IDs from localStorage.
+     */
     validateCache() {
         const storedVersion = localStorage.getItem( this.VERSION_KEY );
         
@@ -1280,6 +1301,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Checks stored JWT tokens and refreshes them or redirects to login.
+     */
     async setupAuthentication() {
         // JWT Authentication: Check for stored tokens
         const tokens = this.getStoredTokens();
@@ -1354,6 +1378,9 @@ class NotificationsUI {
         await this.loadCurrentMode();
     }
 
+    /**
+     * Reads the access and refresh tokens from localStorage.
+     */
     getStoredTokens() {
         /**
          * Retrieve JWT tokens from localStorage.
@@ -1367,6 +1394,9 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Decodes the payload of a JWT on the client without verifying its signature.
+     */
     parseJWTPayload( token ) {
         /**
          * Decode JWT payload without verification (client-side).
@@ -1403,6 +1433,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Tells whether a JWT is expired, using its exp claim.
+     */
     isTokenExpired( token ) {
         /**
          * Check if JWT token is expired by examining exp claim.
@@ -1431,6 +1464,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Fetches timing settings from the server for token refresh, with defaults.
+     */
     async fetchClientConfig() {
         /**
          * Fetch client configuration from authenticated server endpoint.
@@ -1549,6 +1585,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Refreshes the access token when it is close to expiring.
+     */
     async checkAndRefreshToken( source = "manual" ) {
         /**
          * Check token expiration and refresh proactively if needed.
@@ -1620,6 +1659,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Starts a periodic timer that checks whether the token needs refreshing.
+     */
     startTokenRefreshMonitor() {
         /**
          * Start periodic token refresh monitoring using setInterval.
@@ -1646,6 +1688,9 @@ class NotificationsUI {
         this.log( `✓ Token refresh monitor started (${interval_mins}-minute interval)` );
     }
 
+    /**
+     * Stops the periodic token refresh timer and clears its handle.
+     */
     stopTokenRefreshMonitor() {
         /**
          * Stop periodic token refresh monitoring.
@@ -1663,6 +1708,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Starts a periodic WebSocket health check, active during work hours.
+     */
     startWebSocketHealthMonitor() {
         /**
          * Start periodic WebSocket health monitoring during work hours.
@@ -1689,6 +1737,9 @@ class NotificationsUI {
         this.log( "WebSocket health monitor started (90-second interval, work hours 8 AM - Midnight)" );
     }
 
+    /**
+     * Stops the WebSocket health check timer and shows a stopped status.
+     */
     stopWebSocketHealthMonitor() {
         /**
          * Stop WebSocket health monitoring.
@@ -1707,6 +1758,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Checks both WebSocket channels and asks any stalled one to run its own watchdog.
+     */
     checkWebSocketHealth() {
         /**
          * Watchdog for WebSocket connections.
@@ -1744,6 +1798,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Sets the text and style class of the WebSocket health indicator.
+     */
     updateHealthStatus( text, statusClass ) {
         /**
          * Update WebSocket health monitor status in UI.
@@ -1764,6 +1821,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Makes sure the stored auth token is not expired before an API call.
+     */
     async ensureValidToken() {
         /**
          * Ensure authentication token is valid before making API calls.
@@ -1843,6 +1903,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Wraps fetch to refresh the token first and add the Authorization header.
+     */
     async authedFetch( url, options = {} ) {
         /**
          * Authenticated fetch wrapper.
@@ -1876,6 +1939,9 @@ class NotificationsUI {
         return fetch( url, { ...options, headers } );
     }
 
+    /**
+     * Exchanges the refresh token for a new access token and stores it.
+     */
     async refreshAccessToken() {
         /**
          * Refresh access token using refresh token.
@@ -1923,6 +1989,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Clears stored tokens, closes the channels, and redirects to the login page.
+     */
     handleAuthFailure() {
         /**
          * Handle authentication failure by clearing tokens and redirecting to login.
@@ -1949,6 +2018,9 @@ class NotificationsUI {
         window.location.href = `/app/auth/login?redirect=${currentPath}`;
     }
 
+    /**
+     * Logs the user out: clears tokens, closes channels, and goes to the login page.
+     */
     logout() {
         /**
          * Logout user by clearing authentication and redirecting to login.
@@ -1981,6 +2053,9 @@ class NotificationsUI {
         window.location.href = '/app/auth/login';
     }
 
+    /**
+     * Asks the server to reinitialize its configuration through the init endpoint.
+     */
     async reinitializeConfig() {
         /**
          * Reinitialize Lupin configuration by calling /api/init endpoint.
@@ -2046,6 +2121,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Refreshes every field in the System Status section.
+     */
     async refreshAllStatus() {
         /**
          * Refresh all status information in the System Status section.
@@ -2090,6 +2168,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Updates the queue and audio WebSocket status pills from each channel state.
+     */
     refreshWebSocketStatus() {
         /**
          * Update WebSocket connection status displays.
@@ -2124,6 +2205,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Checks the stored tokens and updates the auth status and user display.
+     */
     async refreshAuthStatus() {
         /**
          * Verify current authentication state and update display.
@@ -2163,6 +2247,9 @@ class NotificationsUI {
         this.updateStatus( 'auth-status', `Authenticated${isAdmin ? ' (admin)' : ''}`, 'good' );
     }
 
+    /**
+     * Shows the current queue and audio session IDs in the status display.
+     */
     refreshSessionDisplay() {
         /**
          * Update session ID displays with current values.
@@ -2171,6 +2258,9 @@ class NotificationsUI {
         this.updateElement( 'audio-session', this.audioSessionId || '-' );
     }
 
+    /**
+     * Copies the text of a session ID element to the clipboard.
+     */
     copyToClipboard( elementId ) {
         /**
          * Copy the text content of a session ID element to the clipboard.
@@ -2199,6 +2289,9 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Copies a sender session ID, without its leading hash sign, to the clipboard.
+     */
     copySenderSessionId( btnElement ) {
         /**
          * Copy a sender session ID (without # prefix) to the clipboard.
@@ -2221,6 +2314,9 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Creates a hidden audio element in the page body with an error handler.
+     */
     createAudioElement() {
         const audio = document.createElement( 'audio' );
         audio.controls = false; // Hidden for UI cleanliness
@@ -2236,6 +2332,9 @@ class NotificationsUI {
         return audio;
     }
     
+    /**
+     * Creates the shared AudioContext when the browser supports one.
+     */
     async createAudioContext() {
         try {
             if ( window.AudioContext || window.webkitAudioContext ) {
@@ -2249,6 +2348,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Preloads the notification sound files for each priority.
+     */
     async initializeNotificationSounds() {
         try {
             // Pre-load and cache notification sounds for instant playback
@@ -2276,6 +2378,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Plays the preloaded notification sound that matches a priority.
+     */
     async playNotificationSoundByPriority( priority ) {
         try {
             if ( !this.soundsInitialized ) {
@@ -2328,6 +2433,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Wires the page controls, including the TTS slider and buttons, to their handlers.
+     */
     setupEventListeners() {
         // TTS preview-fraction slider (added 2026-05-14 evening).
         // Nine stops (0/12.5/25/37.5/50/62.5/75/87.5/100) — 12.5% increments.
@@ -2469,6 +2577,9 @@ class NotificationsUI {
         this.log( "Event listeners setup complete" );
     }
 
+    /**
+     * Wires the Claude Code form controls to their handlers.
+     */
     setupClaudeCodeEventListeners() {
         // Submit button
         const submitBtn = document.getElementById( 'cc-submit' );
@@ -2538,6 +2649,9 @@ class NotificationsUI {
     // CC SESSION VOICE INPUT (Phase 6)
     // ========================================
 
+    /**
+     * Sets up delegated voice input handlers for Claude Code session sender cards.
+     */
     _setupCCSessionVoiceDelegation() {
         /**
          * Setup event delegation for CC session voice input in sender cards.
@@ -2586,6 +2700,9 @@ class NotificationsUI {
         this.log( 'CC session voice input delegation setup complete' );
     }
 
+    /**
+     * Sends the typed message for a Claude Code session through the notify endpoint.
+     */
     async sendCCSessionMessage( sessionHash ) {
         /**
          * Send a user message to a CC session via POST /api/notify.
@@ -2698,6 +2815,9 @@ class NotificationsUI {
     // JOB SUBMISSION EVENT LISTENERS
     // ========================================
 
+    /**
+     * Wires the job submission forms, such as research, to their handlers.
+     */
     setupJobSubmitEventListeners() {
         // Research submit button
         const submitResearchBtn = document.getElementById( 'submit-research-job' );
@@ -2780,6 +2900,9 @@ class NotificationsUI {
         this.log( "Job submission event listeners setup complete" );
     }
 
+    /**
+     * Sets up delegated click and Enter handlers for job message controls.
+     */
     _setupJobMessageDelegation( containerId ) {
         /**
          * Setup click + keydown event delegation for job message send UI.
@@ -2871,6 +2994,9 @@ class NotificationsUI {
     // SESSION MANAGEMENT
     // ========================================
     
+    /**
+     * Returns the queue or audio session ID, from storage or from the server.
+     */
     async getOrCreateSessionId( sessionType ) {
         const storageKey = sessionType === 'audio' ? this.AUDIO_SESSION_KEY : this.QUEUE_SESSION_KEY;
         
@@ -2974,6 +3100,9 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Stamps an origin and detail fields onto a session ID error and returns it.
+     */
     tagSessionIdFailure( error, origin, detail = {} ) {
         /**
          * Stamp an origin onto an error on its way to the shared catch.
@@ -3006,6 +3135,9 @@ class NotificationsUI {
         return error;
     }
 
+    /**
+     * Records why a session ID could not be obtained and announces the failure.
+     */
     failSessionIdAcquisition( sessionType, origin, error ) {
         /**
          * Record WHY the session id could not be obtained, announce it, and
@@ -3083,6 +3215,9 @@ class NotificationsUI {
     // WEBSOCKET CONNECTIONS
     // ========================================
     
+    /**
+     * Creates or reuses the queue and audio WebSocket channels and connects them.
+     */
     async connectWebSockets( target = 'both' ) {
         // Phase 2 of the WS reconnect circuit-breaker milestone: this method
         // now constructs (or reuses) two WSChannel state machines instead of
@@ -3220,6 +3355,9 @@ class NotificationsUI {
     // invoked when state transitions to AUTHENTICATING; the channel sends
     // the JSON-stringified return value via the live socket itself.
     // ----------------------------------------------------------------------
+    /**
+     * Builds the auth request message for the queue WebSocket.
+     */
     _buildQueueAuthMessage() {
         return {
             type: "auth_request",
@@ -3261,6 +3399,9 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Builds the auth request message for the audio WebSocket.
+     */
     _buildAudioAuthMessage() {
         return {
             type: "auth_request",
@@ -3293,6 +3434,9 @@ class NotificationsUI {
     // manualRetry on both channels and the user never sees a banner flash.
     // If refresh fails (or reason is 4002/4003), banner copy reflects the
     // auth-permanent semantics.
+    /**
+     * Reacts to a WebSocket circuit-open event with a token refresh or a banner.
+     */
     _showCircuitBanner( detail ) {
         const reason = ( detail && detail.reason ) || "budget-exhausted";
         const code   = ( detail && detail.code !== undefined ) ? detail.code : null;
@@ -3321,8 +3465,9 @@ class NotificationsUI {
         this._renderCircuitBanner( reason, code );
     }
 
-    // Internal: actually paint the banner. Split out from _showCircuitBanner
-    // so the 4001 token-refresh path can defer rendering until refresh resolves.
+    /**
+     * Paints the circuit-breaker banner with text matching the failure reason.
+     */
     _renderCircuitBanner( reason, code ) {
         const banner = document.getElementById( "ws-circuit-banner" );
         if ( !banner ) return;
@@ -3362,6 +3507,9 @@ class NotificationsUI {
         if ( btn ) btn.disabled = false;
     }
 
+    /**
+     * Hides the circuit-breaker banner and re-enables its retry button.
+     */
     _hideCircuitBanner() {
         const banner = document.getElementById( "ws-circuit-banner" );
         if ( !banner ) return;
@@ -3372,6 +3520,9 @@ class NotificationsUI {
         if ( btn ) btn.disabled = false;
     }
 
+    /**
+     * Wires the circuit-breaker banner to the circuit-open event and retry button.
+     */
     _wireCircuitBanner() {
         // Idempotent — safe to call multiple times across init/auth-refresh paths.
         if ( this._circuitBannerWired ) return;
@@ -3420,6 +3571,9 @@ class NotificationsUI {
     // Spec: src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/
     //       05-phase-4-page-lifecycle.md §Lifecycle Wiring
     // -----------------------------------------------------------------------
+    /**
+     * Hooks browser page lifecycle events to both WebSocket channels, once.
+     */
     _attachPageLifecycle() {
         if ( this._pageLifecycleAttached ) return;
         this._pageLifecycleAttached = true;
@@ -3473,6 +3627,9 @@ class NotificationsUI {
     // MESSAGE HANDLERS
     // ========================================
     
+    /**
+     * Parses a queue WebSocket message and routes it by event type.
+     */
     handleQueueMessage( event ) {
         try {
             // Server uses event envelope pattern: envelope.data contains actual payload
@@ -3606,6 +3763,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Handles an audio WebSocket message: binary chunks or JSON events routed by type.
+     */
     handleAudioMessage( event ) {
         // Handle both text and binary messages
         if ( event.data instanceof Blob ) {
@@ -3686,6 +3846,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Answers a server ping on the named channel with a pong message.
+     */
     async handlePing( connectionType ) {
         // Phase 2: `channel.send()` no-ops when state is not CONNECTED, so
         // the pre-existing readyState check is no longer needed. The channel
@@ -3710,6 +3873,9 @@ class NotificationsUI {
     // Q&A FUNCTIONALITY
     // ========================================
     
+    /**
+     * Submits the question typed in the Q&A input to the server.
+     */
     async submitQA() {
         const inputElement = document.getElementById( 'qa-input' );
         const submitButton = document.getElementById( 'submit-qa' );
@@ -3912,6 +4078,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Detects server errors such as HTTP 500 and creates a spoken notification.
+     */
     handleServerError( error ) {
         /**
          * Detect server errors (500, 503, etc.) and create spoken notifications
@@ -3951,6 +4120,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Runs a locally built notification through the server notification update path.
+     */
     simulateNotificationUpdate( notification ) {
         /**
          * Simulate a notification_queue_update WebSocket event locally
@@ -4628,12 +4800,18 @@ class NotificationsUI {
     // Now uses unified RecordingManager
     // ========================================
 
+    /**
+     * Starts speech input for the Q&A text box.
+     */
     async handleQASTTButtonClick() {
         // Thin wrapper - delegates to unified handleSTTButtonClick
         const button = document.getElementById( 'qa-stt-button' );
         await this.handleSTTButtonClick( 'qa-input', button );
     }
 
+    /**
+     * Handles a job completion event, skipping events already processed.
+     */
     handleJobCompletion( envelope ) {
         // Add event deduplication to prevent duplicate processing
         const eventId = `${envelope.type}_${envelope.timestamp}`;
@@ -4676,6 +4854,9 @@ class NotificationsUI {
         this.playTTS( actualText || "Job completed", mode, jobVoiceId );
     }
 
+    /**
+     * Stores a job completion text in the job completion cache for replay.
+     */
     async storeJobCompletionForReplay( envelope, actualText ) {
         /**
          * Store job completion data in JobCompletionCache for replay functionality.
@@ -4745,6 +4926,9 @@ class NotificationsUI {
         await this.handleSTTButtonClick( 'cc-prompt', button );
     }
 
+    /**
+     * Reads the Claude Code form fields and submits them to the queue.
+     */
     async submitClaudeCode() {
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
@@ -4755,6 +4939,9 @@ class NotificationsUI {
         await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun );
     }
 
+    /**
+     * Submits a Claude Code task to the job queue for background execution.
+     */
     async submitClaudeCodeToQueue( project, prompt, taskType, dryRun ) {
         /**
          * Submit a Claude Code task to CJ Flow queue for background execution.
@@ -4859,6 +5046,9 @@ class NotificationsUI {
     // TTS FUNCTIONALITY
     // ========================================
     
+    /**
+     * Speaks the text from the direct TTS input using the selected TTS mode.
+     */
     async directTTSTest() {
         const inputElement = document.getElementById( 'direct-tts-input' );
         const text = inputElement.value.trim();
@@ -4885,12 +5075,18 @@ class NotificationsUI {
         inputElement.value = '';
     }
 
+    /**
+     * Returns the TTS mode chosen in the selector, or the default mode.
+     */
     getCurrentTTSMode() {
         // Get current TTS mode from UI selector with proper fallback to default
         const modeSelector = document.getElementById( 'tts-mode' );
         return modeSelector?.value || this.TTS_MODE_DEFAULT;
     }
 
+    /**
+     * Returns the spoken text for a notification, with a prefix for urgent ones.
+     */
     formatNotificationTTSMessage( notification ) {
         // Format notification message for TTS with priority prefix
         // Single source of truth for notification TTS message formatting
@@ -4904,6 +5100,9 @@ class NotificationsUI {
         return ttsMessage;
     }
 
+    /**
+     * Plays a fixed test sentence in the given TTS mode.
+     */
     async testTTS( mode ) {
         const testText = "This is a test of the text-to-speech system in " + mode + " mode.";
         this.log( `Testing TTS in ${mode} mode: ${testText}` );
@@ -4912,6 +5111,9 @@ class NotificationsUI {
         await this.playTTS( testText, mode, null, true );
     }
     
+    /**
+     * Speaks text in the given mode, using cached audio when available.
+     */
     async playTTS( text, mode, voiceId = null, userInitiated = false ) {
         // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE SHARED POINT THAT DECIDES IT.
         //
@@ -4972,6 +5174,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Plays cached audio from a URL and resolves when playback ends or fails.
+     */
     async playAudioBlob( audioUrl ) {
         return new Promise( ( resolve, reject ) => {
             const audio = this.createAudioElement();
@@ -5179,6 +5384,9 @@ class NotificationsUI {
         return envelope.utterance_id !== this.expectedUtteranceId;
     }
 
+    /**
+     * Streams TTS audio in instant mode and plays the PCM chunks as they arrive.
+     */
     async playInstantTTS( text, voiceId = null ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
 
@@ -5243,6 +5451,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Requests TTS audio in reliable mode and plays the collected chunks as one clip.
+     */
     async playReliableTTS( text, voiceId = null ) {
         this.log( "Starting reliable TTS (OpenAI batch)..." );
 
@@ -5306,6 +5517,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Logs an audio status event from the server.
+     */
     handleAudioStatus( envelope ) {
         this.log( `Audio status: ${envelope.status || envelope.text}` );
         // Future: update UI with loading status
@@ -5391,6 +5605,9 @@ class NotificationsUI {
         this.log( `Showing TTS error modal: ${errorCode} - ${errorText}` );
     }
 
+    /**
+     * Handles one binary audio chunk from the audio WebSocket.
+     */
     handleAudioChunk( blobData ) {
         this.log( `🔊 handleAudioChunk: ${blobData.size} bytes, currentTTSMode=${this.currentTTSMode}` );
 
@@ -5411,6 +5628,9 @@ class NotificationsUI {
         // For reliable mode, chunks are just collected and played later in playCollectedAudio()
     }
     
+    /**
+     * Finishes a TTS stream: stops the indicator, plays or caches audio, resets state.
+     */
     async handleAudioComplete( data ) {
         this.log( `🔴 handleAudioComplete: currentTTSMode=${this.currentTTSMode} at ${Date.now()}` );
 
@@ -5469,6 +5689,9 @@ class NotificationsUI {
         this.sequentialChunksPlayed = 0;
     }
     
+    /**
+     * Stores the generated audio for the current TTS text in the audio cache.
+     */
     async cacheGeneratedAudio( audioBlob = null ) {
         this.log( `Attempting to cache audio - Cache initialized: ${this.audioCacheInitialized}, Current TTS text: ${this.currentTTSText ? '"' + this.currentTTSText.substring( 0, 30 ) + '..."' : 'null'}` );
         
@@ -5505,6 +5728,9 @@ class NotificationsUI {
     // Web Audio API with precise scheduling - replaces choppy sequential playback
     // ========================================
 
+    /**
+     * Creates the 24 kHz AudioContext used for PCM streaming, once.
+     */
     initPCMAudioContext() {
         if ( !this.pcmAudioContext ) {
             this.pcmAudioContext = new ( window.AudioContext || window.webkitAudioContext )( {
@@ -5515,6 +5741,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Decodes one PCM audio chunk and schedules it after the previous one.
+     */
     async playPCMChunk( blobData ) {
         // Capture TTFA state BEFORE any awaits to avoid race condition
         // (handleAudioComplete may reset firstChunkPlayed while we're awaiting)
@@ -5715,6 +5944,9 @@ class NotificationsUI {
     }
     END COMMENTED OUT - OLD CHOPPY IMPLEMENTATION */
 
+    /**
+     * Decodes and plays a streamed audio chunk using the shared AudioContext.
+     */
     async playAudioChunkProgressive( blobData ) {
         try {
             if ( !this.audioContext ) {
@@ -5766,6 +5998,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Combines all collected audio chunks into one MP3 blob and plays it.
+     */
     async playCollectedChunks() {
         try {
             if ( !this.audioChunks || this.audioChunks.length === 0 ) {
@@ -5785,7 +6020,9 @@ class NotificationsUI {
         }
     }
     
-    // Reliable mode audio playback (adapted from original HybridTTS)
+    /**
+     * Plays the collected chunks as a single MP3 clip in reliable mode.
+     */
     async playCollectedAudio() {
         if ( !this.audioChunks || this.audioChunks.length === 0 ) {
             this.error( "No audio data received for reliable mode" );
@@ -5840,6 +6077,9 @@ class NotificationsUI {
         }, { once: true } );
     }
     
+    /**
+     * Plays an audio blob through an Audio element and resolves when playback ends.
+     */
     async playAudioBlob( audioBlob ) {
         return new Promise( ( resolve, reject ) => {
             try {
@@ -5907,6 +6147,9 @@ class NotificationsUI {
         });
     }
     
+    /**
+     * Stops all current audio playback and clears related state.
+     */
     stopAudio() {
         this.log( `🔴 stopAudio() CALLED at ${Date.now()}` );
 
@@ -6384,6 +6627,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Updates a job card in place when a job is paused or resumed.
+     */
     handleJobPauseStateChange( event, isPaused ) {
         /**
          * Handle job_paused / job_resumed WebSocket event.
@@ -6599,6 +6845,9 @@ class NotificationsUI {
     // NOTIFICATION HANDLERS (from original queue.js)
     // ========================================
 
+    /**
+     * Handles a notification queue update by showing it and playing sound and speech.
+     */
     async handleNotificationUpdate( envelope ) {
         console.log( `[DIAG-JR] ENTER handleNotificationUpdate: id=${envelope?.notification?.id_hash} job_id=${envelope?.notification?.job_id} type=${envelope?.notification?.type} msg=${(envelope?.notification?.message||'').substring(0,50)}` );
         this.log( "Notification queue update received:", envelope );
@@ -6963,6 +7212,9 @@ class NotificationsUI {
     // TIMING METRICS DISPLAY
     // ========================================
 
+    /**
+     * Hides the Q&A metrics panel and resets its time values to dashes.
+     */
     resetMetricsDisplay() {
         const metricsDiv = document.getElementById( 'qa-metrics' );
         if ( metricsDiv ) {
@@ -6973,6 +7225,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows the time to text, from submit to text arrival, in the metrics panel.
+     */
     updateMetricsTTT() {
         if ( this.metricsSubmitTime && this.metricsTextTime ) {
             const ttt = this.metricsTextTime - this.metricsSubmitTime;
@@ -6981,6 +7236,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows the time to first audio, from TTS request to first sound, in the metrics.
+     */
     updateMetricsTTFA() {
         // TTFA = TTS request start → first audio plays (audio generation only)
         if ( this.metricsTTSStartTime && this.metricsFirstAudioTime ) {
@@ -6990,6 +7248,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows the round trip time, from submit to first audio, in the metrics panel.
+     */
     updateMetricsRTT() {
         // RTT = Submit → first audio plays (full round-trip ≈ TTT + TTFA)
         if ( this.metricsSubmitTime && this.metricsFirstAudioTime ) {
@@ -7010,6 +7271,9 @@ class NotificationsUI {
     // AUTHENTICATION HELPERS (from original queue.js)
     // ========================================
     
+    /**
+     * Returns the user email used by the queue pages.
+     */
     getCurrentUserEmail() {
         // Use the hardcoded email as per original queue.js pattern
         return "ricardo.felipe.ruiz@gmail.com";
@@ -7040,6 +7304,9 @@ class NotificationsUI {
         return params;
     }
 
+    /**
+     * Returns the Authorization header value built from the JWT access token.
+     */
     getAuthHeader() {
         // Return JWT access token for authentication
         if ( this.authToken ) {
@@ -7062,6 +7329,9 @@ class NotificationsUI {
     // QUEUE LISTS MANAGEMENT (from original queue.js)
     // ========================================
     
+    /**
+     * Fetches one queue list from the server and updates its count and cards.
+     */
     async updateQueueLists( queueName ) {
         this.log( `Updating queue list for: ${queueName}` );
 
@@ -7133,6 +7403,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Changes the queue filter mode for admin users and refreshes the lists.
+     */
     setFilterMode( mode, { reloadHistory = true } = {} ) {
         /**
          * Change the queue filter mode for admin users.
@@ -7205,6 +7478,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows the filter settings panel, activates its button, and scrolls to it.
+     */
     showAndScrollToFilterPanel() {
         /**
          * Show the filter settings panel and scroll it into view.
@@ -7227,6 +7503,9 @@ class NotificationsUI {
         this.scrollIntoViewIfNeeded( filterSection );
     }
 
+    /**
+     * Sets up the filter panel and header badges according to the user role.
+     */
     initializeFilterUI() {
         /**
          * Initialize the filter UI based on user role.
@@ -7273,6 +7552,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Refreshes all four live queues and the history list when expanded.
+     */
     async refreshAllQueues() {
         /**
          * Refresh all queue lists with current filter settings.
@@ -7313,6 +7595,9 @@ class NotificationsUI {
     // PROGRESSIVE DISCLOSURE QUEUE UI METHODS
     // ========================================
 
+    /**
+     * Expands or collapses a queue category and updates its icon.
+     */
     toggleQueueCategory( queueName ) {
         /**
          * Toggle expand/collapse for a queue category.
@@ -7360,6 +7645,9 @@ class NotificationsUI {
         this.saveQueueExpandState();
     }
 
+    /**
+     * Marks a queue category as needing reload and refreshes its cards when expanded.
+     */
     updateQueueCategoryIfExpanded( queueName, count ) {
         /**
          * Refresh job cards if queue category is currently expanded.
@@ -7379,6 +7667,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Fetches a queue's jobs and renders them as cards.
+     */
     async loadQueueJobCards( queueName ) {
         /**
          * Fetch and render job cards for a queue category.
@@ -7463,6 +7754,9 @@ class NotificationsUI {
     // automatically (they are no longer in memory).
     // ═══════════════════════════════════════════════════════════════════════
 
+    /**
+     * Fetches job history from the server and renders history cards.
+     */
     async loadJobHistory( append = false ) {
         /**
          * Fetch and render job history cards from PostgreSQL persistence.
@@ -7534,6 +7828,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Builds the HTML for one history job card using the shared card renderer.
+     */
     renderHistoryCard( job ) {
         /**
          * Render a history-pane job card.
@@ -7572,6 +7869,9 @@ class NotificationsUI {
         return cardHtml;
     }
 
+    /**
+     * Builds the delete and retry buttons for a history job card.
+     */
     renderHistoryActions( job ) {
         /**
          * Render management action buttons for a history job card.
@@ -7610,6 +7910,9 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Routes a card delete action to the handler registered for its queue name.
+     */
     _dispatchDelete( jobId, queueName ) {
         /**
          * Single chokepoint for card-level delete actions.
@@ -7635,6 +7938,9 @@ class NotificationsUI {
         handler( jobId, queueName );
     }
 
+    /**
+     * Deletes a job from stored history after the user confirms.
+     */
     async deleteHistoryJob( jobId ) {
         /**
          * Delete a job from PostgreSQL history.
@@ -7669,6 +7975,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Removes a job from an in-memory queue after the user confirms.
+     */
     async deleteQueueJob( jobId, queueName ) {
         /**
          * Forcefully remove a job from an in-memory queue (todo, run, done, dead).
@@ -7710,6 +8019,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Deletes every job in a queue pane after the user confirms.
+     */
     async deleteAllQueueJobs( queueName ) {
         /**
          * Bulk delete all jobs from a queue pane (todo, run, done, dead, or history).
@@ -7768,6 +8080,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Resubmits a failed or interrupted job's question after the user confirms.
+     */
     async retryHistoryJob( jobId, questionText ) {
         /**
          * Retry a failed/interrupted job by re-submitting to the todo queue.
@@ -7812,6 +8127,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Handles a change of the history time window dropdown.
+     */
     onHistoryTimeWindowChange( value ) {
         /**
          * Handle time window dropdown change.
@@ -7834,6 +8152,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Loads the next page of history results and appends it to the list.
+     */
     loadMoreHistory() {
         /**
          * Load next page of history results (append mode).
@@ -7841,6 +8162,9 @@ class NotificationsUI {
         this.loadJobHistory( true );
     }
 
+    /**
+     * Pulls the question text out of a job's HTML string.
+     */
     extractQuestionFromHtml( html ) {
         /**
          * Extract question text from job HTML string.
@@ -7855,6 +8179,9 @@ class NotificationsUI {
     // JOB CARD HELPERS (Session 107: Simplified after job_state_transition refactor)
     // ========================================
 
+    /**
+     * Removes a job card from the run queue and stops its timer.
+     */
     cleanupRunQueueCard( jobId ) {
         /**
          * Remove a job card from the run queue and stop its timer.
@@ -7883,6 +8210,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Replaces a job card with one rendered from full metadata, keeping its conversation log.
+     *
+     * Does nothing when the queue container or the existing card is missing.
+     */
     updateJobCardMetadata( jobId, metadata, queueName ) {
         /**
          * Update a job card with full metadata while preserving activity log.
@@ -7927,6 +8259,11 @@ class NotificationsUI {
         this.log( `[Phase 6] Updated job card with full metadata: ${jobId}` );
     }
 
+    /**
+     * Adds a notification to a job card's conversation pane, newest first.
+     *
+     * A notification with a progress group updates the existing entry in place. The card and pane are expanded and scrolled into view.
+     */
     appendNotificationToJobCard( jobId, notification ) {
         /**
          * Append a notification to a job card's unified conversation container.
@@ -8032,6 +8369,11 @@ class NotificationsUI {
         this.log( `[Phase 6] Notification appended to job ${jobId}: ${notification.message.substring( 0, 50 )}...` );
     }
 
+    /**
+     * Updates a progress-group entry in place, moving the old message into a history list.
+     *
+     * Increments the update counter and toggle text, keeps the expanded state, and replays the pulse animation.
+     */
     updateProgressGroupEntry( element, notification ) {
         /**
          * Update an existing progress group entry with history accumulation.
@@ -8165,6 +8507,11 @@ class NotificationsUI {
         return link;
     }
 
+    /**
+     * Builds the DOM element for one activity-log line from a notification.
+     *
+     * Shows the time, the escaped message, and a clickable summary marker when an abstract exists.
+     */
     createActivityLogEntry( notification ) {
         /**
          * Create a single activity log entry from a notification.
@@ -8196,6 +8543,11 @@ class NotificationsUI {
     // Session 107: Removed cacheJobNotification, createProvisionalJobRegistration,
     // ensureJobCardExists, scheduleQueueRefreshForJob - job_state_transition handles this now
 
+    /**
+     * Maps a job ID prefix such as dr or pg to a readable agent type name.
+     *
+     * Returns unknown for a missing, non-string or unrecognized prefix.
+     */
     inferAgentTypeFromJobId( jobId ) {
         /**
          * Infer agent type from job ID prefix.
@@ -8223,6 +8575,11 @@ class NotificationsUI {
         return prefixMap[ prefix ] || 'unknown';
     }
 
+    /**
+     * Opens a job card's details section and records the card as expanded.
+     *
+     * Does nothing when the card is missing or already open.
+     */
     expandJobCard( jobId ) {
         /**
          * Auto-expand a job card to show activity.
@@ -8330,6 +8687,11 @@ class NotificationsUI {
         console.groupEnd();
     }
 
+    /**
+     * Builds the HTML string for one job card for the given queue.
+     *
+     * Badges, buttons and sections vary by queue: running, todo, done, dead and history cards each get their own controls and detail blocks.
+     */
     renderJobCard( job, queueName ) {
         /**
          * Generate HTML for a single job card.
@@ -8630,6 +8992,11 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Expands or collapses one job card's details and flips its arrow.
+     *
+     * Takes the DOM key, which carries a history prefix for history cards.
+     */
     toggleJobCard( idKey ) {
         /**
          * Toggle expand/collapse for individual job card.
@@ -8664,6 +9031,11 @@ class NotificationsUI {
     // Approach D: Job Message Send — User-to-Job Communication
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Sends the user's typed message to a running job and shows it in the job's conversation.
+     *
+     * Posts the text with its urgent flag, clears the input at once, and flashes the input border on failure.
+     */
     async sendJobMessage( jobId ) {
         /**
          * Send a user message to a running job via POST /api/jobs/{jobId}/message.
@@ -8744,6 +9116,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Asks the server to cancel a running job after the user confirms.
+     *
+     * Disables the cancel button while the request is in flight and shows an alert if it fails.
+     */
     async cancelJob( jobId ) {
         /**
          * Request graceful cancellation of a running agentic job.
@@ -8790,6 +9167,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Draws the stop-poke mute button from the server's state.
+     *
+     * Shows a bell when on, a muted bell when muted, and a question mark when unknown. Only an admin with a known state can click it. Returns false when the button is absent.
+     */
     _paintPokeMute( state ) {
         /**
          * Paint the stop poke switch in the toolbar (row 3526fb95).
@@ -8829,6 +9211,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Reads the stop-poke mute state from the server and paints the button.
+     *
+     * Paints the unknown state when the read fails. Returns the state, or null when it could not be read.
+     */
     async refreshPokeMute() {
         /**
          * Read the stop poke switch and paint it.
@@ -8850,6 +9237,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Flips the fleet-wide stop-poke mute switch and paints what the server returns.
+     *
+     * On a refusal or failure it logs the problem and re-reads the real state. Does nothing when the button state is unknown.
+     */
     async togglePokeMute() {
         /**
          * Flip the stop poke switch, fleet-wide (admin only; the server enforces it).
@@ -8884,6 +9276,11 @@ class NotificationsUI {
         return this.refreshPokeMute();
     }
 
+    /**
+     * Asks the server to restart the dev server after the user confirms.
+     *
+     * Disables the toolbar button, waits for the health check to come back, then restores the button. Shows the server's reason when the bounce is refused.
+     */
     async bounceDevServer() {
         /**
          * Managed bounce of the dev server (:7999) from the toolbar — row 1b4211ac R2.
@@ -8947,6 +9344,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Polls the health endpoint until the server is back up after a restart.
+     *
+     * Returns true once it answers ok after a down blip or a grace period, and false on timeout.
+     */
     async waitForServerBack( timeoutMs = 90000, intervalMs = 1500 ) {
         /**
          * Resolve true once /health returns ok after the bounce, allowing for the
@@ -8975,6 +9377,11 @@ class NotificationsUI {
         return false;
     }
 
+    /**
+     * Tells whether a job type supports model and effort overrides on resume.
+     *
+     * True for the test-fix and bug-fix expediter job types.
+     */
     isResumableWithOverrides( job ) {
         /**
          * Return true iff this job type supports per-resume model + effort overrides
@@ -8988,6 +9395,11 @@ class NotificationsUI {
         return agentType === 'test_fix_expediter' || agentType === 'bug_fix_expediter';
     }
 
+    /**
+     * Builds the model and effort dropdowns for a stalled job's resume controls.
+     *
+     * The selected values come from the saved browser preferences.
+     */
     renderResumeOverrideControls( jobId ) {
         /**
          * Render Model + Effort dropdowns for a stalled TFE/BFE card. Defaults
@@ -9023,14 +9435,25 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Stores the chosen resume model in browser local storage.
+     */
     saveResumeModelPref( value ) {
         localStorage.setItem( this.RESUME_MODEL_PREF_KEY, value || '' );
     }
 
+    /**
+     * Stores the chosen resume effort level in browser local storage.
+     */
     saveResumeEffortPref( value ) {
         localStorage.setItem( this.RESUME_EFFORT_PREF_KEY, value || '' );
     }
 
+    /**
+     * Resumes a stalled job from its checkpoint after the user confirms.
+     *
+     * Posts the job ID plus any model and effort overrides from the card's dropdowns, and restores the button on failure.
+     */
     async resumeStalledJob( jobId ) {
         /**
          * Resume a stalled job from its checkpoint.
@@ -9096,6 +9519,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Resumes a test-fix job from free-form text such as a job ID, plan path or description.
+     *
+     * Shows candidates when the server finds several matches, or a status line when it resumes one.
+     */
     async submitTFEResume() {
         /**
          * Smart TFE resume from free-form input (session 9056c113).
@@ -9158,6 +9586,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Fills the resume panel with a clickable list of candidate jobs.
+     *
+     * Each row shows the confidence, job ID, stall time and summary. Hides the panel when there are none.
+     */
     _renderTFEResumeCandidates( candidates, containerEl ) {
         /**
          * Render disambiguation list for ambiguous TFE resume matches.
@@ -9194,6 +9627,9 @@ class NotificationsUI {
         containerEl.style.display = 'block';
     }
 
+    /**
+     * Puts the chosen candidate's job ID in the resume input and submits the resume.
+     */
     _pickTFEResumeCandidate( jobId ) {
         /** User picked a candidate from the disambiguation list — resubmit with exact job ID. */
         const inputEl = document.getElementById( 'tfe-resume-input' );
@@ -9201,6 +9637,11 @@ class NotificationsUI {
         this.submitTFEResume();
     }
 
+    /**
+     * Pauses or resumes a queued job through the queue API.
+     *
+     * Shows a temporary button state and reverts it with an alert when the request fails.
+     */
     async toggleJobPause( jobId, shouldPause ) {
         /**
          * Toggle pause/resume state of a todo queue job.
@@ -9250,6 +9691,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Adds the user's own message as an outgoing chat bubble at the top of a job's conversation.
+     *
+     * Marks urgent messages. Does nothing when the pane is missing.
+     */
     appendJobUserMessage( jobId, message, priority ) {
         /**
          * Append a user-sent message to the job's unified conversation pane.
@@ -9277,6 +9723,11 @@ class NotificationsUI {
     // Phase 7: Duration Timer Functions
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Formats a number of seconds as a short text like 2m 34s or 1h 5m.
+     *
+     * Returns 0s for a missing, negative or non-numeric value.
+     */
     formatDuration( seconds ) {
         /**
          * Format duration in seconds to human-readable "Xm Ys" or "Xh Ym" format.
@@ -9304,6 +9755,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Expands or collapses a job's conversation pane and loads its history on first open.
+     *
+     * Stops the click from also toggling the parent card.
+     */
     async toggleJobInteractions( idKey, event ) {
         /**
          * Toggle and lazy-load interaction history for a job.
@@ -9354,6 +9810,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Fetches a job's recorded notifications from the server and renders them in its pane.
+     *
+     * Caches the result and shows a short message when there are none or the load fails.
+     */
     async loadJobInteractions( jobId, idKey = null ) {
         /**
          * Fetch notification interactions for a job from API.
@@ -9386,6 +9847,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Turns a stored notification response into readable, escaped text.
+     *
+     * Unwraps a value envelope and shows nested JSON answers as key and value pairs. Non-JSON text is shown as it is.
+     */
     formatResponseValue( responseValue ) {
         /**
          * Format a notification response value for human-readable display.
@@ -9445,6 +9911,11 @@ class NotificationsUI {
         return this.escapeHtml( JSON.stringify( parsed ) );
     }
 
+    /**
+     * Builds the HTML for one recorded interaction in a job's conversation.
+     *
+     * User messages become outgoing bubbles. Other types show an icon, time and message, plus any recorded response.
+     */
     renderInteractionItem( interaction ) {
         /**
          * Render a single notification interaction.
@@ -9509,6 +9980,11 @@ class NotificationsUI {
         `;
     }
 
+    /**
+     * Shortens text to a maximum length, ending with three dots when it is cut.
+     *
+     * Returns an empty string for empty input.
+     */
     truncateText( text, maxLength ) {
         /**
          * Truncate text with ellipsis if it exceeds maxLength.
@@ -9518,6 +9994,11 @@ class NotificationsUI {
         return text.substring( 0, maxLength - 3 ) + '...';
     }
 
+    /**
+     * Formats a job timestamp as a short date and time in the app time zone.
+     *
+     * Returns the original text when it cannot be parsed and an empty string when missing.
+     */
     formatJobTimestamp( timestamp ) {
         /**
          * Format job timestamp for display.
@@ -9543,6 +10024,11 @@ class NotificationsUI {
     // TIME SAVED DASHBOARD METHODS
     // ========================================
 
+    /**
+     * Loads the time-saved statistics and fills the dashboard fields.
+     *
+     * Reads the user's totals and the global top solutions, then renders the leaderboard. Failures are logged.
+     */
     async refreshTimeSavedStats() {
         /**
          * Fetch and display time saved statistics from the API.
@@ -9599,6 +10085,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Renders the ranked leaderboard of most replayed solutions.
+     *
+     * Shows a no-data message when the list is empty and escapes each question.
+     */
     renderTopSolutions( solutions ) {
         /**
          * Render the top solutions leaderboard.
@@ -9633,6 +10124,11 @@ class NotificationsUI {
     // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §5,§6,§7
     // ========================================
 
+    /**
+     * Fetches the fleet state from the arbiter proxy endpoint.
+     *
+     * Returns the parsed body, an auth-required marker on a 401, or an unreachable marker on any other failure. Never throws.
+     */
     async fetchFleetState() {
         /**
          * Fetch the fleet-state composite from the JWT-authed :7999 reverse-proxy.
@@ -9666,6 +10162,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Groups a flat session list into manager groups with their workers beneath.
+     *
+     * Workers whose manager is unknown go into a final Unmanaged group. Managers and workers are sorted by label. Touches no DOM.
+     */
     groupFleetByManager( sessions ) {
         /**
          * Build the PURE hierarchy model (§7) from a flat session array.
@@ -9731,6 +10232,11 @@ class NotificationsUI {
         return { totalCount: rows.length, groups };
     }
 
+    /**
+     * Picks the display label for a session row.
+     *
+     * Uses the persona, else the first eight characters of the session ID, else unknown.
+     */
     _fleetLabelOf( session ) {
         /**
          * Resolve the "Who" label for a session row: persona preferred, short
@@ -9749,6 +10255,11 @@ class NotificationsUI {
         return "unknown";
     }
 
+    /**
+     * Builds the tooltip text listing a session's raw liveness ages.
+     *
+     * Missing ages show as n/a, and missing liveness data gives a generic message.
+     */
     _fleetLivenessTooltip( liveness ) {
         /**
          * Build the hover tooltip text for the Liveness cell from the raw 4 ages
@@ -9772,6 +10283,11 @@ class NotificationsUI {
         ].join( " · " );
     }
 
+    /**
+     * Splits sessions into live and offline lists by their liveness verdict.
+     *
+     * A session counts as offline only when its verdict says offline. Input order is kept.
+     */
     _splitFleetByLiveness( sessions ) {
         /**
          * Partition sessions into live vs offline by liveness verdict (D6 / §5.1).
@@ -9795,6 +10311,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Builds the button that shows or hides offline sessions, with their count.
+     *
+     * Returns an HTML string wired to the toggle method.
+     */
     _fleetOfflineToggleHtml( offlineCount, showOffline ) {
         /**
          * Build the "Show/Hide offline (N)" view-toggle control (D6 / §5.1).
@@ -9819,6 +10340,11 @@ class NotificationsUI {
                `onclick="window.notificationsUI.toggleFleetShowOffline()">${label}</button></div>`;
     }
 
+    /**
+     * Flips whether offline sessions are shown and repaints from the last fetched data.
+     *
+     * Makes no network call and leaves the updated time stamp alone.
+     */
     toggleFleetShowOffline() {
         /**
          * Flip the "show offline" view state and re-render the LAST fetched composite
@@ -9834,6 +10360,11 @@ class NotificationsUI {
         this.renderFleetStatus( this._lastFleetComposite, false );
     }
 
+    /**
+     * Builds the HTML table of fleet sessions grouped under their managers.
+     *
+     * Each row has eight columns, including context window use joined in per persona. Returns a string and touches no DOM.
+     */
     renderFleetStatusTable( model, personas = {} ) {
         /**
          * Render the grouped hierarchy model (§7) as a read-only table (mirrors the
@@ -9894,6 +10425,11 @@ class NotificationsUI {
         return `<table class="fleet-status-table">${headerRow}<tbody>${body}</tbody></table>`;
     }
 
+    /**
+     * Formats a context window size compactly, such as 1M or 200K.
+     *
+     * Other positive numbers show as plain integers, and unknown values show a dash.
+     */
     _formatWindowSize( windowSize ) {
         /**
          * Format a context-window size for compact display: 1000000 → "1M",
@@ -9916,6 +10452,11 @@ class NotificationsUI {
         return String( windowSize );
     }
 
+    /**
+     * Formats the percent of context window consumed for display.
+     *
+     * Returns a dash when the value is missing.
+     */
     _formatConsumptionPct( pct ) {
         /**
          * Format the "% of context window consumed" for display. The backend
@@ -9933,6 +10474,11 @@ class NotificationsUI {
         return `${pct}%`;
     }
 
+    /**
+     * Maps a liveness verdict to the CSS class that colors the row and its dot.
+     *
+     * Uses the first word of the verdict, case-insensitively, and falls back to an unknown class.
+     */
     _fleetVerdictClass( verdict ) {
         /**
          * Map a liveness verdict to its row-level CSS class (TASK 1, 2026-06-10).
@@ -9957,6 +10503,11 @@ class NotificationsUI {
         return "fleet-verdict-unknown";
     }
 
+    /**
+     * Maps a context percentage to a heat class: low under 50, mid under 80, else high.
+     *
+     * Returns an empty string for a missing or non-numeric value.
+     */
     _fleetPctClass( pct ) {
         /**
          * Map a "% of context window consumed" value to a heat-tint CSS class for
@@ -9979,6 +10530,11 @@ class NotificationsUI {
         return "fleet-pct-high";
     }
 
+    /**
+     * Builds one table row for a fleet session.
+     *
+     * Shows who, role, state, what it is holding on, stuck flag, liveness verdict with tooltip, and context use. Missing fields show a dash.
+     */
     _renderFleetRow( session, indented, personas = {} ) {
         /**
          * Render a single session row (one <tr>) for the fleet-status table.
@@ -10025,6 +10581,11 @@ class NotificationsUI {
             </tr>`;
     }
 
+    /**
+     * Paints the fleet panel for the fetched data and updates the count and updated time.
+     *
+     * Shows a sign-in, offline, empty or live-only message, or the grouped table. Caches the data for the offline toggle.
+     */
     renderFleetStatus( composite, stampUpdated = true ) {
         /**
          * Dispatch the fetched composite to the correct render state (§6.4) and
@@ -10093,6 +10654,11 @@ class NotificationsUI {
         if ( stampUpdated ) this._stampFleetStatusUpdated( composite.app_timezone );
     }
 
+    /**
+     * Formats a date as hours, minutes and seconds with a short zone name.
+     *
+     * Uses the given time zone, and falls back to the browser's zone when it is missing or invalid.
+     */
     _formatFleetTimestamp( date, ianaZone ) {
         /**
          * Format a Date as "HH:MM:SS TZ" (e.g. "14:32:07 EDT") in the configured
@@ -10120,6 +10686,11 @@ class NotificationsUI {
         return new Intl.DateTimeFormat( undefined, opts ).format( date );
     }
 
+    /**
+     * Writes the current time into the fleet panel's updated label.
+     *
+     * Does nothing when the label element is missing.
+     */
     _stampFleetStatusUpdated( ianaZone ) {
         /**
          * Stamp the #fleet-status-updated span with the current time in the
@@ -10140,6 +10711,11 @@ class NotificationsUI {
     // THE FLEET-SIZE DIAL — the cap the spawn path enforces, and its configured ceiling
     // ========================================
 
+    /**
+     * Reads the fleet size cap and its ceiling from the arbiter endpoint.
+     *
+     * Returns the parsed body, or null on any failure after logging an error. Never throws.
+     */
     async fetchFleetSizeCap() {
         /**
          * Read { cap, ceiling } from GET /api/arbiter/fleet-size-cap.
@@ -10165,6 +10741,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Looks up the elements of the fleet size cap control.
+     *
+     * Returns null when the page does not carry the control.
+     */
     _fleetSizeCapEls() {
         /** The dial cluster, or null when the page does not carry it. */
         const root = document.getElementById( "fleet-size-cap-controls" );
@@ -10177,6 +10758,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Moves the cap slider and readout to the payload's cap and ceiling.
+     *
+     * Keeps the control hidden when the payload is unusable, shows live session counts, and returns whether it painted.
+     */
     _paintFleetSizeCap( payload ) {
         /**
          * Move the dial to `payload.cap` and set its span to `payload.ceiling`.
@@ -10238,6 +10824,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Looks up the elements of the skeleton crew switch.
+     *
+     * Returns null when the page does not carry the switch.
+     */
     _skeletonCrewEls() {
         /** The skeleton crew switch cluster, or null when the page does not carry it. */
         const toggle = document.getElementById( "skeleton-crew-toggle" );
@@ -10250,6 +10841,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Paints the skeleton crew switch from the payload.
+     *
+     * Hides it unless the payload has a boolean on state. Shows the mute warning when it applies, and a saving state while a change is pending.
+     */
     _paintSkeletonCrew( payload, saving ) {
         /**
          * Paint the skeleton crew switch from the same payload as the dial.
@@ -10287,6 +10883,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Sends the requested skeleton crew state to the server and returns what it saved.
+     *
+     * Returns null and logs the server's reason on failure. Never throws.
+     */
     async setSkeletonCrew( on ) {
         /**
          * Write { on } and return what the server says it persisted.
@@ -10322,6 +10923,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Binds the skeleton crew switch's change handler once.
+     *
+     * A change writes the new state and repaints from the server's answer, or re-reads the state when the write fails.
+     */
     _wireSkeletonCrew() {
         /**
          * Bind the switch once; the paint runs on every fleet refresh.
@@ -10347,6 +10953,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Fetches the fleet size cap numbers and paints the control.
+     *
+     * Returns whether the control was painted.
+     */
     async refreshFleetSizeCap() {
         /**
          * Fetch the dial's numbers and paint them.
@@ -10358,6 +10969,11 @@ class NotificationsUI {
         return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
     }
 
+    /**
+     * Sends a new fleet size cap to the server and returns what it saved.
+     *
+     * Returns null and logs the server's reason on failure. Never throws.
+     */
     async setFleetSizeCap( cap ) {
         /**
          * PUT the new cap and return what the SERVER SAYS IT PERSISTED.
@@ -10398,6 +11014,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Binds the cap slider's handlers once.
+     *
+     * Dragging only updates the readout. Releasing saves the value and repaints from the server's answer, or re-reads the state on failure.
+     */
     _wireFleetSizeCap() {
         /**
          * Bind the dial's handlers ONCE.
@@ -10443,6 +11064,11 @@ class NotificationsUI {
     }
 
 
+    /**
+     * Runs one fleet-status refresh: fetch, render, then refresh the size cap.
+     *
+     * Skips the call when a fetch is already in flight.
+     */
     async refreshFleetStatus() {
         /**
          * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
@@ -10470,6 +11096,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Starts the fleet-status refresh on a timer after an immediate first refresh.
+     *
+     * Stops any earlier timer first, so calling it again is safe.
+     */
     startFleetStatusPolling() {
         /**
          * Start the 60s fleet-status auto-poll (D4). Fires one immediate refresh,
@@ -10489,6 +11120,11 @@ class NotificationsUI {
         this.log( "Fleet status polling started (60s interval)" );
     }
 
+    /**
+     * Stops the fleet-status refresh timer and clears its handle.
+     *
+     * Does nothing when no timer is running.
+     */
     stopFleetStatusPolling() {
         /**
          * Stop the fleet-status auto-poll and clear the interval handle.
@@ -10510,6 +11146,11 @@ class NotificationsUI {
     // taskListModel / taskListTable) onto the fleet-status structure above.
     // ========================================
 
+    /**
+     * Fetches the task rows from the tasks endpoint using the shared query string.
+     *
+     * Returns the parsed body, or a status object for auth required, missing query module, or unreachable. Never throws.
+     */
     async fetchTaskList() {
         /**
          * Fetch the task-list rows from the JWT-authed :7999 endpoint
@@ -10565,6 +11206,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Looks up one task from a typed reference through the single-row endpoint.
+     *
+     * Returns an outcome object with a state such as found, missing, ambiguous, refused or unreachable. Never throws.
+     */
     async lookupTaskByRef( typed ) {
         /**
          * Resolve a pasted ticket reference to ONE row.
@@ -10631,6 +11277,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Turns a task lookup outcome into one sentence and a state name for display.
+     *
+     * A found row shows its title, status, owner and priority. Missing fields show a dash.
+     */
     describeTaskLookup( typed, outcome ) {
         /**
          * Turn a lookup outcome into the ONE sentence shown in the result region.
@@ -10695,6 +11346,11 @@ class NotificationsUI {
         return { text: window.LUPIN_TASK_LOOKUP_UNREACHABLE_MESSAGE, state: "unreachable" };
     }
 
+    /**
+     * Reads the lookup box, runs the lookup and shows the answer.
+     *
+     * A found task is pinned to the list, and any other outcome shows a message and leaves the list alone.
+     */
     async runTaskLookup() {
         /**
          * Read the box, run the lookup, paint the answer. The DOM half.
@@ -10740,6 +11396,11 @@ class NotificationsUI {
         result.setAttribute( "data-state", rendered.state );
     }
 
+    /**
+     * Fetches the rows waiting in the holding area from the shared query.
+     *
+     * Returns the parsed body, or a status object for auth required, missing query module, or unreachable. Never throws.
+     */
     async fetchHoldingArea() {
         /**
          * Fetch the HOLDING AREA — rows filed but not yet cleared to start.
@@ -10778,6 +11439,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Groups held rows by who filed them, with plans formed from shared correlation keys.
+     *
+     * Plans stay inside one filer. Rows sort by priority then title, and filers sort alphabetically. Touches no DOM.
+     */
     _groupHeldRowsByFiler( tasks, keep ) {
         /**
          * Group held rows BY FILER, which is what the triage session actually needs.
@@ -10848,6 +11514,11 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Tells whether a task status still means work is owed.
+     *
+     * Done, dropped and won't-fix are closed. A missing status counts as open.
+     */
     isTaskOpenStatus( status ) {
         /**
          * True when a task's status is non-terminal (work still owed). A missing
@@ -10879,6 +11550,11 @@ class NotificationsUI {
         return status !== "done" && status !== "dropped" && status !== "wont_fix";
     }
 
+    /**
+     * Returns the sort rank for a task status, most active first and closed last.
+     *
+     * Unknown or missing statuses sort between open and closed statuses.
+     */
     _taskStatusRank( status ) {
         /**
          * Sort rank for a status: most-urgent/most-active first, terminal last.
@@ -10927,6 +11603,11 @@ class NotificationsUI {
         return rank === undefined ? 70 : rank;
     }
 
+    /**
+     * Returns the sort rank for a priority such as P0, with the lowest number first.
+     *
+     * Missing or malformed priorities rank last.
+     */
     _taskPriorityRank( priority ) {
         /**
          * Secondary-sort rank for a `P<n>` priority: P0 highest (0), unknown last.
@@ -10940,6 +11621,9 @@ class NotificationsUI {
         return m ? Number( m[ 1 ] ) : 99;
     }
 
+    /**
+     * Returns the task's owner persona, or Unassigned when there is none.
+     */
     _taskOwnerLabel( task ) {
         /**
          * Resolve a task's owner label: `owner_persona` preferred, "Unassigned"
@@ -10953,6 +11637,9 @@ class NotificationsUI {
         return "Unassigned";
     }
 
+    /**
+     * Returns the task's title, or (untitled) when it is empty.
+     */
     _taskTitleLabel( task ) {
         /**
          * Title fallback so a row never renders an empty primary cell.
@@ -10965,6 +11652,9 @@ class NotificationsUI {
         return "(untitled)";
     }
 
+    /**
+     * Returns the value for a table cell, or a dash when it is empty or none.
+     */
     _taskCellOrDash( value ) {
         /**
          * Empty-cell guard: falsy / "none" → em-dash, else the value verbatim.
@@ -10977,6 +11667,11 @@ class NotificationsUI {
         return value;
     }
 
+    /**
+     * Maps a task status to the CSS class that colors its row and status dot.
+     *
+     * Every known status has its own class, and anything else gets the unknown class.
+     */
     _taskStatusClass( status ) {
         /**
          * Map a status word to its row-accent + status-dot color class. Keys on the
@@ -11020,6 +11715,11 @@ class NotificationsUI {
         return "task-status-unknown";
     }
 
+    /**
+     * Maps a priority such as P1 to a heat class: high for P0 and P1, mid for P2, else low.
+     *
+     * Returns an empty string when the priority is missing or malformed.
+     */
     _taskPriorityClass( priority ) {
         /**
          * Map a `P<n>` priority to its heat-tint class for the Priority cell.
@@ -11038,6 +11738,11 @@ class NotificationsUI {
         return "task-prio-low";
     }
 
+    /**
+     * Formats a next-chase timestamp as month, day and time in the given time zone.
+     *
+     * A timestamp without a zone is read as UTC. Returns a dash when missing or unparseable.
+     */
     _formatTaskChaseTime( iso, ianaZone ) {
         /**
          * Format an ISO-8601 next-chase timestamp as "MM-DD HH:MM" in the given IANA
@@ -11075,6 +11780,11 @@ class NotificationsUI {
         return new Intl.DateTimeFormat( undefined, opts ).format( date );
     }
 
+    /**
+     * Groups tasks by owner persona, with unowned tasks in a last Unassigned group.
+     *
+     * Within a group tasks sort by priority, then status, then title. Touches no DOM.
+     */
     groupTasksByOwner( tasks ) {
         /**
          * Build the owner-grouped model from a flat task array. Each distinct
@@ -11138,6 +11848,9 @@ class NotificationsUI {
         return { totalCount: rows.length, groups };
     }
 
+    /**
+     * Returns the first eight characters of a task's ID, or a dash when missing.
+     */
     _taskIdLabel( task ) {
         /**
          * The compact row identifier: the first 8 chars of the item's id (the
@@ -11152,6 +11865,11 @@ class NotificationsUI {
         return id ? id.slice( 0, 8 ) : "—";
     }
 
+    /**
+     * Tells whether a task has no body text to show.
+     *
+     * True for a missing, null or whitespace-only body.
+     */
     _taskBodyIsEmpty( task ) {
         /**
          * Whether the task has no detail `body` to show in the overlay — drives
@@ -11166,6 +11884,11 @@ class NotificationsUI {
         return body == null || String( body ).trim() === "";
     }
 
+    /**
+     * Returns the display name of the person who filed a task.
+     *
+     * Strips a trailing eight-character session ID and capitalizes words. Shows the whole text when no session ID is found, and a dash when blank.
+     */
     _taskFilerLabel( task ) {
         /**
          * The PERSON who filed this row, from `created_by`, display-cased.
@@ -11210,6 +11933,11 @@ class NotificationsUI {
         return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
     }
 
+    /**
+     * Returns the table header used by the task list and holding area.
+     *
+     * Delegates to the shared row header builder.
+     */
     _taskTableHeaderRow() {
         /**
          * The task list's and holding area's <thead> — now a wrapper over the shared
@@ -11233,6 +11961,11 @@ class NotificationsUI {
         return this._rowTableHeaderRow();
     }
 
+    /**
+     * Returns how many table cells a row's visible line has, including the toggle cell.
+     *
+     * Used for the column span of full-width rows.
+     */
     _rowWidth() {
         /**
          * How many cells the visible line has: the ruled fields plus ONE control cell
@@ -11251,6 +11984,11 @@ class NotificationsUI {
         return this.ROW_SCHEMA.line1.length + 1;
     }
 
+    /**
+     * Builds the table header shared by every pane that shows task rows.
+     *
+     * One header cell per schema field, plus an unlabeled cell for the row controls.
+     */
     _rowTableHeaderRow() {
         /**
          * The <thead> for every pane that renders rows, built from ROW_SCHEMA.
@@ -11277,6 +12015,11 @@ class NotificationsUI {
             </thead>`;
     }
 
+    /**
+     * Builds the HTML and extra class for every field a task row can show.
+     *
+     * Store values are escaped. Returns an object keyed by the field names of the row schema.
+     */
     _rowFieldParts( task, ianaZone ) {
         /**
          * Every field a row can show, keyed by the names ROW_SCHEMA uses.
@@ -11369,6 +12112,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Builds the HTML for one task row, shared by all three panes.
+     *
+     * Produces the visible line with a disclosure toggle, a hidden controls row and a hidden error stripe. The row class and time zone are parameters.
+     */
     _renderRow( task, ianaZone, opts ) {
         /**
          * THE row renderer — one implementation, all three panes.
@@ -11440,6 +12188,11 @@ class NotificationsUI {
             <tr class="task-row-error-stripe" data-error-for="${idAttr}" hidden><td colspan="${width}"></td></tr>`;
     }
 
+    /**
+     * Builds the HTML for a task row with the task list's row class.
+     *
+     * A thin wrapper over the shared row renderer.
+     */
     _renderTaskRow( task, ianaZone ) {
         /**
          * The task list's and holding area's entry point — a thin wrapper over the one
@@ -11456,6 +12209,11 @@ class NotificationsUI {
         return this._renderRow( task, ianaZone, { rowClass: "task-row" } );
     }
 
+    /**
+     * Builds the ellipsis button that opens a row's hidden controls.
+     *
+     * Carries the task ID and starts collapsed.
+     */
     _disclosureToggle( task ) {
         /**
          * The ellipsis that stands in for a row's controls until they are asked for.
@@ -11487,6 +12245,11 @@ class NotificationsUI {
              + `aria-expanded="false" title="Show row controls">⋯</button>`;
     }
 
+    /**
+     * Shows or hides one row's controls row within the clicked pane.
+     *
+     * Updates the button state and title, and clears the row's error stripe on collapse.
+     */
     _handleDisclosureToggle( button ) {
         /**
          * Show or hide one row's controls, scoped to the pane that was clicked.
@@ -11519,6 +12282,11 @@ class NotificationsUI {
         if ( !nowOpen ) this._renderTaskRowError( taskId, "", pane );
     }
 
+    /**
+     * Builds a row's action controls: verb select, mic, reason field and Submit.
+     *
+     * Illegal verbs for the row's status are disabled with the reason in the label. Terminal rows get everything disabled. Ends with the priority controls.
+     */
     _taskActionsCell( task ) {
         /**
          * The per-row state controls: ONE verb select, ONE mic, ONE reason field, ONE Submit.
@@ -11656,6 +12424,11 @@ class NotificationsUI {
                `</div>`;
     }
 
+    /**
+     * Builds the priority select and its update button for a task row.
+     *
+     * The button starts disabled and enables only when the value differs from the painted priority. Unknown stored priorities appear as an extra option.
+     */
     _priorityCell( task ) {
         /**
          * Rick's third pair, far right: the row's priority and one Update button.
@@ -11727,6 +12500,11 @@ class NotificationsUI {
                        `disabled aria-disabled="true" title="Choose a different priority to enable">Update</button>`;
     }
 
+    /**
+     * Enables the Update button only when the chosen priority differs from the painted one.
+     *
+     * Updates the button's disabled state, accessibility state and tooltip.
+     */
     _handlePrioritySelectChange( select ) {
         /**
          * Enable Update only when the chosen priority DIFFERS from the painted one.
@@ -11754,6 +12532,11 @@ class NotificationsUI {
             : "Choose a different priority to enable" );
     }
 
+    /**
+     * Saves the chosen priority for a row, then refreshes the task list.
+     *
+     * Does nothing when the value has not changed. A refusal is shown in the row's error stripe.
+     */
     async _handlePriorityUpdateClick( button ) {
         /**
          * PATCH the row's priority, then let the next poll repaint it.
@@ -11784,6 +12567,11 @@ class NotificationsUI {
         else this._renderTaskRowError( taskId, `Priority update refused: ${result.message}`, scope );
     }
 
+    /**
+     * Sends a field edit for one task to the server.
+     *
+     * Returns an ok result, or a failed result carrying a message. Never throws.
+     */
     async _patchTaskFields( taskId, patch ) {
         /**
          * PATCH one or more editable FIELDS on a row — the field seam, not the oracle.
@@ -11820,6 +12608,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Returns the shared specification for one task verb: what it asks for and posts.
+     *
+     * Returns null for an unknown verb or when the shared module has not loaded.
+     */
     _verbNeeds( verb ) {
         /**
          * What one verb asks the operator for, and what it posts.
@@ -11855,6 +12648,11 @@ class NotificationsUI {
     }
 
 
+    /**
+     * Shows or clears the inline error stripe under one task row.
+     *
+     * Searches within the given pane, or the whole document. Does nothing when the stripe is missing.
+     */
     _renderTaskRowError( taskId, message, scope ) {
         /**
          * Show (or clear) the inline error stripe under one row, IN THE PANE the
@@ -11880,6 +12678,11 @@ class NotificationsUI {
         stripe.hidden = !message;
     }
 
+    /**
+     * Posts a status change for one task to the transition endpoint.
+     *
+     * Returns ok, a pending result for a 202 answer, or a failed result with the server's message. A refusal for a row already at the target counts as success.
+     */
     async _transitionTask( taskId, toStatus, extras = {} ) {
         /**
          * POST one state change to /api/tasks/{id}/transition.
@@ -11954,6 +12757,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Builds the sentence shown when a click found the row already at the target status.
+     */
     _alreadyThereNote( label, status ) {
         /**
          * The sentence shown when a click found the row already at the target.
@@ -11965,6 +12771,11 @@ class NotificationsUI {
         return `${label}: this row is already ${status} — this click changed nothing.`;
     }
 
+    /**
+     * Reads one task and tells whether its status already equals the target.
+     *
+     * Returns false when the read fails. Never throws.
+     */
     async _rowIsAlreadyAt( taskId, toStatus ) {
         /**
          * True iff GET /api/tasks/{id} says the row's status is already `toStatus`.
@@ -11997,6 +12808,11 @@ class NotificationsUI {
     // and its sentence is shown verbatim; hiding the buttons would be presentation, not a control.
     // =========================================================================
 
+    /**
+     * Builds the HTML chip for a row's pending promote or demote request.
+     *
+     * Returns an empty string when nothing is pending or the shared module did not load. The chip has Approve and Deny buttons.
+     */
     _requestChipHtml( task ) {
         /**
          * The pending-request chip for one row, as HTML, or "" when nothing is pending.
@@ -12035,6 +12851,11 @@ class NotificationsUI {
              + `</div>`;
     }
 
+    /**
+     * Turns a click on a request chip's Approve or Deny into a verdict.
+     *
+     * Returns true when the click was on a chip button, and false otherwise.
+     */
     _handleRequestChipClick( target ) {
         /**
          * A click on a chip's Approve or Deny → a verdict. Called FIRST by both panes'
@@ -12055,6 +12876,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Builds and posts the verdict for a request chip, then refreshes the board.
+     *
+     * Refuses a demote approval with no date, ignores repeat presses, and remembers refusals per request.
+     */
     async _sendRequestVerdict( chip, verdict ) {
         /**
          * Build the verdict body through the shared module, POST it, and report.
@@ -12117,6 +12943,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Posts a request verdict body to the server.
+     *
+     * Returns ok, or a failed result with the server's message. Never throws.
+     */
     async _postRequestVerdict( taskId, body ) {
         /**
          * POST /api/tasks/{id}/request-verdict. Never throws.
@@ -12145,11 +12976,19 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Sets the status text on a request chip.
+     */
     _paintRequestStatus( chip, text ) {
         const el = chip.querySelector( ".task-request-status" );
         if ( el ) el.textContent = text;
     }
 
+    /**
+     * Shows who filed a request and why on its chip.
+     *
+     * Shows a fallback message when the trail has neither.
+     */
     _paintRequestDetail( chip, detail ) {
         /**
          * Paint "by <filer> — <reason>", or say the trail carries neither.
@@ -12160,6 +12999,11 @@ class NotificationsUI {
         el.textContent = parts.length > 0 ? parts.join( " — " ) : "filer and reason not on the trail";
     }
 
+    /**
+     * Fills each request chip with its filer and reason and restores any saved refusal.
+     *
+     * Reads each request's event trail once and caches it. Does nothing without a container.
+     */
     _hydrateRequestChips( container ) {
         /**
          * After a paint: fill each chip's filer and reason, and restore a refusal it carried.
@@ -12200,6 +13044,11 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Reads the pending request counts and paints the task list and holding area badges.
+     *
+     * A failed read hides both badges.
+     */
     async refreshRequestBadges() {
         /**
          * Paint the two request badges from GET /api/tasks/request-badges.
@@ -12230,6 +13079,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Tells whether a task is parked with a chase time still in the future.
+     *
+     * A parked row with a missing, unparseable or past chase time is not counted. A time without a zone is read as UTC.
+     */
     _taskIsParked( task, now ) {
         /**
          * PARK-ACTIVE — the browser twin of the store's canonical predicate
@@ -12291,6 +13145,11 @@ class NotificationsUI {
         return chaseMs > nowMs;
     }
 
+    /**
+     * Builds the task list header count text split into live and parked.
+     *
+     * Shows only the live count when nothing is parked.
+     */
     _formatTaskListCount( live, parked ) {
         /**
          * Header text for the task-list count, split LIVE vs PARKED.
@@ -12324,6 +13183,13 @@ class NotificationsUI {
         return `Live: ${l} · Parked: ${p} · Total: ${l + p}`;
     }
 
+    /**
+     * Builds the header text for the closed-vs-new ratio from the flow-ratio payload.
+     *
+     * Returns an empty string when the payload is unusable, so the header omits the clause.
+     * The text shows created and closed counts, the window in days and a percent, plus any room text.
+     * While a window slider is being dragged it shows only a recounting note and that window.
+     */
     _formatFlowRatio( payload, provisionalDays ) {
         /**
          * Header text for the closed-vs-new ratio, from GET /api/tasks/flow-ratio.
@@ -12378,6 +13244,12 @@ class NotificationsUI {
         return `${counts}${days}d = ${this._flowRatioPercentText( payload )}${this._flowRatioRoomText( payload )}`;
     }
 
+    /**
+     * Returns the headroom clause for the ratio badge, read straight from the payload.
+     *
+     * Gives the needed-closures text when the gate already refuses, the remaining-room text when there is room, or the full text at zero.
+     * Returns an empty string when the payload carries no bound. Pure, no DOM.
+     */
     _flowRatioRoomText( payload ) {
         /**
          * Maria's clause, in three states: "Room for N more" | "FULL" | "CLOSE N".
@@ -12470,6 +13342,11 @@ class NotificationsUI {
         return "";
     }
 
+    /**
+     * Formats the flow ratio as a whole percent, an infinity sign or a dash.
+     *
+     * An infinity sign means rows were created but none closed; a dash means an idle window. Pure.
+     */
     _flowRatioPercentText( payload ) {
         /**
          * The ratio as a percentage, or the character that stands in for one.
@@ -12490,6 +13367,11 @@ class NotificationsUI {
         return Number.isFinite( payload.created ) && payload.created > 0 ? "\u221e" : "\u2014";
     }
 
+    /**
+     * Converts a window in hours to whole days for display, never less than one.
+     *
+     * Returns null for a missing, non-numeric or non-positive value so callers can skip rendering.
+     */
     _flowRatioWindowDays( hours ) {
         /**
          * The window in whole DAYS, for display only.
@@ -12510,6 +13392,11 @@ class NotificationsUI {
         return Math.max( 1, Math.round( hours / 24 ) );
     }
 
+    /**
+     * Builds the hover text for the ratio clause, noting it counts every project.
+     *
+     * Returns an empty string when the payload has no usable window. Reuses the short-form text so both quote the same numbers.
+     */
     _flowRatioLongForm( payload ) {
         /** The hover text: the full description the short bar label drops.
          *
@@ -12539,6 +13426,12 @@ class NotificationsUI {
             : "";
     }
 
+    /**
+     * Tells whether the create gate would admit a new row at the given threshold.
+     *
+     * The comparison is strict, so a ratio exactly at the threshold counts as refused.
+     * An unmeasurable ratio counts as open unless rows were created and none closed.
+     */
     _flowRatioIsOpen( payload, threshold ) {
         /**
          * Would the gate ADMIT a new row right now?
@@ -12557,6 +13450,12 @@ class NotificationsUI {
         return payload.ratio < threshold;
     }
 
+    /**
+     * Fetches the closed-vs-new ratio from /api/tasks/flow-ratio.
+     *
+     * Returns the payload object on success and null on any failure; it never throws.
+     * The result is not cached, because the ratio is live state read on each task-list tick.
+     */
     async fetchFlowRatio() {
         /**
          * Fetch the closed-vs-new ratio from GET /api/tasks/flow-ratio.
@@ -12590,6 +13489,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Stores the fetched ratio payload and repaints the ratio clause and its verdict colour.
+     *
+     * Does nothing when the #task-list-flow-ratio span is absent.
+     */
     _renderFlowRatio( payload ) {
         /**
          * Write the ratio clause into #task-list-flow-ratio.
@@ -12609,6 +13513,12 @@ class NotificationsUI {
         this._paintFlowRatioVerdict();
     }
 
+    /**
+     * Writes the ratio text and hover title into the ratio span from the last payload.
+     *
+     * Takes an optional provisional window in days while a slider is dragged, and needs no fetch.
+     * Does nothing when the span is absent.
+     */
     _paintFlowRatioClause( provisionalDays ) {
         /**
          * Write the clause into #task-list-flow-ratio from the LAST FETCHED payload.
@@ -12641,6 +13551,12 @@ class NotificationsUI {
         el.title       = this._flowRatioLongForm( this._flowRatioPayload );
     }
 
+    /**
+     * Colours the ratio clause by whether the gate would admit a new row right now.
+     *
+     * Sets open, closed and preview classes on the span, using a dragged threshold when one is given.
+     * Does nothing when the span is absent.
+     */
     _paintFlowRatioVerdict( provisionalThreshold ) {
         /**
          * Colour the clause by the verdict the gate would return RIGHT NOW.
@@ -12677,6 +13593,11 @@ class NotificationsUI {
     // out loud instead of leaving the slider sitting at a value nothing is using.
     // -----------------------------------------------------------------------
 
+    /**
+     * Reads the live window and threshold settings, with their source, from the server.
+     *
+     * Returns the payload on success and null on failure, logging the failure as an error. Never throws.
+     */
     async fetchFlowRatioSettings() {
         /**
          * Read the live { window_hours, allow_below } and their provenance.
@@ -12702,6 +13623,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Collects the elements of the ratio control cluster into one object.
+     *
+     * Returns null when the page has no #flow-ratio-controls root.
+     */
     _flowRatioControlEls() {
         /** The control cluster, or null when the page does not carry it. */
         const root = document.getElementById( "flow-ratio-controls" );
@@ -12718,6 +13644,12 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Moves the threshold and window sliders to the given settings and labels their source.
+     *
+     * Hides the control cluster and returns false when the settings are missing or incomplete.
+     * Returns true when it painted, and repaints the verdict colour.
+     */
     _paintFlowRatioSettings( settings ) {
         /**
          * Move the sliders to `settings` and label them with their provenance.
@@ -12763,6 +13695,12 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Sends a PATCH with the new threshold or window, then repaints from the server's answer.
+     *
+     * On refusal it shows a status message (admin only on 403) and repaints from a fresh settings read.
+     * Returns the saved settings, or null on failure. Never throws.
+     */
     async saveFlowRatioSettings( patch ) {
         /**
          * PATCH the operator's ratio settings, then repaint from the SERVER's answer.
@@ -12807,6 +13745,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Reads the manager-pull toggle state from /api/tasks/manager-pull.
+     *
+     * Returns the server's JSON, or null when the request fails. Never throws.
+     */
     async fetchManagerPullDisabled() {
         /**
          * Read Rick's manager-pull toggle from the server.
@@ -12827,6 +13770,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Sends a PATCH for the manager-pull toggle, then repaints the checkbox from the reply.
+     *
+     * On refusal it shows a status message (admin only on 403) and repaints from a fresh read.
+     * Returns the server state, or null on failure.
+     */
     async saveManagerPullDisabled( disabled ) {
         /**
          * PATCH the toggle, then repaint from the SERVER's answer.
@@ -12868,6 +13817,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Sets the manager-pull checkbox from the server state.
+     *
+     * Leaves the box untouched when the state is null or the control is absent.
+     */
     _paintManagerPull( live ) {
         /**
          * Put the SERVER's state on the checkbox.
@@ -12882,6 +13836,12 @@ class NotificationsUI {
         els.managerPull.checked = !!live.disabled;
     }
 
+    /**
+     * Deletes the saved override so the configured window and threshold apply again.
+     *
+     * Repaints the sliders from the server's answer and refreshes the ratio clause.
+     * Returns the settings, or null with a status message on failure.
+     */
     async resetFlowRatioSettings() {
         /**
          * DELETE the override so the configured defaults govern again.
@@ -12913,6 +13873,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Binds the ratio sliders once and paints them from the server, retrying until painted.
+     *
+     * Called on every task-list tick. Does nothing when the control cluster is absent.
+     * At most one settings fetch is in flight, and a successful paint is never repeated.
+     */
     initFlowRatioControls() {
         /**
          * Bind the sliders ONCE, then paint them from the server — retrying the paint
@@ -12961,6 +13927,12 @@ class NotificationsUI {
             .finally( () => { this._flowRatioPaintInFlight = false; } );
     }
 
+    /**
+     * Attaches listeners for the ratio sliders, reset button and manager-pull toggle.
+     *
+     * Input events only preview; change events save. The manager-pull state is painted on open.
+     * The caller guarantees it runs once.
+     */
     _bindFlowRatioControls( els ) {
         /**
          * Attach the five listeners. Split out of initFlowRatioControls so the
@@ -13008,6 +13980,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Builds the header count text from a list of open rows.
+     *
+     * Splits the rows into live and park-active and formats them with the shared count formatter.
+     * A non-array argument counts as zero. Pure.
+     */
     _taskListCountText( openTasks, now ) {
         /**
          * Count a set of OPEN rows into the header's live/parked/total text.
@@ -13034,6 +14012,11 @@ class NotificationsUI {
         return this._formatTaskListCount( rows.length - parked, parked );
     }
 
+    /**
+     * Returns the accordion key for an owner group, or the Unassigned key if ownerless.
+     *
+     * This key is used in data-owner and in the saved collapsed set.
+     */
     _taskGroupOwnerKey( group ) {
         /**
          * Stable accordion key for an owner group: the persona itself, or the
@@ -13048,6 +14031,11 @@ class NotificationsUI {
         return group.isUnassigned ? this.TASK_LIST_UNASSIGNED_KEY : group.ownerPersona;
     }
 
+    /**
+     * Turns an owner key into a DOM-id-safe slug for the group's tbody id.
+     *
+     * Prefixes it with task-group- and replaces unsafe characters with hyphens.
+     */
     _taskGroupIdSlug( ownerKey ) {
         /**
          * Map an owner key to a DOM-id-safe slug for the group's <tbody> id /
@@ -13060,6 +14048,11 @@ class NotificationsUI {
         return "task-group-" + String( ownerKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
     }
 
+    /**
+     * Escapes a value for use inside a double-quoted HTML attribute.
+     *
+     * Encodes ampersands, quotes and angle brackets, after converting the value to a string.
+     */
     _escapeTaskAttr( value ) {
         /**
          * Escape a value for safe inclusion in a double-quoted HTML attribute
@@ -13077,6 +14070,12 @@ class NotificationsUI {
             .replace( />/g, "&gt;" );
     }
 
+    /**
+     * Builds the owner-grouped task table as an HTML string.
+     *
+     * Each owner gets its own tbody with a clickable header bar and that owner's rows.
+     * Groups whose key is in the collapsed set render collapsed. Pure, with no DOM access.
+     */
     renderTaskListTable( model, ianaZone, collapsedOwners ) {
         /**
          * Render the owner-grouped model as a read-only table (mirrors
@@ -13133,6 +14132,12 @@ class NotificationsUI {
         return `<table class="task-list-table">${headerRow}${body}</table>`;
     }
 
+    /**
+     * Paints the task list pane from a fetched composite and stamps the update time.
+     *
+     * Shows sign-in, query-unavailable or store-unreachable messages, an empty message, or the grouped table.
+     * Holds the repaint during a press and re-renders a pinned lookup row when one is set.
+     */
     renderTaskList( composite, stampUpdated = true ) {
         /**
          * Dispatch the fetched composite to the correct render state and stamp the
@@ -13233,6 +14238,12 @@ class NotificationsUI {
         if ( stampUpdated ) this._stampTaskListUpdated();
     }
 
+    /**
+     * Renders the task list as only the single row the lookup found.
+     *
+     * Uses the normal table renderer and sets the count to one.
+     * Does nothing without a container or a pinned row.
+     */
     _renderPinnedTaskRow( container, countEl ) {
         /**
          * Render the task list as the ONE row the lookup found.
@@ -13268,6 +14279,11 @@ class NotificationsUI {
         if ( countEl ) countEl.textContent = "Live: 1";
     }
 
+    /**
+     * Clears the lookup filter and shows the whole task list again.
+     *
+     * Resets the pinned row, input and result line, then re-renders from the last good rows.
+     */
     clearTaskLookup() {
         /**
          * Drop the filter and put the whole list back.
@@ -13287,6 +14303,12 @@ class NotificationsUI {
         this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
     }
 
+    /**
+     * Opens the shared New Ticket card over the page.
+     *
+     * Supplies the POST function, the assignee list from the board's owners, and the created and dictate callbacks.
+     * If the shared module is missing it shows a message in the lookup result line and returns null.
+     */
     openNewTicketCard() {
         /**
          * Open Rick's New Ticket card (row c9895403) over the page.
@@ -13326,6 +14348,12 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Starts or stops dictation into the New Ticket card's Title or Details field.
+     *
+     * A click while recording stops it; a click while processing is ignored.
+     * Does nothing when the page has no recording manager.
+     */
     async _handleNewTicketDictate( { field, button, input } ) {
         /**
          * Rick dictating his own ticket, row f9a449c3: *"I've been forced to use the
@@ -13364,6 +14392,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Posts a new ticket payload as JSON to /api/tasks for the shared card.
+     *
+     * Returns status and parsed body on success, status and raw text on a refusal, or status zero on a network error.
+     * Never rejects.
+     */
     async postNewTicket( payload ) {
         /**
          * Send the card's POST, in the shape the shared card reads.
@@ -13391,6 +14425,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows the just-filed ticket by looking it up in the Find box, then refreshes the board.
+     *
+     * The lookup runs only when the Find input exists and the row has a string id.
+     */
     showCreatedTicket( row ) {
         /**
          * After Rick files a ticket: show him the row he just made, and refresh.
@@ -13410,6 +14449,11 @@ class NotificationsUI {
         void this.refreshTaskList();
     }
 
+    /**
+     * Writes board notice markup into the persistent #task-list-notices mount.
+     *
+     * An empty string clears it. Does nothing when the mount is absent.
+     */
     _paintTaskListNotices( html ) {
         /**
          * Paint the Task List's board notices into their PERSISTENT toolbar mount.
@@ -13442,6 +14486,12 @@ class NotificationsUI {
         mount.innerHTML = html || "";
     }
 
+    /**
+     * Builds the banner HTML warning that the task board is truncated, plus any server warnings.
+     *
+     * Triggers on the has_more flag, a count below the total, or a full page with no total.
+     * Returns only the warning lines, or an empty string, when nothing was held back. Pure.
+     */
     _renderTaskListTruncationBanner( composite, queryString ) {
         /**
          * The LOUD half of the truncation fix. Returns banner HTML when the server
@@ -13551,6 +14601,12 @@ class NotificationsUI {
         return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
     }
 
+    /**
+     * Recognizes the server's holding-area note and returns its row count.
+     *
+     * Returns null for anything else, including a note whose count cannot be read.
+     * Pure; never throws.
+     */
     _holdingAreaWarningCount( warning ) {
         /**
          * Recognize the server's HOLDING AREA note and return its row count.
@@ -13577,6 +14633,11 @@ class NotificationsUI {
         return match ? Number( match[ 1 ] ) : null;
     }
 
+    /**
+     * Reads the number shown in the Holding Area header.
+     *
+     * Returns the integer when the element exists and holds a whole number, otherwise null.
+     */
     _holdingAreaHeaderCount() {
         /**
          * The number the Holding Area header (#holding-area-count, notifications.html)
@@ -13598,6 +14659,11 @@ class NotificationsUI {
         return /^\d+$/.test( text ) ? Number( text ) : null;
     }
 
+    /**
+     * Reads the limit parameter from a task query string or the page's task-list query.
+     *
+     * Returns the number, or NaN when it is absent or unparseable.
+     */
     _taskListQueryLimit( queryString ) {
         /**
          * The `limit` a panel actually asked for, read off its query at call time.
@@ -13625,6 +14691,12 @@ class NotificationsUI {
         return match ? Number( match[ 1 ] ) : NaN;
     }
 
+    /**
+     * Paints the store-unreachable state in the task list pane.
+     *
+     * Shows a warning and replays the last known open rows beneath it, or a no-tasks-yet message when none exist.
+     * Updates the count text and does not touch the stored last-good rows.
+     */
     _renderTaskListUnreachable( container, countEl ) {
         /**
          * Store-unreachable / pre-first-poll branch. Shows a "store unreachable"
@@ -13652,6 +14724,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Writes the current time into the #task-list-updated span as an updated stamp.
+     *
+     * Uses the browser's own time zone. Does nothing when the span is absent.
+     */
     _stampTaskListUpdated() {
         /**
          * Stamp the #task-list-updated span with the current time. `/api/tasks`
@@ -13666,6 +14743,12 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), undefined )}`;
     }
 
+    /**
+     * Runs one task-list refresh: fetch the list, render it, then refresh dependent panes.
+     *
+     * Also reloads epic stories, the flow ratio, the ratio controls, the holding area and request badges.
+     * Skips when a refresh is already in flight.
+     */
     async refreshTaskList() {
         /**
          * Orchestrate one task-list refresh: fetch → render. Shared by the 60s
@@ -13716,6 +14799,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Refreshes the task list after a write, waiting out any refresh already in flight.
+     *
+     * Ensures a refresh that began after the call has finished when it resolves.
+     */
     async _refreshTaskListAfterWrite() {
         /**
          * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
@@ -13741,6 +14829,12 @@ class NotificationsUI {
         await this.refreshTaskList();
     }
 
+    /**
+     * Re-reads the task panes when the server reports that the task store changed.
+     *
+     * Refreshes the task list and the finished-tasks pane, each only if its polling has started.
+     * A push during a finished-tasks read queues one more read. Failures are logged.
+     */
     _handleTaskStoreChanged() {
         /**
          * Re-read the task panes when the server says the task store changed (row 8796333b).
@@ -13788,12 +14882,18 @@ class NotificationsUI {
     // ts DESC — the only honest record of WHEN a row finished and WHO finished it.
     // =========================================================================
 
-    // The three terminal statuses, in the order the pills render. Mirrors the
-    // server's TERMINAL_STATUSES; kept as its own copy because Rick's no-code-reuse
-    // ruling (row 87812328) keeps this client independent of the multiplexer, and
-    // the server enum is the authority both copies answer to.
+    /**
+     * Lists the three terminal statuses in the order the finished-tasks pills render.
+     *
+     * This is a local copy of the server's terminal status list.
+     */
     static get FINISHED_STATUSES() { return [ "done", "dropped", "wont_fix" ]; }
 
+    /**
+     * Maps each finished status to the glyph shown on its row and filter pill.
+     *
+     * An unrecognized status has no entry, so lookups fall back to a blank prefix.
+     */
     static get FINISHED_STATUS_GLYPHS() {
         /**
          * The row glyph and the filter pill MUST show the SAME character, so there is
@@ -13817,6 +14917,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Collects the finished-tasks pane elements into one object.
+     *
+     * Returns null when the pane is absent from the page.
+     */
     _finishedTasksEls() {
         /**
          * Resolve the pane's elements once per call.
@@ -13839,6 +14944,11 @@ class NotificationsUI {
         };
     }
 
+    /**
+     * Returns the statuses of the finished-tasks pills that are currently pressed.
+     *
+     * Returns an empty array when the pane is absent.
+     */
     _finishedTasksLitStatuses() {
         /**
          * Which pills are currently lit.
@@ -13857,6 +14967,12 @@ class NotificationsUI {
             .map(    pill => pill.dataset.status );
     }
 
+    /**
+     * Fetches terminal task events inside the window, one request per status.
+     *
+     * Returns events grouped by status plus the first error text. Never throws.
+     * A status that fails is left out of the result rather than set to an empty list.
+     */
     async fetchFinishedTasks( windowDays ) {
         /**
          * Fetch every terminal event inside the window, one call per status.
@@ -13900,6 +15016,12 @@ class NotificationsUI {
         return { eventsByStatus, error };
     }
 
+    /**
+     * Paints the finished-tasks pane from already fetched events, with no network use.
+     *
+     * Updates pill counts and the header count, then shows the merged newest-first table.
+     * Shows a distinct message for error, loading, no pill selected, empty window and partial results.
+     */
     renderFinishedTasks( eventsByStatus, error ) {
         /**
          * Paint the pane from data already fetched. Pure with respect to the network.
@@ -13968,6 +15090,12 @@ class NotificationsUI {
         els.container.innerHTML = this._finishedTasksTable( visible );
     }
 
+    /**
+     * Builds the finished-tasks table HTML with When, Title, Who and Why columns.
+     *
+     * The When cell shows relative age with a status glyph and the absolute time as hover text.
+     * Who is the persona name only, and all text is escaped.
+     */
     _finishedTasksTable( rows ) {
         /**
          * WHEN / TITLE / WHO / WHY — four columns, chosen because at-a-glance beats
@@ -14027,6 +15155,11 @@ class NotificationsUI {
         </table>`;
     }
 
+    /**
+     * Formats an ISO timestamp as a short age such as 14m, 1h12m, 19h or 3d.
+     *
+     * Returns a dash for a missing or unparseable timestamp. Pure.
+     */
     _finishedTasksRelative( iso ) {
         /**
          * "14m" / "1h12m" / "19h" / "3d". Pure; never throws.
@@ -14045,6 +15178,12 @@ class NotificationsUI {
         return `${ Math.floor( hours / 24 ) }d`;
     }
 
+    /**
+     * Fetches the finished tasks for the chosen window and renders them.
+     *
+     * Skips when a fetch is in flight, and runs one more read if a store-change push arrived meanwhile.
+     * Stores the fetched data and error for later pill re-renders.
+     */
     async refreshFinishedTasks() {
         /**
          * One refresh: fetch -> render. Shared by the 60s tick, the ⟳ button and the
@@ -14078,6 +15217,12 @@ class NotificationsUI {
         if ( owed ) await this.refreshFinishedTasks();
     }
 
+    /**
+     * Wires the finished-tasks pills and slider, paints once, then polls every 60 seconds.
+     *
+     * A pill click re-renders existing data, and turning every pill off re-lights Done.
+     * Slider input only previews the label; change triggers a fetch.
+     */
     startFinishedTasksPolling() {
         /**
          * Wire the controls, paint once, then poll every 60s.
@@ -14130,6 +15275,11 @@ class NotificationsUI {
         this._finishedTasksTimer = setInterval( () => this.refreshFinishedTasks(), 60000 );
     }
 
+    /**
+     * Starts the 60-second task-list poll with one immediate refresh.
+     *
+     * Stops any existing interval first and stores the new handle in taskListPollIntervalHandle.
+     */
     startTaskListPolling() {
         /**
          * Start the 60s task-list auto-poll. Fires one immediate refresh, then
@@ -14149,6 +15299,11 @@ class NotificationsUI {
         this.log( "Task list polling started (60s interval)" );
     }
 
+    /**
+     * Stops the task-list poll and clears its interval handle.
+     *
+     * Does nothing when no poll is active.
+     */
     stopTaskListPolling() {
         /**
          * Stop the task-list auto-poll and clear the interval handle.
@@ -14168,6 +15323,11 @@ class NotificationsUI {
     // Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
     // ========================================
 
+    /**
+     * Reads the saved set of collapsed owner keys from localStorage.
+     *
+     * Returns an empty set when the entry is absent, invalid or unreadable, and drops non-string members.
+     */
     loadCollapsedTaskOwners() {
         /**
          * Read the persisted set of collapsed owner keys from localStorage.
@@ -14190,6 +15350,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Saves the set of collapsed owner keys to localStorage as a JSON array.
+     *
+     * Storage errors are logged and swallowed so rendering never breaks.
+     */
     saveCollapsedTaskOwners( collapsedSet ) {
         /**
          * Persist the collapsed owner-key set to localStorage as a JSON array.
@@ -14208,6 +15373,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Flips one owner group between collapsed and expanded and saves the result.
+     *
+     * Returns true when the owner is now collapsed.
+     */
     toggleTaskOwnerCollapsed( ownerKey ) {
         /**
          * Flip one owner's collapsed state and persist the result.
@@ -14233,6 +15403,12 @@ class NotificationsUI {
         return isCollapsed;
     }
 
+    /**
+     * Closes every opened row-controls row inside a group that is being collapsed.
+     *
+     * Resets each matching toggle's expanded state and title, and clears the row's error stripe.
+     * A group with nothing open is left alone.
+     */
     _closeDisclosedRowsIn( scope ) {
         /**
          * Close every controls row disclosed inside a group that is being collapsed.
@@ -14275,6 +15451,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Applies a group's collapsed state to its rendered DOM without a full re-render.
+     *
+     * Toggles the collapsed class, closes disclosed rows when collapsing, and updates the header's aria-expanded and chevron.
+     */
     _applyTaskGroupCollapseState( tbody, isCollapsed ) {
         /**
          * Reflect a group's collapsed state into its already-rendered DOM (class +
@@ -14298,6 +15479,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Toggles the owner group whose header was activated by click or key.
+     *
+     * Does nothing when the target is not inside a group header.
+     * Otherwise it flips and saves the collapsed state and updates that group in place.
+     */
     _handleTaskAccordionToggle( target ) {
         /**
          * Toggle the owner group whose header was activated (click or Enter/Space).
@@ -14318,6 +15505,12 @@ class NotificationsUI {
         this._applyTaskGroupCollapseState( tbody, isCollapsed );
     }
 
+    /**
+     * Routes a click on the task list to the matching handler.
+     *
+     * Request chips, id copy, detail icons and row controls are tried in that order and consume the click.
+     * Anything else toggles the owner accordion.
+     */
     _handleTaskListClick( target ) {
         /**
          * Single delegated dispatcher for the task-list container (design 2026.06.29
@@ -14347,6 +15540,12 @@ class NotificationsUI {
         this._handleTaskAccordionToggle( target );
     }
 
+    /**
+     * Dispatches a click on a row control shared by the task list and the epic board.
+     *
+     * Handles the disclosure toggle, the reason microphone and the action buttons.
+     * Returns true when the click was consumed, false otherwise.
+     */
     _handleRowControlClick( target ) {
         /**
          * The row-control dispatch SHARED by both panes that render these rows.
@@ -14400,6 +15599,11 @@ class NotificationsUI {
         return false;
     }
 
+    /**
+     * Returns the trimmed value of one inline action input, looked up inside a given pane scope.
+     *
+     * Searches the whole document when no scope is given. Returns an empty string when the input is missing.
+     */
     _rowInputValue( taskId, className, scope ) {
         /**
          * The trimmed value of one inline action input, looked up WITHIN THE PANE the
@@ -14434,6 +15638,12 @@ class NotificationsUI {
         return el && typeof el.value === "string" ? el.value.trim() : "";
     }
 
+    /**
+     * Finds one inline action input element by task id and class name.
+     *
+     * Searches inside the given scope, or the whole document when none is given.
+     * Returns null when it is missing.
+     */
     _rowInputElement( taskId, className, scope ) {
         /**
          * The ELEMENT `_rowInputValue` reads — split out so the scoping rule lives in
@@ -14456,6 +15666,12 @@ class NotificationsUI {
         return root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
     }
 
+    /**
+     * Starts or stops dictation into the reason box of the row whose microphone was clicked.
+     *
+     * The box is found inside the clicked button's own pane, and a missing box shows a row error.
+     * Does nothing without a task id or a recording manager.
+     */
     async _handleReasonSttClick( button ) {
         /**
          * The row mic: dictate straight into THIS row's reason box, in THIS pane.
@@ -14516,6 +15732,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Ends a held press and renders any task-list composite that was deferred during it.
+     *
+     * Does nothing more when nothing was held.
+     */
     _releaseTaskListPress() {
         /**
          * The press is over — take any repaint that was held for it.
@@ -14531,6 +15752,12 @@ class NotificationsUI {
         this.renderTaskList( held.composite, held.stampUpdated );
     }
 
+    /**
+     * Reads the operator's unsubmitted work out of a pane before its markup is replaced.
+     *
+     * Captures typed inputs, chosen verbs, pending priority edits, shown error stripes, opened control rows and focus.
+     * Returns a plain object for _restoreOperatorState. Safe on a missing container.
+     */
     _captureOperatorState( container ) {
         /**
          * Everything the operator has done in this pane and NOT yet submitted, read off
@@ -14623,6 +15850,12 @@ class NotificationsUI {
         return state;
     }
 
+    /**
+     * Puts back the state saved by _captureOperatorState after the pane is repainted.
+     *
+     * Restores verbs, priorities, typed values, error stripes, opened rows and focus with its caret.
+     * Rows that no longer exist are skipped.
+     */
     _restoreOperatorState( container, state ) {
         /**
          * Put back what `_captureOperatorState` saved, after the repaint.
@@ -14702,6 +15935,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Builds a stable key for one inline input from its owner attribute, id and class.
+     *
+     * Returns null when any part is missing.
+     */
     _operatorInputKey( el ) {
         /**
          * The identity of one inline input across a repaint: its row plus WHICH box.
@@ -14723,6 +15961,11 @@ class NotificationsUI {
         return which ? `${attr}\u0000${owner}\u0000${which}` : null;
     }
 
+    /**
+     * Finds the input named by a saved key inside freshly painted markup.
+     *
+     * Returns null when the key is malformed or that control is no longer rendered.
+     */
     _operatorInputByKey( container, key ) {
         /**
          * Find the input a saved key names, inside the freshly painted markup.
@@ -14737,6 +15980,11 @@ class NotificationsUI {
             `.${which}[${attr}="${CSS.escape( owner )}"]` );
     }
 
+    /**
+     * Returns the container used to look up inputs beside an action control.
+     *
+     * Prefers the nearest task-actions cell, then the nearest table, then the document.
+     */
     _controlScope( button ) {
         /**
          * The pane-local container for one action control: its `.task-actions` cell,
@@ -14755,6 +16003,11 @@ class NotificationsUI {
         return button.closest( ".task-actions" ) || button.closest( "table" ) || document;
     }
 
+    /**
+     * Returns the table enclosing an action control, or the document when there is none.
+     *
+     * Used to place error stripes in the pane the operator is looking at.
+     */
     _paneScope( button ) {
         /**
          * The enclosing TABLE for one action control — the scope the error stripe needs,
@@ -14764,6 +16017,12 @@ class NotificationsUI {
         return button.closest( "table" ) || document;
     }
 
+    /**
+     * Attaches one delegated change listener to a container for verb and priority selects.
+     *
+     * A verb change updates the row's fields; a priority change goes to the priority handler.
+     * Does nothing when the container is missing.
+     */
     _wireVerbSelects( container ) {
         /**
          * One delegated `change` listener so the row's fields follow the chosen verb.
@@ -14796,6 +16055,12 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Updates a row's inline fields to match the chosen verb.
+     *
+     * Sets the reason box placeholder and disabled state, adds or removes the date input, and disarms Submit.
+     * Does nothing when the select or its cell cannot be found.
+     */
     _handleVerbSelectChange( select ) {
         /**
          * The chosen verb decides what the row asks for. One select, so the FIELDS have
@@ -14851,6 +16116,11 @@ class NotificationsUI {
         this._disarmSubmit( btn );
     }
 
+    /**
+     * Returns a Submit button to its resting state.
+     *
+     * Clears the armed flag and class and sets the label back to Submit. Ignores a missing button.
+     */
     _disarmSubmit( button ) {
         /**
          * Return Submit to its resting state: one click, one action.
@@ -14865,6 +16135,12 @@ class NotificationsUI {
         button.textContent = "Submit";
     }
 
+    /**
+     * Submits the verb chosen on a row's select, after checking what that verb requires.
+     *
+     * Refuses with a row message when no verb, reason or date is given. Terminal verbs arm on the first click and post on the second.
+     * On success it refreshes the list; on refusal it shows the server's message.
+     */
     async _handleTaskSubmitClick( button ) {
         /**
          * The ONE door. Read the verb off the select, check what that verb requires,
@@ -15057,6 +16333,12 @@ class NotificationsUI {
         else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
     }
 
+    /**
+     * Decides what the lookup filter does after a verb lands on the pinned row.
+     *
+     * A row moved to queued is looked up again; any other status clears the filter.
+     * Does nothing unless this row is the pinned one.
+     */
     _settlePinnedRowAfterVerb( taskId, toStatus ) {
         /**
          * After a verb lands on the row the Find box filtered to, decide what the
@@ -15086,6 +16368,11 @@ class NotificationsUI {
         this.clearTaskLookup();
     }
 
+    /**
+     * Returns the refusal sentence a verb shows when its reason is blank.
+     *
+     * Falls back to a generic reason-required message when the verb has none.
+     */
     _verbReasonComplaint( verb ) {
         /**
          * The refusal each verb earns when its reason is blank.
@@ -15104,6 +16391,11 @@ class NotificationsUI {
         return ( spec && spec.complaint ) || "A reason is required.";
     }
 
+    /**
+     * Returns the readable name of a verb for error messages.
+     *
+     * Returns the verb itself when it is unknown.
+     */
     _verbLabel( verb ) {
         /**
          * The human name of a verb, for a refusal stripe.
@@ -15115,6 +16407,12 @@ class NotificationsUI {
     }
 
 
+    /**
+     * Paints the holding-area pane with held rows grouped by filer.
+     *
+     * Shows a status message for sign-in, query-unavailable or unreachable states, and an empty message when nothing waits.
+     * Sets the header count, preserves operator state, and restores plan reports and armed plans.
+     */
     renderHoldingArea( composite ) {
         /**
          * Paint the holding-area pane: rows filed but not yet cleared to start,
@@ -15207,6 +16505,11 @@ class NotificationsUI {
         this._restoreArmedHoldingPlans();
     }
 
+    /**
+     * Returns the map of plans whose Approve all button is armed, keyed by plan id.
+     *
+     * The map holds the row ids each plan was armed for, and is created on first use.
+     */
     _armedHoldingPlans() {
         /**
          * The plans whose Approve all is armed, keyed by plan id, each with the row ids it was armed for.
@@ -15218,6 +16521,11 @@ class NotificationsUI {
         return this._holdingPlanArmed;
     }
 
+    /**
+     * Re-arms plan approve buttons that were armed before a repaint.
+     *
+     * A plan is re-armed only when it is still on screen with the same row ids; otherwise its arm is dropped.
+     */
     _restoreArmedHoldingPlans() {
         /**
          * Put the arm back on every plan that was armed before this repaint and still holds the same rows.
@@ -15236,6 +16544,11 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows one plan's approve button as armed.
+     *
+     * Sets the confirm label and armed class, and writes the line saying the next click approves the rows.
+     */
     _paintHoldingPlanArmed( button, id, count ) {
         /**
          * Show one plan's button armed: the confirm label, the armed class and the line saying what the next click does.
@@ -15246,6 +16559,11 @@ class NotificationsUI {
         this._renderHoldingPlanStatus( id, `Click again to approve ${count} rows in this plan.` );
     }
 
+    /**
+     * Builds the identity of a plan on the pane from its filer and key.
+     *
+     * Two strings are joined with a separator control character. Pure.
+     */
     _holdingPlanId( filer, key ) {
         /**
          * The one identity of a plan on this pane: the filer it sits under plus its key.
@@ -15259,6 +16577,12 @@ class NotificationsUI {
         return `${filer}\u0001${key}`;
     }
 
+    /**
+     * Turns a plan key into a readable title.
+     *
+     * Strips a leading epic: prefix and replaces hyphens and underscores with spaces.
+     * Returns the key itself when nothing remains.
+     */
     _planTitle( key ) {
         /**
          * A plan key as a readable title: "epic:v022-docs-and-reuse" -> "v022 docs and reuse".
@@ -15272,6 +16596,12 @@ class NotificationsUI {
         return title === "" ? String( key ) : title;
     }
 
+    /**
+     * Builds the HTML for one plan sub-group inside a filer's group.
+     *
+     * It has a header with chevron, title, count, one Approve all button and status span, plus a table of the plan's rows.
+     * The group is collapsed unless its plan id is in the expanded set.
+     */
     _renderHoldingPlanGroup( filer, plan ) {
         /**
          * One plan sub-group inside a filer's group: a header (chevron, "Plan: <title>",
@@ -15315,6 +16645,11 @@ class NotificationsUI {
             </div>`;
     }
 
+    /**
+     * Finds the status span of one plan by plan id.
+     *
+     * Returns null when the plan is not on screen.
+     */
     _holdingPlanStatusEl( id ) {
         /**
          * The status span of one plan, matched in JavaScript so a key with a quote or bracket
@@ -15326,6 +16661,11 @@ class NotificationsUI {
         return null;
     }
 
+    /**
+     * Writes a message into one plan's status line.
+     *
+     * Does nothing when the plan is not on screen.
+     */
     _renderHoldingPlanStatus( id, message ) {
         /**
          * Show one plan's inline status line. A missing plan is a no-op, never a throw.
@@ -15334,6 +16674,9 @@ class NotificationsUI {
         if ( el ) el.textContent = message || "";
     }
 
+    /**
+     * Returns the plan id carried by a plan approve button's filer and plan attributes.
+     */
     _planButtonId( button ) {
         /**
          * The plan id a plan approve button carries (its filer and plan data attributes).
@@ -15341,6 +16684,9 @@ class NotificationsUI {
         return this._holdingPlanId( button.dataset.filer || "", button.dataset.plan || "" );
     }
 
+    /**
+     * Returns every plan approve button on the page to its resting label.
+     */
     _disarmHoldingPlanButtons() {
         /**
          * Return every plan header's approve button to its resting label.
@@ -15354,6 +16700,11 @@ class NotificationsUI {
         document.querySelectorAll( ".holding-plan-approve-all" ).forEach( b => this._disarmHoldingPlanButton( b ) );
     }
 
+    /**
+     * Returns one plan's approve button to its resting Approve all label.
+     *
+     * Clears the armed flag and class, and clears the plan's status line if it was armed.
+     */
     _disarmHoldingPlanButton( b ) {
         /**
          * Return one plan's approve button to its resting label.
@@ -15369,6 +16720,11 @@ class NotificationsUI {
         b.textContent = `Approve all ${ ( b.dataset.taskIds || "" ).split( "," ).filter( Boolean ).length }`;
     }
 
+    /**
+     * Arms a plan's approve button on its first click without posting anything.
+     *
+     * Disarms every other plan button, sets the confirm label and status line, and opens the plan's rows.
+     */
     _armHoldingPlanButton( button, id, count ) {
         /**
          * First click of a plan's approve button: arm it, post nothing (row 376dd4cb).
@@ -15387,6 +16743,12 @@ class NotificationsUI {
         this._setHoldingPlanOpen( button.closest( ".holding-plan-group" ), true );
     }
 
+    /**
+     * Approves every row of one plan, one transition at a time, after an arm-then-confirm click.
+     *
+     * Shows progress counts, then a final line naming approved and refused rows and the first refusal.
+     * A set of in-flight plan ids blocks a second run. Refreshes the pane once at the end.
+     */
     async _handleHoldingPlanApproveClick( button ) {
         /**
          * Approve every row listed under one plan, one transition at a time, then report.
@@ -15452,6 +16814,12 @@ class NotificationsUI {
         this._renderHoldingPlanStatus( id, final );
     }
 
+    /**
+     * Builds the HTML for one filer's held rows with batch approve and won't-fix controls.
+     *
+     * Plan sub-groups are listed first, then the ungrouped rows in a table.
+     * The group is collapsed unless the filer is in the expanded set, and shows a request badge when present.
+     */
     _renderHoldingAreaGroup( filer, tasks, plans, ungrouped ) {
         /**
          * One filer's held rows: a header bar carrying the batch controls, then the
@@ -15529,6 +16897,12 @@ class NotificationsUI {
             </div>`;
     }
 
+    /**
+     * Installs the holding-area pane's single delegated click and keydown listeners.
+     *
+     * Clicks go to request chips, id copy, detail icons, group toggles and row controls.
+     * Attached once, and does nothing when the container is absent.
+     */
     _wireHoldingAreaControls() {
         /**
          * Install this pane's single delegated click listener.
@@ -15581,6 +16955,12 @@ class NotificationsUI {
         this.log( "Holding-area control delegation wired" );
     }
 
+    /**
+     * Opens or closes one filer's group from a click or key on its header bar.
+     *
+     * Returns false when the target is a control inside the bar or not a header.
+     * Records the choice in the expanded set so repaints keep it.
+     */
     _toggleHoldingAreaGroup( target ) {
         /**
          * Open or close one filer's holding-area group from a click or key on its bar.
@@ -15613,6 +16993,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Opens or closes one plan sub-group from a click or key on its header bar.
+     *
+     * Returns false when the target is a control inside the bar or not a plan header, and true when it toggled.
+     */
     _toggleHoldingPlanGroup( target ) {
         /**
          * Open or close one plan sub-group from a click or key on its header bar.
@@ -15635,6 +17020,11 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Opens or closes one plan's rows in place and records the choice for the next repaint.
+     *
+     * Updates the collapsed class, aria-expanded and chevron. Closing a plan also disarms its Approve all button.
+     */
     _setHoldingPlanOpen( group, open ) {
         /**
          * Open or close one plan's rows IN PLACE and record the choice for the next repaint.
@@ -15658,6 +17048,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Returns the task ids of the rows in one filer's group, read from the rendered DOM.
+     *
+     * Only rows whose verb select offers an enabled approve option are included.
+     * Returns an empty array for an unknown filer.
+     */
     _heldRowIdsForFiler( filer ) {
         /**
          * The full row ids in one filer's group, read off the rendered DOM.
@@ -15695,6 +17091,11 @@ class NotificationsUI {
             .filter( Boolean );
     }
 
+    /**
+     * Writes a message into one filer group's status line.
+     *
+     * Does nothing when the group's status element is absent.
+     */
     _renderHoldingGroupStatus( filer, message ) {
         /**
          * Show (or clear) one group's inline status line.
@@ -15706,6 +17107,11 @@ class NotificationsUI {
         if ( el ) el.textContent = message || "";
     }
 
+    /**
+     * Disables or re-enables both batch buttons of one filer's group.
+     *
+     * Used to keep the group's approve and won't-fix actions from running at the same time.
+     */
     _setHoldingBatchControls( filer, disabled ) {
         /**
          * Take one filer's batch controls out of service for the length of a batch, and
@@ -15734,6 +17140,12 @@ class NotificationsUI {
         document.querySelectorAll( sel ).forEach( b => { b.disabled = disabled; } );
     }
 
+    /**
+     * Applies one status transition to every row in a filer's group, one at a time.
+     *
+     * Repaints the group's status line after each row and ends with approved and refused counts.
+     * Returns the counts and first error, and refreshes the pane once at the end.
+     */
     async _applyHoldingBatch( filer, toStatus, extras, verb ) {
         /**
          * Apply one transition to every row in a filer's group, then report what
@@ -15825,6 +17237,11 @@ class NotificationsUI {
         return { ok, failed, firstError };
     }
 
+    /**
+     * Returns a batch button's resting label.
+     *
+     * Gives Won't fix all for the won't-fix button and Approve all for any other.
+     */
     _holdingBatchRestLabel( button ) {
         /**
          * A batch button's resting label, read off its class.
@@ -15835,6 +17252,11 @@ class NotificationsUI {
         return button.classList.contains( "holding-wont-fix-all" ) ? "Won't fix all" : "Approve all";
     }
 
+    /**
+     * Returns both batch buttons of one filer's group to their resting labels.
+     *
+     * Clears the armed flag and class on each.
+     */
     _disarmHoldingBatchButtons( filer ) {
         /**
          * Return both of a filer's batch buttons to their resting labels.
@@ -15853,6 +17275,11 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Arms a batch button on its first click without posting anything.
+     *
+     * Disarms the group's other button, sets a confirm label with the row count, and writes what the next click will do.
+     */
     _armHoldingBatchButton( button, filer, count ) {
         /**
          * First click of a batch button: arm it, post nothing. Rick approved a held row
@@ -15878,6 +17305,12 @@ class NotificationsUI {
             : `Click again to approve ${count} rows.` );
     }
 
+    /**
+     * Handles the batch approve button for one filer's group.
+     *
+     * The first click arms it with a row count; the second approves every held row of that filer.
+     * A group with no rows shows a message instead.
+     */
     async _handleHoldingApproveAllClick( button ) {
         /**
          * Batch approve — promote every row this filer put in the holding area.
@@ -15902,6 +17335,11 @@ class NotificationsUI {
         await this._applyHoldingBatch( filer, "queued", {}, "Approved" );
     }
 
+    /**
+     * Handles the batch won't-fix button for one filer's group.
+     *
+     * Requires a non-blank reason on both clicks, arms on the first, and closes every held row with that reason on the second.
+     */
     async _handleHoldingWontFixAllClick( button ) {
         /**
          * Batch won't-fix — close every row this filer put in the holding area, all
@@ -15935,6 +17373,11 @@ class NotificationsUI {
         await this._applyHoldingBatch( filer, "wont_fix", { reason }, "Closed" );
     }
 
+    /**
+     * Fetches the holding-area rows and renders them.
+     *
+     * Skips when a fetch is already in flight, so a manual press on a poll tick does not double-fetch.
+     */
     async refreshHoldingArea() {
         /**
          * One holding-area refresh: fetch → render, with the same in-flight debounce
@@ -15953,6 +17396,12 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Shows a dismissible overlay with a task's body text and a short id header.
+     *
+     * Removes any earlier overlay first and sets the body as plain text.
+     * A backdrop click or the Escape key closes it and removes its key listener.
+     */
     openTaskBodyOverlay( bodyText, idLabel ) {
         /**
          * Show a small dismissible overlay rendering the task-store `body` (design
@@ -16006,6 +17455,11 @@ class NotificationsUI {
         document.body.appendChild( overlay );
     }
 
+    /**
+     * Removes the task body overlay and its document-level Escape listener.
+     *
+     * Safe to call when no overlay is open.
+     */
     _dismissTaskBodyOverlay() {
         /**
          * Tear down the body overlay if present: remove the element and the
@@ -16024,6 +17478,9 @@ class NotificationsUI {
         if ( existing ) existing.remove();
     }
 
+    /**
+     * Attach one delegated click and key listener to the task list container.
+     */
     _wireTaskListAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the accordion.
@@ -16067,6 +17524,9 @@ class NotificationsUI {
         this.log( "Task list accordion delegation wired" );
     }
 
+    /**
+     * Return the owner keys of the task groups currently rendered.
+     */
     _taskListOwnerKeysInDom() {
         /**
          * Collect the owner keys of every currently-rendered group.
@@ -16080,6 +17540,9 @@ class NotificationsUI {
         ).map( el => el.dataset.owner );
     }
 
+    /**
+     * Collapse every rendered task owner group and save that choice.
+     */
     collapseAllTaskOwners() {
         /**
          * Collapse every currently-rendered owner group and persist the set.
@@ -16094,6 +17557,9 @@ class NotificationsUI {
             .forEach( tbody => this._applyTaskGroupCollapseState( tbody, true ) );
     }
 
+    /**
+     * Expand every task owner group by clearing the saved collapsed set.
+     */
     expandAllTaskOwners() {
         /**
          * Expand every owner group: clear the persisted collapsed set.
@@ -16130,6 +17596,9 @@ class NotificationsUI {
     //     🔴 Drift            — rows carrying no epic key, the nudge to stamp one
     // ========================================
 
+    /**
+     * Fetch the epic story text once and cache it, or return {} on any failure.
+     */
     async fetchEpicStories() {
         /**
          * Fetch the hand-maintained epic story text from GET /api/epic-stories
@@ -16169,6 +17638,9 @@ class NotificationsUI {
         return this._epicStories;
     }
 
+    /**
+     * Return a task's epic key, or null when its key lacks the epic prefix.
+     */
     _epicKeyOf( task ) {
         /**
          * The epic key a row belongs to, or null when it carries none.
@@ -16186,6 +17658,9 @@ class NotificationsUI {
         return key.startsWith( this.EPIC_KEY_PREFIX ) ? key : null;
     }
 
+    /**
+     * Return an epic's title, falling back to its key with dashes as spaces.
+     */
     _epicTitleLabel( epicKey ) {
         /**
          * The human title for an epic: the hand-maintained story title when one
@@ -16205,6 +17680,9 @@ class NotificationsUI {
         return String( epicKey ).replace( this.EPIC_KEY_PREFIX, "" ).replace( /-/g, " " );
     }
 
+    /**
+     * Return an epic's one-line story text, or an empty string if none.
+     */
     _epicStoryText( epicKey ) {
         /**
          * The one-line story for an epic, or "" when none is written.
@@ -16217,6 +17695,9 @@ class NotificationsUI {
         return ( story && story.story ) ? String( story.story ) : "";
     }
 
+    /**
+     * Tell whether a task is blocked on Rick through a user or persona reference.
+     */
     _taskWaitsOnRick( task ) {
         /**
          * Whether a row is blocked on Rick himself.
@@ -16242,6 +17723,9 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Group a flat task array by epic, with waiting-on-Rick and drift rows split out.
+     */
     groupTasksByEpic( tasks ) {
         /**
          * Build the epic-grouped model from a flat task array — the MACRO twin of
@@ -16322,6 +17806,9 @@ class NotificationsUI {
         return { totalCount: rows.length, onRick, groups, drift: drift.slice().sort( byUrgency ) };
     }
 
+    /**
+     * Turn an epic key into a DOM-safe element id for its group body.
+     */
     _epicGroupIdSlug( epicKey ) {
         /**
          * Map an epic key to a DOM-id-safe slug for the group's <tbody> id / the
@@ -16334,6 +17821,9 @@ class NotificationsUI {
         return "epic-group-" + String( epicKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
     }
 
+    /**
+     * Return whether a group starts open; only the waiting-on-Rick group does.
+     */
     _epicDefaultExpanded( epicKey ) {
         /**
          * The FIRST-LOAD open/closed default for one group, before the viewer has
@@ -16351,6 +17841,9 @@ class NotificationsUI {
         return epicKey === this.EPIC_ON_RICK_KEY;
     }
 
+    /**
+     * Read the viewer's saved open or closed choices per epic group.
+     */
     loadEpicGroupState() {
         /**
          * Read the persisted per-group open/closed CHOICES from localStorage.
@@ -16382,6 +17875,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Save the per-group open or closed choices to localStorage.
+     */
     saveEpicGroupState( state ) {
         /**
          * Persist the per-group open/closed choice map to localStorage.
@@ -16400,6 +17896,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Resolve whether an epic group is open from the saved choice or the default.
+     */
     _epicGroupIsExpanded( epicKey, state ) {
         /**
          * Resolve one group's open/closed state: the viewer's recorded choice when
@@ -16417,6 +17916,9 @@ class NotificationsUI {
         return typeof recorded === "boolean" ? recorded : this._epicDefaultExpanded( epicKey );
     }
 
+    /**
+     * Flip one epic group's open state, save it, and return the new collapsed value.
+     */
     toggleEpicCollapsed( epicKey ) {
         /**
          * Flip one group's open/closed state and persist the choice.
@@ -16436,6 +17938,9 @@ class NotificationsUI {
         return !isExpanded;
     }
 
+    /**
+     * Render one task as an epic board row using the shared row renderer.
+     */
     _renderEpicRow( task ) {
         /**
          * The epic board's entry point — a thin wrapper over the one renderer.
@@ -16461,6 +17966,9 @@ class NotificationsUI {
         return this._renderRow( task, null, { rowClass: "epic-row" } );
     }
 
+    /**
+     * Render one epic accordion group as a table body with header, story and rows.
+     */
     _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
         /**
          * Render ONE accordion group as a <tbody>: a clickable header bar (chevron
@@ -16501,6 +18009,9 @@ class NotificationsUI {
         return `<tbody class="epic-group${extraClass ? " " + extraClass : ""}${isCollapsed ? " collapsed" : ""}" id="${idSlug}" data-epic="${epicAttr}">${groupHeaderHtml}${storyHtml}${rows}</tbody>`;
     }
 
+    /**
+     * Render the grouped model as a read-only epic board table and return its HTML.
+     */
     renderEpicBoardTable( model, state ) {
         /**
          * Render the epic-grouped model as a read-only table.
@@ -16566,6 +18077,9 @@ class NotificationsUI {
         return `<table class="epic-board-table">${headerRow}${sections.join( "" )}</table>`;
     }
 
+    /**
+     * Draw the epic board from the shared task list result already fetched.
+     */
     renderEpicBoard( composite, stampUpdated = true ) {
         /**
          * Dispatch the SHARED task-list composite to the epic view.
@@ -16626,6 +18140,9 @@ class NotificationsUI {
         if ( stampUpdated ) this._stampEpicBoardUpdated();
     }
 
+    /**
+     * Stamp the epic board's updated label with the current local time.
+     */
     _stampEpicBoardUpdated() {
         /**
          * Stamp the #epic-board-updated span with the current time, in the
@@ -16639,6 +18156,9 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), undefined )}`;
     }
 
+    /**
+     * Show a group's collapsed state in its existing DOM without a re-render.
+     */
     _applyEpicGroupCollapseState( tbody, isCollapsed ) {
         /**
          * Reflect a group's collapsed state into its already-rendered DOM (class +
@@ -16662,6 +18182,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Toggle the epic group whose header was clicked or activated by keyboard.
+     */
     _handleEpicAccordionToggle( target ) {
         /**
          * Toggle the epic group whose header was activated (click or Enter/Space).
@@ -16682,6 +18205,9 @@ class NotificationsUI {
         this._applyEpicGroupCollapseState( tbody, isCollapsed );
     }
 
+    /**
+     * Open the detail overlay when the clicked element is a row's detail emoji.
+     */
     _handleDetailEmojiClick( target ) {
         /**
          * The line-3 detail 📄, for EVERY pane. Rick's P0, row 17393c56.
@@ -16711,6 +18237,9 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Copy a task's full id to the clipboard when its id cell is clicked.
+     */
     _handleTaskIdCopyClick( target ) {
         /**
          * Click the id cell, get the FULL id on the clipboard. Rick's row dbb4c187.
@@ -16773,6 +18302,9 @@ class NotificationsUI {
         return true;
     }
 
+    /**
+     * Write one task id to the clipboard and mark the cell copied or failed.
+     */
     _copyTaskIdToClipboard( cell, full ) {
         /**
          * Write one id to the clipboard and say on the cell whether it landed.
@@ -16806,6 +18338,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Handle a click on the epic board: row controls first, then group toggle.
+     */
     _handleEpicBoardClick( target ) {
         /**
          * The epic board's delegated click entry point: row controls first, then the
@@ -16837,6 +18372,9 @@ class NotificationsUI {
         this._handleEpicAccordionToggle( target );
     }
 
+    /**
+     * Attach one delegated click and key listener to the epic board container.
+     */
     _wireEpicBoardAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the epic
@@ -16865,6 +18403,9 @@ class NotificationsUI {
         this.log( "Epic board accordion delegation wired" );
     }
 
+    /**
+     * Return the group keys of the epic groups currently rendered.
+     */
     _epicKeysInDom() {
         /**
          * Collect the group keys of every currently-rendered epic group.
@@ -16878,6 +18419,9 @@ class NotificationsUI {
         ).map( el => el.dataset.epic );
     }
 
+    /**
+     * Collapse every rendered epic group and save that choice.
+     */
     collapseAllEpics() {
         /**
          * Collapse every currently-rendered epic group and persist the choice.
@@ -16894,6 +18438,9 @@ class NotificationsUI {
             .forEach( tbody => this._applyEpicGroupCollapseState( tbody, true ) );
     }
 
+    /**
+     * Expand every rendered epic group and save that choice.
+     */
     expandAllEpics() {
         /**
          * Expand every currently-rendered epic group and persist the choice.
@@ -16913,6 +18460,9 @@ class NotificationsUI {
     // ABSTRACT TOOLTIP FOR NOTIFICATIONS HISTORY
     // ========================================
 
+    /**
+     * Create the abstract tooltip container and its click handlers once.
+     */
     initAbstractTooltip() {
         /**
          * Initialize abstract tooltip container and click handler.
@@ -17050,6 +18600,9 @@ class NotificationsUI {
     // SECTION VISIBILITY TOOLBAR METHODS
     // ========================================
 
+    /**
+     * Attach click handlers to the section toolbar and apply the saved visibility.
+     */
     initToolbar() {
         /**
          * Initialize section visibility toolbar click handlers.
@@ -17086,6 +18639,9 @@ class NotificationsUI {
         this.log( 'Section visibility toolbar initialized' );
     }
 
+    /**
+     * Show or hide one page section by id and save the new visibility.
+     */
     toggleSectionVisibility( sectionId ) {
         /**
          * Toggle a section's visibility.
@@ -17129,6 +18685,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Save which sections are visible to localStorage as JSON.
+     */
     saveSectionVisibility() {
         /**
          * Save visibility state to localStorage.
@@ -17148,6 +18707,9 @@ class NotificationsUI {
         this.log( 'Section visibility state saved to localStorage' );
     }
 
+    /**
+     * Read the saved section visibility from localStorage, or null if unusable.
+     */
     loadSectionVisibility() {
         /**
          * Load visibility state from localStorage.
@@ -17165,6 +18727,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Restore each section's saved visibility and toolbar button state on load.
+     */
     applySectionVisibility() {
         /**
          * Apply saved visibility state on page load.
@@ -17201,6 +18766,9 @@ class NotificationsUI {
     // QUEUE CATEGORY EXPAND/COLLAPSE PERSISTENCE
     // ========================================
 
+    /**
+     * Save each queue category's expanded flag to localStorage as JSON.
+     */
     saveQueueExpandState() {
         /**
          * Save queue category expand/collapse state to localStorage.
@@ -17217,6 +18785,9 @@ class NotificationsUI {
         this.log( 'Queue expand state saved to localStorage' );
     }
 
+    /**
+     * Read the saved queue expand state from localStorage, or null if unusable.
+     */
     loadQueueExpandState() {
         /**
          * Load queue expand state from localStorage.
@@ -17234,6 +18805,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Restore saved queue expand state; only expanded queues load their job cards.
+     */
     applyQueueExpandState() {
         /**
          * Apply saved queue expand state on page load.
@@ -17262,6 +18836,9 @@ class NotificationsUI {
         this.log( 'Queue expand state restored from localStorage' );
     }
 
+    /**
+     * Store each done job's metadata and check its audio cache availability.
+     */
     async handleDoneQueueUpdate( data ) {
         /**
          * Handle done queue update with enhanced structured job metadata.
@@ -17323,6 +18900,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Return true when a job's response audio is in the TTS cache.
+     */
     async checkJobAudioCacheAvailability( jobMetadata ) {
         /**
          * Check if audio is available in TTS cache for this job.
@@ -17351,6 +18931,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Return a job's HTML with replay and delete buttons styled for its audio state.
+     */
     generateEnhancedJobHtml( jobMetadata ) {
         /**
          * Generate enhanced HTML with replay and delete controls.
@@ -17380,6 +18963,9 @@ class NotificationsUI {
         );
     }
     
+    /**
+     * Attach replay and delete listeners to the done list buttons without duplicates.
+     */
     addDoneListEventListeners() {
         // Add event listeners for replay and delete buttons in the done jobs list
         const doneList = document.getElementById( "done-list" );
@@ -17458,6 +19044,9 @@ class NotificationsUI {
         this.log( `Added event listeners to ${replayButtons.length} replay and ${deleteButtons.length} delete buttons in done list` );
     }
     
+    /**
+     * Replay a completed job's audio, using cached TTS when available.
+     */
     async replayJobAudio( jobId ) {
         /**
          * Replay audio for a completed job using cached or generated TTS.
@@ -17565,6 +19154,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Show an alert saying job deletion is not implemented yet.
+     */
     deleteJob( jobId ) {
         this.log( `Delete requested for job: ${jobId}` );
         // Show alert as requested - don't implement delete yet
@@ -17967,6 +19559,9 @@ class NotificationsUI {
         if ( icon ) this._applyManagerBadge( icon, managerPersona );
     }
 
+    /**
+     * Add one session icon to the session strip, once, restoring saved focus.
+     */
     _addStripIcon( senderId, projectName, persona, sessionId, insertAtTop = true ) {
         const iconsContainer = document.getElementById( "cc-strip-icons" );
         const strip          = document.getElementById( "cc-session-strip" );
@@ -18793,6 +20388,9 @@ class NotificationsUI {
     //   _handleCommonsActivityWS()    — WS event → prepend new row at top
     //   _setCommonsActivityWindow()   — dropdown change handler
 
+    /**
+     * Set up the Commons recent activity section, or hide it when the flag is off.
+     */
     _initCommonsRecentActivity() {
         // Gate: if INI feature flag is off, hide the entire section and bail.
         const section = document.getElementById( "commons-recent-activity-section" );
@@ -18857,11 +20455,17 @@ class NotificationsUI {
         this._loadCommonsRecentActivity( this._currentCommonsWindow() );
     }
 
+    /**
+     * Return the selected Commons window, falling back to the default or today.
+     */
     _currentCommonsWindow() {
         const dropdown = document.getElementById( "commons-recent-activity-window" );
         return dropdown ? dropdown.value : ( this.commonsTrafficVisibilityDefaultWindow || "today" );
     }
 
+    /**
+     * Fetch Commons activity for a time window and render the entries.
+     */
     async _loadCommonsRecentActivity( windowValue ) {
         console.log( `[COMMONS-ACTIVITY] load start, window=${windowValue}` );
         const entriesEl = document.getElementById( "commons-recent-activity-entries" );
@@ -18910,6 +20514,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Build the DOM row for one Commons activity entry and return it.
+     */
     _renderCommonsEntry( entry ) {
         const row = document.createElement( "div" );
         row.className = "commons-activity-entry";
@@ -19036,6 +20643,9 @@ class NotificationsUI {
         return row;
     }
 
+    /**
+     * Prepend a live Commons activity event when it matches the active filter.
+     */
     _handleCommonsActivityWS( notification ) {
         if ( !this.commonsTrafficVisibilityEnabled ) return;
 
@@ -19069,6 +20679,9 @@ class NotificationsUI {
         if ( emptyEl ) emptyEl.hidden = true;
     }
 
+    /**
+     * Reload Commons activity for the window chosen in the dropdown.
+     */
     _setCommonsActivityWindow( value ) {
         this.log( `[COMMONS-ACTIVITY] window changed → ${value}` );
         this._loadCommonsRecentActivity( value );
@@ -19082,6 +20695,9 @@ class NotificationsUI {
     //  doc-link click interception (^/app/docs?path= anchors → iframe-swap in pane).
     // ──────────────────────────────────────────────────────────────────────
 
+    /**
+     * Wire the layout toggle, file-browser button and Reading Pane controls.
+     */
     _initMasterDetailLayout() {
         // Mode-toggle button — flips body[data-layout-mode] and persists.
         const toggleBtn = document.getElementById( "layout-mode-toggle" );
@@ -19493,6 +21109,9 @@ class NotificationsUI {
         } );
     }
 
+    /**
+     * Switch between horizontal and vertical layout and save the choice.
+     */
     _toggleLayoutMode() {
         const next = this._layoutMode === "horizontal" ? "vertical" : "horizontal";
         this._layoutMode = next;
@@ -19516,6 +21135,9 @@ class NotificationsUI {
         this._updateToolbarPosition();
     }
 
+    /**
+     * Set the layout toggle button's tooltip to match the current mode.
+     */
     _updateLayoutModeButtonTooltip( btn ) {
         btn.title = this._layoutMode === "horizontal"
             ? "Switch back to vertical layout"
@@ -19753,6 +21375,9 @@ class NotificationsUI {
         this._arPaneStash = null;
     }
 
+    /**
+     * Draw one content pane history entry, an abstract or a document, in the pane.
+     */
     _renderContentPaneEntry( entry ) {
         const body = document.getElementById( "content-pane-body" );
         if ( !body ) return;
@@ -19780,6 +21405,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Close the content pane and keep the center column's scroll position.
+     */
     _closeContentPane() {
         const pane = document.getElementById( "content-pane" );
         const body = document.getElementById( "content-pane-body" );
@@ -19871,6 +21499,9 @@ class NotificationsUI {
         if ( win ) this._closeContentPane();
     }
 
+    /**
+     * Go back one entry in the content pane history and update the title.
+     */
     _backContentPane() {
         if ( this._contentPaneHistory.length <= 1 ) return;
         // Pop the current entry; render the new top.
@@ -19939,6 +21570,9 @@ class NotificationsUI {
         );
     }
 
+    /**
+     * Make the pane divider draggable, with its split ratio clamped to 0.30-0.85.
+     */
     _initPaneSplitter() {
         const splitter = document.getElementById( "content-pane-splitter" );
         const shell    = document.querySelector( ".content-shell" );
@@ -20079,21 +21713,33 @@ class NotificationsUI {
             : "<em>No activity in window.</em>";
     }
 
+    /**
+     * Set the Commons activity direction filter, save it and re-render.
+     */
     _setCommonsActivityDirection( value ) {
         this._commonsActivityFilter.direction = value || null;
         this._persistCommonsActivityFilter();
         this._renderAllCommonsEntries();
     }
+    /**
+     * Set the Commons activity kind filter, save it and re-render.
+     */
     _setCommonsActivityKind( value ) {
         this._commonsActivityFilter.kind = value || "all";
         this._persistCommonsActivityFilter();
         this._renderAllCommonsEntries();
     }
+    /**
+     * Set the Commons activity persona filter, save it and re-render.
+     */
     _setCommonsActivityPersona( value ) {
         this._commonsActivityFilter.persona = ( value || "" ).toLowerCase() || null;
         this._persistCommonsActivityFilter();
         this._renderAllCommonsEntries();
     }
+    /**
+     * Save the Commons activity filter to localStorage, ignoring storage errors.
+     */
     _persistCommonsActivityFilter() {
         try {
             localStorage.setItem(
@@ -21507,6 +23153,9 @@ class NotificationsUI {
         this.updateDateAccordionCount( senderId, dateString );
     }
 
+    /**
+     * Move a sender card's progress head into history and set the new head message.
+     */
     updateSenderProgressGroupEntry( element, notification ) {
         /**
          * Update an existing progress group entry with history accumulation (sender card path).
@@ -22138,6 +23787,9 @@ class NotificationsUI {
     // NOTIFICATIONS MANAGEMENT (from original queue.js)
     // ========================================
 
+    /**
+     * Add one notification to the notifications list with priority and type styling.
+     */
     addNotificationToList( data ) {
         const { message, type, priority, source, timestamp } = data;
         const notificationsList = document.getElementById( "notifications-list" );
@@ -22360,6 +24012,9 @@ class NotificationsUI {
         this.log( `Added ${type}/${priority} notification to list: "${displayMessage}"` );
     }
     
+    /**
+     * Attach click and key listeners to an audio button that act only when enabled.
+     */
     addAudioControlListeners( button, action, notificationId ) {
         // Add listeners to all buttons, but only respond when enabled
         
@@ -22396,6 +24051,9 @@ class NotificationsUI {
         });
     }
     
+    /**
+     * Run a restart, resume, pause or stop audio action for a notification.
+     */
     async handleAudioControl( action, notificationId ) {
         this.log( `Audio control: ${action} for notification ${notificationId}` );
         
@@ -22432,6 +24090,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Stop the audio now playing and reset its control panel state.
+     */
     stopCurrentAudio() {
         if ( this.currentAudio ) {
             this.currentAudio.pause();
@@ -22449,6 +24110,9 @@ class NotificationsUI {
         this.log( "Audio stopped and reset" );
     }
     
+    /**
+     * Set one notification's audio panel state and reset all other panels.
+     */
     updateAudioControlStates( notificationId, audioState ) {
         // Find all notification control panels and reset them to default
         const allPanels = document.querySelectorAll( '.audio-control-panel' );
@@ -22467,6 +24131,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Apply a playback state to a control panel's buttons and corner pause button.
+     */
     setControlPanelState( panel, audioState ) {
         const restartBtn = panel.querySelector( '.audio-restart-btn' );
         const resumeBtn = panel.querySelector( '.audio-resume-btn' );
@@ -22554,6 +24221,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Style a button as enabled or disabled, including cursor and tab index.
+     */
     updateButtonVisualState( button, enabled ) {
         if ( !button ) return;
         
@@ -22568,6 +24238,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Play a notification's TTS audio and update its control states.
+     */
     async playNotificationAudio( notificationId, restart = false ) {
         const listItem = document.getElementById( notificationId );
         if ( !listItem || !listItem.notificationData ) {
@@ -22627,6 +24300,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Load the user's saved notifications from the server and render them.
+     */
     async loadInitialNotifications() {
         if ( !this.notificationState.userId ) {
             this.log( "Cannot load notifications - user not authenticated" );
@@ -22662,6 +24338,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Delete one notification on the server and remove it from the UI regardless.
+     */
     async deleteNotification( notificationId ) {
         this.log( `Delete button clicked for notification: ${notificationId}` );
         
@@ -22703,6 +24382,9 @@ class NotificationsUI {
         );
     }
 
+    /**
+     * Delete all notifications from one sender after confirmation.
+     */
     async deleteSenderConversation( senderId ) {
         /**
          * Delete all notifications for a specific sender (entire conversation).
@@ -22776,6 +24458,9 @@ class NotificationsUI {
         this.log( `✓ Deleted conversation with ${projectName}` );
     }
 
+    /**
+     * Bulk delete all notifications in the current history window after confirmation.
+     */
     async clearAllNotifications() {
         /**
          * Clear all notifications from the UI and server using bulk delete.
@@ -22875,6 +24560,9 @@ class NotificationsUI {
         this.log( `✓ Cleared ${totalCount} notification${totalCount !== 1 ? 's' : ''}` );
     }
 
+    /**
+     * Return a readable label for the current history window filter.
+     */
     getFilterLabel() {
         /**
          * Get human-readable label for current history window filter.
@@ -22889,6 +24577,9 @@ class NotificationsUI {
         return option ? option.label : `Last ${this.historyWindowHours} hours`;
     }
 
+    /**
+     * Enable or disable the Clear All button from the notification count.
+     */
     updateClearButtonState( count ) {
         /**
          * Update the Clear All button enabled/disabled state based on notification count.
@@ -22908,6 +24599,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Replay a notification's TTS audio and show a loading state on its button.
+     */
     async replayNotificationAudio( notificationId ) {
         this.log( `Replay button clicked for notification: ${notificationId}` );
         
@@ -22979,6 +24673,9 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Load the queue lists and notifications on page start.
+     */
     async loadInitialData() {
         this.log( "Loading initial data (queue lists and notifications)" );
         
@@ -23015,6 +24712,9 @@ class NotificationsUI {
     // UTILITY METHODS
     // ========================================
     
+    /**
+     * Log a message to the console and debug panel when debug mode is on.
+     */
     log( message, ...args ) {
         if ( this.debug ) {
             console.log( `[Notifications] ${message}`, ...args );
@@ -23022,16 +24722,25 @@ class NotificationsUI {
         }
     }
     
+    /**
+     * Log an error to the console and add it to the debug panel.
+     */
     error( message, ...args ) {
         console.error( `[Notifications ERROR] ${message}`, ...args );
         this.addDebugMessage( `ERROR: ${message}`, 'error' );
     }
 
+    /**
+     * Log a WebSocket diagnostic message to the console and debug panel.
+     */
     wsDiag( message, ...args ) {
         console.log( `[WS-DIAG] ${message}`, ...args );
         this.addDebugMessage( `WS-DIAG: ${message}` );
     }
     
+    /**
+     * Prepend a timestamped message to the debug panel, keeping the newest 20.
+     */
     addDebugMessage( message, type = 'info' ) {
         const debugLog = document.getElementById( 'debug-log' );
         if ( debugLog ) {
@@ -23272,6 +24981,9 @@ class NotificationsUI {
         return str.replace( /[&<>"']/g, char => escapeMap[ char ] );
     }
 
+    /**
+     * Set an element's text content by id, if the element exists.
+     */
     updateElement( elementId, content ) {
         const element = document.getElementById( elementId );
         if ( element ) {
@@ -23279,9 +24991,9 @@ class NotificationsUI {
         }
     }
     
-    // Lever D (messaging-coordination plane): show how many notifications the user
-    // missed while offline, surfaced from the auth_success `undelivered_count`.
-    // Returns the resolved count (testable). Updates #missed-status if present.
+    /**
+     * Show the missed-while-away count in its badge and return the number.
+     */
     _surfaceMissedNotifications( count ) {
         const n = Number( count ) || 0;
         this.notificationState.undeliveredCount = n;
@@ -23304,9 +25016,9 @@ class NotificationsUI {
         return n;
     }
 
-    // Reset (soft-dismiss) the "N missed while away" badge. Calls the dismiss endpoint
-    // which sets is_hidden=True on the user's undelivered notifications (state preserved),
-    // then zeroes the badge locally. Wired to the Reset button beside #missed-status.
+    /**
+     * Dismiss missed notifications on the server and zero the badge.
+     */
     async resetMissedNotifications() {
         const n = this.notificationState.undeliveredCount || 0;
         if ( n <= 0 ) return 0;
@@ -23329,6 +25041,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Set an element's text to a status and its class to the matching type.
+     */
     updateStatus( elementId, status, type ) {
         const element = document.getElementById( elementId );
         if ( element ) {
@@ -23632,6 +25347,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Register an incoming action-required notification and render it.
+     */
     addActionRequiredNotification( notification ) {
         this.log( `Adding action-required notification: ${notification.id}` );
 
@@ -24160,6 +25878,9 @@ class NotificationsUI {
         return item;
     }
 
+    /**
+     * Queue a TTS item at the back of the queue in arrival order.
+     */
     addToTTSQueue( item ) {
         // Compute preview split before queueing (Q1 — client-side only).
         // Sets item.previewText, item.stage in-place.
@@ -25124,6 +26845,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Render an action-required notification into the single active slot.
+     */
     renderActionRequiredNotification( notification ) {
         // Render to the active slot (only ONE notification fully displayed at a time)
         const container = document.getElementById( 'action-required-active-slot' );
@@ -25424,6 +27148,9 @@ class NotificationsUI {
         return t === 'string' || t === 'number' || t === 'boolean';
     }
 
+    /**
+     * Build the HTML for a batch of open-ended questions, prefilled from predictions.
+     */
     renderOpenEndedBatchUI( notification ) {
         const questions = notification.response_options?.questions || [];
         const total     = questions.length;
@@ -25560,15 +27287,9 @@ class NotificationsUI {
         `;
     }
 
-    // Thumbs up/down vote controls under a prediction hint. Shown only when the hint's
-    // confidence meets the minimum threshold (so the user does not train on noise). The
-    // threshold rides IN the hint payload (vote_min_confidence_threshold, 0.0-1.0 —
-    // stamped server-side from INI "prediction hint vote min confidence threshold") so
-    // this file cannot drift from the server config. A hint without the gate gets no
-    // controls: the server omits it when voting is disabled, and we never train on an
-    // unknown gate. Buttons are wired via _setupPredictionVoteDelegation (data attrs,
-    // no inline onclick). 👍🏼/👎🏼 use the medium-light skin tone (U+1F3FC — Rick's
-    // preference, NOT default yellow).
+    /**
+     * Build thumbs up and down vote buttons for a prediction above the threshold.
+     */
     _buildPredictionVoteControls( notification, confidencePct, hint ) {
         if ( !notification || !notification.id ) return '';
         const minThreshold = hint ? Number( hint.vote_min_confidence_threshold ) : NaN;
@@ -25587,9 +27308,9 @@ class NotificationsUI {
         `;
     }
 
-    // Delegated click wiring for the prediction vote buttons (replaces inline onclick —
-    // frontend idiom). Delegates on document because hinted cards can render in multiple
-    // dynamic hosts, all sharing the .prediction-vote-btn + data-attr contract.
+    /**
+     * Attach one document click listener that sends prediction votes.
+     */
     _setupPredictionVoteDelegation() {
         document.addEventListener( 'click', ( e ) => {
             const voteBtn = e.target.closest( '.prediction-vote-btn' );
@@ -25598,8 +27319,9 @@ class NotificationsUI {
         } );
     }
 
-    // Send a thumbs up/down vote on a prediction hint to the capture endpoint, then reflect
-    // the selected state. up → approved (reinforce); down → rejected (negative — steer away).
+    /**
+     * Send a thumbs up or down vote on a prediction hint to the server.
+     */
     async votePrediction( notificationId, vote ) {
         if ( !notificationId || ( vote !== 'up' && vote !== 'down' ) ) return;
         const ctx = ( this._predictionVoteContext || {} )[ notificationId ];
@@ -26217,6 +27939,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Start the one-second countdown timer for an action-required notification.
+     */
     startCountdownTimer( notificationId ) {
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state ) return;
@@ -26272,6 +27997,9 @@ class NotificationsUI {
         this.countdownTimers.set( notificationId, intervalHandle );
     }
 
+    /**
+     * Send the user's response for an action-required notification to the server.
+     */
     async submitResponse( notificationId, response ) {
         this.log( `Submitting response for ${notificationId}: ${response}` );
 
@@ -26400,8 +28128,14 @@ class NotificationsUI {
     // lives in ONE place and a test can assert the constant rather than a literal it
     // has retyped -- two copies of a string is two things to keep in step.
     get NO_ANSWER_RECORDED() { return '(no answer was recorded)'; }
+    /**
+     * Return the text shown when an outcome could not be read.
+     */
     get OUTCOME_UNKNOWN()    { return '(outcome could not be read)'; }
 
+    /**
+     * Show a closed-response-window message on a card and record the outcome.
+     */
     handleGracePeriodExceeded( notificationId, state ) {
         this.log( `Grace period exceeded for ${notificationId}` );
 
@@ -26527,6 +28261,9 @@ class NotificationsUI {
         this.routeCompletedNotification( state.notification, outcome, true );
     }
 
+    /**
+     * Replace an action-required card with a confirmation of the response.
+     */
     showConfirmation( notificationId, response, serverTimeDisplay = null, serverDateDisplay = null ) {
         const card = document.getElementById( `action-required-${notificationId}` );
         if ( !card ) return;
@@ -26631,6 +28368,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Move an action-required notification into the regular notifications list.
+     */
     moveToRegularNotifications( notificationId ) {
         const state = this.actionRequiredNotifications.get( notificationId );
         if ( !state ) return;
@@ -26654,6 +28394,9 @@ class NotificationsUI {
         this.addNotificationToList( state.notification );
     }
 
+    /**
+     * Mark a notification expired on countdown end and submit its default value.
+     */
     handleLocalTimeout( notificationId ) {
         this.log( `Local timeout for notification ${notificationId}` );
 
@@ -26767,6 +28510,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Sync a response made on another device by clearing the matching card.
+     */
     handleNotificationResponded( envelope ) {
         this.log( "Notification responded event (multi-device sync):", envelope );
 
@@ -26879,6 +28625,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Handle a server expiry event by running the local timeout handling.
+     */
     handleNotificationExpired( envelope ) {
         this.log( "Notification expired event:", envelope );
 
@@ -26894,6 +28643,9 @@ class NotificationsUI {
         this.handleLocalTimeout( notificationId );
     }
 
+    /**
+     * Stop and forget the countdown timer for a notification.
+     */
     stopCountdownTimer( notificationId ) {
         const intervalHandle = this.countdownTimers.get( notificationId );
         if ( intervalHandle ) {
@@ -27233,6 +28985,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Update the action-required count from notifications still active.
+     */
     updateActionRequiredCount() {
         // Phase 2.2: Count only ACTIVE notifications (not responded/expired)
         const activeCount = Array.from( this.actionRequiredNotifications.values() )
@@ -27798,6 +29553,9 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Attach the document key listener for action-required shortcuts, once.
+     */
     attachKeyboardListener() {
         if ( this.keyboardListenerActive ) return;
 
@@ -28086,6 +29844,9 @@ class NotificationsUI {
         modeStatus.style.color = color;
     }
 
+    /**
+     * Set the agent mode for the current user through the mode endpoint.
+     */
     async setAgentMode( mode ) {
         if ( !this.currentUserEmail ) {
             this.error( "Cannot set mode: No user logged in" );
