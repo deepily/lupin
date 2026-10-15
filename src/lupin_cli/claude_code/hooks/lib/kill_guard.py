@@ -828,6 +828,15 @@ def _segment_before( command: str, position: int ) -> str:
     return head[ cut + 1: ]
 
 
+_LISTING_STAGE_RE = re.compile( r"^[ \t]*(?:\w+=\S*[ \t]+)*(?:pgrep|ps)(?![\w./-])" )
+
+
+def _fed_by_own_children_listing( segment: str ) -> bool:
+    """True iff the pipeline's first stage is a pgrep or ps command scoped to own children."""
+    first = segment.split( "|", 1 )[ 0 ]
+    return _LISTING_STAGE_RE.search( first ) is not None and _OWN_CHILDREN_RE.search( first ) is not None
+
+
 def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]:
     """
     The name of a wrapper whose argument text names a kill verb as a word, or None.
@@ -841,8 +850,9 @@ def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]
         - a top-level shell whose `-c` literal was extracted is skipped, because that
           literal is judged on its own; inside a literal every shell is judged
         - the argument text ends at the first unquoted separator
-        - an xargs fed by an own-children listing (`pgrep -P $$ | xargs kill`, the
-          guard's own recommended substitute) is skipped
+        - an xargs whose pipeline starts with a pgrep or ps command scoped to own
+          children (`pgrep -P $$ | xargs kill`, the guard's recommended substitute)
+          is skipped; an echo carrying the same flags is not
         - never raises
     """
     extracted = { match.start() for match in _SHELL_C_RE.finditer( command ) }
@@ -853,7 +863,7 @@ def _wrapper_naming_a_kill_verb( command: str, nested: bool ) -> Optional[ str ]
         if match.group( "name" ) in _SHELL_WRAPPERS and not nested and match.start() in extracted \
                 and _XARGS_WORD_RE.search( before ) is None:
             continue
-        if match.group( "name" ) == "xargs" and _OWN_CHILDREN_RE.search( _segment_before( command, match.start() ) ):
+        if match.group( "name" ) == "xargs" and _fed_by_own_children_listing( _segment_before( command, match.start() ) ):
             continue
         if _KILL_WORD_RE.search( match.group( "args" ) ):
             return match.group( "name" )

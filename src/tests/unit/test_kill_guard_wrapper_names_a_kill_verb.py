@@ -33,6 +33,9 @@ def _wrapped( command ):
     "xargs sh -c 'kill $0'",
     "echo start; ssh host /bin/kill 4242",
     "LUPIN_X=1 ssh host killall python",
+    "echo -P $$ | xargs kill 12345",
+    "echo pgrep -P $$ | xargs kill",
+    "cat ps --ppid $$ | xargs kill",
 ] )
 def test_a_wrapper_naming_a_kill_verb_is_denied( command ):
     assert _wrapped( command ) is not None, command
@@ -50,6 +53,9 @@ def test_a_wrapper_naming_a_kill_verb_is_denied( command ):
     "ssh host kill-switch",
     "bash -c 'pkill -P $$ -f pytest'",
     "bash -c 'kill $!'",
+    "pgrep -P $$ -f pytest | xargs -r kill",
+    "FOO=1 pgrep -P $$ | grep x | xargs kill",
+    "ps --ppid $$ -o pid | xargs kill",
     'bash -c "echo kill 4242"',
     "LUPIN_ALLOW_UNSCOPED_KILL=1 ssh host pkill -f TOK",
     "bash -c 'LUPIN_ALLOW_UNSCOPED_KILL=1 kill 4242'",

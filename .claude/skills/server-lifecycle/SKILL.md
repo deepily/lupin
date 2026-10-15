@@ -240,6 +240,8 @@ docker exec lupin-rest-dev kill -USR1 1        # in-container PID 1 is the serve
 docker logs --tail 200 lupin-rest-dev          # the dump lands on stderr
 ```
 
+The kill guard refuses the `docker exec … kill` line, because a wrapper that names `kill` is refused. The operator runs it by hand after checking the `[BOOT]` line.
+
 Read the `[BOOT] SIGUSR1 thread-dump handler:` line in the startup log first — it prints
 `registered`, `already-registered`, `declined-existing-handler` or `unsupported-platform`,
 and only the first two mean the signal is safe to send.
