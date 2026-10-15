@@ -202,7 +202,8 @@ def staging_root( tmp_path ):
 
     Ensures:
         - yields a path whose src/docs/fastapi holds copies of the committed api.json
-          and api.md, and whose .venv points at the real one
+          and api.md, whose src/scripts holds the generator and its table repair,
+          and whose .venv points at the real one
     """
     root = tmp_path / "staging"
     ( root / "src" / "docs" / "fastapi" ).mkdir( parents=True )
@@ -212,6 +213,7 @@ def staging_root( tmp_path ):
         shutil.copyfile( os.path.join( DOCS_DIR, name ), root / "src" / "docs" / "fastapi" / name )
     shutil.copyfile( GENERATOR, root / "src" / "scripts" / "generate-api-docs.sh" )
     os.chmod( root / "src" / "scripts" / "generate-api-docs.sh", 0o755 )
+    shutil.copyfile( os.path.join( os.path.dirname( GENERATOR ), "fix_api_md_tables.py" ), root / "src" / "scripts" / "fix_api_md_tables.py" )     # the generator runs it before the footer
     ( root / ".venv" ).symlink_to( os.path.join( LUPIN_ROOT, ".venv" ) )
 
     return root

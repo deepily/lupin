@@ -98,6 +98,15 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+# --- Join the table rows the generator breaks across two lines ---
+
+"$VENV_PYTHON" "$LUPIN_ROOT/src/scripts/fix_api_md_tables.py" "$DOCS_DIR/api.md"
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: fix_api_md_tables.py failed."
+    exit 1
+fi
+
 # --- Inject timestamp footer ---
 
 TIMESTAMP=$( date "+%Y.%m.%d %H:%M:%S" )
