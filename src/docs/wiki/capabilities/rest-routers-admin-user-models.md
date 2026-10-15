@@ -33,7 +33,7 @@ The pydantic models behind the routes in [[rest-routers-admin-users]], all in `c
 
 ## Don't
 - Don't send more than 50 ids or an empty list to batch delete. The model refuses both with 422.
-- Don't store the temporary password from `ResetPasswordResponse`. The route returns it once and keeps no copy.
+- Don't store the temporary password from `ResetPasswordResponse`. The route returns it once and the service keeps only its hash.
 
 ## Invariants
 - A batch delete with no `reason` is recorded as "Batch delete from admin UI".

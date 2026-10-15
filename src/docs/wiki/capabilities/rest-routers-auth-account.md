@@ -19,7 +19,7 @@ The `/auth` router: sign-up, token rotation, logout, the signed-in user, passwor
 ## What it does
 - `register` creates an account with the role `user` only and returns 201 with user info and a token pair. A request naming any other role is refused with 403 and an audit event.
 - `refresh` swaps a refresh token for a new pair and revokes the old one. An invalid, expired or revoked token answers 401.
-- `logout` revokes the refresh token. The access token stays valid until it expires.
+- `logout` revokes the refresh token and answers 400 for a token it cannot read. It does nothing to the access token.
 - `get_current_user` serves `/me` from a Bearer access token. A missing or bad header answers 401, and an unknown user 404.
 - `change_password` checks the current password and the strength of the new one, then writes an audit event.
 - `request_verification` sends a new verification email to a signed-in user, and answers 400 when the email is already verified.

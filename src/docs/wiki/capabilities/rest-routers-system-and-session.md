@@ -24,15 +24,15 @@ The server's own status routes in `routers/system.py`: health, build facts, WebS
 
 ## What it does
 - `health_check` (`GET /`) returns service, timestamp, version and `code_identity`. It takes no credential.
-- `get_server_info` returns `config_block_id`, the database URL with its password replaced by `***`, and the `LUPIN_ENV` name. No credential.
+- `get_server_info` returns `config_block_id`, the database URL with its password replaced by `***`, and the lowercased `LUPIN_ENV` name, `development` when unset. No credential.
 - `get_session_id` returns a fresh two-word `session_id` for WebSocket routing, made by the injected id generator. `get_todo_queue` is the dependency that hands out the todo queue.
 - `auth_test` echoes the authenticated user, so a caller can prove a token works. With no token it answers 401.
 - `get_websocket_sessions` returns session counts, unique users, users with more than one session and the single-session policy flag. `cleanup_stale_sessions` (POST) drops sessions older than `max_age_hours`, default 24, and returns the count.
 - `get_websocket_state` dumps the manager's mappings and diagnostics. It has no credential check; it is a debug door.
-- `get_client_config` returns the web client's settings, read from the INI. They are token refresh timing, heartbeat, timezone, TTS preview and an `env_label` of `TEST` or `DEVELOPMENT`. It needs a valid token.
-- `get_similarity_confirmation` and `set_similarity_confirmation` read and write the live INI value `similarity confirmation enabled` through the todo queue's config manager. The set reply carries `enabled` and `previous`. Bodies are `SimilarityConfirmationRequest` and `SimilarityConfirmationResponse`.
+- `get_client_config` (`GET /api/config/client`) returns the web client's settings, read from the INI with defaults. They are token refresh timing, heartbeat, `app_timezone`, TTS preview and mode, and a few feature flags. `env_label` is `TEST` when `LUPIN_ENV` is `test` or `testing`, else `DEVELOPMENT`. It needs a valid token.
+- `get_similarity_confirmation` and `set_similarity_confirmation` read and write `similarity confirmation enabled` in the todo queue's live config manager. The write is in memory only, and the INI file is not rewritten. Both need a signed-in user. The set reply carries `enabled` and `previous`. Bodies are `SimilarityConfirmationRequest` and `SimilarityConfirmationResponse`.
 - `reset_prediction_engine` (POST) rebuilds the PredictionEngine singleton. It needs a credential. It clears decision rows only when `drop_table=true`; a failed clear still resets and answers `status: error`.
-- `BounceResponse` is the body of `POST /api/system/bounce`: 202 triggered, 409 a bounce is running, 503 the host watcher is silent.
+- `BounceResponse` names the fields (`status`, `reason`, `detail`, `timestamp`) of the `POST /api/system/bounce` reply, which needs a signed-in user. It answers 202 triggered, 409 a bounce is running, 503 the host watcher heartbeat is missing or stale. The handler returns a plain `JSONResponse`, not this model.
 
 ## Don't
 - Don't send `get_client_config` without a token and expect defaults. It answers 401.

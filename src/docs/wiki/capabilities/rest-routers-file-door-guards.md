@@ -23,9 +23,9 @@ The helpers the doc viewer and the `io/` file door share, with their scope and h
 - `ScopeConfig` is the frozen description of one scope: name, root, allowed prefixes, the optional manifest and extra blocklist patterns.
 - `is_credential_file( path )` is true when the bytes look like credentials: service-account JSON, a private key or token fields, or a PEM key. An unreadable file also returns true.
 - `landed_within_roots( real_path, roots )` is true when the path sits inside a root by directory identity, so a second mount of the same directory counts.
-- `landed_relative_path( real_path, root )` gives the path relative to the root.
-- `get_scopes`, `GET /api/docs/scopes`, lists scopes for a signed-in user, with prefixes and a `manifest` or `ini-only` source.
-- `docs_files_health` and `io_files_health` report status for the docs and io doors, with no login.
+- `landed_relative_path( real_path, root )` gives the path relative to the root, or an empty string for the root itself. Call it only after `landed_within_roots` is true.
+- `get_scopes`, `GET /api/docs/scopes`, lists every scope for a signed-in user: name, root, allowed prefixes, root files, extra blocklist and a `manifest` or `ini-only` source.
+- `docs_files_health` (`GET /api/docs/health`) reports each scope's root, whether it exists, its prefixes and manifest flag, plus the `io/` status and media types. `io_files_health` (`GET /api/io/health`) reports `io/` and the file counts under `deep-research` and `podcasts`. Neither needs a login.
 
 ## Don't
 - Don't serve a file because the check could not read it. Unreadable means refused.

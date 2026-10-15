@@ -21,15 +21,15 @@ pins:
 The `/ws/audio/{session_id}` socket, its dependencies and the `/api` routes that inspect and manage live WebSocket sessions. The wider design is in [[rest-routers]].
 
 ## What it does
-- `websocket_audio_endpoint` accepts a valid session id, subscribes to audio events, answers `auth_request` with `auth_success` or `auth_error`, and answers `sys_ping` with `sys_pong`. An invalid id closes with code 1008.
+- `websocket_audio_endpoint` accepts a session id that is `adjective noun` or `prefix-hash`, subscribes to audio events and sends an `audio_streaming_status` frame. It answers `auth_request` with `auth_success` or `auth_error`, and `sys_ping` with `sys_pong`. An invalid id closes with code 1008 before accepting.
 - On disconnect it cancels the session's active streaming task.
 - `get_websocket_manager`, `get_active_tasks` and `get_app_debug` read the manager, the task table and the debug flags from the main module. `websocket_admin` has its own `get_websocket_manager`.
 - `auth_test` (`GET /api/auth-test`) is the version in `websocket.py`. `system.auth_test` has the same path and is included first, so it answers and this one is never reached.
-- `stop_cc_transcript_tailers_for_disconnect` stops each tailer a leaving session was the last watcher of.
+- `stop_cc_transcript_tailers_for_disconnect` stops each tailer a leaving session was the last watcher of. The queue socket (`/ws/queue`) calls it on disconnect, not this one.
 - `get_websocket_stats` (`/api/websocket-sessions/stats`) returns counts. `get_websocket_session` (`/api/websocket-sessions/{session_id}`) returns one session, or 404.
 - `GET /api/websocket-sessions` and `POST /api/websocket-sessions/cleanup` are answered by `system.get_websocket_sessions` and `system.cleanup_stale_sessions`, because `system.router` is included before `websocket_admin.router`. The `websocket_admin.get_websocket_sessions` pinned here and its cleanup twin are unreachable.
-- `disconnect_websocket_session` drops one session, and answers 404 when it is not connected.
-- `update_single_session_policy` takes `enabled` and applies it to new connections. `get_available_events` returns the sorted event names.
+- `disconnect_websocket_session` (`DELETE /api/websocket-sessions/{session_id}`) drops one session, and answers 404 when it is not connected.
+- `update_single_session_policy` (`PUT /api/websocket-sessions/single-session-policy`) takes `enabled` as a query value and applies it to new connections. `get_available_events` (`GET /api/websocket-events`) returns the sorted event names and a total.
 
 ## Don't
 - Don't assume the admin routes need the admin role. They take any signed-in user, and so do the `system.py` versions that shadow two of them.

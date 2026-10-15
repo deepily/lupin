@@ -14,14 +14,14 @@ pins:
 ---
 # Podcast proxy doors
 
-The `/api/podcast-proxy` routes. A seat asks, the operator answers yes on a card, and the seat starts the job. A signed-in person can start one from the doc viewer. Every refusal body is `{ detail: { code, message } }`.
+The `/api/podcast-proxy` routes. A seat asks, the operator answers yes on a card, and the seat starts the job. A signed-in person can start one from the doc viewer. Every refusal the doors raise themselves has the body `{ detail: { code, message } }`.
 
 ## What it does
 - `ask_for_a_podcast` takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id`. A live card for the same file and bytes answers 409 `waiting_card`.
 - `start_a_podcast` takes `StartIn` (`card_id`, `actor`). It re-reads the card and the file, spends the card once, and queues the job.
-- `podcast_card_status` describes a card: state, `spent` and `job_id`.
+- `podcast_card_status` describes a card: `state`, `spent` and `job_id`. A card this feature did not write answers 404 `no_card`.
 - `ViewerIn` carries a `path`. `check_a_viewer_file` says whether the viewer may offer a podcast, and returns `{ ok, name, size }`.
-- `start_a_podcast_from_viewer` treats the click as the yes and queues a job for the caller. It answers 409 `spent` or `claimed_no_job` for a repeat.
+- `start_a_podcast_from_viewer` treats the click as the yes and queues a job for the caller. It answers 409 `spent` or `claimed_no_job` for a repeat of the same file and bytes inside the card's maximum age.
 - `copy_directory` is `io/podcast-proxy` under the project root, where the judged bytes are copied.
 
 ## Don't

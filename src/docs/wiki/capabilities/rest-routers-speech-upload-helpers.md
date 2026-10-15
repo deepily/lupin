@@ -17,17 +17,17 @@ pins:
 ---
 # Speech routes: upload helpers and dependencies
 
-The small pieces shared by the speech doors in `routers/speech.py` (the MP3 and WAV upload doors) and by `/api/v2/ask-audio` and `/api/v2/transcribe` on [[rest-routers-v2-ask-doors]].
+The small pieces of `routers/speech.py`. The upload helpers serve its MP3 and WAV doors and the two audio doors on [[rest-routers-v2-ask-doors]]. `read_utterance_id` and `stream_frame` serve the speech doors only.
 
 ## What it does
 - `resolve_stt_upload_dir` returns the INI value of `speech upload temp dir`, stripped, or `/tmp/lupin-stt` when the key is missing or blank.
 - `audio_suffix_from_filename` keeps a client filename's extension only if it is a dot plus one to five letters or digits. Otherwise it returns the `fallback`, so the client's name never reaches a path.
 - `remove_audio_upload` deletes a saved upload. `None` and an already-gone file are fine, and any other OS error is printed, not raised.
 - `insert_stt_io_row` writes one speech-to-text row, with `input_type`, `input`, `output_raw` and `output_final`, to the input and output table.
-- `read_utterance_id` reads the optional `utterance_id` from a request body. It must be a string of 1 to 255 characters that encodes as UTF-8, or the door answers 400.
+- `read_utterance_id` reads the optional `utterance_id` from a request body. It must be a string of 1 to 255 characters that encodes as UTF-8, or the TTS door answers 400.
 - `stream_frame` adds `utterance_id` to an outgoing frame when one was given and leaves the frame alone when not.
 - `get_whisper_pipeline` returns the main module's Whisper pipeline, or `None` in remote model-server mode.
-- `get_speech_provider` builds a `SpeechToTextProvider` with the app's debug flags. `get_websocket_manager`, `get_config_manager` and `get_active_tasks` return the same-named main-module objects.
+- `get_speech_provider` builds a `SpeechToTextProvider` with the app's debug flags. `get_websocket_manager`, `get_config_manager` and `get_active_tasks` return the main module's `websocket_manager`, `config_mgr` and `active_tasks`.
 - `get_ask_flow` returns the main module's v2 flow, `None` before startup finishes. It is not the v2 router's gated dependency of the same name, so it never answers 503.
 
 ## Don't

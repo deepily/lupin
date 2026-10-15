@@ -20,14 +20,14 @@ pins:
 The read routes of `cosa.rest.routers.tasks`, under `/api`, plus the flow-ratio settings. Writes are in [[rest-routers-tasks-writes]].
 
 ## What it does
-- `query_tasks`, `GET /tasks`: exact-match filters, newest first, `limit` up to 500. It returns `tasks`, `count`, `total`, `has_more`, `truncated` and `warnings`. `count_only=true` returns a true count with a per-status `breakdown` and a `priority_breakdown`. Without `unscoped_audit=true`, a query with no filter that would return over 50 live rows is 400.
-- `query_event_stream`, `GET /tasks/events`: the audit trail across all items, filtered by actor, transition, `to_status`, project and `since` and `until`. An unknown `to_status` is 422.
-- `get_task`, `GET /tasks/{id}`: one item by full UUID or a hex prefix of 4 or more characters. An ambiguous prefix is 422 naming the candidates.
+- `query_tasks`, `GET /tasks`: exact-match filters, newest first, `limit` up to 500. It returns `tasks`, `count`, `total`, `has_more`, `truncated` and `warnings`. `count_only=true` returns a true count with a per-status `breakdown` and a `priority_breakdown`. Without `unscoped_audit=true`, a row query (not `count_only`) that would return over 50 live non-terminal rows with no narrowing filter is 400.
+- `query_event_stream`, `GET /tasks/events`: the audit trail across all items, newest first, filtered by actor, transition, `to_status`, project and `since` and `until` on the event time. An unknown `to_status` is 422.
+- `get_task`, `GET /tasks/{id}`: one item by full UUID or a hex prefix of 4 or more characters. An ambiguous prefix or a junk reference is 422, and no match is 404.
 - `get_task_events`: one item's events, oldest first. 404 for an unknown item.
-- `get_flow_ratio`, `GET /tasks/flow-ratio`: created against closed over a rolling window, with a verdict and the room left.
+- `get_flow_ratio`, `GET /tasks/flow-ratio`: created against closed over a rolling window (`window_hours` 1 to 8760, optional `project`). It returns `ratio`, `verdict`, `room_for`, `close_needed` and `headroom`. Show `room_for`; `headroom` is one higher by ruling.
 - `get_flow_ratio_settings`, `patch_flow_ratio_settings` and `delete_flow_ratio_settings`, `/tasks/flow-ratio/settings`: read the live window and threshold with their sources, set an override (admin, `FlowRatioSettingsRequest`, partial), or clear it.
-- `list_promotion_tickets` lists pending tickets by default and `get_promotion_ticket` returns one with its response.
-- `get_epic_stories` serves `src/conf/epic-stories.json`. A missing file is 200 with no stories.
+- `list_promotion_tickets` (`GET /tasks/promotions`) lists pending tickets by default, newest first, `state=all` for every state. `get_promotion_ticket` returns one with its `response_body`, or 404.
+- `get_epic_stories` (`GET /api/epic-stories`) serves `src/conf/epic-stories.json` with a `count`. A missing file is 200 with no stories, and an invalid one is 500.
 
 ## Don't
 - Don't read `count` as the result size. Use `total` and `has_more`.

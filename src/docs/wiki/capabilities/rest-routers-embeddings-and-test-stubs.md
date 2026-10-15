@@ -22,11 +22,11 @@ The `/api/embeddings` HTTP door to the server's embedding provider, plus three s
 ## What it does
 - `generate_embedding` takes `EmbedRequest` (`text`, `content_type` of `prose` or `code`, optional `role` of `query` or `document`) and returns `EmbedResponse` (`embedding`, `dimensions`).
 - `generate_embeddings_batch` takes `EmbedBatchRequest` and returns `EmbedBatchResponse` (`embeddings`, `dimensions`, `count`). An empty `texts` list answers 400.
-- `get_info` returns `EmbedInfoResponse`: `provider`, `dimensions`, `status` and the `engines` block. It loads no model.
+- `get_info` (`GET /api/embeddings/info`) returns `EmbedInfoResponse`: `provider`, `dimensions`, `status` (always `ready`) and the `engines` block. It loads no model.
 - All three accept an API key or a JWT. Inference runs off the event loop. On generate and batch, a role the provider cannot honour answers 422. `get_info` takes no role.
-- `mock_job_health` returns `{ status: "ok", available: true }` for the mock job endpoint.
-- `get_static_dir` gives the main module's static directory to a route.
-- `delete_snapshot` and `get_answer` are stubs. The first reports a deletion and answers 404 for an id starting with `invalid`. The second serves `gentle-gong.mp3` as the answer audio.
+- `mock_job_health` (`GET /api/mock-job/health`) returns `{ status: "ok", available: true }` and queues nothing.
+- `get_static_dir` returns `static_dir` from `lupin_app.main`. No route in `jobs.py` depends on it.
+- `delete_snapshot` and `get_answer` are stubs. `delete_snapshot` (`GET /api/delete-snapshot/{id}`) reports a deletion, and answers 404 for an empty id or one starting with `invalid`. `get_answer` (`GET /get-answer/{id}`) serves `gentle-gong.mp3`, or 404 if that file is missing.
 
 ## Don't
 - Don't treat `delete_snapshot` or `get_answer` as real. They delete nothing and return a placeholder.

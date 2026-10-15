@@ -18,10 +18,10 @@ pins:
 The `/api/cosa-voice` routes that read and change a session's voice persona and speakerphone flag, both kept on the session bridge file. Every route takes an API key or a JWT. See [[voice-persona-allocation]].
 
 ## What it does
-- `get_voice_persona_pool` (`GET /voice-persona/pool`) returns the configured pool, occupied names and free names. A dead-PID bridge counts as free. It takes no session id.
+- `get_voice_persona_pool` (`GET /voice-persona/pool`) returns the configured pool, occupied names, free names and the active sessions holding a persona. A dead-PID bridge counts as free. It takes no session id.
 - `get_voice_persona_endpoint` (`GET /voice-persona/{session_id}`) returns a session's persona, or null.
 - `release_voice_persona_endpoint` (`POST /voice-persona/{session_id}/release`) clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set.
-- `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample` (`POST /voice-persona/sample`), which returns `audio/mpeg`. A voice outside the pool is 400, and an upstream failure 503.
+- `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample` (`POST /voice-persona/sample`), which returns `audio/mpeg`. A voice outside the pool, or a blank `voice_id` or `text`, is 400. A missing ElevenLabs key or an upstream failure is 503.
 - `get_config_manager` builds a `ConfigurationManager` for these routes.
 - `get_notification_queue` (in both routers) hands the notification queue from the main module to a route.
 - `get_speakerphone_endpoint` (`GET /speakerphone/{session_id}`) returns `{ session_id, on }`. A bridge with no flag gets the mode default: false in solo, true in chorus.

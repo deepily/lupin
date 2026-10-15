@@ -19,13 +19,13 @@ pins:
 Three small readers and writers: the user's agent mode (`/api/mode`), the multiplexer front-end tuning values and the admin roster for the Claude Code transcript console. See [[session-transcript-console]].
 
 ## What it does
-- `get_available_modes` lists the selectable modes as `AvailableModesResponse`, each a `ModeInfo` (`key`, `display_name`, `description`).
-- `get_mode` returns `ModeResponse` for the signed-in user, with `mode` null and `is_system_mode` true when none is set.
-- `clear_mode` returns the user to system mode and answers `ModeChangeResponse` with the previous mode.
-- `ModeSetRequest` is the body for setting a mode, and `null` means system mode. A bad key answers 400.
+- `get_available_modes` (`GET /api/mode/available`) lists the selectable modes as `AvailableModesResponse`, each a `ModeInfo` (`key`, `display_name`, `description`). The mode routes need a signed-in user.
+- `get_mode` (`GET /api/mode/current`) returns `ModeResponse` for the signed-in user, with `mode` null and `is_system_mode` true when none is set.
+- `clear_mode` (`DELETE /api/mode/current`) returns the user to system mode and answers `ModeChangeResponse` with the previous mode.
+- `ModeSetRequest` is the body of `POST /api/mode/current`, and `null` means system mode. A bad key answers 400.
 - `get_todo_queue` hands the todo queue from the main module to the mode routes.
-- `get_multiplexer_config` returns `MultiplexerConfigResponse`: `multiplexer_max_meta_display_bytes` (default 256000) and `tts_preview_fraction` (default 0.25). It needs no sign-in.
-- `get_cc_transcript_roster` is admin only. It returns `{ status, seats, session_count }`, each seat with `transcript_watchable`.
+- `get_multiplexer_config` returns `MultiplexerConfigResponse`: `multiplexer_max_meta_display_bytes` (default 256000) and `tts_preview_fraction` (default 0.25). It needs no sign-in (`GET /api/multiplexer/config`).
+- `get_cc_transcript_roster` (`GET /api/cc-transcript-roster`) is admin only. It returns `{ status, seats, session_count }`, each seat with `session_id`, `project`, `last_ts` and `transcript_watchable`.
 
 ## Don't
 - Don't read an empty roster as a quiet fleet. `status: "unreachable"` means the arbiter did not answer.

@@ -19,15 +19,15 @@ The per-sender conversation doors of `routers/notifications.py`, under `/api/not
 
 ## What it does
 - `get_senders_with_activity` answers `GET /senders/{user_email}` with `sender_id`, `last_activity` and `count`, newest first. `hours` narrows it.
-- `get_visible_senders` answers `GET /senders-visible/{user_email}`. It adds `new_count`, drops senders whose rows are all hidden unless `include_hidden`, and runs off the event loop.
-- `get_sender_conversation` answers `GET /conversation/{sender_id}/{user_email}`: oldest first, within `hours` (default 24) of `anchor` or the sender's last activity.
-- `delete_sender_conversation` answers `DELETE` on the same path and removes every row for that sender.
+- `get_visible_senders` answers `GET /senders-visible/{user_email}`. It adds `new_count`, `voice_persona` and `manager_persona`, drops senders whose rows are all hidden unless `include_hidden`. It skips the user's own job rows when `exclude_own_jobs` is set. It runs off the event loop.
+- `get_sender_conversation` answers `GET /conversation/{sender_id}/{user_email}`: oldest first, within `hours` (default 24) of `anchor` or the sender's last activity. A malformed `anchor` is 400.
+- `delete_sender_conversation` answers `DELETE` on the same path and removes every row from that sender to the user, and answers `deleted_count`.
 - `get_sender_conversation_by_date` answers `GET /conversation-by-date/...` with a map of `YYYY-MM-DD` to rows over `hours` (default 168). Hidden rows need `include_hidden`.
 - `get_sender_date_summaries` answers `GET /sender-dates/...` with `date`, `count` and `new_count`, newest date first.
 - `soft_delete_by_date` answers `DELETE /date/{sender_id}/{user_email}/{date_string}`. It hides the rows and keeps them. A bad date is 400.
-- `get_active_conversation` answers `GET /active-conversation/{user_email}` with the newest sender id, or null.
-- `get_project_sessions` answers `GET /project-sessions/{project}/{user_email}` with a row per session and `is_active` on the newest.
-- `generate_session_gist` answers `POST /generate-gist` with a 3 to 4 word title from up to 5 abstracts then 5 messages. Empty input gives `Empty session`.
+- `get_active_conversation` answers `GET /active-conversation/{user_email}` with `active_sender_id`, the newest sender id or null, and `user_email`.
+- `get_project_sessions` answers `GET /project-sessions/{project}/{user_email}` with a row per session. `is_active` is true for the sender that is most recent across all projects, so it may be false on every row.
+- `generate_session_gist` answers `POST /generate-gist` with a short title from the `Gister`, built from up to 5 abstracts then up to 5 messages. It needs only an API key or JWT. Empty input gives `Empty session`.
 
 ## Don't
 - Don't use `delete_sender_conversation` to hide rows. It is permanent.

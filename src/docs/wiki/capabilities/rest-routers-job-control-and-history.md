@@ -22,9 +22,9 @@ The per-job doors of `routers/queues.py`, plus the five retired doors that now a
 ## What it does
 - `cancel_job` answers `POST /api/jobs/{job_id}/cancel`. A running agentic job gets a cancel request and answers `cancel_requested`. A queued job is removed and answers `cancelled`. A running job of another type is 400, an unknown id is 404, and a removal that lost a race is 409.
 - `send_job_message` answers `POST /api/jobs/{job_id}/message` with `{ "message", "priority" }`. Priority is `normal` or `urgent`, an empty message is 400, and the job must be running. It saves a `user_initiated_message` notification and returns its id.
-- `get_job_interactions` answers `GET /api/get-job-interactions/{job_id}` with the job's metadata and its notifications, newest first. It looks in the running, done and todo queues, then in the database.
-- `get_job_history` answers `GET /api/job-history`, paged, with `status`, `job_type`, `days`, `exclude_ids` and `user_filter`. `get_job_history_detail` answers `GET /api/job-history/{job_id}`.
-- `delete_job_history_endpoint` hard-deletes one record. `delete_all_job_history` answers `DELETE /api/job-history/all` for a `days` window or `all`. An admin deletes across users, anyone else only their own.
+- `get_job_interactions` answers `GET /api/get-job-interactions/{job_id}` with the job's metadata and its notifications, newest first, one per progress group. It looks in the running, done and todo queues, then the database. A failed notification query returns an empty list, not an error.
+- `get_job_history` answers `GET /api/job-history`, paged (`limit` 1 to 100), with `status`, `job_type`, `days`, `exclude_ids` and `user_filter`. `get_job_history_detail` answers `GET /api/job-history/{job_id}`, 404 for an unknown id.
+- `delete_job_history_endpoint` hard-deletes one record for its owner or an admin, 404 if unknown. `delete_all_job_history` answers `DELETE /api/job-history/all` for a `days` window of any whole number, or `all`, and 400 for anything else. An admin deletes across users, anyone else only their own.
 - `push`, `push_agentic` and `retry_job_history` answer 410 and point to `/api/v2/ask` or `/api/v2/submit`. `resume_stalled_job` and `resume_tfe_smart` answer 410 and point to `/api/v2/resume-job`.
 
 ## Don't

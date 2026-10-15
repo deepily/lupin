@@ -19,7 +19,7 @@ pins:
 The typed bodies of the `/api/v2/*` doors on [[rest-routers-v2-ask-doors]]. The flow behind them is on [[v2-ask-flow]].
 
 ## What it does
-- `AskRequest`: `question` (1 to 4000 characters), `websocket_id`, `speak` (default true), `interactive` (default true) and `parent_id_hash`. When `interactive` is false a missing argument returns `needs_input` instead of parking.
+- `AskRequest`: `question` (1 to 4000 characters), `websocket_id`, `speak` (default true), `interactive` (default true) and `parent_id_hash`. When `interactive` is false a missing argument returns `needs_input` instead of parking, and a near-match cache hit is declined instead of confirmed.
 - `SubmitRequest`: `command` (required, up to 200 characters) and `args` carry work already decided, so no routing or extraction runs. `scheduled_at`, `monopolize` and `parent_id_hash` are queue directives, so they sit outside `args`.
 - `ResumeRequest`: `pending_id` from an earlier `needs_input` reply and the human's `answer`.
 - `AskResponse` is the one result shape for ask, submit and resume. `path` is replay, agent, needs_input or receptionist, `status` is done, waiting, parked, needs_input, expired or failed. It also carries `args_missing`, `pending_id`, `job_id`, `cache_hit`, `timings_ms`, `trace_id` and `queue_position`.

@@ -20,12 +20,12 @@ pins:
 The routes of `cosa.rest.routers.tasks` that change an item, under `/api`. All take an API key or a Bearer token. Each body model forbids unknown fields, so a misspelt key is a 422, never a silent drop. Reads are in [[rest-routers-tasks-reads]]; the rules are in [[task-store]].
 
 ## What it does
-- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default, and an over-long title is trimmed with the overflow moved to the body.
+- `create_task`, `POST /tasks` (`TaskCreateIn`): makes one row with 201. An omitted status takes the approval default. An over-long title is trimmed, with the overflow moved into an empty body. The priority firewall answers 403 for a priority the caller may not set. A manager relaying the operator's word for P0 is filed as a petition at P1 instead.
 - `transition_task`, `POST /tasks/{id}/transition` (`TaskTransitionIn`): one state change. Done needs `receipt_refs`, blocked needs typed `blocked_by`, dropped needs a `reason`, parked needs `park_reason`. Returns `{ item, event }`.
 - `correlate_task`, `.../correlate` (`TaskCorrelateIn`): re-stamps the `correlation_key`. A terminal row is 422.
-- `ask_to_unpark`, `.../unpark-ask` (`UnparkAskIn`): a manager seat asks the operator to un-park a row. The server makes a yes or no card and pushes it. It is 403 for a non-manager and 404 for no such row or no operator account. It is 409 for a row not parked or one with a card already waiting. It writes no task event.
+- `ask_to_unpark`, `.../unpark-ask` (`UnparkAskIn`): a manager seat asks the operator to un-park a row. The server makes a yes or no card and pushes it. It is 403 for a non-manager and 404 for no such row or no operator account. It is 409 for a row not parked, one with no recorded park time, or one with a card already waiting. It writes no task event.
 - `amend_task`, `.../amend` (`TaskAmendIn`): appends a stamped note to the body, and a blank note is 422. It is allowed on a closed row, where the note is marked a post-terminal addendum.
-- `patch_task`, `PATCH /tasks/{id}` (`TaskPatchIn`): edits title, body, priority, owner, manager, gate class and urgency. Status and blockers are not editable here. A priority raise the priority firewall refuses is 403.
+- `patch_task`, `PATCH /tasks/{id}` (`TaskPatchIn`): edits title, body, priority, owner, manager, gate class and urgency on a live row. A title over the cap is 422, not trimmed. Status and blockers are not editable here. A priority raise the priority firewall refuses is 403.
 
 ## Don't
 - Don't send `asynchronous` as a string. The field is a strict boolean, and `"true"` is refused.

@@ -18,9 +18,9 @@ The helpers in `routers/dm.py` that decide how a DM is graded and how the grade 
 - `get_dm_quality_judgment_enabled` reads the INI key `dm quality judgment enabled` on each call. It is true only when the key is explicitly true, and false when the key is absent or unreadable.
 - `get_dm_feedback_arm` returns `reject_on_overage` when `dm reject on overage` is true, and `signal_only` otherwise, including on a config error. It only labels corpus rows. No reject path acts on it yet.
 - `get_dm_grade_audit` returns a copy of the deferred-grade counters: `accepted`, `refused`, `refused_under_pytest`, `pending` and `failed`. `reset_dm_grade_audit` zeroes them.
-- Grades run on one background worker with at most 32 jobs waiting. Past that the grade is refused and the corpus row is written ungraded.
+- Grades run on one background worker with at most 32 jobs outstanding, running or waiting. Past that the grade is refused and the corpus row is written ungraded.
 - `format_dm_grade_notice` makes the line `[grade for DM <id>] length … · directness … · tone … · overall …`. A dimension with no weight reads as withheld.
-- `push_dm_grade_to_sender` pushes that line to the sender's seat as a low-priority task notification from `dm-quality-judge@lupin.deepily.ai`. It returns true only when pushed, and a departed seat is not an error.
+- `push_dm_grade_to_sender` pushes that line to the sender's seat as a low-priority task notification from `dm-quality-judge@lupin.deepily.ai`. It returns true only when pushed, and false for a missing grade. A send inside an experiment window does not push its grade back.
 - `reset_dm_experiment_state` empties the per-slot memory of each sender's last length-gate outcome.
 
 ## Don't
@@ -28,4 +28,4 @@ The helpers in `routers/dm.py` that decide how a DM is graded and how the grade 
 - Don't read a zero `pending` as proof grading works. Under pytest every deferral is refused.
 
 ## Invariants
-- A grade that cannot be pushed is dropped quietly. It never stops the worker.
+- A grade that cannot be pushed is dropped with a printed warning. It never stops the worker.

@@ -19,10 +19,10 @@ The per-user and per-notification doors of `routers/notifications.py`, under `/a
 - `get_user_notifications` answers `GET /notifications/{user_id}` from the in-memory queue. `include_played`, `limit` (default 50), `priorities` and `sort` (`queue` or `oldest`) apply. A priority outside urgent, high, medium and low is 400.
 - `get_next_notification` answers `GET /notifications/{user_id}/next` with `found` or `none_available`, and does not change the played flag.
 - `mark_notification_played` answers `POST /notifications/{id}/played`. `delete_notification` answers `DELETE /notifications/{id}`. Both are 404 for an unknown id.
-- `bulk_delete_notifications` answers `DELETE /notifications/bulk/{user_email}`. `hours` must be above 0 (else 400), and `exclude_own_jobs` keeps the user's own job rows and system rows.
-- `PredictionVoteRequest` is the vote body: `vote` is `up` or `down`, and `predicted_value` is required.
-- `vote_on_prediction_hint` answers `POST /notify/prediction-vote/{id}`. It records one case, approved on up and rejected on down, and a second vote flips it. A question it cannot find is 422.
-- `get_broadcast_acks` answers `GET /notifications/broadcast-acks/{broadcast_id}`. It returns the latest ack per session for the caller's own broadcasts, whatever the delivery state.
+- `bulk_delete_notifications` answers `DELETE /notifications/bulk/{user_email}`. `hours` must be above 0 (else 400), an unknown email is 404, and `exclude_own_jobs` keeps the user's own job rows and system rows.
+- `PredictionVoteRequest` is the vote body: `vote` is `up` or `down`. `predicted_value` is optional in the model, but the route answers 422 without it.
+- `vote_on_prediction_hint` answers `POST /notify/prediction-vote/{id}`. It records one case, approved on up and rejected on down, and a second vote flips it. A question it cannot resolve is 422.
+- `get_broadcast_acks` answers `GET /notifications/broadcast-acks/{broadcast_id}`. It returns the latest ack per session for the caller's own broadcasts, whatever the delivery state, newest first. `limit` (default 500) caps the rows scanned before that fold.
 
 ## Don't
 - Don't rely on the played and delete doors to check ownership. They check only that the caller is signed in.

@@ -14,7 +14,7 @@ pins:
 The FastAPI dependencies in `cosa.rest.middleware` that decide who a caller is, and one shared id generator from `cosa.rest.dependencies.config`.
 
 ## What it does
-- `validate_api_key( api_key )` checks a key against the stored hashes in a worker thread. It returns the owner's user id, or `None` for an unknown or inactive key.
+- `validate_api_key( api_key )` checks a key against the stored hashes in a worker thread. It returns the owner's user id, or `None` for an unknown or inactive key, and for any error while checking.
 - `require_api_key_or_jwt` accepts an `X-API-Key` header or an `Authorization: Bearer` token, tries the key first, and returns the user id. A key that is malformed, unknown or inactive is 401 even when a Bearer token comes with it. Anything else is 401. A key must look like `ck_live_` plus 64 or more characters.
 - `authenticated_account_email` returns the verified `email` claim of a Bearer access token, or `None`. It never raises and authenticates nothing, so pair it with the guard above.
 - `require_path_identity_owner` refuses, with 403, a caller who is not the user named in the path (`user_id` or `user_email`). It returns the caller's id. A route with no such parameter is 500.

@@ -21,7 +21,7 @@ The `/admin/users` routes in `cosa.rest.routers.admin`. Every one depends on `re
 - `update_roles` sets a user's roles, `PUT /admin/users/{user_id}/roles`. The service refuses an admin removing their own admin role.
 - `update_status` activates or deactivates an account, `PUT /admin/users/{user_id}/status`. The service refuses self-deactivation.
 - `reset_user_password` makes a temporary password, `POST /admin/users/{user_id}/reset-password`, and returns it once.
-- `create_user_endpoint` makes an account, `POST /admin/users`, with 201. The email is marked verified.
+- `create_user_endpoint` makes an account, `POST /admin/users`, with 201. The service marks the email verified; if that step fails it only prints a warning.
 - `delete_user_endpoint` hard-deletes an account, `DELETE /admin/users/{user_id}`. A body with a `reason` is optional.
 - `batch_delete_users_endpoint` deletes up to 50 accounts in one `POST /admin/users/batch-delete`.
 
