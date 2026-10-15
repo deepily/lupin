@@ -147,14 +147,20 @@ async def get_info(
 
     The engines block is what a stored vector set must be checked against. It
     never loads a model, so a revision of None means that engine is not loaded.
+    Answers 503 with the reason when the model server that holds the engines cannot be read.
     """
     provider = get_embedding_provider()
+
+    try:
+        engines = provider.describe_engines()
+    except RuntimeError as e:
+        raise HTTPException( status_code=503, detail=f"engines info unavailable: {e}" )
 
     return EmbedInfoResponse(
         provider   = provider.provider,
         dimensions = provider.dimensions,
         status     = "ready",
-        engines    = provider.describe_engines()
+        engines    = engines
     )
 
 

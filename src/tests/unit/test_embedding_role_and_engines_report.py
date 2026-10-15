@@ -188,6 +188,15 @@ def test_a_model_server_that_answers_a_different_role_is_refused( http, monkeypa
         make_provider().generate_embedding( "x", content_type="code", role="document" )
 
 
+def test_a_role_less_call_succeeds_when_the_model_server_answers_with_a_role( http, monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_post_with_retry",
+                         lambda self, url, payload, key, timeout, label: FakeResponse( { "embedding" : [ 0.3 ], "embeddings" : [ [ 0.3 ] ], "role" : "query" } ) )
+    p = make_provider()
+    assert p.generate_embedding( "x", content_type="code" ) == [ 0.3 ]
+    assert p.generate_embeddings_batch( [ "x" ], content_type="code" ) == [ [ 0.3 ] ]
+
+
 def test_the_fastapi_router_answer_needs_no_role_echo( http ):
     p = make_provider()                  # FastAPI target; the fake answer has no role key
     assert p.generate_embedding( "x", content_type="code", role="query" ) == [ 0.1 ]
