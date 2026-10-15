@@ -32,7 +32,7 @@ Four render modules draw the Action Required pane, two badges and the persona po
 
 ## How the parts work together
 
-Each renderer is created with an event bus, and all but the listener-error one also with a store. It is then mounted on a root element. It repaints only when an event arrives. The action-required renderer also repaints the active card on timer ticks and pause changes without a full rebuild. Unmounting detaches the listeners and clears what the renderer drew. The action-required renderer also drops its keyboard shortcuts and leaves a placeholder when its list is empty.
+Each renderer is created with an event bus, and all but the listener-error one also with a store. It is then mounted on a root element. After a first paint at `mount` (the listener-error renderer has none), it repaints only when an event arrives. The action-required renderer also repaints the active card on timer ticks and pause changes without a full rebuild. Unmounting detaches the listeners and clears what the renderer drew. The action-required renderer also drops its keyboard shortcuts and leaves a placeholder when its list is empty.
 
 ## Don't
 

@@ -27,12 +27,12 @@ These four renderers paint the reading pane, one seat's live console, the Q&A pa
 - `createSessionTranscriptRenderer` builds `SessionTranscriptRendererImpl`, which paints nothing until `mount()`. It lists blocks newest at the bottom and follows the live end until the reader scrolls up.
 - `SessionTranscriptRendererImpl` opens a seat with `openSeat`, which refuses when the pane refuses. `toggleSeat` closes the console when that seat shows. Pane exit or `unmount()` closes the watch.
 - `describeState` returns the status line: "Catching up…" while repairing, "Session ended", or for a refused watch "Session not found" or "Watch refused". Otherwise it returns an empty string.
-- `renderTranscriptBlock` makes one element per block. `text` is markdown. A tool call is a folded `chipLine`, the first line cut at 120 characters. Other kinds go through `plain`, and a truncated block gets a note.
+- `renderTranscriptBlock` makes one element per block. `text` is markdown. A tool call is a folded `chipLine`, the first line cut at 120 characters. Thinking and folded kinds use the elements below, every remaining kind goes through `plain`, and a truncated block gets a note.
 - `unrecordedThinking` is a dim label for thinking with no text. `inlineThinking` shows thinking text under a label, unfolded. `folded` is a `details` element with plain text inside; `tool_result` uses it.
-- `ReadingPaneRendererImpl` owns the pane chrome, splitter, layout toggle and bust-out. It hides the reading body and shows the console mount when the content is `console`. `req` and `reqId` look up elements by selector or id at mount and throw when one is missing.
+- `ReadingPaneRendererImpl` owns the pane chrome, splitter, layout toggle and bust-out. It hides the reading body and shows the optional console mount when the content is `console` and no action-required card is in the pane. `req` and `reqId` look up elements by selector or id at mount and throw when one is missing.
 - `QaPaneRendererImpl` paints the Q&A pane from its store. `formatMetric` shows milliseconds or `--`. `anyMetric` keeps the metrics strip hidden until one of the three stamps has landed.
 - `SubmitJobsPaneRendererImpl` wires the CC, research, test suite and TFE cards to the store. `schedulingOf` reads a card's schedule checkbox and time, plus the monopolize box when the card has one.
 
 ## How the parts work together
 
-`openSeat` asks the reading pane to show the console, and the reading pane renderer paints that choice. The transcript renderer watches a seat only while the pane's content is "console". Each renderer reads its store and repaints when the store announces a change.
+`openSeat` asks the reading pane to show the console, and the reading pane renderer paints that choice. The transcript renderer watches a seat only while the pane's content is "console"; an action-required card hides the console while the watch continues. Each renderer reads its store and repaints when the store announces a change.

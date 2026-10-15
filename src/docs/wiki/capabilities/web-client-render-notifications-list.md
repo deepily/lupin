@@ -24,7 +24,7 @@ pins:
 These two renderers draw the sender cards and the section header controls of the notifications pane.
 
 - `DEFAULT_SENDER_SORT` orders sender cards by newest activity first. A boot-time comparator option replaces it.
-- `defaultReportFailure` logs the message to the console and raises an alert. `defaultProxyRatifyOpener` opens `/app/admin/proxy-ratify` in the tab named `lupin-proxy-ratify`.
+- `defaultReportFailure` writes an error line to the debug sink, which feeds the console and panel, then raises an alert. `defaultProxyRatifyOpener` opens `/app/admin/proxy-ratify` in the tab named `lupin-proxy-ratify`.
 - `createNotificationsListRenderer` needs `eventBus` and `stores`. Timezone, sort, API and confirm hooks are optional. It returns the renderer.
 - `cardSignature` returns the card's HTML with the active class, active dot and status glyph blanked, then restores them.
 - `paintVolatileHeader` copies those three parts from a fresh card. `paintVolatileState` sets them from an active flag and the last-active time.
@@ -37,4 +37,4 @@ These two renderers draw the sender cards and the section header controls of the
 - `NotificationsHeaderRendererImpl` builds the count, history panel, window picker, Clear All and bounce button. The Mine, Not Mine and All Users switch is hidden unless `isAdmin` is true when the header mounts. `createNotificationsHeaderRenderer` throws without a store.
 
 ## How the parts work together
-On each store change the list renderer first compares card inputs, then the signature, then tries an append-only patch, and only then replaces a card. Cheaper paths keep the live node, so scroll and focus survive. The header renderer is separate. It shows the total count. Clear All deletes visible entries one by one and removes only the successes from the store.
+For a card already on screen, each store change compares card inputs, then the signature, then tries an append-only patch, then replaces the card. A patch keeps the card node and swaps its header, and focus is captured and restored around the update. The header renderer is separate. It shows the total count. Clear All deletes visible entries one by one and removes only the successes from the store.
