@@ -35,6 +35,7 @@ from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex import wiki_lint as wl
 from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_for
+from lupin_mcp import reuse_redact
 
 TOOL_VERSION = "1"                                              # receipts of the one-request-per-entry path
 PACKED_TOOL_VERSION = "2"                                       # receipts of the packed path; both load until the old path is removed
@@ -930,6 +931,24 @@ def _live_budget( ctx ):
         raise ReuseError( "SPEND_LEDGER", str( e ) ) from e
 
 
+def known_routes_of( gen ):
+    """
+    Read the known lupin routes from one index generation.
+
+    Requires:
+        - gen is a generation directory, or None
+
+    Ensures:
+        - returns ( routes, source ): the sorted route paths of the generation's routes.md and "index"
+        - returns ( (), "none" ) when gen is None or routes.md cannot be read, so every absolute path is then redacted
+    """
+    if gen is None: return (), "none"
+    try:
+        return reuse_redact.routes_from_text( ( pathlib.Path( gen ) / "routes.md" ).read_text( encoding="utf-8" ) ), "index"
+    except OSError:
+        return (), "none"
+
+
 def prepare( ctx ):
     """
     Resolve the index and the transport for one sweep.
@@ -1108,6 +1127,11 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     pair = question == "provides"
     if pair and ( ctx.sweeper is None or ctx.pack_size is None ): raise ReuseError( "PAIR_NEEDS_PACKED", "the provides question is asked on the packed path only" )
     flags, entries, sha_, gen = prepared if prepared is not None else prepare( ctx )
+    routes, routes_source = known_routes_of( gen )
+    sent, _ranking, redactions = reuse_redact.redact_need( need, routes )         # the need is redacted before anything is asked
+    if tool == "check_exists" and query == need: query = sent
+    elif tool == "check_exists": query = reuse_redact.redact_need( query, routes )[ 0 ]
+    need = sent
     pages = ctx.pages if tool == "check_exists" and not sweep_only and not pair else []     # fetch_similar lists neighbours, so it sweeps every entry
     need_text = need if tool == "fetch_similar" and need != query and not any( e[ "id" ] == query for e in entries ) else None     # a private definition: the snapshot cannot give its text back
     if exclude_id is not None: entries = [ e for e in entries if e[ "id" ] != exclude_id ]
@@ -1145,6 +1169,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "attempt_counts": attempt_counts( [ log for sweep_ in routed[ "sweeps" ] for log in sweep_[ "attempt_logs" ] ] ),
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
+    if redactions: rec[ "need_redactions" ], rec[ "routes_source" ], rec[ "need_sent" ] = redactions, routes_source, need     # only when the redactor changed the need, so an untouched need keeps its pinned receipt bytes
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
     if need_text is not None: rec[ "need_text" ] = need_text
@@ -1164,6 +1189,7 @@ def _public( receipt, extra=None ):
     keep = ( "verdict", "cause", "causes", "shortlist", "shortlist_total", "nearest", "doubtful", "malformed", "missing", "index_sha", "stats" )
     out  = { "status": "ok", "tool": receipt[ "tool" ], "receipt_id": receipt[ "id" ] }
     out.update( { k: receipt[ k ] for k in keep } )
+    out[ "need_redactions" ] = receipt[ "need_redactions" ] if "need_redactions" in receipt else []
     if extra: out.update( extra )
     return out
 
@@ -1359,6 +1385,7 @@ def replay_impl( rid, ctx, repeat=0 ):
         if stored[ "tool" ] == "fetch_similar":
             need    = stored[ "need_text" ] if "need_text" in stored else next( ( entry_text( e ) for e in entries if e[ "id" ] == stored[ "query" ] ), stored[ "query" ] )
             entries = [ e for e in entries if e[ "id" ] != stored[ "query" ] ]
+        if "need_sent" in stored: need = stored[ "need_sent" ]                      # the redacted text Jev saw; a receipt from before redaction has none
         sweep_only = "sweep_only" in stored
         left_out   = stored[ "exclude_id" ] if "exclude_id" in stored else None                  # a sweep-only receipt and a page-route receipt both name it
         if left_out is not None: entries = [ e for e in entries if e[ "id" ] != left_out ]
