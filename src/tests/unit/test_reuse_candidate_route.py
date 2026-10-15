@@ -252,7 +252,8 @@ def test_a_candidate_receipt_made_before_the_ids_hash_is_refused_by_name_and_not
     r    = rt.check_exists_impl( need, ctx )
     rec, path = _stored( env, r, lambda rec: None )
     old = rt.receipt_id( rec[ "tool" ], rec[ "query" ], rec[ "index_sha" ], rec[ "model" ], rec[ "policy" ], rec[ "prompt_template_hash" ], rec[ "causes" ],
-                         rec[ "tool_version" ], rec[ "request_shape" ], False, None, None, None )     # the id before the ids hash: no candidate part at all
+                         rec[ "tool_version" ], rec[ "request_shape" ], False, None, None,
+                         { "manifest_hash": rec[ "candidate_stage" ][ "manifest_hash" ], "K": rec[ "candidate_stage" ][ "K" ] } )     # the id before the ids hash
     rec[ "id" ] = old
     ( path.parent / f"{old}.json" ).write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
     with pytest.raises( rt.ReuseError, match="RECEIPT_ID_MISMATCH" ): rt.load_receipt( ctx, old )
