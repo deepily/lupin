@@ -1401,7 +1401,7 @@ _LINEAR_SHAPES = {
 
 
 def _best_of( command, repeats=3, seconds=20 ):
-    """The fastest of a few runs; an alarm fails a guard that will not finish instead of hanging."""
+    """The fastest of a few runs, in CPU seconds. An alarm fails a guard that will not finish."""
     import signal as signal_module
     def expired( *args ):
         raise _Expired( f"the guard did not finish within {seconds} s on {len( command )} characters" )
@@ -1410,12 +1410,12 @@ def _best_of( command, repeats=3, seconds=20 ):
     try:
         for _ in range( repeats ):
             signal_module.alarm( seconds )
-            started = time.perf_counter()
+            started = time.thread_time()
             kill_deny_reason(
                 "Bash", { "command": command }, enabled=True, comm_reader=lambda pid: "bash",
                 pgrep_probe=lambda selector: [],
             )
-            elapsed = time.perf_counter() - started
+            elapsed = time.thread_time() - started
             best    = elapsed if best is None else min( best, elapsed )
     finally:
         signal_module.alarm( 0 )
@@ -1434,7 +1434,7 @@ def test_the_guard_time_grows_in_proportion_to_the_command( shape ):
     build = _LINEAR_SHAPES[ shape ]
     base  = 8000
     small = _best_of( build( base ) )
-    large = _best_of( build( base * 4 ), repeats=1 )
+    large = _best_of( build( base * 4 ) )
     assert large / max( small, 0.002 ) < 9, f"{shape}: {small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x the input"
 
 
