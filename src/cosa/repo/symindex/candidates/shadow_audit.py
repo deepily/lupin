@@ -25,6 +25,8 @@ Z_ONE_SIDED_95 = 1.6448536269514722
 CONFIDENCE     = 0.95
 MATCHING       = ( "REUSE", "EXTEND" )
 OUTCOMES       = ( "miss", "ok", "inconclusive" )
+ITEM_FIELDS    = ( "id", "need", "language", "generation", "index_sha", "live", "queued_on", "attempts" )
+TEMP_PREFIX    = ".tmp-"
 RECEIPT_FIELDS = ( "kind", "id", "need_hash", "language", "generation", "index_sha", "live_verdict", "full_verdict",
                    "candidate_count", "causal_ids", "outcome", "missed_ids", "audited_on" )
 
@@ -132,6 +134,17 @@ def _folder( data_dir, name ):
     return path
 
 
+def _temp_name( path ):
+    """Name a write's temporary file so no *.json listing sees it."""
+    return path.with_name( f"{TEMP_PREFIX}{os.getpid()}-{path.name}.part" )
+
+
+def _item_ok( item ):
+    """Return True when a queue file holds every queue field."""
+    return isinstance( item, dict ) and all( key in item for key in ITEM_FIELDS ) and isinstance( item[ "attempts" ], int ) \
+           and isinstance( item[ "live" ], dict )
+
+
 def _write_once( path, text ):
     """
     Put a file in place whole, or leave an existing one alone.
@@ -141,7 +154,7 @@ def _write_once( path, text ):
         - an existing path is never replaced, and the temporary name is gone afterwards
         - returns True when this call created the file
     """
-    temp = path.with_name( f".tmp-{os.getpid()}-{path.name}" )
+    temp = _temp_name( path )
     temp.write_text( text, encoding="utf-8" )
     try:
         os.link( temp, path )
@@ -265,29 +278,34 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         - returns { audited, failed, corrupt, receipts }
         - each audited item leaves a receipt and its queue file is removed
         - an item whose sweep raises stays queued with its attempt count up by one, and counts as failed
-        - a queue file that is not JSON is renamed to <name>.corrupt and counted, and the run goes on
+        - a queue file that is not JSON, or lacks a queue field, is renamed to <name>.corrupt and counted, and the run goes on
+        - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
+        - a temporary file of a write in progress is never read
         - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
     """
     queued, corrupt = [], 0
-    for path in sorted( _folder( data_dir, "shadow-pending" ).glob( "*.json" ) ):
-        try: queued.append( ( json.loads( path.read_text( encoding="utf-8" ) ), path ) )
-        except ValueError:
+    for path in sorted( p for p in _folder( data_dir, "shadow-pending" ).glob( "*.json" ) if not p.name.startswith( TEMP_PREFIX ) ):
+        try: item = json.loads( path.read_text( encoding="utf-8" ) )
+        except ValueError: item = None
+        if not _item_ok( item ):
             path.rename( path.with_name( path.name + ".corrupt" ) )
             corrupt += 1
+            continue
+        queued.append( ( item, path ) )
     queued.sort( key=lambda pair: ( pair[ 0 ][ "attempts" ], pair[ 0 ][ "queued_on" ], pair[ 0 ][ "id" ] ) )
     if limit is not None: queued = queued[ :limit ]
     receipts, failed = [], 0
     for item, path in queued:
-        try: sweep = sweep_fn( item[ "need" ] )
-        except Exception:                      # a transport failure of any kind leaves the item queued, behind the fresh ones
+        try:
+            sweep   = sweep_fn( item[ "need" ] )
+            receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today )
+        except Exception:                      # a transport failure or a malformed answer leaves the item queued, behind the fresh ones
             failed += 1
-            fresh = dict( item, attempts=item[ "attempts" ] + 1 )
-            temp  = path.with_name( f".tmp-{os.getpid()}-{path.name}" )
-            temp.write_text( json.dumps( fresh, sort_keys=True ) + "\n", encoding="utf-8" )
+            temp = _temp_name( path )
+            temp.write_text( json.dumps( dict( item, attempts=item[ "attempts" ] + 1 ), sort_keys=True ) + "\n", encoding="utf-8" )
             os.replace( temp, path )
             continue
-        receipts.append( store_receipt( data_dir, audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ],
-                                                                 item[ "live" ], sweep, today ) ) )
+        receipts.append( store_receipt( data_dir, receipt ) )
         os.remove( path )
     return { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
 
