@@ -134,7 +134,7 @@ def in_scope( path ):
     return not ( name.startswith( "test_" ) or name == "conftest.py" )
 
 
-def tracked_files( repo_root, suffixes, scoped=True ):
+def tracked_files( repo_root, suffixes, scoped=True, links=False ):
     """
     List the git-tracked files with one of the suffixes.
 
@@ -142,17 +142,20 @@ def tracked_files( repo_root, suffixes, scoped=True ):
         - repo_root is a git working tree
         - suffixes is a tuple of strings such as ( ".py", ); ( "", ) lists every file
         - scoped is a bool
+        - links is a bool
 
     Ensures:
         - returns sorted repo-relative posix paths that are in_scope; with scoped False, every path with a suffix, in scope or not
+        - with links True, only the paths the index holds as symbolic links (mode 120000) are listed
         - the population comes from git, never from a disk walk
         - names are read apart at the NUL byte, so a name git would quote is listed as it is
 
     Raises:
         - RuntimeError naming the git error when ls-files fails
     """
-    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "-z", "--", ":/" ], capture_output=True )
+    res = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", *( [ "-s" ] if links else [] ), "-z", "--", ":/" ], capture_output=True )
     if res.returncode != 0: raise RuntimeError( f"git ls-files failed: {res.stderr.decode( 'utf-8', 'replace' ).strip()}" )
+    if links: return sorted( os.fsdecode( e.split( b"\t", 1 )[ 1 ] ) for e in res.stdout.split( b"\0" ) if e.startswith( b"120000 " ) )
     return sorted( p for p in split_names( res.stdout ) if p.endswith( suffixes ) and ( in_scope( p ) or not scoped ) )
 
 

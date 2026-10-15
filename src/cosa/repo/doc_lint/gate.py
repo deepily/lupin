@@ -94,6 +94,7 @@ BARE_RETURN        = re.compile( "\r(?!\n)" )
 GITLINK_MODE       = "160000"
 # The mode git records for a symbolic link. Its blob is the target path, so it is no page and no source file.
 SYMLINK_MODE       = "120000"
+MAX_LINK_HOPS      = 8
 NUMBER             = re.compile( r"\d+" )
 BARE_PREFIX       = "bare reference "
 MECHANICAL_RULES  = frozenset( { "dated-banner", "iso-date", "agent-imperative" } )
@@ -939,17 +940,26 @@ def link_stands_for_source( root, link ):
         - link is the repo-relative path of a staged symbolic link
 
     Ensures:
+        - a target that is itself a symbolic link the index holds is followed, up to MAX_LINK_HOPS links, and the end of the chain is judged
+        - True when a chain is longer than MAX_LINK_HOPS or loops, since its end is not known
         - True when the target text resolves outside the repository, or to nothing the index holds
         - True when the target is a file or a folder whose files, named through the link, are a swept Python file or a TypeScript file
         - False when the target is a folder in the index that holds no such file
 
     Raises:
-        - OSError when the link's blob cannot be read
-        - RuntimeError from git when the listing fails
+        - OSError when a link's blob cannot be read
+        - RuntimeError from git when a listing fails
     """
-    target   = os.fsdecode( staged_bytes( root, link ) ).strip()
-    resolved = posixpath.normpath( posixpath.join( posixpath.dirname( link ), target ) )
-    if target.startswith( "/" ) or resolved == ".." or resolved.startswith( "../" ): return True
+    held = set( tracked_files( root, ( "", ), scoped=False, links=True ) )
+    here = link
+    for _ in range( MAX_LINK_HOPS ):
+        target   = os.fsdecode( staged_bytes( root, here ) ).strip()
+        resolved = posixpath.normpath( posixpath.join( posixpath.dirname( here ), target ) )
+        if target.startswith( "/" ) or resolved == ".." or resolved.startswith( "../" ): return True
+        if resolved not in held: break
+        here = resolved
+    else:
+        return True
     below = [ f for f in tracked_files( root, ( "", ), scoped=False ) if resolved == "." or f == resolved or f.startswith( f"{resolved}/" ) ]
     named = [ link + f[ len( resolved ): ] if resolved != "." else f"{link}/{f}" for f in below ]
     return not below or any( ( n.endswith( ".py" ) and is_swept( n ) ) or tsdoc_lint.in_scope( n ) for n in named )

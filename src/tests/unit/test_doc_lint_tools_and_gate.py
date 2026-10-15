@@ -1193,6 +1193,40 @@ def test_a_symlink_to_a_folder_with_no_source_file_or_in_an_unjudged_folder_is_n
     assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], ( link, lines )
 
 
+def _chain_case( repo, hops, link="tools/a" ):
+    """Commit the links in hops, stage link to the first, and return the gate's answer."""
+    _stage( repo, { "src/rnd/pkg/impl.py": "def f( x ):\n    return x\n", "src/rnd/notes/a.md": "# A\n\nFine.\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    for path, target in hops:
+        ( repo / path ).parent.mkdir( parents=True, exist_ok=True )
+        os.symlink( target, repo / path )
+        _git( repo, "add", path )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
+    os.symlink( hops[ 0 ][ 0 ].rsplit( "/", 1 )[ -1 ], repo / link )
+    _git( repo, "add", link )
+    assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
+    return _blocking( repo )
+
+
+@pytest.mark.parametrize( "hops", [
+    [ ( "tools/b", "../src/rnd/pkg" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "../src/rnd/pkg" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "d" ), ( "tools/d", "e" ), ( "tools/e", "f" ), ( "tools/f", "g" ), ( "tools/g", "h" ), ( "tools/h", "i" ), ( "tools/i", "j" ), ( "tools/j", "../src/rnd/notes" ) ],
+    [ ( "tools/b", "c" ), ( "tools/c", "b" ) ],
+] )
+def test_a_symlink_to_a_tracked_symlink_is_judged_by_the_end_of_the_chain_and_refused_when_it_stands_for_source( repo, monkeypatch, hops ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, hops )
+    assert rc == gate.REFUSAL_EXIT, lines
+    assert [ ln for ln in lines if "tools/a" in ln and "symbolic link" in ln and "NOT checked" in ln ]
+
+
+def test_a_symlink_to_a_tracked_symlink_that_ends_at_a_folder_with_no_source_file_is_not_refused( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    rc, lines = _chain_case( repo, [ ( "tools/b", "c" ), ( "tools/c", "../src/rnd/notes" ) ] )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], lines
+
+
 def test_a_symlink_in_the_swept_scope_that_the_commit_only_moves_is_a_plain_warning( repo, monkeypatch ):
     _no_external( monkeypatch )
     ( repo / "src" / "cosa" ).mkdir( parents=True )
