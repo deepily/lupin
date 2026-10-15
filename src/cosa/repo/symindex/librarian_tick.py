@@ -13,6 +13,9 @@ one line and exits before it builds anything or reads the store.
 Installing the cron lines goes through the shared crontab lock and nothing else. Without that
 lock module the installer refuses and writes nothing.
 
+The tick also carries the vector set's staleness verdict (vector_status.py) on its report when the
+daily vector refresh job is switched on.
+
 Exit 0 means nothing was due, or the run finished and nothing is held.
 Exit 1 means the run could not finish, or an install was refused.
 Exit 2 means the run finished and some rows are held in the pending file.
@@ -277,7 +280,7 @@ def notify_owner( persona, text, environ, post=None, api_key=None ):
     return status == 201
 
 
-def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_path, now, force=False, log=print ):
+def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_path, now, force=False, log=print, vector_check=None ):
     """
     Run one tick.
 
@@ -285,6 +288,7 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         - librarian is a Librarian
         - export_fn is a callable ( rows, path ) returning an object with written and skipped, as miss_record.export_report does
         - now is a datetime in local time
+        - vector_check is a callable () returning the vector status dict, or None to skip the check
 
     Ensures:
         - returns ( exit_code, summary dict )
@@ -296,6 +300,8 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         - a store that could not be read returns 1 and leaves the state and pending file as they were
         - a miss export that raises ValueError or OSError returns 1 and leaves the state as it was
         - every block the export could not read is logged with its row title and reason
+        - a vector_check that answers puts its stale flag and reasons in the summary under vector_status
+        - a vector_check that raises OSError or ValueError is logged, leaves the summary without vector_status and does not fail the tick
     """
     state = read_state( state_path )
     if not force and not due( now, state ): return 0, { "ran": False, "reason": "not due" }
@@ -327,6 +333,12 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     exported = report.written
     write_state( state_path, { "last_run_date": now.date().isoformat(), "findings": len( findings ), **counts, "misses": exported } )
     summary = { "ran": True, "findings": len( findings ), "misses": exported, **counts }
+    if vector_check is not None:
+        try:
+            verdict = vector_check()
+            summary[ "vector_status" ] = { "stale": verdict[ "stale" ], "reasons": verdict[ "reasons" ] }
+        except ( OSError, ValueError ) as error:
+            log( f"vector status check failed: {error}" )
     log( "tick finished: " + json.dumps( summary, sort_keys=True ) )
     return ( 2 if counts[ "pending" ] else 0 ), summary
 
@@ -468,6 +480,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     Ensures:
         - with no mode flag, runs one tick and returns its exit code
         - a tick that is switched off logs one line and returns EXIT_DISABLED before anything is built or read
+        - the vector status check runs in the tick only when the vector refresh switch is on, because a set no job rebuilds is not owed
         - --print-install prints the cron lines and changes nothing
         - --install, --uninstall and --status go through edit_crontab or read the crontab
         - an InstallRefused or a RuntimeError prints one line to err and returns 1
@@ -510,8 +523,10 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     pending   = os.path.join( folder, PENDING_NAME )
     wiki_dir  = os.path.join( root, "src", "docs", "wiki" )
     librarian = ( make_librarian or _live_librarian )( environ, pending, log )
+    from cosa.repo.symindex import vector_refresh, vector_status
+    check     = ( lambda: vector_status.check( root, now, librarian=librarian, environ=environ, log=log ) ) if read_enabled( key=vector_refresh.ENABLED_KEY ) else None
     code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
-                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log )
+                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

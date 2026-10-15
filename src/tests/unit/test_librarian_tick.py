@@ -568,3 +568,40 @@ def test_read_enabled_reads_the_key_it_is_given():
     seen = []
     assert lt.read_enabled( reader=lambda k: seen.append( k ) or "on", key="some other key" ) is True
     assert seen == [ "some other key" ]
+
+
+def test_a_vector_check_puts_its_verdict_on_the_report_and_the_tick_still_records_its_day( tmp_path, pipeline ):
+    state = str( tmp_path / "state.json" )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", state, NOON,
+                                 vector_check=lambda: { "stale": True, "reasons": [ "old" ], "age_hours": 50 } )
+    assert code == 0 and summary[ "vector_status" ] == { "stale": True, "reasons": [ "old" ] }
+    assert lt.read_state( state )[ "last_run_date" ] == "2026-10-14"
+
+
+def test_a_tick_with_no_vector_check_has_no_vector_status( tmp_path, pipeline ):
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON )
+    assert "vector_status" not in summary
+
+
+@pytest.mark.parametrize( "error", [ OSError( "disk full" ), ValueError( "bad header" ) ] )
+def test_a_vector_check_that_fails_is_logged_and_does_not_fail_the_tick( tmp_path, pipeline, error ):
+    def broken(): raise error
+    lines = []
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON,
+                                 log=lines.append, vector_check=broken )
+    assert code == 0 and "vector_status" not in summary
+    assert any( "vector status check failed" in line and str( error ) in line for line in lines )
+
+
+@pytest.mark.parametrize( "switch, runs", [ ( True, 1 ), ( False, 0 ) ] )
+def test_main_runs_the_vector_check_only_when_the_vector_refresh_switch_is_on( cron, tmp_path, monkeypatch, pipeline, switch, runs ):
+    from cosa.repo.symindex import vector_refresh, vector_status
+    keys, seen = [], []
+    def reader( reader=None, errors=None, key=lt.ENABLED_KEY ): keys.append( key ); return switch
+    monkeypatch.setattr( lt, "read_enabled", reader )
+    monkeypatch.setattr( vector_status, "check", lambda root, now, **kw: seen.append( kw[ "librarian" ] ) or { "stale": False, "reasons": [] } )
+    lib = FakeLibrarian()
+    code, out, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch, make_librarian=lambda env, pending, log: lib,
+                             export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    assert vector_refresh.ENABLED_KEY in keys and len( seen ) == runs
+    assert ( "vector_status" in json.loads( out ) ) is bool( runs ) and ( seen == [ lib ] if runs else seen == [] )
