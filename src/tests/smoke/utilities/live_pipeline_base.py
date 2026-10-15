@@ -156,9 +156,17 @@ class LivePipelineTestBase:
             - Returns session_id string on success
             - Returns "smoke-test-session" as fallback
         """
+        # The debug route is admin-only (row 2288e442); the suite's own account is not admin.
+        from tests.smoke.utilities.embedded_proxy import admin_auth_headers
+        try:
+            admin_headers = admin_auth_headers( self.BASE_URL )
+        except RuntimeError as e:
+            print( f"  WebSocket state needs admin: {e}" )
+            return "smoke-test-session"
+
         resp = requests.get(
             f"{self.BASE_URL}/api/debug/websocket-state",
-            headers=headers,
+            headers=admin_headers,
             timeout=10
         )
 
