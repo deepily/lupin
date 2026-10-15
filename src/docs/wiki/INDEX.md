@@ -11,6 +11,8 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)
 - [[dataframe-crud]] — CRUD over DataFrames, storage, schemas and the intent dispatcher. `cosa.crud_for_dataframes`
+- [[dataframe-crud-operations]] — list, update, mark-done and query functions, the spoken answer for each result and the calendar agent. `cosa.crud_for_dataframes` (crud_operations, dispatcher, calendar_crud_agent)
+- [[dataframe-crud-schemas-and-intent]] — the todo, calendar and generic column definitions, the parsed `CRUDIntent` and the intent prompt. `cosa.crud_for_dataframes` (schemas, xml_models, intent_extractor)
 
 ## Notifications, decisions and voice
 
@@ -95,6 +97,10 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
 - [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task. It replays frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
+- [[dm-rewrite-study-freeze]] — the helpers that checksum, filter, sample and verify the frozen DM replay set. `cosa.research.phi4_flash_lite_study` (freeze_corpus)
+- [[dm-rewrite-study-replay]] — loading the snapshot, the per-arm guards, the outcome counts and latency, and the replay command line. `cosa.research.phi4_flash_lite_study` (replay_harness)
+- [[dm-rewrite-study-checks]] — the arm-marker proof that each arm reached its model, and the McNemar and Wilson tests with their floor guards. `cosa.research.phi4_flash_lite_study` (arm_markers, statistics)
+- [[dm-rewrite-study-report]] — the results report and the blind hand-labelling sheet with its answer key. `cosa.research.phi4_flash_lite_study` (report, label_sheet)
 - [[voice-persona-allocation]] — how each Claude Code session gets a named voice, the speakerphone switch beside it, and the name normalization every persona lookup shares. `cosa.rest` (voice_persona_helpers), `cosa.rest.routers` (voice_persona, speakerphone), `lupin_mcp` (persona_normalization, commons_persona_matcher, commons_llm_disambiguator)
 - [[task-store]] — the store of owed work: one row per task, decision, review request, bug or gate, with an append-only event trail, served through `/api/tasks`. `cosa.rest` (task_store_rules, task_store_owed, task_store_rejoin, task_chase_consumer, task_store_change_notifier, task_store_epic_keys, task_store_prose_refs)
 - [[v2-ask-flow]] — the v2 door onto CJ Flow. `AskFlow` takes a question or a decided command and returns one result, over `/api/v2/ask`, `ask-audio`, `transcribe`, `submit`, `resume`, `resume-job` and `agents`. `cosa.rest.v2` (flow, registry), `cosa.rest.routers` (v2_ask)
