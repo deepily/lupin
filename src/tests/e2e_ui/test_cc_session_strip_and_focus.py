@@ -1204,3 +1204,79 @@ class TestMultiplexerFocusHeight:
         after = _card_a_max_height()
         assert after == "250px", \
             f"exiting focus mode reverts to legacy's 250px; got {after}"
+
+
+# ---------------------------------------------------------------------------
+# Keep place — a card arriving at the top does not move what the reader sees
+# ---------------------------------------------------------------------------
+
+KEEP_PLACE_KEY = "notifications_keep_place"
+
+
+def _seed_tall_cards( page, count=8, height_px=420 ):
+    """Inject `count` CC sender cards and give each a fixed height so the page scrolls."""
+    ids = [ f"claude.code@lupin.deepily.ai#{ i:08x}" for i in range( 0x1000, 0x1000 + count ) ]
+    for sid in ids:
+        _inject_cc_sender_card( page, sid )
+    page.add_style_tag( content=f"#notifications-list > .sender-card {{ min-height: {height_px}px; }}" )
+    page.wait_for_timeout( 100 )
+    return ids
+
+
+def _card_top( page, sender_id ):
+    sanitized = sender_id.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+    return page.evaluate(
+        f"() => document.getElementById( 'sender-card-{sanitized}' ).getBoundingClientRect().top"
+    )
+
+
+class TestKeepPlaceToggle:
+    """
+    The Keep place pill in #cc-session-strip.
+
+    On by default: an update that moves a sender card to the top of #notifications-list must not move
+    the card the reader is looking at. Off restores the old behaviour.
+    """
+
+    def test_pill_is_present_and_on_by_default( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        pill = page.locator( "#cc-keep-place-toggle" )
+        assert pill.count() == 1, "Keep place pill should exist in the strip markup"
+        assert pill.get_attribute( "data-keep-place" ) == "true"
+
+    def test_an_update_from_below_keeps_the_card_in_view( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        ids  = _seed_tall_cards( page )
+        # The newest card is first, so ids[0] is at the bottom. Scroll so a middle card is under the strip.
+        watched = ids[ len( ids ) // 2 ]
+        page.evaluate(
+            "( top ) => window.scrollTo( 0, top )",
+            page.evaluate( "( sid ) => document.getElementById( sid ).offsetTop - 120",
+                           "sender-card-" + watched.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" ) )
+        )
+        page.wait_for_timeout( 100 )
+        before = _card_top( page, watched )
+        _trigger_promote( page, ids[ 0 ] )                 # the bottom card gets an update
+        after = _card_top( page, watched )
+        assert abs( after - before ) <= 1, f"the watched card moved from {before} to {after}"
+
+    def test_off_lets_the_view_shift_and_the_choice_survives_a_reload( self, notifications_page_with_strip ):
+        page = notifications_page_with_strip
+        ids  = _seed_tall_cards( page )
+        page.locator( "#cc-keep-place-toggle" ).click()
+        assert page.locator( "#cc-keep-place-toggle" ).get_attribute( "data-keep-place" ) == "false"
+        assert page.evaluate( f"() => localStorage.getItem( '{KEEP_PLACE_KEY}' )" ) == "false"
+        watched = ids[ len( ids ) // 2 ]
+        sanitized = watched.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+        page.evaluate(
+            "( sid ) => window.scrollTo( 0, document.getElementById( sid ).offsetTop - 120 )",
+            f"sender-card-{sanitized}"
+        )
+        page.wait_for_timeout( 100 )
+        before = _card_top( page, watched )
+        _trigger_promote( page, ids[ 0 ] )
+        after = _card_top( page, watched )
+        assert after - before >= 100, f"with Keep place off the card should have been pushed down, moved {after - before}"
+        page.reload()
+        page.wait_for_load_state( "networkidle" )
+        assert page.locator( "#cc-keep-place-toggle" ).get_attribute( "data-keep-place" ) == "false"
