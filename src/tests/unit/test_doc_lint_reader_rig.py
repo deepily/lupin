@@ -132,11 +132,60 @@ def test_a_closing_tag_in_the_text_or_an_answer_cannot_end_its_block():
     assert read.count( f"</text_{suffix}>" ) == 1 and suffix not in attack and tagged( read, "text" ) == attack
 
 
-def test_the_reader_version_is_derived_from_its_prompts_and_code():
+# Append-only: one row per reader key ever pinned, with the sha256 of READER_SYSTEM that key stood for.
+# A reader prompt edit changes the sha and fails the test below. Add a row and bump reader_rig.PROMPT_VERSION
+# together, knowing every ledger answer under the old key is then asked again.
+READER_PINS = { "reader-8e02a7acb1": "9c61ac81c726c7396ffaf0377ca6b00200a8594c54fdab1bc3451f5f11826516" }
+
+
+def test_the_reader_key_is_a_pinned_literal_and_names_the_prompt_it_was_pinned_for():
+    import hashlib
+    assert rt.PROMPT_VERSION == "reader-8e02a7acb1"
+    assert rt.PROMPT_VERSION in READER_PINS
+    assert hashlib.sha256( rt.READER_SYSTEM.encode( "utf-8" ) ).hexdigest() == READER_PINS[ rt.PROMPT_VERSION ], \
+        "READER_SYSTEM changed: bump reader_rig.PROMPT_VERSION and add a READER_PINS row, or revert the edit"
+
+
+def test_the_reader_key_does_not_move_when_the_grader_prompt_or_parser_changes( monkeypatch ):
     import inspect
     from cosa.repo.doc_lint import model_transport as mt
-    assert rt.PROMPT_VERSION == mt.prompt_version( "reader", inspect.getsource( rt ) )
-    assert mt.prompt_version( "reader", inspect.getsource( rt ).replace( "_FENCE = ", "# moved\n_FENCE = ", 1 ) ) != rt.PROMPT_VERSION
+    before = rt.PROMPT_VERSION
+    monkeypatch.setattr( rt, "GRADER_SYSTEM", rt.GRADER_SYSTEM + " Be brief." )
+    assert rt.PROMPT_VERSION == before == "reader-8e02a7acb1"
+    assert mt.prompt_version( "grader", rt.GRADER_SYSTEM ) != rt.GRADER_VERSION
+
+
+def test_the_grader_version_is_derived_from_the_grader_prompt_and_parser():
+    import inspect
+    from cosa.repo.doc_lint import model_transport as mt
+    assert rt.GRADER_VERSION == mt.prompt_version( "grader", rt.GRADER_SYSTEM, inspect.getsource( rt._parse_object ), inspect.getsource( rt.parse_score ) )
+    assert rt.GRADER_VERSION != rt.PROMPT_VERSION and rt.GRADER_VERSION.startswith( "grader-" )
+
+
+def test_only_the_grade_key_carries_the_grader_version( tmp_path ):
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    go( TEXT, TEXT, ledger=ledger, config=rt.ReaderConfig( "reader-m", "grader-m", runs=1 ) )
+    keys = list( ledger.entries )
+    reads, grades = [ k for k in keys if k.startswith( "read|" ) ], [ k for k in keys if k.startswith( "grade|" ) ]
+    assert reads and grades
+    assert all( rt.PROMPT_VERSION in k and rt.GRADER_VERSION not in k for k in reads )
+    assert all( rt.GRADER_VERSION in k and rt.PROMPT_VERSION not in k for k in grades )
+
+
+def test_a_new_grader_version_regrades_the_same_answers_without_asking_the_reader_again( monkeypatch, tmp_path ):
+    ledger = hn.Ledger( str( tmp_path / "l" ) )
+    cfg    = rt.ReaderConfig( "reader-m", "grader-m", runs=1 )
+    go( TEXT, TEXT, ledger=ledger, config=cfg )
+    monkeypatch.setattr( rt, "GRADER_VERSION", "grader-0000000000" )
+    _, models = go( TEXT, TEXT, ledger=ledger, config=cfg )
+    assert [ c for c in models.calls if c[ 1 ] == rt.READER_SYSTEM ] == []
+    assert len( [ c for c in models.calls if c[ 1 ] == rt.GRADER_SYSTEM ] ) == 3
+
+
+def test_the_grader_prompt_asks_for_the_score_object_alone_and_forbids_reasoning():
+    prompt = rt.GRADER_SYSTEM
+    assert "begin with" in prompt and "{" in prompt
+    assert "Do not explain" in prompt and "reasoning" in prompt
 
 
 def test_exact_tie_passes_when_float_means_differ( monkeypatch ):

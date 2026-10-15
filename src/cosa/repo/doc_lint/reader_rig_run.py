@@ -254,7 +254,9 @@ def projected_calls( texts, questions, config, ledger ):
     owed_pairs = 0
     for text in texts:
         for q in questions:
-            base = "|".join( [ harness_runner.text_hash( text ), harness_runner.text_hash( q[ "question" ] ), reader_rig.PROMPT_VERSION ] )
+            pair  = [ harness_runner.text_hash( text ), harness_runner.text_hash( q[ "question" ] ) ]
+            base  = "|".join( pair + [ reader_rig.PROMPT_VERSION ] )
+            gbase = "|".join( pair + [ reader_rig.GRADER_VERSION ] )
             for run in range( config.runs ):
                 rkey   = f"read|{base}|{config.reader_model}|{run}"
                 answer = ledger.get( rkey )
@@ -263,7 +265,7 @@ def projected_calls( texts, questions, config, ledger ):
                         reader_keys.add( rkey )
                         owed_pairs += 1
                     continue
-                grader_keys.add( f"grade|{base}|{harness_runner.text_hash( q[ 'key' ] + chr( 0 ) + answer )}|{config.grader_model}" )
+                grader_keys.add( f"grade|{gbase}|{harness_runner.text_hash( q[ 'key' ] + chr( 0 ) + answer )}|{config.grader_model}" )
     missing = { k for k in grader_keys if ledger.get( k ) is None }
     return { "reader": len( reader_keys ), "grader": owed_pairs + len( missing ) }
 
@@ -654,7 +656,7 @@ def main( argv, query_fn=None ):
     if args.strict_grader and from_ledger: print( f"strict figure not valid unless the ledger was strict throughout: {from_ledger} grades from the ledger" )
     if args.out is not None:
         report = { "old_rev": old_sha, "new_rev": new_sha, "questions_sha256": questions_sha, "reader_model": args.reader_model,
-                   "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION,
+                   "grader_model": args.grader_model, "runs": args.runs, "file_prefix": args.file_prefix, "paths_read": list( groups ), "prompt_version": reader_rig.PROMPT_VERSION, "grader_version": reader_rig.GRADER_VERSION,
                    "attempts": ATTEMPTS, "strict_grader": args.strict_grader, "salvage_scope": "calls made in this run only: a grade cached by an earlier run is not recounted", "files": { f: dict( per_file[ f ], questions=counts[ f ] ) for f in per_file }, "overall": overall, "grades_from_ledger": from_ledger, "calls_spent": spent }
         with open( args.out, "w", encoding="utf-8" ) as out: json.dump( report, out, indent=2 )
     if overall[ "dropped" ]:

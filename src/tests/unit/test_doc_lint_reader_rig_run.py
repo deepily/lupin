@@ -323,9 +323,12 @@ def test_projection_counts_a_missing_grade_for_a_finished_read( tmp_path ):
     item   = { "id": "q", "question": "Why?", "key": "because" }
     ledger = harness_runner.Ledger( str( tmp_path / "l.jsonl" ) )
     base   = "|".join( [ harness_runner.text_hash( text ), harness_runner.text_hash( "Why?" ), reader_rig.PROMPT_VERSION ] )
+    gbase  = "|".join( [ harness_runner.text_hash( text ), harness_runner.text_hash( "Why?" ), reader_rig.GRADER_VERSION ] )
     ledger.put( f"read|{base}|{READER}|0", "an answer" )
     assert rr.projected_calls( [ text ], [ item ], config, ledger ) == { "reader": 0, "grader": 1 }
     ledger.put( f"grade|{base}|{harness_runner.text_hash( 'because' + chr( 0 ) + 'an answer' )}|{GRADER}", 1 )
+    assert rr.projected_calls( [ text ], [ item ], config, ledger ) == { "reader": 0, "grader": 1 }      # a grade under the reader key is not a grade under the grader key
+    ledger.put( f"grade|{gbase}|{harness_runner.text_hash( 'because' + chr( 0 ) + 'an answer' )}|{GRADER}", 1 )
     assert rr.projected_calls( [ text ], [ item ], config, ledger ) == { "reader": 0, "grader": 0 }
 
 
@@ -448,6 +451,7 @@ def test_report_names_revisions_models_and_hashes( repo ):
     assert report[ "questions_sha256" ] == __import__( "hashlib" ).sha256( open( path, "rb" ).read() ).hexdigest()
     assert ( report[ "reader_model" ], report[ "grader_model" ], report[ "runs" ] ) == ( READER, GRADER, 2 )
     assert report[ "prompt_version" ] == reader_rig.PROMPT_VERSION and report[ "attempts" ] == 3
+    assert report[ "grader_version" ] == reader_rig.GRADER_VERSION != report[ "prompt_version" ]
     assert report[ "calls_spent" ] == { READER: 4, GRADER: 2 }
 
 
