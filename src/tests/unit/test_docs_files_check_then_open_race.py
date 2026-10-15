@@ -21,6 +21,7 @@ from fastapi import HTTPException, UploadFile
 
 import cosa.rest.routers.docs_files as docs_files
 from cosa.rest.routers._scope_registry import ScopeConfig
+from tests.helpers import fd_probe
 
 ADMIN = { "email": "rick@lupin", "roles": [ "admin" ] }
 USER  = { "email": "someone@lupin", "roles": [] }
@@ -251,10 +252,10 @@ def test_control_an_unswapped_folder_is_listed_through_a_pinned_descriptor( worl
     seen = []
     real = docs_files.list_directory
     monkeypatch.setattr( docs_files, "list_directory", lambda **kw: ( seen.append( kw[ "abs_dir" ] ), real( **kw ) )[ 1 ] )
-    before = len( os.listdir( "/proc/self/fd" ) )
+    before = fd_probe.fds_under( world[ "repo" ].parent )
     assert _names( _get( "repo/docs/dir" ) ) == [ "f.md" ]
     assert seen and seen[ 0 ].startswith( "/proc/self/fd/" ), "the listing must read the opened descriptor, not the string"
-    assert len( os.listdir( "/proc/self/fd" ) ) == before, "the folder descriptor is closed once the listing is built"
+    assert fd_probe.fds_under( world[ "repo" ].parent ) == before, "the folder descriptor is closed once the listing is built"
 
 
 @pytest.mark.parametrize( "landing", [ "outside", "private" ] )
@@ -307,7 +308,7 @@ def test_the_folder_descriptor_is_closed_when_the_listing_fails( world, monkeypa
     def boom( **kw ):
         raise RuntimeError( "listing failed" )
     monkeypatch.setattr( docs_files, "list_directory", boom )
-    before = len( os.listdir( "/proc/self/fd" ) )
+    before = fd_probe.fds_under( world[ "repo" ].parent )
     with pytest.raises( RuntimeError ):
         _get( "repo/docs/dir" )
-    assert len( os.listdir( "/proc/self/fd" ) ) == before
+    assert fd_probe.fds_under( world[ "repo" ].parent ) == before

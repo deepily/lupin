@@ -16,6 +16,7 @@ import pytest
 from fastapi import HTTPException
 
 import cosa.rest.routers.io_files as io_files
+from tests.helpers import fd_probe
 
 USER = { "email": "someone@lupin", "roles": [] }
 
@@ -65,8 +66,9 @@ def _dir_to_outside( world ):
     return swap
 
 
-def _open_fds():
-    return len( os.listdir( "/proc/self/fd" ) )
+def _open_fds( world ):
+    """Count the descriptors open under this test's own folder."""
+    return fd_probe.fds_under( world[ "root" ].parent )
 
 
 # ── controls: no swap ───────────────────────────────────────────────────────
@@ -76,21 +78,21 @@ def test_control_an_unswapped_text_read_is_served( world ):
 
 
 def test_control_an_unswapped_binary_read_streams_the_pinned_file_and_closes_it( world ):
-    before   = _open_fds()
+    before   = _open_fds( world )
     response = _get( "dir/p.png" )
     assert response.path.startswith( "/proc/self/fd/" ) and response.background is not None
-    assert _open_fds() == before + 1, "the descriptor stays open until the response has been sent"
+    assert _open_fds( world ) == before + 1, "the descriptor stays open until the response has been sent"
     asyncio.run( response.background() )
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
 
 
 def test_control_an_unswapped_download_attaches_with_the_real_filename_and_closes_it( world ):
-    before   = _open_fds()
+    before   = _open_fds( world )
     response = _get( "dir/f.md", download=True )
     assert response.path.startswith( "/proc/self/fd/" )
     assert response.headers[ "content-disposition" ].startswith( "attachment" ) and "f.md" in response.headers[ "content-disposition" ]
     asyncio.run( response.background() )
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
 
 
 # ── the swap: each arm is refused on the opened file ───────────────────────
@@ -135,11 +137,11 @@ def test_a_swap_after_the_open_cannot_redirect_the_text_read( world, monkeypatch
 
 
 def test_the_descriptor_is_closed_on_every_refusal( world, monkeypatch ):
-    before = _open_fds()
+    before = _open_fds( world )
     _swap_after_resolve( monkeypatch, "dir/f.md", _dir_to_outside( world ) )
     with pytest.raises( HTTPException ):
         _get( "dir/f.md" )
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
 
 
 # ── the door's own answers, byte for byte ───────────────────────────────────
@@ -169,23 +171,23 @@ def test_the_string_checks_still_answer_with_the_same_words( world ):
 
 
 def test_a_serving_failure_closes_the_descriptor_and_answers_500( world, monkeypatch ):
-    before = _open_fds()
+    before = _open_fds( world )
     def boom( *args, **kwargs ): raise RuntimeError( "boom" )
     for download, name in ( ( True, "f.md" ), ( False, "p.png" ) ):
         monkeypatch.setattr( io_files, "FileResponse", boom )
         with pytest.raises( HTTPException ) as exc:
             _get( f"dir/{name}", download=download )
         assert exc.value.status_code == 500 and "boom" in exc.value.detail
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
 
 
 def test_a_text_read_failure_closes_the_descriptor_and_answers_500( world, monkeypatch ):
-    before = _open_fds()
+    before = _open_fds( world )
     ( world[ "io" ] / "dir" / "bad.md" ).write_bytes( b"\xff\xfe\xfa not utf-8" )
     with pytest.raises( HTTPException ) as exc:
         _get( "dir/bad.md" )
     assert exc.value.status_code == 500 and exc.value.detail.startswith( "Error reading file" )
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
 
 
 # ── the folder listing (row 147ce846): the listing is of the folder that was opened ──────
@@ -199,10 +201,10 @@ def test_control_an_unswapped_folder_is_listed_through_a_pinned_descriptor( worl
     seen = []
     real = io_files.list_directory
     monkeypatch.setattr( io_files, "list_directory", lambda **kw: ( seen.append( kw[ "abs_dir" ] ), real( **kw ) )[ 1 ] )
-    before = _open_fds()
+    before = _open_fds( world )
     assert _names( _get( "dir" ) ) == [ "f.md", "p.png" ]
     assert seen and seen[ 0 ].startswith( "/proc/self/fd/" ), "the listing must read the opened descriptor, not the string"
-    assert _open_fds() == before, "the folder descriptor is closed once the listing is built"
+    assert _open_fds( world ) == before, "the folder descriptor is closed once the listing is built"
 
 
 def test_a_folder_swapped_after_the_check_is_refused_not_listed( world, monkeypatch ):
@@ -245,7 +247,37 @@ def test_the_folder_descriptor_is_closed_when_the_listing_fails( world, monkeypa
     def boom( **kw ):
         raise RuntimeError( "listing failed" )
     monkeypatch.setattr( io_files, "list_directory", boom )
-    before = _open_fds()
+    before = _open_fds( world )
     with pytest.raises( RuntimeError ):
         _get( "dir" )
-    assert _open_fds() == before
+    assert _open_fds( world ) == before
+
+
+# ── row cde008ce: the descriptor check must ignore descriptors that are not this test's ─────
+
+def test_a_descriptor_closed_by_someone_else_mid_test_does_not_move_the_count( world, monkeypatch ):
+    """
+    Another descriptor in the process closes while the control case runs.
+
+    A whole-process count moves, and the test's own count does not. This is the full-tier failure
+    `assert 40 == 42` without the load.
+    """
+    unrelated = os.open( os.devnull, os.O_RDONLY )
+    real      = io_files.open_pinned
+    closed    = []
+
+    def open_then_lose_an_unrelated_descriptor( full_path, judge, directory=False ):
+        fd = real( full_path, judge, directory )
+        os.close( unrelated )
+        closed.append( unrelated )
+        return fd
+
+    monkeypatch.setattr( io_files, "open_pinned", open_then_lose_an_unrelated_descriptor )
+    total_before = len( os.listdir( "/proc/self/fd" ) )
+    before       = _open_fds( world )
+    response     = _get( "dir/p.png" )
+    assert closed, "the unrelated descriptor was never closed: this test would pass for the wrong reason"
+    assert len( os.listdir( "/proc/self/fd" ) ) == total_before, "a whole-process count would read the door's descriptor as missing"
+    assert _open_fds( world ) == before + 1, "the door's own descriptor is counted, and only that"
+    asyncio.run( response.background() )
+    assert _open_fds( world ) == before

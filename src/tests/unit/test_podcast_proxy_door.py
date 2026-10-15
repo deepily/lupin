@@ -12,6 +12,7 @@ import pytest
 
 from cosa.rest import podcast_proxy as pp
 from cosa.rest.routers._scope_registry import ScopeConfig
+from tests.helpers import fd_probe
 
 # Built at run time: the commit scanner refuses a key header written out in a staged line.
 PEM = "-----" + "BEGIN PRIVATE KEY" + "-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n" + "-----" + "END PRIVATE KEY" + "-----\n"
@@ -56,10 +57,10 @@ def test_the_hash_follows_the_content_and_not_the_name( scope ):
 def test_the_opened_handle_is_closed_on_success_and_on_refusal( scope ):
     _put( scope, "io/tmp/ok.md" )
     _put( scope, "io/tmp/key.md", PEM )
-    before = len( os.listdir( "/proc/self/fd" ) )
+    before = fd_probe.fds_under( scope[ "root" ].parent )
     _door( scope, "demo/io/tmp/ok.md" )
     with pytest.raises( pp.DoorRefusal ): _door( scope, "demo/io/tmp/key.md" )
-    assert len( os.listdir( "/proc/self/fd" ) ) == before
+    assert fd_probe.fds_under( scope[ "root" ].parent ) == before
 
 
 @pytest.mark.parametrize( "sent", [ None, "", "   ", 7, [ "demo/io/tmp/a.md" ] ] )
@@ -279,7 +280,7 @@ def test_an_os_error_while_reading_the_opened_file_is_a_refusal_not_a_crash( sco
     monkeypatch.setattr( pp.os, "read", broken )
     with pytest.raises( pp.DoorRefusal ) as refusal: _door( scope, "demo/io/tmp/bad.md" )
     assert refusal.value.code == "not_found" and "demo/io/tmp/bad.md" in str( refusal.value ) and "OSError" in str( refusal.value )
-    assert len( os.listdir( "/proc/self/fd" ) ) < 200
+    assert fd_probe.fds_under( scope[ "root" ].parent ) == 0
 
 
 def test_the_kind_is_judged_on_the_file_the_handle_opened_not_the_file_the_path_resolved_to( scope, monkeypatch ):
