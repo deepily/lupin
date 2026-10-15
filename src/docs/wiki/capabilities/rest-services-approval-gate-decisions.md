@@ -21,8 +21,8 @@ The pure functions behind the holding-area gate, and the one validated way to ch
 - `refusal_for_admission` returns a refusal detail or `None`. It is `None` when enforcement is off, when the move is not approver-only, or when the authenticated account maps to a current approver. A manager may close a held row, and may un-park with an operator-approved card.
 - A declared actor string never grants approver rights there. It is only named in the refusal.
 - `refusal_for_batch( actor, account_persona, recent_admissions )` refuses a second admission inside the window unless the caller is ask-exempt; the first always passes.
-- `refusal_for_live_mint` refuses a create that names a live status while the holding default is on. The operator, an explicit holding status, and a deployment with the default off pass.
-- `refusal_for_pull` guards the edge into `in_progress` while the pull switch is on. An approver by account, or an owner claiming their own row with a reason, passes.
+- `refusal_for_live_mint` refuses a create that names a live status while the holding default is on. It passes when `status` was not named or the holding default is off. It also passes for the holding status itself, for priority P0 and for the operator.
+- `refusal_for_pull` guards the edge into `in_progress` while the pull switch is on. Other transitions, an `in_progress` re-patch and a switched-off toggle return `None`, and an approver by validated account passes.
 - `actor_is_claiming_their_own_row( actor, owner, manager )` is true only when the actor is the owner and the manager is someone else.
 - `set_overrides( updated_by, **settings )` validates every key before writing any, preserves other keys and returns the live values read back. `set_manager_pull_disabled( disabled, updated_by )` takes a real bool.
 

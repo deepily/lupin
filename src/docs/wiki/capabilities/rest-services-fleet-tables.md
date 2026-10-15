@@ -27,7 +27,7 @@ The models in `cosa.rest.postgres_models` behind notifications, the decision pro
 - `ServerLifecycle` is one row, key `singleton`. The heartbeat stamps `last_available_at`; startup reads it to catch up scheduled jobs inside the downtime.
 - `ApprovalSetting` is one row per writable approval-policy key, with who wrote it and when.
 - `PodcastProxySpentCard` marks a podcast proxy card as having started its one job. The primary key makes two simultaneous starts impossible.
-- `TaskItem` is one row per obligation; status defaults to `queued`, and a `CHECK` requires `next_chase_ts` when status is `blocked`. `TaskEvent` is its append-only audit trail, written in the same transaction as each change.
+- `TaskItem` is one row per obligation; status defaults to `queued`, and a `CHECK` requires `next_chase_ts` when status is `blocked` and `blocked_by` names a persona. `TaskEvent` is its append-only audit trail, written in the same transaction as each change.
 - `TaskPromotionTicket` records one promotion out of the holding area and how it resolved: `pending`, `approved`, `refused`, `superseded` or `stalled`.
 
 ## Don't

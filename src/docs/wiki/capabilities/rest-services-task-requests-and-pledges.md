@@ -28,7 +28,7 @@ A manager files a request to admit a held row or demote a live one, and the oper
 - `badge_for_move` maps demote to the task-area badge and admit to the holding-area badge, and raises for any other move. `badge_counts( requests )` counts pending requests per badge and always returns both keys.
 - `pledge_is_dead( pledge_status )` is true when the pledged row is gone or terminal. `pledge_changed_hands( owner, pledged_by )` is true when the owner differs, or when no pledger was recorded.
 - `request_is_stranded_by_its_pledge` is true for a pending admit whose pledge is dead or changed hands, so the manager may re-file it.
-- `refusal_for_consuming_pledge` answers `( 409, detail )` for a dead or reassigned pledge, so approval never admits unpaid.
+- `refusal_for_consuming_pledge` answers `( 409, detail )` for a dead or reassigned pledge, so an admit that carries a pledge is never approved unpaid. An admit with no pledge returns `None` and is approved.
 
 ## Don't
 - Don't add a clock to the lifecycle functions. Silence never grants and never denies.

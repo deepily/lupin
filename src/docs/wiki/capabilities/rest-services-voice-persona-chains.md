@@ -21,7 +21,7 @@ The helpers that turn environment settings into a persona choice for a new sessi
 - `display_name_for( pool_name )` turns a pool key into its display form: `"mr radio"` becomes `"Mr. Radio"`, `"maria"` becomes `"María"`, an empty value gives `""`.
 - `load_overflow_persona_from_config` reads the persona handed out when the pool is full (default `sam`). It returns `None` when it has no voice id or the name is set blank.
 - `parse_persona_chain( raw )` splits a comma-separated string or list into ordered elements, drops case-insensitive duplicates, and keeps `*` as "then anything free". A JSON list string is read as a list.
-- `parse_declared_managers( raw )` does the same for a manager roster, dropping `*`.
+- `parse_declared_managers( raw )` parses a manager roster and drops `*`. It de-duplicates by canonical persona key, so `Mr. Radio` and `mr radio` count once, and it does not read a JSON list string.
 - `pick_persona_chain_from_env( project )` returns the raw `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` value, or `None`. `pick_declared_managers_from_env` reads `COSA_VOICE_MANAGERS__<PROJECT>` into a name list. The project is upper-cased with hyphens turned into underscores.
 - `resolve_session_start_persona_chain( project, environ )` picks the chain a SessionStart sends. `COSA_VOICE_PERSONA_CHAIN` wins. Next, a headless child (`COSA_VOICE_HEADLESS` is `"1"`) gets `None`. Next comes the per-repo variable. With none set the result is `None` and the server allocates at random.
 - `allocate_persona_for_session( config_mgr, stable_session_id, declared_managers )` reads the pool, scans occupied personas, and picks or borrows one. Declared managers are never picked at random. It returns `None` for an empty pool.
@@ -32,4 +32,4 @@ The helpers that turn environment settings into a persona choice for a new sessi
 - Don't let a spawned worker inherit the per-repo manager default; the headless rule exists for that.
 
 ## Invariants
-- None of these functions raises on a malformed value.
+- The two parse functions return `[]` for `None`, blank or non-string input.

@@ -21,7 +21,7 @@ Read-only scanners for the task store, each paired with a disclosure of what it 
 ## What it does
 - `strip_amendment_stamps( body )` removes amendment header stamps and returns `( text, count )`, so a shrinking result can be told from a working filter.
 - `extract_prose_refs( body )` returns `canonical` (full UUIDs, lowercased, de-duplicated), `abbreviated` (8-hex tokens) and `stamps_excluded`.
-- `classify_prose_refs( body, blocked_by, status_by_id )` reports a finding for a citation of a terminal id with no matching `blocked_by` edge. An abbreviated token is never resolved and never a finding.
+- `classify_prose_refs( body, blocked_by, status_by_id )` reports a finding for a citation with no matching `blocked_by` edge. The id must be terminal, or looked up and not found. An abbreviated token is never resolved and never a finding.
 - `candidate_ref_ids( rows )` returns only canonical ids, for one batch status lookup. `aggregate_counts` sums per-row classifications.
 - `scope_disclosure` in `task_store_prose_refs` states the bodies scanned and both blind spots. It is emitted for a clean scan too.
 - `task_store_rejoin.dormancy_days( closed_at, now )` counts whole days a row sat stranded, truncated toward zero, 0 for a future close, `None` if unparseable.

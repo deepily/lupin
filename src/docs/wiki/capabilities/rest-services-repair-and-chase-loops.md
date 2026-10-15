@@ -21,11 +21,11 @@ pins:
 The circuit breakers and background watchers that keep automatic repair and blocked rows from running away. The expediters they dispatch are in [[fix-expediter-tfe]] and [[fix-expediter-bfe]].
 
 ## What it does
-- `RepairAttempt` is one repair try; `RepairChain` holds every try for one failed job. `can_attempt` refuses when attempts, cumulative cost or wall-clock time reach the chain's limit, and returns `( allowed, reason )`.
-- `RepairAttemptTracker` keeps chains in memory, thread-safe. `get_or_create_chain`, `can_attempt`, `record_attempt`, `update_attempt`, `check_semantic_dedup` and `get_chain_summary` all take the original job id.
+- `RepairAttempt.to_dict` leaves out the gist embedding. `RepairChain` exposes `attempt_count`, `cumulative_cost` and `elapsed_seconds` as properties. `can_attempt` refuses when attempts, cumulative cost or wall-clock time reach the chain's limit, and returns `( allowed, reason )`.
+- `RepairAttemptTracker` keeps chains in memory. `get_or_create_chain` and `get_chain_summary` take a lock; the other methods do not. `get_or_create_chain`, `can_attempt`, `record_attempt`, `update_attempt`, `check_semantic_dedup` and `get_chain_summary` all take the original job id.
 - `cosine_similarity` returns 0.0 for an empty or all-zero vector. `is_semantically_duplicate` compares a new fix gist embedding to prior attempts that have one and returns `( is_duplicate, max_similarity, matching_attempt )`.
 - `init_tracker( config_mgr )` builds the process singleton; `get_tracker` returns it, or `None` before init.
-- `TestSuiteCompletionWatchdog.evaluate( completed_job )` dispatches a TestFixExpediter job for a finished `test_suite` job whose remediation snapshot lists failures, and returns its job id, or `None`. It skips a rerun the expediter itself triggered, a count over the failure cap, and a chain the repair tracker refuses. It never raises.
+- `TestSuiteCompletionWatchdog.evaluate( completed_job )` dispatches a TestFixExpediter job for a finished `test_suite` job whose remediation snapshot lists failures, and returns its job id, or `None`. It skips a rerun the expediter itself triggered and a count over the failure cap. Its repair-tracker check applies only when a tracker is passed, and `init_watchdogs` passes none. It never raises.
 - `init_watchdog`, `get_watchdog` and `reset_watchdog` manage that singleton; `reset_watchdog` is for tests.
 - `init_watchdogs` builds the dead-queue and test-suite watchdogs together, one failing without stopping the other, and returns `( bfe_watchdog, tfe_watchdog )`.
 - `TaskChaseConsumer` is a daemon that chases overdue blocked task rows. `sweep_once` signals and re-arms each one in one transaction. `stall_report` lists them read-only.
@@ -35,4 +35,4 @@ The circuit breakers and background watchers that keep automatic repair and bloc
 - Don't rely on `RepairChain.to_dict` for the wall-clock limit; it leaves it out.
 
 ## Invariants
-- A disabled chase consumer does no database access and `start` returns `False`.
+- On a disabled chase consumer, `sweep_once` does no database access and `start` returns `False`. `stall_report` is never gated and still queries.

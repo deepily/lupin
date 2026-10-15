@@ -21,7 +21,7 @@ The SQLAlchemy models in `cosa.rest.postgres_models` for the `lupin_auth` databa
 - `ApiKey` (`api_keys`) holds a bcrypt hash at cost 12, not a SHA-256 digest. The `String(64)` column width says nothing about the algorithm.
 - `EmailVerificationToken` and `PasswordResetToken` each hold a unique token string, `expires_at` and a `used` flag defaulting to `False`.
 - `FailedLoginAttempt` records email and IP with a BIGSERIAL id and no foreign key, so attempts against accounts that do not exist are tracked too.
-- `AuthAuditLog` records one row per authentication event with `event_type`; `user_id` is optional and `success` defaults to `True`.
+- `AuthAuditLog` requires an `event_type`. Its `user_id` is optional so events for users who are not logged in can be kept, and `success` defaults to `True`.
 - `FcmToken` is one row per mobile device token for the silent wake channel. The token is the upsert key, `user_id` is indexed, and the wake registry rehydrates from this table after a restart.
 
 ## Don't
@@ -30,4 +30,4 @@ The SQLAlchemy models in `cosa.rest.postgres_models` for the `lupin_auth` databa
 - Don't add a foreign key to `FailedLoginAttempt`; it would drop the attempts that matter most.
 
 ## Invariants
-- `created_at` defaults to the current timestamp on every table here; `FcmToken` timestamps are timezone-aware UTC.
+- `FcmToken` timestamps are timezone-aware UTC. `AuthAuditLog` stamps `event_time` and `FailedLoginAttempt` stamps `attempt_time`; neither has a `created_at`.

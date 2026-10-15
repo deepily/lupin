@@ -15,7 +15,7 @@ pins:
 ---
 # Task store write validators
 
-Pure checks on what a create, an edit or a closed-row correction may carry. They return a list of error strings, empty when clean; the router turns a non-empty list into a 422. Overview: [[task-store]].
+Pure checks on what a create, an edit or a closed-row correction may carry. The `validate_*` functions return a list of error strings, empty when clean; the router turns a non-empty list into a 422. Overview: [[task-store]].
 
 ## What it does
 - `validate_create( item_class, gate_class, priority, authority, urgency )` checks that each of the five values is in its enum and returns one error per bad field.
@@ -31,4 +31,4 @@ Pure checks on what a create, an edit or a closed-row correction may carry. They
 - Don't send a priority change with a correction prefix on a closed row. The whole patch is refused.
 
 ## Invariants
-- Every validator reports all violations, not only the first.
+- `validate_create` returns one error per bad field.

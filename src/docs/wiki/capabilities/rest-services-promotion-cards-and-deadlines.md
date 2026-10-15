@@ -35,4 +35,4 @@ The text and arguments of the owner's yes/no card, the un-park card check, and t
 - Don't re-derive a deadline from today's config; the sweeper uses the value stored on the row.
 
 ## Invariants
-- `answer_by` is never later than `resolves_by`.
+- `deadlines_for` reads the ask timeout once, so both stamps come from one value.

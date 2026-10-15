@@ -21,7 +21,7 @@ pins:
 How the task store decides who is an approver and which switches are on. The gate that uses them is [[task-promotion-gate]]; the store is [[task-store]].
 
 ## What it does
-- Each setting has two layers: a stored override in the `approval_settings` table, then the INI key. `current_settings()` returns `{ key: { value, source } }` where `source` is `override` or `config`, read through the live readers.
+- Most settings have two layers: a stored override in the `approval_settings` table, then the INI key. The admission window reads the INI key only. `current_settings()` returns `{ key: { value, source } }` where `source` is `override` or `config`, read through the live readers.
 - `get_approvers()` returns canonical persona keys and always includes `UNCONDITIONAL_APPROVERS`, so a bad list cannot lock the fleet out. A non-list override is ignored.
 - `get_approver_accounts()` maps lowercased login email to a persona from the override or the INI `email = persona` pairs. A malformed pair is skipped.
 - `approver_persona_for_account( email )` returns that persona only while it is still an approver, else `None`.
@@ -36,4 +36,4 @@ How the task store decides who is an approver and which switches are on. The gat
 - Don't read a setting once at import. The default mint status and the flags are read on each call.
 
 ## Invariants
-- `recorded_actor` never exceeds 255 characters and never drops the identity half.
+- With an account, `recorded_actor` puts the identity first and cuts the declared half to fit 255 characters. If the identity alone cannot fit, it returns the declared actor unchanged.

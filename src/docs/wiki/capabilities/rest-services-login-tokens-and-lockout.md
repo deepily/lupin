@@ -22,11 +22,11 @@ The functions that store failed logins and refresh tokens. The login route and t
 - `record_failed_login( email, ip_address )` writes one `failed_login_attempts` row. It catches every error and returns nothing.
 - `get_failed_attempts_count( email, minutes=15 )` counts attempts in the window and returns 0 on error.
 - `clear_failed_attempts( email )` deletes every attempt for the email, after a successful login.
-- `cleanup_old_attempts( hours )` deletes attempts older than the cutoff and returns the count.
+- `cleanup_old_attempts( hours )` converts hours to whole days, at least 1, and deletes attempts older than that many days. It returns the number deleted, or 0 on error.
 - `store_refresh_token( user_id, token, jti, user_agent, ip_address )` stores the SHA-256 hash of the token and its expiry, never the token. It returns `( success, message )`.
 - `validate_refresh_token( token )` checks signature, expiry and the revoked flag, updates `last_used_at`, and returns `( success, message, token_data )` with `jti`, `user_id` and `created_at`.
 - `revoke_refresh_token( jti )` sets `revoked`; revoking twice is fine. `revoke_all_user_tokens( user_id )` forces a new login.
-- `cleanup_expired_tokens` deletes rows past `expires_at` and returns `( success, message, deleted_count )`; run it periodically.
+- `cleanup_expired_tokens` deletes rows past `expires_at` and every revoked row, and returns `( success, message, deleted_count )`; run it periodically.
 - `get_auth_db_connection` opens the SQLite auth database with `sqlite3.Row` and foreign keys on. `init_auth_database` creates its users and token tables and is safe to call again.
 
 ## Don't

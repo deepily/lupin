@@ -21,7 +21,7 @@ Which task rows count as owed, and which waits can never end. Each rule has a Py
 ## What it does
 - A parked row is park-active while its `next_chase_ts` is in the future. Expiry is computed at read time and never written back. `park_is_active_clause( model, now )` is the SQL twin and treats a NULL chase as not active.
 - `holding_is_active` and `holding_is_active_clause` do the same for a `not_approved` row. On expiry such a row becomes visible but is not poked, since nobody approved it.
-- `owed_clause( model, now )` is true for every row that is not park-active. `owed_status_row( status, next_chase_ts, now )` is the dict-level form of the owed-only set: queued, in_progress, and parked rows whose park has expired.
+- `owed_clause( model, now )` is true for every row that is not park-active. `owed_status_row( status, next_chase_ts, now )` is the dict-level form of the owed-only set: queued, in_progress, and parked rows whose park has expired. Its SQL form is `owed_status_clause`, not `owed_clause`.
 - `is_owed` is the general rule (non-terminal and not park-active). No reader uses it as its owed definition yet, because it would also count blocked, claimed and review rows.
 - `park_reason_is_stale` and its clause are true when the body changed after the park reason was captured. They compare `body_changed_ts`, not `updated_ts`, and a NULL on either side reads as not stale.
 - `item_blocker_ids( blocked_by )` returns the `{kind: item}` ids, skipping malformed entries. Persona and user refs are left out because nothing can say they are gone.
@@ -29,8 +29,8 @@ Which task rows count as owed, and which waits can never end. Each rule has a Py
 - `blocker_is_terminal( status, blocked_by, status_by_id )` flags a row waiting on a blocker that can never move again. It is advisory and changes no status.
 
 ## Don't
-- Don't pass a default clock. Every predicate takes `now` from the caller.
-- Don't treat a missing id as a deleted blocker unless it is a full UUID; a short prefix may simply not resolve.
+- Don't default the clock. The predicates that compare times take `now` from the caller.
+- Don't expect an id missing from `status_by_id` to be flagged. An id is flagged only when it resolved to a terminal status, or was looked up, not found, and is a full UUID.
 
 ## Invariants
-- The Python and SQL forms of a rule must agree. A NULL chase lands on the owed side in both.
+- Each predicate and its SQL twin must agree. A NULL chase lands on the owed side in both.

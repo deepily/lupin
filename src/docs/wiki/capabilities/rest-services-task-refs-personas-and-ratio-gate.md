@@ -24,9 +24,9 @@ Pure helpers in `task_store_rules` for naming a row, naming its owner, and limit
 - `persona_from_created_by( created_by )` strips a trailing 6 or more hex session id from `"<persona> <sid>"` and canonicalizes the rest. `session_id_from_created_by` returns that tail or `None`.
 - `build_persona_advisory( owner, manager, known_keys )` returns `( advisory, marker )` for off-roster persona fields, or `( None, None )`. It never rejects.
 - `epic_key_advisory( correlation_key )` is `None` for an `epic:` or `cc-task:` key and otherwise names `epic:unassigned` as a legal answer.
-- `ratio_gate_advisory( created, closed, priority, correlation_key, allow_below )` returns a refusal string or `None`. `ratio_gate_reading` is the log line for a permit, with `n/a` when nothing is closed.
+- `ratio_gate_advisory( created, closed, priority, correlation_key, allow_below )` returns a refusal string or `None`. A P0 priority and a `cc-task:` key return `None` before any arithmetic. `ratio_gate_reading` is the log line for a permit, with `n/a` when nothing is closed.
 - `ratio_gate_headroom` counts how many more ordinary creates the gate admits, and `ratio_gate_close_needed` how many closures it needs. Both ask the gate rather than repeating its rule.
-- `ratio_loop_headroom` is one less than the gate headroom by ruling.
+- `ratio_loop_headroom` is the gate headroom minus one, and `None` when the gate headroom is 0 or `None`.
 
 ## Don't
 - Don't pass `allow_below=None` from new code; the router passes the live threshold so gate and endpoint agree.
