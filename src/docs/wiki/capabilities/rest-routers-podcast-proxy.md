@@ -18,7 +18,7 @@ The `/api/podcast-proxy` routes. A seat asks, the operator answers yes on a card
 
 ## What it does
 - `ask_for_a_podcast` is `POST /api/podcast-proxy/ask`. It takes `AskIn` (`path`, `actor`), judges the file, writes the yes/no card itself and returns `card_id` with `name`, `size`, `sha256`, `asked_by`, `expires_at` and `pushed`. A live card for the same file and bytes answers 409 `waiting_card`.
-- `ask_for_a_podcast` and `start_a_podcast` need an `actor` that ends in the caller's session id, or they answer 400 `bad_actor`.
+- `ask_for_a_podcast` and `start_a_podcast` need an `actor` shaped like `<persona> <hex tail>` (a tail of 6 or more lowercase hex characters), or they answer 400 `bad_actor`. Ask does not compare the tail to the caller's session. Start answers 403 `wrong_session` when the card was asked by another session.
 - `start_a_podcast` is `POST /api/podcast-proxy/start`. It takes `StartIn` (`card_id`, `actor`), re-reads the card and the file, spends the card once, and queues the job.
 - `podcast_card_status` is `GET /api/podcast-proxy/card/{card_id}`. It describes a card: `state`, `spent` and `job_id`. A card this feature did not write answers 404 `no_card`.
 - `ViewerIn` carries a `path`. `check_a_viewer_file` is `GET /api/podcast-proxy/from-viewer/check?path=<scope>/<path>`. It says whether the viewer may offer a podcast, and returns `{ ok, name, size }`.
