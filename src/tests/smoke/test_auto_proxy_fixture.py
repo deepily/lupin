@@ -62,6 +62,7 @@ def test_fixture_started_proxy( request ):
     Requires:
         - `--auto-proxy` is set (else SKIP)
         - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD env vars set
+        - LUPIN_TEST_ADMIN_EMAIL/_PASSWORD env vars set (the debug route is admin-only)
         - Lupin server reachable at LUPIN_API_URL (default http://localhost:7999)
 
     Ensures:
@@ -73,7 +74,8 @@ def test_fixture_started_proxy( request ):
         pytest.skip( "--auto-proxy not set; fixture is a no-op" )
 
     base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-    resp     = requests.get( f"{base_url}/api/debug/websocket-state", timeout=5 )
+    headers  = embedded_proxy_module.admin_auth_headers( base_url )
+    resp     = requests.get( f"{base_url}/api/debug/websocket-state", headers=headers, timeout=5 )
     assert resp.status_code == 200, f"websocket-state returned {resp.status_code}: {resp.text[ :200 ]}"
 
     state           = resp.json()

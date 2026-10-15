@@ -21,7 +21,7 @@ from cosa.rest.routers._retired_doors import gone, tombstone_description
 # Import dependencies
 from cosa.rest.auth import get_current_user
 from cosa.rest.queue_auth import authorize_queue_filter
-from cosa.rest.auth_middleware import is_admin
+from cosa.rest.auth_middleware import is_admin, require_admin
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.rest.job_state import JobState
 from cosa.rest.job_persistence import persist_job_cancelled, CANCELLABLE_QUEUES
@@ -522,7 +522,7 @@ async def get_queue(
     description = "Clear all five queues (todo, run, done, dead, notification) and return items-cleared summary."
 )
 async def reset_queues(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends( require_admin ),
     todo_queue = Depends(get_todo_queue),
     running_queue = Depends(get_running_queue),
     done_queue = Depends(get_done_queue),
@@ -533,7 +533,7 @@ async def reset_queues(
     Reset all queues by clearing their contents.
     
     Requires:
-        - User must be authenticated with valid token
+        - User must be authenticated with valid token and hold the admin role
         - All queue instances must be available
         
     Ensures:
