@@ -16,7 +16,7 @@ pins:
 Measures documentation tokens and marker rates per package at a revision, before and after a change. The dashboard built on it is in [[doc-lint-metrics-dashboard]]; the marker counts come from [[doc-lint-marker-counts]].
 
 ## Measuring
-- `package_files` lists the in-scope `.py` and `.dart` files under a package at a revision, from git. With no revision it lists the tracked files still on disk.
+- `package_files` lists the in-scope `.py` and `.dart` files under a package at a revision, from git. With no revision it lists the tracked files still on disk plus untracked files git does not ignore.
 - `doc_texts` returns the docstrings of a Python file or the doc blocks of a Dart file. A Python file that does not parse returns `None`, so the caller can count it.
 - `package_metrics` and `files_metrics` return files, unparsed paths, tokens, summed marker counts and rates per thousand tokens.
 
