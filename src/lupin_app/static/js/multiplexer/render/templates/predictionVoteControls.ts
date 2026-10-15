@@ -32,9 +32,10 @@ export interface PredictionVoteHandlers {
  * render options (senderCard → dateAccordion → notificationItem). The template
  * stays pure: it reads `getVote` for the `.selected` highlight and forwards
  * clicks to `onVote`. Absent in the storeless component-isolation parity harness
- * — there the controls still RENDER (presence is pure-data, driven by
- * `notification.prediction_hint`), and clicks are inert (no orchestrator), so
- * the harness stays store-free.
+ * — there the action-required card (`predictionHintBox`) does NOT mount the
+ * controls at all, because a button with no orchestrator behind it is a dead
+ * control. The notification-item path always passes a handler to
+ * `renderPredictionVoteControls`, so this applies to the card path only.
  */
 export interface PredictionVoteIntegration {
   /** Authoritative cast vote for the notification id (for the `.selected` highlight on (re)render). */

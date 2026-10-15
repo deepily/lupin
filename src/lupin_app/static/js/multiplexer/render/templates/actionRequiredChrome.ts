@@ -116,7 +116,7 @@ export function abstractBlock( abstract: string | undefined ): HTMLElement | nul
 /**
  * Build the prediction hint box of a card. It is always returned.
  *
- * A missing hint gives a ghost box that reads "Learning, no prediction yet". Otherwise the box shows the predicted value, the strategy when there is one, and the vote controls when the confidence passes the vote gate. Without `vote` the controls still render and a click does nothing.
+ * A missing hint gives a ghost box that reads "Learning, no prediction yet". Otherwise the box shows the predicted value and the strategy when there is one. It adds the vote controls when `vote` is given and the confidence passes the gate. Without `vote` the controls are not mounted. A control with no handler would be a painted button that does nothing.
  */
 export function predictionHintBox(
   item : { id_hash: string; response_type: string; prediction_hint?: PredictionHint | null },
@@ -145,14 +145,15 @@ export function predictionHintBox(
     strategy.textContent = hint.strategy;
     root.appendChild( strategy );
   }
-  const cast = vote?.getVote( item.id_hash );
+  if ( vote === undefined ) return root;
+  const cast = vote.getVote( item.id_hash );
   const controls = renderPredictionVoteControls(
     {
       notificationId : item.id_hash,
       confidencePct  : Math.round( hint.confidence * 100 ),
       ...( cast === undefined ? {} : { castVote: cast } ),
     },
-    { onVote: ( dir ) => vote?.onVote( item.id_hash, dir ) },
+    { onVote: ( dir ) => vote.onVote( item.id_hash, dir ) },
   );
   if ( controls !== null ) root.appendChild( controls );
   return root;
