@@ -74,13 +74,13 @@ REFUSAL_EXIT      = 3
 WARN_ONLY_PATHS    = ()
 WARN_ONLY_PREFIXES = ( "history/", "todo-history/" )
 # The root record files. They block, judged on added lines, under rule set B of the same ruling ("I'll go with your
-# recommended set B"): the rules in RECORD_RULES_OFF and RECORD_DATE_RULES, and a bare-ref of the row-id-or-sha kind,
-# do not apply to them, since a record is where dates, rows and commits are cited. Every other rule blocks.
+# recommended set B"): the rules in RECORD_DATE_RULES, and a bare-ref of the row-id-or-sha kind, do not apply to them,
+# since a record is where dates, rows and commits are cited. Every other rule blocks, caps and sentence-length included.
 RECORD_PATHS       = ( "history.md", "TODO.md", "bug-fix-queue.md" )
 RECORD_DATE_RULES  = frozenset( { "iso-date", "dated-banner" } )
-# Rick ruled these two off for now, and said they come back once the writing rules are fixed (row 8188ff76).
-# To turn them back on, make this frozenset() and nothing else changes.
-RECORD_RULES_OFF   = frozenset( { "caps", "sentence-length" } )
+# Rules switched off for the record files. Empty since row 8188ff76: caps and sentence-length were off until the fleet
+# was on the new writing rules, and block again now. Add a rule name here to drop it for the record files alone.
+RECORD_RULES_OFF   = frozenset()
 WARN_ONLY_MARK     = " (warn mode, commit allowed)"
 PREDATES_MARK      = " (warn mode, commit allowed: this condition predates the commit)"
 MERGED_MARK        = " (warn mode, commit allowed: this line came in with the merged or picked commit)"

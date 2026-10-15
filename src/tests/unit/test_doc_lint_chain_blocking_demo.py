@@ -250,12 +250,21 @@ def test_the_same_finding_in_a_look_alike_of_a_record_location_stops_a_real_comm
 
 
 @pytest.mark.parametrize( "rel", ROOT_RECORDS )
-def test_a_root_record_file_entry_with_a_date_a_row_id_and_a_shouted_word_is_committed_by_rule_set_b( scratch, rel ):
-    _stage( scratch, { "docs/p.md": CLEAN, rel: "# Log\n\nMeasured 2026-10-14 at 0123abc4, row 8dbe659a, this is NOT fine.\n" } )
+def test_a_root_record_file_entry_with_a_date_and_a_row_id_is_committed_by_rule_set_b( scratch, rel ):
+    _stage( scratch, { "docs/p.md": CLEAN, rel: "# Log\n\nMeasured 2026-10-14 at 0123abc4, row 8dbe659a.\n" } )
     res = _commit( scratch )
     assert res.returncode == 0
     assert f"{rel}:" not in res.stderr and "REFUSED" not in res.stderr
     assert _commit_count( scratch ) == 1 and _committed_paths( scratch ) == sorted( [ "docs/p.md", rel ] )
+
+
+@pytest.mark.parametrize( "rel", ROOT_RECORDS )
+def test_a_root_record_file_entry_with_a_shouted_word_stops_a_real_commit( scratch, rel ):
+    _stage( scratch, { rel: "# Log\n\nMeasured 2026-10-14 at 0123abc4, row 8dbe659a, this is NOT fine.\n" } )
+    res = _commit( scratch )
+    assert res.returncode == 1
+    assert f"[doc-lint] REFUSED {rel}:3: {CAPS}" in res.stderr.split( "\n" )
+    assert _commit_count( scratch ) == 0
 
 
 @pytest.mark.parametrize( "rel", ROOT_RECORDS )

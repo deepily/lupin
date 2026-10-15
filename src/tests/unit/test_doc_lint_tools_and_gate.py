@@ -500,9 +500,9 @@ def test_a_non_conforming_entry_added_to_a_root_record_file_is_refused( repo, mo
 
 
 @pytest.mark.parametrize( "rel", ROOT_RECORDS )
-def test_an_added_date_sha_row_id_or_shouted_word_in_a_root_record_file_does_not_refuse( repo, monkeypatch, rel ):
+def test_an_added_date_sha_or_row_id_in_a_root_record_file_does_not_refuse( repo, monkeypatch, rel ):
     _no_external( monkeypatch )
-    _stage( repo, { rel: DATED + SHOUTED } )
+    _stage( repo, { rel: DATED } )
     rc, lines = _blocking( repo )
     assert rc == 0, lines
     assert not [ ln for ln in lines if f"{rel}:" in ln ]
@@ -521,18 +521,24 @@ def test_a_section_or_label_bare_ref_in_a_record_file_still_blocks_while_a_row_i
     labelled = Finding( "history.md", 1, "bare-ref", "bare reference 'AC3'" )
     row_id   = Finding( "history.md", 1, "bare-ref", "bare reference '8dbe659a'" )
     assert not gate.is_record_exempt( labelled ) and gate.is_record_exempt( row_id )
-    for rule in ( "iso-date", "dated-banner", "caps", "sentence-length" ): assert gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
-    for rule in ( "tic", "glyph", "dead-link", "agent-imperative", "dead-design" ): assert not gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    for rule in ( "iso-date", "dated-banner" ): assert gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
+    for rule in ( "tic", "glyph", "dead-link", "agent-imperative", "dead-design", "caps", "sentence-length" ): assert not gate.is_record_exempt( Finding( "TODO.md", 1, rule, "m" ) )
     assert not gate.is_record_exempt( Finding( "docs/history.md", 1, "iso-date", "m" ) )
 
 
-def test_the_caps_and_sentence_length_switch_is_one_named_constant_that_turns_them_back_on( repo, monkeypatch ):
+def test_the_caps_and_sentence_length_rules_are_on_for_the_root_record_files( repo, monkeypatch ):
     _no_external( monkeypatch )
-    assert gate.RECORD_RULES_OFF == frozenset( { "caps", "sentence-length" } )
-    monkeypatch.setattr( gate, "RECORD_RULES_OFF", frozenset() )
-    _stage( repo, { "history.md": SEEDED } )
+    assert gate.RECORD_RULES_OFF == frozenset()
+    for rule in ( "caps", "sentence-length" ): assert not gate.is_record_exempt( Finding( "history.md", 1, rule, "m" ) )
+    _stage( repo, { "history.md": SHOUTED } )
     rc, lines = _blocking( repo )
-    assert rc == gate.REFUSAL_EXIT and f"[doc-lint] REFUSED history.md:1: {CAPS}" in lines
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED history.md:1: caps:" ) ], lines
+    _stage( repo, { "history.md": "word " * 30 + "end.\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT and [ ln for ln in lines if ln.startswith( "[doc-lint] REFUSED history.md:1: sentence-length:" ) ], lines
+    _stage( repo, { "history.md": DATED } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ], lines
 
 
 @pytest.mark.parametrize( "rel", RECORDS )
