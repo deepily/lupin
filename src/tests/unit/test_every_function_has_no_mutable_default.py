@@ -135,6 +135,38 @@ def mutable_defaults( source, path="<source>", lookup=None ):
     return found
 
 
+def scan_tree( root, files ):
+    """
+    Find the mutable defaults in files, following a name imported from another file.
+
+    Requires:
+        - files are repo-relative paths under src, and root holds them
+
+    Ensures:
+        - returns the same tuples as mutable_defaults, across every file
+        - a name imported by `from pkg.mod import X` is mutable when mod binds X to a container, directly or by a re-export
+    """
+    modules = { p[ len( "src/" ):-3 ].replace( "/", "." ): p for p in files }
+    parsed  = { }
+    found   = [ ]
+    def names_of( path ):
+        if path not in parsed:
+            with warnings.catch_warnings():
+                warnings.simplefilter( "ignore" )
+                with open( os.path.join( root, path ), encoding="utf-8" ) as handle: parsed[ path ] = module_names( ast.parse( handle.read() ) )
+        return parsed[ path ]
+    def lookup( module, name, depth ):
+        path = modules.get( module )
+        if path is None or depth > 4: return False
+        assigned, imported = names_of( path )
+        if name in assigned: return is_container( assigned[ name ] )
+        return name in imported and lookup( *imported[ name ].rpartition( "." )[ ::2 ], depth + 1 )
+    for path in files:
+        with open( os.path.join( root, path ), encoding="utf-8" ) as handle:
+            found += mutable_defaults( handle.read(), path, lookup )
+    return found
+
+
 class TestScan:
     """The scanner finds what it should, so a clean tree means something."""
 
@@ -161,6 +193,21 @@ class TestScan:
                  "def f( t=TABLE ): pass\ndef g( l=LIST ): pass\ndef h( a=ALIAS ): pass\ndef k( s=SAFE, n=NUM ): pass\n"
         assert sorted( f[ 2 ] for f in mutable_defaults( source ) ) == [ "f", "g", "h" ]
 
+    def test_a_name_built_by_dict_or_annotated_is_found( self ):
+        source = "T: dict = { }\nD = dict( a=1 )\nN: int = 3\ndef f( t=T ): pass\ndef g( d=D ): pass\ndef h( n=N ): pass\n"
+        assert sorted( f[ 2 ] for f in mutable_defaults( source ) ) == [ "f", "g" ]
+
+    def test_a_default_imported_across_files_is_found_directly_and_through_a_re_export( self, tmp_path ):
+        files = { "src/pkg/a.py": "TABLE = { }\nSAFE = ( 1, )\n",
+                  "src/pkg/b.py": "from pkg.a import TABLE as REEXPORTED\n",
+                  "src/pkg/c.py": "from pkg.a import TABLE, SAFE\ndef direct( t=TABLE, s=SAFE ): pass\n",
+                  "src/pkg/d.py": "from pkg.b import REEXPORTED\ndef hopped( r=REEXPORTED ): pass\n" }
+        for rel, text in files.items():
+            ( tmp_path / rel ).parent.mkdir( parents=True, exist_ok=True )
+            ( tmp_path / rel ).write_text( text, encoding="utf-8" )
+        found = scan_tree( str( tmp_path ), sorted( files ) )
+        assert sorted( ( f[ 0 ], f[ 2 ], f[ 3 ] ) for f in found ) == [ ( "src/pkg/c.py", "direct", "t" ), ( "src/pkg/d.py", "hopped", "r" ) ]
+
     def test_a_name_imported_from_another_module_is_followed( self ):
         found = mutable_defaults( "from pkg.mod import TABLE, SAFE\ndef f( t=TABLE, s=SAFE ): pass\n", lookup=lambda module, name, depth: name == "TABLE" )
         assert [ f[ 3 ] for f in found ] == [ "t" ]
@@ -170,6 +217,14 @@ class TestScan:
         assert [ f[ 3 ] for f in mutable_defaults( "from mylib import Depends\ndef f( d=Depends( x ) ): pass\n" ) ] == [ "d" ]
         assert mutable_defaults( "import datetime as _d\ndef f( n=_d.datetime( 2026, 1, 1 ) ): pass\n" ) == []
         assert [ f[ 3 ] for f in mutable_defaults( "from other import datetime\ndef f( n=datetime( 1 ) ): pass\n" ) ] == [ "n" ]
+
+    def test_an_import_cycle_ends_and_reports_nothing( self, tmp_path ):
+        files = { "src/pkg/a.py": "from pkg.b import X\n", "src/pkg/b.py": "from pkg.a import X\n",
+                  "src/pkg/c.py": "from pkg.a import X\ndef f( x=X ): pass\n" }
+        for rel, text in files.items():
+            ( tmp_path / rel ).parent.mkdir( parents=True, exist_ok=True )
+            ( tmp_path / rel ).write_text( text, encoding="utf-8" )
+        assert scan_tree( str( tmp_path ), sorted( files ) ) == [ ]
 
     def test_immutable_defaults_are_not_reported( self ):
         assert mutable_defaults( "from fastapi import Depends, Query\ndef fine( n=None, s='x', t=(), u=frozenset(), k=1, d=Depends( f ), q=Query( 1 ) ): pass\n" ) == []
@@ -188,23 +243,6 @@ class TestTree:
         assert not any( bit in p for p in files for bit in EXCLUDED )
 
     def test_no_function_has_a_mutable_default( self ):
-        root, found = _root(), []
-        files   = tracked_sources( root )
-        modules = { p[ len( "src/" ):-3 ].replace( "/", "." ): p for p in files }
-        parsed  = { }
-        def names_of( path ):
-            if path not in parsed:
-                with warnings.catch_warnings():
-                    warnings.simplefilter( "ignore" )
-                    with open( os.path.join( root, path ), encoding="utf-8" ) as handle: parsed[ path ] = module_names( ast.parse( handle.read() ) )
-            return parsed[ path ]
-        def lookup( module, name, depth ):
-            path = modules.get( module )
-            if path is None or depth > 4: return False
-            assigned, imported = names_of( path )
-            if name in assigned: return is_container( assigned[ name ] )
-            return name in imported and lookup( *imported[ name ].rpartition( "." )[ ::2 ], depth + 1 )
-        for path in files:
-            with open( os.path.join( root, path ), encoding="utf-8" ) as handle:
-                found += mutable_defaults( handle.read(), path, lookup )
+        root  = _root()
+        found = scan_tree( root, tracked_sources( root ) )
         assert found == [], "mutable defaults:\n" + "\n".join( f"  {p}:{n} {fn}( {a}={d} )" for p, n, fn, a, d in found )
