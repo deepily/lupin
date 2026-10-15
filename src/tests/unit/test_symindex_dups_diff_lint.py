@@ -178,7 +178,8 @@ def test_every_seeded_wiki_finding_fires( tmp_path, monkeypatch ):
     assert ( "stale", "stale-page", "repo:pkg.util.Widget" ) in kinds
     assert ( "unindexed", "stale-page", None ) in kinds
     assert ( "dangling", "dangling-page", "repo:pkg.util.gone_fn" ) in kinds
-    assert ( "orphan", None, "repo:pkg.util.Widget.render" ) in kinds                               # package "repo:pkg"... has a page, symbol uncovered
+    assert ( "orphan", None, "repo:pkg.util.Widget.render" ) not in kinds                           # its class is pinned, so the method is covered
+    assert ( "orphan", None, "repo:pkg.util.Widget.__init__" ) not in kinds                         # an __init__ is never an orphan
     assert not any( k[ 0 ] in ( "stale", "unindexed", "dangling" ) and k[ 1 ] == "good-page" for k in kinds )
 
 
@@ -188,7 +189,7 @@ def test_orphans_are_counted_per_package_until_the_package_has_a_page( tmp_path,
     out  = queue( tmp_path / "no-wiki-at-all", gen )                                               # empty wiki: no crash
     assert out and all( f[ "kind" ] == "orphan_package" for f in out )
     assert { f[ "package" ] for f in out } == { "pkg.util", "pkg.router", "web.app", "web.lib" }
-    assert sum( f[ "count" ] for f in out ) == len( bd.read_symbols( gen ) )
+    assert sum( f[ "count" ] for f in out ) == len( bd.read_symbols( gen ) ) - 1                   # less Widget.__init__, which is exempt
 
 
 def test_pin_algorithm_change_is_decided_once_before_any_page_and_suppresses_stale( tmp_path, monkeypatch ):
@@ -275,3 +276,65 @@ def test_cli_uses_the_cwd_git_toplevel_by_default( tmp_path, monkeypatch, capsys
     monkeypatch.setattr( cli, "spec_for", lambda root: ( _ for _ in () ).throw( StopIteration( str( root ) ) ) )
     with pytest.raises( StopIteration ) as e: cli.main( [ "fresh" ] )
     assert pathlib.Path( str( e.value ) ) == REPO_ROOT
+
+
+UTIL_TAIL = '''
+
+class Gadget:
+    """Not pinned by any page."""
+
+    def __init__( self ):
+        self.on = True
+
+    def run( self ):
+        return 1
+
+
+class Outer:
+    """Pinned by a page."""
+
+    class Inner:
+        def go( self ):
+            return 1
+
+    def work( self ):
+        return 2
+
+
+def quick_smoke_test():
+    return 1
+'''
+
+
+def _orphans_with_tail( tmp_path, monkeypatch, pins ):
+    monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )
+    root = make_repo( tmp_path / "t" )
+    util = root / "pkg" / "util.py"
+    util.write_text( util.read_text( encoding="utf-8" ) + UTIL_TAIL, encoding="utf-8" )
+    gen  = bd.build( root, tmp_path / "out-t" )[ "gen_dir" ]
+    live = _live( gen )
+    wiki = tmp_path / "wiki-t"; wiki.mkdir()
+    ( wiki / "INDEX.md" ).write_text( "# Index\n- [[tail-page]]\n", encoding="utf-8" )
+    _page( wiki, "tail-page", [ ( sid, live[ sid ] ) for sid in pins ], algo=_algo( gen ) )
+    return { f[ "symbol" ] for f in queue( wiki, gen ) if f[ "kind" ] == "orphan" }, live
+
+
+def test_an_init_and_a_smoke_test_are_never_orphans( tmp_path, monkeypatch ):
+    found, live = _orphans_with_tail( tmp_path, monkeypatch, [ "repo:pkg.util.public_fn" ] )
+    assert "repo:pkg.util.Gadget.__init__" in live and "repo:pkg.util.quick_smoke_test" in live    # the index holds both
+    assert "repo:pkg.util.Gadget.__init__" not in found and "repo:pkg.util.quick_smoke_test" not in found
+    assert "repo:pkg.util.Widget.__init__" not in found
+
+
+def test_a_method_of_an_unpinned_class_stays_an_orphan( tmp_path, monkeypatch ):
+    found, _ = _orphans_with_tail( tmp_path, monkeypatch, [ "repo:pkg.util.public_fn" ] )
+    assert "repo:pkg.util.Gadget.run" in found and "repo:pkg.util.Gadget" in found
+    assert "repo:pkg.util.Outer.work" in found                                                    # no page pins Outer yet
+
+
+def test_a_method_of_a_pinned_class_is_covered_but_a_nested_class_is_not( tmp_path, monkeypatch ):
+    found, live = _orphans_with_tail( tmp_path, monkeypatch, [ "repo:pkg.util.Outer" ] )
+    assert "repo:pkg.util.Outer.work" not in found                                                # its class is pinned
+    assert "repo:pkg.util.Outer.Inner" in live and "repo:pkg.util.Outer.Inner" in found           # a class is not a method: it needs its own pin
+    assert "repo:pkg.util.Outer.Inner.go" in found                                                # and its method waits on that class
+    assert "repo:pkg.util.Gadget.run" in found                                                    # another class is still unpinned

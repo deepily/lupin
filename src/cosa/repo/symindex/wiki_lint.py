@@ -5,7 +5,8 @@ Findings (one dict each):
   - stale: a page pins symbol@hash and the code changed since
   - dangling: a page pins a symbol that no longer exists
   - unindexed: a capability page missing from `INDEX.md`, so it can never be selected
-  - orphan: a public symbol in a package that has a page, which no page covers
+  - orphan: a public symbol in a package that has a page, which no page covers. Two kinds are never orphans: an
+    `__init__` or `quick_smoke_test`, and a method whose class is pinned by a page.
   - orphan_package: a package with no capability page. One finding with a count, not one per symbol.
   - pin_algorithm_changed: a pinned page records a different pin algorithm than the index. Reported once.
   - pin_algorithm_missing: a pinned page records no pin algorithm at all. Reported once.
@@ -17,6 +18,7 @@ import re
 
 from cosa.repo.symindex.build import read_header, read_symbols
 
+EXEMPT_NAMES = ( "__init__", "quick_smoke_test" )
 PIN_RE      = re.compile( r"([\w.\-:#$]+)@([0-9a-f]{10})" )
 FRONT_RE    = re.compile( r"\A---\n(.*?)\n---", re.S )
 ALGO_RE     = re.compile( r"^pin_algorithm:\s*(\S+)\s*$", re.M )
@@ -58,9 +60,13 @@ def queue( wiki_dir, gen ):
         - an empty or missing wiki returns only orphan_package findings
         - the pin-algorithm check runs once, before any page is judged, so page order cannot change the result
         - duplicate ids in the index cannot hide a finding: the builder makes ids unique
+        - a symbol named in EXEMPT_NAMES is neither an orphan nor counted in an orphan_package
+        - a method is covered, so not an orphan, when the class that holds it is pinned by any page
     """
     wiki  = pathlib.Path( wiki_dir )
-    live  = { r[ "id" ]: r[ "pin" ] for r in read_symbols( gen ) }
+    rows  = read_symbols( gen )
+    live  = { r[ "id" ]: r[ "pin" ] for r in rows }
+    kinds = { r[ "id" ]: r[ "kind" ] for r in rows }
     algo  = read_header( gen )[ "pin_algorithm" ]
     toc   = wiki / "INDEX.md"
     index = set( LINK_RE.findall( toc.read_text( encoding="utf-8" ) ) ) if toc.exists() else set()
@@ -86,6 +92,9 @@ def queue( wiki_dir, gen ):
                 out.append( { "kind": "stale", "page": page.stem, "symbol": sid, "was": h, "now": live[ sid ] } )
     counts = {}
     for sid in sorted( set( live ) - covered ):
+        owner, _, name = sid.rpartition( "." )
+        if name in EXEMPT_NAMES: continue
+        if kinds[ sid ] == "method" and owner in covered: continue
         pkg = _package( sid )
         if pkg in pages_by_pkg: out.append( { "kind": "orphan", "symbol": sid, "package": pkg } )
         else: counts[ pkg ] = counts.get( pkg, 0 ) + 1
