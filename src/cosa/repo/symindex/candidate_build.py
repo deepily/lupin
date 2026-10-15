@@ -34,20 +34,24 @@ class BoundedJobWriter:
     response file, which this writer reads. The job is covered by the Max plan.
     """
 
-    def __init__( self, work_dir, submit, timeout=JOB_TIMEOUT, poll=POLL_SECONDS, sleep=time.sleep, clock=time.monotonic ):
+    def __init__( self, work_dir, submit, to_container=None, index_path=None, timeout=JOB_TIMEOUT, poll=POLL_SECONDS, sleep=time.sleep, clock=time.monotonic ):
         """
         Hold the hand-off folder and the transport.
 
         Requires:
-            - work_dir is the purpose-lines folder, which the job can write
+            - work_dir is a folder the job can read and write, under the checkout the container mounts
             - submit is a callable taking the /api/v2/submit payload
+            - to_container turns a host path into the path the job sees, or is None for the same path
+            - index_path is the container path of the index's symbols file, or None to name none
         """
-        self.work_dir = pathlib.Path( work_dir )
-        self.submit   = submit
-        self.timeout  = timeout
-        self.poll     = poll
-        self.sleep    = sleep
-        self.clock    = clock
+        self.work_dir     = pathlib.Path( work_dir )
+        self.submit       = submit
+        self.to_container = to_container if to_container is not None else str
+        self.index_path   = index_path
+        self.timeout      = timeout
+        self.poll         = poll
+        self.sleep        = sleep
+        self.clock        = clock
 
     def __call__( self, ids ):
         """
@@ -57,7 +61,7 @@ class BoundedJobWriter:
             - ids is a non-empty list of entry ids
 
         Ensures:
-            - the job is sent the ids and two file names, never source text
+            - the job is sent the ids and file names as the container sees them, never source text
             - returns { id: purpose } for the ids the job answered
 
         Raises:
@@ -70,7 +74,9 @@ class BoundedJobWriter:
         self.work_dir.mkdir( parents=True, exist_ok=True )
         if response.exists(): response.unlink()
         request.write_text( json.dumps( { "ids": ids } ), encoding="utf-8" )
-        prompt = f"{pl.PROMPT_TEXT} The ids are in {request}. Write the JSON list to {response}, then reply with the word done."
+        where  = f" Each id is the id field of one line of {self.index_path}, which names its file and line." if self.index_path else ""
+        prompt = ( f"{pl.PROMPT_TEXT} The ids are in {self.to_container( request )}.{where} "
+                   f"Write the JSON list to {self.to_container( response )}, then reply with the word done." )
         self.submit( { "command": harness_schedule.COMMAND, "args": { "prompt": prompt, "task_type": "BOUNDED" } } )
         deadline = self.clock() + self.timeout
         while not response.is_file():
@@ -82,7 +88,7 @@ class BoundedJobWriter:
         return { a[ "id" ]: a[ "purpose" ] for a in answers }
 
 
-def run( root, writer, client, screen=None, config=None, environ=None ):
+def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE ):
     """
     Write the missing purpose lines and rebuild the vector set.
 
@@ -105,7 +111,7 @@ def run( root, writer, client, screen=None, config=None, environ=None ):
     cache     = sp.candidate_dir( "query_cache", data, config, environ )
     entries   = sx_build.read_symbols( sx_build.ensure( root ) )
     report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION,
-                                        screen if screen is not None else pl.default_screen() )
+                                        screen if screen is not None else pl.default_screen(), batch_size=batch_size )
     new_dir   = live.with_name( live.name + ".new" )
     if new_dir.exists(): shutil.rmtree( new_dir )
     manifest  = vb.build_vectors( entries, pl.load_lines( purpose / "purpose.jsonl" ), client, new_dir )
@@ -113,6 +119,28 @@ def run( root, writer, client, screen=None, config=None, environ=None ):
     cleared   = vs.clear_stale_queries( cache, manifest[ "manifest_hash" ] )
     return { "purposes": report, "manifest_hash": manifest[ "manifest_hash" ], "rows": manifest[ "rows" ],
              "stale_queries_cleared": cleared, "seconds": round( time.monotonic() - started, 1 ) }
+
+
+def sample_purposes( root, writer, store_path, count, batch_size=pl.BATCH_SIZE, screen=None ):
+    """
+    Write purpose lines for an evenly spaced sample of the index into a separate store.
+
+    Requires:
+        - root is a lupin repository root
+        - count is a positive integer
+        - store_path is a purpose.jsonl path that is not the live store
+
+    Ensures:
+        - the entries are the public symbols sorted by id, taking every k-th, so two runs pick the same ones
+        - returns the write report with the sampled ids added as "ids"
+    """
+    entries = sorted( sx_build.read_symbols( sx_build.ensure( pathlib.Path( root ) ) ), key=lambda e: e[ "id" ] )
+    step    = max( 1, len( entries ) // count )
+    chosen  = entries[ ::step ][ :count ]
+    report  = pl.write_purpose_lines( chosen, writer, store_path, WRITER_VERSION,
+                                      screen if screen is not None else pl.default_screen(), batch_size=batch_size )
+    report[ "ids" ] = [ e[ "id" ] for e in chosen ]
+    return report
 
 
 def main( argv=None, environ=None, writer_factory=None, client=None ):
@@ -132,16 +160,23 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
     parser  = argparse.ArgumentParser( description="Write purpose lines and rebuild the candidate vector set." )
     parser.add_argument( "--root", required=True )
     parser.add_argument( "--base-url", default=environ.get( "LUPIN_APP_SERVER_URL", "http://localhost:7999" ) )
+    parser.add_argument( "--batch-size", type=int, default=pl.BATCH_SIZE )
+    parser.add_argument( "--sample", type=int, default=0, help="write lines for this many entries into --store and build nothing" )
+    parser.add_argument( "--store", default=None, help="the purpose.jsonl path for --sample" )
     args    = parser.parse_args( argv )
     try:
         if writer_factory is None:
             email, password = environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ], environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]
             submit  = lambda payload: harness_schedule.submit( payload, args.base_url, email, password )
-            work    = sp.candidate_dir( "purpose", data_dir( args.root ), environ=environ )
-            writer  = BoundedJobWriter( work, submit )
+            to_c    = lambda path: sp.container_path( path, args.root, environ=environ )
+            index   = to_c( sp.main_checkout( args.root ) / "src" / "docs" / "index" / "current" / "symbols.jsonl" )
+            writer  = BoundedJobWriter( sp.handoff_dir( args.root, environ=environ ), submit, to_container=to_c, index_path=index )
         else:
             writer = writer_factory( args )
-        report = run( args.root, writer, client if client is not None else vb.EndpointClient(), environ=environ )
+        if args.sample:
+            report = sample_purposes( args.root, writer, args.store, args.sample, batch_size=args.batch_size )
+        else:
+            report = run( args.root, writer, client if client is not None else vb.EndpointClient(), environ=environ, batch_size=args.batch_size )
     except CandidateError as e:
         print( json.dumps( { "error": e.code, "detail": e.detail } ) )
         return 2

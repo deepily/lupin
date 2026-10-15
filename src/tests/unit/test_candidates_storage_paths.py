@@ -31,7 +31,9 @@ FULL = {
     "reuse candidate vectors subdir"       : "vec",
     "reuse candidate query cache subdir"   : "qc",
     "reuse candidate purpose lines subdir" : "pl",
-    "reuse candidate search interpreter"   : ""
+    "reuse candidate search interpreter"   : "",
+    "reuse candidate purpose handoff subdir" : "io/handoff",
+    "reuse candidate container root"       : "/var/lupin"
 }
 
 
@@ -148,10 +150,11 @@ def real_config( monkeypatch ):
     return ConfigurationManager( env_var_name=sp.CONFIG_ENV_VAR, _reset_singleton=True )
 
 
-def test_the_registered_command_arguments_read_all_five_keys( real_config ):
+def test_the_registered_command_arguments_read_all_seven_keys( real_config ):
     values = { name: real_config.get( ini_key, silent=True ) for name, ( ini_key, _ ) in sp.KEYS.items() }
     assert values == { "data_subdir": "reuse-review", "vectors": "vectors", "query_cache": "query-cache",
-                       "purpose": "purpose-lines", "interpreter": "" }
+                       "purpose": "purpose-lines", "interpreter": "", "handoff": "io/reuse-candidate-purpose",
+                       "container_root": "/var/lupin" }
 
 
 def test_every_key_is_in_both_ini_files():
@@ -206,3 +209,53 @@ def test_default_out_dir_of_another_repo_is_under_the_data_directory( monkeypatc
     monkeypatch.setattr( paths, "is_lupin_tree", lambda root: False )
     monkeypatch.setattr( paths, "data_dir", lambda root: tmp_path / "data" )
     assert paths.default_out_dir( tmp_path / "lupin-mobile" ) == tmp_path / "data" / "index" / "lupin-mobile"
+
+
+# ── the hand-off folder and the container's view of the checkout ────────────
+
+
+@pytest.fixture
+def main_tree( monkeypatch, tmp_path ):
+    """A main checkout at tmp_path / "main", whatever root is asked about."""
+    main = tmp_path / "main"
+    monkeypatch.setattr( sp, "main_checkout", lambda root: main )
+    return main
+
+
+def test_handoff_dir_is_relative_to_the_main_checkout( main_tree ):
+    assert sp.handoff_dir( "/any/worktree", FakeConfig( FULL ), {} ) == main_tree / "io" / "handoff"
+
+
+def test_handoff_dir_override_is_an_absolute_path_that_wins( main_tree ):
+    d = sp.handoff_dir( "/r", FakeConfig( FULL ), { "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": "/elsewhere/h" } )
+    assert d == pathlib.Path( "/elsewhere/h" )
+
+
+def test_handoff_dir_refuses_a_relative_override( main_tree ):
+    with pytest.raises( CandidateError ) as e:
+        sp.handoff_dir( "/r", FakeConfig( FULL ), { "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": "rel/h" } )
+    assert e.value.code == STORAGE_KEY_MISSING
+
+
+def test_container_path_swaps_the_checkout_for_the_container_root( main_tree ):
+    p = sp.container_path( main_tree / "io" / "handoff" / "request-1.json", "/r", FakeConfig( FULL ), {} )
+    assert p == "/var/lupin/io/handoff/request-1.json"
+
+
+def test_container_root_override_beats_the_ini( main_tree ):
+    p = sp.container_path( main_tree / "a.json", "/r", FakeConfig( FULL ), { "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/app" } )
+    assert p == "/app/a.json"
+
+
+def test_a_path_outside_the_main_checkout_is_not_in_the_container( main_tree, tmp_path ):
+    with pytest.raises( CandidateError ) as e:
+        sp.container_path( tmp_path / "elsewhere" / "x.json", "/r", FakeConfig( FULL ), {} )
+    assert e.value.code == sp.HANDOFF_NOT_IN_CONTAINER
+
+
+def test_main_checkout_of_a_worktree_is_its_parent_checkout():
+    # the seat tree under test is itself a worktree or the main tree: either way the answer holds a .git
+    root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    main = sp.main_checkout( root )
+    assert ( main / ".git" ).exists()
+    assert main == sp.main_checkout( main )

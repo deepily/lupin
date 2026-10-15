@@ -176,8 +176,8 @@ def test_a_run_whose_build_fails_leaves_the_live_set_alone( world, tmp_path ):
 def test_main_prints_the_report_and_returns_zero( capsys ):
     seen = {}
 
-    def fake_run( root, writer, client, environ=None ):
-        seen.update( root=root, writer=writer, client=client )
+    def fake_run( root, writer, client, environ=None, batch_size=25 ):
+        seen.update( root=root, writer=writer, client=client, batch_size=batch_size )
         return { "rows": 3 }
 
     import cosa.repo.symindex.candidate_build as mod
@@ -188,7 +188,7 @@ def test_main_prints_the_report_and_returns_zero( capsys ):
         mod.run = orig
     assert rc == 0
     assert json.loads( capsys.readouterr().out ) == { "rows": 3 }
-    assert seen == { "root": "/repo", "writer": "WRITER", "client": "CLIENT" }
+    assert seen == { "root": "/repo", "writer": "WRITER", "client": "CLIENT", "batch_size": 25 }
 
 
 def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, tmp_path, capsys ):
@@ -197,26 +197,33 @@ def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, 
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
     seen = {}
 
-    def fake_run( root, writer, client, environ=None ):
+    def fake_run( root, writer, client, environ=None, batch_size=25 ):
         seen[ "writer" ] = writer
         writer.submit( { "x": 1 } )
         return { "rows": 0 }
 
     monkeypatch.setattr( cb, "run", fake_run )
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path / "main" )
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e@x", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "pw",
-            "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": str( tmp_path / "pl" ) }
+            "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "main" / "io" / "h" ),
+            "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
     assert cb.main( [ "--root", "/repo" ], environ=env, client="C" ) == 0
-    assert isinstance( seen[ "writer" ], cb.BoundedJobWriter )
-    assert seen[ "writer" ].work_dir == tmp_path / "pl"
+    w = seen[ "writer" ]
+    assert isinstance( w, cb.BoundedJobWriter )
+    assert w.work_dir == tmp_path / "main" / "io" / "h"
+    assert w.index_path == "/var/lupin/src/docs/index/current/symbols.jsonl"
+    assert w.to_container( tmp_path / "main" / "io" / "h" / "r.json" ) == "/var/lupin/io/h/r.json"
     assert submitted == [ ( { "x": 1 }, "http://localhost:7999", "e@x", "pw" ) ]
 
 
 def test_main_uses_the_server_url_variable_and_the_endpoint_client_by_default( monkeypatch, tmp_path ):
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path )
     seen = {}
-    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None: seen.update( client=client ) or { "rows": 0 } )
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25: seen.update( client=client ) or { "rows": 0 } )
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path )
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
-            "LUPIN_APP_SERVER_URL": "http://test:8000", "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR": str( tmp_path / "pl" ) }
+            "LUPIN_APP_SERVER_URL": "http://test:8000", "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "io" ),
+            "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
     assert cb.main( [ "--root", "/repo" ], environ=env ) == 0
     assert isinstance( seen[ "client" ], cb.vb.EndpointClient )
 
@@ -226,3 +233,54 @@ def test_main_reports_a_named_error_and_returns_two( capsys ):
 
     assert cb.main( [ "--root", "/repo" ], environ={}, writer_factory=factory, client="C" ) == 2
     assert json.loads( capsys.readouterr().out ) == { "error": "STORAGE_KEY_MISSING", "detail": "no key" }
+
+
+# ── container paths in the prompt, and the sample mode ──────────────────────
+
+
+def test_the_prompt_names_the_container_paths_and_the_index( tmp_path ):
+    sent = []
+    key  = None
+
+    def submit( payload ):
+        sent.append( payload )
+        import hashlib
+        k = hashlib.sha256( b"m.a" ).hexdigest()[ :12 ]
+        pathlib_write( tmp_path / "work" / f"response-{k}.json", [ { "id": "m.a", "purpose": "Return a." } ] )
+
+    to_c = lambda p: str( p ).replace( str( tmp_path ), "/var/lupin" )
+    w = cb.BoundedJobWriter( tmp_path / "work", submit, to_container=to_c, index_path="/var/lupin/src/docs/index/current/symbols.jsonl" )
+    assert w( [ "m.a" ] ) == { "m.a": "Return a." }
+    prompt = sent[ 0 ][ "args" ][ "prompt" ]
+    assert "/var/lupin/work/request-" in prompt and "/var/lupin/work/response-" in prompt
+    assert str( tmp_path ) not in prompt
+    assert "/var/lupin/src/docs/index/current/symbols.jsonl" in prompt
+
+
+def test_sample_purposes_takes_every_kth_entry_into_its_own_store( world, tmp_path, screen_for_sample=None ):
+    symbols = world[ "symbols" ]
+    for i in range( 6 ): symbols.append( { **tvb.entry( f"z{i}", f"pz{i}" ), "lang": "py", "kind": "function", "line": 1, "public": True } )
+    calls = []
+    report = cb.sample_purposes( world[ "root" ], answering_writer( calls ), tmp_path / "s" / "sample.jsonl", 4, batch_size=2 )
+    ids = report[ "ids" ]
+    assert len( ids ) == 4 and ids == sorted( ids )
+    assert [ len( c ) for c in calls ] == [ 2, 2 ]
+    assert report[ "written" ] == 4
+    assert not ( tmp_path / "data" / "pl" ).exists()
+    again = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "s2" / "sample.jsonl", 4 )
+    assert again[ "ids" ] == ids
+
+
+def test_main_sample_mode_writes_the_store_and_builds_nothing( world, tmp_path, capsys ):
+    argv = [ "--root", str( world[ "root" ] ), "--sample", "2", "--store", str( tmp_path / "s.jsonl" ), "--batch-size", "1" ]
+    calls = []
+    assert cb.main( argv, environ={}, writer_factory=lambda a: answering_writer( calls ), client="NOT USED" ) == 0
+    out = json.loads( capsys.readouterr().out )
+    assert out[ "written" ] == 2 and len( out[ "ids" ] ) == 2
+    assert [ len( c ) for c in calls ] == [ 1, 1 ]
+
+
+def test_run_passes_the_batch_size_through( world, tmp_path ):
+    calls = []
+    cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={}, batch_size=1 )
+    assert [ len( c ) for c in calls ] == [ 1, 1 ]
