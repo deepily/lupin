@@ -121,9 +121,8 @@ class TestRunAllArms:
         assert out[ "meta" ][ "manifest_hash" ] == "mh" * 32 and out[ "meta" ][ "code_sha" ] == "abc123"
         assert out[ "needs" ] == 2 and out[ "misses" ] == 0 and out[ "pages" ] == len( world( tmp_path )[ "pages" ] )
         assert out[ "snapshot_entries" ] == len( ENTRIES ) and out[ "vector_entries" ] == len( IDS )
-        ref = out[ "reference" ]
-        assert ref[ "needs" ] == len( ref[ "per_need" ] ) and ref[ "items" ] == sum( ref[ "per_need" ].values() )
-        assert set( ref[ "per_need" ] ) <= { "n1", "n2" } and all( c >= 1 for c in ref[ "per_need" ].values() )
+        assert out[ "reference" ] == { "needs": 1, "items": 1, "per_need": { "n1": 1 } }       # n1 has one high answer, n2 has none
+        for arm in arms.ARMS: assert set( out[ "reference" ][ "per_need" ] ) == set( out[ "measured" ][ arm ][ "t1_first" ][ 128 ][ "per_need" ] )
 
     def test_the_vector_count_is_what_the_set_holds_of_the_snapshot( self, tmp_path ):
         out = self.run( tmp_path, vset=vset( IDS[ :4 ] + [ "not-in-the-index" ] ) )
