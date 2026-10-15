@@ -269,7 +269,9 @@ class TestQueueAndRun:
         assert ( tmp_path / "shadow-pending" / "0000000000000000.json.corrupt" ).exists()
 
     @pytest.mark.parametrize( "text", [ "[1, 2]", "null", json.dumps( { "id": "x", "need": "n" } ), json.dumps( { **dict.fromkeys( sa.ITEM_FIELDS, 1 ), "attempts": "no" } ),
-                                        json.dumps( { **dict.fromkeys( sa.ITEM_FIELDS, 1 ), "live": "not a dict" } ) ] )
+                                        json.dumps( { **dict.fromkeys( sa.ITEM_FIELDS, 1 ), "live": "not a dict" } ),
+                                        json.dumps( { **dict.fromkeys( sa.ITEM_FIELDS, "x" ), "attempts": 0, "live": { }, "queued_on": None } ),
+                                        json.dumps( { **dict.fromkeys( sa.ITEM_FIELDS, "x" ), "attempts": 0, "live": { }, "id": None } ) ] )
     def test_a_queue_file_of_the_wrong_shape_is_set_aside( self, tmp_path, text ):
         sa.enqueue_if_sampled( tmp_path, "good", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
         ( tmp_path / "shadow-pending" / "ffffffffffffffff.json" ).write_text( text )
@@ -283,6 +285,15 @@ class TestQueueAndRun:
         assert ( out[ "audited" ], out[ "failed" ] ) == ( 1, 1 )
         left = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
         assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "bad", 1 ) ]
+
+    def test_a_damaged_receipt_file_fails_its_item_and_the_run_goes_on( self, tmp_path ):
+        for need in ( "n1", "n2" ): sa.enqueue_if_sampled( tmp_path, need, "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )
+        damaged = sa.audit_receipt( "n1", "py", GEN, INDEX, LIVE, sweep_of( "NEW" ), "2026-10-15" )[ "id" ]
+        ( sa._folder( tmp_path, "receipts" ) / f"shadow-{damaged}.json" ).write_text( '{"id": "ab' )
+        out = sa.run_pending( tmp_path, lambda need: sweep_of( "NEW" ), "2026-10-15" )
+        assert ( out[ "audited" ], out[ "failed" ] ) == ( 1, 1 )
+        left = [ json.loads( p.read_text() ) for p in ( tmp_path / "shadow-pending" ).glob( "*.json" ) ]
+        assert [ ( q[ "need" ], q[ "attempts" ] ) for q in left ] == [ ( "n1", 1 ) ]
 
     def test_a_write_in_progress_is_not_read_by_the_drain( self, tmp_path ):
         sa.enqueue_if_sampled( tmp_path, "good", "py", GEN, INDEX, LIVE, "2026-10-14", rate=1 )

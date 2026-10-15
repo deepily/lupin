@@ -140,9 +140,14 @@ def _temp_name( path ):
 
 
 def _item_ok( item ):
-    """Return True when a queue file holds every queue field."""
+    """
+    Return True when a queue file holds every queue field.
+
+    Ensures:
+        - the id and the queued date are text, so the drain can sort on them
+    """
     return isinstance( item, dict ) and all( key in item for key in ITEM_FIELDS ) and isinstance( item[ "attempts" ], int ) \
-           and isinstance( item[ "live" ], dict )
+           and isinstance( item[ "live" ], dict ) and isinstance( item[ "id" ], str ) and isinstance( item[ "queued_on" ], str )
 
 
 def _write_once( path, text ):
@@ -278,7 +283,8 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         - returns { audited, failed, corrupt, receipts }
         - each audited item leaves a receipt and its queue file is removed
         - an item whose sweep raises stays queued with its attempt count up by one, and counts as failed
-        - a queue file that is not JSON, or lacks a queue field, is renamed to <name>.corrupt and counted, and the run goes on
+        - a queue file that is not JSON, lacks a queue field, or holds an id or queued date that is not text, is renamed to <name>.corrupt and counted, and the run goes on
+        - an item whose receipt file is already there and damaged counts as failed like a raised sweep, stays queued, and the run goes on
         - a sweep answer that lacks verdict or causal_ids counts as a failure of that item, like a raised error
         - a temporary file of a write in progress is never read
         - at most limit items are taken, fewest attempts first, then oldest queued date, then queue id
@@ -299,13 +305,14 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
         try:
             sweep   = sweep_fn( item[ "need" ] )
             receipt = audit_receipt( item[ "need" ], item[ "language" ], item[ "generation" ], item[ "index_sha" ], item[ "live" ], sweep, today )
-        except Exception:                      # a transport failure or a malformed answer leaves the item queued, behind the fresh ones
+            stored  = store_receipt( data_dir, receipt )
+        except Exception:                      # a transport failure, a malformed answer or a damaged receipt file leaves the item queued, behind the fresh ones
             failed += 1
             temp = _temp_name( path )
             temp.write_text( json.dumps( dict( item, attempts=item[ "attempts" ] + 1 ), sort_keys=True ) + "\n", encoding="utf-8" )
             os.replace( temp, path )
             continue
-        receipts.append( store_receipt( data_dir, receipt ) )
+        receipts.append( stored )
         os.remove( path )
     return { "audited": len( receipts ), "failed": failed, "corrupt": corrupt, "receipts": receipts }
 
