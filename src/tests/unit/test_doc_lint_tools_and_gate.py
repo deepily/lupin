@@ -1140,6 +1140,33 @@ def test_a_symlink_replacing_a_page_is_named_and_the_target_page_is_still_judged
     assert "[doc-lint] WARNING: docs/swap.md is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" in lines
 
 
+@pytest.mark.parametrize( "link,target", [ ( "src/cosa/evil.py", "../rnd/impl.py" ), ( "src/pkg/evil.py", "../rnd/impl.py" ), ( "src/web/evil.ts", "../rnd/impl.ts" ) ] )
+def test_a_symlink_named_like_a_swept_source_file_is_refused_when_the_commit_adds_it( repo, monkeypatch, link, target ):
+    _no_external( monkeypatch )
+    _stage( repo, { "src/rnd/impl.py": "def f( x ):\n    return x\n", "src/rnd/impl.ts": "export const x = 1;\n", "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    ( repo / link ).parent.mkdir( parents=True, exist_ok=True )
+    os.symlink( target, repo / link )
+    _git( repo, "add", link )
+    assert _git( repo, "ls-files", "-s", link ).split()[ 0 ] == "120000"
+    rc, lines = _blocking( repo )
+    assert rc == gate.REFUSAL_EXIT, ( link, lines )
+    assert [ ln for ln in lines if link in ln and "symbolic link" in ln and "NOT checked" in ln ]
+
+
+def test_a_symlink_in_the_swept_scope_that_the_commit_only_moves_is_a_plain_warning( repo, monkeypatch ):
+    _no_external( monkeypatch )
+    ( repo / "src" / "cosa" ).mkdir( parents=True )
+    os.symlink( "../rnd/impl.py", repo / "src" / "cosa" / "old.py" )
+    _git( repo, "add", "src/cosa/old.py" )
+    _stage( repo, { "docs/keep.md": "# K\n\nFine.\n" } )
+    _git( repo, "commit", "-q", "-m", "base" )
+    _git( repo, "mv", "src/cosa/old.py", "src/cosa/new.py" )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not [ ln for ln in lines if "REFUSED" in ln ]
+    assert [ ln for ln in lines if "src/cosa/new.py" in ln and "symbolic link" in ln ]
+
+
 def test_a_runbook_finding_that_predates_the_commit_is_allowed_and_one_the_commit_introduces_is_refused( repo, monkeypatch ):
     _no_external( monkeypatch )
     _page_base( repo, { RUNBOOK: "# Ops\n\nSome text.\n" } )

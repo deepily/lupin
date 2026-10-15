@@ -951,6 +951,8 @@ def collect( root ):
         - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - a staged gitlink whose name a linter would read adds one warning that says it was not checked, and is read by no linter
         - a staged symbolic link whose name a linter would read adds one warning the same way: its blob is a target path, not a page
+        - that warning is an Unchecked when the link's name is a swept Python file or a TypeScript file and the commit adds the link or changes its target, since the language imports it as source
+        - it stays a plain warning for a link named like a page, whose target is judged as itself, and for a link the commit only moves
         - a markdown file that markdownlint_unnamed lists is refused, since that tool could not check it; this cannot be waived
         - a staged Python or markdown file that staged_binary lists adds one warning, since the diff gives no touched line for it
         - that warning is an Unchecked when the commit adds the file or changes its content, and is_warn_only does not name it
@@ -983,10 +985,15 @@ def collect( root ):
     waived     = []
     refusals   = []
     warnings   = [ f"[doc-lint] WARNING: {shown( p )} is staged as a gitlink (a submodule entry), which holds a commit and no text, so it was NOT checked" for p in gitlinks ]
-    warnings  += [ f"[doc-lint] WARNING: {shown( p )} is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked" for p in staged_entries( root )[ 4 ] if p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ]
     binary     = set( staged_binary( root ) )
     incoming   = incoming_commits( root )[ 0 ]
-    created    = ( staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ] & set( paths ) ) | moved_in
+    changed    = staged_entries( root )[ 3 ] & set.intersection( *[ staged_entries( root, sha )[ 3 ] for sha in incoming ] ) if incoming else staged_entries( root )[ 3 ]
+    created    = ( changed & set( paths ) ) | moved_in
+    for p in staged_entries( root )[ 4 ]:
+        if not ( p.endswith( ( ".py", ".md" ) ) or tsdoc_lint.in_scope( p ) ): continue
+        line = f"[doc-lint] WARNING: {shown( p )} is staged as a symbolic link, its content is a target path and not a page, so it was NOT checked"
+        executable = ( p.endswith( ".py" ) and is_swept( p ) ) or tsdoc_lint.in_scope( p )
+        warnings.append( Unchecked( line ) if executable and ( p in changed or p in moved_in ) and not is_warn_only( p ) else line )
     warnings  += [ ( Unchecked if p in created and not is_warn_only( p ) else str )( f"[doc-lint] WARNING: {shown( p )} could NOT be checked because git treats it as binary, so the lines this commit touches in it are not known" ) for p in paths if p in binary and p.endswith( ( ".py", ".md" ) ) ]
     skipped    = []
     decode_out = []
