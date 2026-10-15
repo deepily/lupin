@@ -107,9 +107,12 @@ def read_create_cap( environ, reader=None ):
     return int( value ) if value.isdigit() and int( value ) > 0 else DEFAULT_CAP
 
 
-def read_enabled( reader=None, errors=None ):
+def read_enabled( reader=None, errors=None, key=ENABLED_KEY ):
     """
-    Read the switch that turns the tick on.
+    Read the switch that turns a tick on.
+
+    Requires:
+        - key is the configuration key of the switch; the default is the librarian's
 
     Ensures:
         - returns True only when the key reads true, 1, yes or on, in any case
@@ -117,7 +120,7 @@ def read_enabled( reader=None, errors=None ):
         - a read failure appends its message to errors when errors is a list
         - never raises
     """
-    return ( _disk_value( ENABLED_KEY, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
+    return ( _disk_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
 
 
 def read_persona( key, reader=None ):
@@ -343,18 +346,19 @@ def cron_lines( root, python, log_path ):
     return [ f"{CRON_SCHEDULE} {run}", f"@reboot sleep 120 && {run}" ]
 
 
-def merge_lines( current, lines ):
+def merge_lines( current, lines, tag=CRON_TAG ):
     """
     Replace every tagged line of a crontab text with lines.
 
     Requires:
         - current is the crontab text; lines is the list from cron_lines or an empty list
+        - tag is the comment that ends each line of one tool; the default is the librarian's
 
     Ensures:
-        - lines that do not carry CRON_TAG keep their text and order
+        - lines that do not carry the tag keep their text and order
         - the tagged lines end the text, once each
     """
-    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( CRON_TAG ) ]
+    kept = [ line for line in current.splitlines() if not line.rstrip().endswith( tag ) ]
     return "\n".join( kept + list( lines ) ) + "\n"
 
 
@@ -379,7 +383,7 @@ def load_crontab_lock( environ ):
     return module.crontab_lock
 
 
-def _rewrite( lines, crontab_cmd, backup_dir, now ):
+def _rewrite( lines, crontab_cmd, backup_dir, now, tag=CRON_TAG ):
     """
     Do the read, backup and write of one crontab edit; the caller holds the lock.
 
@@ -394,19 +398,20 @@ def _rewrite( lines, crontab_cmd, backup_dir, now ):
         os.makedirs( backup_dir, exist_ok=True )
         with open( os.path.join( backup_dir, f"crontab-{now.strftime( '%Y%m%d-%H%M%S' )}.txt" ), "w", encoding="utf-8" ) as handle: handle.write( old )
     except OSError as error: return None, f"no backup, so no write: {error}"
-    new   = merge_lines( old, lines )
+    new   = merge_lines( old, lines, tag )
     write = subprocess.run( [ *crontab_cmd, "-" ], input=new, capture_output=True, text=True )
     if write.returncode != 0: return None, f"crontab write failed: {write.stderr.strip()}"
     return new, None
 
 
-def edit_crontab( lines, environ, crontab_cmd, backup_dir, now ):
+def edit_crontab( lines, environ, crontab_cmd, backup_dir, now, tag=CRON_TAG, owner="wiki-librarian-tick" ):
     """
     Read, back up and rewrite the crontab under the shared lock.
 
     Requires:
         - lines is the list to install, or an empty list to remove ours
         - crontab_cmd is the command list, for example [ "crontab" ]
+        - tag and owner name the tool: its line tag and the owner the lock records; the defaults are the librarian's
 
     Ensures:
         - the whole read and write sit inside the lock
@@ -415,20 +420,23 @@ def edit_crontab( lines, environ, crontab_cmd, backup_dir, now ):
         - raises InstallRefused when the lock module is missing, and RuntimeError when a crontab call or the backup fails
     """
     lock = load_crontab_lock( environ )
-    with lock( owner="wiki-librarian-tick" ):
-        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now )
+    with lock( owner=owner ):
+        new, failure = _rewrite( lines, crontab_cmd, backup_dir, now, tag )
     if failure is not None: raise RuntimeError( failure )
     return new
 
 
-def status_text( crontab_text ):
+def status_text( crontab_text, tag=CRON_TAG ):
     """
     Describe the tagged lines found in a crontab text.
+
+    Requires:
+        - tag is the comment that ends each line of one tool; the default is the librarian's
 
     Ensures:
         - returns "installed: 2 lines", "partly installed: n lines" or "not installed"
     """
-    count = sum( 1 for line in crontab_text.splitlines() if line.rstrip().endswith( CRON_TAG ) )
+    count = sum( 1 for line in crontab_text.splitlines() if line.rstrip().endswith( tag ) )
     if count == 0: return "not installed"
     return f"installed: {count} lines" if count == 2 else f"partly installed: {count} lines"
 

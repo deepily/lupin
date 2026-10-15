@@ -1,7 +1,8 @@
 """
 Manual driver: write the missing purpose lines, then rebuild the stored vector set.
 
-Run it on the host against the dev server. It is not a test and it is not scheduled.
+Run it on the host against the dev server. It is not a test. The daily scheduled run is
+cosa.repo.symindex.vector_refresh, which calls run() below.
     PYTHONPATH=src python3 -m cosa.repo.symindex.candidate_build --root <repo root>
 """
 import argparse
@@ -15,10 +16,12 @@ import time
 
 from cosa.repo.doc_lint import harness_schedule
 from cosa.repo.symindex import build as sx_build
+from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates import purpose_lines as pl
 from cosa.repo.symindex.candidates import storage_paths as sp
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
+from cosa.repo.symindex.candidates.errors import CandidateError, DEPENDENCY_MISSING
 from cosa.repo.symindex.paths import data_dir, default_out_dir
 
 WRITER_VERSION = "bounded-cc-1"
@@ -88,7 +91,7 @@ class BoundedJobWriter:
         return { a[ "id" ]: a[ "purpose" ] for a in answers }
 
 
-def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE ):
+def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE, built_at=None ):
     """
     Write the missing purpose lines and rebuild the vector set.
 
@@ -99,9 +102,15 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
 
     Ensures:
         - the index is ensured, and its public entries are the rows of the set
+        - the whole run holds the build lock, so a manual build and the scheduled one cannot overlap
+        - the new set carries its build info: the index manifest it was built from, and built_at
+          (the current UTC time when built_at is None)
         - the live vector set is replaced by rename only after the new one is sealed
         - query-cache files made under another set are cleared
-        - returns { purposes, manifest_hash, rows, stale_queries_cleared, seconds }
+        - returns { purposes, manifest_hash, rows, stale_queries_cleared, seconds, index_manifest, built_at }
+
+    Raises:
+        - CandidateError BUILD_LOCK_HELD when another build holds the lock; nothing is written
     """
     started   = time.monotonic()
     root      = pathlib.Path( root )
@@ -109,16 +118,21 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
     purpose   = sp.candidate_dir( "purpose", data, config, environ )
     live      = sp.candidate_dir( "vectors", data, config, environ )
     cache     = sp.candidate_dir( "query_cache", data, config, environ )
-    entries   = sx_build.read_symbols( sx_build.ensure( root ) )
-    report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION,
-                                        screen if screen is not None else pl.default_screen(), batch_size=batch_size )
-    new_dir   = live.with_name( live.name + ".new" )
-    if new_dir.exists(): shutil.rmtree( new_dir )
-    manifest  = vb.build_vectors( entries, pl.load_lines( purpose / "purpose.jsonl" ), client, new_dir )
-    vs.swap_in( new_dir, live )
-    cleared   = vs.clear_stale_queries( cache, manifest[ "manifest_hash" ] )
+    gen       = sx_build.ensure( root )
+    header    = sx_build.read_header( gen )
+    entries   = sx_build.read_symbols( gen )
+    with fr.refresh_lock( data / fr.LOCK_FILE ):
+        report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION,
+                                            screen if screen is not None else pl.default_screen(), batch_size=batch_size )
+        new_dir   = live.with_name( live.name + ".new" )
+        if new_dir.exists(): shutil.rmtree( new_dir )
+        manifest  = vb.build_vectors( entries, pl.load_lines( purpose / "purpose.jsonl" ), client, new_dir )
+        info      = fr.write_build_info( new_dir, header, built_at if built_at is not None else fr.utc_now() )
+        vs.swap_in( new_dir, live )
+        cleared   = vs.clear_stale_queries( cache, manifest[ "manifest_hash" ] )
     return { "purposes": report, "manifest_hash": manifest[ "manifest_hash" ], "rows": manifest[ "rows" ],
-             "stale_queries_cleared": cleared, "seconds": round( time.monotonic() - started, 1 ) }
+             "stale_queries_cleared": cleared, "seconds": round( time.monotonic() - started, 1 ),
+             "index_manifest": info[ "index_manifest" ], "built_at": info[ "built_at" ] }
 
 
 def sample_purposes( root, writer, store_path, count, batch_size=pl.BATCH_SIZE, screen=None ):
@@ -143,6 +157,35 @@ def sample_purposes( root, writer, store_path, count, batch_size=pl.BATCH_SIZE, 
     return report
 
 
+def make_job_writer( root, base_url, environ ):
+    """
+    Build the bounded-job writer the live runs use.
+
+    Requires:
+        - root is the main checkout, never a worktree: the job reads the index of the main checkout
+        - environ holds LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD
+
+    Ensures:
+        - returns a BoundedJobWriter whose submit logs in to base_url and posts to /api/v2/submit
+        - the hand-off folder and the index path are the ones the container sees
+
+    Raises:
+        - ValueError naming the main checkout when root is a worktree
+        - CandidateError DEPENDENCY_MISSING when a credential variable is absent
+    """
+    main_tree = sp.main_checkout( root )
+    if pathlib.Path( root ).resolve() != pathlib.Path( main_tree ).resolve():
+        raise ValueError( f"--root {root} is a worktree; the job reads the index of the main checkout {main_tree}. Pass --root {main_tree}" )
+    try:
+        email, password = environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ], environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]
+    except KeyError as e:
+        raise CandidateError( DEPENDENCY_MISSING, f"the job credential variable {e.args[ 0 ]} is not set" )
+    submit = lambda payload: harness_schedule.submit( payload, base_url, email, password )
+    to_c   = lambda path: sp.container_path( path, root, environ=environ )
+    index  = to_c( default_out_dir( main_tree ) / "current" / "symbols.jsonl" )
+    return BoundedJobWriter( sp.handoff_dir( root, environ=environ ), submit, to_container=to_c, index_path=index )
+
+
 def main( argv=None, environ=None, writer_factory=None, client=None ):
     """
     Command line entry: build the purpose lines and the vector set for one repository.
@@ -157,7 +200,6 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
         - exits with the argparse usage error, naming the option, for a batch size or sample below 1,
           a --sample without --store, or a worktree --root with the default writer
     """
-    from cosa.repo.symindex.candidates.errors import CandidateError
     environ = os.environ if environ is None else environ
     parser  = argparse.ArgumentParser( description="Write purpose lines and rebuild the candidate vector set." )
     parser.add_argument( "--root", required=True )
@@ -171,14 +213,10 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
     if args.sample and args.store is None: parser.error( "--sample needs --store, the purpose.jsonl path to write" )
     try:
         if writer_factory is None:
-            main_tree = sp.main_checkout( args.root )
-            if pathlib.Path( args.root ).resolve() != pathlib.Path( main_tree ).resolve():
-                parser.error( f"--root {args.root} is a worktree; the job reads the index of the main checkout {main_tree}. Pass --root {main_tree}" )
-            email, password = environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ], environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]
-            submit  = lambda payload: harness_schedule.submit( payload, args.base_url, email, password )
-            to_c    = lambda path: sp.container_path( path, args.root, environ=environ )
-            index   = to_c( default_out_dir( main_tree ) / "current" / "symbols.jsonl" )
-            writer  = BoundedJobWriter( sp.handoff_dir( args.root, environ=environ ), submit, to_container=to_c, index_path=index )
+            try:
+                writer = make_job_writer( args.root, args.base_url, environ )
+            except ValueError as e:
+                parser.error( str( e ) )
         else:
             writer = writer_factory( args )
         if args.sample:

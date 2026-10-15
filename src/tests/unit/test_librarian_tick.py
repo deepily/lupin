@@ -541,3 +541,30 @@ def test_a_refused_empty_export_log_line_says_how_to_clear_it( tmp_path, pipelin
     lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), refuse, path, str( tmp_path / "s.json" ), NOON, log=lines.append )
     line = [ l for l in lines if "could not write the misses file" in l ][ 0 ]
     assert "move " + path + " aside" in line
+
+
+# ── the tag, owner and key parameters another job reuses ────────────────────
+
+
+def test_merge_lines_and_status_text_work_on_the_tag_they_are_given():
+    other = "0 * * * * keep\n17 10 * * * lib " + lt.CRON_TAG + "\n"
+    mine  = [ "47 10 * * * x # other-tool", "@reboot y # other-tool" ]
+    merged = lt.merge_lines( other, mine, "# other-tool" )
+    assert merged == other + "\n".join( mine ) + "\n"
+    assert lt.merge_lines( merged, [], "# other-tool" ) == other
+    assert lt.status_text( merged, "# other-tool" ) == "installed: 2 lines"
+    assert lt.status_text( merged ) == "partly installed: 1 lines"
+
+
+def test_edit_crontab_records_the_owner_it_is_given_and_only_touches_its_tag( cron ):
+    lt.edit_crontab( [ "1 1 * * * a # t" ], cron[ "env" ], cron[ "cmd" ], str( cron[ "backups" ] ), NOON, tag="# t", owner="some-job" )
+    assert "lock-enter some-job" in cron[ "log" ].read_text()
+    lt.edit_crontab( lt.cron_lines( "/m", "/p", "/l" ), cron[ "env" ], cron[ "cmd" ], str( cron[ "backups" ] ), NOON )
+    text = cron[ "file" ].read_text()
+    assert "# t" in text and lt.CRON_TAG in text and "lock-enter wiki-librarian-tick" in cron[ "log" ].read_text()
+
+
+def test_read_enabled_reads_the_key_it_is_given():
+    seen = []
+    assert lt.read_enabled( reader=lambda k: seen.append( k ) or "on", key="some other key" ) is True
+    assert seen == [ "some other key" ]

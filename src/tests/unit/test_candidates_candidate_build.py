@@ -111,6 +111,7 @@ def world( tmp_path, monkeypatch ):
     for s in symbols: s.update( lang="py", kind="function", line=1, public=True )
     monkeypatch.setattr( cb.sx_build, "ensure", lambda root: "gen" )
     monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: symbols )
+    monkeypatch.setattr( cb.sx_build, "read_header", lambda gen: { "manifest": { "m.py": [ 1, 2 ] }, "symbols_sha": "sha-1" } )
     monkeypatch.setattr( cb, "data_dir", lambda root: tmp_path / "data" )
     environ = {}
     return { "root": tmp_path / "repo", "data": tmp_path / "data", "environ": environ, "symbols": symbols }
@@ -329,3 +330,35 @@ def test_main_refuses_a_worktree_root_and_names_the_main_checkout( monkeypatch, 
     assert e.value.code == 2
     err = capsys.readouterr().err
     assert f"--root {tmp_path / 'wt'} is a worktree" in err and f"Pass --root {tmp_path / 'main'}" in err
+
+
+# ── build info, the build lock and the extracted job writer ─────────────────
+
+
+def test_run_writes_the_build_info_into_the_new_set_before_the_swap_and_returns_it( world, tmp_path ):
+    from cosa.repo.symindex.candidates import freshness as fr
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-15T14:00:00+00:00" )
+    info   = fr.read_build_info( tmp_path / "data" / "vec" )
+    assert info == { "index_manifest": fr.index_manifest( { "manifest": { "m.py": [ 1, 2 ] } } ), "symbols_sha": "sha-1", "built_at": "2026-10-15T14:00:00+00:00" }
+    assert report[ "index_manifest" ] == info[ "index_manifest" ] and report[ "built_at" ] == info[ "built_at" ]
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == report[ "manifest_hash" ]
+
+
+def test_the_build_info_does_not_enter_the_manifest_hash( world, tmp_path ):
+    one = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-15T14:00:00+00:00" )
+    two = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-16T09:00:00+00:00" )
+    assert one[ "manifest_hash" ] == two[ "manifest_hash" ] and one[ "built_at" ] != two[ "built_at" ]
+
+
+def test_run_stamps_the_current_utc_time_when_no_time_is_given( world ):
+    report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert report[ "built_at" ].endswith( "+00:00" )
+
+
+def test_make_job_writer_refuses_a_worktree_by_value_error_and_a_missing_credential_by_name( monkeypatch, tmp_path ):
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path / "main" )
+    with pytest.raises( ValueError, match="is a worktree" ):
+        cb.make_job_writer( str( tmp_path / "wt" ), "http://x", {} )
+    with pytest.raises( CandidateError ) as e:
+        cb.make_job_writer( str( tmp_path / "main" ), "http://x", { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e" } )
+    assert e.value.code == "DEPENDENCY_MISSING" and "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" in e.value.detail
