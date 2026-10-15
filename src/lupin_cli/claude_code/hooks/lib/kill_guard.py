@@ -52,10 +52,11 @@ from typing import List, Optional, Tuple
 
 # What this guard does not see, kept as documented gaps. The test file pins each as allowed,
 # so a change to this list is a decision. Seeing them would mean parsing arbitrary shell.
-#   bash -c, sh -c, xargs, ssh, eval, env -S via a variable, systemd-run, docker exec, watch, find -exec,
-#   parallel, python -c, a quoted-split name (p""kill, pk\ill), a variable holding the command name
-#   ($PKILL, $(which pkill)), and an alias.
-# Handled: a redirection before the command word (`2>&1 pkill ...`) is a transparent
+#   ssh, eval, systemd-run, docker exec, watch, find -exec, parallel, python -c, a second level of
+#   `bash -c`, a quoted-split name (p""kill, pk\ill), a variable holding the command name
+#   ($PKILL, $(which pkill)), an alias, and a pid list or pattern read from stdin by xargs.
+# Handled: one level of `bash|sh|dash|zsh [-flags] -c '<literal>'` is judged by running this guard over the
+# literal, and `xargs` in front of kill, pkill or killall is read as a wrapper of that verb. A redirection before the command word (`2>&1 pkill ...`) is a transparent
 # prefix, and a `<<` inside a comment or a quoted span opens no heredoc.
 # Bash tool name as it appears in the PreToolUse hook payload.
 BASH_TOOL_NAMES = ( "Bash", )
@@ -103,7 +104,7 @@ _WS = r"(?:[ \t]|\\\n)"
 _QUOTED_OR_ESCAPED = r"""\\.|"[^"]*"|'[^']*'"""
 # The value of an assignment (`FOO="a b"`, `FOO=a\ b`): a shell word that ends at a separator.
 _ASSIGN_VALUE = r"""(?:""" + _QUOTED_OR_ESCAPED + r"""|[^\s;&|"'\\])*"""
-_WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt)"
+_WRAPPERS = r"(?:env|command|builtin|exec|sudo|doas|nohup|time|nice|stdbuf|setsid|ionice|unbuffer|taskset|chrt|xargs)"
 # A wrapper may carry options, each with at most one value: `nice -n 5`, `sudo -u root`,
 # `env -i`, `ionice -c3`. A value is never a wrapper, a verb or an assignment, so every
 # word has exactly one reading and the pattern cannot backtrack exponentially: a command
@@ -770,6 +771,39 @@ _INLINE_FLAG_RE = re.compile(
     rf"(?:{_WS}*(?:{_PREFIX_ELEMENT}))*?"
     rf"{_WS}*{_ENV_FLAG}=(?P<value>[^\s;&|]*)"
 )
+
+
+# `bash -c '<literal>'` and its siblings: the literal is a whole command line the shell runs. One level
+# is read, by running this guard over the literal. Anything deeper stays unseen.
+_SHELL_NAMES    = r"(?:bash|sh|dash|zsh)"
+_SHELL_FLAG     = rf"{_WS}+(?:--[A-Za-z][A-Za-z-]*|[-+][A-Za-z]+)"
+_SHELL_C_RE     = re.compile(
+    rf"{_CMD_START}{_PREFIXES}{_WS}*{_WORD_PRE}{_SHELL_NAMES}{_WORD_POST}"
+    rf"(?P<flags>(?:{_SHELL_FLAG})*?(?:{_WS}+-[A-Za-z]*c[A-Za-z]*))"
+    rf"{_WS}+(?:'(?P<single>[^']*)'|\"(?P<double>(?:\\.|[^\"\\])*)\")"
+)
+
+
+def _shell_c_literals( command: str ) -> List[ str ]:
+    """
+    The literal command lines handed to `bash|sh|dash|zsh [-flags] -c`.
+
+    Requires:
+        - command is the shell command string, heredoc bodies already removed
+
+    Ensures:
+        - returns each single- or double-quoted literal that follows a flag group ending in a
+          cluster containing `c`, in order of appearance
+        - a double-quoted literal has its backslash escapes resolved
+        - a bare `-c` with no literal after it, and a script run, return nothing
+    """
+    found = []
+    for match in _SHELL_C_RE.finditer( command ):
+        if match.group( "single" ) is not None:
+            found.append( match.group( "single" ) )
+        else:
+            found.append( re.sub( r"\\(.)", r"\1", match.group( "double" ) ) )
+    return found
 
 
 def _hatch_in_prefix( command ) -> bool:
@@ -1446,6 +1480,47 @@ def _deny_reason_for( claude_pids: list ) -> str:
     )
 
 
+def _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid ) -> Optional[ str ]:
+    """
+    The deny reason for one command line whose heredoc bodies are already removed, or None.
+
+    Requires:
+        - command is a non-empty string without heredoc bodies
+        - the other arguments are those of `kill_deny_reason`
+
+    Ensures:
+        - None when the command carries the escape hatch in the prefix of its own command
+        - otherwise the reason `kill_deny_reason` documents for Shapes A to D
+        - a `_SelectorRejected` selector yields its refusal reason
+    """
+    # The hatch, read from the command text. Placed after the heredoc strip so a flag
+    # quoted inside a heredoc body is data and cannot unlock anything.
+    if _hatch_in_prefix( command ):
+        return None
+    reader      = comm_reader if comm_reader is not None else _default_comm_reader
+    claude_pids = _claude_pids_targeted( command, reader )
+    if claude_pids:
+        return _deny_reason_for( claude_pids )
+    prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
+    owner       = None
+    if _PATTERN_SWEEP_RE.search( command ):
+        owner = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
+    try:
+        if owner is not None:
+            sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
+            if foreign:
+                return _foreign_deny_reason( foreign )
+        else:
+            sweep_hits = _sweep_seat_hits( command, prober, reader )
+    except _SelectorRejected as rejected:
+        return _rejected_deny_reason( rejected )
+    if sweep_hits:
+        return _deny_reason_for( sweep_hits )
+    if _sweeps_unscoped( command ):
+        return _deny_reason_for( [] )
+    return None
+
+
 def kill_deny_reason(
     tool_name,
     tool_input,
@@ -1495,32 +1570,16 @@ def kill_deny_reason(
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command:
             return None
-        command     = _strip_heredocs( command )
-        # The hatch, read from the COMMAND. Placed after the heredoc strip so a flag
-        # quoted inside a heredoc body is data and cannot unlock anything.
+        command = _strip_heredocs( command )
+        reason  = _judge_command( command, comm_reader, pgrep_probe, cwd, proc, caller_pid )
+        if reason is not None:
+            return reason
         if _hatch_in_prefix( command ):
             return None
-        reader      = comm_reader if comm_reader is not None else _default_comm_reader
-        claude_pids = _claude_pids_targeted( command, reader )
-        if claude_pids:
-            return _deny_reason_for( claude_pids )
-        prober      = pgrep_probe if pgrep_probe is not None else _default_pgrep_probe
-        owner       = None
-        if _PATTERN_SWEEP_RE.search( command ):
-            owner = _resolve_ownership( cwd, caller_pid, reader, proc if proc is not None else _ProcFs() )
-        try:
-            if owner is not None:
-                sweep_hits, foreign = _sweep_hits_with_owner( command, prober, reader, owner )
-                if foreign:
-                    return _foreign_deny_reason( foreign )
-            else:
-                sweep_hits = _sweep_seat_hits( command, prober, reader )
-        except _SelectorRejected as rejected:
-            return _rejected_deny_reason( rejected )
-        if sweep_hits:
-            return _deny_reason_for( sweep_hits )
-        if _sweeps_unscoped( command ):
-            return _deny_reason_for( [] )
+        for literal in _shell_c_literals( command ):
+            reason = _judge_command( _strip_heredocs( literal ), comm_reader, pgrep_probe, cwd, proc, caller_pid )
+            if reason is not None:
+                return reason
         return None
     except Exception:                    # pragma: no cover - fail-open backstop; NOT decorative: a missing `import subprocess` in the probe path landed here on 2026-08-24 and turned every verdict into a silent allow, which is why the guard is replayed against real traffic rather than trusted to its unit tests
         return None

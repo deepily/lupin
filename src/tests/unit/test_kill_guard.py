@@ -936,7 +936,7 @@ def test_an_escaped_hash_and_an_escaped_quote_do_not_open_a_comment_or_a_span():
 
 
 @pytest.mark.parametrize( "command", [
-    'bash -c "pkill -f TOK"', "sh -c 'pkill -f TOK'", "xargs pkill -f TOK", "ssh host pkill -f TOK",
+    "ssh host pkill -f TOK",
     "eval pkill -f TOK", "systemd-run --user pkill -f TOK",
     "docker exec c pkill -f TOK", "watch pkill -f TOK", "find . -exec pkill -f TOK {} +",
     "parallel pkill -f TOK ::: a", 'python3 -c "import os; os.system(\'pkill -f TOK\')"',
@@ -985,3 +985,109 @@ def test_a_closed_arithmetic_span_does_not_hide_a_later_marker_on_the_line():
 def test_an_unclosed_expansion_is_text_to_the_end_of_the_line_and_the_next_line_is_read():
     """`${x` never closes, so the marker is inside it. Reading the next line is the safe side."""
     assert _deny( "echo ${x <<EOF\npgrep -f pytest | xargs kill" ) is not None
+
+
+# ---------------------------------------------------------------------------
+# One level of `bash -c '<literal>'`, and xargs in front of kill, pkill or killall
+# ---------------------------------------------------------------------------
+
+_PROBE_ONE_SEAT = lambda selector: [ "4242" ]
+
+SHELL_C_SHAPES = {
+    "B-pgrep-xargs" : ( "pgrep -f pytest | xargs kill",                                   _no_claude  ),
+    "A-literal"     : ( "kill 4242",                                                        _all_claude ),
+    "B-awk"         : ( 'ps -eo pid,args | grep pytest | awk "{print \\$1}" | xargs kill',  _no_claude  ),
+    "C-pkill"       : ( "pkill -f pytest",                                                  _all_claude ),
+}
+
+SHELL_WRAPPERS = [
+    "bash -c {q}", "sh -c {q}", "dash -c {q}", "zsh -c {q}", "/bin/bash -c {q}", "bash -lc {q}",
+    "bash -x -c {q}", "bash --norc -c {q}", "sudo bash -c {q}", "env FOO=1 bash -c {q}",
+    "timeout 30 bash -c {q}", "FOO=1 sh -c {q}", "nohup bash -c {q}", "2>&1 bash -c {q}",
+]
+
+
+@pytest.mark.parametrize( "shape", sorted( SHELL_C_SHAPES ) )
+def test_the_bare_shell_c_literal_denies( shape ):
+    """The positive control: the literal alone is denied, so the wrapped verdicts say something."""
+    command, reader = SHELL_C_SHAPES[ shape ]
+    assert _deny( command, comm_reader=reader, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+@pytest.mark.parametrize( "shape", sorted( SHELL_C_SHAPES ) )
+@pytest.mark.parametrize( "wrapper", SHELL_WRAPPERS )
+def test_a_shell_c_literal_is_judged_like_the_same_command_typed_bare( shape, wrapper ):
+
+    command, reader = SHELL_C_SHAPES[ shape ]
+    quoted          = "'" + command.replace( "'", "'\\''" ) + "'"
+    assert _deny( wrapper.format( q=quoted ), comm_reader=reader, pgrep_probe=_PROBE_ONE_SEAT ) is not None, wrapper
+
+
+def test_a_double_quoted_shell_c_literal_is_judged_too():
+
+    assert _deny( 'bash -c "kill 4242"', comm_reader=_all_claude ) is not None
+    assert _deny( 'bash -c "pkill -f \\"pytest\\""', comm_reader=_all_claude, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+def test_a_shell_c_after_a_separator_is_judged():
+
+    assert _deny( "echo start; bash -c 'kill 4242' && echo done", comm_reader=_all_claude ) is not None
+
+
+@pytest.mark.parametrize( "command", [
+    "bash -c 'echo hi'",
+    "bash -c 'ls | wc -l'",
+    "bash script.sh",
+    "bash -c 'pkill -P $$ -f pytest'",
+    "bash -c 'kill $!'",
+    'bash -c "echo kill 4242"',
+    "sh -c 'cat pids.txt | xargs kill'",
+    "bash -c ''",
+    "bash -c",
+    "bash -l",
+    "bash --version",
+    "zsh -c 'echo $((1+2))'",
+] )
+def test_an_ordinary_shell_c_is_allowed( command ):
+
+    assert _deny( command, comm_reader=_no_claude, pgrep_probe=lambda selector: [] ) is None
+
+
+def test_the_hatch_outside_a_shell_c_unlocks_it_and_the_hatch_inside_unlocks_that_literal():
+
+    assert _deny( "LUPIN_ALLOW_UNSCOPED_KILL=1 bash -c 'kill 4242'", comm_reader=_all_claude ) is None
+    assert _deny( "bash -c 'LUPIN_ALLOW_UNSCOPED_KILL=1 kill 4242'", comm_reader=_all_claude ) is None
+
+
+def test_a_second_level_of_shell_c_stays_unseen_by_design():
+    """One level only. A literal inside a literal is deeper parsing than this guard does."""
+    assert _deny( "bash -c \"bash -c 'kill 4242'\"", comm_reader=_all_claude ) is None
+
+
+def test_an_heredoc_inside_a_shell_c_literal_is_data():
+
+    assert _deny( "bash -c 'cat <<EOF\nkill 4242\nEOF'", comm_reader=_all_claude ) is None
+
+
+@pytest.mark.parametrize( "command", [
+    "xargs pkill -f TOK",
+    "xargs -r pkill -f TOK",
+    "xargs -n1 -P4 pkill -f TOK",
+    "echo a | xargs -r killall -r TOK",
+    "echo 1 | xargs kill 4242",
+    "FOO=1 xargs sudo pkill -f TOK",
+] )
+def test_xargs_in_front_of_kill_pkill_or_killall_is_judged_like_the_bare_verb( command ):
+
+    assert _deny( command, comm_reader=_all_claude, pgrep_probe=_PROBE_ONE_SEAT ) is not None
+
+
+def test_xargs_with_a_stdin_pattern_or_an_unknowable_pid_list_stays_allowed():
+    """`cat pids.txt | xargs kill` and `echo TOK | xargs pkill -f` name nothing readable."""
+    for command in ( "cat pids.txt | xargs kill", "echo TOK | xargs pkill -f", "xargs -r kill < pids.txt" ):
+        assert _deny( command, comm_reader=_all_claude, pgrep_probe=lambda selector: [] ) is None, command
+
+
+def test_xargs_in_front_of_an_ordinary_program_is_allowed():
+
+    assert _deny( "git ls-files | xargs wc -l", comm_reader=_all_claude ) is None

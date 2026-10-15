@@ -1446,7 +1446,7 @@ def test_a_4000_line_ordinary_heredoc_costs_well_under_a_second():
 
 _SIX_REGEXES = (
     "_KILL_LITERAL_RE", "_UNSCOPED_LISTING_RE", "_PATTERN_SWEEP_RE",
-    "_KILL_SUBST_RE", "_KILL_VERB_RE", "_INLINE_FLAG_RE",
+    "_KILL_SUBST_RE", "_KILL_VERB_RE", "_INLINE_FLAG_RE", "_SHELL_C_RE",
 )
 _WHITESPACE_SHAPES = {
     "newlines"        : lambda size: "\n" * size,
