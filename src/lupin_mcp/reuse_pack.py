@@ -13,7 +13,9 @@ from lupin_mcp import reuse_pair as rpair
 from lupin_mcp import reuse_pair_request as rpr
 from lupin_mcp import reuse_tools as rt
 
-SHAPE           = "packed-choice-1"                           # names the body layout; a new layout needs a new name
+SHAPE           = "packed-choice-1"                           # names the body layout; a new layout needs a new name; packs are cut from the cache misses
+SHAPE_WHOLE     = "packed-choice-2"                           # packs are cut from the whole shortlist sorted by id, so a pack does not move with cache state
+SHAPES          = ( SHAPE, SHAPE_WHOLE )
 KEY_PREFIX      = "q_"
 WORKERS_MIN     = 4
 WORKERS_MAX     = 8
@@ -81,7 +83,7 @@ def pack_answers( response, qmap ):
     return answered, unasked
 
 
-def stage1_key( need, text, pack_size, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL ):
+def stage1_key( need, text, pack_size, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, shape=SHAPE ):
     """
     Key a response in a measurement arm.
 
@@ -89,11 +91,11 @@ def stage1_key( need, text, pack_size, run_index, template=rt.PROMPT_TEMPLATE, m
         - the key holds the shape, model, template hash, need, candidate text, pack size and run index
         - two arms with different pack sizes or run indices never share an answer
     """
-    return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need,
+    return rt.sha( rt.canonical( { "shape": shape, "model": model, "template": rt.prompt_template_hash( template ), "need": need,
                                    "candidate": text, "pack_size": pack_size, "run_index": run_index } ) )
 
 
-def replay_key( need, text, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL ):
+def replay_key( need, text, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, shape=SHAPE ):
     """
     Key one candidate's answer in a replay repeat.
 
@@ -101,18 +103,18 @@ def replay_key( need, text, run_index, template=rt.PROMPT_TEMPLATE, model=rt.JEV
         - the key holds the candidate key's fields and the repeat number under its own field name
         - it never equals the candidate key, nor a measurement arm's key (which holds pack_size and run_index), nor another repeat's
     """
-    return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need,
+    return rt.sha( rt.canonical( { "shape": shape, "model": model, "template": rt.prompt_template_hash( template ), "need": need,
                                    "candidate": text, "replay": run_index } ) )
 
 
-def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL ):
+def candidate_key( need, text, template=rt.PROMPT_TEMPLATE, model=rt.JEV_MODEL, shape=SHAPE ):
     """
     Key one candidate's answer wherever it was packed.
 
     Ensures:
         - the key holds the shape, model, template hash, need and candidate text, and no pack size or run index
     """
-    return rt.sha( rt.canonical( { "shape": SHAPE, "model": model, "template": rt.prompt_template_hash( template ), "need": need, "candidate": text } ) )
+    return rt.sha( rt.canonical( { "shape": shape, "model": model, "template": rt.prompt_template_hash( template ), "need": need, "candidate": text } ) )
 
 
 def pair_key( need, text, model=rt.JEV_MODEL, run_index=None, replay=None ):
@@ -264,9 +266,11 @@ def send_pack( transport, need, entries, template=rt.PROMPT_TEMPLATE, model=rt.J
     return { "answers": [], "failed": row[ "ids" ], "not_reached": [], "rows": [ row ] }
 
 
-def _check_sweep_args( size, workers, key_mode, run_index, kind="choice" ):
+def _check_sweep_args( size, workers, key_mode, run_index, kind="choice", shape=SHAPE ):
     """Raises: ValueError naming the argument that is out of range."""
     if kind not in KINDS: raise ValueError( f"kind must be one of {KINDS}, got {kind!r}" )
+    if shape not in SHAPES: raise ValueError( f"shape must be one of {SHAPES}, got {shape!r}" )
+    if shape == SHAPE_WHOLE and kind != "choice": raise ValueError( f"shape {SHAPE_WHOLE} is for the choice question, got kind {kind!r}" )
     if type( size ) is not int or size < 1: raise ValueError( f"size must be a positive integer, got {size!r}" )
     if type( workers ) is not int or not WORKERS_MIN <= workers <= WORKERS_MAX: raise ValueError( f"workers must be an integer from {WORKERS_MIN} to {WORKERS_MAX}, got {workers!r}" )
     if key_mode not in KEY_MODES: raise ValueError( f"key_mode must be one of {KEY_MODES}, got {key_mode!r}" )
@@ -294,7 +298,7 @@ def _pair_hit( key, hit ):
 
 
 def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="candidate", run_index=None, template=None, model=None,
-                  frozen=False, gaps=None, budget=None, breaker=None, kind="choice", size_limit=rpr.SIZE_LIMIT_TOKENS ):
+                  frozen=False, gaps=None, budget=None, breaker=None, kind="choice", size_limit=rpr.SIZE_LIMIT_TOKENS, shape=SHAPE ):
     """
     Ask Jev about every entry in packs.
 
@@ -309,6 +313,9 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - budget, when not passed, is ctx.run_budget when a driver set one, else the live transport's own; a stand-in transport has none of its own
         - kind "pair" asks the Noul and Score question; its key is the candidate key, or with key_mode "stage1" the candidate key plus
           the run index (no pack size); each pack is first cut under size_limit tokens
+        - the old shape cuts packs from the cache misses, as every earlier receipt did; the whole shape sorts the entries by id, cuts
+          packs of size from the whole list, and sends a pack whole when any entry in it has no cached answer; it is for the choice
+          question, and each shape keys its answers under its own name, so one never reads the other's cache
         - breaker, when given, is a RefusalBreaker shared with the caller; else the sweep makes one from BREAKER_422
         - a refused pack and all its halves are one refusal, keyed by the top-level pack's hash; BREAKER_422 refused
           packs in a row, with no answered request between them, stop the sweep and the rest is not reached
@@ -319,6 +326,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - every answered entry is cached on its own, with the pack it came from
         - failed_attempts holds one { request, ids, attempts } for each request that left entries without an answer
         - attempts_answered and attempts_failed split the rows' attempts by whether the request was answered
+        - under SHAPE_WHOLE an entry that already has a cached answer keeps it, whatever its pack's response says, and is not counted as a call
         - a pack the budget refuses is not reached and no HTTP is made for it
         - a response that names a model other than the one asked for answers nothing: its entries fail, the row says
           ModelMismatch and holds the served name, its tokens are counted, and the sweep stops with stopped_by
@@ -327,7 +335,7 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         - ValueError for an argument out of range
         - ReuseError CACHE_MISSING or CACHE_CORRUPT when an answer is absent or damaged and the sweep is frozen, or a two-question entry is damaged
     """
-    _check_sweep_args( size, workers, key_mode, run_index, kind )
+    _check_sweep_args( size, workers, key_mode, run_index, kind, shape )
     template, model = template or ctx.template, model or ctx.model
     if budget is None: budget = ctx.run_budget
     if budget is None and isinstance( ctx.transport, rt.LiveJevTransport ): budget = ctx.transport.budget
@@ -337,8 +345,8 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
     def key_of( rec ):
         text = rt.entry_text( rec )
         if kind == "pair": return pair_key( need, text, model, run_index if key_mode == "stage1" else None, run_index if key_mode == "replay" else None )
-        if key_mode == "replay": return replay_key( need, text, run_index, template, model )
-        return candidate_key( need, text, template, model ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model )
+        if key_mode == "replay": return replay_key( need, text, run_index, template, model, shape )
+        return candidate_key( need, text, template, model, shape ) if key_mode == "candidate" else stage1_key( need, text, size, run_index, template, model, shape )
 
     state, misses = {}, []                                          # state maps an entry id to its answer, or to ( "failed" | "not_reached" )
     for rec in entries:
@@ -349,11 +357,18 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         misses.append( rec )
     by_id  = { rec[ "id" ]: rec for rec in entries }
     chunks, oversize = [], []
-    for i in range( 0, len( misses ), size ):
-        if kind == "pair":
-            pieces, big = rpr.split_for_size( need, misses[ i:i + size ], size_limit )
-            chunks += pieces; oversize += big
-        else: chunks.append( misses[ i:i + size ] )
+    cached = { i for i, v in state.items() if isinstance( v, tuple ) }         # an answer the cache already holds is kept, whatever a whole pack's response says
+    if shape == SHAPE_WHOLE:
+        whole = sorted( entries, key=lambda rec: rec[ "id" ] )
+        for i in range( 0, len( whole ), size ):
+            pack = whole[ i:i + size ]
+            if any( rec[ "id" ] not in state for rec in pack ): chunks.append( pack )
+    else:
+        for i in range( 0, len( misses ), size ):
+            if kind == "pair":
+                pieces, big = rpr.split_for_size( need, misses[ i:i + size ], size_limit )
+                chunks += pieces; oversize += big
+            else: chunks.append( misses[ i:i + size ] )
     for i in oversize: state[ i ] = "failed"
 
     def one( chunk ):
@@ -369,9 +384,12 @@ def sweep_packed( ctx, need, entries, size, workers=WORKERS_DEFAULT, key_mode="c
         results = list( pool.map( one, chunks ) )
     rows, unwritten = [], []
     for out, bad in results:
-        for a in out[ "answers" ]: state[ a[ "id" ] ] = ( "live", { k: v for k, v in a.items() if k != "id" } if kind == "pair" else a[ "probabilities" ] )
-        for i in out[ "failed" ]: state[ i ] = "failed"
-        for i in out[ "not_reached" ]: state[ i ] = "not_reached"
+        for a in out[ "answers" ]:
+            if a[ "id" ] not in cached: state[ a[ "id" ] ] = ( "live", { k: v for k, v in a.items() if k != "id" } if kind == "pair" else a[ "probabilities" ] )
+        for i in out[ "failed" ]:
+            if i not in cached: state[ i ] = "failed"
+        for i in out[ "not_reached" ]:
+            if i not in cached: state[ i ] = "not_reached"
         rows += out[ "rows" ]; unwritten += bad
     for n, r in enumerate( rows ): r[ "index" ] = n
     answers = [ { "id": rec[ "id" ], **state[ rec[ "id" ] ][ 1 ] } if kind == "pair" else { "id": rec[ "id" ], "probabilities": state[ rec[ "id" ] ][ 1 ] }
@@ -419,22 +437,22 @@ def pair_ask( ctx, need, entries ):
              "malformed": sw[ "malformed" ], "stats": stats }
 
 
-def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None, kind="choice" ):
+def packed_sweeper( size, workers=WORKERS_DEFAULT, breaker=None, kind="choice", shape=SHAPE ):
     """
     Make the sweeper a ReuseContext takes for the packed path.
 
     Requires:
-        - size and workers are in range for sweep_packed, and kind is "choice" or "pair"
+        - size and workers are in range for sweep_packed, kind is "choice" or "pair", and shape is a known shape name
     Ensures:
         - returns a function with sweep's signature that sweeps in packs with the per-candidate cache key
         - the same function serves the page asks and the entry asks, so both travel through one transport
     Raises:
         - ValueError for a size or worker count out of range
     """
-    _check_sweep_args( size, workers, "candidate", None, kind )
+    _check_sweep_args( size, workers, "candidate", None, kind, shape )
 
     def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
         return sweep_packed( ctx, need, entries, size, workers=workers, key_mode="candidate", template=template, model=model,
-                             frozen=frozen, gaps=gaps, breaker=breaker, kind=kind )
+                             frozen=frozen, gaps=gaps, breaker=breaker, kind=kind, shape=shape )
 
     return sweeper
