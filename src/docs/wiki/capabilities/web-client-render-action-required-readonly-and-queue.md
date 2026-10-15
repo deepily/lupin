@@ -28,4 +28,4 @@ The non-interactive card, the "no pending actions" line and the minimized row fo
 `ActionRequiredRenderer` paints an active card with the interactive form from [[web-client-render-action-required-interactive]] and the queued items as queue rows. It uses `renderActionRequiredEmpty` when nothing is pending.
 
 ## Don't
-- Don't expect `renderActionRequiredReadOnly` to be on screen. A search of the multiplexer sources found no caller outside its own file.
+- Don't expect `renderActionRequiredReadOnly` to be on screen. It has no production caller; only its unit test calls it.

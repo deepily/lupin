@@ -26,7 +26,7 @@ These functions keep a job's meta JSON from freezing the page. `populateJobMetaI
 - `populateJobMetaIfNeeded( card, meta )` fills the card's `.job-meta-json` on the first call, removes `hidden`, and remembers that element.
 
 ## How the parts work together
-The pane's card-header click handler calls `populateJobMetaIfNeeded`. It runs `safeStringifyMeta`, which checks `estimateSize` first and so avoids a large `JSON.stringify`. Boot calls `configureMetaDisplayCap` once with the server config it fetches at startup.
+The pane's card-header click handler and `reopenExpandedCards` call `populateJobMetaIfNeeded`. It runs `safeStringifyMeta`, which checks `estimateSize` first and so avoids a large `JSON.stringify`. Boot calls `configureMetaDisplayCap` once with the server config it fetches at startup.
 
 ## Don't
 - Don't expect the meta block to refresh. After the first expand the element is cached, and later calls do nothing.

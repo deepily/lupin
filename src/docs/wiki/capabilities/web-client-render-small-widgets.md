@@ -15,7 +15,7 @@ Four helpers used by the notification and filter panes: a date accordion, a filt
 - `renderDateAccordion( dateKey, notifications, opts, count )` returns a `.date-accordion` div for one `YYYY-MM-DD` date. It carries `data-id-hash` and `data-date-key` set to the date, and starts with `data-collapsed="false"`.
 - Its header shows the date, the count in parentheses, a `.date-delete-btn` and a toggle. The count is `count` when given, else `notifications.length`.
 - Its messages area holds one notification item per entry, built through `keyedListMerge` in the order given.
-- `createFilterSettingsReveal( { toolbar, doc } )` returns a function. When called, it calls `toolbar().showSection` for the filter-settings section, then scrolls that section into view. A missing section element is a no-op.
+- `createFilterSettingsReveal( { toolbar, doc } )` returns a function. When called, it calls `toolbar().showSection` for the filter-settings section, then scrolls that section into view. `showSection` runs first and always. Only the scroll is skipped when the section element is missing.
 - `createHistoryWindowDropdown( store, doc )` returns `{ element, sync, dispose }`. The element is `#history-window-dropdown` with one item per history-window option.
 - A click on an item closes the menu, sets the window on the store and repaints. A click outside closes the menu. A click inside does not reach an ancestor.
 - `insertTranscriptionText( existing, selStart, selEnd, text )` returns `{ value, caret }`. With a caret it replaces the selected range with `text` and returns the index after it.

@@ -30,7 +30,7 @@ pins:
 - `resetForTesting` sets the cached policy to null. It does not touch the known-template set.
 
 ## How the parts work together
-`html` calls `ensurePolicy`, registers its strings as known and runs `assemble`. It parses the result, then runs `applyAttributes` and `applyChildren` on the content. When Trusted Types exists, the policy refuses to mint HTML for a template array it never registered. So only tagged templates and `raw` payloads reach the parser.
+`html` calls `ensurePolicy`, registers its strings as known and runs `assemble`. It parses the result, then runs `applyAttributes` and `applyChildren` on the content. When Trusted Types exists, the policy refuses to mint HTML for a template array it never registered. `html` itself registers the array it is given, so the policy guards the `createHTML` hook and not the entry point.
 
 ## Don't
 - Don't pass unsanitized text to `raw`. It bypasses the escaping this tag exists to provide.
