@@ -362,3 +362,16 @@ def test_make_job_writer_refuses_a_worktree_by_value_error_and_a_missing_credent
     with pytest.raises( CandidateError ) as e:
         cb.make_job_writer( str( tmp_path / "main" ), "http://x", { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e" } )
     assert e.value.code == "DEPENDENCY_MISSING" and "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" in e.value.detail
+
+
+def test_the_build_info_is_in_the_new_set_at_the_moment_of_the_swap( world, monkeypatch ):
+    seen = {}
+    real = cb.vs.swap_in
+
+    def watching( new_dir, live_dir ):
+        seen[ "info_in_new_set" ] = ( new_dir / "build-info.json" ).is_file()
+        real( new_dir, live_dir )
+
+    monkeypatch.setattr( cb.vs, "swap_in", watching )
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={} )
+    assert seen == { "info_in_new_set": True }

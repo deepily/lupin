@@ -31,7 +31,8 @@ def test_build_info_round_trips_and_names_the_manifest_the_symbols_and_the_time(
     assert fr.read_build_info( tmp_path ) == written
 
 
-@pytest.mark.parametrize( "text", [ None, "{not json", "[1]", json.dumps( { "built_at": "t" } ), json.dumps( { "index_manifest": "m" } ) ] )
+@pytest.mark.parametrize( "text", [ None, "{not json", "[1]", "5", json.dumps( "index_manifest built_at" ),
+                                   json.dumps( { "built_at": "t" } ), json.dumps( { "index_manifest": "m" } ) ] )
 def test_build_info_reads_as_none_when_absent_unreadable_or_incomplete( tmp_path, text ):
     if text is not None: ( tmp_path / fr.BUILD_INFO_FILE ).write_text( text )
     assert fr.read_build_info( tmp_path ) is None
