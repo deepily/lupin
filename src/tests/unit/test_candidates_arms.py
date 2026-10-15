@@ -98,11 +98,23 @@ class TestPositiveControl:
             shortlist = arms.run_arm( "B1", "unmatched words", stages, available, k )[ "shortlist" ]
             assert am.recall_at_k( shortlist, reference ) == 1.0
 
-    def test_a_cut_below_the_reference_loses_recall( self, stages ):
+    def test_a_cut_below_the_reference_loses_recall( self ):
+        small     = arms.build_arm_stages( ENTRIES, PURPOSES, head=2 )
         reference = [ "a", "c", "e" ]
         available = { "vector_concat": [ "b", "d", "x" ] + reference }
-        shortlist = arms.run_arm( "B1", "unmatched words", stages, available, 3 )[ "shortlist" ]
+        shortlist = arms.run_arm( "B1", "unmatched words", small, available, 2 )[ "shortlist" ]
+        assert shortlist == [ "b", "d" ]
         assert am.recall_at_k( shortlist, reference ) < 1.0
+
+    def test_a_cut_below_the_head_is_refused_by_the_arm_itself( self, stages ):
+        with pytest.raises( CandidateError ) as caught:
+            arms.run_arm( "B1", "unmatched words", stages, { "vector_concat": [ "a" ] }, 3 )
+        assert caught.value.code == arms.K_BELOW_HEAD
+        assert "head size 5" in caught.value.detail
+
+    def test_a_cut_equal_to_the_head_is_accepted( self, stages ):
+        out = arms.run_arm( "C0", "config", stages, {}, 5 )
+        assert out[ "shortlist" ] == [ "a" ]
 
 
 class TestFullRanking:

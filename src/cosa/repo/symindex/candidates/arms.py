@@ -14,6 +14,7 @@ ARM_UNKNOWN         = "ARM_UNKNOWN"
 ARM_LIST_MISSING    = "ARM_LIST_MISSING"
 FRESH_NEEDS_REFUSED = "FRESH_NEEDS_REFUSED"
 FUSION_EMPTY        = "FUSION_EMPTY"
+K_BELOW_HEAD        = "K_BELOW_HEAD"
 
 ARMS = ( "C0", "C1", "B1", "B2", "B2w" )
 KS   = ( 32, 64, 128, 256, 512 )
@@ -80,9 +81,11 @@ def run_arm( arm, need, stages, available, K ):
 
     Raises:
         - CandidateError ARM_UNKNOWN or ARM_LIST_MISSING, from lists_for_arm
+        - CandidateError K_BELOW_HEAD when K is smaller than the stage's head size, since the head ids alone would not fit
     """
     extra = lists_for_arm( arm, available )
     stage = stages[ "purposed" if ARM_PURPOSE[ arm ] else "plain" ]
+    if K < stage.fusion[ "head" ]: raise CandidateError( K_BELOW_HEAD, f"K {K} is below the head size {stage.fusion[ 'head' ]}" )
     return cs.shortlist( need, stage, K, extra )
 
 
