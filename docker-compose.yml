@@ -255,6 +255,11 @@ services:
       # remove". Both rest services mount the SAME host dir, which is what lets an
       # operator's slider move on :7999 and be honoured by the gate on :8000.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
+      # Reuse-review data (purpose lines, the candidate vector set, the query cache) — the resident
+      # candidate search reads the vectors, so the mount is read-only. It sits at the HOST's own path
+      # because the caller (cosa-voice, on the host) sends `vectors_dir` as a host path and the router
+      # confines that path under LUPIN_REUSE_REVIEW_DATA_ROOT below.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:ro
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -350,6 +355,11 @@ services:
       # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
       # `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      # The folder the candidate search may read vectors from: the host path mounted above. WITHOUT
+      # THIS the router derives /projects-data/lupin/reuse-review, which no request path is under, and
+      # every search answered 403 PATH_REFUSED. ⚠️ Env + mounts resolve at container CREATE: picking this
+      # up needs `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_REUSE_REVIEW_DATA_ROOT: /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review
       LUPIN_SERVER_PORT: "7999"
       DB_HOST: lupin-postgres
       # Row 80513825 (Rick, 2026-10-03): the app connects as its OWN role, `lupin_app`, not
@@ -541,6 +551,11 @@ services:
       # remove". Both rest services mount the SAME host dir, which is what lets an
       # operator's slider move on :7999 and be honoured by the gate on :8000.
       - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio:/var/lupin/flow-ratio
+      # Reuse-review data (purpose lines, the candidate vector set, the query cache) — the resident
+      # candidate search reads the vectors, so the mount is read-only. It sits at the HOST's own path
+      # because the caller (cosa-voice, on the host) sends `vectors_dir` as a host path and the router
+      # confines that path under LUPIN_REUSE_REVIEW_DATA_ROOT below.
+      - /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review:ro
       - ./pytest.ini:/var/lupin/pytest.ini:ro
       # Repo-root deploy artifacts the unit suite ASSERTS ABOUT (bug b5b6d252).
       # Without these, 19 unit tests fail in-container with FileNotFoundError
@@ -640,6 +655,11 @@ services:
       # ⚠️ Env + mounts resolve at container CREATE: picking this up needs
       # `docker compose up -d --force-recreate`, never a plain restart.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      # The folder the candidate search may read vectors from: the host path mounted above. WITHOUT
+      # THIS the router derives /projects-data/lupin/reuse-review, which no request path is under, and
+      # every search answered 403 PATH_REFUSED. ⚠️ Env + mounts resolve at container CREATE: picking this
+      # up needs `docker compose up -d --force-recreate`, never a plain restart.
+      LUPIN_REUSE_REVIEW_DATA_ROOT: /mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review
       # The heartbeat poke switch THIS server reads and writes: a test-only file in the shared
       # flow-ratio folder, never the fleet's real heartbeat-poke-mute.json. The folder is mounted
       # into both servers, and the Stop hook on the host reads the real file on every stop, so a

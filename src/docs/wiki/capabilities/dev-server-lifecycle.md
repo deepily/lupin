@@ -27,6 +27,7 @@ Small modules that say whether a server is free, announce its restarts and name 
 - Don't call a venue idle from `pool-status` or the user-filtered queue listings. Only `/api/busy` sees every user's queued and inline work. The listings show only the caller's own.
 - Don't add `-p`, `--junit-xml` or `--rootdir` to the pytest allowlist. The first imports a module, the second is a write path, and the third moves which conftest is imported.
 - Don't put the exception message in the error envelope. Nobody has audited what it could expose.
+- Don't restart a container to pick up the reuse-review mount or `LUPIN_REUSE_REVIEW_DATA_ROOT`: a changed mount or env needs `docker compose up -d --force-recreate`.
 - Don't compute code identity per request. A fresh read would answer from the files, not from the running process.
 
 ## Invariants

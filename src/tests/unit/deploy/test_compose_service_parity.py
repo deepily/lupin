@@ -241,6 +241,14 @@ KNOWN_DIVERGENT_MOUNTS = {
         "dev-test"  : "2026-09-28 — Rick's personal gcloud ADC login powers dev's FCM wake-ups only (row 9b366409).",
         "cloud-gpu" : "2026-09-28 — same; the VM has no gcloud user login to mount.",
     },
+    # ── the reuse-review data folder (row d3f71441, 2026-10-15) ──────────────
+    # The candidate search reads vectors that the build driver writes on the dev host. The cloud leg
+    # has no such folder and no caller that sends a host path to it, so it neither mounts the folder
+    # nor names it. LUPIN_REUSE_REVIEW_DATA_ROOT below is this mount's partner and carries the same scope.
+    "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/reuse-review": {
+        "cloud-gpu" : "2026-10-15 — the vectors live on the dev host, which the VM cannot see; "
+                      "no caller sends it a host vectors path (row d3f71441).",
+    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
@@ -252,6 +260,9 @@ KNOWN_DIVERGENT_ENV = {
     },
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
+    },
+    "LUPIN_REUSE_REVIEW_DATA_ROOT": {
+        "cloud-gpu" : "2026-10-15 — the partner of the reuse-review mount, which the VM does not take (row d3f71441).",
     },
     # LUPIN_FLOW_RATIO_DIR's exemption was REMOVED 2026-09-26 with its mount partner — see
     # the /var/lupin/flow-ratio comment in KNOWN_DIVERGENT_MOUNTS above for why the original
