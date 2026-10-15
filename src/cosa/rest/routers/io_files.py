@@ -164,13 +164,25 @@ async def get_io_file(
     if os.path.isdir( full_path ):
         # Compute relative-to-io path (the path callers expect for io scope)
         rel_to_io = landed_relative_path( full_path, io_base )   # "" at the io root; never a `../..` form
-        listing = list_directory(
-            abs_dir          = full_path,
-            rel_dir          = rel_to_io,
-            scope            = "io",
-            allowed_exts     = set( MEDIA_TYPES.keys() ),
-            parent_validator = lambda p: bool( p ),
-        )
+        # Open the folder first, judge where the descriptor landed, and list through it
+        # (row 147ce846): the isdir above saw a string a peer can swap before the listing reads it.
+        try:
+            dir_fd = open_pinned( full_path, lambda landed: _judge_landed( landed, io_base ), directory=True )
+        except PinnedPathGone:
+            raise HTTPException(
+                status_code = 404,
+                detail      = f"File not found: {decoded_path}"
+            )
+        try:
+            listing = list_directory(
+                abs_dir          = f"{PROC_FD}/{dir_fd}",
+                rel_dir          = rel_to_io,
+                scope            = "io",
+                allowed_exts     = set( MEDIA_TYPES.keys() ),
+                parent_validator = lambda p: bool( p ),
+            )
+        finally:
+            os.close( dir_fd )
         return JSONResponse( content=listing )
 
     # Check if file exists

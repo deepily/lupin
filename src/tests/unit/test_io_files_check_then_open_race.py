@@ -186,3 +186,66 @@ def test_a_text_read_failure_closes_the_descriptor_and_answers_500( world, monke
         _get( "dir/bad.md" )
     assert exc.value.status_code == 500 and exc.value.detail.startswith( "Error reading file" )
     assert _open_fds() == before
+
+
+# ── the folder listing (row 147ce846): the listing is of the folder that was opened ──────
+
+def _names( response ):
+    import json
+    return sorted( e[ "name" ] for e in json.loads( response.body )[ "entries" ] )
+
+
+def test_control_an_unswapped_folder_is_listed_through_a_pinned_descriptor( world, monkeypatch ):
+    seen = []
+    real = io_files.list_directory
+    monkeypatch.setattr( io_files, "list_directory", lambda **kw: ( seen.append( kw[ "abs_dir" ] ), real( **kw ) )[ 1 ] )
+    before = _open_fds()
+    assert _names( _get( "dir" ) ) == [ "f.md", "p.png" ]
+    assert seen and seen[ 0 ].startswith( "/proc/self/fd/" ), "the listing must read the opened descriptor, not the string"
+    assert _open_fds() == before, "the folder descriptor is closed once the listing is built"
+
+
+def test_a_folder_swapped_after_the_check_is_refused_not_listed( world, monkeypatch ):
+    """Kills the mutant that lists the checked string: the folder became a link to outside."""
+    ( world[ "outside" ] / "only-outside.md" ).write_text( "x" )
+    fired = _swap_after_resolve( monkeypatch, "dir", _dir_to_outside( world ) )
+    with pytest.raises( HTTPException ) as exc:
+        _get( "dir" )
+    assert fired, "the swap never fired: this test would pass for the wrong reason"
+    assert ( exc.value.status_code, exc.value.detail ) == ( 400, "Invalid path: must be within io/ directory" )
+
+
+def test_a_swap_after_the_folder_is_pinned_cannot_redirect_the_listing( world, monkeypatch ):
+    """Kills the mutant that lists the string after pinning the folder."""
+    ( world[ "outside" ] / "only-outside.md" ).write_text( "x" )
+    real  = io_files.open_pinned
+    fired = []
+
+    def open_then_swap( full_path, judge, directory=False ):
+        fd = real( full_path, judge, directory )
+        fired.append( full_path )
+        _dir_to_outside( world )()
+        return fd
+
+    monkeypatch.setattr( io_files, "open_pinned", open_then_swap )
+    names = _names( _get( "dir" ) )
+    assert fired and names == [ "f.md", "p.png" ]
+
+
+def test_a_folder_that_is_gone_at_the_open_answers_the_doors_own_404( world, monkeypatch ):
+    def gone( full_path, judge, directory=False ):
+        raise io_files.PinnedPathGone( full_path )
+    monkeypatch.setattr( io_files, "open_pinned", gone )
+    with pytest.raises( HTTPException ) as exc:
+        _get( "dir" )
+    assert ( exc.value.status_code, exc.value.detail ) == ( 404, "File not found: dir" )
+
+
+def test_the_folder_descriptor_is_closed_when_the_listing_fails( world, monkeypatch ):
+    def boom( **kw ):
+        raise RuntimeError( "listing failed" )
+    monkeypatch.setattr( io_files, "list_directory", boom )
+    before = _open_fds()
+    with pytest.raises( RuntimeError ):
+        _get( "dir" )
+    assert _open_fds() == before

@@ -473,13 +473,22 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator, scope_c
     """
     # Directory branch (polymorphic response) — must come before isfile check
     if os.path.isdir( full_path ):
-        listing = list_directory(
-            abs_dir          = full_path,
-            rel_dir          = rel_path,
-            scope            = scope,
-            allowed_exts     = set( MEDIA_TYPES.keys() ),
-            parent_validator = parent_validator,
-        )
+        # Open the folder first, judge where the descriptor landed, and list through it
+        # (row 147ce846): the isdir above saw a string a peer can swap before the listing reads it.
+        try:
+            dir_fd = open_pinned( full_path, lambda landed: _judge_landed( scope_cfg, landed ), directory=True )
+        except PinnedPathGone:
+            raise HTTPException( status_code=404, detail=f"Path not found: {rel_path}" )
+        try:
+            listing = list_directory(
+                abs_dir          = f"{_PROC_FD}/{dir_fd}",
+                rel_dir          = rel_path,
+                scope            = scope,
+                allowed_exts     = set( MEDIA_TYPES.keys() ),
+                parent_validator = parent_validator,
+            )
+        finally:
+            os.close( dir_fd )
         return JSONResponse( content=listing )
 
     if not os.path.isfile( full_path ):

@@ -238,3 +238,76 @@ def test_a_swap_that_is_undone_after_the_pin_still_cannot_land_outside( world, m
         _upload( "repo/docs/up", "n.md", b"hello" )
     assert exc.value.status_code == 400
     assert [ p.name for p in world[ "outside" ].iterdir() ] == [ "f.md" ], "the pinned outside folder received the write"
+
+
+# ── FOLDER LISTING (row 147ce846) ───────────────────────────────────────────
+
+def _names( response ):
+    import json
+    return sorted( e[ "name" ] for e in json.loads( response.body )[ "entries" ] )
+
+
+def test_control_an_unswapped_folder_is_listed_through_a_pinned_descriptor( world, monkeypatch ):
+    seen = []
+    real = docs_files.list_directory
+    monkeypatch.setattr( docs_files, "list_directory", lambda **kw: ( seen.append( kw[ "abs_dir" ] ), real( **kw ) )[ 1 ] )
+    before = len( os.listdir( "/proc/self/fd" ) )
+    assert _names( _get( "repo/docs/dir" ) ) == [ "f.md" ]
+    assert seen and seen[ 0 ].startswith( "/proc/self/fd/" ), "the listing must read the opened descriptor, not the string"
+    assert len( os.listdir( "/proc/self/fd" ) ) == before, "the folder descriptor is closed once the listing is built"
+
+
+@pytest.mark.parametrize( "landing", [ "outside", "private" ] )
+def test_a_folder_swapped_after_the_check_is_refused_not_listed( world, monkeypatch, landing ):
+    """`outside` escapes the scope root; `private` is inside the root but outside the whitelist."""
+    ( world[ landing ] / "only-there.md" ).write_text( "x" )
+    real  = docs_files.resolve_in_scope
+    fired = []
+
+    def swapping( scope_cfg, rel ):
+        landed = real( scope_cfg, rel )
+        fired.append( rel )
+        _swap_dir_for_symlink( str( world[ "repo" ] / "docs" / "dir" ), str( world[ landing ] ) )
+        return landed
+
+    monkeypatch.setattr( docs_files, "resolve_in_scope", swapping )
+    with pytest.raises( HTTPException ) as exc:
+        _get( "repo/docs/dir" )
+    assert fired, "the swap never fired: this test would pass for the wrong reason"
+    assert exc.value.status_code == 400
+
+
+def test_a_swap_after_the_folder_is_pinned_cannot_redirect_the_listing( world, monkeypatch ):
+    ( world[ "outside" ] / "only-outside.md" ).write_text( "x" )
+    real  = docs_files.open_pinned
+    fired = []
+
+    def open_then_swap( full_path, judge, directory=False ):
+        fd = real( full_path, judge, directory )
+        fired.append( full_path )
+        _swap_dir_for_symlink( str( world[ "repo" ] / "docs" / "dir" ), str( world[ "outside" ] ) )
+        return fd
+
+    monkeypatch.setattr( docs_files, "open_pinned", open_then_swap )
+    assert _names( _get( "repo/docs/dir" ) ) == [ "f.md" ]
+    assert fired
+
+
+@pytest.mark.parametrize( "error,detail", [ ( "PinnedPathGone", "Path not found: docs/dir" ), ( "PinnedPathUnlinked", "Path not found: docs/dir" ) ] )
+def test_a_folder_that_is_gone_at_the_open_answers_404( world, monkeypatch, error, detail ):
+    def gone( full_path, judge, directory=False ):
+        raise getattr( docs_files, error )( full_path )
+    monkeypatch.setattr( docs_files, "open_pinned", gone )
+    with pytest.raises( HTTPException ) as exc:
+        _get( "repo/docs/dir" )
+    assert ( exc.value.status_code, exc.value.detail ) == ( 404, detail )
+
+
+def test_the_folder_descriptor_is_closed_when_the_listing_fails( world, monkeypatch ):
+    def boom( **kw ):
+        raise RuntimeError( "listing failed" )
+    monkeypatch.setattr( docs_files, "list_directory", boom )
+    before = len( os.listdir( "/proc/self/fd" ) )
+    with pytest.raises( RuntimeError ):
+        _get( "repo/docs/dir" )
+    assert len( os.listdir( "/proc/self/fd" ) ) == before
