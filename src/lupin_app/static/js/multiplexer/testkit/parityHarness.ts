@@ -44,6 +44,9 @@ interface ParityHarnessWindow {
   __parityLegacyShapes?: ( scenario: ParityScenario ) => LegacyShapes;
 }
 
+/**
+ * Render the scenario into the sender cards container and return the sender count.
+ */
 function mount( scenario: ParityScenario ): number {
   const container = document.getElementById( "sender-cards-container" );
   /* c8 ignore next */ // defensive: the harness page always provides the mount node; the throw guards a malformed page and is not exercised by the happy-path tests.
@@ -63,6 +66,9 @@ function mount( scenario: ParityScenario ): number {
   return model.senders.length;
 }
 
+/**
+ * Return the scenario in the senders-visible and conversation-by-date shapes.
+ */
 function legacyShapes( scenario: ParityScenario ): LegacyShapes {
   return {
     sendersVisible    : toSendersVisible( scenario ),

@@ -48,6 +48,11 @@ export function parseResponseQuestions(raw: unknown): ReadonlyArray<ActionRequir
   return out;
 }
 
+/**
+ * Converts one raw option value into a list holding zero or one action-required options.
+ *
+ * A string becomes a label-only option, an object with a string label keeps its non-empty description, and anything else gives an empty list.
+ */
 function toOption(raw: unknown): ActionRequiredOption[] {
   if (typeof raw === "string") return [{ label: raw }];
   if (!isRecord(raw) || typeof raw.label !== "string") return [];
@@ -57,6 +62,11 @@ function toOption(raw: unknown): ActionRequiredOption[] {
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line: c8's JSON puts the only uncovered arm on the function NAME, and null, array, scalar and record inputs all run the body (response_questions.test.ts).
+/**
+ * Tells whether a value is a plain object, excluding null and arrays.
+ *
+ * Acts as a type guard for string-keyed records.
+ */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

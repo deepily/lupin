@@ -16,7 +16,13 @@
 // Import the production-ready SequentialAudioManager
 import { SequentialAudioManager } from '/static/js/sequential-audio-manager.js';
 
+/**
+ * Models a page that streams TTS audio over a WebSocket and measures latency.
+ */
 class ExperimentalProgressiveTTS {
+    /**
+     * Sets up streaming state, metrics and page slots, then starts initialize.
+     */
     constructor() {
         // Firefox-first configuration
         this.isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
@@ -52,6 +58,9 @@ class ExperimentalProgressiveTTS {
         this.initialize();
     }
     
+    /**
+     * Prepares the test page for streaming and sets the status to Ready.
+     */
     async initialize() {
         this.log('🦊 Initializing Firefox-First Progressive TTS', 'info');
         
@@ -75,6 +84,9 @@ class ExperimentalProgressiveTTS {
         this.updateStatus('playback-status', 'Ready');
     }
     
+    /**
+     * Looks up the status elements on the page and stores them by name.
+     */
     setupStatusElements() {
         this.statusElements = {
             browserInfo: document.getElementById('browser-info'),
@@ -90,6 +102,9 @@ class ExperimentalProgressiveTTS {
         };
     }
     
+    /**
+     * Reports the browser name and whether Web Audio and WebSocket are supported.
+     */
     detectBrowserCapabilities() {
         const userAgent = navigator.userAgent;
         let browserInfo = 'Unknown';
@@ -129,6 +144,9 @@ class ExperimentalProgressiveTTS {
         this.log(`WebSocket support: ${hasWebSocket ? '✓' : '✗'}`, hasWebSocket ? 'success' : 'error');
     }
     
+    /**
+     * Picks Web Audio or plain audio elements and builds the fallback pool.
+     */
     async initializeAudioSystem() {
         try {
             // Try to initialize Web Audio API (Firefox-optimized)
@@ -154,6 +172,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Creates the pool of hidden audio elements used as a playback fallback.
+     */
     initializeAudioElementsPool() {
         this.log(`🔊 Creating ${this.maxAudioElements} audio elements for seamless playback`, 'info');
         
@@ -188,6 +209,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Creates the manager that plays audio chunks one after another.
+     */
     initializeSequentialAudioManager() {
         this.log( '🎯 Initializing Sequential Audio Manager for proper chunk ordering', 'info' );
         
@@ -211,6 +235,9 @@ class ExperimentalProgressiveTTS {
         this.log( '✅ Sequential Audio Manager initialized successfully', 'success' );
     }
     
+    /**
+     * Fetches the session ID from the server and shows it on the page.
+     */
     async getSessionId() {
         try {
             this.log('🔗 Getting session ID...', 'info');
@@ -227,6 +254,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Creates and resumes the Web Audio context for chunk playback.
+     */
     async initializeWebAudioContext() {
         if (!this.useWebAudioAPI || this.audioContext) return;
         
@@ -255,6 +285,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Opens the audio WebSocket for the current session and resolves once it is open.
+     */
     async connectWebSocket() {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
             this.log('⚠️ WebSocket already connected', 'warning');
@@ -301,6 +334,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Routes a WebSocket message to chunk handling or status handling.
+     */
     async handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Binary audio chunk received
@@ -316,6 +352,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Counts a received audio chunk and queues it for ordered playback.
+     */
     async handleAudioChunk(audioBlob) {
         this.chunksReceived++;
         this.updateStatus('chunksReceived', this.chunksReceived);
@@ -352,6 +391,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Decodes a chunk and schedules it right after the previous one.
+     */
     async playChunkWithWebAudio(audioBlob) {
         try {
             // Convert blob to ArrayBuffer
@@ -384,6 +426,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Plays one audio chunk on the next audio element in the pool.
+     */
     async playChunkWithAudioElement(audioBlob) {
         try {
             // Get next audio element from pool
@@ -421,6 +466,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Reacts to a parsed server status message by its type.
+     */
     handleStatusMessage(message) {
         const { type, text, status, provider } = message;
         
@@ -452,6 +500,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Marks streaming finished and shows the total time.
+     */
     onStreamComplete() {
         this.isStreaming = false;
         this.updateStatus('playbackStatus', 'Complete');
@@ -470,14 +521,23 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Logs that the audio element at the given index started playing.
+     */
     onAudioChunkPlayStart(elementIndex) {
         this.log(`▶️ Audio element ${elementIndex} started playing`, 'info');
     }
     
+    /**
+     * Logs that the audio element at the given index finished playing.
+     */
     onAudioChunkPlayEnd(elementIndex) {
         this.log(`⏹️ Audio element ${elementIndex} finished playing`, 'info');
     }
     
+    /**
+     * Adds a marker for the latest chunk to the chunk display.
+     */
     addChunkIndicator() {
         const chunksDisplay = document.getElementById('chunks-display');
         if (!chunksDisplay) return;
@@ -495,6 +555,9 @@ class ExperimentalProgressiveTTS {
         this.addLatencyBar();
     }
     
+    /**
+     * Adds a bar for the latest latency to the latency chart.
+     */
     addLatencyBar() {
         const chart = document.getElementById('latency-chart');
         if (!chart || this.latencyMeasurements.length === 0) return;
@@ -521,6 +584,9 @@ class ExperimentalProgressiveTTS {
         chart.appendChild(bar);
     }
     
+    /**
+     * Runs one streaming test with the entered text and current settings.
+     */
     async testProgressiveStreaming() {
         const textInput = document.getElementById('test-text');
         const testBtn = document.getElementById('test-progressive-btn');
@@ -589,6 +655,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Runs the same text through the Flash and Turbo models in turn.
+     */
     async testABComparison() {
         const textInput = document.getElementById('test-text');
         const text = textInput?.value.trim();
@@ -620,6 +689,9 @@ class ExperimentalProgressiveTTS {
         this.log('✅ A/B Comparison Complete! Check logs above for latency comparison.', 'success');
     }
     
+    /**
+     * Runs one timed streaming test with the given settings and logs the results.
+     */
     async runSingleTest(text, settings, modelName) {
         try {
             // Reset metrics for this test
@@ -685,6 +757,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Clears the chunk counts, latency data and the displays that show them.
+     */
     resetMetrics() {
         this.chunksReceived = 0;
         this.chunksPlayed = 0;
@@ -719,6 +794,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Stops the current stream and all audio playback.
+     */
     stopStreaming() {
         this.log('⏹️ Stopping streaming...', 'info');
         this.isStreaming = false;
@@ -751,6 +829,9 @@ class ExperimentalProgressiveTTS {
         this.updateStatus('playbackStatus', 'Stopped');
     }
     
+    /**
+     * Sets the text of the named status element on the page, if that element exists.
+     */
     updateStatus(elementId, value) {
         const element = this.statusElements[elementId];
         if (element) {
@@ -758,6 +839,9 @@ class ExperimentalProgressiveTTS {
         }
     }
     
+    /**
+     * Appends a timestamped line to the page log and the console.
+     */
     log(message, type = 'info') {
         if (!this.logElement) return;
         
@@ -773,6 +857,9 @@ class ExperimentalProgressiveTTS {
         console.log(`[ExperimentalTTS] ${message}`);
     }
     
+    /**
+     * Empties the page log and writes a single cleared message to it.
+     */
     clearLogs() {
         if (this.logElement) {
             this.logElement.innerHTML = '';
@@ -789,6 +876,9 @@ const testMessages = {
     custom: "Enter your own test message here to experiment with progressive streaming..."
 };
 
+/**
+ * Fills the test text box with a preset message and focuses it.
+ */
 function setTestText(preset) {
     const textInput = document.getElementById('test-text');
     if (textInput && testMessages[preset]) {
@@ -803,18 +893,27 @@ function setTestText(preset) {
     }
 }
 
+/**
+ * Starts the streaming test on the page's experimental TTS object, if it exists.
+ */
 function testProgressiveStreaming() {
     if (window.experimentalTTS) {
         window.experimentalTTS.testProgressiveStreaming();
     }
 }
 
+/**
+ * Stops streaming on the page's experimental TTS object, if it exists.
+ */
 function stopStreaming() {
     if (window.experimentalTTS) {
         window.experimentalTTS.stopStreaming();
     }
 }
 
+/**
+ * Clears the log on the page's experimental TTS object, if it exists.
+ */
 function clearLogs() {
     if (window.experimentalTTS) {
         window.experimentalTTS.clearLogs();
@@ -822,12 +921,18 @@ function clearLogs() {
 }
 
 // A/B Testing Functions
+/**
+ * Starts the Flash and Turbo comparison on the page's TTS test object.
+ */
 function testABComparison() {
     if (window.experimentalTTS) {
         window.experimentalTTS.testABComparison();
     }
 }
 
+/**
+ * Shows or hides the custom settings and sets the model for the profile.
+ */
 function updateCustomSettings() {
     const profileSelect = document.getElementById('profile-select');
     const customSettings = document.getElementById('custom-settings');
@@ -851,6 +956,9 @@ function updateCustomSettings() {
     }
 }
 
+/**
+ * Reads the model, voice and profile controls into a settings object.
+ */
 function getCurrentSettings() {
     const profileSelect = document.getElementById('profile-select');
     const modelSelect = document.getElementById('model-select');

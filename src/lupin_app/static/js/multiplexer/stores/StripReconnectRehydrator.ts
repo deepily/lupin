@@ -62,6 +62,11 @@ export interface StripReconnectRehydrator {
   disposeForTesting(): void;
 }
 
+/**
+ * Reloads the strip's data after the queue socket reconnects.
+ *
+ * Listens for connection state changes and drops a second trigger while a fetch is running.
+ */
 class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
   private readonly bus      : EventBus;
   private readonly api      : StripRehydrateApiClient;
@@ -74,6 +79,9 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Stores the bus, API client, stores and email getter, and listens for connection changes.
+   */
   constructor( opts: StripReconnectRehydratorOptions ) {
     this.bus      = opts.bus;
     this.api      = opts.api;
@@ -84,6 +92,9 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
     );
   }
 
+  /**
+   * Removes the connection state listener; used by tests.
+   */
   disposeForTesting(): void {
     for ( const off of this.unsubscribers ) off();
   }

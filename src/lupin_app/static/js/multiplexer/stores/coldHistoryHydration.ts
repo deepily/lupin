@@ -82,6 +82,9 @@ export interface ColdHistoryHydration {
   dispose(): void;
 }
 
+/**
+ * Loads senders and history on page open, and again on retry or change.
+ */
 class ColdHistoryHydrationImpl implements ColdHistoryHydration {
   private readonly api               : ColdHydrationApiLike;
   private readonly stores            : ColdHydrationStores;
@@ -93,6 +96,9 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
   private inFlight      = false;
   private reloadPending = false;
 
+  /**
+   * Keeps the API, stores and getters, and subscribes to retry and window changes.
+   */
   constructor(opts: ColdHistoryHydrationOptions) {
     this.api               = opts.api;
     this.stores            = opts.stores;
@@ -160,6 +166,9 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
     }
   }
 
+  /**
+   * Resets the loaded history and runs again.
+   */
   async reload(): Promise<void> {
     if (this.inFlight) {
       this.reloadPending = true;   // the in-flight run starts it when it finishes
@@ -169,6 +178,9 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
     await this.run();
   }
 
+  /**
+   * Removes the bus subscriptions this runner made.
+   */
   dispose(): void {
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }

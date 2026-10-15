@@ -378,6 +378,9 @@ function micButton( tid, field, label, control, onDictate ) {
  * @param {string} selected
  * @param {Record<string, string>} [labels]
  */
+/**
+ * Builds a select element with one option per value and one selected.
+ */
 function selectOf( values, selected, labels = {} ) {
     const select = document.createElement( "select" );
     select.className = "new-ticket-select";
@@ -392,6 +395,9 @@ function selectOf( values, selected, labels = {} ) {
 }
 
 /** @param {string} placeholder */
+/**
+ * Builds a text input with the new-ticket input class and the given placeholder.
+ */
 function textInput( placeholder ) {
     const input = document.createElement( "input" );
     input.type = "text";

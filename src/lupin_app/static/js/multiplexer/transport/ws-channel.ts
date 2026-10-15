@@ -62,6 +62,9 @@ export interface WSChannel {
   readonly generation: number;   // observable for tests + telemetry
 }
 
+/**
+ * Wraps one WebSocket with a state and a generation counter.
+ */
 class WSChannelImpl implements WSChannel {
   private readonly url             : string;
   private readonly protocols?      : string | string[];
@@ -76,6 +79,9 @@ class WSChannelImpl implements WSChannel {
   private gen      : number;
   private _state   : WSChannelState = "closed";
 
+  /**
+   * Stores the socket options and checks a URL and WebSocket constructor exist.
+   */
   constructor(opts: WSChannelOptions) {
     if (typeof opts.url !== "string" || opts.url.length === 0) {
       throw new Error("ws-channel: opts.url is required (non-empty string)");
@@ -97,14 +103,23 @@ class WSChannelImpl implements WSChannel {
     }
   }
 
+  /**
+   * Exposes the channel state: connecting, open, closing or closed.
+   */
   get state(): WSChannelState {
     return this._state;
   }
 
+  /**
+   * Exposes the generation counter, which rises on each start and stop.
+   */
   get generation(): number {
     return this.gen;
   }
 
+  /**
+   * Opens a new socket unless one is already connecting or open.
+   */
   start(): void {
     // Idempotency: if a socket is already CONNECTING or OPEN, do not create
     // another. The caller (ConnectionStateMachine) is responsible for calling
@@ -197,6 +212,9 @@ class WSChannelImpl implements WSChannel {
     };
   }
 
+  /**
+   * Drops pending callbacks, closes the socket and sets the state to closed.
+   */
   stop(): void {
     // Bump generation FIRST so any in-flight callback bound to the current
     // socket is dropped before its handler can run.
@@ -210,6 +228,9 @@ class WSChannelImpl implements WSChannel {
     this._state = "closed";
   }
 
+  /**
+   * Sends a string as is, or any other value as JSON, over the open socket.
+   */
   send(envelope: unknown): void {
     if (!this.socket || this._state !== "open") {
       throw new Error(`ws-channel: cannot send — channel state is '${this._state}'`);
@@ -244,6 +265,9 @@ export function createWSChannel(opts: WSChannelOptions): WSChannel {
 // polyfills globalThis.CloseEvent before invoking the constructor-failure
 // path. Production browsers always hit the true branch.
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; both real branches inside the body ARE covered — verified via lcov).
+/**
+ * Returns a close event with the given code and reason.
+ */
 function makeCloseEvent(code: number, reason: string): CloseEvent {
   if (typeof CloseEvent !== "undefined") {
     return new CloseEvent("close", { code, reason });

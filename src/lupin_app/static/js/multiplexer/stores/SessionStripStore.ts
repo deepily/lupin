@@ -149,6 +149,9 @@ export interface SessionStripStoreOptions {
 // Implementation
 // ---------------------------------------------------------------------------
 
+/**
+ * Tracks one strip icon per session sender.
+ */
 class SessionStripStoreImpl implements SessionStripStore {
   private readonly bus   : EventBus;
   private readonly nowFn : () => number;
@@ -157,6 +160,9 @@ class SessionStripStoreImpl implements SessionStripStore {
 
   private readonly unsubscribers: Array<() => void> = [];
 
+  /**
+   * Builds the store from a bus and an optional clock, then subscribes to bus events.
+   */
   constructor(opts: SessionStripStoreOptions) {
     this.bus = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
@@ -164,15 +170,24 @@ class SessionStripStoreImpl implements SessionStripStore {
     this.subscribe();
   }
 
+  /**
+   * Returns the strip session for a sender ID, or undefined when none is tracked.
+   */
   get(senderId: string): StripSession | undefined {
     return this.sessions.get(senderId);
   }
 
+  /**
+   * Returns every tracked strip session as an array.
+   */
   list(): ReadonlyArray<StripSession> {
     return Array.from(this.sessions.values());
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Unsubscribes from all bus events so a test can finish cleanly.
+   */
   disposeForTesting(): void {
     for (const off of this.unsubscribers) off();
   }
@@ -281,12 +296,18 @@ class SessionStripStoreImpl implements SessionStripStore {
     return nullPersona;
   }
 
+  /**
+   * Adds or updates sessions from a server snapshot without removing any.
+   */
   hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
     this.upsertRecords(records);   // additive — the null-persona set is not pruned (cold-boot stays additive)
     // Single emission for the whole snapshot — renderer reconciles from list().
     this.emit("hydrated");
   }
 
+  /**
+   * Applies a server snapshot and removes sessions it reports as persona-less.
+   */
   reconcile(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
     const nullPersona = this.upsertRecords(records);
     // Prune the sessions the snapshot AUTHORITATIVELY reports as persona-less

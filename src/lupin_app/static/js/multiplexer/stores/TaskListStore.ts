@@ -188,6 +188,11 @@ export interface TaskListStoreOptions {
   actorProvider?  : () => string | null;
 }
 
+/**
+ * Holds the cached task list, refreshes it by polling and push, and applies quick edits.
+ *
+ * It emits a bus event whenever the cached list changes.
+ */
 class TaskListStoreImpl implements TaskListStore {
   private readonly bus      : EventBus;
   private readonly api      : TaskListApiClient;
@@ -203,6 +208,11 @@ class TaskListStoreImpl implements TaskListStore {
   private pollHandle    : number | null = null;
   private unsubscribePush : ( () => void ) | null = null;
 
+  /**
+   * Creates the store from a bus and API client, defaulting endpoint, clock, timers and actor.
+   *
+   * It fetches nothing yet.
+   */
   constructor( opts: TaskListStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -218,10 +228,18 @@ class TaskListStoreImpl implements TaskListStore {
     this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
   }
 
+  /**
+   * Returns the last fetched task list result, or null before the first fetch.
+   */
   composite(): TaskListComposite | null {
     return this.lastComposite;
   }
 
+  /**
+   * Fetches the task list and emits a change event.
+   *
+   * Does nothing when a fetch is already in flight.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
     this.inFlight = true;
@@ -238,6 +256,9 @@ class TaskListStoreImpl implements TaskListStore {
     return run;
   }
 
+  /**
+   * Waits out any fetch in flight, then returns one that started after this call.
+   */
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlightRun !== null ) await this.inFlightRun;
     // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
@@ -249,6 +270,11 @@ class TaskListStoreImpl implements TaskListStore {
     return this.refresh();
   }
 
+  /**
+   * Fetches now, then refetches on a timer and whenever the server pushes a task store change.
+   *
+   * Restarts cleanly if already polling.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
@@ -261,6 +287,9 @@ class TaskListStoreImpl implements TaskListStore {
     this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
   }
 
+  /**
+   * Cancels the poll timer and the server push subscription.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -273,6 +302,9 @@ class TaskListStoreImpl implements TaskListStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops polling; used by tests for cleanup.
+   */
   disposeForTesting(): void {
     this.stopPolling();
   }
@@ -282,6 +314,11 @@ class TaskListStoreImpl implements TaskListStore {
   // Phase 2 — optimistic mutations (PATCH priority/owner; transition→dropped)
   // -------------------------------------------------------------------------
 
+  /**
+   * Applies priority or owner changes to a cached task at once and sends a PATCH request.
+   *
+   * Returns a rollback function and a promise for the request; a missing cache or task gives a no-op handle.
+   */
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
@@ -303,6 +340,11 @@ class TaskListStoreImpl implements TaskListStore {
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
+  /**
+   * Moves a cached task to a new status at once and posts the transition.
+   *
+   * A closed status removes the row. Returns a rollback function and a promise that rejects while approval is pending.
+   */
   transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
@@ -393,8 +435,9 @@ class TaskListStoreImpl implements TaskListStore {
   }
 }
 
-// A no-op mutation handle for the cache-miss path (no cached composite / unknown
-// id): no api call, an immediately-resolved `done`, an inert `restoreState`.
+/**
+ * Returns a mutation handle that does nothing: inert rollback and a resolved promise.
+ */
 function NOOP_MUTATION(): TaskMutation {
   return { restoreState: () => { /* nothing to revert */ }, done: Promise.resolve() };
 }

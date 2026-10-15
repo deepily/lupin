@@ -142,16 +142,29 @@ export function transcriptBlockBytes( block: TranscriptBlock ): number {
   return ENCODER.encode( block.text ?? "" ).length;
 }
 
+/**
+ * Tells whether a value is a plain object, not null and not an array.
+ */
 function isFrame( value: unknown ): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray( value );
 }
 
+/**
+ * Returns the object entries of a value as transcript blocks, or an empty list.
+ *
+ * Empty blocks are kept.
+ */
 function blocksOf( value: unknown ): TranscriptBlock[] {
   // An EMPTY block is content, and dropping one is indistinguishable from a block that never
   // arrived — so only non-objects are filtered, never empties.
   return Array.isArray( value ) ? value.filter( isFrame ) as unknown as TranscriptBlock[] : [];
 }
 
+/**
+ * Keeps the transcript of one watched Claude Code session in a size-capped ring of segments.
+ *
+ * It reads the backlog over HTTP, follows live appends over the socket, and pages in earlier history.
+ */
 class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   private readonly bus          : EventBus;
   private readonly api          : SessionTranscriptApiClient;
@@ -177,6 +190,11 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   // on is recognised as stale and discarded rather than spliced into the wrong stream.
   private generation     = 0;
 
+  /**
+   * Sets up the store from the bus, API client and send function, with defaults.
+   *
+   * It subscribes to auth success and transcript append and state events.
+   */
   constructor( opts: SessionTranscriptStoreOptions ) {
     this.bus          = opts.bus;
     this.api          = opts.api;
@@ -196,6 +214,11 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
 
   // ── public surface ───────────────────────────────────────────────────────
 
+  /**
+   * Starts watching a session: unwatches the old one, clears state, reads the backlog.
+   *
+   * It does nothing for an empty ID or the session already watched.
+   */
   async open( ccSessionId: string ): Promise<void> {
     if ( !ccSessionId ) return;
     if ( ccSessionId === this.watched ) return;   // already there: no unwatch/watch churn
@@ -208,6 +231,9 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     await this.readBacklog();
   }
 
+  /**
+   * Stops watching the current session, clears the stream and emits a change.
+   */
   close(): void {
     if ( this.watched ) this.trySend( { type: "cc_transcript_unwatch", cc_session_id: this.watched } );
     this.resetStream();
@@ -215,6 +241,11 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     this.changed();
   }
 
+  /**
+   * Fetches the page of transcript just before the earliest loaded offset and prepends it.
+   *
+   * It is skipped when nothing earlier exists or a load is running. A changed file epoch triggers a full re-read.
+   */
   async loadEarlier(): Promise<void> {
     const before = this.earliestOffset();
     if ( before === null || before <= 0 || this.loadingEarlier ) return;
@@ -245,6 +276,9 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     }
   }
 
+  /**
+   * Returns a copy of the view state: blocks, offsets, stream state and paging flags.
+   */
   snapshot(): SessionTranscriptSnapshot {
     const earliest = this.earliestOffset();
     return {
@@ -263,6 +297,9 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     };
   }
 
+  /**
+   * Unsubscribes the store from all bus events.
+   */
   destroy(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;

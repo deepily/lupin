@@ -127,6 +127,9 @@ export interface MuxParityModel {
  */
 export const RESPONSE_ID_SUFFIX = "-response";
 
+/**
+ * Project a test voice persona onto the five-field client persona shape.
+ */
 function muxPersona( p: ParityVoicePersona ): VoicePersona {
   // Explicit 5-field projection (D-E canonical shape) — no assigned_at on the
   // client VoicePersona.
@@ -139,6 +142,9 @@ function muxPersona( p: ParityVoicePersona ): VoicePersona {
   };
 }
 
+/**
+ * Convert a scenario sender into a multiplexer sender record.
+ */
 function muxSenderRecord( s: ParityScenarioSender ): SenderRecord {
   const record: SenderRecord = {
     sender_id                : s.sender_id,
@@ -153,6 +159,9 @@ function muxSenderRecord( s: ParityScenarioSender ): SenderRecord {
   return record;
 }
 
+/**
+ * Convert a scenario notification into an incoming multiplexer notification.
+ */
 function muxIncoming( senderId: string, n: ParityScenarioNotification ): Notification {
   const norm: Notification = {
     id_hash         : n.id,
@@ -167,6 +176,9 @@ function muxIncoming( senderId: string, n: ParityScenarioNotification ): Notific
   return norm;
 }
 
+/**
+ * Build the synthetic outgoing notification carrying a scenario response value.
+ */
 function muxOutgoing( senderId: string, n: ParityScenarioNotification, value: string ): Notification {
   // Synthetic outgoing response — mirrors legacy notifications.js:14321-14328.
   return {
@@ -242,6 +254,9 @@ export interface ConversationRow {
 /** Rows by sender id, then by calendar date, as the conversation-by-date endpoint answers. */
 export type ConversationByDate = Record<string, Record<string, ConversationRow[]>>;
 
+/**
+ * Convert a scenario notification into a conversation-by-date row.
+ */
 function conversationRow( senderId: string, n: ParityScenarioNotification ): ConversationRow {
   const row: ConversationRow = {
     id        : n.id,

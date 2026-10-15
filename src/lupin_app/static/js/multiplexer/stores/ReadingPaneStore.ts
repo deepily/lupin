@@ -122,6 +122,11 @@ export interface ReadingPaneStoreOptions {
   storage : StorageService;
 }
 
+/**
+ * Models the reading pane: layout mode, split ratio, history of opened entries, console.
+ *
+ * It persists layout and ratio to storage and emits events on the bus when state changes.
+ */
 class ReadingPaneStoreImpl implements ReadingPaneStore {
   private readonly bus     : EventBus;
   private readonly storage : StorageService;
@@ -137,6 +142,9 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   // cannot disagree.
   private consoleTitleValue: string | null = null;
 
+  /**
+   * Creates the store from a bus and storage service and loads saved layout settings.
+   */
   constructor( opts: ReadingPaneStoreOptions ) {
     this.bus     = opts.bus;
     this.storage = opts.storage;
@@ -170,33 +178,64 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   // Reads
   // -------------------------------------------------------------------------
 
+  /**
+   * Returns the current layout mode, horizontal or vertical.
+   */
   getLayoutMode(): LayoutMode { return this.layoutMode; }
+  /**
+   * Returns the current split ratio of the pane divider.
+   */
   getSplitRatio(): number     { return this.splitRatio; }
 
+  /**
+   * Returns a copy of the stack of opened pane entries, oldest first.
+   */
   getHistory(): ReadonlyArray<ContentPaneEntry> {
     // Defensive copy — callers must not mutate internal state.
     return this.history.map(e => ({ ...e }));
   }
 
+  /**
+   * Returns a copy of the newest history entry, or null when the history is empty.
+   */
   currentEntry(): ContentPaneEntry | null {
     if (this.history.length === 0) return null;
     const top = this.history[this.history.length - 1] as ContentPaneEntry;
     return { ...top };
   }
 
+  /**
+   * Reports whether the pane shows a history entry, the action card or the console.
+   */
   isPaneOpen(): boolean {
     return this.history.length > 0 || this.arInPane || this.consoleTitleValue !== null;
   }
 
+  /**
+   * Reports whether the action-required card currently occupies the pane.
+   */
   isActionRequiredInPane(): boolean { return this.arInPane; }
 
-  // Back operates on the reading stack, which the console never joined.
+  /**
+   * Reports whether Back would work: no console and more than one history entry.
+   */
   canGoBack(): boolean { return this.consoleTitleValue === null && this.history.length > 1; }
 
+  /**
+   * Returns which kind of content the pane shows, reading or console.
+   */
   getPaneContent(): PaneContent { return this.consoleTitleValue === null ? "reading" : "console"; }
 
+  /**
+   * Returns the console title while the console shows, otherwise null.
+   */
   consoleTitle(): string | null { return this.consoleTitleValue; }
 
+  /**
+   * Reports whether the given abstract text is the entry now shown in the pane.
+   *
+   * Returns false while the action-required card or console holds the pane.
+   */
   isAbstractShown(abstract: string): boolean {
     if (this.arInPane || this.consoleTitleValue !== null) return false;
     const current = this.currentEntry();
@@ -207,6 +246,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
   // Mutations
   // -------------------------------------------------------------------------
 
+  /**
+   * Pushes an entry onto the pane history and leaves the console, trimming to the cap.
+   *
+   * Returns false and changes nothing while the action-required card owns the pane.
+   */
   open(type: ContentPaneEntry["type"], payload: string, title: string): boolean {
     // While AR owns the pane, abstract/doc opens are suppressed (the blocking
     // response card keeps the pane — legacy `_openContentPane` AR guard).
@@ -219,12 +263,20 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return true;
   }
 
+  /**
+   * Empties the pane history, leaves the console and emits a closed event.
+   */
   close(): void {
     this.history           = [];
     this.consoleTitleValue = null;
     this.emit("closed");
   }
 
+  /**
+   * Switches the pane to the console with the given title, defaulting to Console.
+   *
+   * Returns false while the action-required card owns the pane.
+   */
   showConsole(title: string): boolean {
     if (this.arInPane) return false;
     this.consoleTitleValue = title || "Console";
@@ -232,6 +284,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return true;
   }
 
+  /**
+   * Switches the pane from the console back to the reading history.
+   *
+   * Returns false when the console was not showing.
+   */
   showReading(): boolean {
     if (this.consoleTitleValue === null) return false;
     this.consoleTitleValue = null;
@@ -239,6 +296,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return true;
   }
 
+  /**
+   * Pops the newest history entry to show the previous one.
+   *
+   * Returns false when the console shows or only one entry remains.
+   */
   back(): boolean {
     // Not only a disabled button: the console never joined the stack, so Back is refused.
     if (this.consoleTitleValue !== null || this.history.length <= 1) return false;
@@ -247,6 +309,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return true;
   }
 
+  /**
+   * Flips the layout between horizontal and vertical, saves it, and returns the new mode.
+   *
+   * Switching to vertical closes the pane and releases the action-required card.
+   */
   toggleLayoutMode(): LayoutMode {
     const next: LayoutMode = this.layoutMode === "horizontal" ? "vertical" : "horizontal";
     this.layoutMode = next;
@@ -266,6 +333,9 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return next;
   }
 
+  /**
+   * Clamps the ratio to its allowed range, saves it to storage and emits a ratio event.
+   */
   setSplitRatio(ratio: number): void {
     let clamped = ratio;
     if (clamped < MIN_SPLIT_RATIO) clamped = MIN_SPLIT_RATIO;
@@ -275,6 +345,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     this.emit("ratio");
   }
 
+  /**
+   * Moves the action-required card into the pane with a temporary split ratio.
+   *
+   * Returns false unless the layout is horizontal and the card is not already there.
+   */
   enterActionRequiredPane(): boolean {
     if (this.layoutMode !== "horizontal" || this.arInPane) return false;
     this.arPriorRatio = this.splitRatio;
@@ -284,6 +359,11 @@ class ReadingPaneStoreImpl implements ReadingPaneStore {
     return true;
   }
 
+  /**
+   * Takes the action-required card out of the pane and restores the saved split ratio.
+   *
+   * Returns false when it was not in the pane.
+   */
   exitActionRequiredPane(): boolean {
     if (!this.arInPane) return false;
     this.restoreArPriorRatio();

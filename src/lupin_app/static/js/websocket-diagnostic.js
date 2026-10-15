@@ -12,6 +12,9 @@
  */
 
 class WebSocketDiagnosticTool {
+    /**
+     * Sets up empty counters and maps for connections, audio and timing.
+     */
     constructor() {
         // Connection tracking
         this.sessionId = null;
@@ -41,6 +44,9 @@ class WebSocketDiagnosticTool {
         this.initialize();
     }
     
+    /**
+     * Finds the console element, sets up the status fields and fetches the session ID.
+     */
     async initialize() {
         this.log('🔧 Initializing WebSocket Diagnostic Tool', 'diagnostic');
         
@@ -55,6 +61,9 @@ class WebSocketDiagnosticTool {
         this.updateStatus('session-id', this.sessionId);
     }
     
+    /**
+     * Looks up the status panel elements by ID and keeps them for later updates.
+     */
     setupStatusElements() {
         this.statusElements = {
             sessionId: document.getElementById('session-id'),
@@ -68,6 +77,9 @@ class WebSocketDiagnosticTool {
         };
     }
     
+    /**
+     * Fetches a session ID from the server and stores it.
+     */
     async getSessionId() {
         try {
             const response = await fetch('/api/get-session-id');
@@ -80,6 +92,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Runs one diagnostic pass with a monitored socket and a TTS request.
+     */
     async startDiagnosticTest() {
         if (this.isRunning) {
             this.log('⚠️ Diagnostic test already running', 'warning');
@@ -122,6 +137,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Opens an audio WebSocket for the session and records its lifecycle events.
+     */
     async createMonitoredWebSocket() {
         const connectionId = `conn_${this.connectionCounter++}`;
         const wsUrl = `ws://${window.location.host}/ws/audio/${encodeURIComponent(this.sessionId)}`;
@@ -197,6 +215,9 @@ class WebSocketDiagnosticTool {
         });
     }
     
+    /**
+     * Handles one socket message, recording audio chunks and parsing status text.
+     */
     handleDiagnosticMessage(event, connectionId) {
         const connectionInfo = this.connections.get(connectionId);
         
@@ -246,6 +267,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Plays a received audio chunk in a hidden element and tracks its playback state.
+     */
     async simulateAudioPlayback(audioBlob, sequence, connectionId) {
         // Create audio element for monitoring (mirrors original behavior)
         const elementId = `audio_${this.audioElementCounter++}`;
@@ -325,6 +349,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Posts the test text and voice settings to the speech endpoint for this session.
+     */
     async sendTTSRequest(settings) {
         try {
             this.log('📡 Sending TTS request to ElevenLabs endpoint...', 'diagnostic');
@@ -361,6 +388,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Marks the test finished and logs connection, chunk and overlap totals.
+     */
     onTestComplete() {
         this.isRunning = false;
         const totalTime = Date.now() - this.startTime;
@@ -390,6 +420,9 @@ class WebSocketDiagnosticTool {
         this.enableTestButton();
     }
     
+    /**
+     * Stops the test by closing open sockets and pausing playing audio.
+     */
     stopDiagnosticTest() {
         this.log('⏹️ Stopping diagnostic test...', 'diagnostic');
         this.isRunning = false;
@@ -413,6 +446,9 @@ class WebSocketDiagnosticTool {
         this.enableTestButton();
     }
     
+    /**
+     * Clears all counters, connections and audio elements, and the status panel.
+     */
     resetMetrics() {
         this.connections.clear();
         this.audioElements.clear();
@@ -438,12 +474,18 @@ class WebSocketDiagnosticTool {
         document.getElementById('chunk-timeline').innerHTML = '<div style="color: #888; font-style: italic;">No audio activity yet...</div>';
     }
     
+    /**
+     * Writes the active, total and duplicate connection counts to the status panel.
+     */
     updateConnectionMetrics() {
         this.updateStatus('active-connections', this.activeConnections);
         this.updateStatus('total-connections', this.connectionCounter);
         this.updateStatus('duplicate-connections', this.duplicateConnections);
     }
     
+    /**
+     * Appends a connection row to the connection list and scrolls to the end.
+     */
     addConnectionToList(connectionId, status, cssClass) {
         const list = document.getElementById('connection-list');
         const item = document.createElement('div');
@@ -457,6 +499,9 @@ class WebSocketDiagnosticTool {
         list.scrollTop = list.scrollHeight;
     }
     
+    /**
+     * Changes the status text and style class of an existing connection row.
+     */
     updateConnectionInList(connectionId, status, cssClass) {
         const item = document.getElementById(`conn-${connectionId}`);
         if (item) {
@@ -465,6 +510,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Appends a timestamped entry of the given type to the chunk timeline.
+     */
     addToChunkTimeline(type, message) {
         const timeline = document.getElementById('chunk-timeline');
         const entry = document.createElement('div');
@@ -477,6 +525,9 @@ class WebSocketDiagnosticTool {
         timeline.scrollTop = timeline.scrollHeight;
     }
     
+    /**
+     * Re-enables the test button and restores its start label.
+     */
     enableTestButton() {
         const testBtn = document.getElementById('diagnostic-test-btn');
         if (testBtn) {
@@ -485,6 +536,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Reads the test text, voice, model and quality profile from the page controls.
+     */
     getCurrentSettings() {
         return {
             text: document.getElementById('test-text')?.value.trim() || '',
@@ -494,6 +548,9 @@ class WebSocketDiagnosticTool {
         };
     }
     
+    /**
+     * Sets the text of one status panel element, if it exists.
+     */
     updateStatus(elementId, value) {
         const element = this.statusElements[elementId];
         if (element) {
@@ -501,6 +558,9 @@ class WebSocketDiagnosticTool {
         }
     }
     
+    /**
+     * Adds a timestamped, styled line to the diagnostic and browser consoles.
+     */
     log(message, type = 'info') {
         if (!this.logElement) return;
         
@@ -516,6 +576,9 @@ class WebSocketDiagnosticTool {
         console.log(`[WebSocketDiagnostic] ${message}`);
     }
     
+    /**
+     * Empties the diagnostic console and writes a short ready message.
+     */
     clearLogs() {
         if (this.logElement) {
             this.logElement.innerHTML = '';
@@ -539,18 +602,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Global functions for UI
+/**
+ * Starts the diagnostic test from the page button, if the tool has been created.
+ */
 async function startDiagnosticTest() {
     if (diagnosticTool) {
         await diagnosticTool.startDiagnosticTest();
     }
 }
 
+/**
+ * Stops the running diagnostic test, if the tool has been created.
+ */
 function stopDiagnosticTest() {
     if (diagnosticTool) {
         diagnosticTool.stopDiagnosticTest();
     }
 }
 
+/**
+ * Clears the diagnostic console, if the tool has been created.
+ */
 function clearDiagnosticLogs() {
     if (diagnosticTool) {
         diagnosticTool.clearLogs();

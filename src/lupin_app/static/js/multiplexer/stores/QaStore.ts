@@ -236,6 +236,9 @@ const AUTO_ROUTE_STATUS: QaModeStatus = { text: "Auto-routing enabled", color: S
 /** The text the response pane shows before any answer; the legacy client's empty state. */
 export const QA_EMPTY_RESPONSE = "No response yet...";
 
+/**
+ * Models the question and answer pane: agents, status, response and timing.
+ */
 class QaStoreImpl implements QaStore {
   private readonly bus        : EventBus;
   private readonly api        : QaApiClient;
@@ -260,6 +263,9 @@ class QaStoreImpl implements QaStore {
   private ttsRequestedAt : number | null = null;
   private metricState    : QaMetrics = { ttt: null, ttfa: null, rtt: null };
 
+  /**
+   * Takes the bus, API client and options, and listens for speech job requests.
+   */
   constructor( opts: QaStoreOptions ) {
     this.bus        = opts.bus;
     this.api        = opts.api;
@@ -279,12 +285,33 @@ class QaStoreImpl implements QaStore {
     );
   }
 
+  /**
+   * Returns the cached agent list payload, or null when none has loaded.
+   */
   agentsPayload(): QaAgentsPayload | null { return this.agents; }
+  /**
+   * Returns the current status line text and color.
+   */
   modeStatus(): QaModeStatus              { return this.status; }
+  /**
+   * Returns the voice mode label, or null when none is set.
+   */
   voiceModeLabel(): string | null         { return this.voiceMode; }
+  /**
+   * Reports whether a submit request is in flight.
+   */
   submitting(): boolean                   { return this.inFlight; }
+  /**
+   * Returns the text shown in the response pane.
+   */
   responseText(): string                  { return this.response; }
+  /**
+   * Returns the pending question the server asked back, or null when there is none.
+   */
   interview(): QaInterview | null         { return this.question; }
+  /**
+   * Returns the current timing metrics for the last submit.
+   */
   metrics(): QaMetrics                    { return this.metricState; }
 
   /**
@@ -451,10 +478,16 @@ class QaStoreImpl implements QaStore {
     this.emitChanged();
   }
 
+  /**
+   * Records when the speech request went out, to time first audio.
+   */
   noteTtsRequested(): void {
     this.ttsRequestedAt = this.nowFn();
   }
 
+  /**
+   * Stamps first-audio and round-trip times from the clocks that have started.
+   */
   noteFirstAudio(): void {
     // Legacy guards each stamp on ITS OWN clock having started, so a first-audio
     // with no request behind it (a replay, another client's speech) still stamps RTT
@@ -468,6 +501,9 @@ class QaStoreImpl implements QaStore {
     this.emitChanged();
   }
 
+  /**
+   * Unsubscribes the store from the bus.
+   */
   dispose(): void {
     this.busOff();
   }

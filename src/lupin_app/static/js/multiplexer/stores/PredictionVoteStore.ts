@@ -61,6 +61,9 @@ export interface PredictionVoteStoreOptions {
   nowFn? : () => number;
 }
 
+/**
+ * Models thumbs up and down votes on predictions, keyed by notification ID.
+ */
 class PredictionVoteStoreImpl implements PredictionVoteStore {
   private readonly bus   : EventBus;
   private readonly api   : PredictionVoteApiClient;
@@ -69,6 +72,9 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   private readonly contexts = new Map<string, PredictionVoteContext>();
   private readonly votes    = new Map<string, PredictionVoteDir>();
 
+  /**
+   * Stores the bus and API client and the clock, which defaults to the current time.
+   */
   constructor( opts: PredictionVoteStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -76,15 +82,24 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
     this.nowFn = opts.nowFn ?? ( () => Date.now() );
   }
 
+  /**
+   * Remembers the prediction details of a notification so it can be voted on.
+   */
   setContext( notificationId: string, ctx: PredictionVoteContext ): void {
     if ( !notificationId ) return;
     this.contexts.set( notificationId, ctx );
   }
 
+  /**
+   * Returns the vote cast for the notification, or undefined when none was.
+   */
   getVote( notificationId: string ): PredictionVoteDir | undefined {
     return this.votes.get( notificationId );
   }
 
+  /**
+   * Posts an up or down vote and records it when the request succeeds.
+   */
   async vote( notificationId: string, dir: PredictionVoteDir ): Promise<boolean> {
     if ( !notificationId ) return false;
     if ( dir !== "up" && dir !== "down" ) return false;
@@ -116,6 +131,9 @@ class PredictionVoteStoreImpl implements PredictionVoteStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Clears all saved contexts and votes; used by tests.
+   */
   disposeForTesting(): void {
     this.contexts.clear();
     this.votes.clear();

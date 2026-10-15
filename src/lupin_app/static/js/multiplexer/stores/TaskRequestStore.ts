@@ -100,6 +100,9 @@ export interface TaskRequestStoreOptions {
   clearIntervalFn? : ( handle: number ) => void;
 }
 
+/**
+ * Holds the request badge counts and cached filing details for task requests.
+ */
 class TaskRequestStoreImpl implements TaskRequestStore {
   private readonly bus             : EventBus;
   private readonly api             : TaskRequestApiClient;
@@ -113,6 +116,9 @@ class TaskRequestStoreImpl implements TaskRequestStore {
   private pollHandle : number | null = null;
   private readonly details = new Map<string, RequestFiledDetail>();
 
+  /**
+   * Keeps the bus, API client and timer functions, with optional defaults.
+   */
   constructor( opts: TaskRequestStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
@@ -125,10 +131,16 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
   }
 
+  /**
+   * Returns the latest request badge counts, or null when none are known.
+   */
   counts(): RequestBadgeCounts {
     return this.lastCounts;
   }
 
+  /**
+   * Reads the request badge counts and emits a badge changed event.
+   */
   async refresh(): Promise<void> {
     if ( this.inFlight !== null ) return this.inFlight;
     const run = ( async () => {
@@ -155,25 +167,26 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     return run;
   }
 
-  // 🔴 JOINING IS NOT ENOUGH AFTER A WRITE, AND THIS STORE HAD NO VERB FOR IT.
-  // `refresh()` above JOINS a read already in flight, which is correct for the
-  // poll — but a read whose fetch STARTED before the verdict landed cannot see
-  // it however patiently you wait. `submitVerdict` used to `await this.refresh()`
-  // and could therefore settle on counts taken BEFORE its own POST, leaving the
-  // badge one behind. Join the in-flight read so we neither race nor double-fetch
-  // beside it, then take a fresh one — the first read that can observe the write.
-  // Same shape as HoldingAreaStore/TaskListStore (Mr. Radio, measured at fcf2b6bc).
+  /**
+   * Waits for any read in flight, then reads fresh so the write is visible.
+   */
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlight !== null ) await this.inFlight;
     return this.refresh();
   }
 
+  /**
+   * Reads the counts now and then on a fixed interval.
+   */
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
     this.pollHandle = this.setIntervalFn( () => void this.refresh(), TASK_REQUEST_POLL_INTERVAL_MS );
   }
 
+  /**
+   * Cancels the polling timer if one is running.
+   */
   stopPolling(): void {
     if ( this.pollHandle !== null ) {
       this.clearIntervalFn( this.pollHandle );
@@ -182,11 +195,17 @@ class TaskRequestStoreImpl implements TaskRequestStore {
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
+  /**
+   * Stops polling so tests can clean up.
+   */
   disposeForTesting(): void {
     this.stopPolling();
   }
   /* c8 ignore stop */
 
+  /**
+   * Posts a verdict for a request and then re-reads the badges and the boards.
+   */
   async submitVerdict( taskId: string, body: Record<string, unknown> ): Promise<RequestVerdictResult> {
     try {
       await this.api.post<unknown>( requestVerdictPath( taskId ), body );
@@ -215,10 +234,16 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     return { ok: true, stale };
   }
 
+  /**
+   * Returns the cached filing detail for a request, or undefined if not loaded.
+   */
   cachedDetail( taskId: string, requestTs: string ): RequestFiledDetail | undefined {
     return this.details.get( `${ taskId }@${ requestTs }` );
   }
 
+  /**
+   * Reads the filing detail for a request and caches it by id and request time.
+   */
   async loadDetail( taskId: string, requestTs: string ): Promise<void> {
     try {
       const body = await this.api.get<{ events?: unknown }>( requestEventsPath( taskId ) );

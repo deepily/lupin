@@ -214,6 +214,9 @@ export const RESEARCH_COMMAND_PODCAST      = "agent router go to research to pod
 /** The router command that runs research and then makes a presentation. */
 export const RESEARCH_COMMAND_PRESENTATION = "agent router go to research to presentation";
 
+/**
+ * Holds status, in-flight flags and candidates for the Submit Agentic Jobs cards.
+ */
 class SubmitJobsStoreImpl implements SubmitJobsStore {
   private readonly bus       : EventBus;
   private readonly api       : SubmitJobsApiClient;
@@ -230,6 +233,9 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
   private candidates : ReadonlyArray<TfeCandidate> = [];
   private autoFix    = false;
 
+  /**
+   * Keeps the bus, API client, session ID source and optional hooks.
+   */
   constructor( opts: SubmitJobsStoreOptions ) {
     this.bus       = opts.bus;
     this.api       = opts.api;
@@ -239,11 +245,26 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
     this.nowFn     = opts.nowFn ?? ( () => Date.now() );
   }
 
+  /**
+   * Returns the current status message and color for one card.
+   */
   status( card: CardKey ): CardStatus            { return this.statuses[ card ]; }
+  /**
+   * Says whether a submit for the given card is in flight.
+   */
   busy( card: CardKey ): boolean                 { return this.inFlight[ card ]; }
+  /**
+   * Returns the list of test fix candidates last loaded.
+   */
   tfeCandidates(): ReadonlyArray<TfeCandidate>   { return this.candidates; }
+  /**
+   * Returns the current auto fix default.
+   */
   autoFixDefault(): boolean                      { return this.autoFix; }
 
+  /**
+   * Sets the auto fix default and announces the change.
+   */
   setAutoFixDefault( enabled: boolean ): void {
     if ( enabled === this.autoFix ) return;
     this.autoFix = enabled;
