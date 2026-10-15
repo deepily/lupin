@@ -161,6 +161,20 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[doc-lint-reader-run-text]] — reader-test questions and text. `cosa.repo.doc_lint` (reader_rig_run)
 - [[doc-lint-reader-run-scoring]] — reader-test scoring and caps. `cosa.repo.doc_lint` (reader_rig_run)
 - [[doc-lint-train-builder]] — approved packages for the merge train. `cosa.repo.doc_lint` (train_builder)
+- [[rest-data-db-startup]] — the database URL, connection-pool size, boot-time wait and migration config helpers. `cosa.rest.db` (auto_migrate, database)
+- [[rest-data-schema-drift]] — the boot-time check that compares ORM models with the live database and raises a drift alarm. `cosa.rest.db` (schema_drift)
+- [[rest-data-embedding-regeneration]] — the plan, fill and swap steps that re-embed stored text: scope, exclusions, norm band and verification. `cosa.rest.db` (embedding_regeneration)
+- [[rest-data-embedding-regen-run-control]] — the busy and off-peak gate and the checkpoint file that lets a regeneration run resume. `cosa.rest.db` (embedding_regeneration)
+- [[rest-data-embedding-regen-batching]] — the character budget, batch splitting and bulk shadow-column write of a regeneration run. `cosa.rest.db` (embedding_regeneration)
+- [[rest-data-vector-store-models]] — the eight pgvector table models: tables, keys and index rules. `cosa.rest.db` (vector_store_models)
+- [[rest-data-repos-auth]] — the user, API key, token, failed-login and audit-log repositories. `cosa.rest.db` (repositories)
+- [[rest-data-repos-tasks]] — TaskRepository and ApprovalSettingRepository: task rows, the event trail and promotion-gate settings. `cosa.rest.db` (repositories)
+- [[rest-data-repos-notifications]] — the notification, push-token and podcast-proxy-spent repositories. `cosa.rest.db` (repositories)
+- [[rest-data-repos-proxy-predictions]] — the proxy-decision, trust-state, prediction-decision and prediction-log repositories. `cosa.rest.db` (repositories)
+- [[rest-data-repos-memory]] — the embedding-cache, question-embedding, input/output, query-log and solution-snapshot repositories. `cosa.rest.db` (repositories)
+- [[rest-data-v2-execution]] — the inline and queued executors, AskFlow hand-off, pending entries and submit refusals. `cosa.rest.v2` (executor, flow, pending, refusal)
+- [[rest-data-v2-routing]] — the command registry, router client and prompt generator, and the request bearer token. `cosa.rest.v2` (registry, router_client, router_prompt_generator, request_context)
+- [[rest-data-v2-cache-and-sources]] — V2Cache, StageTrace, the near-match guard and source-document validation. `cosa.rest.v2` (cache, trace, near_match_guard, source_document)
 
 ## Draft slugs folded into written pages
 
