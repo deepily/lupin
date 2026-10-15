@@ -44,7 +44,7 @@
 | GET | `/api/config/client` | JWT | Get client configuration values |
 | GET | `/api/config/similarity-confirmation` | JWT | Get similarity confirmation setting |
 | POST | `/api/config/similarity-confirmation` | JWT | Toggle similarity confirmation |
-| GET | `/api/debug/websocket-state` | Public | Full WebSocket diagnostic state |
+| GET | `/api/debug/websocket-state` | Admin | Full WebSocket diagnostic state |
 
 ## 4. Queue Management
 
@@ -54,7 +54,7 @@
 | POST | `/api/push-agentic` | — | 🪦 **Gone (410)** — use `/api/v2/submit`. Remove by end of 2026. It was the closest thing to `submit` that already existed: `routing_command` becomes `command`, `websocket_id` becomes optional. And `args` / `question` / `scheduled_at` / `monopolize` keep their names. |
 | GET | `/api/get-queue/{queue_name}` | JWT | Get queue contents (user-filtered) |
 | GET | `/api/queue/pool-status` | JWT | CJ Flow agentic-pool state + per-provider API contention (core state, plus the `api_resource_manager` enrichment) |
-| POST | `/api/reset-queues` | JWT | Clear all queues for current user |
+| POST | `/api/reset-queues` | Admin | Clear all five queues (every user's jobs) |
 | GET | `/api/get-job-interactions/{job_id}` | JWT | Get interaction history for a job |
 | POST | `/api/jobs/{job_id}/message` | JWT | Send message to running job |
 | GET | `/api/job-history` | JWT | Paginated job history (days, status, job_type, exclude_ids filters) |
