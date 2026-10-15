@@ -230,7 +230,7 @@ def render_partial_page( meta, arm, measured, t3, absent, pending, ruling ):
 
     Requires:
         - meta holds every key of arm_report.META_KEYS
-        - measured is measure_arm's result, t3 is am.t3_summary of measure_twins's ranks
+        - measured is measure_arm's result, t3 is am.t3_summary of measure_twins's ranks with a first count per language
         - pending lists the arms not measured yet, each as ( arm, what it waits on )
         - ruling is the sentence that defines the twin query
 
@@ -256,11 +256,11 @@ def render_partial_page( meta, arm, measured, t3, absent, pending, ruling ):
         row = measured[ "t1_first" ][ k ]
         lines.append( f"| {k} | {ar.percent( row[ 'mean' ] )} | {ar.percent( measured[ 't1_union' ][ k ][ 'mean' ] )} | {ar.size( row[ 'mean_size' ] )} |" )
     lines += [ "", "## Where the known twin lands", "", ruling, "",
-               "| language | members | unranked | median | median counting unranked as worst | top 10 | top 50 | top 128 |", "|---|---|---|---|---|---|---|---|" ]
+               "| language | members | unranked | median | median counting unranked as worst | rank 1 | top 10 | top 50 | top 128 |", "|---|---|---|---|---|---|---|---|---|" ]
     for language in sorted( t3 ):
         row = t3[ language ]
         lines.append( f"| {language} | {row[ 'members' ]} | {row[ 'unranked' ]} | {row[ 'median' ]} | {row[ 'median_all' ]} "
-                      f"| {row[ 'within' ][ 10 ]} | {row[ 'within' ][ 50 ]} | {row[ 'within' ][ 128 ]} |" )
+                      f"| {row[ 'first' ]} | {row[ 'within' ][ 10 ]} | {row[ 'within' ][ 50 ]} | {row[ 'within' ][ 128 ]} |" )
     lines += [ "", f"{len( absent )} known-twin members are not in the snapshot.", "",
                "## Verdict replay of cached answers", "",
                "A flip here is a verdict difference across repeats. The strict rule also counts a shortlist difference.", "",
@@ -300,8 +300,8 @@ def run_arm_report( env, snapshot_paths, needs_path, fresh_sha, manifest_path, o
     measured = measure_arm( arm, needs, stages, {}, answers )
     manifest = json.load( open( manifest_path ) )
     ranks, absent = measure_twins( arm, entries, twin_map( manifest ), stages, {} )
-    t3 = am.t3_summary( ranks )
-    t3[ "all" ] = am.t3_summary( { "all": [ r for held in ranks.values() for r in held ] } )[ "all" ]
+    t3 = am.t3_summary( dict( ranks, all=[ r for held in ranks.values() for r in held ] ) )
+    for language, held in dict( ranks, all=[ r for h in ranks.values() for r in h ] ).items(): t3[ language ][ "first" ] = sum( 1 for r in held if r == 1 )
     meta = { "run_id": f"{arm}-{hash_answers( answers )[ :8 ]}", "code_sha": code_sha, "index_sha": os.path.basename( path ).split( "." )[ 0 ],
              "manifest_hash": sha256_of( manifest_path ), "needs_sha": sha256_of( needs_path ), "cache_sha": hash_answers( answers ) }
     pending = [ ( "C1", "purpose lines for the whole index; only samples exist" ), ( "B1", "the concatenated vector matrix" ),

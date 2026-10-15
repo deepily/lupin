@@ -185,7 +185,7 @@ class TestPage:
     T1      = { 32: { "mean": 0.5, "mean_size": 31.0 }, 64: { "mean": None, "mean_size": None } }
     MEASURED = { "t1_first": T1, "t1_union": T1, "empty": [ "n2" ],
                  "t2": { "control": { "needs": 2, "flip_rate": 0.0, "agreement": 1.0, "uncached": 0 } } }
-    T3      = { "py": { "members": 3, "unranked": 1, "median": 2, "median_all": 3, "within": { 10: 2, 50: 2, 128: 2 } } }
+    T3      = { "py": { "members": 3, "unranked": 1, "median": 2, "median_all": 3, "first": 1, "within": { 10: 2, 50: 2, 128: 2 } } }
 
     def page( self, **over ):
         args = dict( meta=self.META, arm="C0", measured=self.MEASURED, t3=self.T3, absent=[ "g" ], pending=[ ( "B1", "vectors" ) ], ruling="RULING TEXT" )
@@ -195,7 +195,7 @@ class TestPage:
     def test_page_carries_numbers_ruling_and_pending_arms( self ):
         text = self.page()
         assert "| 32 | 50.0% | 50.0% | 31 |" in text
-        assert "| py | 3 | 1 | 2 | 3 | 2 | 2 | 2 |" in text
+        assert "| py | 3 | 1 | 2 | 3 | 1 | 2 | 2 | 2 |" in text
         assert "RULING TEXT" in text
         assert "| B1 | vectors |" in text
         assert "not a flip rate" in text
@@ -220,6 +220,7 @@ class TestPage:
         assert out[ "misses" ] == 0 and out[ "needs" ] == 2 and out[ "members" ] == 5
         text = ( tmp_path / "out" / "page.md" ).read_text()
         assert "abc123" in text and "## Arms not measured yet" in text and "| C1 |" in text
+        assert "| all | 5 | " in text
 
     def test_main_wires_the_real_environment( self, tmp_path, monkeypatch, capsys ):
         held = cache_for( [ "n1", "n2" ], { "n1": "parse_config" } )
