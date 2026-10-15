@@ -804,3 +804,13 @@ def test_a_parser_that_runs_out_of_memory_is_read_as_a_parse_error_too( monkeypa
     monkeypatch.setattr( docstring_lint.ast, "parse", boom )
     findings = docstring_lint.lint_source( "src/lupin_mcp/a.py", "x = 1\n" )
     assert [ ( f.rule, f.line ) for f in findings ] == [ ( "parse-error", 1 ) ] and "MemoryError" in findings[ 0 ].message
+
+
+def test_a_ruff_override_that_is_not_ruff_is_reported_and_does_not_hide_as_a_clean_run( repo, monkeypatch, tmp_path ):
+    _stub_ruff( tmp_path, monkeypatch, "exit 0\n" )                                                   # a program that prints nothing and succeeds, as /bin/true does
+    _stage( repo, { "src/lupin_mcp/plain.py": "x = 1\n" } )
+    rc, lines = _blocking( repo )
+    assert rc == 0 and not _refused( lines )
+    assert [ ln for ln in lines if "did not print the JSON report ruff prints" in ln ] == [
+        f"[doc-lint] WARNING: {tmp_path / 'stub-tools' / 'ruff'} did not print the JSON report ruff prints, so it is not ruff or not this ruff, and no file was checked by it; "
+        "fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" ]

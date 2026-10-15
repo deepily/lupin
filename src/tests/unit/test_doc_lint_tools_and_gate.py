@@ -93,7 +93,7 @@ def test_run_ruff_parses_findings_with_the_rule_as_ruff_code( monkeypatch, tmp_p
     assert [ ( f.path, f.line, f.rule ) for f in findings ] == [ ( "src/a.py", 7, "ruff:D205" ), ( "src/b.py", 3, "ruff:D213" ) ]
     cmd = fake.calls[ 0 ][ 0 ]
     assert cmd[ 1 : 3 ] == [ "check", "--config" ] and cmd[ 3 ] == "/r/pyproject.toml" and cmd[ -2: ] == [ "src/a.py", "src/b.py" ]
-    assert tr.run_ruff( "/r", [ "src/a.py" ], _fake( 0, "" ) ) == ( [], [] )
+    assert tr.run_ruff( "/r", [ "src/a.py" ], _fake( 0, "[]" ) ) == ( [], [] )
 
 
 def test_run_ruff_warns_loudly_when_missing_and_when_ruff_itself_fails( no_tools, monkeypatch, tmp_path ):
@@ -104,6 +104,17 @@ def test_run_ruff_warns_loudly_when_missing_and_when_ruff_itself_fails( no_tools
     findings, warnings = tr.run_ruff( "/r", [ "a.py" ], _fake( 2, "", "bad config" ) )
     assert findings == [] and "ruff cannot run here (exit 2), so no file was checked by it: bad config" in warnings[ 0 ]
     assert not isinstance( warnings[ 0 ], tr.Unchecked )                                  # a tool that fails on a blank file fails on every commit, so it is not a refusal
+
+
+def test_run_ruff_says_so_when_the_program_it_ran_prints_no_ruff_report( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    findings, warnings = tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "" ) )
+    assert findings == [] and len( warnings ) == 1 and not isinstance( warnings[ 0 ], tr.Unchecked )
+    assert warnings[ 0 ] == ( f"[doc-lint] WARNING: {tmp_path} did not print the JSON report ruff prints, so it is not ruff or not this ruff, and no file was checked by it; "
+                              "fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" )
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 1, "   \n" ) )[ 1 ] == warnings                          # exit 1 with a blank report reads the same
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "usage: not-ruff [-h]" ) )[ 1 ] == warnings            # text that is not JSON reads the same
+    assert tr.run_ruff( "/r", [ "a.py" ], _fake( 0, "{}" ) )[ 1 ] == warnings                              # JSON that is not a list reads the same
 
 
 def test_run_ruff_refuses_only_the_input_it_failed_on_when_it_checks_a_blank_file_fine( monkeypatch, tmp_path ):

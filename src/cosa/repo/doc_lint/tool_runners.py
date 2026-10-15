@@ -82,6 +82,7 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
         - an exit status other than 0 or 1 yields one Unchecked warning carrying ruff's stderr, and no findings
         - unless ruff also fails on a blank file, which is a version or configuration skew that fails every commit alike:
           that yields one plain warning, no refusal, and the line says how to fix it
+        - a program that exits 0 or 1 without printing ruff's JSON list is not ruff: one plain warning, no refusal, no file checked
         - a file name follows the option's equals sign or a -- separator, so one that starts with a dash is read as a name
         - with sources, each run checks one file, and its findings carry the path that was asked for, not the name ruff printed
         - so a file name that is not UTF-8, which ruff prints with a replacement character, keeps its findings
@@ -106,7 +107,11 @@ def run_ruff( root, paths, runner=subprocess.run, sources=None ):
             if blank.returncode not in ( 0, 1 ):
                 return [], [ f"[doc-lint] WARNING: ruff cannot run here (exit {res.returncode}), so no file was checked by it: {why}; fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" ]
             return [], [ Unchecked( f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {why}" ) ]
-        for item in json.loads( res.stdout or "[]" ):
+        try: items = json.loads( res.stdout )
+        except ValueError: items = None
+        if not isinstance( items, list ):
+            return [], [ f"[doc-lint] WARNING: {tool} did not print the JSON report ruff prints, so it is not ruff or not this ruff, and no file was checked by it; fix: install the ruff version pyproject.toml pins, or point LUPIN_RUFF at it" ]
+        for item in items:
             rel = asked if asked is not None else os.path.relpath( os.path.join( root, item[ "filename" ] ), root )
             if rel not in paths: warnings.append( f"[doc-lint] WARNING: ruff placed a finding in {shown( rel )}, a file it was not asked about, so that finding is NOT attached to any staged file" )
             findings.append( Finding( rel, item[ "location" ][ "row" ], f"ruff:{item[ 'code' ]}", item[ "message" ] ) )
