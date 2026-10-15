@@ -33,7 +33,7 @@ How the task store decides who is an approver and which switches are on. The gat
 
 ## Don't
 - Don't coerce a stored string with `bool()`. `"false"` would read as on; readers parse strings, and an unparseable value falls through to the next layer.
-- Don't read a setting once at import. The default mint status and the flags are read on each call.
+- Don't read a setting once at import. The default mint status and the flags are read on each call, though the stored layer may be up to 2 seconds stale.
 
 ## Invariants
-- With an account, `recorded_actor` puts the identity first and cuts the declared half to fit 255 characters. If the identity alone cannot fit, it returns the declared actor unchanged.
+- With an account, `recorded_actor` returns `<identity> (<declared>)`. Over 255 characters, the declared half becomes an elision marker. If identity plus marker still exceeds 255, it returns the declared actor unchanged.

@@ -32,4 +32,4 @@ The helpers that turn environment settings into a persona choice for a new sessi
 - Don't let a spawned worker inherit the per-repo manager default; the headless rule exists for that.
 
 ## Invariants
-- The two parse functions return `[]` for `None`, blank or non-string input.
+- The two parse functions return `[]` for `None`, blank input or a type other than string or list. A list gives its string items.

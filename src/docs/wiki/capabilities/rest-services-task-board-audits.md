@@ -25,9 +25,9 @@ Read-only scanners for the task store, each paired with a disclosure of what it 
 - `candidate_ref_ids( rows )` returns only canonical ids, for one batch status lookup. `aggregate_counts` sums per-row classifications.
 - `scope_disclosure` in `task_store_prose_refs` states the bodies scanned and both blind spots. It is emitted for a clean scan too.
 - `task_store_rejoin.dormancy_days( closed_at, now )` counts whole days a row sat stranded, truncated toward zero, 0 for a future close, `None` if unparseable.
-- `dormancy_stamp( closed_blockers, now )` builds the amendment note for a rejoined row. It says the premise is unverified and names the blockers' closing receipts.
+- `dormancy_stamp( closed_blockers, now )` builds the amendment note for a rejoined row. It says the premise is unverified, lists the blocker ids and tells the reader to read their closing receipts.
 - `task_store_rejoin.scope_disclosure( counts )` says what the rejoin pass did and which rows it left alone.
-- `classify_key( correlation_key )` returns one of four buckets: epic, mirror, foreign or blank. `reach_disclosure` states the rows seen, all four buckets, whether the unknown-slug check ran and which statuses were fetched.
+- `classify_key( correlation_key )` returns one of four buckets: epic, mirror, foreign or blank. `reach_disclosure` states the rows seen, all four buckets, whether the unknown-slug check ran, whether terminal rows were included, and whether the fetch was truncated.
 
 ## Don't
 - Don't report a count without its disclosure. A clean result omits the unscanned half otherwise.

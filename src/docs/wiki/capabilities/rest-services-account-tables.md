@@ -22,7 +22,7 @@ The SQLAlchemy models in `cosa.rest.postgres_models` for the `lupin_auth` databa
 - `EmailVerificationToken` and `PasswordResetToken` each hold a unique token string, `expires_at` and a `used` flag defaulting to `False`.
 - `FailedLoginAttempt` records email and IP with a BIGSERIAL id and no foreign key, so attempts against accounts that do not exist are tracked too.
 - `AuthAuditLog` requires an `event_type`. Its `user_id` is optional so events for users who are not logged in can be kept, and `success` defaults to `True`.
-- `FcmToken` is one row per mobile device token for the silent wake channel. The token is the upsert key, `user_id` is indexed, and the wake registry rehydrates from this table after a restart.
+- `FcmToken` is one row per mobile device token for the silent wake channel. The token is the upsert key, `user_id` is indexed, and the wake service reads a user's tokens from this table when it needs them.
 
 ## Don't
 - Don't store a plaintext password: `User.password_hash` takes a hash only.

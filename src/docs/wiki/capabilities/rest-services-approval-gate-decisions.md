@@ -18,7 +18,7 @@ The pure functions behind the holding-area gate, and the one validated way to ch
 
 ## What it does
 - `requested_move( from_status, to_status )` names the approver-only move a transition is (admit, won't-fix, demote or un-park), or `None`. `move_for_ticket( to_status )` is shorter: a ticket is only minted for admit or demote, so the holding status means demote and anything else means admit.
-- `refusal_for_admission` returns a refusal detail or `None`. It is `None` when enforcement is off, when the move is not approver-only, or when the authenticated account maps to a current approver. A manager may close a held row, and may un-park with an operator-approved card.
+- `refusal_for_admission` returns a refusal detail or `None`. It is `None` when enforcement is off, when the move is not approver-only, or when the authenticated account maps to a current approver. A manager may close a held row, from `not_approved` to `done`. A manager may also move a parked row to `queued` with an operator-approved card.
 - A declared actor string never grants approver rights there. It is only named in the refusal.
 - `refusal_for_batch( actor, account_persona, recent_admissions )` refuses a second admission inside the window unless the caller is ask-exempt; the first always passes.
 - `refusal_for_live_mint` refuses a create that names a live status while the holding default is on. It passes when `status` was not named or the holding default is off. It also passes for the holding status itself, for priority P0 and for the operator.

@@ -22,7 +22,7 @@ Pure checks on what a create, an edit or a closed-row correction may carry. The 
 - `validate_patch( fields )` needs at least one editable field and checks title, priority, gate class and urgency. `normalize_patch_fields` canonicalizes `owner_persona` and `accountable_manager` and keeps an explicit `None`.
 - `soft_guard_title( title, body, cap )` trims a title over 120 characters on create and moves the overflow into the body, so nothing is discarded. `validate_edit_title_length` rejects an over-cap title on edit instead.
 - `validate_terminal_title_prefix( old, new )` accepts a closed row's new title only as `"<MARKER> — <old title>"` with a marker of `WITHDRAWN`, `SUPERSEDED` or `CORRECTED`.
-- `validate_terminal_edit_fields( fields, current_title, status )` refuses everything on a terminal row except that title prefix, and refuses it if any other field rides along.
+- `validate_terminal_edit_fields( fields, current_title, status )` refuses everything on a terminal row except that title prefix, and refuses it if any other caller-settable field rides along.
 - `envelope_tail_tag( text )` names a tool-call closing tag a text ends with, or `None`. `validate_no_envelope_tail( fields )` returns one error per free-text field that ends in one; it never edits the value.
 - `UnscopedQueryError` is raised by the repository when an unscoped query matches more than 50 non-terminal rows and `unscoped_audit` is not set. The router answers 400.
 

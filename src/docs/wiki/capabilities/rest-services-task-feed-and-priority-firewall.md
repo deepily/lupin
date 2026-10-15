@@ -26,7 +26,7 @@ The push that tells web panes a task changed, and the rules on who may set a pri
 - `caller_is_operator( account_email )` is true only for a validated account that maps to an unconditional approver. It never reads a declared name.
 - `caller_is_manager( bridge_role, account_email )` is true for a bridge role of `manager` or for the operator. `caller_is_manager_by_bridge` resolves the role from the session id inside `actor`, and is false if the bridge cannot be read.
 - `session_id_from_actor( actor )` returns the last token when it looks like a session id (8 or more hex-like characters), else `None`.
-- `petition_is_available` is true only for a manager asking for P0 with the relay authority; a worker escalates through a manager.
+- `petition_is_available` is true only for a manager, not the operator, asking for P0 with `authority` exactly `user_direct`. A worker escalates through a manager.
 
 ## Don't
 - Don't use a savepoint in code that writes task events. A savepoint rollback drops parked events and a release can push early.

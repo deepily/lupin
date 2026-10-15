@@ -25,7 +25,7 @@ Three small controls around a scheduled test run. See [[scheduled-test-suite]] f
 - `validate_timeout_against_suite_budget` raises `PytestArgsRejected` when that timeout is under the whole-suite budget of a suite in `test_types`. Without `--timeout` it returns `None`.
 - `suite_run_token.issue( parent_id, ttl_seconds )` returns a URL-safe token and stores only its digest and expiry. A second `issue` for the same parent replaces the first.
 - `check( parent_id, token, active_monopolizer )` returns `( True, None )` or `( False, reason )`. The reasons are `token_unknown`, `token_mismatch`, `token_expired` and `not_active_monopolizer`.
-- `token_enabled` is False unless the INI key is set. `revoke( parent_id )` forgets one parent; `clear` forgets all.
+- `token_enabled` is False unless the INI key `v2 parent stamp token enabled` is true. `revoke( parent_id )` forgets one parent; `clear` forgets all.
 - `venue_idle.check( port )` reads `GET /api/busy` and returns `( verdict, report_text, signals )`. `format_report` renders the same text; `main` prints it and returns exit code 0 for `IDLE`, 1 for `BUSY` and 2 for `UNKNOWN`.
 
 ## Don't

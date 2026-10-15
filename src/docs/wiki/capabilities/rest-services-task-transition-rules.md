@@ -23,7 +23,7 @@ The pure rules the task store applies to a status change. Each returns data and 
 - `validate_blocked_by_refs` requires a non-empty list of typed refs (item, persona or user). `blocked_by_has_persona` is true when one is a persona.
 - `validate_blocked_fields( blocked_by, next_chase_ts )` requires a chase time only when a persona ref is present.
 - `normalize_status_fields( status, blocked_by, next_chase_ts )` returns `( resolved, dropped )`. `blocked_by` survives only for `blocked` and is named in `dropped` when emptied; `next_chase_ts` is kept as given on every status. `compose_drop_marker` folds that list into the event reason as `[dropped: ...]`.
-- `is_blocker_repoint` is true for a `blocked` to `blocked` change that moves the blocker or the chase.
+- `is_blocker_repoint` is true for a `blocked` to `blocked` change that moves the blocker or the chase. It is false when the caller gives no current values.
 - `validate_park( from_status, next_chase_ts, park_reason )` needs a legal source, a chase time and a non-blank reason. `is_park_legal_from` allows `queued`, `in_progress` and `parked`. `is_park_refresh` is true for a parked-to-parked write carrying both fields.
 
 ## Don't
@@ -31,4 +31,4 @@ The pure rules the task store applies to a status change. Each returns data and 
 - Don't allow any other same-status transition; it would write a meaningless event.
 
 ## Invariants
-- A re-park keeps the row's origin as queued or in_progress, so expired parked rows rejoin owed work safely.
+- A row is parked only from queued or in_progress, and a re-park is parked to parked. So every parked row came from an owed status.
