@@ -20,11 +20,11 @@ EMAIL_RE    = re.compile( r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+" )
 IPV4_RE     = re.compile( r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w)(?!\.\d)" )
 IPV6_RE     = re.compile( r"(?<![\w:.])[0-9A-Fa-f:]{2,}(?![\w:])" )
 POSIX_RE    = re.compile( r"(?<![\w/.\-])/(?=[^\s/])[^\s/]+(?:/[^\s/]+)+" )
-HOME_RE     = re.compile( r"(?<![\w/.\-])(?:~[\w.-]*|\$\{?HOME\}?)/\S*" )
+HOME_RE     = re.compile( r"(?<![\w/.\-])(?:~(?:[A-Za-z_][\w.-]*)?|\$\{?HOME\}?)/\S*" )   # ~/x and ~user/x, never ~5/10
 WINDOWS_RE  = re.compile( r"(?<!\w)[A-Za-z]:[\\/]\S+|\\\\[\w.$-]+\\[\w.$-]+\S*" )
 PREFIX_RE   = re.compile( r"\bsk-[A-Za-z0-9_-]{8,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[abprs]-[A-Za-z0-9-]{10,}|\beyJ[A-Za-z0-9_-]{10,}" )
 GENERIC_RE  = re.compile( r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])" )
-WORD_SEG_RE = re.compile( r"[a-z]*(?:[A-Z][a-z]+)*\d*\Z" )                   # lowercase run, capitalised words, then digits: linear, no nested repeat
+WORD_SEG_RE = re.compile( r"[a-z]*(?:[A-Z]+(?=[A-Z][a-z])|[A-Z][a-z]+)*\d*\Z" )   # lowercase run, then capitalised words or an acronym that a capitalised word follows, then digits: an acronym can end at one place only, so it is linear
 ROUTE_LINE  = re.compile( r"^[A-Z]+\s+(/\S*)\s+->" )
 
 
@@ -152,7 +152,7 @@ def _is_known_route( token, routes ):
     Ensures:
         - a token that holds an email, URL, IP address or credential is never a route, whatever route it matches
         - a `{parameter}` segment of a route matches exactly one segment of the token
-        - a query string or fragment is cut off before the segments are compared
+        - a query string or fragment is cut off before the segments are compared; redact_need never calls this for a token that has one
     """
     if any( find( token ) for find in ( _urls, _emails, _ips, _secrets ) ): return False
     parts = [ s for s in re.split( r"[?#]", token )[ 0 ].split( "/" ) if s ]
@@ -175,7 +175,7 @@ def redact_need( text, known_routes=() ):
         - redacted holds `[email]`, `[url]`, `[ip]`, `[path]` and `[secret]` in place of each matched span, and is otherwise the text, byte for byte
         - ranking_text is the text with each matched span replaced by one space, so no placeholder word reaches a ranker
         - hits is a list of { kind, count } sorted by kind, and is empty when nothing matched
-        - a POSIX path that is a known route is kept, and no other absolute path is
+        - a POSIX path that is a known route is kept, and no other absolute path is; a route that carries a query or fragment is not kept
         - the function is idempotent: redacting `redacted` again returns it unchanged
         - a span of an earlier kind in the finder order wins an overlap, so a path that holds an email is one `[path]`
         - never raises on any string
@@ -184,7 +184,7 @@ def redact_need( text, known_routes=() ):
     finders = { "url": _urls, "path": _paths, "email": _emails, "secret": _secrets, "ip": _ips }
     for rank, kind in enumerate( ORDER ):
         for s, e in finders[ kind ]( text ):
-            if kind == "path" and text[ s ] == "/" and _is_known_route( text[ s:e ], known_routes ): continue
+            if kind == "path" and text[ s ] == "/" and re.search( r"[?#]", text[ s:e ] ) is None and _is_known_route( text[ s:e ], known_routes ): continue     # a query or fragment is data, so the whole token goes
             cand.append( ( rank, s, e, kind ) )
     taken = []
     for rank, s, e, kind in sorted( cand ):

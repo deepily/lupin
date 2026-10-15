@@ -95,7 +95,6 @@ def test_a_kept_route_a_templated_route_and_a_prefix_of_a_route_stay_visible():
     assert red( "wrap /api/v2/submit please", ROUTES ) == "wrap /api/v2/submit please"
     assert red( "wrap /api/queue/7 please", ROUTES ) == "wrap /api/queue/7 please"
     assert red( "under /api/queue now", ROUTES ) == "under /api/queue now"
-    assert red( "with /api/v2/submit?x=1 now", ROUTES ) == "with /api/v2/submit?x=1 now"
 
 
 def test_a_route_is_kept_only_when_it_matches_a_known_route():
@@ -181,3 +180,32 @@ def test_routes_from_text_reads_the_path_of_each_route_line():
            "not a route line\n"
     assert rr.routes_from_text( text ) == ( "/api/queue/{id}", "/api/v2/submit" )
     assert rr.routes_from_text( "" ) == ()
+
+
+# --- review fixes: query strings, tilde-number text, acronym identifiers ---
+
+@pytest.mark.parametrize( "need", [ "go /api/v2/submit?session=zz91 now", "go /api/v2/submit#token=abc now", "go /api/queue/7?x=1 now" ] )
+def test_a_known_route_that_carries_a_query_or_fragment_is_redacted_whole( need ):
+    assert red( need, ROUTES ) == need.split( " " )[ 0 ] + " [path] now"
+    assert "zz91" not in red( need, ROUTES ) and "abc" not in red( need, ROUTES )
+
+
+def test_the_same_route_without_a_query_is_still_kept():
+    assert red( "go /api/v2/submit now", ROUTES ) == "go /api/v2/submit now"
+
+
+@pytest.mark.parametrize( "text", [ "a score of ~5/10 here", "about ~2/3 of it", "roughly ~1.5/2 done" ] )
+def test_a_tilde_number_ratio_is_not_a_home_path( text ):
+    assert red( text ) == text
+
+
+@pytest.mark.parametrize( "text, expected", [ ( "see ~/notes/a.txt", "see [path]" ), ( "see ~rick/notes/a.txt", "see [path]" ), ( "see ${HOME}/x", "see [path]" ) ] )
+def test_a_home_path_is_still_redacted( text, expected ):
+    assert red( text ) == expected
+
+
+def test_an_identifier_with_an_acronym_run_is_kept_and_a_bare_capital_run_is_not_a_word():
+    assert red( "call getHTTPResponseHeaderValueByName2 now" ) == "call getHTTPResponseHeaderValueByName2 now"
+    assert rr._is_word_shaped( "getHTTPResponseHeader2" ) is True
+    assert rr._is_word_shaped( "ZZ" ) is False
+    assert red( "tok 9aB3dE7fG1hJ5kL8mN2pQ4rS6tU0vW9xY3zA" ) == "tok [secret]"

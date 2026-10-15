@@ -949,6 +949,21 @@ def known_routes_of( gen ):
         return (), "none"
 
 
+def unscreened_path_count( entries, routes ):
+    """
+    Count the index entries that reach Jev holding a path sendable() did not screen.
+
+    Requires:
+        - entries are index entries as sendable() leaves them
+        - routes is the tuple known_routes_of() returns
+
+    Ensures:
+        - returns the number of entries whose id, signature and first docstring line hold an absolute path that is not a known route
+        - an entry with no such path is not counted, and an empty list gives 0
+    """
+    return sum( 1 for e in entries if any( h[ "kind" ] == "path" for h in reuse_redact.redact_need( entry_text( e ), routes )[ 2 ] ) )
+
+
 def prepare( ctx ):
     """
     Resolve the index and the transport for one sweep.
@@ -1170,6 +1185,8 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
                        "refused_422": sum( sweep_[ "refused_422" ] for sweep_ in routed[ "sweeps" ] ),
                        "stopped_by": next( ( sweep_[ "stopped_by" ] for sweep_ in routed[ "sweeps" ] if sweep_[ "stopped_by" ] ), None ) } }
     if redactions: rec[ "need_redactions" ], rec[ "routes_source" ], rec[ "need_sent" ] = redactions, routes_source, need     # only when the redactor changed the need, so an untouched need keeps its pinned receipt bytes
+    unscreened = unscreened_path_count( entries, routes )
+    if unscreened: rec[ "unscreened_entry_paths" ] = unscreened                  # the plan's K14 count; written only when nonzero, so a clean index keeps its pinned receipt bytes
     if sweep_only: rec[ "sweep_only" ], rec[ "exclude_id" ] = True, exclude_id
     elif tool == "check_exists" and exclude_id is not None: rec[ "exclude_id" ] = exclude_id
     if need_text is not None: rec[ "need_text" ] = need_text
@@ -1190,6 +1207,7 @@ def _public( receipt, extra=None ):
     out  = { "status": "ok", "tool": receipt[ "tool" ], "receipt_id": receipt[ "id" ] }
     out.update( { k: receipt[ k ] for k in keep } )
     out[ "need_redactions" ] = receipt[ "need_redactions" ] if "need_redactions" in receipt else []
+    out[ "unscreened_entry_paths" ] = receipt[ "unscreened_entry_paths" ] if "unscreened_entry_paths" in receipt else 0
     if extra: out.update( extra )
     return out
 

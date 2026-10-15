@@ -172,3 +172,28 @@ def test_known_routes_come_from_the_generation_and_default_to_none( env, tmp_pat
     assert rt.known_routes_of( None ) == ( (), "none" )
     assert rt.known_routes_of( tmp_path / "no-such-generation" ) == ( (), "none" )
     assert rr.routes_from_text( ( pathlib.Path( prepared[ 3 ] ) / "routes.md" ).read_text( encoding="utf-8" ) ) == ( "/api/v2/submit", )
+
+
+# --- the plan's K14 count: entries that reach Jev holding an absolute path sendable() did not screen ---
+
+def test_an_entry_with_a_path_outside_sendables_roots_is_counted_and_reported( env_with_where ):
+    env = env_with_where
+    r   = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ) )
+    assert r[ "unscreened_entry_paths" ] == 1
+    assert stored( env, r )[ "unscreened_entry_paths" ] == 1
+
+
+def test_a_clean_index_reports_zero_and_its_receipt_has_no_such_key( env ):
+    r = rt.check_exists_impl( RAW_NEED, packed_ctx( env, Recording() ) )
+    assert r[ "unscreened_entry_paths" ] == 0
+    assert "unscreened_entry_paths" not in stored( env, r )
+
+
+def test_the_counter_skips_a_known_route_and_counts_each_entry_once():
+    routes   = ( "/api/queue/{id}", )
+    entries  = [ { "id": "a.one", "sig": "()", "doc": "Serves /api/queue/7." },
+                 { "id": "a.two", "sig": "()", "doc": "Reads /projects/acme/x.py and /projects/acme/y.py." },
+                 { "id": "a.three", "sig": "()", "doc": "Plain words." } ]
+    assert rt.unscreened_path_count( entries, routes ) == 1
+    assert rt.unscreened_path_count( [], routes ) == 0
+    assert rt.unscreened_path_count( entries, () ) == 2                          # with no routes, the route is a path too
