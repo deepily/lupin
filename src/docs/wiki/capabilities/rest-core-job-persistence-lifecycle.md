@@ -22,7 +22,7 @@ pins:
 - `is_agentic_job_type( job_type )` is true only for the types in `AGENTIC_JOB_TYPES`, which include `test_suite`, and false for `None`.
 - `persist_job_created_from_metadata` inserts a `pending` row, or does nothing when the row exists, as on a restore. `persist_job_started_from_metadata` sets `running` and `started_at`. `persist_job_completed_from_metadata` sets `completed`, the completion time and the metadata, plus the duration when `started_at` is set.
 - `persist_job_stalled_from_metadata` sets `stalled` and merges the checkpoint, so the job stays resumable. `persist_job_failed_from_metadata` sets `failed` with the error.
-- `persist_job_cancelled` sets `CANCELLED`. Without it a cancelled job stays `pending` and the next boot would run it.
+- `persist_job_cancelled` sets the status `cancelled`. Without it a cancelled job stays `pending` and the next boot would run it.
 - `persist_job_paused_state( job_id, paused )` records the pause flag, so a paused job comes back held.
 
 ## Restart

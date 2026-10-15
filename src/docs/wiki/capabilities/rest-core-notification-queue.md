@@ -13,7 +13,8 @@ The queue that holds notifications, the per-sender limit on sending them, and th
 
 ## Queue
 - `NotificationItem` is the light record kept in the queue; `to_dict` returns a dict for JSON, with a fresh `time_display`.
-- `NotificationFifoQueue` extends `FifoQueue`. `push_notification` builds an item, inserts it by priority, logs it to the input-and-output table and emits one WebSocket event when emission is on. `urgent` and `high` go ahead of lower priorities, after any already queued.
+- `NotificationFifoQueue` extends `FifoQueue`. `push_notification` builds an item, inserts it by priority, logs it to the input-and-output table and announces it. Every enqueue first runs the mobile wake check, then emits only when a manager is wired and emission is on. `urgent` and `high` go ahead of lower priorities, after any already queued.
+- The event goes to the item's user, or to all clients without a `user_id`. With a `job_id` it also goes to the session `cc-listener-<job_id>`.
 - `mark_played( notification_id )` records the play and its count, and returns `False` for an unknown id. `get_next_unplayed( user_id )` returns the first unplayed one, for all users when the id is `None`.
 - `get_user_notifications( user_id, include_played, priorities, oldest_first )` returns queue order by default, which is not time order. `oldest_first` sorts by creation time.
 
