@@ -114,14 +114,14 @@ def cosine_sources( ids, matrices, query_vectors ):
              for name in sorted( query_vectors ) }
 
 
-def refuse_fresh_needs( need_ids, fresh_ids=(), needs_sha=None, fresh_sha=None ):
+def refuse_fresh_needs( need_ids, needs_sha, fresh_sha, fresh_ids=() ):
     """
     Stop a run that holds a need reserved for the confirmation phase.
 
     Requires:
         - need_ids is the ids of the needs about to be used
         - fresh_ids is any extra ids that are reserved
-        - needs_sha and fresh_sha are the content hashes of the needs file in use and of the reserved file, both or neither
+        - needs_sha and fresh_sha are the content hashes of the needs file in use and of the reserved file
 
     Ensures:
         - returns None when no need is reserved
@@ -129,11 +129,11 @@ def refuse_fresh_needs( need_ids, fresh_ids=(), needs_sha=None, fresh_sha=None )
         - the needs file counts as reserved when its hash equals the reserved file's hash
 
     Raises:
-        - CandidateError FRESH_NEEDS_REFUSED naming the reserved ids, or the file
-        - ValueError when only one of the two hashes is given
+        - CandidateError FRESH_NEEDS_REFUSED naming the reserved ids, the file, or the missing hash
+        - a missing hash refuses, so a caller that cannot name the files is stopped and not waved through
     """
-    if ( needs_sha is None ) != ( fresh_sha is None ): raise ValueError( "give both file hashes or neither" )
-    if needs_sha is not None and needs_sha == fresh_sha: raise CandidateError( FRESH_NEEDS_REFUSED, "the needs file is the reserved file" )
+    if not needs_sha or not fresh_sha: raise CandidateError( FRESH_NEEDS_REFUSED, "a file hash is missing, so the needs file cannot be checked" )
+    if needs_sha == fresh_sha: raise CandidateError( FRESH_NEEDS_REFUSED, "the needs file is the reserved file" )
     reserved = sorted( n for n in need_ids if n.startswith( FRESH_PREFIX ) or n in set( fresh_ids ) )
     if reserved: raise CandidateError( FRESH_NEEDS_REFUSED, ", ".join( reserved ) )
 

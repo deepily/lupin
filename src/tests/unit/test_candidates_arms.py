@@ -137,28 +137,31 @@ class TestRefuseFresh:
 
     def test_prefix_is_refused( self ):
         with pytest.raises( CandidateError ) as caught:
-            arms.refuse_fresh_needs( [ "f01", "fresh-07", "fresh-02" ] )
+            arms.refuse_fresh_needs( [ "f01", "fresh-07", "fresh-02" ], "abc", "def" )
         assert caught.value.code == arms.FRESH_NEEDS_REFUSED
         assert caught.value.detail == "fresh-02, fresh-07"
 
     def test_explicit_ids_are_refused( self ):
         with pytest.raises( CandidateError ):
-            arms.refuse_fresh_needs( [ "f01", "n9" ], fresh_ids=[ "n9" ] )
+            arms.refuse_fresh_needs( [ "f01", "n9" ], "abc", "def", fresh_ids=[ "n9" ] )
 
     def test_in_sample_needs_pass( self ):
-        assert arms.refuse_fresh_needs( [ "f01", "f02" ], fresh_ids=[ "n9" ] ) is None
+        assert arms.refuse_fresh_needs( [ "f01", "f02" ], "abc", "def", fresh_ids=[ "n9" ] ) is None
 
     def test_the_reserved_file_itself_is_refused_whatever_its_ids_are( self ):
         with pytest.raises( CandidateError ) as caught:
-            arms.refuse_fresh_needs( [ "wa-fresh-07" ], needs_sha="abc", fresh_sha="abc" )
+            arms.refuse_fresh_needs( [ "wa-fresh-07" ], "abc", "abc" )
         assert caught.value.code == arms.FRESH_NEEDS_REFUSED
 
     def test_a_different_file_passes_the_hash_check( self ):
-        assert arms.refuse_fresh_needs( [ "need-03" ], needs_sha="abc", fresh_sha="def" ) is None
+        assert arms.refuse_fresh_needs( [ "need-03" ], "abc", "def" ) is None
 
-    def test_one_hash_without_the_other_is_an_error( self ):
-        with pytest.raises( ValueError ):
-            arms.refuse_fresh_needs( [ "need-03" ], needs_sha="abc" )
+    @pytest.mark.parametrize( "needs_sha, fresh_sha", [ ( None, "def" ), ( "abc", None ), ( None, None ), ( "", "def" ) ] )
+    def test_a_missing_hash_refuses_and_does_not_skip( self, needs_sha, fresh_sha ):
+        with pytest.raises( CandidateError ) as caught:
+            arms.refuse_fresh_needs( [ "need-03" ], needs_sha, fresh_sha )
+        assert caught.value.code == arms.FRESH_NEEDS_REFUSED
+        assert "hash is missing" in caught.value.detail
 
 
 class TestSelectFusion:
