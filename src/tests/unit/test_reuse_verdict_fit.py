@@ -81,14 +81,36 @@ def test_a_twin_that_was_never_asked_or_came_back_unreadable_is_refused_not_scor
     with pytest.raises( ValueError, match="twin" ): vf.receipt( _record(), rows, _split(), 0.05, "r" * 64 )
 
 
-def test_the_receipt_is_created_exclusively_so_a_file_that_appears_after_the_check_is_never_overwritten( tmp_path, monkeypatch ):
+def _argv( tmp_path, out ):
     for name, data in ( ( "neg", _record() ), ( "rows", { "rows": _rows() } ), ( "split", _split() ) ): ( tmp_path / f"{name}.json" ).write_text( json.dumps( data ) )
+    return [ "--negatives", str( tmp_path / "neg.json" ), "--rows", str( tmp_path / "rows.json" ), "--split", str( tmp_path / "split.json" ), "--rate", "0.05", "--out", str( out ) ]
+
+
+def test_a_file_that_appears_after_the_check_is_never_overwritten_and_no_temporary_file_is_left( tmp_path, monkeypatch ):
     out  = tmp_path / "o.json"
     real = vf.receipt
     def appears( *a, **k ):
         out.write_text( "someone else's receipt" )                 # a concurrent run lands its file between the check and the write
         return real( *a, **k )
     monkeypatch.setattr( vf, "receipt", appears )
-    argv = [ "--negatives", str( tmp_path / "neg.json" ), "--rows", str( tmp_path / "rows.json" ), "--split", str( tmp_path / "split.json" ), "--rate", "0.05", "--out", str( out ) ]
-    with pytest.raises( FileExistsError ): vf.main( argv )
+    with pytest.raises( FileExistsError ): vf.main( _argv( tmp_path, out ) )
     assert out.read_text() == "someone else's receipt"
+    assert sorted( p.name for p in tmp_path.iterdir() ) == [ "neg.json", "o.json", "rows.json", "split.json" ]
+
+
+def test_the_receipt_appears_whole_under_its_name_and_no_temporary_file_is_left( tmp_path ):
+    out = tmp_path / "o.json"
+    assert vf.main( _argv( tmp_path, out ) ) == 0
+    assert json.loads( out.read_text() )[ "format" ] == vf.FORMAT
+    assert sorted( p.name for p in tmp_path.iterdir() ) == [ "neg.json", "o.json", "rows.json", "split.json" ]
+
+
+def test_the_temporary_file_is_removed_when_the_name_is_taken_at_the_moment_of_linking( tmp_path, monkeypatch ):
+    out = tmp_path / "o.json"
+    real_link = vf.os.link
+    def taken( src, dst ):
+        out.write_text( "taken at the last moment" )
+        return real_link( src, dst )
+    monkeypatch.setattr( vf.os, "link", taken )
+    with pytest.raises( FileExistsError ): vf.main( _argv( tmp_path, out ) )
+    assert out.read_text() == "taken at the last moment" and sorted( p.name for p in tmp_path.iterdir() ) == [ "neg.json", "o.json", "rows.json", "split.json" ]

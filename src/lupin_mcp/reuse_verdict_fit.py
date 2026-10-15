@@ -10,7 +10,9 @@ No model is called.
 import argparse
 import hashlib
 import json
+import os
 import pathlib
+import tempfile
 
 from cosa.repo.symindex import labelled_set as ls
 from lupin_mcp import reuse_stage2_fit as fit
@@ -64,7 +66,7 @@ def main( argv=None ):
         - writes the receipt to --out and prints the threshold line, then returns 0
 
     Raises:
-        - FileExistsError when the output file exists, which the exclusive create decides at the moment of writing, so a recorded fit is never overwritten
+        - FileExistsError when the output file exists, which the link decides at the moment the receipt takes its name, so a recorded fit is never overwritten and never seen half written
     """
     ap = argparse.ArgumentParser( description=__doc__ )
     for flag in ( "--negatives", "--rows", "--split", "--out" ): ap.add_argument( flag, required=True )
@@ -76,7 +78,12 @@ def main( argv=None ):
     data = json.loads( raw )
     rec  = receipt( json.loads( pathlib.Path( a.negatives ).read_text() ), data[ "rows" ] if isinstance( data, dict ) else data,
                     json.loads( pathlib.Path( a.split ).read_text() ), a.rate, hashlib.sha256( raw ).hexdigest(), a.band )
-    with open( out, "x", encoding="utf-8" ) as handle: handle.write( json.dumps( rec, indent=1, sort_keys=True ) + "\n" )
+    handle, temporary = tempfile.mkstemp( dir=out.parent, prefix=f".{out.name}.", suffix=".tmp" )
+    try:
+        with os.fdopen( handle, "w", encoding="utf-8" ) as stream: stream.write( json.dumps( rec, indent=1, sort_keys=True ) + "\n" )
+        os.link( temporary, out )                 # fails when the name exists, and shows the name only when the whole receipt is there
+    finally:
+        os.unlink( temporary )
     print( f"threshold={rec[ 'threshold' ][ 'value' ]} rate={a.rate} rows={rec[ 'set' ][ 'rows' ]} uncovered={rec[ 'uncovered_counts' ]}" )
     return 0
 

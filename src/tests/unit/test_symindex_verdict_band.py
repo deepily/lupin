@@ -154,3 +154,20 @@ def test_the_confidence_of_a_strong_candidate_is_banded_against_the_strong_cut_o
     policy = dict( vd.POLICY, confidence=0.5, strong=0.8, band=BAND )
     answers = [ { "id": "e0", "probabilities": { "reuse": 0.81, "extend": 0.1, "unrelated": 0.09 } } ]
     assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), policy )[ "causes" ]
+
+
+@pytest.mark.parametrize( "overlap", [ 0.31, 0.299, 0.3, 0.349, 0.251 ] )
+def test_an_entry_that_could_be_doubtful_and_sits_inside_the_band_of_the_floor_is_near_cutoff( overlap ):
+    answers = [ { "id": "e0", "probabilities": _p( overlap ) } ]
+    assert "NEAR_CUTOFF" in vd.decide( answers, [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ]
+
+
+@pytest.mark.parametrize( "overlap", [ 0.35, 0.25, 0.1 ] )
+def test_an_entry_outside_the_band_of_the_floor_is_not_flagged_for_the_floor( overlap ):
+    answers = [ { "id": "e0", "probabilities": _p( overlap ) } ]
+    assert "NEAR_CUTOFF" not in vd.decide( answers, [ "e0" ], [], set(), dict( vd.POLICY, band=BAND ) )[ "causes" ]
+
+
+def test_an_entry_that_cannot_be_doubtful_is_not_flagged_for_the_floor():
+    answers = [ { "id": "e0", "probabilities": _p( 0.31 ) } ]
+    assert "NEAR_CUTOFF" not in vd.decide( answers, [ "e0" ], [], set(), dict( BASE, band=BAND ) )[ "causes" ]

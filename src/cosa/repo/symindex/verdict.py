@@ -78,13 +78,14 @@ def _near_cutoff( rows, policy ):
 
     Ensures:
         - the cut-offs are the threshold and the strong cut-off for the overlap
-        - and the confidence bar for a row that could be doubtful, and the strong cut-off for a row that could be strong
+        - and the confidence bar for a row that could be doubtful, the floor for a row whose confidence is under the bar, and the strong cut-off for a row that could be strong
     """
     cuts   = [ policy[ "threshold" ] ] + ( [ policy[ "strong" ] ] if "strong" in policy else [] )
     strong = policy.get( "strong" )
     for r in rows:
         if any( _near( r[ "p_overlap" ], cut, policy ) for cut in cuts ): return True
         if r[ "p_overlap" ] >= policy[ "floor" ] and _near( r[ "confidence" ], policy[ "confidence" ], policy ): return True
+        if r[ "confidence" ] < policy[ "confidence" ] and _near( r[ "p_overlap" ], policy[ "floor" ], policy ): return True
         if strong is not None and r[ "p_overlap" ] >= strong and _near( r[ "confidence" ], strong, policy ): return True
     return False
 
