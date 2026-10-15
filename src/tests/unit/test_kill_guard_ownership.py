@@ -1458,16 +1458,21 @@ _WHITESPACE_SHAPES = {
 
 
 def _search_seconds( regex, text, seconds=20 ):
-    """One `regex.search( text )`, failing instead of hanging when it will not finish."""
+    """
+    One `regex.search( text )` in CPU seconds. Fails instead of hanging.
+
+    This is CPU time of the thread, not the wall clock. A busy host preempts a wall-clock
+    sample and inflates it, with no change to the regex.
+    """
     import signal as signal_module
     def expired( *args ):
         raise _Expired( f"{regex.pattern[ :30 ]!r} did not finish within {seconds} s on {len( text )} characters" )
     previous = signal_module.signal( signal_module.SIGALRM, expired )
     try:
         signal_module.alarm( seconds )
-        started = time.perf_counter()
+        started = time.thread_time()
         regex.search( text )
-        return time.perf_counter() - started
+        return time.thread_time() - started
     finally:
         signal_module.alarm( 0 )
         signal_module.signal( signal_module.SIGALRM, previous )
@@ -1480,7 +1485,7 @@ def test_each_module_regex_is_linear_on_a_whitespace_run( name, shape ):
     regex = getattr( kill_guard, name )
     build = _WHITESPACE_SHAPES[ shape ]
     small = min( _search_seconds( regex, build( 8000 ) ) for _ in range( 3 ) )
-    large = _search_seconds( regex, build( 32000 ) )
+    large = min( _search_seconds( regex, build( 32000 ) ) for _ in range( 3 ) )
     assert large / max( small, 0.002 ) < 9, f"{name} on {shape}: {small * 1000:.1f} ms -> {large * 1000:.1f} ms for 4x"
 
 
