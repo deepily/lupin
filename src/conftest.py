@@ -10,6 +10,7 @@ tree-specific fixtures belong in `src/tests/conftest.py` /
 
 import importlib._bootstrap
 import errno
+import json
 import os
 import socket
 import subprocess
@@ -40,10 +41,26 @@ import pytest
 # calls for EVERY consumer. This delegation keeps the name and the signature so
 # src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
 # PATH and reaches in for this attribute — still guards it.
+from cosa.utils import dotenv_password as _dotenv_password
 from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
 
 
-_seed_db_password_from_dotenv()
+# Under xdist a worker inherits the controller's seeded DB_USER / DB_PASSWORD, so its own seeder
+# returns early and its `_SEEDED` stays empty. reselect_seeded_login then reads the inherited login
+# as one the operator exported (row 62777c82). The controller therefore records what it seeded in
+# one variable, and a worker restores a key only while the environment still holds that value.
+_SEEDED_LOGIN_HANDOFF = "LUPIN_PYTEST_SEEDED_LOGIN"
+
+if os.environ.get( "PYTEST_XDIST_WORKER" ) is not None:
+    try:
+        _handed_off = json.loads( os.environ.get( _SEEDED_LOGIN_HANDOFF, "{}" ) )
+    except ValueError:
+        _handed_off = { }
+    for _key, _value in _handed_off.items():
+        if os.environ.get( _key ) == _value: _dotenv_password._SEEDED[ _key ] = _value
+else:
+    _seed_db_password_from_dotenv()
+    if _dotenv_password._SEEDED: os.environ[ _SEEDED_LOGIN_HANDOFF ] = json.dumps( _dotenv_password._SEEDED )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
