@@ -432,6 +432,17 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-render-holding-area-table]] — the DOM builders of the holding area: one collapsible group per filer, with batch controls, plan sub-groups and a table of held rows. `src.lupin_app.static.js.multiplexer.render` (holdingAreaTable)
 - [[web-client-render-operator-state-and-keep-place]] — keeping the operator's typed input, open controls and scroll place across a repaint. `src.lupin_app.static.js.multiplexer.render` (operatorState, keepPlace)
 - [[web-client-render-row-disclosure-and-new-ticket]] — the shared disclosure parts of a task row, and the new-ticket button that opens the shared create card with dictation. `src.lupin_app.static.js.multiplexer.render` (rowDisclosure, newTicketCard)
+- [[web-client-render-cards-helpers]] — press-hold repaint guard, scroll reveal, markdown render and sanitize, and time formatters shared by the multiplexer renderers. `src.lupin_app.static.js.multiplexer.render` (pressHoldGuard, scrollReveal, markdown, slugify, time)
+- [[web-client-render-cards-sender]] — the per-sender card of the notification list and the sender-id project and slug helpers. `src.lupin_app.static.js.multiplexer.render` (senderCard, senderProject)
+- [[web-client-render-cards-session-strip]] — the round persona button that stands for one session in the session strip, with its manager badge and allocation status. `src.lupin_app.static.js.multiplexer.render` (sessionStripIcon)
+- [[web-client-render-cards-tts]] — the speech queue pane: transport controls, active and waiting cards and the preview slider. `src.lupin_app.static.js.multiplexer.render` (ttsChrome, ttsCardShared, ttsActiveCard, ttsMinimizedCard, ttsPreviewSlider)
+- [[web-client-render-items-notification-item]] — one notification chat-bubble row and its prediction vote buttons. `src.lupin_app.static.js.multiplexer.render.templates` (notificationItem, predictionVoteControls)
+- [[web-client-render-items-podcast-links]] — making the Play Here and Download links of a finished podcast card work inside the multiplexer page. `src.lupin_app.static.js.multiplexer.render` (podcastLinks)
+- [[web-client-render-items-request-chips]] — a manager's pending promote or demote request on a board row, with Approve and Deny and a header count badge. `src.lupin_app.static.js.multiplexer.render` (requestChips)
+- [[web-client-render-items-status-badges]] — poke mute switch, listener error badge, missed badge and truncated-board banner. `src.lupin_app.static.js.multiplexer.render` (pokeMuteSwitch, listenerErrorBadge, missedBadge, truncationBanner)
+- [[web-client-render-panes-modals-and-state]] — persisted open state of job buckets, the session rename dialog and the persona popover. `src.lupin_app.static.js.multiplexer.render` (jobsBucketExpand, sessionNameEditModal, personaModal)
+- [[web-client-render-panes-section-chrome]] — section header with collapse chevron, visibility toolbar and top nav bar. `src.lupin_app.static.js.multiplexer.render` (sectionHeader, sectionToolbar, navBar)
+- [[web-client-render-panes-submit-and-qa]] — element builders for the Submit Agentic Jobs pane cards and the question pane. `src.lupin_app.static.js.multiplexer.render` (submitJobsChrome, qaChrome)
 
 ## Draft slugs folded into written pages
 
