@@ -66,13 +66,18 @@ BROAD_SKIP_ALLOWED = {
     "src/tests/unit/test_task_request_columns_migration.py"              : "database connect; a rolled-back temp table probe with a loud skip",
 }
 
-# Files that skip inside an `if` on a response status, and why that is allowed. None of them is a login.
+# Files that skip inside an `if` on a status-like result (status code, auth result, token), and why that is
+# allowed. None of them is an HTTP login to the app.
 STATUS_SKIP_ALLOWED = {
     "src/tests/integration/test_queue_not_self_filter.py"   : "a push the test environment does not serve; the login is a separate call",
     "src/tests/integration/test_tfe_resume_e2e.py"          : "a submit endpoint that may not exist (404), not a login",
     "src/tests/smoke/test_io_files_endpoint.py"             : "an io file the environment may not hold (404), not a login",
     "src/tests/smoke/test_model_server_smoke.py"            : "a health check on a model server that is not ready, not a login",
     "src/tests/smoke/test_voice_persona_allocation.py"      : "a 404 that means the test and the server read different bridge directories, not a login",
+    "src/tests/smoke/test_external_scopes.py"               : "an unauthenticated /api/docs/health check, read through a bare status name; not a login",
+    "src/tests/smoke/test_notify_idempotency_midconnect_smoke.py" : "a websocket auth result that leaves the probe unproven; not an HTTP login, and the app_login helper does not cover that door",
+    "src/tests/integration/test_commons_traffic_visibility_integration.py" : "a body field 'no-active-sessions' on a broadcast reply, not a login",
+    "src/tests/integration/test_task_approval_gate_e2e.py"  : "a config value (default_mint_status), not a response; the name only contains the word",
 }
 
 
@@ -92,16 +97,28 @@ def _broad_skip_files( population, read ):
     return sorted( set( found ) )
 
 
+STATUS_WORDS = ( "status", "auth", "login", "token" )
+
+
+def _reads_a_status( test ):
+    """Return True when an `if` test names a status-like value."""
+    for sub in ast.walk( test ):
+        if isinstance( sub, ast.Name ):                                         label = sub.id
+        elif isinstance( sub, ast.Attribute ):                                  label = sub.attr
+        elif isinstance( sub, ast.Constant ) and isinstance( sub.value, str ):  label = sub.value
+        else: continue
+        if set( label.lower().replace( "-", "_" ).split( "_" ) ) & set( STATUS_WORDS ): return True
+    return False
+
+
 def _status_skip_files( population, read ):
-    """Return the files with an `if` on a response status whose body calls pytest.skip."""
+    """Return the files with an `if` on a status-like result whose body skips."""
     found = [ ]
     for path in population:
         source = read( path )
-        if "skip" not in source or "status" not in source: continue
+        if "skip" not in source: continue
         for node in ast.walk( ast.parse( source ) ):
-            if not isinstance( node, ast.If ): continue
-            reads_status = any( isinstance( sub, ast.Attribute ) and sub.attr in ( "status_code", "status" ) for sub in ast.walk( node.test ) )
-            if reads_status and "skip" in _calls( node.body ):
+            if isinstance( node, ast.If ) and _reads_a_status( node.test ) and "skip" in _calls( node.body ):
                 found.append( path )
                 break
     return sorted( set( found ) )
@@ -207,6 +224,15 @@ def test_the_status_census_names_a_login_that_skips_on_its_code_and_ignores_the_
     tuple_  = login.replace( "resp.status_code", "resp.status" )
     sources = { "a.py": login, "b.py": plain, "c.py": no_code, "d.py": tuple_, "e.py": "x = 1\n" }
     assert _status_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "d.py" ]
+
+
+def test_the_status_census_names_a_skip_on_an_auth_result_or_a_bare_status_name():
+    ws_auth = "import pytest\ndef f( obs ):\n    if obs.get( 'auth' ) != 'auth_success':\n        pytest.skip( 'instrument not proven' )\n"
+    bare    = "import pytest\ndef f():\n    status, _, body = fetch()\n    if status != 200:\n        pytest.skip( 'health failed' )\n"
+    keyed   = "import pytest\ndef f( body ):\n    if body[ 'status' ] == 'down':\n        pytest.skip( 'down' )\n"
+    other   = "import pytest\ndef f( n ):\n    if n > 3:\n        pytest.skip( 'too many' )\n"
+    sources = { "a.py": ws_auth, "b.py": bare, "c.py": keyed, "d.py": other }
+    assert _status_skip_files( sorted( sources ), lambda path: sources[ path ] ) == [ "a.py", "b.py", "c.py" ]
 
 
 NINE_LOGIN_FILES = (
