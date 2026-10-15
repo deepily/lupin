@@ -867,7 +867,7 @@ def test_hatch_in_prefix_on_the_empty_and_absent_cases():
 REDIRECT_PREFIXES = [
     "2>&1 ", ">/dev/null ", "</dev/null ", "2>/dev/null ", "&>/dev/null ",
     ">> out.log ", "> /dev/null ", "2> err.log ", "2>&1 sudo ", "FOO=1 2>&1 ",
-    "<<< hello ",
+    "<<< hello ", "{fd}>f ", "{log_fd}>>out ", "{fd}<in ",
 ]
 
 

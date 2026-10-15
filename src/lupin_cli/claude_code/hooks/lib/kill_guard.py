@@ -127,11 +127,11 @@ _ENV_QUOTED_ASSIGN = (
     rf"{_WORD_PRE}env{_WORD_POST}{_WRAPPER_OPERANDS}"
     rf"""(?:{_WS}+(?:"[A-Za-z_][A-Za-z0-9_]*=[^"]*"|'[A-Za-z_][A-Za-z0-9_]*=[^']*'))+"""
 )
-# A redirection written before the command word: `2>&1 pkill`, `>/dev/null pkill`, `<<< text pkill`.
+# A redirection written before the command word: `2>&1 pkill`, `>/dev/null pkill`, `{fd}>f pkill`, `<<< text pkill`.
 # Bash performs it and then runs the verb, so it is one more transparent prefix.
 # The target is required, which keeps every start unambiguous and linear.
 _REDIRECT_PREFIX = (
-    rf"(?:\d*|&)(?:>>?|<{{1,3}})&?{_WS}*(?:{_QUOTED_OR_ESCAPED}|[^\s;&|()`\"'\\<>])+"
+    rf"(?:\d*|&|\{{[A-Za-z_][A-Za-z0-9_]*\}})(?:>>?|<{{1,3}})&?{_WS}*(?:{_QUOTED_OR_ESCAPED}|[^\s;&|()`\"'\\<>])+"
 )
 # One link of a prefix chain: an assignment, a redirection, `timeout N`, or a transparent wrapper with its options.
 _PREFIX_ELEMENT = (
