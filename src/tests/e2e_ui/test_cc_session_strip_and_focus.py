@@ -1230,12 +1230,33 @@ def _card_top( page, sender_id ):
     )
 
 
+def _speak_card_below( page, sender_id ):
+    """
+    Reveal a spoken notification in the given card, as starting its audio does.
+
+    Chromium's scroll anchoring holds the view when a card is inserted above it. So a plain
+    card move never shifts the view, and the reveal is the scroll the reader sees.
+    """
+    sanitized = sender_id.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
+    page.evaluate(
+        """( args ) => {
+            const spoken = document.createElement( "div" );
+            spoken.id = "kp-spoken-notification";
+            document.getElementById( args.cardId ).appendChild( spoken );
+            window.notificationsUI.expandAccordionsForNotification( spoken.id );
+        }""",
+        { "cardId": f"sender-card-{sanitized}" }
+    )
+    page.wait_for_timeout( 800 )                           # the reveal scrolls smoothly
+
+
 class TestKeepPlaceToggle:
     """
     The Keep place switch in #cc-session-strip.
 
-    Off by default: a card arriving at the top of #notifications-list scrolls the list as it always did.
-    Turned on, it must not move the card the reader is looking at, and the choice survives a reload.
+    Off by default: a spoken card is scrolled into view as it always was.
+    Turned on, speaking a card below must not move the card the reader is looking at, and the choice
+    survives a reload.
     """
 
     def test_pill_is_present_and_off_by_default( self, notifications_page_with_strip ):
@@ -1245,7 +1266,7 @@ class TestKeepPlaceToggle:
         assert pill.get_attribute( "data-keep-place" ) == "false"
         assert page.evaluate( f"() => localStorage.getItem( '{KEEP_PLACE_KEY}' )" ) is None
 
-    def test_by_default_an_update_from_below_shifts_the_view( self, notifications_page_with_strip ):
+    def test_by_default_a_spoken_card_below_scrolls_the_view( self, notifications_page_with_strip ):
         page = notifications_page_with_strip
         ids  = _seed_tall_cards( page )
         watched   = ids[ len( ids ) // 2 ]
@@ -1256,9 +1277,9 @@ class TestKeepPlaceToggle:
         )
         page.wait_for_timeout( 100 )
         before = _card_top( page, watched )
-        _trigger_promote( page, ids[ 0 ] )                 # the bottom card gets an update
+        _speak_card_below( page, ids[ 0 ] )                # the bottom card is spoken
         after = _card_top( page, watched )
-        assert after - before >= 100, f"by default the card should have been pushed down, moved {after - before}"
+        assert abs( after - before ) >= 100, f"by default the spoken card should have been scrolled to, moved {after - before}"
 
     def test_on_keeps_the_card_in_view_and_survives_a_reload( self, notifications_page_with_strip ):
         page = notifications_page_with_strip
@@ -1274,7 +1295,7 @@ class TestKeepPlaceToggle:
         )
         page.wait_for_timeout( 100 )
         before = _card_top( page, watched )
-        _trigger_promote( page, ids[ 0 ] )
+        _speak_card_below( page, ids[ 0 ] )
         after = _card_top( page, watched )
         assert abs( after - before ) <= 1, f"the watched card moved from {before} to {after}"
         page.reload()
