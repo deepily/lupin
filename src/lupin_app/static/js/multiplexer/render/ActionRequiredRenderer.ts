@@ -68,6 +68,8 @@ import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
+import type { PredictionVoteStore } from "../stores/PredictionVoteStore";
+import type { PredictionVoteDir } from "../shared/types";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -164,6 +166,11 @@ export interface ActionRequiredRendererOptions {
   // threads the PredictionVoteStore in; a storeless harness omits it and the vote
   // controls do not mount, rather than mounting with no handler.
   predictionVote? : PredictionVoteIntegration;
+  // Row ed6db05a — the vote store, for the production wiring. Given this and no
+  // `predictionVote`, the renderer builds the bridge itself (stash the hint context, POST
+  // through the store, repaint the card on a refused or thrown cast), as the notifications
+  // list renderer does for its cards. `predictionVote` wins when both are given.
+  predictionVoteStore? : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote">;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +213,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
-    this.predictionVote = opts.predictionVote;
+    const voteStore = opts.predictionVoteStore;
+    this.predictionVote = opts.predictionVote ?? (voteStore === undefined ? undefined : {
+      getVote : (id) => voteStore.getVote(id),
+      onVote  : (id, dir) => this.castPredictionVote(voteStore, id, dir),
+    });
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
     this.recorder = opts.recorder ?? recordingManager;
     this.onMic = createActionRequiredMic(
@@ -306,6 +317,29 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 
   forceRenderForTesting(): void {
     if (this.mounted) this.renderAll();
+  }
+
+  // Row ed6db05a — a thumbs click on a card's prediction hint. The control has already painted
+  // its highlight. The server does not keep the hint, so the context is stashed here from the
+  // card and sent with the vote. A refused or thrown cast repaints the card, which reads
+  // getVote → undefined and drops the highlight; a recorded one keeps what was painted.
+  private castPredictionVote(
+    store : Pick<PredictionVoteStore, "getVote" | "setContext" | "vote">,
+    id    : string,
+    dir   : PredictionVoteDir,
+  ): void {
+    const item = this.stores.actionRequired.list().find((it) => it.id_hash === id);
+    /* c8 ignore next */ // defensive: the control is painted only for a card in the list that carries a hint.
+    if (item === undefined || item.prediction_hint == null) return;
+    const hint = item.prediction_hint;
+    store.setContext(id, {
+      question        : item.prompt,
+      predicted_value : hint.predicted_value,
+      category        : hint.category,
+      response_type   : item.response_type,
+    });
+    const revert = (): void => { this.renderAll(); };
+    void store.vote(id, dir).then((ok) => { if (!ok) revert(); }).catch(revert);
   }
 
   // -------------------------------------------------------------------------

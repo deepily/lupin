@@ -583,6 +583,9 @@ function bootMultiplexer(): void {
   const actionRequiredRenderer = createActionRequiredRenderer({
     eventBus,
     stores        : { actionRequired: stores.actionRequired },
+    // Row ed6db05a — the thumbs on a card's prediction hint POST through the same store the
+    // notification cards use. Without it the controls are not mounted at all (row 2650df28).
+    predictionVoteStore : stores.predictionVote,
     revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
     // A-2 #2j/#2k/#2l — the card 🎤s upload with the operator's token, as every other mic does.
     getAuthToken  : () => cachedAccessToken,
