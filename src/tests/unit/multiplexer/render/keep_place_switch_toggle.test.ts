@@ -1,6 +1,8 @@
-// The CC session strip's Keep place toggle, a third pill beside Focus and Hide-inactive.
+// The Keep place switch: state, label, storage and teardown.
 //
-// Run via `npx tsx --test src/tests/unit/multiplexer/render/session_strip_keep_place_toggle.test.ts`.
+// SessionStripRenderer wires it, though the switch sits in the notification history pane.
+//
+// Run via `npx tsx --test src/tests/unit/multiplexer/render/keep_place_switch_toggle.test.ts`.
 
 import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -35,7 +37,10 @@ function makeRoot(withToggle: boolean): { root: HTMLElement; toggle: HTMLElement
     toggle = document.createElement("button");
     toggle.id = "cc-keep-place-toggle";
     toggle.setAttribute("data-phase6-pending", "true");
-    strip.appendChild(toggle);
+    const pane = document.createElement("div");
+    pane.id = "notifications-pane";
+    pane.appendChild(toggle);
+    root.appendChild(pane);
   }
   root.appendChild(strip);
   document.body.appendChild(root);
@@ -90,5 +95,5 @@ test("a page without the pill mounts and unmounts cleanly", () => {
   const { root } = makeRoot(false);
   const r = mount(root);
   r.unmount();
-  assert.equal(document.getElementById("cc-keep-place-toggle"), null);
+  assert.equal(document.querySelectorAll("#cc-keep-place-toggle").length, 0);
 });
