@@ -4,13 +4,14 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.routers.docs_files.get_docs_file@f6b61c9fe4
   - cosa.rest.routers.docs_files.upload_docs_file@ed41be996e
-  - cosa.rest.routers.io_files.get_io_file@8ae4efff80
+  - cosa.rest.routers.io_files.get_io_file@3e431b3d92
   - cosa.rest.routers._pinned_open.open_pinned@4865d9e913
   - cosa.rest.routers._scope_registry.build_scope_registry@31e0911165
   - cosa.rest.routers._scope_registry.resolve_in_scope@b5d0cf1c5e
   - cosa.rest.routers._scope_registry.credential_verdict@6392b090c3
   - cosa.rest.upload_size_guard.UploadSizeGuard@bee5e4c2a7
   - cosa.config.docview_manifest.DocviewManifest@000517ca8a
+  - cosa.config.docview_manifest.load_manifest_for_scope@dfa7acf4ae
 ---
 # Doc viewer
 
@@ -20,7 +21,7 @@ The doc viewer serves repo files and the `io/` folder to the browser, and lets a
 - `get_docs_file` (`GET /api/docs/file`) resolves the path through one gate, then returns a file or a directory listing.
 - `get_io_file` (`GET /api/io/file`) is the older, separate door for `io/`. It accepts `.pptx`, which the docs door does not.
 - `build_scope_registry` reads the INI `external repos` block each time it is called. It skips names that collide with `docs` or `io`. The docs router calls it once and caches the result.
-- A repo's `.docview.yml` (`DocviewManifest`) narrows what is served. A missing, oversized, unparsable or invalid manifest means the INI `allowed prefixes` apply, or a wildcard if there are none. The floor blocklist still applies.
+- A repo's `.docview.yml` (`DocviewManifest`) narrows what is served. `load_manifest_for_scope` reads it. A missing, oversized, unparsable or invalid manifest means the INI `allowed prefixes` apply, or a wildcard if there are none. The floor blocklist still applies.
 - `upload_docs_file` (`POST /api/docs/upload`, admin only) takes `on_conflict` of `refuse`, `replace` or `rename`. Files over 100 MB are refused.
 
 ## Don't
@@ -30,7 +31,7 @@ The doc viewer serves repo files and the `io/` folder to the browser, and lets a
 - Don't pass `?scope=`. It is retired and answers 400.
 
 ## Invariants
-- Both file doors open the file first, judge where the descriptor landed, and serve through it (`open_pinned`). A symlink swapped in after the check cannot redirect them.
+- Both file doors open the file first, judge where the descriptor landed, and serve through it (`open_pinned`). A symlink swapped in after the check cannot redirect them. A folder listing does the same: it opens the folder, judges where it landed, and lists through the descriptor.
 - Upload pins its target folder the same way. All three rely on `/proc/self/fd`, so they work on Linux only.
 - The secrets blocklist runs before the project name is looked up. The whitelist and the manifest's extra blocklist follow.
 - An upload is staged in a hidden temp file, then placed with `os.link`, or `os.replace` when replacing. Only `replace` overwrites an existing name.

@@ -10,6 +10,8 @@ pins:
   - cosa.orchestration.claude_code.dispatcher.TaskType@516e546e49
   - cosa.orchestration.claude_code.message_history.MessageHistory@8e4f5bfd84
   - cosa.orchestration.claude_code.message_history.MessageHistory.get_context_prompt@91ce45a3f6
+  - cosa.orchestration.claude_code.dispatcher.SessionInfo@70455f8ece
+  - cosa.orchestration.claude_code.dispatcher.main@901f46bccb
 ---
 # Claude Code dispatch
 
@@ -31,4 +33,5 @@ pins:
 - It opens a `ClaudeSDKClient` with the same tools, a stdio `cosa-voice` server and a system prompt that names the task's `sender_id`.
 - It streams every message to `on_message`, then sends the next queued message, if any. A result message with `is_error` is raised and returned as the error, with the same renew-login sentence on a 401. It succeeds only if a result message arrived; otherwise the error is `No result received`.
 - `inject`, `interrupt`, `end_session` and `get_active_sessions` work on the open session. `inject` queues the message and, by default, interrupts the session. With `preserve_context` on, its default, and some history, it prepends `MessageHistory.get_context_prompt`. No code outside the tests calls them.
+- `SessionInfo` holds one open session's client, its pending-message queue, a running flag and its history.
 - `MessageHistory` keeps the original prompt and the turns. By default it keeps the first 500 characters of each and adds `...` to any that were longer.

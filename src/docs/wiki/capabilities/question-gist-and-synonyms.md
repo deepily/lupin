@@ -2,15 +2,14 @@
 capability: question-gist-and-synonyms
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.memory.normalizer.Normalizer.normalize@2435412d12
-  - cosa.memory.gister.Gister.get_gist@124cce9144
-  - cosa.memory.gist_normalizer.GistNormalizer.get_normalized_gist@47883efef9
-  - cosa.memory.gist_cache_table.GistCacheTable.get_cached_gist@282bffcd3c
-  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable.add_synonym@97128637c9
-  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable.find_exact_verbatim@67b21097c6
+  - cosa.memory.normalizer.Normalizer@d15c1d8113
+  - cosa.memory.gister.Gister@3d25be9a94
+  - cosa.memory.gist_normalizer.GistNormalizer@89a2f4cd02
+  - cosa.memory.gist_cache_table.GistCacheTable@da02ff991f
+  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@3e62512d2d
   - cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository@d5abda0d75
   - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@7e7ebe0bb4
-  - cosa.rest.multimodal_munger.MultiModalMunger@5c5251c7e8
+  - cosa.rest.multimodal_munger.MultiModalMunger@053090eb91
 ---
 # Question gist and synonyms
 
