@@ -214,6 +214,17 @@
              its mount (boot_order_mount_integrity pins that). -->
         <section id="notifications-pane" class="notifications-pane"
                  data-testid="multiplexer-notifications-pane">
+            <!-- Keep place switch, at the top of the notification history (Rick's row text).
+                 Off by default, so an arriving card scrolls the list to the top as it always did;
+                 on, it holds the card being read. SessionStripRenderer owns it and lifts the marker. -->
+            <div id="keep-place-bar" class="keep-place-bar" data-testid="multiplexer-keep-place-bar">
+                <button id="cc-keep-place-toggle" type="button" class="cc-strip-toggle"
+                        role="switch" aria-checked="false"
+                        data-testid="multiplexer-cc-keep-place-toggle"
+                        data-phase6-pending="true" data-keep-place="false"
+                        title="Keep place: stop new cards from scrolling the list back to the top while you read">📌 Keep place</button>
+            </div>
+
             <!-- B1 (01-A, 2026-06-29): Broadcast card, with commons "Recent
                  Activity" re-nested INSIDE its rendered subtree.
                  BroadcastCardRenderer injects the compose card AND the nested
@@ -239,10 +250,6 @@
                 <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
                         data-testid="multiplexer-cc-hide-inactive-toggle"
                         data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
-                <button id="cc-keep-place-toggle" type="button" class="cc-strip-toggle"
-                        data-testid="multiplexer-cc-keep-place-toggle"
-                        data-phase6-pending="true" data-keep-place="true"
-                        title="Keep place: a card arriving at the top does not move what you are reading">📌 Keep place</button>
             </div>
 
             <!-- WP2 retire (2026-06-10): the #focus-mode-toggle (FocusTrayRenderer)
