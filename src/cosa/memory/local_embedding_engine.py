@@ -6,6 +6,10 @@ Provides two singleton engines:
 - ProseEmbeddingEngine: Uses raw transformers for nomic-embed-text-v1.5 with Matryoshka support
 
 Both engines support lazy GPU loading, unit-length output, and configurable via lupin-app.ini.
+
+Unit length is true only of vectors these classes make in-process. Vectors served by lupin_model_server
+(src/lupin_model_server/main.py) come from a bare SentenceTransformer encode() and are not normalized.
+The dev server's embeddings endpoint returned norms of 22.35 (prose) and 24.47 (code) when probed.
 """
 
 import gc

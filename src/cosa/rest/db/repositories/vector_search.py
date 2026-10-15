@@ -1,7 +1,8 @@
 """
 Shared dot-product (inner-product) nearest-k search for the pgvector repos.
 
-Every ANN column is searched by dot product, and the keystone vectors are not normalized to unit length.
+Every ANN column is searched by dot product, and the vectors served by lupin_model_server are not normalized
+to unit length. The in-process engines in cosa.memory.local_embedding_engine do return unit vectors.
 So the operator is inner product, ``<#>`` (``max_inner_product`` in pgvector's SQLAlchemy binding).
 It is never cosine ``<=>`` by default.
 
@@ -13,8 +14,8 @@ Similarity scale:
 ``metric="cosine"``:
     ``dot * 100`` is a percentage only if both vectors are unit length. That held for OpenAI
     ``text-embedding-3-small``, which returns unit-length vectors, where dot is cosine. It stopped
-    holding with the local ``nomic-ai`` models, which do not normalize: a measured query norm of
-    19.809 against stored rows at norm 1.000.
+    holding with ``nomic-ai`` vectors from lupin_model_server, which does not normalize: a measured query
+    norm of 19.809 against stored rows at norm 1.000.
 
     The score then came out about 20 times too high. A live question scored 1024.15% for a true cosine of
     0.517. The caller's ``>= 100.0`` branch read that as a perfect exact match, so an unrelated
