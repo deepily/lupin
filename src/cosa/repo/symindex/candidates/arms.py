@@ -95,10 +95,11 @@ def full_ranking( arm, need, stages, available ):
 
     Ensures:
         - returns the fused order with no cut, so a twin's rank can be read from it
+        - an index smaller than the head size is cut at the head size, so a small index is never refused
         - an entry that no list holds within the fusion depth is absent
     """
     stage = stages[ "purposed" if ARM_PURPOSE[ arm ] else "plain" ]
-    return run_arm( arm, need, stages, available, len( stage.ids ) )[ "ranking" ]
+    return run_arm( arm, need, stages, available, max( len( stage.ids ), stage.fusion[ "head" ] ) )[ "ranking" ]
 
 
 def cosine_sources( ids, matrices, query_vectors ):

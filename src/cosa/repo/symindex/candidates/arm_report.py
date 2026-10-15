@@ -30,12 +30,12 @@ def count_redactable( needs, redactor, planted_text ):
     return { "count": len( hit ), "ids": hit, "of": len( needs ), "control": redactor( planted_text ) > 0 }
 
 
-def _pct( value ):
+def percent( value ):
     """Format a share as a percentage, or a dash when it was not measured."""
     return "-" if value is None else f"{100 * value:.1f}%"
 
 
-def _size( value ):
+def size( value ):
     """Format a mean shortlist size, or a dash when no shortlist was measured."""
     return "-" if value is None else f"{value:.0f}"
 
@@ -68,7 +68,7 @@ def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable ):
                "| arm | " + " | ".join( f"K={k}" for k in sorted( next( iter( t1.values() ) ) ) ) + " |",
                "|---|" + "---|" * len( next( iter( t1.values() ) ) ) ]
     for arm in sorted( t1 ):
-        cells = [ f"{_pct( t1[ arm ][ k ][ 'mean' ] )} ({_size( t1[ arm ][ k ][ 'mean_size' ] )} ids)" for k in sorted( t1[ arm ] ) ]
+        cells = [ f"{percent( t1[ arm ][ k ][ 'mean' ] )} ({size( t1[ arm ][ k ][ 'mean_size' ] )} ids)" for k in sorted( t1[ arm ] ) ]
         lines.append( f"| {arm} | " + " | ".join( cells ) + " |" )
     lines += [ "", "## T3: where the known twin lands", "", "| arm | language | members | unranked | median of ranked | median of all | in top 10 | in top 50 | in top 128 |", "|---|---|---|---|---|---|---|---|---|" ]
     for arm in sorted( t3 ):
@@ -78,7 +78,7 @@ def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable ):
     lines += [ "", "## T2: replayed verdicts", "", "| arm | needs | verdict flip rate | agreement | uncached answers |", "|---|---|---|---|---|" ]
     for arm in sorted( t2 ):
         row = t2[ arm ]
-        lines.append( f"| {arm} | {row[ 'needs' ]} | {_pct( row[ 'flip_rate' ] )} | {_pct( row[ 'agreement' ] )} | {row[ 'uncached' ]} |" )
+        lines.append( f"| {arm} | {row[ 'needs' ]} | {percent( row[ 'flip_rate' ] )} | {percent( row[ 'agreement' ] )} | {row[ 'uncached' ]} |" )
     lines += [ "", "## Redaction", "",
                f"{redactable[ 'count' ]} of {redactable[ 'of' ]} needs hold a redactable token. The replay uses the raw needs.",
                f"Positive control: the redactor {'found' if redactable[ 'control' ] else 'did NOT find'} a planted token." ]
