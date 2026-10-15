@@ -1,0 +1,93 @@
+"""
+The uncertain band of the verdict layer (candidate-stage plan, Phase 3, decision D7).
+
+A top score inside `band` of a cut-off reads UNCERTAIN_READ_SOURCE with the cause NEAR_CUTOFF. A policy with
+no `band` decides as it does today, and so does a score outside the band.
+"""
+import importlib
+
+import pytest
+
+from cosa.repo.symindex import verdict as vd
+
+BAND = 0.05
+
+
+def _p( overlap ):
+    """Return a valid answer whose p_overlap is overlap and whose confidence clears the bar."""
+    return { "reuse": round( overlap, 6 ), "extend": 0.0, "unrelated": round( 1.0 - overlap, 6 ) }
+
+
+def _decide( top, policy ):
+    answers = [ { "id": "e0", "probabilities": _p( top ) }, { "id": "e1", "probabilities": _p( 0.0 ) } ]
+    return vd.decide( answers, [ "e0", "e1" ], [], set(), policy )
+
+
+BANDED = dict( vd.POLICY, band=BAND )
+
+
+def test_the_cause_list_names_near_cutoff_after_the_existing_causes():
+    assert vd.CAUSES[ -1 ] == "NEAR_CUTOFF" and vd.CAUSES[ :-1 ] == ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE" )
+
+
+CUTS = ( ( "threshold", 0.5 ), ( "strong", 0.9 ) )
+
+
+@pytest.mark.parametrize( "name,cut", CUTS )
+@pytest.mark.parametrize( "step", [ 0.0, 0.049, -0.049 ] )
+def test_a_top_score_inside_the_band_is_uncertain_near_cutoff_on_both_sides_of_each_cut_off( name, cut, step ):
+    got = _decide( round( cut + step, 6 ), BANDED )
+    assert ( got[ "verdict" ], got[ "cause" ], got[ "causes" ] ) == ( "UNCERTAIN_READ_SOURCE", "NEAR_CUTOFF", [ "NEAR_CUTOFF" ] ), name
+
+
+@pytest.mark.parametrize( "name,cut", CUTS )
+@pytest.mark.parametrize( "step", [ 0.05, -0.05, 0.051, -0.051 ] )
+def test_a_top_score_exactly_at_or_just_outside_the_band_edge_is_decided_as_today( name, cut, step ):
+    top = round( cut + step, 6 )
+    assert _decide( top, BANDED ) == _decide( top, vd.POLICY ), ( name, top )
+
+
+def test_the_band_edge_is_exclusive_even_where_float_subtraction_lands_below_it():
+    assert abs( 0.45 - 0.5 ) < BAND                                       # the arithmetic trap: 0.04999999999999999
+    assert _decide( 0.45, BANDED ) == _decide( 0.45, vd.POLICY )
+
+
+def test_the_strong_cut_off_has_its_own_band_in_both_directions():
+    assert _decide( 0.86, BANDED )[ "causes" ] == [ "NEAR_CUTOFF" ]
+    assert _decide( 0.94, BANDED )[ "causes" ] == [ "NEAR_CUTOFF" ]
+    assert _decide( 0.96, BANDED ) == _decide( 0.96, vd.POLICY )
+
+
+def test_a_policy_without_a_band_decides_exactly_as_before():
+    for top in ( 0.0, 0.46, 0.5, 0.54, 0.9, 1.0 ): assert "NEAR_CUTOFF" not in _decide( top, vd.POLICY )[ "causes" ]
+
+
+def test_the_band_adds_to_the_causes_that_already_hold_and_does_not_replace_them():
+    answers = [ { "id": "e0", "probabilities": _p( 0.52 ) } ]
+    got = vd.decide( answers, [ "e0" ], [], { "INDEX_STALE" }, BANDED )
+    assert got[ "causes" ] == [ "INDEX_STALE", "NEAR_CUTOFF" ] and got[ "cause" ] == "INDEX_STALE"
+
+
+def test_no_answered_entry_means_no_band_to_test():
+    got = vd.decide( [], [ "e0" ], [ "e0" ], set(), BANDED )
+    assert "NEAR_CUTOFF" not in got[ "causes" ]
+
+
+@pytest.mark.parametrize( "band", [ 0.0, 0.01, 0.0499 ] )
+def test_the_record_step_refuses_a_band_under_the_floor_while_decide_stays_a_pure_function_of_its_policy( band ):
+    ls = importlib.import_module( "cosa.repo.symindex.labelled_set" )
+    with pytest.raises( ValueError, match="0.05" ): ls.check_band( band )
+    assert _decide( 0.5, dict( vd.POLICY, band=band ) )[ "verdict" ] in ( "UNCERTAIN_READ_SOURCE", "REUSE", "EXTEND", "NEW" )
+
+
+@pytest.mark.parametrize( "band", [ 0.05, 0.08, 0.2 ] )
+def test_the_record_step_accepts_a_band_at_or_above_the_floor( band ):
+    ls = importlib.import_module( "cosa.repo.symindex.labelled_set" )
+    assert ls.check_band( band ) == band
+
+
+def test_the_distance_to_a_cut_off_is_rounded_to_the_named_number_of_places_before_it_meets_the_band():
+    assert vd.BAND_DECIMALS == 6
+    assert _decide( 0.45, BANDED ) == _decide( 0.45, vd.POLICY )          # 0.5 - 0.45 is 0.04999999999999999 unrounded
+    assert _decide( 0.450001, BANDED )[ "causes" ] == [ "NEAR_CUTOFF" ]   # one unit of the sixth place inside is inside
+    assert _decide( 0.549999, BANDED )[ "causes" ] == [ "NEAR_CUTOFF" ]
