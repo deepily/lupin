@@ -116,6 +116,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-experimental-tts]] — the experimental and failed-integration TTS scripts. `src/lupin_app/static/js`
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
+- [[app-startup-tasks-and-asset-tools]] — the speech model loader and background loops `lifespan` starts, and the static-file helpers of the asset token check. `lupin_app.main`, `lupin_app.asset_tokens`
 - [[dm-rewrite-model-study]] — the one-off package that compares Phi-4 14B on a local vLLM host with `gemini-3.1-flash-lite` on Vertex for the DM Tutor rewrite task. It replays frozen DM bodies. `cosa.research.phi4_flash_lite_study` (freeze_corpus, replay_harness)
 - [[dm-rewrite-study-freeze]] — the helpers that checksum, filter, sample and verify the frozen DM replay set. `cosa.research.phi4_flash_lite_study` (freeze_corpus)
 - [[dm-rewrite-study-replay]] — loading the snapshot, the per-arm guards, the outcome counts and latency, and the replay command line. `cosa.research.phi4_flash_lite_study` (replay_harness)
