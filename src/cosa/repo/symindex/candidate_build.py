@@ -154,6 +154,8 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
     Ensures:
         - prints the run report as JSON and returns 0
         - returns 2 and prints the code when a CandidateError stops the run
+        - exits with the argparse usage error, naming the option, for a batch size or sample below 1,
+          a --sample without --store, or a worktree --root with the default writer
     """
     from cosa.repo.symindex.candidates.errors import CandidateError
     environ = os.environ if environ is None else environ
@@ -164,12 +166,18 @@ def main( argv=None, environ=None, writer_factory=None, client=None ):
     parser.add_argument( "--sample", type=int, default=0, help="write lines for this many entries into --store and build nothing" )
     parser.add_argument( "--store", default=None, help="the purpose.jsonl path for --sample" )
     args    = parser.parse_args( argv )
+    if args.batch_size < 1: parser.error( f"--batch-size must be 1 or more, got {args.batch_size}" )
+    if args.sample < 0:     parser.error( f"--sample must be 1 or more, or left out, got {args.sample}" )
+    if args.sample and args.store is None: parser.error( "--sample needs --store, the purpose.jsonl path to write" )
     try:
         if writer_factory is None:
+            main_tree = sp.main_checkout( args.root )
+            if pathlib.Path( args.root ).resolve() != pathlib.Path( main_tree ).resolve():
+                parser.error( f"--root {args.root} is a worktree; the job reads the index of the main checkout {main_tree}. Pass --root {main_tree}" )
             email, password = environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" ], environ[ "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" ]
             submit  = lambda payload: harness_schedule.submit( payload, args.base_url, email, password )
             to_c    = lambda path: sp.container_path( path, args.root, environ=environ )
-            index   = to_c( sp.main_checkout( args.root ) / "src" / "docs" / "index" / "current" / "symbols.jsonl" )
+            index   = to_c( main_tree / "src" / "docs" / "index" / "current" / "symbols.jsonl" )
             writer  = BoundedJobWriter( sp.handoff_dir( args.root, environ=environ ), submit, to_container=to_c, index_path=index )
         else:
             writer = writer_factory( args )

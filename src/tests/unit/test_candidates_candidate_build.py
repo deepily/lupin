@@ -207,7 +207,7 @@ def test_main_builds_the_default_writer_from_the_test_credentials( monkeypatch, 
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e@x", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "pw",
             "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "main" / "io" / "h" ),
             "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
-    assert cb.main( [ "--root", "/repo" ], environ=env, client="C" ) == 0
+    assert cb.main( [ "--root", str( tmp_path / "main" ) ], environ=env, client="C" ) == 0
     w = seen[ "writer" ]
     assert isinstance( w, cb.BoundedJobWriter )
     assert w.work_dir == tmp_path / "main" / "io" / "h"
@@ -224,7 +224,7 @@ def test_main_uses_the_server_url_variable_and_the_endpoint_client_by_default( m
     env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p",
             "LUPIN_APP_SERVER_URL": "http://test:8000", "LUPIN_REUSE_CANDIDATE_HANDOFF_DIR": str( tmp_path / "io" ),
             "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT": "/var/lupin" }
-    assert cb.main( [ "--root", "/repo" ], environ=env ) == 0
+    assert cb.main( [ "--root", str( tmp_path ) ], environ=env ) == 0
     assert isinstance( seen[ "client" ], cb.vb.EndpointClient )
 
 
@@ -260,15 +260,23 @@ def test_the_prompt_names_the_container_paths_and_the_index( tmp_path ):
 def test_sample_purposes_takes_every_kth_entry_into_its_own_store( world, tmp_path, screen_for_sample=None ):
     symbols = world[ "symbols" ]
     for i in range( 6 ): symbols.append( { **tvb.entry( f"z{i}", f"pz{i}" ), "lang": "py", "kind": "function", "line": 1, "public": True } )
+    # the index holds m.b, m.a, m.z0..m.z5; sorted that is a, b, z0..z5 (8 entries), count 4 gives step 2
     calls = []
     report = cb.sample_purposes( world[ "root" ], answering_writer( calls ), tmp_path / "s" / "sample.jsonl", 4, batch_size=2 )
-    ids = report[ "ids" ]
-    assert len( ids ) == 4 and ids == sorted( ids )
-    assert [ len( c ) for c in calls ] == [ 2, 2 ]
+    assert report[ "ids" ] == [ "m.a", "m.z0", "m.z2", "m.z4" ]
+    assert calls == [ [ "m.a", "m.z0" ], [ "m.z2", "m.z4" ] ]
     assert report[ "written" ] == 4
     assert not ( tmp_path / "data" / "pl" ).exists()
     again = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "s2" / "sample.jsonl", 4 )
-    assert again[ "ids" ] == ids
+    assert again[ "ids" ] == report[ "ids" ]
+
+
+def test_sample_purposes_takes_at_most_count_when_the_step_leaves_a_tail( world, tmp_path ):
+    symbols = world[ "symbols" ]
+    for i in range( 3 ): symbols.append( { **tvb.entry( f"y{i}", f"py{i}" ), "lang": "py", "kind": "function", "line": 1, "public": True } )
+    # sorted: a, b, y0, y1, y2 (5 entries), count 3 gives step 1 and the first three
+    report = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "t.jsonl", 3 )
+    assert report[ "ids" ] == [ "m.a", "m.b", "m.y0" ]
 
 
 def test_main_sample_mode_writes_the_store_and_builds_nothing( world, tmp_path, capsys ):
@@ -281,6 +289,39 @@ def test_main_sample_mode_writes_the_store_and_builds_nothing( world, tmp_path, 
 
 
 def test_run_passes_the_batch_size_through( world, tmp_path ):
+    world[ "symbols" ].append( { **tvb.entry( "c", "pc" ), "lang": "py", "kind": "function", "line": 1, "public": True } )
     calls = []
-    cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={}, batch_size=1 )
-    assert [ len( c ) for c in calls ] == [ 1, 1 ]
+    cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={}, batch_size=2 )
+    assert calls == [ [ "m.b", "m.a" ], [ "m.c" ] ]
+
+
+def test_main_hands_the_batch_size_to_run( monkeypatch ):
+    seen = {}
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, batch_size=25: seen.update( batch_size=batch_size ) or { "rows": 0 } )
+    assert cb.main( [ "--root", "/repo", "--batch-size", "7" ], environ={}, writer_factory=lambda a: "W", client="C" ) == 0
+    assert seen == { "batch_size": 7 }
+
+
+# ── refused arguments ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize( "argv, named", [
+    ( [ "--root", "/repo", "--batch-size", "0" ],                            "--batch-size must be 1 or more, got 0" ),
+    ( [ "--root", "/repo", "--sample", "-3", "--store", "/s.jsonl" ],        "--sample must be 1 or more" ),
+    ( [ "--root", "/repo", "--sample", "5" ],                                "--sample needs --store" ),
+] )
+def test_main_refuses_a_bad_option_by_name( argv, named, capsys ):
+    with pytest.raises( SystemExit ) as e:
+        cb.main( argv, environ={}, writer_factory=lambda a: pytest.fail( "the writer must not be built" ), client="C" )
+    assert e.value.code == 2
+    assert named in capsys.readouterr().err
+
+
+def test_main_refuses_a_worktree_root_and_names_the_main_checkout( monkeypatch, tmp_path, capsys ):
+    monkeypatch.setattr( cb.sp, "main_checkout", lambda root: tmp_path / "main" )
+    env = { "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL": "e", "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD": "p" }
+    with pytest.raises( SystemExit ) as e:
+        cb.main( [ "--root", str( tmp_path / "wt" ) ], environ=env, client="C" )
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert f"--root {tmp_path / 'wt'} is a worktree" in err and f"Pass --root {tmp_path / 'main'}" in err
