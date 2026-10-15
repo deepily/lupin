@@ -19,13 +19,13 @@ A seat asks for a podcast of a document on the operator's behalf. The server jud
 - `check_source( scope_path )` returns `{scope, rel, name, server_path, size, sha256}` or raises `DoorRefusal`. It opens the file first and judges that handle, so a link swapped in later cannot redirect the read.
 - It reads the whole file once. The same bytes are checked for credential text, measured and hashed.
 - It refuses a blank or malformed path, an unknown scope, and a path the viewer's whitelist or blocklist refuses.
-- It refuses a link landing outside the scope, a missing file, a folder, an unreadable file, and one over 8 MiB.
+- It refuses a symlink landing outside the scope, a missing file, a folder, a file that is not UTF-8 text, and one over 8 MiB. A hard link to an outside file is accepted.
 - It refuses credential content and an extension a podcast cannot read.
-- `DoorRefusal` carries a `code` (`bad_path`, `not_found`, `viewer_refused`, `wrong_kind`, `too_large`, `credential`, `unreadable`) and a message naming the path as sent. `refusal_detail( code, message )` is the `{code, message}` body.
+- `DoorRefusal` carries a `code` (`bad_path`, `not_found`, `viewer_refused`, `wrong_kind`, `too_large`, `credential`, `unreadable`) and a message naming the path as sent, unless the path was blank. `refusal_detail( code, message )` is the `{code, message}` body.
 
 ## After the yes
 - `file_changed_refusal( payload, facts )` is `None` only when the hash, size and server path all match the card. Otherwise it is a 409 `hash_mismatch`.
-- `write_copy( directory, card_id, name, content )` writes the bytes the door judged, mode 0640, into a folder for that card. It removes a stale copy and creates the file exclusively.
+- `write_copy( directory, card_id, name, content )` writes the bytes the door judged, mode 0640, into a folder for that card. `content` comes from `check_source( ..., keep_content=True )`. It removes a stale copy and creates the file exclusively.
 - `remove_copy( directory, card_id )` removes that folder and never raises.
 - `viewer_claim_id( user_id, scope_path, sha256 )` is a stable uuid for one person, one file and one set of bytes. `human_size` prints bytes, KiB or MiB.
 

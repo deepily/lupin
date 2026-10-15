@@ -11,13 +11,14 @@ pins:
 Daemons that tail the commons store and turn entries into notifications, and the limit on user broadcasts. The commons itself is on [[commons-and-dm]].
 
 ## Ack watcher
-- `CommonsAckWatcher` tails `broadcast-acks` and pushes a `commons_broadcast_ack` notification to the user who sent each broadcast.
+- `CommonsAckWatcher` tails `broadcast-acks` and saves and pushes a `commons_broadcast_ack` notification to the user who sent each broadcast.
 - `register_broadcast( id, user_id, expected )` starts tracking and raises `ValueError` on a repeat id; the endpoint turns that into 409. `unregister_broadcast` is silent for an unknown id. `is_in_flight` is false once the entry expires.
-- `tick` reads entries newer than its cursor, pushes for those whose broadcast is in flight, prunes expired entries and returns the count dispatched.
+- `tick` reads entries newer than its cursor, pushes for those whose broadcast is in flight and returns the count dispatched. Expired entries are pruned as it goes, and by `register_broadcast` and `is_in_flight`.
 
 ## Activity watcher
-- `CommonsActivityWatcher` tails every commons topic except an exclude list and fires a `commons_activity` notification for each new entry.
-- The INI key `commons traffic visibility ws push enabled` gates the push. One cursor serves all topics. `tick` returns the count dispatched.
+- `CommonsActivityWatcher` tails every commons topic except the `commons traffic visibility exclude topics` list, default `presence` and `system-events`.
+- It fires a `commons_activity` notification for new entries, at most 100 per topic per tick. Broadcasts collapse to one per broadcast id, and acks to one per broadcast, sender and status.
+- Startup in `lupin_app.main` creates the watcher only when `commons traffic visibility enabled` and `commons traffic visibility ws push enabled` are both true. One cursor serves all topics. `tick` returns the count dispatched.
 
 ## Broadcast limit
 - `CommonsBroadcastRateLimiter( window_seconds )` allows one broadcast per user per window. `check_and_record( user_id )` returns `(True, None)` and records, or `(False, retry_after)`.

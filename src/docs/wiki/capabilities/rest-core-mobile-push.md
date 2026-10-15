@@ -14,12 +14,12 @@ A content-free push that wakes the mobile app when notifications are waiting, an
 
 ## Wake service
 - `build_wake_payload( reason )` returns `{type, reason, ts}`, all strings, with `type` equal to `ws_wake`. The reason must be `undelivered` or `reconnect-hint`, else `ValueError`.
-- `FcmWakeService.maybe_send_wake( user_id, reason )` returns the outcome: `disabled`, `paused`, `mobile_ws_live`, `deferred`, `debounced`, `no_tokens` or `submitted`.
+- `FcmWakeService.maybe_send_wake( user_id, reason )` returns the outcome: `disabled`, `paused`, `mobile_ws_live`, `deferred`, `debounced`, `no_tokens` or `submitted`, or `error` when the policy block throws.
 - A notify inside a debounce window schedules one trailing wake and later ones collapse onto it. The trailing wake re-runs the whole policy, so a device that reconnected is not woken.
-- It never raises and never blocks on the network; the send runs on an executor. `shutdown` cancels pending wakes and stops the executor.
+- It never blocks on the network, and the policy block returns `error` rather than raising; the send runs on an executor. `shutdown` cancels pending wakes and stops the executor.
 
 ## Pause
-- `PushPauseController.pause( minutes, user, loop )` sets `fcm wake push enabled` false in memory. `minutes` is 1 to 1440 and arms a timer, or `None` for no timer. A new pause replaces the old.
+- `PushPauseController.pause( minutes, user, loop )` sets `fcm wake push enabled` false in memory. `minutes` is 1 to 1440, else `ValueError`, and arms a timer; `None` arms none. It needs the server's event loop. A new pause replaces the old.
 - `resume( user )` restores the value the key had at startup, not a fixed true, and cancels the timer. `status` returns `paused`, `resumes_at`, `set_by`, `set_at` and the live `push_enabled`.
 - Nothing reaches the INI file, so a restart ends a pause. `shutdown` logs a pause that was still active.
 - `init_controller( config_mgr )` builds the singleton at startup. `get_controller` returns it, and builds one lazily if startup did not.

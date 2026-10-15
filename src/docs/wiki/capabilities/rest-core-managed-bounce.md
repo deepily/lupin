@@ -17,15 +17,15 @@ The warning before a `:7999` bounce and the all-clear after it, as injectable lo
 
 ## Warning
 - `format_dirty_clause( dirty_files )` folds `git status --short` output into one single-line clause, at most a cap of paths and then `; …(+N more)`. A clean tree gives `""`.
-- `count_acked_sessions( entries, broadcast_id )` counts distinct sessions that acked, deduped by sender session and status. One recipient can write the same ack several times.
+- `count_acked_sessions( entries, broadcast_id )` counts distinct sender sessions whose ack has the given `status`, `completed` by default. One recipient can write the same ack several times.
 - `resolve_ack_timing( config_mgr, ... )` returns the ack deadline and poll interval, each falling back to the default passed in.
 
 ## All-clear
-- `boot_counter_path( project_root, server_label )` is the counter file under `io/managed-bounce/`. The label is cut to its alphanumerics, so `:7999` and `:8000` use different files.
+- `boot_counter_path( project_root, server_label )` is the counter file under `io/managed-bounce/`. Each character outside letters and digits becomes `-`, and the ends are trimmed, so `:7999` and `:8000` use different files and `dev:7999` gives `boot-counter-dev-7999.txt`.
 - `socket_match_key( session_id )` strips the `cc-listener-` prefix and keeps the short id, so roster ids and live-socket keys can be compared.
 - `missed_sessions( expected_ids, present_ids )` returns the sorted full ids with no live socket.
 - `wait_for_roster_coverage( roster_fn, present_fn, deadline_seconds, ... )` returns once every roster id has a socket, or at the deadline. The result has `reason` (`coverage` or `deadline`), `count`, `missing` and `curve`.
-- `emit_bounce_broadcast_in_process( kind, message, ... )` sends through the commons and never raises. It returns `None` when commons is not wired and `{"error": ...}` on a failure.
+- `emit_bounce_broadcast_in_process( kind, message, ... )` sends through the commons and never raises. It returns `None` when commons is not wired and `{"error": ...}` when it throws. A refused or rate-limited send returns the normal result dict.
 
 ## Don't
 - Don't compare roster ids with socket keys directly. They never match.

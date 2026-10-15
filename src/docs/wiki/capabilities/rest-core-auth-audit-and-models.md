@@ -28,9 +28,10 @@ pins:
 
 Audit rows for authentication events and the bodies of the `/auth` routes, which are on [[auth-and-accounts]].
 - `log_auth_event( event_type, user_id, email, ip_address, details, success )` stores one timestamped row and catches every exception, so a failed audit write never breaks a request.
-- `get_user_audit_log( user_id, limit=50 )` and `get_failed_logins( email, limit=50 )` return entries newest first; the email may be omitted.
-- `get_suspicious_activity( hours=24, threshold=5 )` returns `(email, failures)` pairs at or above the threshold.
-- Requests: `RegisterRequest` (email, password, roles), `LoginRequest` (email, password), `RefreshRequest` and `LogoutRequest` (refresh_token).
+- `get_user_audit_log( user_id, limit=50 )` returns one user's entries, newest first, or `[]` for a bad id or a database error.
+- `get_failed_logins( email, limit=50 )` takes the newest `limit` events with `success` false from the last 365 days, then filters by email. An email can therefore return fewer than `limit`.
+- `get_suspicious_activity( hours=24, threshold=5 )` returns `(email, failures)` pairs at or above the threshold, highest first, from at most 10,000 events.
+- Requests: `RegisterRequest` (email, password of 8 or more characters, roles). The route, not the model, refuses a role other than `user`. `LoginRequest` (email, password), `RefreshRequest` and `LogoutRequest` (refresh_token).
 - More requests: `VerifyEmailRequest` (token), `RequestPasswordResetRequest` (email), `ResetPasswordRequest` (token, new_password), `ChangePasswordRequest` (current_password, new_password), `RequestVerificationRequest` (no fields).
 - `TokenResponse`: access_token, refresh_token, token_type, expires_in.
 - `UserResponse`: id, email, roles, email_verified, is_active, created_at, last_login_at.

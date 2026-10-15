@@ -17,12 +17,12 @@ One-use tokens for verifying an email address or resetting a password, and the S
 
 ## Tokens
 - `generate_verification_token( user_id )` and `generate_password_reset_token( user_id )` return `(success, message, token)`. The token is 32 random bytes. A verification token lasts 24 hours and a reset token lasts 1 hour.
-- `validate_verification_token( token )` and `validate_password_reset_token( token )` return `(success, message, user_id)`. A good token is marked used at once, so a second call with it fails. An expired, unknown or used token gives `(False, message, None)`.
-- `cleanup_expired_tokens` deletes expired rows from both tables and returns `(verification_deleted, reset_deleted)`.
+- `validate_verification_token( token )` and `validate_password_reset_token( token )` return `(success, message, user_id)`. A good token is marked used at once, so a second call with it fails. An expired, unknown or used token gives `(False, message, None)`. So does any database error.
+- `cleanup_expired_tokens` deletes expired or used rows from both tables and returns `(verification_deleted, reset_deleted)`. It returns `(0, 0)` on any error.
 
 ## Mail
-- `send_verification_email( email, token, user_name )` and `send_password_reset_email( email, token, user_name )` use the SMTP settings in config. They return `True` when the mail went out and `False` when it did not.
-- `test_email_configuration` tries to reach the SMTP server and returns `True` or `False`. It prints the error on failure.
+- `send_verification_email( email, token, user_name )` and `send_password_reset_email( email, token, user_name )` use the SMTP settings in config. They return `True` when the mail went out and `False` when sending failed. With `send email enabled` false, the default, they return `True` and send nothing.
+- `test_email_configuration` tries to reach the SMTP server and returns `True` or `False`, printing the error. A bad port or malformed setting raises `ValueError` or `TypeError`.
 
 ## Don't
 - Don't validate a token to peek at it. Validation spends it.

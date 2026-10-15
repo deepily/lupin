@@ -14,7 +14,7 @@ A 500 that tells the caller whose problem it is. During a mid-refactor save a ca
 - `detail` is the fixed text `Internal Server Error`. The exception message is never included.
 - `exception_class` is the exception's class name, so a `NameError` reads as a server fault.
 - `server_started_at` is the ISO instant captured at app import and bound when the handler is built. A caller comparing it with its last value learns the process restarted.
-- The handler ignores the request, so the body names no route.
+- The handler ignores the request, so the body names no route. A raised `HTTPException` keeps FastAPI's own body.
 
 ## Don't
 - Don't compute the start instant per request. It would move on every error and answer nothing.

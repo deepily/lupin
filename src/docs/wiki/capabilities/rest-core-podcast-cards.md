@@ -19,7 +19,7 @@ The question the operator answers, and the checks before a job starts. The file 
 ## Card
 - `card_payload( facts, asker, session_id )` is what the server stores: `kind`, `command`, `scope_path`, `server_path`, `name`, `size`, `sha256`, `asked_by` and `asked_by_session`. Every value is server-made.
 - `asker_label` reads `<persona> (<id>)` for a session the bridge knows, else `an unrecognized session (<id>)`. The caller's actor string is never in it.
-- `binding_id( session_id, seat )` is the first 8 characters of the seat's stable id, or the given id for an unknown seat. A re-spun seat still finds its card. It is a courtesy, not a lock.
+- `binding_id( session_id, seat )` is the first 8 characters of the seat's stable id. Without a seat or a stable id it is the given id. A re-spun seat finds its card. It is a courtesy, not a lock.
 - `card_text( payload )` returns the `(question, abstract)` pair. The question holds no path or hash.
 - `card_state( card, now )` is one of `waiting`, `yes`, `wrong_login`, `no`, `default_answer` or `expired`.
 

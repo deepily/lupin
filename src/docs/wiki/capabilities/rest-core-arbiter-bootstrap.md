@@ -18,7 +18,7 @@ Three small pieces the dev server holds for the heartbeat arbiter and for answer
 - `arbiter_already_present( todo_queue, run_queue )` is true when either queue holds a job whose `JOB_TYPE` is the arbiter job's. A queue without `queue_list` counts as empty.
 - `build_arbiter_job( config_mgr )` builds the standing `ArbiterConsumerJob` from config and the file-backed commons gateway, with built-in defaults for absent keys.
 - `submit_arbiter_if_absent( todo_queue, run_queue, config_mgr, ask_flow=... )` submits one through the v2 ask flow unless one is present. A failure is logged and swallowed, so the arbiter never blocks server boot.
-- `submit_arbiter_if_enabled` wraps that behind the `arbiter in-process bootstrap enabled` flag, so the standalone arbiter and the in-process one never both act.
+- `submit_arbiter_if_enabled` wraps that behind the `arbiter in-process bootstrap enabled` flag, so the standalone arbiter and the in-process one never both act. The flag defaults true, and a value that is not true or false reads as false.
 
 ## Snapshot cache
 - `set_snapshot( dict )` replaces the cached fleet snapshot, last writer wins. `get_snapshot` returns it, or `None` before the first push. `clear_snapshot` resets it.

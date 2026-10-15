@@ -21,11 +21,11 @@ The bearer-scheme dependencies in `cosa.rest.auth`. `verify_token` and the overv
 - `get_current_user` takes the bearer credentials, runs `verify_token` and returns the user dict. `get_current_user_id` returns only its `uid`.
 - `get_optional_user` returns `None` for no credentials and for a bad token. It never raises.
 - `identity_or_401( current_user )` returns `( uid, email )` or raises 401 naming the missing one. It checks the id first. The v2 doors use it.
-- `HTTPBearerWith401` answers 401 with `WWW-Authenticate: Bearer` when credentials are missing.
+- `HTTPBearerWith401` answers 401 with `WWW-Authenticate: Bearer` when credentials are missing or the header is not `Bearer`.
 
 ## Verifiers
-- `verify_jwt_token` checks an access token, loads the user, and answers 401 if the user is gone.
-- `verify_mock_token` accepts `mock_token_*` strings. It is for development.
+- `verify_jwt_token` checks an access token and loads the user. It answers 401 for a missing user and for an inactive account.
+- `verify_mock_token` accepts `mock_token_*` strings, for development. An unknown id gets a made-up `@generated.local` user, and the result has no `roles` key.
 - `verify_firebase_token` is a legacy name for `verify_token`. `init_firebase` only sets a flag and contacts no service.
 - `TokenExpiredException` is an `HTTPException` subclass for an expired access token.
 

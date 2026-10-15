@@ -18,12 +18,12 @@ The dependencies in `cosa.rest.auth_middleware` read the `Authorization` header 
 
 ## Dependencies
 - `get_current_user` requires `Authorization: Bearer <token>` and answers 401 for a missing header, a bad format or a bad token.
-- `get_current_user_optional` returns `None` with no header, and still answers 401 when a token is present and bad.
+- `get_current_user_optional` returns `None` with no header, and still answers 401 when a header is present and malformed or bad.
 - `require_roles( [...] )` builds a dependency that passes a user holding any one listed role. `require_all_roles` needs every one.
-- Both builders answer 403 for a user without the role and raise `ValueError` on an empty list.
+- Both builders answer 403 for a user without the role and raise `ValueError` when called with an empty list.
 
 ## Manual checks
-- `has_role( user, role )`, `has_any_role( user, roles )` and `has_all_roles( user, roles )` read the `roles` list of the user dict and return a bool.
+- `has_role( user, role )`, `has_any_role( user, roles )` and `has_all_roles( user, roles )` read the `roles` list of the user dict and return a bool. Under `auth mode` mock the dict has no roles, so every role check fails and `require_roles` answers 403.
 - `is_admin( user )` and `is_user( user )` are `has_role` for `admin` and `user`.
 - Use them inside a route when the response shape, not access, depends on the role.
 

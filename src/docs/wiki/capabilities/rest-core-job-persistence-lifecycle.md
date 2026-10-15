@@ -16,19 +16,19 @@ pins:
 ---
 # Job persistence: writing a job's life and restoring it
 
-`job_persistence` keeps one `job_history` row per agentic job so a restart can restore it. The queues it mirrors are on [[cj-flow-queue]]. Every `persist_*` call logs and returns on failure; none raises into the queue.
+`job_persistence` keeps one `job_history` row per agentic job so a restart can restore it. The queues it mirrors are on [[cj-flow-queue]]. Every `persist_*` call logs and returns on failure; none raises into the queue. When `cj flow persistence enabled` is false the writes do nothing. The reads are not gated.
 
 ## Writes, in lifecycle order
-- `is_agentic_job_type( job_type )` is true only for the listed agentic types, false for `None`.
-- `persist_job_created_from_metadata` inserts a `pending` row. `persist_job_started_from_metadata` sets `running` and `started_at`.
+- `is_agentic_job_type( job_type )` is true only for the types in `AGENTIC_JOB_TYPES`, which include `test_suite`, and false for `None`.
+- `persist_job_created_from_metadata` inserts a `pending` row, or does nothing when the row exists, as on a restore. `persist_job_started_from_metadata` sets `running` and `started_at`. `persist_job_completed_from_metadata` sets `completed`, the completion time and the metadata, plus the duration when `started_at` is set.
 - `persist_job_stalled_from_metadata` sets `stalled` and merges the checkpoint, so the job stays resumable. `persist_job_failed_from_metadata` sets `failed` with the error.
 - `persist_job_cancelled` sets `CANCELLED`. Without it a cancelled job stays `pending` and the next boot would run it.
 - `persist_job_paused_state( job_id, paused )` records the pause flag, so a paused job comes back held.
 
 ## Restart
-- `record_server_available` stamps one lifecycle row from the clock heartbeat and at clean shutdown. `get_last_available` reads it, or `None` on a first boot.
-- `get_restorable_jobs` returns the rows still `pending` after `mark_interrupted_jobs` has run.
-- `restore_pending_jobs( restorable, job_factory, ask_flow )` rebuilds each job from its stored `original_args` and its old `id_hash`, and re-holds a paused one. A row with no `routing_command`, or whose factory returns `None`, is skipped. It returns the count pushed.
+- `record_server_available` stamps one lifecycle row from the clock heartbeat and at clean shutdown. `get_last_available` reads it, or `None` on a first boot or a failed read.
+- `get_restorable_jobs` returns every `pending` row, or `[]` on a database failure. Call it after `mark_interrupted_jobs`, which decides which rows stay pending.
+- `restore_pending_jobs( restorable, job_factory, ask_flow )` rebuilds each job from its stored `original_args` and its old `id_hash`, and re-holds a paused one. A row with no `routing_command`, or whose factory returns `None`, is skipped. It returns the count submitted. A refused submit still counts.
 
 ## Don't
 - Don't build a restored job from the whole metadata. The submit args live under `original_args`.
