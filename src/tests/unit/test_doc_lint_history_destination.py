@@ -6,6 +6,7 @@ git_loc_delta rewrite and its claim worksheet), not written for this file. The d
 small real git repo in a temp directory.
 """
 
+import copy
 import io
 import json
 import subprocess
@@ -70,7 +71,9 @@ def repo( tmp_path ):
     return tmp_path
 
 
-def _files( tmp_path, sort=REAL_SORT, worksheet=REAL_WORKSHEET ):
+def _files( tmp_path, sort=None, worksheet=None ):
+    if sort is None: sort = copy.deepcopy( REAL_SORT )
+    if worksheet is None: worksheet = copy.deepcopy( REAL_WORKSHEET )
     sort_path = tmp_path / "sort.jsonl"
     sort_path.write_text( "\n".join( json.dumps( r, ensure_ascii=False ) for r in sort ) + "\n", encoding="utf-8" )
     sheet_path = tmp_path / "worksheet.json"
@@ -78,7 +81,9 @@ def _files( tmp_path, sort=REAL_SORT, worksheet=REAL_WORKSHEET ):
     return str( sort_path ), str( sheet_path )
 
 
-def _run( repo, out, *extra, sort=REAL_SORT, worksheet=REAL_WORKSHEET ):
+def _run( repo, out, *extra, sort=None, worksheet=None ):
+    if sort is None: sort = copy.deepcopy( REAL_SORT )
+    if worksheet is None: worksheet = copy.deepcopy( REAL_WORKSHEET )
     sort_path, sheet_path = _files( out.parent if out.parent != repo else repo, sort, worksheet )
     stream = io.StringIO()
     code   = hd.main( [ "--repo-root", str( repo ), "--sort", sort_path, "--worksheet", sheet_path, "--out", str( out ), *extra ], stream )

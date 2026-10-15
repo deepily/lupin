@@ -10,6 +10,7 @@ arms exist to prove there is NO path that quietly skips him. An arm that never
 fails is not a guard; each control here is deleted in the mutation pass and the
 named arm below must go red.
 """
+import copy
 import pytest
 
 from cosa.rest import task_promotion_gate as gate
@@ -365,7 +366,8 @@ def test_an_UNRECOGNISED_answer_is_never_recorded_as_ricks_keypress():
     proves it: a default still allows, and is still stamped as a default rather
     than as a keypress. Closing this must not turn an absent Rick into a blocker.
     """
-    def _answers( text, default_used=False, answered_by=OPERATOR_ANSWER ):
+    def _answers( text, default_used=False, answered_by=None ):
+        if answered_by is None: answered_by = copy.deepcopy( OPERATOR_ANSWER )
         return gate.approval_for_promotion(
             session_id="m", actor="María", task_id="t-42", title="x",
             is_manager_fn=lambda sid, **kw: True,

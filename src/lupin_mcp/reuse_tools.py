@@ -93,12 +93,13 @@ def sha( text, n=None ):
     return h[ :n ] if n else h
 
 
-def prompt_template_hash( template=PROMPT_TEMPLATE ):
+def prompt_template_hash( template=None ):
     """Ensures: returns 12 hex characters identifying the Jev instructions and criteria."""
+    if template is None: template = copy.deepcopy( PROMPT_TEMPLATE )
     return sha( canonical( template ), 12 )
 
 
-def build_request( need, candidate, template=PROMPT_TEMPLATE, model=JEV_MODEL ):
+def build_request( need, candidate, template=None, model=JEV_MODEL ):
     """
     Build the body of one Jev call.
 
@@ -110,6 +111,7 @@ def build_request( need, candidate, template=PROMPT_TEMPLATE, model=JEV_MODEL ):
     Raises:
         - ValueError when model ends with "-latest"
     """
+    if template is None: template = copy.deepcopy( PROMPT_TEMPLATE )
     if model.endswith( "-latest" ): raise ValueError( f"model {model!r} is a moving alias; pin a version" )
     return { "model": model, "state": { "need": need, "candidate": candidate },
              "questions": { "fit": { "type": "choice", "instructions": template[ "instructions" ], "criteria": template[ "criteria" ] } } }

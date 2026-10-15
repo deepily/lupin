@@ -7,6 +7,7 @@ It shows the same figures on the check half. It also fits the one cut-off of the
 The rate of false reuse it may tolerate is a required argument with no default. Nothing is fitted on a
 number nobody chose. No model is called, and nothing is written except the report on the console.
 """
+import copy
 import argparse
 import itertools
 import json
@@ -225,7 +226,7 @@ def _best( policies, rows, rate ):
     return { "chosen": best[ "policy" ], "table": table, "feasible": len( ok ), "tied": len( tied ) }
 
 
-def fit_policy( rows, halves, rate, grid=GRID ):
+def fit_policy( rows, halves, rate, grid=None ):
     """
     Fit the four cut-offs of the new question on the fit half.
 
@@ -241,6 +242,7 @@ def fit_policy( rows, halves, rate, grid=GRID ):
         - ValueError for a bad rate or grid, no rows, an unknown member, or a row of the check half
         - NoFeasiblePolicy when no point keeps false reuse within the rate
     """
+    if grid is None: grid = copy.deepcopy( GRID )
     _check_rate( rate )
     _check_grid( grid )
     _check_fit_rows( rows, halves )
@@ -303,7 +305,7 @@ def _counts( rows, split, halves ):
              for h in ( "fit", "check" ) }
 
 
-def report( rows, split, rate, grid=GRID, placeholder=False ):
+def report( rows, split, rate, grid=None, placeholder=False ):
     """
     Fit the new question and read the chosen policy on both halves.
 
@@ -316,6 +318,7 @@ def report( rows, split, rate, grid=GRID, placeholder=False ):
         - edges names each chosen value that sits on the edge of its grid
         - on_check is the chosen policy read on the check half, which the fit never saw
     """
+    if grid is None: grid = copy.deepcopy( GRID )
     halves = ss.half_by_member( split )
     check_rows( rows )
     fit_rows, other = split_rows( rows, halves )

@@ -4,6 +4,7 @@ Unit tests for lupin_mcp.reuse_tools against a request-keyed fake Jev.
 The fake is keyed on the hash of a request body written out LITERALLY in this file, so a client
 that builds the request wrongly gets an unexpected-request failure instead of a canned answer.
 """
+import copy
 import hashlib
 import json
 import multiprocessing
@@ -35,8 +36,9 @@ ALL_TEXTS  = ( FEEDS_TEXT, MATHX_TEXT, SERVE_TEXT )
 NEED       = "read an RSS feed and return articles"
 
 
-def literal_body( need, candidate, instr=INSTR, crit=CRIT, model="jev-1.13.0" ):
+def literal_body( need, candidate, instr=INSTR, crit=None, model="jev-1.13.0" ):
     """The request body, spelled out here and not built by the code under test."""
+    if crit is None: crit = copy.deepcopy( CRIT )
     return { "model": model, "state": { "need": need, "candidate": candidate },
              "questions": { "fit": { "type": "choice", "instructions": instr, "criteria": crit } } }
 

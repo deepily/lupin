@@ -3,6 +3,7 @@ Sweeping a catalogue in packs: chunks, workers, the per-entry cache, receipt cou
 
 Plan 10.3 a to d and 10.6. The stand-in transport is the one the send tests use.
 """
+import copy
 import threading
 
 import pytest
@@ -22,7 +23,9 @@ def ctx_for( tmp_path ):
     return make
 
 
-def sweep( ctx, entries=ENTRIES, size=3, **kw ): return rp.sweep_packed( ctx, NEED, entries, size, **kw )
+def sweep( ctx, entries=None, size=3, **kw ):
+    if entries is None: entries = copy.deepcopy( ENTRIES )
+    return rp.sweep_packed( ctx, NEED, entries, size, **kw )
 
 
 def test_every_entry_is_answered_in_order_in_packs_of_the_given_size( ctx_for ):

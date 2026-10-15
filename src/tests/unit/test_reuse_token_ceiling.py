@@ -4,6 +4,7 @@ The token ceiling of one live run: reserve first, then settle on reported usage.
 Plan 10.6. The ceiling counts input and output tokens together. Every test sends through
 jev_transport.send_with_meta with a stand-in post function, so a refused attempt shows as zero calls.
 """
+import copy
 import json
 import math
 import threading
@@ -36,8 +37,9 @@ class Post:
             return self.script.pop( 0 ) if len( self.script ) > 1 else self.script[ 0 ]
 
 
-def send( budget, post, body=BODY, entries=1 ):
+def send( budget, post, body=None, entries=1 ):
     """Send one request as the packed sender does: open, post, then close or fail."""
+    if body is None: body = copy.deepcopy( BODY )
     budget.open_request( body, entries )
     try:
         text, meta = jt.send_with_meta( json.dumps( body ).encode( "utf-8" ), post, lambda s: None, ENV, budget, lambda: 0.5 )

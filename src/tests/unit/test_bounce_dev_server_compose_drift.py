@@ -15,6 +15,7 @@ drift and no-drift arms cannot pass by the same path:
     probe 20  → fail OPEN: `docker restart`, and the script says the probe could not answer
     no probe  → fail OPEN the same way (python3 exits 2 on a missing file)
 """
+import copy
 import os
 import subprocess
 import tempfile
@@ -33,7 +34,8 @@ RECREATE_ARGS = [ "docker", "compose", "--project-name", "lupin", "--project-dir
                   "-f", COMPARED_TREE + "/docker-compose.yml", "up", "-d", "--force-recreate", "--no-deps", "lupin-rest-dev" ]
 
 
-def _run( drift_rc=None, extra_args=(), recreate_args=RECREATE_ARGS ):
+def _run( drift_rc=None, extra_args=(), recreate_args=None ):
+    if recreate_args is None: recreate_args = copy.deepcopy( RECREATE_ARGS )
     tmp     = tempfile.mkdtemp()
     scripts = Path( tmp ) / "src" / "scripts"
     scripts.mkdir( parents=True )

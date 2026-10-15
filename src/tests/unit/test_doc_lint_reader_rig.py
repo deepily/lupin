@@ -7,6 +7,7 @@ or NOT STATED, and the fake grader scores 1 when the key's words occur in the an
 with sentences removed really does score lower, and the control below shows it.
 """
 
+import copy
 import asyncio
 import json
 import re
@@ -50,7 +51,8 @@ class FakeModels:
         yield AssistantMessage( content=[ TextBlock( text ) ], model=options.model )
 
 
-def go( old, new, questions=QUESTIONS, config=CONFIG, ledger=None, models=None ):
+def go( old, new, questions=None, config=CONFIG, ledger=None, models=None ):
+    if questions is None: questions = copy.deepcopy( QUESTIONS )
     models = models or FakeModels()
     return asyncio.run( rt.run_reader_test( old, new, questions, config, ledger=ledger, query_fn=models ) ), models
 

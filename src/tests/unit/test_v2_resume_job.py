@@ -12,6 +12,7 @@ routed between the two behaviours.
 The HTTP class enters the way a caller does, through the mounted router with only auth and
 the queue swapped, so the route, the request model and the response model are the real ones.
 """
+import copy
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,7 +54,8 @@ def _queue( size=4 ):
     return q
 
 
-async def _call( text, queue=None, user=USER, **overrides ):
+async def _call( text, queue=None, user=None, **overrides ):
+    if user is None: user = copy.deepcopy( USER )
     return await v2_resume_job( ResumeJobRequest( resume_from=text, **overrides ), current_user=user,
                                 todo_queue=queue if queue is not None else _queue() )
 

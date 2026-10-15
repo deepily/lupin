@@ -15,6 +15,7 @@ Venue: :8000 (scheduled) — E2E UI suite.
 """
 
 from __future__ import annotations
+import copy
 
 import json
 import os
@@ -64,7 +65,8 @@ HELD_WITH_REQUESTS = {
 }
 
 
-def _open_multiplexer( page, holding_body=HELD ) -> None:
+def _open_multiplexer( page, holding_body=None ) -> None:
+    if holding_body is None: holding_body = copy.deepcopy( HELD )
     access, refresh = _tokens()
     page.context.add_init_script(
         f"window.localStorage.setItem('lupin_access_token', { json.dumps( access ) });"

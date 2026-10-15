@@ -4,6 +4,7 @@ Sweeping a catalogue with two questions a pack: the key, the cache and the size 
 This is unit 6 of the new question. The transport is the PairFake, which answers from the need
 and each candidate's text. Nothing here reaches Jev.
 """
+import copy
 import pytest
 
 from lupin_mcp import reuse_pack as rp
@@ -21,7 +22,9 @@ def ctx_for( tmp_path ):
     return make
 
 
-def sweep( ctx, entries=ENTRIES, size=3, **kw ): return rp.sweep_packed( ctx, NEED, entries, size, kind="pair", **kw )
+def sweep( ctx, entries=None, size=3, **kw ):
+    if entries is None: entries = copy.deepcopy( ENTRIES )
+    return rp.sweep_packed( ctx, NEED, entries, size, kind="pair", **kw )
 
 
 def test_the_pair_key_holds_the_need_the_text_and_the_model_and_no_pack():

@@ -7,6 +7,7 @@ Three entries live in the fixture repo: cosa.feeds.parse_feed, cosa.mathx.add an
 Two capability pages cover them: `feeds-page` (the module cosa.feeds) and `math-page` (cosa.mathx only,
 named through a module list).
 """
+import copy
 import json
 import threading
 
@@ -66,8 +67,10 @@ def env( tmp_path ):
     return root, tmp_path / "data", tmp_path / "out"
 
 
-def write_wiki( root, index_lines=LINES, pins=PINS, pages=( "feeds-page", "math-page" ) ):
+def write_wiki( root, index_lines=None, pins=None, pages=( "feeds-page", "math-page" ) ):
     """Write the wiki index with one bullet per slug and a page file for each slug in `pages`."""
+    if index_lines is None: index_lines = copy.deepcopy( LINES )
+    if pins is None: pins = copy.deepcopy( PINS )
     wiki = root / "src" / "docs" / "wiki"
     ( wiki / "capabilities" ).mkdir( parents=True, exist_ok=True )
     ( wiki / "INDEX.md" ).write_text( "\n".join( f"- [[{slug}]] — {line}" for slug, line in index_lines.items() ) + "\n", encoding="utf-8" )

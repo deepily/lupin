@@ -6,6 +6,7 @@ state of the pipeline. It gets back the verdict, the cause, every cause that hol
 and the nearest entries. A malformed answer is reported under its own cause and never
 contributes to a verdict.
 """
+import copy
 import math
 
 STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reach this for a strong match to win
@@ -17,7 +18,7 @@ BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many pl
 ANSWERS = ( "reuse", "extend", "unrelated" )
 
 
-def malformed_reason( probabilities, policy=POLICY ):
+def malformed_reason( probabilities, policy=None ):
     """
     Check one answer's probabilities.
 
@@ -27,6 +28,7 @@ def malformed_reason( probabilities, policy=POLICY ):
         - otherwise returns the first reason: not_a_mapping, missing_or_extra_keys, not_a_number,
           not_finite, out_of_range or sum_not_one
     """
+    if policy is None: policy = copy.deepcopy( POLICY )
     if not isinstance( probabilities, dict ): return "not_a_mapping"
     if set( probabilities ) != set( ANSWERS ): return "missing_or_extra_keys"
     values = [ probabilities[ k ] for k in ANSWERS ]
@@ -90,7 +92,7 @@ def _near_cutoff( rows, policy ):
     return False
 
 
-def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
+def decide( answers, expected_ids, failed_ids, flags, policy=None ):
     """
     Apply the decision table to one sweep.
 
@@ -125,6 +127,7 @@ def decide( answers, expected_ids, failed_ids, flags, policy=POLICY ):
         - shortlist holds the relevant entries and `nearest` the best entries by p_overlap whatever
           their value, each cut to policy["shortlist"], so a `NEW` verdict still names what to read
     """
+    if policy is None: policy = copy.deepcopy( POLICY )
     expected  = set( expected_ids )
     failed    = set( failed_ids )
     seen, dup = set(), set()
@@ -189,7 +192,7 @@ def _number_reason( values, low=0.0, high=1.0 ):
     return None
 
 
-def malformed_reason_provides( provides, coverage, policy=POLICY_PROVIDES ):
+def malformed_reason_provides( provides, coverage, policy=None ):
     """
     Check one answer's Noul number and Score probabilities.
 
@@ -200,6 +203,7 @@ def malformed_reason_provides( provides, coverage, policy=POLICY_PROVIDES ):
         - otherwise returns the first reason, provides first: not_a_number, not_finite, out_of_range,
           not_a_mapping, missing_or_extra_keys or sum_not_one
     """
+    if policy is None: policy = copy.deepcopy( POLICY_PROVIDES )
     reason = _number_reason( [ provides ] )
     if reason is not None: return reason
     if not isinstance( coverage, dict ): return "not_a_mapping"
@@ -248,7 +252,7 @@ def _cut_shortlist( causal, pool, cap ):
     return _provides_order( causal + others[ :cap - len( causal ) ] )
 
 
-def decide_provides( answers, expected_ids, failed_ids, flags, policy=POLICY_PROVIDES ):
+def decide_provides( answers, expected_ids, failed_ids, flags, policy=None ):
     """
     Apply the Noul-and-Score decision rule to one sweep.
 
@@ -276,6 +280,7 @@ def decide_provides( answers, expected_ids, failed_ids, flags, policy=POLICY_PRO
         - ValueError naming the first flag, in sorted order, that is not one of the four pipeline
           flags, so a caller's failure claim is never silently dropped
     """
+    if policy is None: policy = copy.deepcopy( POLICY_PROVIDES )
     expected  = set( expected_ids )
     failed    = set( failed_ids )
     seen, dup = set(), set()

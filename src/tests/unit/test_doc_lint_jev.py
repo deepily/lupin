@@ -6,6 +6,7 @@ returns depends on how many of the claim's words occur in the state, so a verdic
 input would not survive. One fixture is a response captured from the real API (jev-1.13.0).
 """
 
+import copy
 import asyncio
 import json
 import pathlib
@@ -56,7 +57,8 @@ def scripted_post( statuses, calls=None ):
     return post
 
 
-def ask( post, sleeps=None, environ=ENV, model=MODEL ):
+def ask( post, sleeps=None, environ=None, model=MODEL ):
+    if environ is None: environ = copy.deepcopy( ENV )
     return jev_transport.ask_noul( model, { "new_text": "x" }, "q", jev_judge.CRITERIA, post_fn=post,
                                    sleep_fn=( sleeps.append if sleeps is not None else ( lambda s: None ) ), environ=environ,
                                    random_fn=lambda: 0.5 )                  # jitter factor exactly 1, so waits are the plain doubling

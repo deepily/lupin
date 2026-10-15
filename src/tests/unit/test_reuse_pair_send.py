@@ -5,6 +5,7 @@ This is unit 5 of the new question. The transport is the PairFake. It answers fr
 and each candidate's text, so a pack that mixes up its entries shows in the values.
 Nothing here reaches Jev.
 """
+import copy
 import pytest
 
 from cosa.repo.doc_lint import jev_transport as jt
@@ -23,7 +24,9 @@ ENTRIES = [ { "id": "cosa.feeds.parse_feed", "sig": "( url )", "doc": "Parse an 
             { "id": "cosa.text.lines", "sig": "( s )", "doc": "Split text into lines." } ]
 
 
-def send( client, entries=ENTRIES, **kw ): return rp.send_pack( client, NEED, entries, kind="pair", **kw )
+def send( client, entries=None, **kw ):
+    if entries is None: entries = copy.deepcopy( ENTRIES )
+    return rp.send_pack( client, NEED, entries, kind="pair", **kw )
 
 
 def ids( out ): return [ a[ "id" ] for a in out[ "answers" ] ]

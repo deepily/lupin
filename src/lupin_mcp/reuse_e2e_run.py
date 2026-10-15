@@ -6,6 +6,7 @@ rest is paid for. A search is complete or it is a miss, and the reason is kept a
 ledger, failed calls, malformed answers. Searches the ceiling or the stop rule never started are not run.
 The driver sends nothing itself: the transport is a factory, and a stand-in is the default in tests.
 """
+import copy
 import argparse
 import collections
 import json
@@ -193,7 +194,7 @@ def run_searches( env, run_name, items, twins, ceiling_tokens, kind="run", prior
 def _canary_path( env, spec ): return env.results_dir / f"{spec[ 'prefix' ]}-canary.canary.json"
 
 
-def run_canary( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
+def run_canary( env, items, twins, ceiling_tokens, spec=None ):
     """
     Ask the first five members, both questions, and write the numbers a person reads first.
 
@@ -208,6 +209,7 @@ def run_canary( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
         - the allowance is the smaller of 1.5 times the estimate and the ledger's remaining allowance after the canary
         - tripped names each crossing: projection_over_allowance, incomplete, stopped
     """
+    if spec is None: spec = copy.deepcopy( E2E_SPEC )
     name = f"{spec[ 'prefix' ]}-canary"
     limit, total = env.ledger.snapshot()
     if spec[ "estimate" ] > limit - total:
@@ -241,7 +243,7 @@ def run_line( t ):
              f"not run {t[ 'totals' ][ 'not_run' ]}, spent {t[ 'totals' ][ 'spent_tokens' ]}" )
 
 
-def approve_canary( env, by, why, spec=E2E_SPEC, revised_estimate=None ):
+def approve_canary( env, by, why, spec=None, revised_estimate=None ):
     """
     Record that a person read the canary and let the rest run.
 
@@ -257,6 +259,7 @@ def approve_canary( env, by, why, spec=E2E_SPEC, revised_estimate=None ):
         - CanaryNotApproved when no canary was run
         - CanaryTripped when the canary crossed a number a revised estimate cannot clear, or the projection is still above the revised allowance
     """
+    if spec is None: spec = copy.deepcopy( E2E_SPEC )
     if not isinstance( by, str ) or not by or not isinstance( why, str ) or not why: raise s1.DriverRefused( "by and why must say who approved the canary and why" )
     path = _canary_path( env, spec )
     if not path.exists(): raise s1.CanaryNotApproved( "no canary was run" )
@@ -278,7 +281,7 @@ def approve_canary( env, by, why, spec=E2E_SPEC, revised_estimate=None ):
     _write_json( path, report )
 
 
-def run_full( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
+def run_full( env, items, twins, ceiling_tokens, spec=None ):
     """
     Run the members after the canary's five, once the canary is approved.
 
@@ -287,6 +290,7 @@ def run_full( env, items, twins, ceiling_tokens, spec=E2E_SPEC ):
     Raises:
         - CanaryNotApproved when there is no approved canary
     """
+    if spec is None: spec = copy.deepcopy( E2E_SPEC )
     path = _canary_path( env, spec )
     if not path.exists() or json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is None: raise s1.CanaryNotApproved( "the canary has not been approved" )
     canary = f"{spec[ 'prefix' ]}-canary"

@@ -11,6 +11,7 @@ All collaborators are patched at their SOURCE modules because the listener
 imports them lazily inside the method body.
 """
 
+import copy
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -48,8 +49,9 @@ def _bridge_scan( personas ):
     return [ ( MagicMock(), f"sid-{i}", p ) for i, p in enumerate( personas ) ]
 
 
-def _invoke( listener, notification, scan_result, meta=_META ):
+def _invoke( listener, notification, scan_result, meta=None ):
     """Run _handle_broadcast_received with all collaborators patched; return the handle_broadcast mock."""
+    if meta is None: meta = copy.deepcopy( _META )
     with patch(
         "lupin_mcp.broadcast_handler.handle_broadcast"
     ) as mock_handle, patch(

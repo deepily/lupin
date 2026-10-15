@@ -10,6 +10,7 @@ auth backend, no transcriber and no AskFlow stack are touched. The D4 arms call 
 directly, so they can hold the response without iterating it. :7999-eligible.
 """
 
+import copy
 import asyncio
 import gc
 import io
@@ -103,7 +104,8 @@ def io_rows( monkeypatch ):
     return rows
 
 
-def _app( flow, provider, upload_dir, user=USER ):
+def _app( flow, provider, upload_dir, user=None ):
+    if user is None: user = copy.deepcopy( USER )
     app = FastAPI()
     app.include_router( v2_ask.router )
     app.dependency_overrides[ v2_ask.get_current_user ]         = lambda: user

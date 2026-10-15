@@ -9,6 +9,7 @@ Isolation contract:
     - No test makes a directory in the shared temporary directory: the scratch parent is pointed at tmp_path.
 """
 
+import copy
 import asyncio
 import json
 import os
@@ -68,7 +69,8 @@ class FakeAgy:
     FakeModel does for Claude, and records every model call it receives.
     """
 
-    def __init__( self, version="1.2.17", answer=None, result_overrides=None, exit_code=0, usage=USAGE, on_call=None ):
+    def __init__( self, version="1.2.17", answer=None, result_overrides=None, exit_code=0, usage=None, on_call=None ):
+        if usage is None: usage = copy.deepcopy( USAGE )
         self.version          = version
         self.answer           = answer
         self.result_overrides = result_overrides or {}
