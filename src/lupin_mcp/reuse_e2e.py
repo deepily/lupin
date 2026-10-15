@@ -19,13 +19,14 @@ STRATA          = ( ( "has_exact_cluster", 58 ), ( "near_only", 42 ) )
 MEMBERS         = sum( n for _, n in STRATA )
 Z_95            = 1.959964
 HEADLINE        = ( "on_shortlist", "ranked_first", "top_ten" )
+FRESH_SHA_PREFIX = "0a0da7b7"                  # the reserved fresh-needs file; _read_checked opens it only for the driver that passes allow_fresh
 
 
 class FrozenInputRefused( ValueError ):
     """A frozen input is not the one the run was written for."""
 
 
-def _read_checked( path, expected_sha, what ):
+def _read_checked( path, expected_sha, what, allow_fresh=False ):
     """
     Read a JSON file whose hash must match.
 
@@ -33,9 +34,12 @@ def _read_checked( path, expected_sha, what ):
         - path names a file; expected_sha is 64 hex characters
     Ensures:
         - returns the parsed JSON
+        - a hash that starts with FRESH_SHA_PREFIX is refused before the file is opened, unless allow_fresh is true
     Raises:
-        - FrozenInputRefused when the file's sha256 differs, naming both, or when it is not JSON
+        - FrozenInputRefused when the hash is the reserved file's and not allowed, when the file's sha256 differs, naming both, or when it is not JSON
     """
+    if not allow_fresh and str( expected_sha ).startswith( FRESH_SHA_PREFIX ):
+        raise FrozenInputRefused( f"{what} {path}: the hash is the reserved fresh-needs file's, which only the confirmation driver may open" )
     raw = open( path, "rb" ).read()
     got = hashlib.sha256( raw ).hexdigest()
     if got != expected_sha: raise FrozenInputRefused( f"{what} {path}: sha256 is {got}, the run expects {expected_sha}" )

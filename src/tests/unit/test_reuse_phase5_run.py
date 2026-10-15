@@ -1,8 +1,8 @@
 """
-The fresh-needs driver: pinned file, three-part estimate, seeded sample, fixed settings.
+The fresh-needs driver: reserved hash, estimate, recorded sample, sweep, fixed settings.
 
-Nothing here reaches Jev. The flip driver is replaced by a recorder that parses the arguments with its real parser.
-The fresh-needs file of the run is never opened: the tests write a scratch file of their own under the same layout.
+Nothing here reaches Jev: the transport is the stand-in and the ledger is a scratch file.
+The reserved file of the run is never opened: the tests write a scratch file of their own under the same layout.
 """
 import json
 import subprocess
@@ -12,21 +12,37 @@ import pytest
 
 from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_flip_run as frun
+from lupin_mcp import reuse_ledger as rl
 from lupin_mcp import reuse_phase5_run as p5
 from lupin_mcp import reuse_stage1 as s1
 from tests.unit.test_reuse_e2e_cli import put
+from tests.unit.test_reuse_e2e_run import make_wide_repo
 from tests.unit.test_reuse_flip_run import rows_of
 
 
 class Scratch:
-    """A projects-data directory with a 30-row needs file under the pinned layout."""
+    """A projects-data directory with a 30-row needs file, a tree and a ledger."""
 
     def __init__( self, tmp_path, monkeypatch ):
         folder = tmp_path / "projects-data" / p5.FRESH_NEEDS_DIR
         folder.mkdir( parents=True )
         self.projects_data = str( tmp_path / "projects-data" )
-        self.sha           = put( folder / p5.FRESH_NEEDS_NAME, { "format": frun.NEEDS_FORMAT, "needs": rows_of( 30 ) } )
-        monkeypatch.setattr( p5, "FRESH_SHA_PREFIX", self.sha[ :8 ] )
+        self.sha    = put( folder / p5.FRESH_NEEDS_NAME, { "format": frun.NEEDS_FORMAT, "needs": rows_of( 30 ) } )
+        self.root   = make_wide_repo( tmp_path )
+        self.data   = tmp_path / "data"
+        self.ledger = tmp_path / "ledger.jsonl"
+        rl.AccountLedger.create( self.ledger, rl.ACCOUNT_LIMIT_TOKENS, "test", "scratch" )
+        monkeypatch.setattr( e2e, "FRESH_SHA_PREFIX", self.sha[ :8 ] )
+
+    def args( self, command, *extra, sha=None ):
+        base = [ command, "--projects-data", self.projects_data, "--needs-sha", sha or self.sha ]
+        if command == "estimate": return base
+        base += [ "--data", str( self.data ) ]
+        if command != "sample": base += [ "--root", str( self.root ), "--ledger", str( self.ledger ) ]
+        return base + list( extra )
+
+    def sample( self, seed="seed-before-the-run", arm="new-question-full", index="ix-123" ):
+        return p5.cli( self.args( "sample", "--seed", seed, "--arm", arm, "--index-sha", index ) )
 
 
 @pytest.fixture
@@ -34,36 +50,23 @@ def scratch( tmp_path, monkeypatch ):
     return Scratch( tmp_path, monkeypatch )
 
 
-@pytest.fixture
-def recorder( monkeypatch ):
-    """Stands in for the flip driver's cli: parses with the real parser, then records."""
-    seen = []
-    def fake( argv ):
-        frun._parser().parse_args( argv )
-        seen.append( argv )
-        return 7
-    monkeypatch.setattr( frun, "cli", fake )
-    return seen
-
-
 def items_of( n=30 ):
     return [ { "member": f"n{i:02d}", "need": f"need {i}", "exclude": None, "kind": "distinct" } for i in range( n ) ]
 
 
 def test_estimate_parts_pin_each_part_and_the_sum_to_literals():
-    parts = p5.estimate_parts()
+    parts = p5.estimate_parts( 30 )
     assert parts == { "run": 368_040_000, "canary": 61_400_000, "sample": 24_536_000, "total": 453_976_000 }
     assert parts[ "total" ] == parts[ "run" ] + parts[ "canary" ] + parts[ "sample" ]
 
 
-def test_estimate_parts_follow_needs_repeats_and_sample():
-    parts = p5.estimate_parts( needs=2, repeats=3, sample=1 )
-    assert parts[ "run" ] == 6 * 2_453_600
-    assert parts[ "sample" ] == 2_453_600
+def test_estimate_parts_follow_the_files_own_count_of_needs():
+    assert p5.estimate_parts( 2, repeats=3, sample=1 )[ "run" ] == 6 * 2_453_600
+    assert p5.estimate_parts( 40 )[ "run" ] == 40 * 5 * 2_453_600
 
 
 def test_estimate_lines_show_three_parts_then_the_total_with_dollars():
-    lines = p5.estimate_lines( p5.estimate_parts() )
+    lines = p5.estimate_lines( p5.estimate_parts( 30 ), 30 )
     assert lines[ :3 ] == [ "run: 368.0 M tokens", "canary: 61.4 M tokens", "sample: 24.5 M tokens" ]
     assert lines[ 3 ].startswith( "total: 454.0 M tokens, about $19.07 at $0.042 per M, 15.13 M per need" )
     assert "estimate, not measured" in lines[ 3 ]
@@ -75,7 +78,6 @@ def test_pick_sample_is_ten_members_in_file_order_and_repeatable():
     assert len( first ) == 10 and len( set( first ) ) == 10
     assert first == sorted( first )
     assert first == p5.pick_sample( items, "seed-one" )
-    assert set( first ) <= { i[ "member" ] for i in items }
 
 
 def test_pick_sample_changes_with_the_seed_and_the_order_of_the_file_does_not_matter():
@@ -99,76 +101,147 @@ def test_needs_path_joins_the_pinned_layout_and_ignores_a_trailing_slash():
     assert p5.needs_path( "/x/projects-data" ) == p5.needs_path( "/x/projects-data/" )
 
 
-def test_check_sha_pins_the_prefix_of_the_real_file():
-    assert p5.FRESH_SHA_PREFIX == "0a0da7b7"
-    full = "0a0da7b7" + "f" * 56
+def test_the_reserved_prefix_is_the_one_the_plan_names_and_check_sha_pins_it( monkeypatch ):
+    assert e2e.FRESH_SHA_PREFIX == "0a0da7b7"
+    full = e2e.FRESH_SHA_PREFIX + "f" * 56
     assert p5.check_sha( full ) == full
     for bad in ( "1" * 64, None, 12 ):
-        with pytest.raises( e2e.FrozenInputRefused, match="0a0da7b7" ): p5.check_sha( bad )
+        with pytest.raises( e2e.FrozenInputRefused, match="must start with" ): p5.check_sha( bad )
 
 
-def run_args( scratch, command, *extra, live=False ):
-    base = [ command, "--root", "/r", "--data", "/d", "--ledger", "/l", "--projects-data", scratch.projects_data, "--needs-sha", scratch.sha ]
-    return base + ( [ "--live" ] if live else [] ) + list( extra )
+def test_the_shared_reader_refuses_the_reserved_hash_to_every_other_caller( scratch ):
+    path = p5.needs_path( scratch.projects_data )
+    with pytest.raises( e2e.FrozenInputRefused, match="reserved" ): e2e._read_checked( path, scratch.sha, "any file" )
+    with pytest.raises( e2e.FrozenInputRefused, match="reserved" ): frun.load_flip_needs( path, scratch.sha )
+    assert e2e._read_checked( path, scratch.sha, "any file", allow_fresh=True )[ "format" ] == frun.NEEDS_FORMAT
+    assert len( frun.load_flip_needs( path, scratch.sha, allow_fresh=True ) ) == 30
 
 
-def test_every_step_hands_the_flip_driver_the_fixed_settings( scratch, recorder, capsys ):
-    total = str( p5.estimate_parts()[ "total" ] )
-    path  = p5.needs_path( scratch.projects_data )
-    fixed = [ "--prefix", "p5", "--estimate-tokens", total, "--repeats", "5", "--route", "full", "--question", "new" ]
-    assert p5.main( run_args( scratch, "canary", "--ceiling", "9" ) ) == 7
-    assert recorder[ -1 ] == [ "--root", "/r", "--data", "/d", "--ledger", "/l", "--pack-size", "50" ] + fixed + [ "canary", "--needs", path, "--needs-sha", scratch.sha, "--ceiling", "9" ]
-    p5.main( run_args( scratch, "run", "--ceiling", "8", live=True ) )
-    assert recorder[ -1 ][ 6: 9 ] == [ "--live", "--pack-size", "50" ]
-    assert recorder[ -1 ][ -2: ] == [ "--ceiling", "8" ]
-    p5.main( run_args( scratch, "approve", "--by", "cheech", "--why", "read the canary" ) )
-    assert recorder[ -1 ][ -4: ] == [ "--by", "cheech", "--why", "read the canary" ]
-    p5.main( run_args( scratch, "report" ) )
-    assert recorder[ -1 ][ -5: ] == [ "report", "--needs", path, "--needs-sha", scratch.sha ]
-    assert len( recorder ) == 4
+def test_the_flip_driver_refuses_the_reserved_file_and_has_no_flag_to_allow_it( scratch, capsys ):
+    argv = [ "--root", str( scratch.root ), "--data", str( scratch.data ), "--ledger", str( scratch.ledger ), "canary",
+             "--needs", p5.needs_path( scratch.projects_data ), "--needs-sha", scratch.sha, "--ceiling", "1" ]
+    assert frun.cli( argv ) == 2
+    assert "reserved" in capsys.readouterr().err
+    with pytest.raises( SystemExit ): frun.cli( argv + [ "--allow-fresh" ] )                      # the command line carries no such flag
 
 
-def test_estimate_command_prints_the_parts_and_sends_nothing( recorder, capsys ):
-    assert p5.main( [ "estimate" ] ) == 0
+def test_estimate_command_prints_the_parts_for_the_files_own_count( scratch, capsys ):
+    assert p5.cli( scratch.args( "estimate" ) ) == 0
     out = capsys.readouterr().out
     assert "run: 368.0 M tokens" in out and "total: 454.0 M tokens" in out
-    assert recorder == []
 
 
-def test_sample_command_prints_the_seed_and_ten_members_from_the_checked_file( scratch, recorder, capsys ):
-    assert p5.main( [ "sample", "--seed", "written-before-the-run", "--projects-data", scratch.projects_data, "--needs-sha", scratch.sha ] ) == 0
-    record = json.loads( capsys.readouterr().out )
-    assert record[ "seed" ] == "written-before-the-run" and len( record[ "members" ] ) == 10
-    assert record[ "members" ] == p5.pick_sample( frun.load_flip_needs( p5.needs_path( scratch.projects_data ), scratch.sha ), "written-before-the-run" )
-    assert recorder == []
+def test_sample_is_recorded_once_with_arm_and_index_and_the_same_call_repeats( scratch, capsys ):
+    assert scratch.sample() == 0
+    first = json.loads( capsys.readouterr().out )
+    held  = json.loads( ( scratch.data / p5.SAMPLE_FILE ).read_text( encoding="utf-8" ) )
+    assert first == held
+    assert held[ "seed" ] == "seed-before-the-run" and held[ "arm" ] == "new-question-full" and held[ "index_sha" ] == "ix-123" and held[ "needs_sha" ] == scratch.sha
+    assert len( held[ "members" ] ) == 10
+    assert scratch.sample() == 0 and json.loads( capsys.readouterr().out ) == held
 
 
-def test_cli_returns_the_flip_drivers_code_and_two_after_a_refusal( scratch, recorder, capsys ):
-    assert p5.cli( run_args( scratch, "report" ) ) == 7
-    assert p5.cli( [ "sample", "--seed", " ", "--projects-data", scratch.projects_data, "--needs-sha", scratch.sha ] ) == 2
-    assert "refused (DriverRefused)" in capsys.readouterr().err
-    assert p5.cli( [ "sample", "--seed", "s", "--projects-data", scratch.projects_data, "--needs-sha", "9" * 64 ] ) == 2
-    assert "refused (FrozenInputRefused)" in capsys.readouterr().err
-    assert p5.cli( [ "sample", "--seed", "s", "--projects-data", scratch.projects_data, "--needs-sha", scratch.sha[ :8 ] + "0" * 56 ] ) == 2    # right prefix, wrong file
+@pytest.mark.parametrize( "change", [ { "seed": "another" }, { "arm": "other-arm" }, { "index": "ix-999" } ] )
+def test_a_different_seed_arm_or_index_is_refused_after_the_sample_is_recorded( scratch, capsys, change ):
+    assert scratch.sample() == 0
+    before = ( scratch.data / p5.SAMPLE_FILE ).read_text( encoding="utf-8" )
+    capsys.readouterr()
+    assert scratch.sample( **change ) == 2
+    assert "already recorded" in capsys.readouterr().err
+    assert ( scratch.data / p5.SAMPLE_FILE ).read_text( encoding="utf-8" ) == before
+
+
+@pytest.mark.parametrize( "step", [ ( "canary", "--ceiling", "1" ), ( "approve", "--by", "c", "--why", "w" ), ( "run", "--ceiling", "1" ), ( "report", ), ( "sweep", "--ceiling", "1" ) ] )
+def test_a_step_that_spends_or_reports_is_refused_before_the_sample_is_recorded( scratch, capsys, step ):
+    assert p5.cli( scratch.args( *step ) ) == 2
+    assert "no sample is recorded" in capsys.readouterr().err
+    assert not ( scratch.data / "e2e-results" ).exists()                                        # nothing was created or sent
+
+
+def test_a_sample_recorded_for_another_needs_file_is_refused( scratch, capsys ):
+    assert scratch.sample() == 0
+    record = json.loads( ( scratch.data / p5.SAMPLE_FILE ).read_text( encoding="utf-8" ) )
+    record[ "needs_sha" ] = "0" * 64
+    ( scratch.data / p5.SAMPLE_FILE ).write_text( json.dumps( record ), encoding="utf-8" )
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 2
+    assert "recorded for needs file" in capsys.readouterr().err
+
+
+def test_flip_argv_fixes_the_settings_and_holds_the_estimate_to_the_run_and_the_canary( scratch ):
+    class A: pass
+    a = A()
+    a.root, a.data, a.ledger, a.pack_size, a.live, a.command = "/r", "/d", "/l", 50, False, "canary"
+    a.projects_data, a.needs_sha, a.ceiling = scratch.projects_data, scratch.sha, 9
+    parts = p5.estimate_parts( 30 )
+    argv  = p5.flip_argv( a, parts )
+    assert argv[ :8 ] == [ "--root", "/r", "--data", "/d", "--ledger", "/l", "--pack-size", "50" ]
+    assert argv[ 8: ] == [ "--prefix", "p5", "--estimate-tokens", "429440000", "--repeats", "5", "--route", "full", "--question", "new",
+                           "canary", "--needs", p5.needs_path( scratch.projects_data ), "--needs-sha", scratch.sha, "--ceiling", "9" ]
+    assert 429_440_000 == parts[ "run" ] + parts[ "canary" ] == parts[ "total" ] - parts[ "sample" ]
+    a.live, a.command, a.by, a.why = True, "approve", "me", "ok"
+    argv = p5.flip_argv( a, parts )
+    assert argv[ 6 ] == "--live" and argv[ -4: ] == [ "--by", "me", "--why", "ok" ]
+    a.command = "report"
+    assert p5.flip_argv( a, parts )[ -5: ] == [ "report", "--needs", p5.needs_path( scratch.projects_data ), "--needs-sha", scratch.sha ]
+
+
+def test_the_steps_run_end_to_end_on_the_stand_in_and_the_report_names_the_recorded_sample( scratch, capsys ):
+    assert scratch.sample() == 0
+    members = json.loads( capsys.readouterr().out )[ "members" ]
+    assert p5.cli( scratch.args( "sweep", "--ceiling", "100000000" ) ) == 0
+    sweep = json.loads( ( scratch.data / "e2e-results" / "p5s-sample.json" ).read_text( encoding="utf-8" ) )
+    assert sweep[ "members" ] == members and sweep[ "questions" ] == [ "r1" ] and len( sweep[ "searches" ] ) == 10
+    assert all( s[ "status" ] == "complete" for s in sweep[ "searches" ] )
+    assert p5.cli( scratch.args( "canary", "--ceiling", "100000000" ) ) == 0
+    canary = json.loads( ( scratch.data / "e2e-results" / "p5-canary.json" ).read_text( encoding="utf-8" ) )
+    assert canary[ "questions" ] == [ "r1", "r2", "r3", "r4", "r5" ] and canary[ "pack_size" ] == 50
+    assert p5.cli( scratch.args( "approve", "--by", "cheech", "--why", "read it" ) ) == 0
+    assert p5.cli( scratch.args( "run", "--ceiling", "300000000" ) ) == 0
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "report" ) ) == 0
+    out = capsys.readouterr().out
+    assert "flip rate (new question, route full)" in out
+    assert "sample: seed 'seed-before-the-run', arm 'new-question-full', index ix-123, members " + ", ".join( members ) in out
+
+
+def test_a_refusal_of_the_flip_driver_is_returned_as_its_code( scratch, capsys ):
+    assert scratch.sample() == 0
+    capsys.readouterr()
+    assert p5.cli( scratch.args( "run", "--ceiling", "100000000" ) ) == 2                       # the canary has not run
+    assert "refused" in capsys.readouterr().err
+
+
+def test_the_hash_is_checked_before_the_sample_or_anything_else_is_read( scratch, capsys ):
+    assert p5.cli( scratch.args( "sample", "--seed", "s", "--arm", "a", "--index-sha", "i", sha="9" * 64 ) ) == 2
+    assert "must start with" in capsys.readouterr().err
+    assert p5.cli( scratch.args( "sample", "--seed", "s", "--arm", "a", "--index-sha", "i", sha=scratch.sha[ :8 ] + "0" * 56 ) ) == 2    # right prefix, not the file
     assert "sha256" in capsys.readouterr().err
+    assert p5.cli( scratch.args( "sample", "--seed", " ", "--arm", "a", "--index-sha", "i" ) ) == 2
+    assert "seed" in capsys.readouterr().err
+    assert not ( scratch.data / p5.SAMPLE_FILE ).exists()
 
 
-def test_a_wrong_hash_stops_a_step_before_the_flip_driver_is_called( scratch, recorder ):
-    args = [ "run", "--root", "/r", "--data", "/d", "--ledger", "/l", "--projects-data", scratch.projects_data, "--needs-sha", "1" * 64, "--ceiling", "1" ]
-    with pytest.raises( e2e.FrozenInputRefused ): p5.main( args )
-    assert recorder == []
-
-
-def test_only_this_driver_names_the_fresh_needs_file():
-    root  = Path( subprocess.run( [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True, check=True, cwd=Path( __file__ ).parent ).stdout.strip() )
-    files = subprocess.run( [ "git", "ls-files", "*.py" ], capture_output=True, text=True, check=True, cwd=root ).stdout.split()
-    assert len( files ) > 1000                                                                 # the population is the tree's python files, not an empty listing
-    named = sorted( f for f in files if ( root / f ).exists() and p5.FRESH_NEEDS_NAME in ( root / f ).read_text( encoding="utf-8", errors="replace" ) )
-    assert named == [ "src/lupin_mcp/reuse_phase5_run.py" ]
-
-
-def test_sample_refuses_another_file_at_the_path_even_when_its_own_hash_is_given( scratch, recorder, capsys ):
+def test_another_file_at_the_path_is_refused_even_with_its_own_hash( scratch, capsys ):
     other = put( Path( p5.needs_path( scratch.projects_data ) ), { "format": frun.NEEDS_FORMAT, "needs": rows_of( 31 ) } )
     assert other != scratch.sha
-    assert p5.cli( [ "sample", "--seed", "s", "--projects-data", scratch.projects_data, "--needs-sha", other ] ) == 2
+    assert p5.cli( scratch.args( "estimate", sha=other ) ) == 2
     assert "must start with" in capsys.readouterr().err
+
+
+def grep_tracked( root, needle ):
+    """Ensures: returns the tracked text files that hold needle; binary files are skipped."""
+    out = subprocess.run( [ "git", "grep", "-l", "-I", "-F", "-e", needle ], capture_output=True, text=True, cwd=root )
+    assert out.returncode in ( 0, 1 ), out.stderr
+    return sorted( out.stdout.split() )
+
+
+def test_only_this_driver_names_the_reserved_file_and_only_the_reader_and_this_test_hold_its_hash():
+    root  = Path( subprocess.run( [ "git", "rev-parse", "--show-toplevel" ], capture_output=True, text=True, check=True, cwd=Path( __file__ ).parent ).stdout.strip() )
+    files = subprocess.run( [ "git", "ls-files" ], capture_output=True, text=True, check=True, cwd=root ).stdout.split()
+    assert len( files ) > 1000                                                                 # the population is every tracked file, not an empty listing
+    driver, reader, here = "src/lupin_mcp/reuse_phase5_run.py", "src/lupin_mcp/reuse_e2e.py", "src/tests/unit/test_reuse_phase5_run.py"
+    statement = "src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-problem-statement.md"   # a document that says where the file is; it cannot open it
+    assert grep_tracked( root, p5.FRESH_NEEDS_NAME ) == sorted( [ driver, statement ] )         # positive control: the driver itself is found
+    assert grep_tracked( root, p5.FRESH_NEEDS_DIR ) == sorted( [ driver, statement ] )
+    assert grep_tracked( root, "0a0da7b7" ) == sorted( [ reader, here ] )

@@ -28,12 +28,13 @@ PREFIX          = "fl"
 ESTIMATE_TOKENS = 319_000_000                         # 150 searches at 2,125,705 tokens each, rounded up, from the end-to-end run of 9 October
 
 
-def load_flip_needs( path, expected_sha ):
+def load_flip_needs( path, expected_sha, allow_fresh=False ):
     """
     Read the frozen needs of the flip-rate test.
 
     Requires:
         - path names a JSON file { format, needs: [ { id, need, kind, exclude } ] }
+        - allow_fresh is true only for the driver that owns the reserved fresh-needs file
     Ensures:
         - returns [ { member, need, exclude, kind } ] in file order; member is the need's id
         - the file's hash matched, there are at least MIN_NEEDS needs, and no id or need text is repeated
@@ -41,7 +42,7 @@ def load_flip_needs( path, expected_sha ):
     Raises:
         - FrozenInputRefused for any of the above that does not hold
     """
-    record = e2e._read_checked( path, expected_sha, "flip needs file" )
+    record = e2e._read_checked( path, expected_sha, "flip needs file", allow_fresh=allow_fresh )
     if record[ "format" ] != NEEDS_FORMAT: raise e2e.FrozenInputRefused( f"flip needs file format is {record[ 'format' ]!r}, expected {NEEDS_FORMAT!r}" )
     rows = record[ "needs" ]
     if len( rows ) < rf.MIN_NEEDS: raise e2e.FrozenInputRefused( f"flip needs file holds {len( rows )} needs; the test needs at least {rf.MIN_NEEDS}" )
@@ -200,10 +201,12 @@ def _parser():
     return ap
 
 
-def main( argv=None ):
+def main( argv=None, allow_fresh=False ):
     """
     Run one step of the flip-rate test.
 
+    Requires:
+        - allow_fresh is set in code by the confirmation driver; the command line has no flag for it
     Ensures:
         - returns 0 after the step; prints how it ended
     Raises:
@@ -214,7 +217,7 @@ def main( argv=None ):
     if not root: raise rr.RunnerRefused( "give --root, or set LUPIN_ROOT" )
     prefix = _check_options( args )
     rr.check_paths( root, args.data, args.ledger, args.live )                                    # a path refusal comes before the slow reads
-    items = load_flip_needs( args.needs, args.needs_sha )
+    items = load_flip_needs( args.needs, args.needs_sha, allow_fresh=allow_fresh )
     spec  = { "prefix": prefix, "members": len( items ), "estimate": args.estimate_tokens, "canary_members": e2r.CANARY_MEMBERS }
     if args.question == "new" and args.route != "full": raise s1.DriverRefused( "the new question has no candidate stage; give --route full" )
     env   = e2r._open_env( root, args.data, args.ledger, args.live, repeat_asks( args.repeats, args.route, QUESTION_NAMES[ args.question ] ), args.pack_size )
@@ -232,7 +235,7 @@ def main( argv=None ):
     return 0
 
 
-def cli( argv=None ):
+def cli( argv=None, allow_fresh=False ):
     """
     Run main as a command line: a refusal is one line and exit code 2.
 
@@ -241,7 +244,7 @@ def cli( argv=None ):
         - returns 2 after one line on the error stream for a refusal of the runner, the driver, the frozen needs or the ledger
         - any other error propagates untouched, so a crash is never read as a refusal
     """
-    try: return main( argv )
+    try: return main( argv, allow_fresh=allow_fresh )
     except ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
              e2e.FrozenInputRefused, rl.AccountLimitReached, rl.LedgerUnreadable ) as e:
         print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
