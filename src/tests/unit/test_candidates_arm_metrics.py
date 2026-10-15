@@ -48,6 +48,8 @@ class TestT1Table:
         table      = am.t1_table( shortlists, references )
         assert table[ "C0" ][ 32 ][ "per_need" ] == { "n1": 0.5, "n2": 1.0 }
         assert table[ "C0" ][ 32 ][ "mean" ] == 0.75
+        assert table[ "C0" ][ 32 ][ "mean_size" ] == 1.5
+        assert table[ "B1" ][ 32 ][ "mean_size" ] == 2.0
         assert table[ "B1" ][ 32 ][ "mean" ] == 1.0
 
     def test_a_need_with_no_reference_is_left_out( self ):
@@ -57,6 +59,7 @@ class TestT1Table:
     def test_no_measured_need_gives_no_mean( self ):
         table = am.t1_table( { "C0": { 64: { "n2": [ "a" ] } } }, { "n2": [] } )
         assert table[ "C0" ][ 64 ][ "mean" ] is None
+        assert table[ "C0" ][ 64 ][ "mean_size" ] == 1.0
 
     def test_reference_ids_come_from_a_decision( self ):
         decision = vd.decide( [ { "id": "b", "probabilities": REUSE }, { "id": "a", "probabilities": REUSE },

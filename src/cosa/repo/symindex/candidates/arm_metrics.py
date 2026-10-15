@@ -37,7 +37,8 @@ def t1_table( shortlists, references ):
         - references maps need id to the full sweep's shortlist, and holds every need that appears
 
     Ensures:
-        - returns { arm: { K: { "mean": float, "per_need": { need id: recall } } } }
+        - returns { arm: { K: { "mean": float, "mean_size": float, "per_need": { need id: recall } } } }
+        - mean_size is the mean number of ids in the shortlists, over every need given, or None when there are none
         - a need with an empty reference is left out of the mean and the per-need map
     """
     table = {}
@@ -45,7 +46,10 @@ def t1_table( shortlists, references ):
         table[ arm ] = {}
         for k, by_need in by_k.items():
             per = { n: recall_at_k( ids, references[ n ] ) for n, ids in by_need.items() if references[ n ] }
-            table[ arm ][ k ] = { "mean": statistics.fmean( per.values() ) if per else None, "per_need": per }
+            sizes = [ len( ids ) for ids in by_need.values() ]
+            table[ arm ][ k ] = { "mean"      : statistics.fmean( per.values() ) if per else None,
+                                  "mean_size" : statistics.fmean( sizes ) if sizes else None,
+                                  "per_need"  : per }
     return table
 
 

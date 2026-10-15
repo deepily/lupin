@@ -13,19 +13,21 @@ REPORT_META_MISSING = "REPORT_META_MISSING"
 META_KEYS           = ( "run_id", "code_sha", "index_sha", "manifest_hash", "needs_sha", "cache_sha" )
 
 
-def count_redactable( needs, redactor ):
+def count_redactable( needs, redactor, planted_text ):
     """
-    Count the needs that hold a token the redactor would blank.
+    Count the needs that hold a token the redactor would blank, and run the positive control.
 
     Requires:
         - needs is a mapping of need id to need text
         - redactor takes a text and returns the number of spans it would blank
+        - planted_text holds a token the redactor is meant to find
 
     Ensures:
-        - returns the count of needs with at least one span, and their sorted ids
+        - returns the count of needs with at least one span, their sorted ids, the number of needs,
+          and a control flag that is True only when the redactor finds a span in planted_text
     """
     hit = sorted( n for n, text in needs.items() if redactor( text ) > 0 )
-    return { "count": len( hit ), "ids": hit, "of": len( needs ) }
+    return { "count": len( hit ), "ids": hit, "of": len( needs ), "control": redactor( planted_text ) > 0 }
 
 
 def _pct( value ):
@@ -33,15 +35,20 @@ def _pct( value ):
     return "-" if value is None else f"{100 * value:.1f}%"
 
 
-def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable, redactor_control ):
+def _size( value ):
+    """Format a mean shortlist size, or a dash when no shortlist was measured."""
+    return "-" if value is None else f"{value:.0f}"
+
+
+def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable ):
     """
     Build the markdown results page.
 
     Requires:
         - meta holds every key of META_KEYS
         - t1 is the t1_table result, t3 maps arm to the t3_summary result, t2 maps arm to the t2_replay result
-        - vectors_choice is the one-vector or the two-vector arm name, fusion is ( k, depth, head ), redactable is count_redactable's result
-        - redactor_control is True when the redactor found a planted token
+        - vectors_choice is the one-vector or the two-vector arm name, fusion is ( k, depth, head )
+        - redactable is count_redactable's result, whose control flag the page prints
 
     Ensures:
         - returns the page text, with the run id and the five shas in the header
@@ -57,9 +64,12 @@ def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable, redacto
               "| key | value |", "|---|---|" ] + [ f"| {key} | {meta[ key ]} |" for key in META_KEYS ]
     lines += [ "", f"**Winning vector arm:** {vectors_choice}", "",
                f"**Fusion constants:** k {fusion[ 0 ]}, depth {fusion[ 1 ]}, head {fusion[ 2 ]}", "",
-               "## T1: recall of the full-sweep shortlist", "", "| arm | " + " | ".join( f"K={k}" for k in sorted( next( iter( t1.values() ) ) ) ) + " |",
+               "## T1: recall of the full-sweep shortlist", "", "Each cell is the mean recall, then the mean number of ids in the shortlist at that K.", "",
+               "| arm | " + " | ".join( f"K={k}" for k in sorted( next( iter( t1.values() ) ) ) ) + " |",
                "|---|" + "---|" * len( next( iter( t1.values() ) ) ) ]
-    for arm in sorted( t1 ): lines.append( f"| {arm} | " + " | ".join( _pct( t1[ arm ][ k ][ "mean" ] ) for k in sorted( t1[ arm ] ) ) + " |" )
+    for arm in sorted( t1 ):
+        cells = [ f"{_pct( t1[ arm ][ k ][ 'mean' ] )} ({_size( t1[ arm ][ k ][ 'mean_size' ] )} ids)" for k in sorted( t1[ arm ] ) ]
+        lines.append( f"| {arm} | " + " | ".join( cells ) + " |" )
     lines += [ "", "## T3: where the known twin lands", "", "| arm | language | members | unranked | median of ranked | median of all | in top 10 | in top 50 | in top 128 |", "|---|---|---|---|---|---|---|---|---|" ]
     for arm in sorted( t3 ):
         for language in sorted( t3[ arm ] ):
@@ -71,7 +81,7 @@ def render_report( meta, t1, t3, t2, vectors_choice, fusion, redactable, redacto
         lines.append( f"| {arm} | {row[ 'needs' ]} | {_pct( row[ 'flip_rate' ] )} | {_pct( row[ 'agreement' ] )} | {row[ 'uncached' ]} |" )
     lines += [ "", "## Redaction", "",
                f"{redactable[ 'count' ]} of {redactable[ 'of' ]} needs hold a redactable token. The replay uses the raw needs.",
-               f"Positive control: the redactor {'found' if redactor_control else 'did NOT find'} a planted token." ]
+               f"Positive control: the redactor {'found' if redactable[ 'control' ] else 'did NOT find'} a planted token." ]
     return "\n".join( lines ) + "\n"
 
 
