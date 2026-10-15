@@ -17,7 +17,7 @@ pins:
 ---
 # Web client transport channels
 
-The audio and queue sockets, their connection state machine and the shared channel helpers. [[web-client-transport-and-auth]] describes the transport as a whole.
+The audio and queue sockets, their connection state machine and the shared channel helpers. [[web-client-transport-and-auth]] describes the transport as a whole. `AudioTransport.ts` imports `QueueTransport.ts`. `QueueTransport.ts` imports `ConnectionStateMachine.ts` and `ws-channel.ts`. `index.ts` imports `QueueTransport.ts` and `AudioTransport.ts` and `ws-channel.ts`.
 
 ## What it does
 - `AudioTransport.ts`. `defaultBinaryHandler`: Logs the size of a received binary audio frame to the console debug output. `createAudioTransport`: Build an audio transport for `/ws/audio`; no socket opens until `start` is called.

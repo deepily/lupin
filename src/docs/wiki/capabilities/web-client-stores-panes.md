@@ -25,10 +25,10 @@ pins:
 ---
 # Web client stores: panes and audio
 
-The stores for action-required prompts, TTS audio, the Q and A pane, the reading pane and view state. [[web-client-stores]] covers how they are built.
+The stores for action-required prompts, TTS audio, the Q and A pane, the reading pane and view state. [[web-client-stores]] covers how they are built. No file in this group imports another; each is loaded on its own by the code that calls it.
 
 ## What it does
-- `ActionRequiredStore.ts`. `isActionRequiredLive`: Takes the bare `state` so the reading pane's looser item shape can ask it too. `isAwaitingActivation`: a card first in line that has not started: it arrived while TTS played and. `countLiveActionRequired`: The number of cards in `items` still owed an answer. `cancelResponseFor`: What the ✕ answers a prompt with. `toWireResponseValue`: Turn a response into the server's string: a string as is, anything else as JSON. `ActionRequiredStoreImpl`: Tracks pending action-required prompts with countdowns and a response flow. `createActionRequiredStore`: Build the store.
+- `ActionRequiredStore.ts`. `isActionRequiredLive`: Takes the bare `state` so the reading pane's looser item shape can ask it too. `isAwaitingActivation`: a card first in line that has not started: it arrived while TTS played and waits for the current item to finish. The one predicate the store and the renderer both ask. `countLiveActionRequired`: The number of cards in `items` still owed an answer. `cancelResponseFor`: What the ✕ answers a prompt with. `toWireResponseValue`: Turn a response into the server's string: a string as is, anything else as JSON. `ActionRequiredStoreImpl`: Tracks pending action-required prompts with countdowns and a response flow. `createActionRequiredStore`: Build the store.
 - `AudioStore.ts`. `AudioStoreImpl`: Models TTS audio playback as a state machine fed by binary chunks from the audio socket. `defaultAudioContextFactory`: Creates a browser audio context at 24000 Hz for production use.
 - `PredictionVoteStore.ts`. `PredictionVoteStoreImpl`: Models thumbs up and down votes on predictions, keyed by notification ID. `createPredictionVoteStore`: Build the store. It makes no request until a vote is cast.
 - `QaStore.ts`. `QaStoreImpl`: Models the question and answer pane: agents, status, response and timing. `errorText`: The message a caller should show for a thrown value of unknown shape. `createQaStore`: Build the store.

@@ -26,7 +26,7 @@ pins:
 ---
 # Web client boot, console and podcast
 
-The page boot, the console page and the document podcast control of the multiplexer. [[web-client-jobs-and-session-panes]] describes the panes they mount.
+The page boot, the console page and the document podcast control of the multiplexer. [[web-client-jobs-and-session-panes]] describes the panes they mount. `boot.ts` imports `wireQaMetrics.ts`. `consolePage.ts` imports `consolePageUrl.ts`.
 
 ## What it does
 - `boot.ts`. `phase6cSenderSort`: Orders senders with conversation mode active first, then by most recent activity. `pickRandom`: Returns a random element of a non-empty array. `generateSessionId`: Builds a fallback session ID from a random adjective and animal. `buildWebSocketBaseUrl`: Returns this page's WebSocket base URL, using wss on HTTPS pages. `emitLifecycle`: Emits a page or network lifecycle event on the event bus with the current time. `attachLifecycleListeners`: Turns visibility, online, offline and page restore events into lifecycle events.

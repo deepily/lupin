@@ -18,7 +18,7 @@ pins:
 ---
 # Web client audio modules
 
-TTS playback, its caches and the recorder, in the multiplexer's modules and the older page scripts. [[web-client-audio-and-tts]] describes the audio flow.
+TTS playback, its caches and the recorder, in the multiplexer's modules and the older page scripts. [[web-client-audio-and-tts]] describes the audio flow. No file in this group imports another; each is loaded on its own by the code that calls it.
 
 ## What it does
 - `audio-recorder.js`. `AudioRecorder`: AudioRecorder - Reusable audio recording module with server-side transcription.

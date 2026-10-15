@@ -25,7 +25,7 @@ pins:
 ---
 # Web client stores: tasks and jobs
 
-The stores for jobs, the task list, the holding area, finished tasks and task requests. [[web-client-stores]] covers how they are built.
+The stores for jobs, the task list, the holding area, finished tasks and task requests. [[web-client-stores]] covers how they are built. `HoldingAreaStore.ts` imports `TaskListStore.ts` and `alreadyAtTarget.ts`. `TaskListStore.ts` imports `HoldingAreaStore.ts` and `alreadyAtTarget.ts`. `TaskRequestStore.ts` imports `HoldingAreaStore.ts`.
 
 ## What it does
 - `FinishedTasksStore.ts`. `FinishedTasksStoreImpl`: Holds finished-task events by terminal status for a chosen window of days. `describeFailure`: A human-readable failure for one status's call. `createFinishedTasksStore`: Build the store. It fetches nothing when it is built.

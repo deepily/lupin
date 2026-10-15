@@ -27,7 +27,7 @@ pins:
 ---
 # Web client shared services
 
-The small services every multiplexer module shares: the event bus, storage, the debug sink and a few helpers. [[web-client-stores]] and [[web-client-transport-and-auth]] build on them.
+The small services every multiplexer module shares: the event bus, storage, the debug sink and a few helpers. [[web-client-stores]] and [[web-client-transport-and-auth]] build on them. `StorageService.ts` imports `EventBus.ts`. `broadcast.ts` imports `EventBus.ts`.
 
 ## What it does
 - `EventBus.ts`. `EventBusImpl`: Delivers typed events to listeners through a DOM event target. `createEventBusForTesting`: Build a separate bus for a test, so no listeners leak between test cases.
@@ -37,4 +37,4 @@ The small services every multiplexer module shares: the event bus, storage, the 
 - `debugSink.ts`. `setDebugPanel`: Register (or clear) the panel that receives lines. `currentDebugPanel`: The sink currently registered — for a test to assert wiring without a panel. `toPanel`: Sends a message to the registered debug panel with its type. `log`: An ordinary diagnostic line. `error`: An error line. `wsDiag`: A WebSocket diagnostic.
 - `ownLookup.ts`. `ownLookup`: Read `key` from `table`, answering only for keys the table owns.
 - `personaLabel.ts`. `personaLabel`: The display name inside a stored `<persona> <8-hex session>` value.
-- `ttsPreview.ts`. `truncateAtBoundary`: Truncate `text` to roughly `fraction` of its length, extending forward to the next.
+- `ttsPreview.ts`. `truncateAtBoundary`: Truncate `text` to roughly `fraction` of its length, extending forward to the next natural boundary.

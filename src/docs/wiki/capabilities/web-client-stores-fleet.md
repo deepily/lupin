@@ -22,7 +22,7 @@ pins:
 ---
 # Web client stores: fleet and commons
 
-The stores for fleet status, the flow ratio, submitted jobs, commons entries and epic stories. [[web-client-stores]] covers how they are built.
+The stores for fleet status, the flow ratio, submitted jobs, commons entries and epic stories. [[web-client-stores]] covers how they are built. No file in this group imports another; each is loaded on its own by the code that calls it.
 
 ## What it does
 - `CommonsStore.ts`. `defaultFilter`: Returns the default commons filter with no direction or persona and all kinds. `CommonsStoreImpl`: Holds cached commons entries with their filter, window, and disabled flag. `createCommonsStore`: Build the store.

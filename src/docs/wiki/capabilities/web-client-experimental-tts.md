@@ -14,7 +14,7 @@ pins:
 ---
 # Web client experimental TTS scripts
 
-The experimental and failed-integration text-to-speech scripts kept in the static folder. [[web-client-audio-and-tts]] describes the audio that ships.
+The experimental and failed-integration text-to-speech scripts kept in the static folder. [[web-client-audio-and-tts]] describes the audio that ships. No file in this group imports another; each is loaded on its own by the code that calls it.
 
 ## What it does
 - `hybrid-tts-FAILED-INTEGRATION.js`. `HybridTTS`: Hybrid TTS Module.

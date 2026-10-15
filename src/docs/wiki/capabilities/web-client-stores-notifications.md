@@ -22,7 +22,7 @@ pins:
 ---
 # Web client stores: notifications and senders
 
-The stores behind the notification list, its senders and its broadcast card. [[web-client-stores]] covers how they are built and ordered.
+The stores behind the notification list, its senders and its broadcast card. [[web-client-stores]] covers how they are built and ordered. `NotificationStore.ts` imports `SessionStripStore.ts`. `SenderStore.ts` imports `SessionStripStore.ts`.
 
 ## What it does
 - `AckStore.ts`. `foldKey`: Builds the key an ack is stored under: the session ID or a unique anonymous key. `normalizeText`: Returns the value when it is a string and null otherwise. `AckStoreImpl`: Stores broadcast acknowledgements folded by session and emits change events. `createAckStore`: Build the store.

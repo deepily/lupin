@@ -27,7 +27,7 @@ pins:
 ---
 # Web client stores: transcripts and history
 
-The session transcript store and roster, the page-load history helpers and the response question parser. [[web-client-stores]] covers how they are built.
+The session transcript store and roster, the page-load history helpers and the response question parser. [[web-client-stores]] covers how they are built. `StripReconnectRehydrator.ts` imports `historyWindow.ts`. `coldHistoryHydration.ts` imports `historyWindow.ts`.
 
 ## What it does
 - `SessionTranscriptRoster.ts`. `parseSenderId`: Split a chip's `sender_id` into its project and its 8-hex id prefix. `resolveTranscriptSeat`: Resolve a chip to exactly one watchable roster row's full id. `rowsOf`: Returns the entries of a value that look like roster rows. `SessionTranscriptRosterImpl`: Models the seats whose transcripts can be watched, for admin users. `createSessionTranscriptRoster`: Build the roster.

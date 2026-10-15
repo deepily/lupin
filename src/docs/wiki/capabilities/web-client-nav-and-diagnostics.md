@@ -25,10 +25,10 @@ pins:
 ---
 # Web client navigation and diagnostics
 
-The shared navigation bar and the WebSocket diagnostic pages. [[web-client-transport-and-auth]] describes the sockets they probe.
+The shared navigation bar and the WebSocket diagnostic pages. [[web-client-transport-and-auth]] describes the sockets they probe. `boot.ts` imports `websocketDiagnostic.ts`.
 
 ## What it does
-- `boot.ts`. `createBrowserDeps`: Build the diagnostic tool's dependencies from the real browser globals. `wireDiagnostic`: Wire the DOMContentLoaded bootstrap + the global onclick handlers onto the.
+- `boot.ts`. `createBrowserDeps`: Build the diagnostic tool's dependencies from the real browser globals. `wireDiagnostic`: Wire the DOMContentLoaded bootstrap + the global onclick handlers onto the given doc/target using the provided tool factory. Pure (injected seams) so it is unit-tested directly.
 - `websocketDiagnostic.ts`. `WebSocketDiagnosticTool`: Diagnostic controller that opens monitored WebSockets and watches the audio they carry.
 - `lupinNav.ts`. `getToken`: Read the stored access token. `getUserData`: Read the stored `user_data` blob. `isAuthenticated`: Say whether the stored access token is present, decodable and not yet expired. `isAdmin`: Say whether the stored user has the admin role. `getUserEmail`: Read the stored user's email address. `isActivePage`: Say whether a nav item's URL is the page the viewer is on. `computeNavState`: Gather what the nav bar needs to render into one state object. `visibleNavItems`: Filter nav items by the viewer's auth/admin state. `renderNavInnerHtml`: Build the inner HTML of the nav bar for the given state. `buildNavElement`: Build the detached `<nav id="lupin-nav">` element for the given state. `wireEvents`: Wire logout + hamburger handlers onto an already-built nav element. `mountNav`: Compute state, build the nav, inject it at the top of body, and wire it. `scheduleMount`: Run `mount` now if the document is ready, else defer to DOMContentLoaded.
 - `websocket-diagnostic.js`. `WebSocketDiagnosticTool`: WebSocket Audio Diagnostic Tool. `startDiagnosticTest`: Starts the diagnostic test from the page button, if the tool has been created. `stopDiagnosticTest`: Stops the running diagnostic test, if the tool has been created. `clearDiagnosticLogs`: Clears the diagnostic console, if the tool has been created.

@@ -20,7 +20,7 @@ pins:
 ---
 # Web client auth and API client
 
-Token handling, the sign-in guard and the API client of the multiplexer page. [[web-client-transport-and-auth]] describes how they work together.
+Token handling, the sign-in guard and the API client of the multiplexer page. [[web-client-transport-and-auth]] describes how they work together. `ApiClient.ts` imports `AuthManager.ts`. `AuthManager.ts` imports `jwt.ts`. `authGuard.ts` imports `AuthManager.ts`.
 
 ## What it does
 - `ApiClient.ts`. `ApiError`: The error thrown when the server answers with a non-2xx status. `ApiClientImpl`: Sends authenticated JSON requests to the server's API with a timeout. `createApiClient`: Build the API client for one base URL and auth manager.
