@@ -1,0 +1,33 @@
+---
+capability: rest-routers-voice-and-speakerphone
+pin_algorithm: py3.13.xebd695/ts5.9.3
+pins:
+  - cosa.rest.routers.speakerphone.get_notification_queue@419a0b0054
+  - cosa.rest.routers.speakerphone.SpeakerphoneBody@0f990c653f
+  - cosa.rest.routers.speakerphone.get_speakerphone_endpoint@369a88b108
+  - cosa.rest.routers.voice_persona.get_notification_queue@419a0b0054
+  - cosa.rest.routers.voice_persona.get_config_manager@ce7d0e35b7
+  - cosa.rest.routers.voice_persona.get_voice_persona_pool@7807b69fbc
+  - cosa.rest.routers.voice_persona.get_voice_persona_endpoint@0b5050b505
+  - cosa.rest.routers.voice_persona.release_voice_persona_endpoint@bbf490b347
+  - cosa.rest.routers.voice_persona.VoicePersonaSampleRequest@7de00d499f
+  - cosa.rest.routers.voice_persona.voice_persona_sample@baa9abadfa
+---
+# Voice persona and speakerphone routes
+
+The `/api/cosa-voice` routes that read and change a session's voice persona and speakerphone flag, both kept on the session bridge file. See [[voice-persona-allocation]].
+
+## What it does
+- `get_voice_persona_pool` returns the configured pool, occupied names and free names. A dead-PID bridge counts as free.
+- `get_voice_persona_endpoint` returns a session's persona, or null.
+- `release_voice_persona_endpoint` clears the persona and broadcasts `voice_persona_released`. It answers `released: false` when none was set.
+- `VoicePersonaSampleRequest` (`voice_id`, `text`) feeds `voice_persona_sample`, which returns `audio/mpeg`. A voice outside the pool is 400, and an upstream failure 503.
+- `get_config_manager` builds a `ConfigurationManager` for these routes.
+- `get_notification_queue` (in both routers) hands the notification queue from the main module to a route.
+- `SpeakerphoneBody` carries `on`. `get_speakerphone_endpoint` returns `{ session_id, on }`, and 404 when no bridge matches.
+
+## Don't
+- Don't pass an arbitrary `voice_id` to the sample route. Only pool voices and the overflow persona's voice are served.
+
+## Invariants
+- A session id with no bridge answers 404 on every route here.
