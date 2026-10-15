@@ -124,6 +124,9 @@ export class SequentialAudioManager {
   private errorCount           : number = 0;
   private readonly blobUrls    : Set<string> = new Set();
 
+  /**
+   * Creates the audio chunk queue from its options, with defaults and Firefox check.
+   */
   constructor( opts: SequentialAudioManagerOptions = {} ) {
     this.onChunkStart   = opts.onChunkStart   ?? null;
     this.onChunkEnd     = opts.onChunkEnd     ?? null;

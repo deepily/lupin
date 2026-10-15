@@ -255,6 +255,11 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
   private readonly listeners     : Set<(state: ConnectionState, prev: ConnectionState) => void> = new Set();
   private prevState              : ConnectionState = "connecting";
 
+  /**
+   * Creates the state machine actor for one transport and starts it.
+   *
+   * Every state change is emitted on the bus and passed to direct subscribers.
+   */
   constructor(opts: ConnectionStateMachineOptions) {
     this.bus           = opts.bus;
     this.transportName = opts.transportName;
@@ -327,18 +332,30 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
     this.actor.start();
   }
 
+  /**
+   * Sends an event to the state machine.
+   */
   send(event: ConnectionEvent): void {
     this.actor.send(event);
   }
 
+  /**
+   * Returns the current connection state.
+   */
   get state(): ConnectionState {
     return this.actor.getSnapshot().value as ConnectionState;
   }
 
+  /**
+   * Returns the number of reconnect attempts recorded so far.
+   */
   get attempts(): number {
     return this.actor.getSnapshot().context.attempts;
   }
 
+  /**
+   * Registers a listener for state changes and returns a function that removes it.
+   */
   subscribe(
     listener: (state: ConnectionState, prev: ConnectionState) => void,
   ): () => void {
@@ -346,6 +363,9 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Removes all listeners and stops the state machine.
+   */
   stop(): void {
     this.listeners.clear();
     this.actor.stop();

@@ -122,6 +122,11 @@ export abstract class BaseTransportImpl implements Transport {
   protected csmUnsub        : (() => void) | null = null;
   protected stopped         : boolean = false;
 
+  /**
+   * Stores the auth manager, event bus, WebSocket constructor and retry limits.
+   *
+   * Strips any trailing slash from the base URL.
+   */
   constructor(opts: BaseTransportOptions) {
     this.authManager = opts.authManager;
     this.bus         = opts.bus;
@@ -131,11 +136,19 @@ export abstract class BaseTransportImpl implements Transport {
     if (opts.graceMs !== undefined) this.graceMs = opts.graceMs;
   }
 
+  /**
+   * Exposes the connection state, or connecting before the transport has started.
+   */
   get state(): ConnectionState {
     // Pre-start: report initial CSM state.
     return this.csm?.state ?? "connecting";
   }
 
+  /**
+   * Begins the connection for a session ID and opens the WebSocket.
+   *
+   * Starting again with the same session does nothing. Throws if stopped or given a different session.
+   */
   start(sessionId: string): void {
     if (this.stopped) {
       throw new Error(`${this.transportName}: cannot start a stopped transport`);
@@ -166,6 +179,9 @@ export abstract class BaseTransportImpl implements Transport {
     this.openSocket();
   }
 
+  /**
+   * Stops the transport for good: cancels timers, subscriptions and the WebSocket channel.
+   */
   stop(): void {
     this.stopped = true;
     this.cancelBackoffTimer();
@@ -198,6 +214,11 @@ export abstract class BaseTransportImpl implements Transport {
     this.csm.send({ type: "restart" });
   }
 
+  /**
+   * Sends an envelope over the open WebSocket channel.
+   *
+   * Throws if the transport has not been started.
+   */
   send(envelope: unknown): void {
     if (!this.wsChannel) {
       throw new Error(`${this.transportName}: cannot send — channel is not started`);

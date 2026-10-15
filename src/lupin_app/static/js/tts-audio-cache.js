@@ -25,6 +25,9 @@
  */
 
 class TTSAudioCache {
+    /**
+     * Sets up the cache from its options: enabled flag, age, size limit and debug.
+     */
     constructor( options = {} ) {
         // Configuration
         this.cacheEnabled = options.cacheEnabled !== false; // Default true
@@ -51,6 +54,9 @@ class TTSAudioCache {
         if ( this.debug ) console.log( 'TTSAudioCache: Initialized with', options );
     }
     
+    /**
+     * Opens the IndexedDB store and schedules periodic cleanup.
+     */
     async initialize() {
         if ( !this.cacheEnabled ) {
             if ( this.debug ) console.log( 'TTSAudioCache: Caching disabled' );
@@ -66,6 +72,9 @@ class TTSAudioCache {
         }
     }
     
+    /**
+     * Returns a SHA-256 hex digest of the normalized text as the cache key.
+     */
     async generateCacheKey( text ) {
         const encoder = new TextEncoder();
         const data = encoder.encode( text.trim().toLowerCase() ); // Normalize text
@@ -74,6 +83,9 @@ class TTSAudioCache {
         return hashArray.map( b => b.toString( 16 ).padStart( 2, '0' ) ).join( '' );
     }
     
+    /**
+     * Opens the IndexedDB database, creating the audio store on first use.
+     */
     async initializeIndexedDB() {
         return new Promise( ( resolve, reject ) => {
             const request = indexedDB.open( this.dbName, this.dbVersion );
@@ -94,6 +106,9 @@ class TTSAudioCache {
         } );
     }
     
+    /**
+     * Looks up cached audio for the text, first in memory and then in IndexedDB.
+     */
     async checkCache( text ) {
         if ( !this.cacheEnabled ) return null;
         
@@ -136,6 +151,9 @@ class TTSAudioCache {
         }
     }
     
+    /**
+     * Stores an audio blob for the text in memory and IndexedDB.
+     */
     async saveToCache( text, audioBlob ) {
         if ( !this.cacheEnabled || !audioBlob ) return;
         
@@ -171,6 +189,9 @@ class TTSAudioCache {
         }
     }
     
+    /**
+     * Reads one entry from IndexedDB by key.
+     */
     async getFromIndexedDB( key ) {
         if ( !this.db ) return null;
         
@@ -184,6 +205,9 @@ class TTSAudioCache {
         } );
     }
     
+    /**
+     * Writes one entry to IndexedDB, and rejects if the write fails.
+     */
     async saveToIndexedDB( entry ) {
         if ( !this.db ) return;
         
@@ -197,10 +221,16 @@ class TTSAudioCache {
         } );
     }
     
+    /**
+     * Says whether a cache entry is older than the maximum age.
+     */
     isExpired( entry ) {
         return Date.now() - entry.timestamp > this.maxAge;
     }
     
+    /**
+     * Runs cleanup when the recorded total size is above the size limit.
+     */
     async cleanupIfNeeded() {
         // Simple cleanup: remove expired entries when total size exceeds limit
         if ( this.stats.totalSize > this.maxSize ) {
@@ -208,6 +238,9 @@ class TTSAudioCache {
         }
     }
     
+    /**
+     * Removes expired entries from memory and IndexedDB and lowers the recorded size.
+     */
     async cleanup() {
         const beforeSize = this.stats.totalSize;
         let removedSize = 0;
@@ -245,11 +278,17 @@ class TTSAudioCache {
         }
     }
     
+    /**
+     * Starts a timer that runs cleanup every 30 minutes.
+     */
     scheduleCleanup() {
         // Run cleanup every 30 minutes
         setInterval( () => this.cleanup(), 30 * 60 * 1000 );
     }
     
+    /**
+     * Returns hits, misses, stores, hit rate, total size and in-memory entry count.
+     */
     getStats() {
         const hitRate = this.stats.hits + this.stats.misses > 0 
             ? ( this.stats.hits / ( this.stats.hits + this.stats.misses ) * 100 ).toFixed( 1 )
@@ -266,6 +305,9 @@ class TTSAudioCache {
         };
     }
     
+    /**
+     * Empties the in-memory cache and the IndexedDB store, and resets the counters.
+     */
     clearCache() {
         // Clear memory cache
         this.memoryCache.clear();

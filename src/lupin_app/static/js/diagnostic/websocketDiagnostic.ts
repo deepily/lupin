@@ -152,10 +152,18 @@ export class WebSocketDiagnosticTool {
     currentWebSocket     : WebSocketLike | null = null;
     currentConnectionId  : string | null = null;
 
+    /**
+     * Creates the diagnostic tool around injected document, fetch, timer and socket helpers.
+     */
     constructor( deps: DiagnosticDeps ) {
         this.deps = deps;
     }
 
+    /**
+     * Prepares the diagnostic page by finding its log element, status fields and session ID.
+     *
+     * Logs progress and writes the session ID into the status panel.
+     */
     async initialize(): Promise<void> {
         this.log( "🔧 Initializing WebSocket Diagnostic Tool", "diagnostic" );
 
@@ -170,6 +178,9 @@ export class WebSocketDiagnosticTool {
         this.updateStatus( "session-id", this.sessionId ?? "" );
     }
 
+    /**
+     * Looks up the status panel elements by ID and stores them for later updates.
+     */
     setupStatusElements(): void {
         const doc = this.deps.doc;
         this.statusElements = {
@@ -184,6 +195,11 @@ export class WebSocketDiagnosticTool {
         };
     }
 
+    /**
+     * Fetches the session ID from the server and stores it.
+     *
+     * Logs and rethrows the error when the request fails.
+     */
     async getSessionId(): Promise<void> {
         try {
             const response = await this.deps.fetchFn( "/api/get-session-id" );
@@ -196,6 +212,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Starts a diagnostic run: resets metrics, opens a monitored socket and sends a TTS request.
+     *
+     * Does nothing if a run is active or the text box is empty. On failure it logs and re-enables the test button.
+     */
     async startDiagnosticTest(): Promise<void> {
         if ( this.isRunning ) {
             this.log( "⚠️ Diagnostic test already running", "warning" );
@@ -237,6 +258,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Opens an audio WebSocket for the session and tracks it in the connection list.
+     *
+     * Flags a duplicate when another connection is active. Resolves on open, rejects on error or after 5 seconds.
+     */
     async createMonitoredWebSocket(): Promise<void> {
         const connectionId = `conn_${this.connectionCounter++}`;
         const wsUrl = `ws://${this.deps.host}/ws/audio/${encodeURIComponent( this.sessionId ?? "" )}`;
@@ -331,6 +357,11 @@ export class WebSocketDiagnosticTool {
         } );
     }
 
+    /**
+     * Processes one socket message, counting audio chunks and reading text status messages.
+     *
+     * Records first-audio latency, and ends the test when streaming completes.
+     */
     handleDiagnosticMessage( event: { data: unknown }, connectionId: string ): void {
         const connectionInfo = this.connections.get( connectionId )!;
 
@@ -379,6 +410,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Plays a received audio chunk in a hidden audio element to watch for overlapping playback.
+     *
+     * Counts simultaneous playback, logs play events, and cleans up the element when playback ends.
+     */
     async simulateAudioPlayback( audioBlob: Blob, sequence: number, connectionId: string ): Promise<void> {
         // Create audio element for monitoring (mirrors original behaviour)
         const elementId = `audio_${this.audioElementCounter++}`;
@@ -458,6 +494,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Posts the test text and voice settings to the speech endpoint.
+     *
+     * Logs the response and throws an error when the request fails or the status is not ok.
+     */
     async sendTTSRequest( settings: DiagnosticSettings ): Promise<void> {
         try {
             this.log( "📡 Sending TTS request to ElevenLabs endpoint...", "diagnostic" );
@@ -494,6 +535,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Finishes a run by logging totals and a verdict on duplicates and overlapping playback.
+     *
+     * Re-enables the test button.
+     */
     onTestComplete(): void {
         this.isRunning = false;
         const totalTime = this.deps.now() - ( this.startTime ?? this.deps.now() );
@@ -523,6 +569,11 @@ export class WebSocketDiagnosticTool {
         this.enableTestButton();
     }
 
+    /**
+     * Stops the current run by closing open sockets and pausing playing audio elements.
+     *
+     * Re-enables the test button.
+     */
     stopDiagnosticTest(): void {
         this.log( "⏹️ Stopping diagnostic test...", "diagnostic" );
         this.isRunning = false;
@@ -546,6 +597,9 @@ export class WebSocketDiagnosticTool {
         this.enableTestButton();
     }
 
+    /**
+     * Clears all counters, connections and audio records and resets the status panel.
+     */
     resetMetrics(): void {
         this.connections.clear();
         this.audioElements.clear();
@@ -573,12 +627,18 @@ export class WebSocketDiagnosticTool {
         timeline.innerHTML = '<div style="color: #888; font-style: italic;">No audio activity yet...</div>';
     }
 
+    /**
+     * Writes the active, total and duplicate connection counts into the status panel.
+     */
     updateConnectionMetrics(): void {
         this.updateStatus( "active-connections", this.activeConnections );
         this.updateStatus( "total-connections", this.connectionCounter );
         this.updateStatus( "duplicate-connections", this.duplicateConnections );
     }
 
+    /**
+     * Appends a connection row with a status and style class, then scrolls to it.
+     */
     addConnectionToList( connectionId: string, status: string, cssClass: string ): void {
         const list = this.deps.doc.getElementById( "connection-list" )!;
         const item = this.deps.doc.createElement( "div" );
@@ -592,6 +652,9 @@ export class WebSocketDiagnosticTool {
         list.scrollTop = list.scrollHeight;
     }
 
+    /**
+     * Changes the status text and style class of an existing connection row, if it is present.
+     */
     updateConnectionInList( connectionId: string, status: string, cssClass: string ): void {
         const item = this.deps.doc.getElementById( `conn-${connectionId}` );
         if ( item ) {
@@ -601,6 +664,9 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Appends a time-stamped entry of the given type to the chunk timeline and scrolls to it.
+     */
     addToChunkTimeline( type: string, message: string ): void {
         const timeline = this.deps.doc.getElementById( "chunk-timeline" )!;
         const entry = this.deps.doc.createElement( "div" );
@@ -613,6 +679,9 @@ export class WebSocketDiagnosticTool {
         timeline.scrollTop = timeline.scrollHeight;
     }
 
+    /**
+     * Re-enables the test button and restores its start label.
+     */
     enableTestButton(): void {
         const testBtn = this.deps.doc.getElementById( "diagnostic-test-btn" ) as HTMLButtonElement | null;
         if ( testBtn ) {
@@ -621,6 +690,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Reads the text, voice, model and quality profile from the page controls.
+     *
+     * Returns defaults for any control that is missing.
+     */
     getCurrentSettings(): DiagnosticSettings {
         const doc = this.deps.doc;
         const textEl    = doc.getElementById( "test-text" ) as HTMLInputElement | null;
@@ -635,6 +709,9 @@ export class WebSocketDiagnosticTool {
         };
     }
 
+    /**
+     * Writes a value into the named status element, when that element exists.
+     */
     updateStatus( elementId: string, value: string | number ): void {
         const element = this.statusElements[ elementId ];
         if ( element ) {
@@ -642,6 +719,11 @@ export class WebSocketDiagnosticTool {
         }
     }
 
+    /**
+     * Appends a time-stamped, styled line to the diagnostic console.
+     *
+     * Does nothing when the log element is missing.
+     */
     log( message: string, type: LogType = "info" ): void {
         if ( !this.logElement ) return;
 
@@ -655,6 +737,9 @@ export class WebSocketDiagnosticTool {
         this.deps.consoleLog( `[WebSocketDiagnostic] ${message}` );
     }
 
+    /**
+     * Empties the diagnostic console and writes two fresh status lines.
+     */
     clearLogs(): void {
         if ( this.logElement ) {
             this.logElement.innerHTML = "";

@@ -12,6 +12,9 @@
  */
 
 class HybridTTS {
+    /**
+     * Sets up the hybrid TTS player, its cache, and its analytics from the options.
+     */
     constructor(options = {}) {
         // Configuration options
         this.wsUrl = options.wsUrl || `ws://${window.location.host}/ws/audio`;
@@ -78,6 +81,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Creates a hidden audio element and rejects the pending request if it errors.
+     */
     createAudioElement() {
         const audio = document.createElement('audio');
         audio.controls = true;
@@ -98,6 +104,9 @@ class HybridTTS {
         return audio;
     }
     
+    /**
+     * Opens the audio WebSocket for the session and sends the auth message.
+     */
     async initialize() {
         try {
             // Session ID is REQUIRED - fail fast if not provided
@@ -166,6 +175,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Creates the Web Audio context for instant mode, or turns Web Audio off.
+     */
     async initializeWebAudio() {
         try {
             // Create AudioContext (Firefox-optimized)
@@ -189,6 +201,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Handles one WebSocket message, either an audio chunk or a JSON status.
+     */
     async handleWebSocketMessage(event) {
         if (event.data instanceof Blob) {
             // Audio chunk received
@@ -296,6 +311,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Joins the received chunks into one blob, caches it, and plays it.
+     */
     async playCollectedAudio() {
         if (this.audioChunks.length === 0) {
             this.onError('No audio data received');
@@ -346,6 +364,9 @@ class HybridTTS {
     }
     
     // TTS Mode management methods
+    /**
+     * Switches between instant and reliable mode and saves the choice.
+     */
     async setMode(mode) {
         if (!['instant', 'reliable'].includes(mode)) {
             throw new Error(`Invalid TTS mode: ${mode}. Must be 'instant' or 'reliable'.`);
@@ -365,10 +386,16 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Returns the current TTS mode, either instant or reliable.
+     */
     getMode() {
         return this.mode;
     }
     
+    /**
+     * Clears the collected chunks and start time and resets the playback position.
+     */
     resetAudioState() {
         this.audioChunks = [];
         this.startTime = null;
@@ -380,6 +407,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Decodes one audio chunk and schedules it for gapless Web Audio playback.
+     */
     async playChunkProgressive(audioBlob) {
         const chunkId = Date.now() + '-' + Math.random().toString(36).substr(2, 5);
         console.log( `🔍 [CHUNK-${chunkId}] playChunkProgressive START` );
@@ -488,6 +518,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Speaks text in the current or given mode, falling back to the other mode.
+     */
     async speak(text, options = {}) {
         if (this.isRequesting) {
             this.onStatusUpdate('Request already in progress...', 'loading');
@@ -521,6 +554,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Speaks text in reliable mode using the batch TTS endpoint.
+     */
     async batchSpeak(text, options = {}) {
         console.log(`[HybridTTS] Using reliable (batch) mode for: "${text.substring(0, 30)}..."`);
         
@@ -535,6 +571,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Speaks text in instant mode using the streaming TTS endpoint.
+     */
     async streamingSpeak(text, options = {}) {
         console.log(`[HybridTTS] Using instant (streaming) mode for: "${text.substring(0, 30)}..."`);
         
@@ -549,6 +588,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Retries a failed request in the opposite mode and throws if that also fails.
+     */
     async fallbackSpeak(text, options, failedMode) {
         console.warn(`[HybridTTS] Attempting fallback after ${failedMode} mode failed`);
         
@@ -570,6 +612,9 @@ class HybridTTS {
         }
     }
     
+    /**
+     * Speaks text from the cache when possible, otherwise from the server.
+     */
     async originalSpeak(text) {
         // This contains the original speak method logic
         
@@ -664,11 +709,16 @@ class HybridTTS {
         }
     }
     
-    // Override onComplete to resolve the promise
+    /**
+     * Stores the callback that is run when playback or streaming completes.
+     */
     set onComplete(callback) {
         this._onComplete = callback;
     }
     
+    /**
+     * Runs the stored completion callback and resolves the pending speak promise.
+     */
     get onComplete() {
         return (audioUrl, totalTime) => {
             if (this._onComplete) {
@@ -681,11 +731,16 @@ class HybridTTS {
         };
     }
     
-    // Override onError to reject the promise
+    /**
+     * Stores the callback that is run when a TTS error occurs.
+     */
     set onError(callback) {
         this._onError = callback;
     }
     
+    /**
+     * Runs the stored error callback and rejects the pending speak promise.
+     */
     get onError() {
         return (error) => {
             if (this._onError) {
@@ -698,7 +753,9 @@ class HybridTTS {
         };
     }
     
-    // Clean up method
+    /**
+     * Closes the WebSocket, removes the audio element, and frees cached URLs.
+     */
     destroy() {
         if (this.websocket) {
             this.websocket.close();
@@ -716,6 +773,9 @@ class HybridTTS {
     }
     
     // Cache Methods
+    /**
+     * Returns the SHA-256 hash of the text as a hex string for use as a cache key.
+     */
     async generateCacheKey(text) {
         const encoder = new TextEncoder();
         const data = encoder.encode(text);
@@ -724,6 +784,9 @@ class HybridTTS {
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
     
+    /**
+     * Opens the IndexedDB database and creates the audio cache store if missing.
+     */
     async initializeIndexedDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.dbVersion);
@@ -744,6 +807,9 @@ class HybridTTS {
         });
     }
     
+    /**
+     * Finds cached audio for the text in memory or IndexedDB, or returns null.
+     */
     async checkCache(text) {
         if (!this.cacheEnabled) return null;
         
@@ -775,6 +841,9 @@ class HybridTTS {
         return null;
     }
     
+    /**
+     * Saves the audio blob and metadata to the memory cache and IndexedDB.
+     */
     async saveToCache(text, audioBlob, metadata) {
         if (!this.cacheEnabled) return;
         
@@ -804,6 +873,9 @@ class HybridTTS {
         await this.evictOldEntries();
     }
     
+    /**
+     * Reads one cache entry from IndexedDB by key.
+     */
     async getFromIndexedDB(key) {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['audioCache'], 'readonly');
@@ -815,6 +887,9 @@ class HybridTTS {
         });
     }
     
+    /**
+     * Writes one cache entry to IndexedDB.
+     */
     async saveToIndexedDB(key, entry) {
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction(['audioCache'], 'readwrite');
@@ -826,10 +901,16 @@ class HybridTTS {
         });
     }
     
+    /**
+     * Returns true when the entry is older than the maximum cache age.
+     */
     isCacheExpired(entry) {
         return Date.now() - entry.timestamp > this.cacheMaxAge;
     }
     
+    /**
+     * Removes expired entries, then the oldest ones until the cache fits its limit.
+     */
     async evictOldEntries() {
         let totalSize = 0;
         const entries = Array.from(this.audioCache.values());
@@ -866,11 +947,17 @@ class HybridTTS {
     }
     
     // Analytics Methods
+    /**
+     * Increments the count of how often this text has been spoken.
+     */
     updatePhraseFrequency(text) {
         const count = this.analytics.popularPhrases.get(text) || 0;
         this.analytics.popularPhrases.set(text, count + 1);
     }
     
+    /**
+     * Returns cache statistics, including hit rate, size, and the top phrases.
+     */
     getAnalytics() {
         const hitRate = this.analytics.totalRequests > 0 
             ? (this.analytics.cacheHits / this.analytics.totalRequests * 100).toFixed(2) 
@@ -896,6 +983,9 @@ class HybridTTS {
         };
     }
     
+    /**
+     * Empties the memory cache and IndexedDB store and resets the size count.
+     */
     clearCache() {
         // Clear in-memory cache
         this.audioCache.forEach(entry => {

@@ -236,6 +236,9 @@ export class JobCompletionCache {
    */
   readonly ready : Promise<void>;
 
+  /**
+   * Sets up the cache limits, timing helpers, and IndexedDB access from the options.
+   */
   constructor( options: JobCompletionCacheOptions = {} ) {
     this.cacheEnabled = options.cacheEnabled !== false; // Default true.
     this.cacheMaxSize = options.cacheMaxSize ?? DEFAULT_MAX_SIZE;

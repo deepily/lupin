@@ -67,6 +67,11 @@ export class AudioRecorder {
   private audioChunks          : Blob[] = [];
   private maxDurationTimeout   : ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * Sets the upload endpoint, auth token, audio format, maximum duration and callbacks.
+   *
+   * Each falls back to a default when not given.
+   */
   constructor( opts: AudioRecorderOptions = {} ) {
     this.uploadEndpoint   = opts.uploadEndpoint   ?? DEFAULT_ENDPOINT;
     this.uploadMethod     = opts.uploadMethod     ?? "POST";

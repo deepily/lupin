@@ -122,6 +122,9 @@ export class TaskRowController {
   // The document-level Esc listener for the body overlay (null when closed).
   private overlayKeyListener : ( ( e: KeyboardEvent ) => void ) | null = null;
 
+  /**
+   * Stores the container, writer, recorder, and timing hooks from the options.
+   */
   constructor( opts: TaskRowControllerOptions ) {
     this.container = opts.container;
     this.writer    = opts.writer;

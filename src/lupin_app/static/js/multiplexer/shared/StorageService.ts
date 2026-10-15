@@ -227,19 +227,34 @@ export function createStorageServiceForTesting(
 export class InMemoryStorage implements StorageBackend {
   private readonly store = new Map<string, string>();
 
+  /**
+   * Returns how many entries the in-memory store holds.
+   */
   get length(): number {
     return this.store.size;
   }
+  /**
+   * Returns the stored string for a key, or null when the key is absent.
+   */
   getItem(key: string): string | null {
     /* c8 ignore next */ // defensive: setItem(key, value) only stores string values, and Map.get(k) for a present key returns the stored value (string); the `?? null` fallback is unreachable from this class's API surface. Belt-and-suspenders for any future extension that might allow undefined values.
     return this.store.has(key) ? (this.store.get(key) ?? null) : null;
   }
+  /**
+   * Stores a string value under a key.
+   */
   setItem(key: string, value: string): void {
     this.store.set(key, value);
   }
+  /**
+   * Deletes a key from the in-memory store.
+   */
   removeItem(key: string): void {
     this.store.delete(key);
   }
+  /**
+   * Returns the key at the given position in insertion order, or null when out of range.
+   */
   key(index: number): string | null {
     if (index < 0 || index >= this.store.size) return null;
     let i = 0;

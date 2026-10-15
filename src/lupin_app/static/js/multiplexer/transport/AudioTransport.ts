@@ -70,9 +70,9 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
 
   private boundBinaryHandler: (data: Blob | ArrayBuffer) => void = defaultBinaryHandler;
 
-  // Re-typed `start` to accept the optional binary handler. The base class's
-  // `start(sessionId)` is called; we set the bound handler first so
-  // `openSocket()` (invoked from base.start) sees it.
+  /**
+   * Sets the binary frame handler and then starts the base transport.
+   */
   override start(sessionId: string, binaryHandler?: (data: Blob | ArrayBuffer) => void): void {
     this.boundBinaryHandler = binaryHandler ?? defaultBinaryHandler;
     super.start(sessionId);

@@ -38,6 +38,9 @@ import { alreadyAtTarget } from "./alreadyAtTarget";
 export class AwaitingHumanApprovalError extends Error {
   readonly pending  = true as const;
   readonly ticketId : string;
+  /**
+   * Builds the error for a transition still awaiting human approval, keeping the ticket ID.
+   */
   constructor( ticketId: string ) {
     super( "Waiting on Rick — he has not been asked yet." );
     this.name     = "AwaitingHumanApprovalError";

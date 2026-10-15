@@ -18,6 +18,11 @@
  */
 
 class SequentialAudioManager {
+    /**
+     * Sets up the audio chunk queue, playback counters, retry settings and blob URL tracking.
+     *
+     * Takes optional chunk start and end callbacks and a debug flag, and detects Firefox and promise-based play support.
+     */
     constructor( onChunkStart = null, onChunkEnd = null, debug = false ) {
         // Core state management
         this.chunkQueue = [];

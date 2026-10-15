@@ -55,6 +55,11 @@ class NavigatorLockManager implements LockManager {
 export class ChainMutexLockManager implements LockManager {
   private readonly tails = new Map<string, Promise<unknown>>();
 
+  /**
+   * Queues the callback behind earlier ones of the same name, then runs it.
+   *
+   * Returns the callback's result and releases the lock even if it throws.
+   */
   async request<T>(name: string, callback: () => Promise<T>): Promise<T> {
     const prev = this.tails.get(name) ?? Promise.resolve();
     // TS "definitely assigned" placeholder — the Promise constructor below
@@ -237,6 +242,11 @@ export class AuthManagerImpl implements AuthManager {
   // The refresh token the current attempt last posted; reported on refresh_failed.
   private lastSentRefresh           : string | null = null;
 
+  /**
+   * Builds the auth manager from its options and starts the auth state machine.
+   *
+   * Publishes state changes on the event bus. If a valid token is stored, it moves straight to the ready state.
+   */
   constructor(opts: AuthManagerOptions) {
     this.refreshUrl       = opts.refreshUrl;
     this.defaultTimeoutMs = opts.defaultTimeoutMs;
@@ -268,14 +278,27 @@ export class AuthManagerImpl implements AuthManager {
     }
   }
 
+  /**
+   * Exposes the current auth state from the state machine.
+   */
   get state(): AuthState {
     return this.actor.getSnapshot().value as AuthState;
   }
 
+  /**
+   * Tells the state machine the current token is no longer good.
+   *
+   * A refresh happens on next use.
+   */
   invalidate(): void {
     this.actor.send({ type: "INVALIDATE" });
   }
 
+  /**
+   * Returns the email claim of the current access token, or null when there is no token.
+   *
+   * Falls back to the stored token when none is in memory.
+   */
   getCurrentUserEmail(): string | null {
     // Prefer the in-memory token; fall back to the stored access token. The
     // email claim is stable across refresh, so an expired-but-present token
@@ -286,6 +309,11 @@ export class AuthManagerImpl implements AuthManager {
     return jwtEmail(accessToken);
   }
 
+  /**
+   * Returns true when the current access token carries the admin role.
+   *
+   * Returns false when there is no token.
+   */
   isCurrentUserAdmin(): boolean {
     // Same token source as getCurrentUserEmail: roles are stable across refresh.
     const accessToken =
@@ -294,6 +322,9 @@ export class AuthManagerImpl implements AuthManager {
     return jwtRoles(accessToken).includes("admin");
   }
 
+  /**
+   * Returns the subject claim of the current access token, or null when there is no token.
+   */
   getCurrentUserId(): string | null {
     // Same token source as getCurrentUserEmail: the sub claim is stable across refresh.
     const accessToken =
@@ -314,6 +345,11 @@ export class AuthManagerImpl implements AuthManager {
     return { accessToken, refreshToken, expiresAt };
   }
 
+  /**
+   * Returns a valid token, refreshing under a lock when it is missing or near expiry.
+   *
+   * Concurrent callers share one refresh.
+   */
   async getToken(): Promise<Token> {
     // Hot path: snapshot the in-memory token; if still valid, return without
     // any lock or fetch.

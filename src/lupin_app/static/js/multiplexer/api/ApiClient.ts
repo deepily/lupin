@@ -150,6 +150,11 @@ export interface ApiClient {
  * where the text is the response body, or "unauthorized" for a 401.
  */
 export class ApiError extends Error {
+  /**
+   * Builds the error from an HTTP status, a URL and a message.
+   *
+   * The message is formatted as the status, the URL and the text.
+   */
   constructor(
     public readonly status: number,
     public readonly url: string,

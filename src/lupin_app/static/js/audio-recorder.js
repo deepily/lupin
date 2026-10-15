@@ -17,6 +17,11 @@
  */
 
 class AudioRecorder {
+    /**
+     * Creates a recorder from options for format, duration, upload endpoint, token, callbacks.
+     *
+     * It also sets the debug flags and internal recording state.
+     */
     constructor( options = {} ) {
         // Audio settings
         this.audioFormat   = options.audioFormat || 'audio/mpeg';
@@ -446,12 +451,18 @@ class AudioRecorder {
     // LOGGING
     // ========================================
 
+    /**
+     * Prints the arguments to the console with a recorder prefix when debug is on.
+     */
     log( ...args ) {
         if ( this.debug ) {
             console.log( '[AudioRecorder]', ...args );
         }
     }
 
+    /**
+     * Prints the arguments as a console error with a recorder prefix when debug is on.
+     */
     error( ...args ) {
         if ( this.debug ) {
             console.error( '[AudioRecorder]', ...args );

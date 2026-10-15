@@ -188,6 +188,11 @@ export class TtsAudioCache {
   private db    : MinimalIdbDatabase | null = null;
   private stats : CacheStatsCounters = { hits: 0, misses: 0, stores: 0, totalSize: 0 };
 
+  /**
+   * Sets up the cache from its options, with defaults for age, size and services.
+   *
+   * Does not open the database. That happens in initialize.
+   */
   constructor( options: TtsAudioCacheOptions = {} ) {
     this.cacheEnabled = options.cacheEnabled !== false; // Default true.
     this.maxAge       = options.maxAge ?? DEFAULT_MAX_AGE;
