@@ -22,13 +22,13 @@ What a symbol record is and how the Python and TypeScript extractors produce one
 - `validate_record( rec )` returns `None` for a valid record. It raises `ValueError` for a missing key, an unknown kind, a bad `line` or `public`, or neither `pin` nor `pin_text`. The build runs it on Dart records only.
 
 ## Python
-- `extract_python( spec, path, include_all=False )` parses one file and returns its records. A file that does not parse raises `SyntaxError`, and the caller lists it as unparsed.
+- `extract_python( spec, path, include_all=False )` parses one file and returns its records. A file that does not parse raises `SyntaxError` (an unreadable one, `UnicodeDecodeError`), and the caller lists it as unparsed.
 - Without `include_all` only public names are returned. With it, private names, every dunder and helpers nested inside functions come back too, and `public` still marks which are public.
 - `module_name( spec, path )` gives the dotted name relative to `spec.module_base`; a package `__init__.py` is named after the package.
 - `strip_docs( node )` returns a deep copy with every docstring removed, an emptied body holding `pass`. `first_doc_line( node )` returns the first non-empty docstring line, or an empty string.
 
 ## JavaScript and TypeScript
-- `find_node()` tries `$LUPIN_NODE`, then `PATH`, then the newest `~/.nvm` install. `find_typescript( root )` wants `node_modules/typescript` under the root, else under `$LUPIN_ROOT`. Each raises `DependencyMissing` when it finds nothing.
+- `find_node()` tries `$LUPIN_NODE`, then `PATH`, then the last `~/.nvm` install in sorted order. `find_typescript( root )` wants `node_modules/typescript` under the root, else under `$LUPIN_ROOT`. Each raises `DependencyMissing` when it finds nothing.
 - `typescript_version( ts_dir )` reads the version from that package's `package.json`; it feeds the pin algorithm.
 - `extract_js( root, files )` runs `ts_extract.js` under node once and returns public records only. An empty list returns `[]` without starting node, and a non-zero exit raises `RuntimeError`.
 - `extract_js_shapes( root, files, public_only=False )` returns `scanned`, `skipped` and `defs`, where each def carries its node-kind list with names and literals erased. The duplicate finder uses it ([[repo-tools-symindex-core-routes-diff-dups]]).

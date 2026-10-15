@@ -30,4 +30,4 @@ The first half of `git_loc_delta` (see [[branch-and-directory-loc-analysis]]). `
 
 ## Errors
 - `GitLocDeltaError( message, context=None )` is the base.
-- `DateRangeError( message, since, until, branch )` means a bad or empty range: `--since` after `--until`, `--branch` on the base itself, or an unknown branch. The CLI reports an empty branch range as "No commits in range." and exits 0.
+- `DateRangeError( message, since, until, branch )` means a bad or empty range: `--since` after `--until`, or `--branch` on the base itself. The CLI reports the second as "No commits in range." and exits 0. An unknown branch raises `GitCommandError` instead.

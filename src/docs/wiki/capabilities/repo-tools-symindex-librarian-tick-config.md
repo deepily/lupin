@@ -29,6 +29,6 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 - `status_text` answers `not installed`, `installed: 2 lines` or `partly installed: n lines`.
 
 ## Installing
-- `--print-install` prints the lines and changes nothing. `--install`, `--uninstall` and `--status` go through `edit_crontab`.
+- `--print-install` prints the lines and changes nothing. `--install` and `--uninstall` go through `edit_crontab`. `--status` only reads the crontab and prints the status text.
 - `edit_crontab( lines, environ, crontab_cmd, backup_dir, now )` holds the shared crontab lock for the whole read and write. It writes a timestamped backup first, and writes nothing if the backup fails. It raises `RuntimeError` on a failed crontab call.
 - `load_crontab_lock` loads `workflow/scripts/crontab_lock.py` from `PLANNING_IS_PROMPTING_ROOT`. When the variable is unset or the file is absent it raises `InstallRefused`, and nothing is written.

@@ -24,7 +24,7 @@ The daily job that lints the wiki, queues the findings and exports the reuse mis
 - It is due when the local hour is 10 or later and the last finished run was on another day (`due`). `--force` skips that check.
 - It refuses with exit 1 when the wiki has no capability page or the index holds no symbols. An empty lint read would clear every open rollup.
 - Otherwise it ensures the index, lints, calls `librarian.sync` with the index header's `symbols_sha`, reads every row including done and dropped, and writes the misses file. The state file gets today's date only after the sync finished.
-- A vector status check, if given, puts its stale flag and reasons in the summary. Its failure is logged and does not fail the tick.
+- A vector status check, if given, puts its stale flag and reasons in the summary. An `OSError` or `ValueError` from it is logged and does not fail the tick.
 
 ## Files and helpers
 - `data_dir` is `<fleet data root>/reuse-review/librarian`. It holds `tick-state.json`, `pending.jsonl`, `librarian.log` and `misses.jsonl`.

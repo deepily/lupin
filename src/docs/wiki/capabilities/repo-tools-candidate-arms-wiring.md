@@ -31,7 +31,7 @@ pins:
 - `cosine_sources( ids, matrices, query_vectors )` ranks the ids by each stored matrix that has a query vector, and names the lists `vector_<name>`.
 
 ## Guards and choices
-- `refuse_fresh_needs( need_ids, needs_sha, fresh_sha )` raises `FRESH_NEEDS_REFUSED` in four cases.
+- `refuse_fresh_needs( need_ids, needs_sha, fresh_sha, fresh_ids=() )` raises `FRESH_NEEDS_REFUSED` in three cases.
 - A need id starts with `fresh-` or is in `fresh_ids`.
 - The needs file hash equals the reserved file's hash.
 - Either hash is missing.

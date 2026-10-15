@@ -1,33 +1,26 @@
 ---
 capability: candidate-stage
-status: planned, not built
+status: built; wired into check_exists through an optional candidate stage
 plan: src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-plan.md
 ---
-# Candidate stage (planned, not built)
+# Candidate stage
 
-Nothing on this page exists in code yet. It records what the approved plan will build, so a reader does not look for it.
+The candidate stage ranks the symbol index so that `check_exists` asks Jev about a shortlist, not every entry. The code exists. This page is the map; each part has its own page.
 
-## What it will do
-- Rank the symbol index before Jev sees it. The ranking is rank fusion over BM25, a prose vector list, a code vector list and the wiki page list.
-- Pass the top 128 entries to Jev, widened to 512 when the top Jev score sits inside the uncertain band. Packs hold 50 entries, sorted by id.
-- Redact the need string first. Emails, URLs, IP addresses, credentials and absolute paths are blanked, and known lupin routes are kept.
-- Keep one vector set, the current state of the repo. A receipt records its manifest hash, and a replay after a rebuild refuses.
+## Where each part lives
+- Ranking (BM25, rank fusion, the wiki page list): [[repo-tools-candidate-ranking]] in `cosa.repo.symindex.candidates`.
+- Vectors: [[repo-tools-candidate-vector-store]], [[repo-tools-candidate-vector-build]] and [[repo-tools-candidate-vector-freshness]]. Purpose lines: [[repo-tools-candidate-purpose-lines]].
+- Search and the resident process: [[repo-tools-candidate-search]] and [[repo-tools-candidate-stage-and-resident]]. Paths and keys: [[repo-tools-candidate-storage-paths]].
+- Shadow audit of "write new" verdicts: [[repo-tools-candidate-shadow-audit]] and [[repo-tools-candidate-shadow-audit-queue]].
+- Offline comparison of the five arms: [[repo-tools-candidate-arms-wiring]], with its metrics, run-inputs, measure and report pages.
 
-## Where it will live
-- The ranking code goes in `cosa.repo.symindex.candidates`, run as a child process in the Lupin environment.
-- The redactor goes in `lupin_mcp.reuse_redact`. The wiring goes in `lupin_mcp.reuse_tools`.
-- Vectors come from the existing `/api/embeddings` endpoints, which gain a `role` field and an `engines` block.
-
-## Offline comparison tooling
-- `arms.py` wires the five arms onto the candidate stage. They are BM25 alone, plus purpose lines, plus one vector list, plus two vector lists, plus the wiki list. `arm_metrics.py` holds recall of the full-sweep shortlist, twin rank and the verdict replay. It also holds the one-or-two-vectors rule. `arm_report.py` writes the results page. Plan: `src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/2026.10.14-reuse-lookup-candidate-stage-plan.md`.
-- It measures nothing by itself. The caller brings the shortlists, rankings and cached answers.
-- `refuse_fresh_needs` stops a run that holds a need whose id starts with `fresh-`. Those needs are reserved for the confirmation phase.
+## How the lookup uses it
+- `lupin_mcp.reuse_tools` builds a `CandidateStage` client (`lupin_mcp.reuse_candidates`) from the INI storage keys. It asks the Lupin server's resident search for the shortlist, because the cosa-voice process cannot import numpy.
+- `check_exists` sweeps only that shortlist when the context carries a stage. `fetch_similar` always sweeps every entry.
+- A failed stage answers `UNCERTAIN_READ_SOURCE` with cause `CALL_FAILED`, and nothing is swept. The receipt's `candidate_stage` block names the error.
+- `lupin_mcp.reuse_redact` blanks emails, URLs, IP addresses, absolute paths and credential-shaped tokens in the need before it leaves the machine. Known lupin routes are kept.
 
 ## Don't
-- Don't treat a name here as importable. No module named above exists yet.
-- Don't use a page-first route. The plan removes it in its wiring phase.
-
-## Invariants the plan sets
-- The same need and the same vector set give the same shortlist, byte for byte.
-- A "write new" verdict carries a measured miss-rate bound from a shadow audit of 1% of lookups.
-- No storage path is hard-coded. Every location is an INI key with an environment override.
+- Don't expect the vector set to follow the repo on its own. It is rebuilt by a job, and a replay after a rebuild is refused.
+- Don't catch a message. Catch the `CandidateError` code.
+- The older page-first route still exists in `reuse_tools` (`page_candidates`). See [[reuse-search-tools]] for what a lookup sends.

@@ -26,10 +26,11 @@ The parts around `DirectoryScanner` and `DirectoryAnalyzer` (see [[branch-and-di
 ## `DirectoryReportFormatter`
 - `format_console( stats, directory_path, scan_stats=None )`, `format_json( ... )` and `format_markdown( ... )` return strings and never print.
 - When `scan_stats` from `DirectoryScanner.get_scan_stats()` is passed, the console report adds the skipped-file and skipped-directory counts if any is above zero.
-- JSON adds `metadata` unless `json_output.include_metadata` is false. Markdown adds its time block unless `markdown_output.include_timestamp` is false.
+- JSON adds `metadata` unless `json_output.include_metadata` is false. Markdown adds its Directory and Generated lines unless `markdown_output.include_timestamp` is false.
 
 ## Errors
 - `DirectoryAnalyzerError( message, context=None )` is the base. `run_directory_analyzer` catches it, prints it to stderr and exits 1.
 - `ScannerError( message, path=None, original_error=None )` is raised when the scan root does not exist or is not a directory.
 - `ConfigurationError` is raised when the packaged `default_config.yaml` is missing or holds invalid YAML.
+- `DirectoryAnalyzer` re-raises both as `DirectoryAnalyzerError`, so its callers see only the base class.
 - `FileReadError` is defined and imported by the scanner, but no code raises it. Unreadable files are skipped and counted instead.

@@ -28,5 +28,5 @@ Three smaller readers over the same tree. `routes.md` comes from the first, `dif
 ## Duplicates (`dups.py`)
 - `find_duplicates( spec, paths, min_nodes=25, threshold=0.85, js_files=(), include_private=True )` returns `provenance`, `exact` and `near`. Definitions under `min_nodes` AST nodes are left out.
 - `normalised( node )` erases docstrings, names, constants and decorators; two defs with equal normalised trees are an exact group.
-- `shingles( node )` and `shingles_of( seq )` hash 5-long windows over the pre-order node-type list. A near pair is two defs whose shingle sets reach the Jaccard threshold and whose trees differ.
+- `shingles( node )` and `shingles_of( seq )` hash 5-long windows over the pre-order node-type list. A near pair is two defs whose shingle sets reach the Jaccard threshold and whose trees differ. Only pairs that share one of each definition's rarest shingles are compared, so a pair above the threshold can be missed.
 - Python and script definitions are never grouped or paired together. A repeated id is numbered `~2`, `~3`.

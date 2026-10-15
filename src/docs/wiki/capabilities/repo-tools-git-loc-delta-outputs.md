@@ -16,7 +16,7 @@ The second half of `git_loc_delta` (see [[repo-tools-git-loc-delta-read-and-buck
 ## Console and JSON
 - `format_console( daily, summary, since, until, branch, rev_range )` returns a string with two tables. The first is daily totals with a closing total row; the second is date by file type. An empty `daily` gives the banner and "No commits in range."
 - `format_json( daily, summary, since, until, branch, rev_range, repo_path )` returns indented JSON with `since`, `until`, `branch`, `rev_range`, `repo_path`, `summary` and `days` (date ascending).
-- `print_console_banner( title )` prints a banner through `cosa.utils.util.print_banner`. The CLI uses it in `--debug`.
+- `print_console_banner( title )` prints a banner through `cosa.utils.util.print_banner`. Nothing in the CLI calls it; it is for callers that want the banner printed directly.
 
 ## CSV
 - `write_csv( by_type, path, repo, branch=None )` writes the tidy-long schema v2: columns `date`, `repo`, `branch`, `file_type`, `added`, `deleted`, `files_touched`, `commits`. It creates the parent folder, sorts by date then added (largest first), and returns the row count. An empty input gives a header-only file.

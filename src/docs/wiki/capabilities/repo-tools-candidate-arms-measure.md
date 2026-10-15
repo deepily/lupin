@@ -18,8 +18,8 @@ The rest of `arm_run.py` measures one arm and writes its partial results page. I
 ## Recall and replay
 - `references( answers, needs )` returns `( first, union )` per need. `first` is the full-sweep shortlist of repeat 1. `union` is every id any of the five repeats shortlisted.
 - `measure_arm( arm, needs, stages, available, answers )` returns `t1_first`, `t1_union`, `empty` and `t2`.
-- `empty` lists needs whose repeat-1 reference is empty. They are left out of both tables.
-- `t2` holds a `control` replay of the whole answered set, which always agrees, plus `K=128` and `K=512`.
+- `empty` lists needs whose repeat-1 reference is empty. They are left out of the repeat-1 table. They stay in the union table unless the union is also empty.
+- `t2` holds a `control` replay of the answered set. It agrees only when every repeat answered the same entries. It also holds `K=128` and `K=512`.
 
 ## Known twins
 - `twin_map( manifest )` maps each member of an exact or near cluster to the other members of its cluster.

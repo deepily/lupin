@@ -26,4 +26,4 @@ The candidate stage cuts the symbol index to a shortlist before the Jev judge se
 - `wiki_ranked_ids( need, pages )` ranks capability pages ( `slug`, `text`, `pins` ) by BM25 over their text. Each page's pinned ids follow it in id order, an id once. It is a ranking input, never a gate.
 
 ## Errors
-- `CandidateError( code, detail )` carries a stable `code`; `str( exc )` is the code, then `: detail`. Codes live in `errors.py`, for example `ENGINE_MISMATCH`, `VECTOR_SET_CORRUPT`, `STAGE_UNKNOWN`, `PATH_REFUSED`, `BUILD_LOCK_HELD`. Catch the code, not the message.
+- `CandidateError( code, detail )` carries a stable `code`; `str( exc )` is the code, then `: detail`. Most codes live in `errors.py`, for example `ENGINE_MISMATCH`, `VECTOR_SET_CORRUPT`, `STAGE_UNKNOWN`, `PATH_REFUSED`, `BUILD_LOCK_HELD`. A module that raises its own code names it, for example `rank_fusion.HEAD_EXCEEDS_LIMIT`. Catch the code, not the message.
