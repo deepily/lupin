@@ -64,6 +64,25 @@ def refresh_dir( root ):
     return data_dir( root ) / FOLDER
 
 
+def missing_purpose_lines( entries, purpose_store, screen, settled=() ):
+    """
+    Count the sendable pins that have no stored purpose line.
+
+    Requires:
+        - entries are the public symbols of an index generation
+        - screen is a Screen from purpose_lines.default_screen
+        - settled are pins the last build for this index could not get a line for
+
+    Ensures:
+        - returns the number of distinct pins the screen lets through that purpose_store holds no line for
+        - a settled pin is not counted, so a pin the writer never answers is not rebuilt for every day
+    """
+    stored      = pl.load_lines( purpose_store )
+    skipped     = set( settled )
+    sendable, _ = screen.sendable( entries )
+    return len( { e[ "pin" ] for e in sendable if e[ "pin" ] not in stored and e[ "pin" ] not in skipped } )
+
+
 def check_fresh( live, header, entries, purpose_store, client, screen ):
     """
     Say whether the live vector set needs no work.
@@ -76,7 +95,7 @@ def check_fresh( live, header, entries, purpose_store, client, screen ):
     Ensures:
         - returns ( True, "fresh" ) only when the set records an index manifest equal to the index's,
           its manifest is readable, its engines match what the server reports, and every sendable pin
-          has a stored purpose line
+          has a stored purpose line or is listed in the set's unwritten_pins for this index
         - otherwise returns ( False, reason ) with the first reason found
         - an engine mismatch or an engine that is not loaded is a reason, not an error
     """
@@ -89,9 +108,7 @@ def check_fresh( live, header, entries, purpose_store, client, screen ):
         vs.check_engines( manifest, client.info() )
     except CandidateError as e:
         return False, f"engines: {e.code}"
-    stored       = pl.load_lines( purpose_store )
-    sendable, _  = screen.sendable( entries )
-    missing      = len( { e[ "pin" ] for e in sendable if e[ "pin" ] not in stored } )
+    missing = missing_purpose_lines( entries, purpose_store, screen, info.get( "unwritten_pins", [] ) )
     if missing: return False, f"{missing} pins have no purpose line"
     return True, "fresh"
 

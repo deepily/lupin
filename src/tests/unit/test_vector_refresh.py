@@ -371,3 +371,66 @@ def test_the_wrapper_script_the_cron_lines_name_exists_and_is_executable():
     assert script.is_file() and os.access( script, os.X_OK )
     text = script.read_text()
     assert "cosa.repo.symindex.vector_refresh" in text and "REUSE_VECTOR_REFRESH_ENV" in text
+
+
+# ── a pin no line can be written for is settled for its index, not rebuilt every day ──
+
+
+def omitting( omit ):
+    """A writer that answers every id except those in omit."""
+    def w( ids ): return { i: f"Return {i}." for i in ids if i not in omit }
+    return w
+
+
+def too_long( ids ): return { i: " ".join( [ "word" ] * 40 ) for i in ids }
+
+
+def test_a_pin_the_writer_never_answers_is_settled_so_the_next_day_is_fresh_and_does_no_work( world ):
+    code, first = go( world, writer=omitting( { "m.b" } ) )
+    assert code == 0 and first[ "outcome" ] == "built"
+    assert fr.read_build_info( world[ "data" ] / "vec" )[ "unwritten_pins" ] == [ "pb" ]
+    calls, client = [], tvb.FakeClient()
+    code, second = go( world, writer=answering_writer( calls ), client=client, now=TOMORROW )
+    assert ( code, second[ "outcome" ], second[ "reason" ] ) == ( 0, "fresh", "fresh" ) and calls == [] and client.calls == []
+
+
+def test_a_pin_the_judge_rejects_is_settled_the_same_way( world ):
+    go( world, writer=too_long )
+    assert sorted( fr.read_build_info( world[ "data" ] / "vec" )[ "unwritten_pins" ] ) == [ "pa", "pb" ]
+    calls = []
+    assert go( world, writer=answering_writer( calls ), now=TOMORROW )[ 1 ][ "outcome" ] == "fresh" and calls == []
+
+
+def test_a_settled_pin_is_asked_for_again_when_the_index_changes( world ):
+    go( world, writer=omitting( { "m.b" } ) )
+    world[ "header" ][ "manifest" ] = { "m.py": [ 7, 7 ] }
+    calls = []
+    code, summary = go( world, writer=answering_writer( calls ), now=TOMORROW )
+    assert summary[ "outcome" ] == "built" and calls == [ [ "m.b" ] ]
+    assert fr.read_build_info( world[ "data" ] / "vec" )[ "unwritten_pins" ] == []
+
+
+def test_a_new_pin_after_a_settled_one_still_forces_a_rebuild( world ):
+    go( world, writer=omitting( { "m.b" } ) )
+    world[ "symbols" ].append( symbol( "c", "pc" ) )
+    code, summary = go( world, writer=answering_writer( [] ), now=TOMORROW )
+    assert summary[ "outcome" ] == "built" and summary[ "reason" ] == "1 pins have no purpose line"
+
+
+def test_a_set_whose_build_info_lacks_unwritten_pins_counts_every_missing_pin( world ):
+    go( world, writer=omitting( { "m.b" } ) )
+    path = world[ "data" ] / "vec" / fr.BUILD_INFO_FILE
+    info = json.loads( path.read_text() )
+    del info[ "unwritten_pins" ]
+    path.write_text( json.dumps( info ) )
+    assert go( world, writer=answering_writer( [] ), now=TOMORROW )[ 1 ][ "reason" ] == "1 pins have no purpose line"
+
+
+def test_missing_purpose_lines_skips_settled_pins_and_counts_the_rest( tmp_path ):
+    store = tmp_path / "purpose.jsonl"
+    store.write_text( json.dumps( { "pin": "pa", "purpose": "Return a.", "prompt_hash": "h", "writer_version": "w" } ) + "\n" )
+    entries = [ symbol( "a", "pa" ), symbol( "b", "pb" ), symbol( "c", "pc" ) ]
+    screen  = pl.Screen( lambda es: ( es, [] ), lambda r: [] )
+    assert vr.missing_purpose_lines( entries, store, screen ) == 2
+    assert vr.missing_purpose_lines( entries, store, screen, [ "pb" ] ) == 1
+    assert vr.missing_purpose_lines( entries, store, screen, [ "pb", "pc", "zz" ] ) == 0

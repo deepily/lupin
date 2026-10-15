@@ -27,7 +27,8 @@ def test_utc_now_is_an_iso_string_in_utc_to_the_second():
 
 def test_build_info_round_trips_and_names_the_manifest_the_symbols_and_the_time( tmp_path ):
     written = fr.write_build_info( tmp_path, HEADER, "2026-10-15T14:00:00+00:00" )
-    assert written == { "index_manifest": fr.index_manifest( HEADER ), "symbols_sha": "abc123", "built_at": "2026-10-15T14:00:00+00:00" }
+    assert written == { "index_manifest": fr.index_manifest( HEADER ), "symbols_sha": "abc123", "built_at": "2026-10-15T14:00:00+00:00",
+                        "unwritten_pins": [] }
     assert fr.read_build_info( tmp_path ) == written
 
 
@@ -85,3 +86,10 @@ def test_the_lock_holds_across_processes_and_a_killed_holder_leaves_no_stale_loc
         proc.kill()
         proc.wait()
     with fr.refresh_lock( path ): pass
+
+
+def test_build_info_keeps_the_unwritten_pins_sorted_and_once_each( tmp_path ):
+    pins = [ f"p{n}" for n in range( 9, -1, -1 ) ]
+    fr.write_build_info( tmp_path, HEADER, "t", pins + [ "p3" ] )
+    assert fr.read_build_info( tmp_path )[ "unwritten_pins" ] == sorted( pins )
+    assert fr.read_build_info( tmp_path )[ "unwritten_pins" ][ :3 ] == [ "p0", "p1", "p2" ]

@@ -44,7 +44,7 @@ def utc_now():
     return datetime.datetime.now( datetime.timezone.utc ).isoformat( timespec="seconds" )
 
 
-def write_build_info( set_dir, header, built_at ):
+def write_build_info( set_dir, header, built_at, unwritten_pins=() ):
     """
     Write the build info beside the files of a new set.
 
@@ -52,12 +52,15 @@ def write_build_info( set_dir, header, built_at ):
         - set_dir is the new set's folder, before the swap
         - header is the index header the set's entries were read from
         - built_at is an ISO time string
+        - unwritten_pins are the sendable pins that still had no purpose line when the build ended
 
     Ensures:
-        - writes index_manifest, symbols_sha and built_at to build-info.json
+        - writes index_manifest, symbols_sha, built_at and the sorted unwritten_pins to build-info.json
+        - a pin listed there is settled for this index manifest: the job asks for it again only after the index changes
         - returns the dict written
     """
-    info = { "index_manifest": index_manifest( header ), "symbols_sha": header[ "symbols_sha" ], "built_at": built_at }
+    info = { "index_manifest": index_manifest( header ), "symbols_sha": header[ "symbols_sha" ], "built_at": built_at,
+             "unwritten_pins": sorted( set( unwritten_pins ) ) }
     ( pathlib.Path( set_dir ) / BUILD_INFO_FILE ).write_text( json.dumps( info, indent=2, sort_keys=True ) + "\n", encoding="utf-8" )
     return info
 

@@ -339,7 +339,8 @@ def test_run_writes_the_build_info_into_the_new_set_before_the_swap_and_returns_
     from cosa.repo.symindex.candidates import freshness as fr
     report = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-15T14:00:00+00:00" )
     info   = fr.read_build_info( tmp_path / "data" / "vec" )
-    assert info == { "index_manifest": fr.index_manifest( { "manifest": { "m.py": [ 1, 2 ] } } ), "symbols_sha": "sha-1", "built_at": "2026-10-15T14:00:00+00:00" }
+    assert info == { "index_manifest": fr.index_manifest( { "manifest": { "m.py": [ 1, 2 ] } } ), "symbols_sha": "sha-1", "built_at": "2026-10-15T14:00:00+00:00",
+                     "unwritten_pins": [] }
     assert report[ "index_manifest" ] == info[ "index_manifest" ] and report[ "built_at" ] == info[ "built_at" ]
     assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == report[ "manifest_hash" ]
 
