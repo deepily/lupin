@@ -562,6 +562,34 @@ class EmbeddingProvider:
         if role == "document": return engine.encode_document( texts )
         return engine.encode_query( texts )
 
+    def _describe_engines_via_http( self ):
+        """
+        Read the engines block from lupin-model-server's /embeddings/info.
+
+        Requires:
+            - a model server URL resolves and its API key is readable
+
+        Ensures:
+            - returns the engines dict the model server reports
+
+        Raises:
+            - RuntimeError when there is no key, the answer is not 200, or it has no engines block
+        """
+        import requests
+
+        base_url, api_key, prefix = self._resolve_http_target( False )
+        if not api_key:
+            raise RuntimeError( "EmbeddingProvider engines info: no API key found for lupin-model-server" )
+        url      = f"{base_url}{prefix}/info"
+        timeout  = float( self._config_mgr.get( "embedding http timeout seconds", default="90" ) )
+        response = requests.get( url, headers={ "X-API-Key": api_key }, timeout=timeout )
+        if response.status_code != 200:
+            raise RuntimeError( f"EmbeddingProvider engines info returned {response.status_code} from {url}: {response.text[ :200 ]}" )
+        body = response.json()
+        if "engines" not in body:
+            raise RuntimeError( f"EmbeddingProvider engines info: {url} reports no engines block; it predates role support" )
+        return body[ "engines" ]
+
     def describe_engines( self ):
         """
         Report the settings that decide what a vector means, without loading a model.
@@ -572,7 +600,11 @@ class EmbeddingProvider:
             - libraries holds torch, transformers, sentence-transformers and numpy
               versions, None for a package that is not installed
             - never loads a model
+        - a process that does not own the engines, with a model server to ask, reports the
+          model server's engines block instead of its own unloaded engines
         """
+        if not self._is_in_process_engine_owner and self._resolve_model_server_url():
+            return self._describe_engines_via_http()
         from importlib import metadata
         from cosa.memory.local_embedding_engine import device_class
 

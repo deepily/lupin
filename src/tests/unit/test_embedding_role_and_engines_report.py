@@ -250,6 +250,7 @@ def test_fastapi_api_key_is_none_when_the_lookup_raises( monkeypatch ):
 
 def test_describe_engines_reports_both_engines_device_class_and_libraries( monkeypatch ):
     monkeypatch.setattr( lee, "device_class", lambda device: f"card for {device}" )
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) )
     import importlib.metadata as md
     versions = { "torch" : "2.1.0", "transformers" : "4.40.0", "numpy" : "2.4.4" }
 
@@ -430,3 +431,71 @@ def test_info_carries_the_engines_block( client ):
     assert body[ "provider" ] == "local"
     assert body[ "engines" ][ "code" ] == { "model" : "c", "revision" : "r1" }
     assert body[ "engines" ][ "prose" ][ "revision" ] is None
+
+
+# ── describe_engines in a process that does not own the engines ─────────────
+
+
+def _model_server_target( monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_is_in_process_engine_owner", False )
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: "ms-key" ) )
+
+
+def test_describe_engines_asks_the_model_server_when_this_process_does_not_own_the_engines( monkeypatch ):
+    import requests
+    _model_server_target( monkeypatch )
+    seen = {}
+
+    class Answer:
+        status_code = 200
+        text        = ""
+        def json( self ): return { "engines" : { "code" : { "revision" : "r1" }, "prose" : { "revision" : "r2" }, "device_class" : "card", "libraries" : {} } }
+
+    def fake_get( url, headers, timeout ):
+        seen.update( url=url, headers=headers, timeout=timeout )
+        return Answer()
+
+    monkeypatch.setattr( requests, "get", fake_get )
+    p = make_provider( code=MagicMock( describe=MagicMock( side_effect=AssertionError( "local engine read" ) ) ) )
+    p._config_mgr.get.return_value = "45"
+    engines = p.describe_engines()
+    assert engines[ "code" ][ "revision" ] == "r1" and engines[ "device_class" ] == "card"
+    assert seen == { "url" : "http://lupin-model-server:7998/embeddings/info", "headers" : { "X-API-Key" : "ms-key" }, "timeout" : 45.0 }
+
+
+def test_describe_engines_via_http_refuses_by_name( monkeypatch ):
+    import requests
+    _model_server_target( monkeypatch )
+    p = make_provider()
+    p._config_mgr.get.return_value = "90"
+
+    class Answer:
+        def __init__( self, status, body ): self.status_code, self._b, self.text = status, body, "boom"
+        def json( self ): return self._b
+
+    monkeypatch.setattr( requests, "get", lambda url, headers, timeout: Answer( 503, {} ) )
+    with pytest.raises( RuntimeError, match="returned 503 from http://lupin-model-server:7998/embeddings/info" ):
+        p.describe_engines()
+    monkeypatch.setattr( requests, "get", lambda url, headers, timeout: Answer( 200, { "code_model" : "x" } ) )
+    with pytest.raises( RuntimeError, match="reports no engines block; it predates role support" ):
+        p.describe_engines()
+    monkeypatch.setattr( EmbeddingProvider, "_http_api_key", staticmethod( lambda: None ) )
+    with pytest.raises( RuntimeError, match="no API key found for lupin-model-server" ):
+        p.describe_engines()
+
+
+def test_describe_engines_reads_the_local_engines_when_no_model_server_resolves( monkeypatch ):
+    monkeypatch.setattr( EmbeddingProvider, "_is_in_process_engine_owner", False )
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) )
+    monkeypatch.setattr( lee, "device_class", lambda d: "local-card" )
+    assert make_provider().describe_engines()[ "device_class" ] == "local-card"
+
+
+def test_describe_engines_reads_its_own_engines_when_this_process_owns_them_even_with_a_model_server_url( monkeypatch ):
+    import requests
+    monkeypatch.setattr( EmbeddingProvider, "_is_in_process_engine_owner", True )
+    monkeypatch.setattr( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: "http://lupin-model-server:7998" ) )
+    monkeypatch.setattr( requests, "get", lambda *a, **k: pytest.fail( "an engine owner must not ask the model server" ) )
+    monkeypatch.setattr( lee, "device_class", lambda d: "own-card" )
+    assert make_provider().describe_engines()[ "device_class" ] == "own-card"

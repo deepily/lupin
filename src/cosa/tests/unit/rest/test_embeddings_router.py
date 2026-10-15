@@ -162,6 +162,7 @@ class TestEmbeddingsRouter( unittest.TestCase ):
         provider._prose_engine.describe.return_value = { "model": "prose-model", "device": "cuda:1", "revision": None }
 
         with patch( "cosa.rest.routers.embeddings.get_embedding_provider", return_value=provider ), \
+             patch.object( EmbeddingProvider, "_resolve_model_server_url", staticmethod( lambda: None ) ), \
              patch( "cosa.memory.local_embedding_engine.device_class", return_value="TEST GPU, sm_00" ) as dev:
             resp = asyncio.run( get_info( authenticated_user_id="user_1" ) )
 
