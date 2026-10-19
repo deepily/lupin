@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import requests
 
-import cosa.agents.notification_proxy.listener as ln
+import cosa.agents.utils.proxy_agents.base_listener as base
 from cosa.agents.notification_proxy.listener import WebSocketListener
 
 
@@ -99,23 +99,23 @@ class TestLogin:
         l = _make()
         resp = MagicMock( status_code=200 )
         resp.json.return_value = { "tokens": { "access_token": "TKN" } }
-        with patch.object( ln.requests, "post", return_value=resp ):
+        with patch.object( base.requests, "post", return_value=resp ):
             assert l._login() == "TKN"
 
     def test_non_200_returns_none_with_help( self ):
         l = _make()
         resp = MagicMock( status_code=401, text="unauthorized" )
-        with patch.object( ln.requests, "post", return_value=resp ):
+        with patch.object( base.requests, "post", return_value=resp ):
             assert l._login() is None
 
     def test_connection_error_returns_none( self ):
         l = _make()
-        with patch.object( ln.requests, "post", side_effect=requests.ConnectionError() ):
+        with patch.object( base.requests, "post", side_effect=requests.ConnectionError() ):
             assert l._login() is None
 
     def test_timeout_returns_none( self ):
         l = _make()
-        with patch.object( ln.requests, "post", side_effect=requests.Timeout() ):
+        with patch.object( base.requests, "post", side_effect=requests.Timeout() ):
             assert l._login() is None
 
 
@@ -170,7 +170,7 @@ class TestConnectAndListen:
         ]
         ws = FakeWS( auth, messages )
         with patch.object( l, "_login", return_value="TKN" ), \
-             patch.object( ln.websockets, "connect", return_value=FakeConnect( ws ) ):
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
             asyncio.run( l._connect_and_listen() )
 
         assert l._connected is True
@@ -183,7 +183,7 @@ class TestConnectAndListen:
         l._running = True
         ws = FakeWS( json.dumps( { "type": "auth_success", "user_id": "u9" } ), [] )
         with patch.object( l, "_login", return_value="TKN" ), \
-             patch.object( ln.websockets, "connect", return_value=FakeConnect( ws ) ):
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
             asyncio.run( l._connect_and_listen() )
         assert l._connected is True
 
@@ -192,7 +192,7 @@ class TestConnectAndListen:
         l._running = True
         ws = FakeWS( json.dumps( { "type": "auth_error", "message": "bad token" } ), [] )
         with patch.object( l, "_login", return_value="TKN" ), \
-             patch.object( ln.websockets, "connect", return_value=FakeConnect( ws ) ):
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
             asyncio.run( l._connect_and_listen() )
         assert l._connected is False
 
@@ -201,7 +201,7 @@ class TestConnectAndListen:
         l._running = True
         ws = FakeWS( json.dumps( { "type": "mystery" } ), [] )
         with patch.object( l, "_login", return_value="TKN" ), \
-             patch.object( ln.websockets, "connect", return_value=FakeConnect( ws ) ):
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
             asyncio.run( l._connect_and_listen() )
         assert l._connected is False
 
@@ -220,7 +220,7 @@ class TestConnectAndListen:
             json.dumps( { "type": "evt_two" } ),     # should never be dispatched (break first)
         ] )
         with patch.object( l, "_login", return_value="TKN" ), \
-             patch.object( ln.websockets, "connect", return_value=FakeConnect( ws ) ):
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
             asyncio.run( l._connect_and_listen() )
         assert l._running is False
 
@@ -251,7 +251,7 @@ class TestRun:
             l._running = False
 
         l._connect_and_listen = AsyncMock( side_effect=boom_then_stop )
-        with patch.object( ln.asyncio, "sleep", new=AsyncMock() ):
+        with patch.object( base.asyncio, "sleep", new=AsyncMock() ):
             asyncio.run( l.run() )
         assert calls[ "n" ] == 2
 
@@ -264,6 +264,41 @@ class TestRun:
         """Persistent clean drops (running stays True) → attempts climb to MAX → give up."""
         l = _make()
         l._connect_and_listen = AsyncMock( return_value=None )   # always "drops", never stops
-        with patch.object( ln.asyncio, "sleep", new=AsyncMock() ):
+        with patch.object( base.asyncio, "sleep", new=AsyncMock() ):
             asyncio.run( l.run() )
-        assert l._attempt >= ln.RECONNECT_MAX_ATTEMPTS
+        assert l._attempt >= base.RECONNECT_MAX_ATTEMPTS
+
+
+# ===========================================================================
+# Behaviour kept across the move onto BaseWebSocketListener
+# ===========================================================================
+class TestKeptBehaviour:
+
+    def test_reconnect_waits_are_the_plain_exponential_series_with_no_jitter( self ):
+        l = _make()
+        l._connect_and_listen = AsyncMock( return_value=None )
+        sleeper = AsyncMock()
+        with patch.object( base.asyncio, "sleep", new=sleeper ):
+            asyncio.run( l.run() )
+        waits = [ c.args[ 0 ] for c in sleeper.await_args_list ]
+        assert waits == [ 2.0, 4.0, 8.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0 ]
+
+    def test_the_auth_message_subscribes_to_the_notification_events( self ):
+        from cosa.agents.notification_proxy.config import SUBSCRIBED_EVENTS
+        l   = _make()
+        ws  = FakeWS( json.dumps( { "type": "auth_success", "user_id": "u1" } ), [] )
+        with patch.object( l, "_login", return_value="TKN" ), \
+             patch.object( base.websockets, "connect", return_value=FakeConnect( ws ) ):
+            asyncio.run( l._connect_and_listen() )
+        sent = json.loads( ws.sent[ 0 ] )
+        assert sent[ "subscribed_events" ] == SUBSCRIBED_EVENTS
+        assert len( SUBSCRIBED_EVENTS ) >= 3
+
+    def test_log_lines_carry_the_listener_prefix( self, capsys ):
+        l = _make()
+        l._connect_and_listen = AsyncMock( return_value=None )
+        with patch.object( base.asyncio, "sleep", new=AsyncMock() ):
+            asyncio.run( l.run() )
+        out = capsys.readouterr().out
+        assert "[Listener] Connection lost. Reconnecting in 2.0s (attempt 1/10)..." in out
+        assert "[Listener] Max reconnection attempts (10) reached. Giving up." in out

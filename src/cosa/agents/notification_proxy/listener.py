@@ -11,32 +11,23 @@ References:
     - src/cosa/rest/websocket_manager.py (server-side subscription logic)
 """
 
-import asyncio
-import json
-import time
-from urllib.parse import quote
-from typing import Callable, Optional
-
-import requests
-import websockets
-
 from cosa.agents.notification_proxy.config import (
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
     SUBSCRIBED_EVENTS,
     RECONNECT_INITIAL_DELAY,
     RECONNECT_MAX_DELAY,
-    RECONNECT_MAX_ATTEMPTS,
     RECONNECT_BACKOFF_FACTOR,
 )
-
-# Bound on the /auth/login POST (row f6ce66f1: every HTTP call carries a named timeout).
-_AUTH_LOGIN_TIMEOUT_SECONDS = 30
+from cosa.agents.utils.proxy_agents.base_listener import BaseWebSocketListener
 
 
-class WebSocketListener:
+class WebSocketListener( BaseWebSocketListener ):
     """
-    Async WebSocket client that logs in, subscribes to events and calls back.
+    Async WebSocket client that logs in, subscribes to notification events and calls back.
+
+    Login, the receive loop, reconnection and stop live in BaseWebSocketListener. This
+    class fixes the subscribed events and keeps this listener's plain backoff.
 
     Requires:
         - email is a valid mock test email
@@ -48,6 +39,8 @@ class WebSocketListener:
         - Reconnects with exponential backoff on disconnection
         - Calls on_event for every received WebSocket message
     """
+
+    LOG_PREFIX = "[Listener]"
 
     def __init__(
         self,
@@ -69,246 +62,32 @@ class WebSocketListener:
             - session_id is a non-empty string
             - on_event is an async callable( event_type: str, event_data: dict )
 
-        Ensures:
-            - Stores connection parameters
-            - Does not connect (call run() to start)
-
         Args:
             email: User email for JWT authentication
             password: User password for JWT authentication
             session_id: WebSocket session identifier
             on_event: Async callback for received events
-            host: Server hostname (default: localhost)
-            port: Server port (default: 7999)
+            host: Server hostname
+            port: Server port
             debug: Enable debug output
             verbose: Enable verbose output
         """
-        self.email      = email
-        self.password   = password
-        self.session_id = session_id
-        self.on_event   = on_event
-        self.host       = host
-        self.port       = port
-        self.debug      = debug
-        self.verbose    = verbose
+        super().__init__(
+            email, password, session_id, on_event, SUBSCRIBED_EVENTS,
+            host=host, port=port, debug=debug, verbose=verbose
+        )
 
-        self._ws          = None
-        self._running     = False
-        self._connected   = False
-        self._attempt     = 0
-        self._user_id     = None
-        self._token       = None
-
-    @property
-    def is_connected( self ):
-        """Whether the WebSocket is currently connected and authenticated."""
-        return self._connected
-
-    @property
-    def authorization( self ):
+    def _next_delay( self ):
         """
-        The `Bearer <jwt>` this listener logged in with, or None before its first login.
-
-        The answer door requires a credential. The responder borrows this one, so every
-        answer the proxy posts carries the login it already holds.
-        """
-        return self._token
-
-    async def run( self ):
-        """
-        Start the listener with automatic reconnection.
+        Seconds to wait before the next reconnect attempt: plain exponential, capped, no jitter.
 
         Requires:
-            - Server is running at host:port
+            - self._attempt has already been incremented for this retry
 
         Ensures:
-            - Connects, authenticates, and enters receive loop
-            - Reconnects with exponential backoff on disconnection
-            - Stops after RECONNECT_MAX_ATTEMPTS consecutive failures
-            - Returns cleanly when stop() is called
+            - returns the smaller of initial * factor ** attempt and the maximum delay
         """
-        self._running = True
-        self._attempt = 0
-
-        while self._running and self._attempt < RECONNECT_MAX_ATTEMPTS:
-            try:
-                await self._connect_and_listen()
-                # Clean exit means stop() was called
-                if not self._running:
-                    break
-                # Connection dropped — reset for reconnect
-                self._connected = False
-                self._attempt += 1
-                delay = min(
-                    RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ),
-                    RECONNECT_MAX_DELAY
-                )
-                print( f"[Listener] Connection lost. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
-                await asyncio.sleep( delay )
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self._connected = False
-                self._attempt += 1
-                delay = min(
-                    RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ),
-                    RECONNECT_MAX_DELAY
-                )
-                print( f"[Listener] Error: {e}. Reconnecting in {delay:.1f}s (attempt {self._attempt}/{RECONNECT_MAX_ATTEMPTS})..." )
-                await asyncio.sleep( delay )
-
-        if self._attempt >= RECONNECT_MAX_ATTEMPTS:
-            print( f"[Listener] Max reconnection attempts ({RECONNECT_MAX_ATTEMPTS}) reached. Giving up." )
-
-    async def stop( self ):
-        """
-        Gracefully stop the listener.
-
-        Ensures:
-            - Sets running flag to False
-            - Closes WebSocket connection if open
-        """
-        self._running   = False
-        self._connected = False
-        if self._ws:
-            await self._ws.close()
-
-    def _login( self ):
-        """
-        Authenticate via REST API and return JWT access token.
-
-        Requires:
-            - self.email and self.password are non-empty
-            - Server is running at self.host:self.port
-
-        Ensures:
-            - Returns JWT token string on success
-            - Returns None on failure (with error printed)
-        """
-        url = f"http://{self.host}:{self.port}/auth/login"
-
-        try:
-            resp = requests.post(
-                url,
-                json    = { "email": self.email, "password": self.password },
-                timeout = _AUTH_LOGIN_TIMEOUT_SECONDS
-            )
-        except requests.ConnectionError:
-            print( f"[Listener] Cannot connect to {url} — is the server running?" )
-            return None
-        except requests.Timeout:
-            print( f"[Listener] Login request timed out ({url})" )
-            return None
-
-        if resp.status_code == 200:
-            token = resp.json()[ "tokens" ][ "access_token" ]
-            if self.debug: print( f"[Listener] JWT obtained for {self.email}" )
-            return token
-
-        print( f"[Listener] Login failed: {resp.status_code}" )
-        print( f"[Listener] Response: {resp.text[ :200 ]}" )
-        print()
-        print( "  Possible fixes:" )
-        print( "  1. Account may not exist. Register it:" )
-        print( f'     curl -X POST "http://{self.host}:{self.port}/auth/register" \\' )
-        print( f'       -H "Content-Type: application/json" \\' )
-        print( f'       -d \'{{"email": "{self.email}", "password": "<your-password>"}}\'' )
-        print( "  2. Password may be wrong. Check your env vars:" )
-        print( "     LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
-        return None
-
-    async def _connect_and_listen( self ):
-        """
-        Single connection lifecycle: connect, auth, subscribe, receive loop.
-
-        Requires:
-            - self._running is True
-
-        Ensures:
-            - Logs in via REST to obtain JWT
-            - Authenticates WebSocket with Bearer token
-            - Subscribes to configured events
-            - Dispatches events to on_event callback
-            - Responds to sys_ping with sys_pong (keep-alive)
-            - Returns on disconnection or stop()
-        """
-        # Obtain a fresh JWT (handles token expiry on reconnects)
-        jwt_token = self._login()
-        if jwt_token is None:
-            print( "[Listener] Authentication failed — cannot obtain JWT" )
-            return
-
-        encoded_session = quote( self.session_id )
-        uri = f"ws://{self.host}:{self.port}/ws/queue/{encoded_session}"
-
-        if self.debug: print( f"[Listener] Connecting to {uri}..." )
-
-        async with websockets.connect( uri ) as ws:
-            self._ws = ws
-
-            # Send auth message with real JWT
-            self._token = f"Bearer {jwt_token}"
-            auth_msg = {
-                "type"              : "auth_request",
-                "token"             : self._token,
-                "session_id"        : self.session_id,
-                "subscribed_events" : SUBSCRIBED_EVENTS
-            }
-            await ws.send( json.dumps( auth_msg ) )
-
-            # Wait for auth response
-            auth_response = await asyncio.wait_for( ws.recv(), timeout=10.0 )
-            auth_data     = json.loads( auth_response )
-
-            if auth_data.get( "type" ) == "auth_success":
-                self._connected = True
-                self._attempt   = 0  # Reset backoff on successful connect
-                self._user_id   = auth_data.get( "user_id", "unknown" )
-
-                print( "" )
-                print( "  " + "─" * 54 )
-                print( "  Authenticated" )
-                print( "  " + "─" * 54 )
-                print( f"  Email      : {self.email}" )
-                print( f"  User ID    : {self._user_id}" )
-                print( f"  Session ID : {self.session_id}" )
-                print( f"  Token      : {self._token}" )
-                print( "  " + "─" * 54 )
-                print( "" )
-
-                if self.debug and self.verbose:
-                    print( f"[Listener] Auth response: {json.dumps( auth_data, indent=2 )}" )
-            elif auth_data.get( "type" ) == "auth_error":
-                print( f"[Listener] Authentication failed: {auth_data.get( 'message', 'unknown error' )}" )
-                return
-            else:
-                print( f"[Listener] Unexpected auth response: {auth_data}" )
-                return
-
-            # Receive loop
-            async for message in ws:
-                if not self._running:
-                    break
-
-                try:
-                    data       = json.loads( message )
-                    event_type = data.get( "type", "unknown" )
-
-                    # Handle ping/pong keep-alive
-                    if event_type == "sys_ping":
-                        pong = { "type": "sys_pong" }
-                        await ws.send( json.dumps( pong ) )
-                        if self.verbose: print( "[Listener] Pong sent" )
-                        continue
-
-                    # Dispatch to callback
-                    await self.on_event( event_type, data )
-
-                except json.JSONDecodeError as e:
-                    print( f"[Listener] Invalid JSON received: {e}" )
-                except Exception as e:
-                    print( f"[Listener] Error handling message: {e}" )
+        return min( RECONNECT_INITIAL_DELAY * ( RECONNECT_BACKOFF_FACTOR ** self._attempt ), RECONNECT_MAX_DELAY )
 
 
 # ============================================================================
