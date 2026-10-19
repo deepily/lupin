@@ -10,6 +10,7 @@ File naming: `yyyy.mm.dd-<slug>-post-game.md`. Frontmatter names the manager. Th
 
 | Date | Retro | Manager | Tier | Tags |
 |---|---|---|---|---|
+| 15 Oct 2026 | [Mr. Radio's overnight and day crews](v0.2.2/2026.10.15-mr-radio-overnight-and-day-crews-post-game.md) | Mr. Radio 🦉 | full | crew-run · overnight · across-three-respins · no-roundtable · review-ran-only-changed-files · old-row-already-fixed · rebase-onto-moved-main · condensed-dm-lost-addressing · archived-branch-already-landed |
 | 13 Oct 2026 | [Plan 1, the first seven phases](v0.2.2/2026.10.13-plan-1-phases-0-to-6-post-game.md) | Cheech 🌿 | full | plan-close · per-phase-receipts · exit-gate-audited-and-found-short · two-readings-of-one-sweep-count · landing-section-open · draft-pending-manager-review |
 | 14 Oct 2026 | [Plan 1, the final tip went red on six unit tests](v0.2.2/2026.10.14-plan-1-final-tip-unit-red-addendum-post-game.md) | Cheech 🌿 | addendum | plan-close · final-tip-red-on-six-unit-tests · no-unit-tier-run-on-the-sweep · mutant-survivors-classified |
 | 13 Oct 2026 | [Plan 1, the documentation rewrite](v0.2.2/2026.10.13-plan-1-documentation-rewrite-post-game.md) | Cheech 🌿 | full | plan-close · commit-gate-flip-six-fix-rounds · flaky-fixture-met-by-the-gate-build · main-moved-under-the-stack · reviewer-ran-the-chain-script-directly · draft-pending-manager-review |
