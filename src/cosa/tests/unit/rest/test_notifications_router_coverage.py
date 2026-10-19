@@ -197,6 +197,18 @@ class TestTimeDateDisplay( unittest.TestCase ):
             out = get_formatted_date_display()
         self.assertRegex( out, r"^\d{4}-\d{2}-\d{2}$" )
 
+    def test_local_now_text_uses_fmt_in_zone_and_fallback_fmt_outside_it( self ):
+        from cosa.rest.routers.notifications import _local_now_text
+        with _patch_fastapi_main( self._main( "UTC" ) ):
+            self.assertRegex( _local_now_text( "%H:%M %Z", "%H:%M" ), r"^\d{2}:\d{2} UTC$" )
+        with _patch_fastapi_main( self._main( "Bogus/Zone" ) ):
+            self.assertRegex( _local_now_text( "%H:%M %Z", "%H:%M" ), r"^\d{2}:\d{2}$" )
+            self.assertRegex( _local_now_text( "%H:%M %Z", "%Y" ), r"^\d{4}$" )
+
+    def test_time_display_in_zone_carries_the_zone_abbreviation( self ):
+        with _patch_fastapi_main( self._main( "UTC" ) ):
+            self.assertRegex( get_formatted_time_display(), r"^\d{2}:\d{2} UTC$" )
+
 
 class TestResolveSenderId( unittest.TestCase ):
     """Coverage for resolve_sender_id precedence."""

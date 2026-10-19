@@ -467,6 +467,32 @@ def get_local_timestamp():
         return datetime.now().isoformat()
 
 
+def _local_now_text( fmt, fallback_fmt ):
+    """
+    Format the current time in the app timezone.
+
+    Requires:
+        - lupin_app.main module is available
+        - config_mgr is accessible
+        - fmt and fallback_fmt are strftime formats
+
+    Ensures:
+        - Returns datetime.now( configured zone ) formatted with fmt
+        - Uses the "app timezone" key, defaulting to America/New_York
+        - Falls back to the server's local time formatted with fallback_fmt when the zone is invalid
+    """
+    import lupin_app.main as main_module
+    config_mgr = main_module.config_mgr
+
+    timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
+
+    try:
+        tz = zoneinfo.ZoneInfo( timezone_name )
+        return datetime.now( tz ).strftime( fmt )
+    except Exception:
+        return datetime.now().strftime( fallback_fmt )
+
+
 def get_formatted_time_display():
     """
     Get a "HH:MM TZ" time string with the timezone abbreviation, e.g. "17:45 EST".
@@ -482,18 +508,7 @@ def get_formatted_time_display():
         - Falls back to simple time format if timezone configuration is invalid
 
     """
-    import lupin_app.main as main_module
-    config_mgr = main_module.config_mgr
-
-    timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
-
-    try:
-        tz = zoneinfo.ZoneInfo( timezone_name )
-        local_time = datetime.now( tz )
-        return local_time.strftime( '%H:%M %Z' )
-    except Exception as e:
-        # Fallback to simple time format
-        return datetime.now().strftime( '%H:%M' )
+    return _local_now_text( '%H:%M %Z', '%H:%M' )
 
 
 def get_formatted_date_display():
@@ -513,18 +528,7 @@ def get_formatted_date_display():
         - Falls back to local date if timezone configuration is invalid
 
     """
-    import lupin_app.main as main_module
-    config_mgr = main_module.config_mgr
-
-    timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
-
-    try:
-        tz = zoneinfo.ZoneInfo( timezone_name )
-        local_time = datetime.now( tz )
-        return local_time.strftime( '%Y-%m-%d' )
-    except Exception:
-        # Fallback to simple date format
-        return datetime.now().strftime( '%Y-%m-%d' )
+    return _local_now_text( '%Y-%m-%d', '%Y-%m-%d' )
 
 
 def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:

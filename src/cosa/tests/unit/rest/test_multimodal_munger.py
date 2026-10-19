@@ -365,6 +365,28 @@ class TestMungeTransforms( _MungerBase ):
         out, _ = self.mm.munge_sql_punctuation( "select five", mmm.trans_mode_sql_punctuation )
         self.assertEqual( out, "select 5" )
 
+    def test_python_strips_the_phrase_space_comma_but_sql_keeps_it( self ):
+        """The one place the two bodies differ: the first regex."""
+        py_out,  py_mode  = self.mm.munge_python_punctuation( "x space, y", mmm.trans_mode_python_punctuation )
+        sql_out, sql_mode = self.mm.munge_sql_punctuation( "x space, y", mmm.trans_mode_sql_punctuation )
+        self.assertEqual( py_out, "x y" )
+        self.assertEqual( sql_out, "x space y" )
+        self.assertEqual( ( py_mode, sql_mode ), ( mmm.trans_mode_python_punctuation, mmm.trans_mode_sql_punctuation ) )
+
+    def test_both_strip_commas_and_dashes_lowercase_and_join_digits( self ):
+        self.assertEqual( self.mm.munge_python_punctuation( "A,B-C one two", "m" )[ 0 ], "abc 12" )
+        self.assertEqual( self.mm.munge_sql_punctuation( "A,B-C one two", "m" )[ 0 ], "abc 12" )
+
+    def test_each_prints_its_own_before_and_after_labels( self ):
+        import contextlib, io
+        for method, label in ( ( self.mm.munge_python_punctuation, "code" ), ( self.mm.munge_sql_punctuation, "sql" ) ):
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout( buffer ):
+                method( "Select, Five", "m" )
+            lines = buffer.getvalue().splitlines()
+            self.assertEqual( lines[ 0 ], f"BEFORE {label}: select, five" )
+            self.assertEqual( lines[ -1 ], f"AFTER {label}: select 5" )
+
 
 class TestBacktickExtraction( _MungerBase ):
     """_extract_string_from_backticked_llm_output try + except arcs."""

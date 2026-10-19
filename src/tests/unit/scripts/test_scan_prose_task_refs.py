@@ -226,6 +226,14 @@ class TestFetchBoard:
         assert "hide_parked=false"      in url
         assert f"limit={mod.PAGE_SIZE}" in url
 
+    def test_the_module_page_size_sets_the_limit_of_the_first_request( self, mod, wired, monkeypatch ):
+        """PAGE_SIZE is read at call time, so lowering it lowers the request."""
+        monkeypatch.setattr( mod, "PAGE_SIZE", 100 )
+
+        mod.fetch_board( SETTINGS, "k", 1000 )
+
+        assert _limit_of( wired[ "calls" ][ 0 ][ 1 ] ) == 100
+
     def test_paging_continues_while_has_more_and_advances_the_offset_by_rows_seen( self, mod, wired ):
         wired[ "pages" ] = [ { "tasks": [ _row( "a", "queued" ), _row( "b", "queued" ) ],
                                "has_more": True },

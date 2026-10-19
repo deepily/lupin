@@ -397,3 +397,45 @@ def test_an_unavailable_config_yields_the_LITERAL_defaults_not_merely_the_consta
     assert frs.get_window_hours() == 24
     assert frs.get_allow_below()  == 1.0
     assert "unreadable" in capsys.readouterr().out
+
+
+def test_settings_override_path_names_any_file_in_the_flow_ratio_directory( monkeypatch ):
+    """
+    The filename is the only thing that varies; both branches keep the same directory.
+
+    Ensures:
+        - the env-var branch joins the file to $LUPIN_FLOW_RATIO_DIR
+        - the host branch joins it under <fleet_data_root>/<OVERRIDE_SUBDIR>
+        - override_path() is this function with the shipped filename
+    """
+    monkeypatch.setenv( frs._SETTINGS_DIR_ENV, "/var/lupin/flow-ratio" )
+    assert frs.settings_override_path( "other.json" ) == "/var/lupin/flow-ratio/other.json"
+
+    monkeypatch.delenv( frs._SETTINGS_DIR_ENV, raising=False )
+    monkeypatch.setattr( frs, "fleet_data_root", lambda: "/data/lupin" )
+    assert frs.settings_override_path( "other.json" ) == "/data/lupin/flow-ratio/other.json"
+    assert frs.override_path() == "/data/lupin/flow-ratio/flow-ratio-settings.json"
+
+
+def test_stored_or_ini_prefers_the_stored_value_and_clamps_both_arms( isolated, monkeypatch ):
+    """
+    Pins the three layers of the shared resolver with a clamp that is not the identity.
+
+    Ensures:
+        - a stored override is clamped and the INI is never read
+        - without one, the INI value is clamped
+        - the fallback is passed through to the clamp in both arms
+    """
+    calls = []
+    def clamp( value, fallback ):
+        calls.append( ( value, fallback ) )
+        return ( "clamped", value )
+
+    monkeypatch.setattr( frs, "_ini_value", lambda key, kind, fallback: ( "ini", key, kind, fallback ) )
+    isolated.write_text( '{ "window_hours": 7 }' )
+    assert frs._stored_or_ini( "window_hours", "k", "int", 24, clamp ) == ( "clamped", 7 )
+    assert calls == [ ( 7, 24 ) ]
+
+    calls.clear()
+    assert frs._stored_or_ini( "allow_below", "k", "float", 1.0, clamp ) == ( "clamped", ( "ini", "k", "float", 1.0 ) )
+    assert calls == [ ( ( "ini", "k", "float", 1.0 ), 1.0 ) ]

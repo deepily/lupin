@@ -23,92 +23,41 @@ ROUTES      = ( "full", "candidates" )
 QUESTIONS   = ( "choice", "provides" )                 # the old question and the new one, by the name run_question takes
 
 
-def repeat_sweeper( size, workers, run_index, breaker=None ):
+def _sweeper_factory( key_mode, kind=None ):
     """
-    Build a packed sweeper whose cache keys hold the repeat number.
+    Build the factory behind the four public sweeper builders.
 
     Requires:
-        - size and workers are in range for sweep_packed
-        - run_index is a whole number of 1 or more
+        - key_mode is "stage1" or "replay"
+        - kind is None (the old question) or "pair" (the new question)
     Ensures:
-        - returns a function with sweep's signature
-        - answers are cached under keys that hold run_index, so a repeat never reads another repeat's answers or the production answers
-        - the same run_index asked again is a cache hit and sends nothing
+        - returns factory( size, workers, run_index, breaker=None ) that checks its arguments, then returns a function with sweep's signature
+        - the function sweeps in key_mode with the given run_index; it passes kind to sweep_packed only when kind is not None
     Raises:
-        - ValueError for a size, worker count or run_index out of range, before anything is sent
+        - ValueError from the factory for a size, worker count or run_index out of range, before anything is sent
     """
-    rp._check_sweep_args( size, workers, "stage1", run_index )
+    check_args = () if kind is None else ( kind, )
+    sweep_args = {} if kind is None else { "kind": kind }
 
-    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
-        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="stage1", run_index=run_index, template=template, model=model,
-                                frozen=frozen, gaps=gaps, breaker=breaker )
+    def factory( size, workers, run_index, breaker=None ):
+        rp._check_sweep_args( size, workers, key_mode, run_index, *check_args )
 
-    return sweeper
+        def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
+            return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode=key_mode, run_index=run_index, template=template, model=model,
+                                    frozen=frozen, gaps=gaps, breaker=breaker, **sweep_args )
 
+        return sweeper
 
-def repeat_pair_sweeper( size, workers, run_index, breaker=None ):
-    """
-    Build a packed sweeper for the new question whose cache keys hold the repeat number.
-
-    Requires:
-        - size and workers are in range for sweep_packed; run_index is a whole number of 1 or more
-    Ensures:
-        - returns a function with sweep's signature that sweeps in the pair kind, keyed by need, candidate text and run_index
-        - a key of this sweeper never equals the production pair key, nor another repeat's
-    Raises:
-        - ValueError for a size, worker count or run_index out of range, before anything is sent
-    """
-    rp._check_sweep_args( size, workers, "stage1", run_index, "pair" )
-
-    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
-        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="stage1", run_index=run_index, template=template, model=model,
-                                frozen=frozen, gaps=gaps, breaker=breaker, kind="pair" )
-
-    return sweeper
+    return factory
 
 
-def replay_sweeper( size, workers, run_index, breaker=None ):
-    """
-    Build a packed sweeper for a replay repeat, keyed apart from the measurement arms.
-
-    Requires:
-        - size and workers are in range for sweep_packed
-        - run_index is a whole number of 1 or more
-    Ensures:
-        - returns a function with sweep's signature
-        - answers are cached under replay keys, so a replay repeat never reads a flip or stage-1 answer, nor the production answers
-        - the same run_index asked again is a cache hit and sends nothing
-    Raises:
-        - ValueError for a size, worker count or run_index out of range, before anything is sent
-    """
-    rp._check_sweep_args( size, workers, "replay", run_index )
-
-    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
-        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="replay", run_index=run_index, template=template, model=model,
-                                frozen=frozen, gaps=gaps, breaker=breaker )
-
-    return sweeper
-
-
-def replay_pair_sweeper( size, workers, run_index, breaker=None ):
-    """
-    Build a pair sweeper for a replay repeat, keyed apart from measurement.
-
-    Requires:
-        - size and workers are in range for sweep_packed; run_index is a whole number of 1 or more
-    Ensures:
-        - returns a function with sweep's signature that sweeps in the pair kind under replay keys
-        - a key of this sweeper never equals the production pair key, nor a measurement repeat's
-    Raises:
-        - ValueError for a size, worker count or run_index out of range, before anything is sent
-    """
-    rp._check_sweep_args( size, workers, "replay", run_index, "pair" )
-
-    def sweeper( ctx, need, entries, frozen=False, template=None, model=None, gaps=None ):
-        return rp.sweep_packed( ctx, need, entries, size, workers=workers, key_mode="replay", run_index=run_index, template=template, model=model,
-                                frozen=frozen, gaps=gaps, breaker=breaker, kind="pair" )
-
-    return sweeper
+# The four public builders are kept as names because reuse_tools and the flip driver call them.
+# Each caches answers under keys that hold run_index, so a repeat never reads another repeat's answers
+# or the production answers; replay builders use replay keys, apart from the measurement arms.
+repeat_sweeper       = _sweeper_factory( "stage1" )
+repeat_pair_sweeper  = _sweeper_factory( "stage1", "pair" )
+replay_sweeper       = _sweeper_factory( "replay" )
+replay_pair_sweeper  = _sweeper_factory( "replay", "pair" )
 
 
 def ask_repeat( ctx, need, member, run_index, workers=rp.WORKERS_DEFAULT, route="full", question="choice" ):

@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import cosa.rest.flow_ratio_settings as frs
 import cosa.rest.task_approval_settings as approval
 from cosa.rest.db.repositories.approval_setting_repository import ApprovalSettingRepository
 from cosa.rest.postgres_models import ApprovalSetting
@@ -165,7 +166,7 @@ def legacy_dir( tmp_path, monkeypatch ):
 
 def test_the_legacy_path_falls_back_to_the_fleet_data_root( monkeypatch ):
     monkeypatch.delenv( "LUPIN_FLOW_RATIO_DIR", raising=False )
-    monkeypatch.setattr( approval, "fleet_data_root", lambda: "/data/lupin" )
+    monkeypatch.setattr( frs, "fleet_data_root", lambda: "/data/lupin" )
     assert approval.legacy_override_path() == "/data/lupin/flow-ratio/task-approval-settings.json"
 
 

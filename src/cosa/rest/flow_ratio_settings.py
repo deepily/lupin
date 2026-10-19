@@ -115,6 +115,26 @@ _cache       = { "window_hours": None, "allow_below": None }
 _cache_mtime = None
 
 
+def settings_override_path( filename ):
+    """
+    The path of one settings file in the flow-ratio directory.
+
+    Requires:
+        - filename is a non-empty file name, not a path
+
+    Ensures:
+        - returns $LUPIN_FLOW_RATIO_DIR/<filename> when the variable is set and
+          non-empty (the container's mount point — see the note beside _SETTINGS_DIR_ENV)
+        - otherwise <fleet_data_root()>/flow-ratio/<filename>, with OVERRIDE_SUBDIR
+          appended so both branches name the same directory
+        - does not create the file or the directory
+    """
+    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
+    if override_dir:
+        return os.path.join( override_dir, filename )
+    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, filename )
+
+
 def override_path():
     """
     The persisted override file.
@@ -132,10 +152,7 @@ def override_path():
           writes (`dm.py` does the same with its `dm-corpus` subdirectory)
         - does not create the file or the directory (reads tolerate absence)
     """
-    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
-    if override_dir:
-        return os.path.join( override_dir, OVERRIDE_FILENAME )
-    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, OVERRIDE_FILENAME )
+    return settings_override_path( OVERRIDE_FILENAME )
 
 
 def _read_overrides():
@@ -221,6 +238,25 @@ def _clamp_threshold( value, fallback ):
     return max( MIN_ALLOW_BELOW, min( MAX_ALLOW_BELOW, value ) )
 
 
+def _stored_or_ini( key, ini_key, kind, fallback, clamp ):
+    """
+    Resolve one numeric setting: persisted override, else INI, else fallback.
+
+    Requires:
+        - key names a field of the override file
+        - kind is the ConfigurationManager return type for ini_key ("int", "float")
+        - clamp is a function ( value, fallback ) that coerces and bounds the value
+
+    Ensures:
+        - returns clamp( stored, fallback ) when an override is stored
+        - otherwise clamp( INI value or fallback, fallback )
+    """
+    stored = _read_overrides()[ key ]
+    if stored is not None:
+        return clamp( stored, fallback )
+    return clamp( _ini_value( ini_key, kind, fallback ), fallback )
+
+
 def get_window_hours():
     """
     The live window, in hours — persisted override, else INI, else fallback.
@@ -228,11 +264,7 @@ def get_window_hours():
     Ensures:
         - always an int inside [ MIN_WINDOW_HOURS, MAX_WINDOW_HOURS ]
     """
-    stored = _read_overrides()[ "window_hours" ]
-    if stored is not None:
-        return _clamp_window( stored, FALLBACK_WINDOW_HOURS )
-    return _clamp_window( _ini_value( INI_KEY_WINDOW_HOURS, "int", FALLBACK_WINDOW_HOURS ),
-                          FALLBACK_WINDOW_HOURS )
+    return _stored_or_ini( "window_hours", INI_KEY_WINDOW_HOURS, "int", FALLBACK_WINDOW_HOURS, _clamp_window )
 
 
 def get_allow_below():
@@ -243,11 +275,7 @@ def get_allow_below():
         - persisted override, else INI, else fallback
         - always a float inside [ MIN_ALLOW_BELOW, MAX_ALLOW_BELOW ]
     """
-    stored = _read_overrides()[ "allow_below" ]
-    if stored is not None:
-        return _clamp_threshold( stored, FALLBACK_ALLOW_BELOW )
-    return _clamp_threshold( _ini_value( INI_KEY_ALLOW_BELOW, "float", FALLBACK_ALLOW_BELOW ),
-                             FALLBACK_ALLOW_BELOW )
+    return _stored_or_ini( "allow_below", INI_KEY_ALLOW_BELOW, "float", FALLBACK_ALLOW_BELOW, _clamp_threshold )
 
 
 def get_enforcement_active():
