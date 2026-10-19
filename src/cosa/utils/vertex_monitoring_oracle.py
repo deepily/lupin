@@ -202,7 +202,7 @@ class MonitoringOracle:
                          f"model_user_id is '{model}', expected '{expected_model}' — the pin was "
                          f"defeated and a different model was billed." )
 
-            if container and self.project_id not in container:
+            if container and container not in ( self.project_id, f"projects/{self.project_id}" ):
                 return ( Verdict.FAIL,
                          f"resource_container '{container}' is not our project "
                          f"'{self.project_id}' — the project guard was bypassed and someone "
