@@ -82,6 +82,23 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
             event_time = datetime.now( timezone.utc )
         )
 
+    def _page_by( self, column, value, limit: int, offset: int ) -> List[AuthAuditLog]:
+        """
+        Get one page of audit logs whose column equals a value, newest first.
+
+        Requires:
+            - column is an AuthAuditLog column; value is what it must equal
+            - limit and offset are non-negative integers
+
+        Ensures:
+            - returns at most limit logs after skipping offset, ordered by event_time descending
+        """
+        return self.session.query( AuthAuditLog ).filter(
+            column == value
+        ).order_by(
+            AuthAuditLog.event_time.desc()
+        ).limit( limit ).offset( offset ).all()
+
     def get_by_user( self, user_id: uuid.UUID, limit: int = 100, offset: int = 0 ) -> List[AuthAuditLog]:
         """
         Get audit logs for a specific user.
@@ -99,11 +116,7 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
         Returns:
             List of AuthAuditLog instances
         """
-        return self.session.query( AuthAuditLog ).filter(
-            AuthAuditLog.user_id == user_id
-        ).order_by(
-            AuthAuditLog.event_time.desc()
-        ).limit( limit ).offset( offset ).all()
+        return self._page_by( AuthAuditLog.user_id, user_id, limit, offset )
 
     def get_by_event_type( self, event_type: str, limit: int = 100, offset: int = 0 ) -> List[AuthAuditLog]:
         """
@@ -125,11 +138,7 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
             # Get all password change events
             password_changes = audit_repo.get_by_event_type( "password_change" )
         """
-        return self.session.query( AuthAuditLog ).filter(
-            AuthAuditLog.event_type == event_type
-        ).order_by(
-            AuthAuditLog.event_time.desc()
-        ).limit( limit ).offset( offset ).all()
+        return self._page_by( AuthAuditLog.event_type, event_type, limit, offset )
 
     def get_failed_events( self, hours: int = 24, limit: int = 100 ) -> List[AuthAuditLog]:
         """
