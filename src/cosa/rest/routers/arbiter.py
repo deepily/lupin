@@ -364,23 +364,33 @@ def get_fleet_size_cap(
     return _fleet_size_cap_payload()
 
 
-async def refuse_api_key_cap_writer(
-    x_api_key     : Annotated[ Optional[ str ], Header() ] = None,
-    authorization : Annotated[ Optional[ str ], Header() ] = None
-) -> None:
+def _refuse_api_key_only( detail: str, name: str ):
     """
-    Turn away a caller that presents only an API key, before the admin check runs.
+    Build a FastAPI dependency that turns away a caller presenting only an API key.
+
+    Requires:
+        - detail is the 403 text the refused caller reads
+        - name is the public name the dependency is bound to at module level
 
     Ensures:
-        - raises 403 when X-API-Key is present and Authorization is not, which is how a
-          Claude session calls. A manager's own key therefore cannot set the cap
-        - otherwise returns None, and the admin check decides
+        - the returned coroutine raises 403 with detail when X-API-Key is present and
+          Authorization is not, which is how a Claude session calls
+        - otherwise it returns None, and the admin check decides
+        - it is a named function, because FastAPI keys Depends( ... ) on the object
     """
-    if x_api_key and not authorization:
-        raise HTTPException(
-            status_code = 403,
-            detail      = "Only an administrator may change the fleet cap."
-        )
+    async def dependency(
+        x_api_key     : Annotated[ Optional[ str ], Header() ] = None,
+        authorization : Annotated[ Optional[ str ], Header() ] = None
+    ) -> None:
+        if x_api_key and not authorization:
+            raise HTTPException( status_code=403, detail=detail )
+
+    dependency.__name__     = name
+    dependency.__qualname__ = name
+    return dependency
+
+
+refuse_api_key_cap_writer = _refuse_api_key_only( "Only an administrator may change the fleet cap.", "refuse_api_key_cap_writer" )
 
 
 @router.put(
@@ -483,23 +493,7 @@ class SkeletonCrewIn( BaseModel ):
     on : StrictBool = Field( description="True turns skeleton crew on, false turns it off." )
 
 
-async def refuse_api_key_flipper(
-    x_api_key     : Annotated[ Optional[ str ], Header() ] = None,
-    authorization : Annotated[ Optional[ str ], Header() ] = None
-) -> None:
-    """
-    Turn away a caller that presents only an API key, before the admin check runs.
-
-    Ensures:
-        - raises 403 when X-API-Key is present and Authorization is not, which is how a
-          Claude session calls. A manager's own key therefore cannot flip the switch
-        - otherwise returns None, and the admin check decides
-    """
-    if x_api_key and not authorization:
-        raise HTTPException(
-            status_code = 403,
-            detail      = "Only an administrator may change the skeleton crew switch."
-        )
+refuse_api_key_flipper = _refuse_api_key_only( "Only an administrator may change the skeleton crew switch.", "refuse_api_key_flipper" )
 
 
 def _flip_message( on: bool ) -> str:
