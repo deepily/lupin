@@ -117,15 +117,16 @@ def test_an_unhashable_or_non_string_timezone_name_still_never_raises( monkeypat
     assert len( capsys.readouterr().err.splitlines() ) == 1, "reported once per value"
 
 
-def test_a_closed_stderr_does_not_break_the_stamp( monkeypatch ):
+@pytest.mark.parametrize( "error", [ ValueError( "I/O operation on closed file." ), BrokenPipeError( "pipe closed" ) ] )
+def test_a_closed_or_broken_stderr_does_not_break_the_stamp( monkeypatch, error ):
     import cosa.utils.edt_timestamp as edt
     monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
 
-    class _Closed:
-        def write( self, text ): raise ValueError( "I/O operation on closed file." )
-        def flush( self ): raise ValueError( "I/O operation on closed file." )
+    class _Broken:
+        def write( self, text ): raise error
+        def flush( self ): raise error
 
-    monkeypatch.setattr( edt.sys, "stderr", _Closed() )
+    monkeypatch.setattr( edt.sys, "stderr", _Broken() )
     when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
     assert format_edt_timestamp( when, tz_name="Not/AZone" ) == "[2026.06.24 at 18:44:09]"
 
