@@ -3226,16 +3226,23 @@ def execute_dm_send(
     return result
 
 
-@router.post(
-    "/send",
-    summary     = "Send a notification-native AI↔AI direct message (body inline)",
-    description = "Notification-native peer DM: resolves the recipient persona/session (same-user scoped) and delivers the message body INLINE via a direction='ai_to_ai' notification — no commons board, no claim-check, no commons_read re-fetch. Returns 201 with {message_id, thread_id}, or 422 (RecipientResolutionError) if the recipient can't be resolved.",
-)
-async def post_dm_send(
-    body: DmSendRequest,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
-    notification_queue: NotificationFifoQueue = Depends( get_notification_queue ),
-) -> JSONResponse:
+async def _run_dm_send( body, authenticated_user_id, notification_queue ) -> JSONResponse:
+    """
+    Run the send execution core for POST /api/dm/send and POST /api/dm/respond.
+
+    The two routes differ only in their request model, so both call this.
+    `body` is a DmSendRequest or a DmRespondRequest; the core reads it by attribute.
+
+    Requires:
+        - body is a validated DmSendRequest or DmRespondRequest
+        - authenticated_user_id is the caller's user id
+        - notification_queue is the NotificationFifoQueue to push the DM onto
+
+    Ensures:
+        - runs execute_dm_send off the event loop with the recipient resolver, sender-id builder and persist seams
+        - returns a JSONResponse carrying the core's body and status when the status is below 400
+        - raises HTTPException with the core's status and detail otherwise
+    """
     # Lazy import to avoid a commons<->notifications import cycle and to read the
     # commons module's runtime-initialized active-session threshold.
     from cosa.rest.routers import commons as _commons
@@ -3273,6 +3280,19 @@ async def post_dm_send(
     if http_status >= 400:
         raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
     return JSONResponse( status_code=http_status, content=result )
+
+
+@router.post(
+    "/send",
+    summary     = "Send a notification-native AI↔AI direct message (body inline)",
+    description = "Notification-native peer DM: resolves the recipient persona/session (same-user scoped) and delivers the message body INLINE via a direction='ai_to_ai' notification — no commons board, no claim-check, no commons_read re-fetch. Returns 201 with {message_id, thread_id}, or 422 (RecipientResolutionError) if the recipient can't be resolved.",
+)
+async def post_dm_send(
+    body: DmSendRequest,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    notification_queue: NotificationFifoQueue = Depends( get_notification_queue ),
+) -> JSONResponse:
+    return await _run_dm_send( body, authenticated_user_id, notification_queue )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -3325,38 +3345,7 @@ async def post_dm_respond(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     notification_queue: NotificationFifoQueue = Depends( get_notification_queue ),
 ) -> JSONResponse:
-    # Mirrors post_dm_send exactly — respond shares send's resolution + execution
-    # core; only the request model differs (threading mandatory).
-    from cosa.rest.routers import commons as _commons
-    from lupin_cli.claude_code.hooks.lib.session_bridge import (
-        find_active_sessions, build_sender_id_for_cc,
-    )
-
-    def _resolve( recipient_session_id, recipient_persona, authenticated_user_id ):
-        return _commons._resolve_dm_recipient(
-            recipient_session_id             = recipient_session_id,
-            recipient_persona                = recipient_persona,
-            authenticated_user_id            = authenticated_user_id,
-            # require_persona=False — null-persona workers stay reachable by
-            # session_id on the reply path too (bug d57dbfea); see post_dm_send.
-            raw_sessions_fn                  = lambda: find_active_sessions( require_persona=False ),
-            bridge_loader                    = _commons._load_bridge_fields,
-            active_session_threshold_seconds = getattr( _commons, "_active_session_threshold_seconds", 600.0 ),
-        )
-
-    result = await asyncio.to_thread(
-        execute_dm_send,
-        authenticated_user_id = authenticated_user_id,
-        body                  = body,
-        notification_queue    = notification_queue,
-        resolve_recipient_fn  = _resolve,
-        build_sender_id       = _make_sender_id_builder( build_sender_id_for_cc ),
-        persist_fn            = _persist_dm_send_sync,
-    )
-    http_status = result.pop( "http_status" )
-    if http_status >= 400:
-        raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
-    return JSONResponse( status_code=http_status, content=result )
+    return await _run_dm_send( body, authenticated_user_id, notification_queue )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
