@@ -443,3 +443,35 @@ def test_a_rebuild_reports_how_many_vector_rows_were_reused_and_embedded( world 
     code, summary = go( world, now=TOMORROW )
     assert summary[ "outcome" ] == "built"
     assert summary[ "vectors" ][ "code" ] == { "reused": 2, "embedded": 0 } and summary[ "vectors" ][ "prose" ] == { "reused": 1, "embedded": 1 }
+
+
+# ── cron's environment is bare: the wrapper must hand the job a ConfigurationManager default ──
+
+import subprocess
+import sys
+
+DEFAULT_CONFIG_ARGS = "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+
+
+def run_wrapper_bare( tmp_path, extra_env=None ):
+    """Run the wrapper in a bare environment; a fake python dumps what it received."""
+    fake = tmp_path / "fake-python"
+    dump = tmp_path / "env.json"
+    fake.write_text( f"#!{sys.executable}\nimport json, os, sys\n"
+                     f"json.dump( {{ 'env': dict( os.environ ), 'argv': sys.argv[ 1: ] }}, open( {str( dump )!r}, 'w' ) )\n" )
+    fake.chmod( 0o755 )
+    script = pathlib.Path( os.environ[ "LUPIN_ROOT" ] ) / "src" / "scripts" / vr.SCRIPT_NAME
+    env    = { "PATH": "/usr/bin:/bin", "REUSE_VECTOR_REFRESH_PYTHON": str( fake ), **( extra_env or {} ) }
+    done   = subprocess.run( [ "/bin/bash", str( script ) ], env=env, capture_output=True, text=True, timeout=30 )
+    assert done.returncode == 0, done.stderr
+    return json.loads( dump.read_text() )
+
+
+def test_the_wrapper_defaults_the_configuration_manager_args_under_a_bare_environment( tmp_path ):
+    seen = run_wrapper_bare( tmp_path )
+    assert seen[ "env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] == DEFAULT_CONFIG_ARGS
+
+
+def test_the_wrapper_keeps_a_callers_own_configuration_manager_args( tmp_path ):
+    seen = run_wrapper_bare( tmp_path, { "LUPIN_CONFIG_MGR_CLI_ARGS": "config_path=/mine.ini" } )
+    assert seen[ "env" ][ "LUPIN_CONFIG_MGR_CLI_ARGS" ] == "config_path=/mine.ini"

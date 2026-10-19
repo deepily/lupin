@@ -39,5 +39,7 @@ if [ -n "${REUSE_VECTOR_REFRESH_ENV:-}" ] && [ -r "$REUSE_VECTOR_REFRESH_ENV" ];
 fi
 
 export LUPIN_ROOT="$ROOT"
+# Cron's environment is bare. Default the ConfigurationManager arguments the way run-lupin-arbiter-app.sh does.
+export LUPIN_CONFIG_MGR_CLI_ARGS="${LUPIN_CONFIG_MGR_CLI_ARGS:-config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development}"
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 exec "$PYTHON" -m cosa.repo.symindex.vector_refresh --root "$ROOT" --python "$PYTHON" "$@"
