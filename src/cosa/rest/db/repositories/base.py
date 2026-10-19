@@ -199,6 +199,19 @@ class BaseRepository(Generic[ModelType]):
         Returns:
             True if exists, False otherwise
         """
+        return self._exists_where( self.model.id, id )
+
+    def _exists_where( self, column, value ) -> bool:
+        """
+        Check whether any row has the given value in a column.
+
+        Requires:
+            - column is a column of self.model; value is what it must equal
+
+        Ensures:
+            - returns True iff a row with column == value exists
+            - no entity is loaded
+        """
         return self.session.query(
-            self.session.query( self.model ).filter( self.model.id == id ).exists()
+            self.session.query( self.model ).filter( column == value ).exists()
         ).scalar()

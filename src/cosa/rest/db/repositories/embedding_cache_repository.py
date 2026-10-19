@@ -38,11 +38,7 @@ class EmbeddingCacheRepository( BaseRepository[EmbeddingCache] ):
         Ensures:
             - returns True iff a row with that exact normalized_text exists
         """
-        return self.session.query(
-            self.session.query( EmbeddingCache ).filter(
-                EmbeddingCache.normalized_text == normalized_text
-            ).exists()
-        ).scalar()
+        return self._exists_where( EmbeddingCache.normalized_text, normalized_text )
 
     def get_cached_embedding( self, normalized_text: str ) -> Optional[List[float]]:
         """

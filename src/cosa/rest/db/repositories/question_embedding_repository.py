@@ -38,11 +38,7 @@ class QuestionEmbeddingRepository( BaseRepository[QuestionEmbedding] ):
         Ensures:
             - returns True iff a row with that exact question exists
         """
-        return self.session.query(
-            self.session.query( QuestionEmbedding ).filter(
-                QuestionEmbedding.question == question
-            ).exists()
-        ).scalar()
+        return self._exists_where( QuestionEmbedding.question, question )
 
     def get_embedding( self, question: str ) -> Optional[List[float]]:
         """
