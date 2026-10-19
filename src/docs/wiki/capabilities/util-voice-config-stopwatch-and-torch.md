@@ -9,7 +9,7 @@ pins:
   - cosa.utils.util_stopwatch.Stopwatch.print@cd0d9bcf93
   - cosa.utils.util_pytorch.is_allocated_to_cpu@e8e08f1349
   - cosa.utils.util_pytorch.print_device_allocation@4f7a4d80fd
-  - cosa.utils.util_pytorch.release_gpu_memory@aeffca4d63
+  - cosa.utils.util_pytorch.release_gpu_memory@e9fd57ffa5
 ---
 # Voice settings, stopwatch and torch device helpers
 
@@ -25,7 +25,7 @@ Two voice settings from `cosa.utils.util`, `util_stopwatch` and `util_pytorch`. 
 - `release_gpu_memory( model )` moves the model to the cpu, collects garbage and empties the cuda cache when cuda exists.
 
 ## Don't
-- Do not expect `release_gpu_memory` to free the caller's model. `del model` drops only the local name, so the caller must drop its own reference.
+- `release_gpu_memory` moves the model to the cpu and leaves the caller's reference alone, still usable. The GPU memory is freed fully only once the caller drops its own reference.
 - Do not use `Stopwatch.print` for hour-long runs. It reads `.seconds`, which wraps at one day.
 
 ## Invariants

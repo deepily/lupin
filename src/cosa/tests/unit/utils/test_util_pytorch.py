@@ -60,6 +60,15 @@ class TestReleaseGpuMemory( unittest.TestCase ):
         model.to.assert_called_once_with( "cpu-device" )
         empty.assert_called_once()
 
+    def test_the_callers_model_stays_usable_after_the_release( self ):
+        """The function cannot null the caller's name; the model must still work, on the CPU."""
+        model = up.torch.nn.Linear( 2, 2 )
+        with patch.object( up.torch.cuda, "is_available", return_value=False ):
+            up.release_gpu_memory( model )
+        self.assertIsNotNone( model )
+        self.assertEqual( next( model.parameters() ).device.type, "cpu" )
+        self.assertEqual( tuple( model( up.torch.zeros( 1, 2 ) ).shape ), ( 1, 2 ) )
+
     def test_none_model_skips_move_and_no_cache_when_cuda_absent( self ):
         with patch.object( up.torch.cuda, "is_available", return_value=False ), \
              patch.object( up.torch.cuda, "empty_cache" ) as empty:
