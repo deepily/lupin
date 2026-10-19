@@ -29,36 +29,38 @@ TIMEOUT_SECONDS = 60
 CLIENT_VERSION  = "jev_transport/py%d.%d.%d" % sys.version_info[ :3 ]     # recorded with a run; not sent to Jev
 
 
-class JevConfigError( Exception ):
-    """Jev cannot be called as configured: no key, or the server refused the key or the request."""
+class _JevError( Exception ):
+    """Shared shape of the two Jev call errors: a message, the HTTP status, and the attempt log."""
 
     def __init__( self, message, status=None, attempt_log=None ):
         """
-        Build the error from a message, the refusing HTTP status and the attempt log.
+        Build the error from a message, an HTTP status and the attempt log.
 
         Ensures:
-            - status is None when no request was made
-            - attempt_log is an empty list when none is given
+            - status is None when no request was made or no response came
+            - attempt_log is an empty list when none is given, one entry per attempt as send_with_meta logs them
         """
         super().__init__( message )
-        self.status      = status        # the HTTP status of a refusal (401, 403 or 422), or None when no request was made
-        self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
+        self.status      = status
+        self.attempt_log = [] if attempt_log is None else attempt_log
 
 
-class JevCallError( Exception ):
-    """A Jev call gave no usable answer: retries ran out, the server failed, or the body is bad."""
+class JevConfigError( _JevError ):
+    """
+    Jev cannot be called as configured.
 
-    def __init__( self, message, status=None, attempt_log=None ):
-        """
-        Build the error from a message, the last HTTP status seen and the attempt log.
+    The cause is no key, or a server that refused the key or the request. The status is the
+    refusal (401, 403 or 422), or None when no request was made.
+    """
 
-        Ensures:
-            - status is None when no response came, as with a timeout or a reset
-            - attempt_log is an empty list when none is given
-        """
-        super().__init__( message )
-        self.status      = status        # the last HTTP status seen, or None when no response came (a timeout or a reset)
-        self.attempt_log = [] if attempt_log is None else attempt_log      # one entry per attempt, as send_with_meta logs them
+
+class JevCallError( _JevError ):
+    """
+    A Jev call gave no usable answer.
+
+    Retries ran out, the server failed, or the body is bad. The status is the last HTTP status
+    seen, or None when no response came (a timeout or a reset).
+    """
 
 
 class JevBudgetSpent( Exception ):

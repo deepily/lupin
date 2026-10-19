@@ -211,7 +211,7 @@ def cron_lines( root, python, log_path ):
         - the reboot line gives a slow start 240 seconds before the run, after the librarian's 120
     """
     run = f"cd {root} && LUPIN_ROOT={root} REUSE_VECTOR_REFRESH_PYTHON={python} {root}/src/scripts/{SCRIPT_NAME} >> {log_path} 2>&1 {CRON_TAG}"
-    return [ f"{CRON_SCHEDULE} {run}", f"@reboot sleep 240 && {run}" ]
+    return lt.cron_lines_for( run, CRON_SCHEDULE, 240 )
 
 
 def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, writer_factory=None, client=None, enabled_fn=None ):

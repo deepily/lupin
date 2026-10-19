@@ -280,6 +280,17 @@ def test_the_manifest_records_both_shas_the_counts_and_every_skipped_file( repo,
     assert manifest[ "builder_sha256" ] == hashlib.sha256( open( pb.__file__, "rb" ).read() ).hexdigest()
 
 
+def test_a_sibling_builder_can_record_its_own_sha_in_the_manifest( tmp_path ):
+    """A builder_sha passed in replaces this module's own sha, and None keeps this module's."""
+    out = tmp_path / "pool.jsonl"
+    pb.write_pool( [], { "rows": 0 }, str( out ), builder_sha="f" * 64 )
+    manifest = json.loads( ( tmp_path / "pool.jsonl.manifest.json" ).read_text( encoding="utf-8" ) )
+    assert manifest[ "builder_sha256" ] == "f" * 64 != pb.builder_sha256()
+    pb.write_pool( [], { "rows": 0 }, str( out ) )
+    manifest = json.loads( ( tmp_path / "pool.jsonl.manifest.json" ).read_text( encoding="utf-8" ) )
+    assert manifest[ "builder_sha256" ] == pb.builder_sha256()
+
+
 def test_the_written_pool_is_read_back_by_the_seeder_unchanged( populated, tmp_path_factory ):
     repo, sha = populated
     out = tmp_path_factory.mktemp( "o" ) / "pool.jsonl"

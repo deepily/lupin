@@ -32,12 +32,12 @@ import json
 from typing import Dict, Any
 
 
-class ReportFormatter:
+class BaseReportFormatter:
     """
-    Formats statistics in multiple output formats.
+    Holds the settings every report formatter reads from the analyzer configuration.
 
-    Supports console (with COSA print_banner), JSON, and Markdown
-    formats with configuration-driven formatting options.
+    Subclasses supply the column widths for their own tables by overriding
+    _read_column_widths; the rest of initialization is shared.
     """
 
     def __init__( self, config: Dict, debug: bool = False, verbose: bool = False ):
@@ -51,9 +51,10 @@ class ReportFormatter:
 
         Ensures:
             - Formatter initialized and ready to format statistics
+            - the subclass has read its column widths
 
         Raises:
-            - Never raises
+            - NotImplementedError if the subclass does not override _read_column_widths
         """
         self.debug   = debug
         self.verbose = verbose
@@ -65,11 +66,7 @@ class ReportFormatter:
         self.json_config     = config.get( 'json_output', {} )
         self.markdown_config = config.get( 'markdown_output', {} )
 
-        # Column widths
-        col_widths           = self.fmt_config.get( 'column_widths', {} )
-        self.col_file_type   = col_widths.get( 'file_type', 15 )
-        self.col_counts      = col_widths.get( 'counts', 10 )
-        self.col_net_change  = col_widths.get( 'net_change', 12 )
+        self._read_column_widths( self.fmt_config.get( 'column_widths', {} ) )
 
         # Formatting characters
         self.border_char     = self.fmt_config.get( 'border_char', '=' )
@@ -81,7 +78,45 @@ class ReportFormatter:
         self.decimal_places   = self.output_config.get( 'decimal_places', 1 )
 
         if self.debug:
-            print( "[ReportFormatter] Initialized with console/JSON/markdown support" )
+            print( f"[{type( self ).__name__}] Initialized with console/JSON/markdown support" )
+
+    def _read_column_widths( self, col_widths: Dict ) -> None:
+        """
+        Read this report's column widths onto self.
+
+        Requires:
+            - col_widths is the configured column_widths dict, possibly empty
+
+        Ensures:
+            - sets one col_* attribute per column of this report
+
+        Raises:
+            - NotImplementedError always, in the base class
+        """
+        raise NotImplementedError( f"{type( self ).__name__} must define _read_column_widths" )
+
+
+class ReportFormatter( BaseReportFormatter ):
+    """
+    Formats statistics in multiple output formats.
+
+    Supports console (with COSA print_banner), JSON, and Markdown
+    formats with configuration-driven formatting options.
+    """
+
+    def _read_column_widths( self, col_widths: Dict ) -> None:
+        """
+        Read the branch report's column widths onto self.
+
+        Requires:
+            - col_widths is the configured column_widths dict, possibly empty
+
+        Ensures:
+            - sets col_file_type, col_counts and col_net_change, with defaults 15, 10 and 12
+        """
+        self.col_file_type   = col_widths.get( 'file_type', 15 )
+        self.col_counts      = col_widths.get( 'counts', 10 )
+        self.col_net_change  = col_widths.get( 'net_change', 12 )
 
     def format_console( self, stats: Dict[str, Any], base_branch: str, head_branch: str,
                         repo_path: str = '.', base_branch_input: str = None,

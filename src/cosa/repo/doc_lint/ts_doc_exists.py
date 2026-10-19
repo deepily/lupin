@@ -11,10 +11,8 @@ The table format, the stamp and the checks are those of counts.py.
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 from collections import namedtuple
 
 from . import counts, ts_counts, tsdoc_lint
@@ -130,18 +128,7 @@ def extract( root, texts ):
     Raises:
         - RuntimeError from the extractor
     """
-    if not texts: return {}
-    scratch = tempfile.mkdtemp( prefix="ts-exports-" )
-    names   = ts_counts.scratch_names( texts )
-    try:
-        for path, text in texts.items():
-            full = os.path.join( scratch, names[ path ] )
-            os.makedirs( os.path.dirname( full ), exist_ok=True )
-            with open( full, "w", encoding="utf-8" ) as handle: handle.write( text )
-        by_name = run_extractor( root, [ names[ path ] for path in texts ], source_root=scratch )
-        return { path: by_name[ names[ path ] ] for path in texts }
-    finally:
-        shutil.rmtree( scratch, ignore_errors=True )
+    return ts_counts.extract_with( root, texts, "ts-exports-", run_extractor )
 
 
 def count_record( path, record ):

@@ -143,6 +143,21 @@ def test_extract_writes_the_given_texts_to_a_scratch_tree_and_reads_them_from_th
     assert not os.path.exists( seen[ "source_root" ] )                                   # the scratch tree is gone
 
 
+def test_extract_with_uses_the_given_prefix_and_extractor_and_starts_nothing_for_no_texts( repo, tmp_path, monkeypatch ):
+    made = []
+    def mk( prefix ):
+        made.append( prefix )
+        d = tmp_path / f"s{len( made )}"
+        d.mkdir()
+        return str( d )
+    monkeypatch.setattr( ts_counts.tempfile, "mkdtemp", mk )
+    def mine( root, files, source_root=None ): return { f: [ "mine" ] for f in files }
+    assert ts_counts.extract_with( str( repo ), { "a.ts": "x\n" }, "pre-", mine ) == { "a.ts": [ "mine" ] }
+    assert made == [ "pre-" ]
+    def never( *a, **k ): raise AssertionError( "no texts must not start the extractor" )
+    assert ts_counts.extract_with( str( repo ), {}, "pre-", never ) == {} and made == [ "pre-" ]
+
+
 def test_extract_removes_the_scratch_tree_when_the_extractor_fails( repo, monkeypatch ):
     seen = {}
     def boom( root, files, source_root=None ):

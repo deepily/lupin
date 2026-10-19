@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from cosa.repo.branch_analyzer.report_formatter import ReportFormatter
+from cosa.repo.branch_analyzer.report_formatter import BaseReportFormatter, ReportFormatter
 
 
 def _make_stats( languages=("python", "javascript", "typescript") ):
@@ -92,6 +92,38 @@ class TestInit:
         """Ensures: debug=True emits an init line."""
         ReportFormatter( {}, debug=True )
         assert "Initialized" in capsys.readouterr().out
+
+
+class TestBaseReportFormatter:
+    """BaseReportFormatter holds the shared settings; subclasses read their own widths."""
+
+    def test_base_without_width_hook_raises( self ):
+        """Raises: NotImplementedError when the width hook is not overridden."""
+        with pytest.raises( NotImplementedError, match="BaseReportFormatter must define" ):
+            BaseReportFormatter( {} )
+
+    def test_subclass_hook_runs_before_shared_settings( self ):
+        """Ensures: the hook gets the column_widths dict and shared settings are still read."""
+        seen = []
+
+        class Narrow( BaseReportFormatter ):
+            def _read_column_widths( self, col_widths ):
+                seen.append( col_widths )
+                self.col_only = col_widths.get( "only", 7 )
+
+        f = Narrow( { "formatting": { "column_widths": { "only": 3 }, "border_char": "#" } } )
+        assert seen == [ { "only": 3 } ]
+        assert f.col_only == 3
+        assert f.border_char == "#"
+
+    def test_debug_line_names_the_subclass( self, capsys ):
+        """Ensures: the debug line carries the concrete class name, not the base name."""
+        class Named( BaseReportFormatter ):
+            def _read_column_widths( self, col_widths ):
+                pass
+
+        Named( {}, debug=True )
+        assert "[Named] Initialized" in capsys.readouterr().out
 
 
 class TestFormatConsole:
