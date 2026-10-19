@@ -144,6 +144,7 @@ def check_files( directory, values=None, group_id=GROUP_ID ):
         - the first gap-line set ends with one remedy line
         - a file this login cannot read is a note, not a gap: the service group may read it and a seat may not
         - the content is compared only when values is given, and a note says so when it is not
+        - a file with no entry in values is a note too, not an error
         - a directory that is not mode 0750 and owner root:group_id is a gap too
         - a directory this login cannot search gives one note and no gap: the files cannot be seen, which is
           not the same as absent
@@ -172,7 +173,9 @@ def check_files( directory, values=None, group_id=GROUP_ID ):
             notes.append( f"note: secret file {path} cannot be read by this login, so its content was not checked" )
             continue
         if not content: gaps.append( f"secret file {path} is empty" )
-        elif values is not None and content != values[ name ]: gaps.append( f"secret file {path} does not hold the password of the given password file" )
+        elif values is None: continue
+        elif name not in values: notes.append( f"note: no password was given for {path}, so its content was not compared" )
+        elif content != values[ name ]: gaps.append( f"secret file {path} does not hold the password of the given password file" )
     if values is None: notes.append( "note: no password files were given, so the content of the secret files was not compared" )
     if gaps: gaps.append( f"remedy: sudo python -m cosa.utils.db_roles --secrets-dir {directory} --apply, with the three password files and --psql" )
     return gaps, notes

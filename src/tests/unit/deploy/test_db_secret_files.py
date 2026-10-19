@@ -388,3 +388,12 @@ def test_a_gap_in_a_searchable_directory_still_exits_one_and_a_clean_one_exits_z
     assert db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "missing" ) ], run_fn=Psql(), out=io.StringIO() ) == 1
     _write( tmp_path / "s", owners )
     assert db_roles.main( [ "--psql", "x", "--check", "--secrets-dir", str( tmp_path / "s" ) ], run_fn=Psql(), out=io.StringIO() ) == 0
+
+
+def test_check_files_with_values_for_one_file_only_notes_the_other_and_does_not_raise( tmp_path, owners ):
+    target = tmp_path / "secrets"
+    _write( target, owners )
+    gaps, notes = sf.check_files( str( target ), { sf.APP_FILE: APP } )
+    assert gaps == [ ]
+    assert any( sf.TEST_FILE in note and "not compared" in note for note in notes ), notes
+    assert not any( sf.APP_FILE in note and "not compared" in note for note in notes ), notes

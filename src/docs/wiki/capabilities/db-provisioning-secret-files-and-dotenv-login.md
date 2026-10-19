@@ -5,7 +5,7 @@ pins:
   - cosa.utils.db_roles.build_psql_stdin@48b675941f
   - cosa.utils.db_roles.main@b322babf6f
   - cosa.utils.db_roles.read_secret@8b1fa51ba2
-  - cosa.utils.db_secret_files.check_files@42271751c7
+  - cosa.utils.db_secret_files.check_files@dfc04511e0
   - cosa.utils.db_secret_files.unsearchable@7f6c9e22a7
   - cosa.utils.db_secret_files.wanted@72a10444bd
   - cosa.utils.db_secret_files.write_files@69372ca0f7
@@ -37,4 +37,4 @@ How the Postgres roles are provisioned with their passwords, how the compose sec
 - `check_files` and `write_files` never print or return a password. A link in place of a secret file is a gap and is replaced on write.
 - `write_files` raises `PermissionError` when not root. A file is written beside itself at mode 0440 and renamed into place.
 - The `.env` login follows `LUPIN_ENV`: `LUPIN_TEST_DB_*` when it is `testing`, otherwise `LUPIN_HOST_DB_*`. `POSTGRES_PASSWORD` is the fallback. An exported `DB_PASSWORD` is never overwritten.
-- `check_files` indexes `values[ name ]` for both files, so a dict missing one raises `KeyError`.
+- `check_files` notes a secret file that has no entry in `values` and does not compare it; it does not raise.
