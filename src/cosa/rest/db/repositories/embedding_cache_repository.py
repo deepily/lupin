@@ -10,6 +10,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from cosa.rest.db.repositories.base import BaseRepository
+from cosa.rest.db.repositories.vector_search import embedding_where
 from cosa.rest.db.vector_store_models import EmbeddingCache
 
 
@@ -50,12 +51,7 @@ class EmbeddingCacheRepository( BaseRepository[EmbeddingCache] ):
         Ensures:
             - returns the stored embedding as a list of floats, or None on a miss
         """
-        row = self.session.query( EmbeddingCache ).filter(
-            EmbeddingCache.normalized_text == normalized_text
-        ).first()
-        if row is None or row.embedding is None:
-            return None
-        return list( row.embedding )
+        return embedding_where( self.session, EmbeddingCache, EmbeddingCache.normalized_text, normalized_text )
 
     def cache_embedding( self, normalized_text: str, embedding: List[float] ) -> EmbeddingCache:
         """
