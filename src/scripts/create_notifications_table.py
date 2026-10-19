@@ -33,6 +33,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
+from cosa.utils.admin_script_helpers import run_create_script, validate_table
 
 
 # SQL schema from design doc (Area 1 Q1.3 + Q1.4)
@@ -172,67 +173,8 @@ def validate_schema( conn ):
     Ensures:
         - Returns validation report dict
     """
-    try:
-        cursor = conn.cursor()
+    return validate_table( conn, "notifications", 23, 3 )
 
-        # Check table exists
-        cursor.execute( """
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='notifications'
-        """ )
-        table_result = cursor.fetchone()
-
-        if not table_result:
-            return {
-                "success": False,
-                "error": "Table 'notifications' not found"
-            }
-
-        # Count fields
-        cursor.execute( "PRAGMA table_info(notifications)" )
-        fields = cursor.fetchall()
-        field_count = len( fields )
-
-        # Expected: 23 fields total (including deleted_at from Q1.4)
-        # Breakdown: id(1) + routing(2) + source(2) + content(4) + timestamps(4) + response(6) + state(1) + legacy(3) = 23
-        expected_fields = 23
-        if field_count != expected_fields:
-            return {
-                "success": False,
-                "error": f"Expected {expected_fields} fields, found {field_count}",
-                "field_count": field_count
-            }
-
-        # Count indexes (excluding SQLite's automatic PRIMARY KEY index)
-        cursor.execute( """
-            SELECT name FROM sqlite_master
-            WHERE type='index' AND tbl_name='notifications'
-            AND name NOT LIKE 'sqlite_autoindex%'
-        """ )
-        indexes = cursor.fetchall()
-        index_count = len( indexes )
-
-        # Expected: 3 indexes (idx_recipient_state, idx_recipient_created, idx_expires_at)
-        # Note: SQLite auto-creates sqlite_autoindex_notifications_1 for PRIMARY KEY, which we exclude
-        expected_indexes = 3
-        if index_count != expected_indexes:
-            return {
-                "success": False,
-                "error": f"Expected {expected_indexes} indexes, found {index_count}",
-                "index_count": index_count
-            }
-
-        return {
-            "success": True,
-            "field_count": field_count,
-            "index_count": index_count
-        }
-
-    except sqlite3.Error as e:
-        return {
-            "success": False,
-            "error": f"Validation query failed: {e}"
-        }
 
 
 def main():
@@ -242,33 +184,8 @@ def main():
     Returns:
         0 on success, 1 on error
     """
-    print( "==================================================" )
-    print( "  Notifications Table Creation Script" )
-    print( "  Phase 2.0 Foundation - Week 1" )
-    print( "==================================================" )
-    print()
+    return run_create_script( "Notifications Table Creation Script", "Phase 2.0 Foundation - Week 1", "Notifications table created", create_notifications_table )
 
-    try:
-        success = create_notifications_table()
-
-        if success:
-            print()
-            print( "==================================================" )
-            print( "  ✓ SUCCESS: Notifications table created" )
-            print( "==================================================" )
-            return 0
-        else:
-            print()
-            print( "==================================================" )
-            print( "  ✗ FAILED: See errors above" )
-            print( "==================================================" )
-            return 1
-
-    except Exception as e:
-        print( f"\n✗ FATAL ERROR: {e}", file=sys.stderr )
-        import traceback
-        traceback.print_exc()
-        return 1
 
 
 if __name__ == "__main__":
