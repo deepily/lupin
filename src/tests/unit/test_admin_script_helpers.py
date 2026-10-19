@@ -81,6 +81,18 @@ def test_a_wrong_index_count_reports_the_count_found_and_ignores_the_primary_key
     assert result == { "success": False, "error": "Expected 3 indexes, found 2", "index_count": 2 }
 
 
+def test_too_many_fields_is_a_mismatch_too( conn ):
+    result = h.validate_table( conn, "widgets", 2, 2 )
+
+    assert result == { "success": False, "error": "Expected 2 fields, found 3", "field_count": 3 }
+
+
+def test_too_many_indexes_is_a_mismatch_too( conn ):
+    result = h.validate_table( conn, "widgets", 3, 1 )
+
+    assert result == { "success": False, "error": "Expected 1 indexes, found 2", "index_count": 2 }
+
+
 def test_a_failing_query_is_reported_not_raised():
     closed = sqlite3.connect( ":memory:" )
     closed.close()
