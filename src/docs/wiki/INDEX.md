@@ -246,6 +246,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[fix-run-outputs-and-guards]] — Plan and report writers, resume guard, SDK error shaping, timeout brake. `cosa.agents` (shared)
 - [[generator-voice-bridges]] — Podcast and presentation cosa_interface and voice_io wrappers over the shared voice layer. `cosa.agents` (podcast_generator, presentation_generator)
 - [[heartbeat-arbiter-plumbing]] — Arbiter commons gateway, journal logger, per-edge ledger, event tail offsets, lineage carry file. `cosa.agents` (heartbeat_arbiter)
+- [[arbiter-app-service]] — the standalone 8001 arbiter app: /health, /state, loop wiring and the DM-push hop. `lupin_arbiter_app` (app)
 - [[heartbeat-context-pressure]] — Transcript-based context pressure, liveness and fleet table. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-fleet-view]] — Per-session fleet view, liveness verdicts, snapshot and table rendering. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-idle-roster-and-managers]] — Idle classification and roster, manager lineage and active-manager resolution. `cosa.agents` (heartbeat_arbiter)
