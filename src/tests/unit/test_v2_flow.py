@@ -4099,3 +4099,28 @@ def test_a_replay_of_a_row_the_user_marked_wrong_never_reaches_the_executor( tmp
     f.ask( "what is 3 plus 3", **_CTX )
 
     assert [ w for w in exe.works if w.kind == "replay" ] == [ ], "a refused row was queued as a replay"
+
+
+def test_the_read_guard_is_not_asked_about_a_lookup_that_is_not_a_replay_hit( tmp_path, notifier, monkeypatch ):
+    """
+    The guard judges a row that is about to be replayed. On a miss it has nothing to judge.
+
+    Putting the guard first would run it, and write its refusal marks, on every lookup.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    asked      = [ ]
+    real_guard = AskFlow._may_serve.__func__
+
+    def _spy_guard( cls, trace, snapshot, why ):
+        asked.append( why )
+        return real_guard( cls, trace, snapshot, why )
+
+    monkeypatch.setattr( AskFlow, "_may_serve", classmethod( _spy_guard ) )
+    snap = _snapshot( routing_command="agent router go to math" )
+    cache = FakeCache( lookup_result=_lookup( is_replay_hit=False, snapshot=snap ) )
+    f = _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                    FakeExecutor( _outcome( status="done", answer="6", answer_raw="6" ) ), FakePending(), notifier )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert "exact_hit" not in asked
