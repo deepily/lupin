@@ -13,7 +13,7 @@ This capability reports what an embedding vector means: its dimension, and each 
 
 ## What it does
 - `embedding_dimensions( config_mgr )` is the one read of the INI key `embedding dimensions`. It returns an int and defaults to 768.
-- The provider, the embedding manager and the cache, synonym, question-embedding, input-and-output and solution tables all call it.
+- The provider, the embedding manager and the cache, synonym, question-embedding, query-log, input-and-output and solution tables all call it.
 - Each engine's `describe` returns its model, revision, dtype, device, prefixes and dimensions. It never loads the model and never touches the GPU.
 - `revision` is None until the model is loaded. `dtype` is the INI value before load and the loaded parameters' dtype after.
 - `EmbeddingProvider.describe_engines` returns the code and prose `describe` dicts, the device class and the library versions.
