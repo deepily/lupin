@@ -39,6 +39,13 @@ from cosa.memory.local_embedding_engine import (
 _VEC768 = [ 0.1 ] * 768
 
 
+def _loaded_model( dtype=torch.float16 ):
+    """A Mock model whose parameters() yields one parameter of the given dtype, afresh per call."""
+    model = Mock()
+    model.parameters.side_effect = lambda: iter( [ torch.zeros( 1, dtype=dtype ) ] )
+    return model
+
+
 def _reset():
     CodeEmbeddingEngine._instance  = None
     ProseEmbeddingEngine._instance = None
@@ -125,7 +132,7 @@ class TestCodeEmbeddingEngine( unittest.TestCase ):
     def test_load_model_loads_once_with_cuda_vram( self ):
         """_load_model builds the SentenceTransformer; debug+cuda triggers vram_report."""
         engine = _build_code( device="cuda:0", debug=True )
-        fake_model = Mock()
+        fake_model = _loaded_model()
         with patch( "sentence_transformers.SentenceTransformer", return_value=fake_model ) as mock_st, \
              patch( "cosa.memory.local_embedding_engine.vram_report",
                     return_value={ "allocated_gb": 1.0, "peak_gb": 2.0 } ) as mock_vram, \
@@ -138,11 +145,39 @@ class TestCodeEmbeddingEngine( unittest.TestCase ):
     def test_load_model_cpu_no_vram_branch( self ):
         """_load_model on a CPU device (debug off) skips the VRAM-report branch."""
         engine = _build_code( device="cpu", debug=False )
-        with patch( "sentence_transformers.SentenceTransformer", return_value=Mock() ) as mock_st, \
+        with patch( "sentence_transformers.SentenceTransformer", return_value=_loaded_model() ) as mock_st, \
              patch( "cosa.memory.local_embedding_engine.vram_report" ) as mock_vram:
             engine._load_model()
         mock_st.assert_called_once()
         mock_vram.assert_not_called()                            # 126->exit (debug/cuda false)
+
+    def test_load_model_casts_a_model_the_loader_left_in_float32( self ):
+        """The INI says float16; a loader that returns float32 is cast, and describe() says float16."""
+        engine = _build_prose( device="cpu", debug=False )
+        fake_model = _loaded_model( torch.float32 )
+        recast     = _loaded_model( torch.float16 )
+        fake_model.to.return_value = recast
+        recast.config = Mock( _commit_hash="abc" )
+        with patch( "transformers.AutoTokenizer" ), \
+             patch( "transformers.AutoModel" ) as mock_model:
+            mock_model.from_pretrained.return_value.to.return_value.eval.return_value = fake_model
+            engine._load_model()
+        fake_model.to.assert_called_once_with( torch.float16 )
+        self.assertIs( engine._model, recast )
+        self.assertEqual( engine.describe()[ "dtype" ], "float16" )
+
+    def test_load_model_casts_a_model_the_loader_left_in_float32( self ):
+        """The INI says float16; a loader that returns float32 is cast, and describe() says float16."""
+        engine = _build_code( device="cpu", debug=False )
+        fake_model = _loaded_model( torch.float32 )
+        recast     = _loaded_model( torch.float16 )
+        fake_model.to.return_value = recast
+        with patch( "sentence_transformers.SentenceTransformer", return_value=fake_model ):
+            engine._load_model()
+        fake_model.to.assert_called_once_with( torch.float16 )
+        self.assertIs( engine._model, recast )
+        recast.__getitem__ = Mock( return_value=Mock( auto_model=Mock( config=Mock( _commit_hash="abc" ) ) ) )
+        self.assertEqual( engine.describe()[ "dtype" ], "float16" )
 
     def test_load_model_short_circuits_when_loaded( self ):
         """_load_model returns immediately when the model is already set."""
@@ -311,7 +346,7 @@ class TestProseEmbeddingEngine( unittest.TestCase ):
     def test_load_model_loads_with_cuda_vram( self ):
         """_load_model builds tokenizer + model; debug+cuda triggers vram_report."""
         engine = _build_prose( device="cuda:0", debug=True )
-        fake_model = Mock()
+        fake_model = _loaded_model()
         # .to(device).eval() chain must return the model
         fake_model.to.return_value.eval.return_value = fake_model
         with patch( "transformers.AutoTokenizer" ) as mock_tok, \
@@ -328,7 +363,7 @@ class TestProseEmbeddingEngine( unittest.TestCase ):
     def test_load_model_cpu_no_vram_branch( self ):
         """_load_model on CPU (debug off) skips the VRAM-report branch."""
         engine = _build_prose( device="cpu", debug=False )
-        fake_model = Mock()
+        fake_model = _loaded_model()
         with patch( "transformers.AutoTokenizer" ), \
              patch( "transformers.AutoModel" ) as mock_model, \
              patch( "cosa.memory.local_embedding_engine.vram_report" ) as mock_vram:
