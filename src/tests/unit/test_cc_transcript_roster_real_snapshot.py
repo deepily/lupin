@@ -104,3 +104,25 @@ def test_a_bridge_lookup_that_raises_has_no_project( monkeypatch ):
     def _boom( sid ): raise RuntimeError( "scan failed" )
     monkeypatch.setattr( job, "_find_session_by_id", _boom )
     assert job._default_project_fn( SEAT ) is None
+
+
+def test_the_activity_time_is_the_newest_signal_not_the_last_stop_event( monkeypatch ):
+    """
+    A seat that posted on commons after its last stop event shows the later time.
+
+    The earlier tests give the seat one stop event, so the stop time and the activity time are
+    equal and cannot be told apart. Here commons is newer.
+    """
+    stop_ts    = ( NOW - datetime.timedelta( seconds=600 ) ).isoformat()
+    commons_ts = ( NOW - datetime.timedelta( seconds=30 ) ).isoformat()
+    events = { SEAT: [ {
+        "session_id": SEAT, "persona": "Krishna", "outcome": "poke", "ts": stop_ts,
+        "poke_count": 0, "cap": 3, "work_owed": False, "awaiting": None,
+    } ] }
+    who_rows = [ { "session_id": SEAT, "persona_name": "Krishna", "last_post_ts": commons_ts } ]
+    view     = build_fleet_view( events, who_rows, NOW, alive_threshold_seconds=3600, bridge_sessions={ SEAT: "Krishna" } )
+    rows     = build_snapshot( view, { SEAT: NOW.timestamp() - 5 }, NOW )[ "sessions" ]
+    monkeypatch.setattr( module, "resolve_transcript_path", lambda *a, **k: "" )
+
+    assert rows[ 0 ][ "last_activity_ts" ] == commons_ts
+    assert module._project_seats( rows )[ 0 ][ "last_ts" ] == commons_ts
