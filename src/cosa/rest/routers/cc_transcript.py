@@ -232,7 +232,7 @@ def _project_seats( sessions ):
             "session_id"           : session_id,
             "persona"              : session.get( "persona" ) or session.get( "persona_name" ),
             "project"              : session.get( "project" ),
-            "last_ts"              : session.get( "last_ts" ) or session.get( "last_seen" ),
+            "last_ts"              : session.get( "last_ts" ) or session.get( "last_seen" ) or session.get( "last_activity_ts" ),
             "transcript_watchable" : bool( transcript_path ),
             "file_epoch"           : epoch_for_path( transcript_path ) or None,
         } )

@@ -211,6 +211,20 @@ def _lookup_dead( process_dead, sid ):
     return any( _sid_matches( sid, dead_sid ) for dead_sid in ( process_dead or () ) )
 
 
+def _iso_or_none( value ):
+    """
+    Render a view timestamp as ISO text.
+
+    Requires:
+        - value is whatever the fleet view holds, normally a datetime or None
+
+    Ensures:
+        - returns value.isoformat() for a datetime, else None
+        - never raises, so a malformed timestamp never costs the row
+    """
+    return value.isoformat() if isinstance( value, datetime.datetime ) else None
+
+
 def build_snapshot( fleet_view, bridge_mtimes, now,
                     live_seconds         = DEFAULT_LIVE_SECONDS,
                     quiet_seconds        = DEFAULT_QUIET_SECONDS,
@@ -242,7 +256,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         - hold_mtimes (default None) is { session_id: epoch-float|None }; each row's hold mtime is passed to compute_liveness(hold_mtime=...), so its hold_age_s joins the freshest-of union unconditionally (an interactive manager that only refreshes its hold at Stop reads `LIVE`, not stale). None or a missing sid means hold_age_s is None for that row, byte-identical to the prior block. Hold mtime feeds liveness only, never state or the progress signature
         - transcript_mtimes (default None) is { session_id: epoch-float|None }; each row's transcript mtime is passed to compute_liveness(transcript_mtime=...), so its transcript_age_s joins the freshest-of union unconditionally (a manager mid-plan, appending its transcript on every tool call but emitting no Stop, reads `LIVE`, not stale). None or a missing sid means transcript_age_s is None for that row, byte-identical to the prior block; a missing or unreadable transcript is no signal, so a dark session is never masked. Transcript mtime feeds liveness only, never state or the progress signature
         - alive_threshold_seconds (default None) gates display sanitization: a row whose holder session is beyond the alive threshold (dependency_graph.session_is_stale, the same predicate the peer-edge gate uses) shows its `peer:X` holding_on as the neutral "none", so the displayed hold agrees with edge inference. None means no gate, byte-identical to the prior render. Only peer-prefixed holds are gated (user: and commons: holds are untouched). Fail-safe: a missing or unparseable last_activity_ts is not stale, so the raw value is kept and a live hold is never hidden. Display only: edge inference and the deadlock escalation are untouched
-        - each row keeps state and liveness as separate keys plus the two hierarchy keys: { session_id, persona, state, holding_on, stuck, liveness{...}, role, manager }
+        - each row keeps state and liveness as separate keys plus the two hierarchy keys and the last activity time (ISO text or None): { session_id, persona, state, holding_on, stuck, liveness{...}, role, manager, last_activity_ts }
         - role = "manager" if the session id (prefix-tolerantly) belongs to the injected manager set (list_managers_fn) or its persona is in the declared roster (`declared_managers`, compared case-insensitively through canonical_persona_key, from `COSA_VOICE_MANAGERS__<PROJECT>`; a declared manager badges as manager even before its first spawn), else "worker"
         - manager = resolve_manager_fn(sid).manager_persona only when its source is "lineage"; for declared, unresolved or error sources it is None; a guessed manager is never shown, and None lands the row in the "Unmanaged" group rather than mis-parenting a worker
         - the seams list_managers_fn and resolve_manager_fn (both default None) keep this function pure and fully testable with fakes; with neither injected every row is role="worker", manager=None (flat, back-compatible)
@@ -336,6 +350,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             "liveness"   : liveness,
             "role"       : role,
             "manager"    : manager,
+            "last_activity_ts" : _iso_or_none( view.get( "last_activity_ts" ) ),
         } )
     return {
         "generated_at"  : now.isoformat(),
