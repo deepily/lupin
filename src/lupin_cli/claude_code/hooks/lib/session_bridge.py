@@ -567,10 +567,28 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
     try:
         with open( path ) as f:
             data = json.load( f )
-        bridge_cwd = data.get( "cwd" )
-        if not bridge_cwd:
-            return None
+    except ( json.JSONDecodeError, OSError, ValueError ):
+        return None
+    return project_from_bridge_cwd( data.get( "cwd" ) )
 
+
+def project_from_bridge_cwd( bridge_cwd ) -> Optional[str]:
+    """
+    Resolve a project name from a bridge's SessionStart cwd.
+
+    `_resolve_project_from_bridge_cwd` runs this walk on the calling session's own bridge. It is split out so the arbiter, reading another seat's bridge, gets the same answer from the same code.
+
+    Requires:
+        - bridge_cwd is the `cwd` field of a bridge file, or None
+
+    Ensures:
+        - Returns None when bridge_cwd is falsy, and also on an OS, value or import error
+        - Otherwise returns what `_resolve_project_from_bridge_cwd` returns for a bridge holding that cwd
+        - Never raises exceptions
+    """
+    if not bridge_cwd:
+        return None
+    try:
         from cosa.agents.utils.sender_id import (
             _PROJECT_ALIASES,
             _worktree_owner_basename,
@@ -626,7 +644,7 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         # get a sensible default rather than None.
         basename = candidate.name.lower()
         return _PROJECT_ALIASES.get( basename, basename )
-    except ( json.JSONDecodeError, OSError, ValueError, ImportError ):
+    except ( OSError, ValueError, ImportError ):
         return None
 
 

@@ -75,6 +75,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_active_voice_persona_sessions as _find_active_voice_persona_sessions,
     find_dead_sessions as _find_dead_sessions,
     find_session_by_id as _find_session_by_id,
+    project_from_bridge_cwd as _project_from_bridge_cwd,
 )
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
@@ -470,6 +471,25 @@ def _default_transcript_mtime_fn( session_id ):   # pragma: no cover - productio
         return None
 
 
+def _default_project_fn( session_id ):
+    """
+    Read a seat's project name from its own bridge.
+
+    Requires:
+        - session_id is a fleet session id (full uuid or 8-char prefix)
+
+    Ensures:
+        - returns the project the bridge's SessionStart cwd resolves to, through session_bridge.project_from_bridge_cwd
+        - returns None when no bridge matches or it holds no cwd
+        - never raises
+    """
+    try:
+        data = _find_session_by_id( session_id )
+        return _project_from_bridge_cwd( data.get( "cwd" ) ) if isinstance( data, dict ) else None
+    except Exception:
+        return None
+
+
 # Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
 # to arbiter_journal.make_log_fn — the ONE owner of the line shape (ts + ts_local).
 # In-pool arbiter events keep the historical "heartbeat-arbiter" service tag; the
@@ -654,6 +674,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         hold_mtime_fn            : Optional[ Callable ] = None,   # task 70be69f2: per-session hold-file mtime reader (None → real reader; hold-as-liveness)
+        project_fn               : Optional[ Callable ] = None,   # per-session project reader (None → the seat's bridge cwd); feeds the roster's `project`
         transcript_mtime_fn      : Optional[ Callable ] = None,   # bug fb332fcd: per-session transcript-file mtime reader (None → real reader; transcript-as-liveness, 7th signal)
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
         known_owners_fn          : Optional[ Callable ] = None,   # 262c59f6 (A): fleet-wide known-owner-persona read () -> [canonical keys] (None → inert; DONE→UNKNOWN fail-safe never fires)
@@ -838,6 +859,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # needs no factory wiring. A non-existent hold (unit fake-id sessions) stats
         # to None, so unit/in-pool construction stays clean without injection.
         self._hold_mtime_fn   = hold_mtime_fn if hold_mtime_fn is not None else _default_hold_mtime_fn
+        self._project_fn      = project_fn if project_fn is not None else _default_project_fn
         self._transcript_mtime_fn = transcript_mtime_fn if transcript_mtime_fn is not None else _default_transcript_mtime_fn
         # bug 26dd3afb MANAGER-STALE bridge-mtime veto seam: () -> {canonical_persona_key:
         # freshest bridge-file mtime}. UNLIKE the mtime readers above this defaults to
@@ -1500,6 +1522,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             count_dm_as_liveness = count_dm,    # DM-as-liveness toggle (read once in _poll_once)
             hold_mtimes          = hold_mtimes, # task 70be69f2 hold-as-liveness (unconditional fail-safe signal)
             transcript_mtimes    = transcript_mtimes, # bug fb332fcd transcript-as-liveness (7th unconditional fail-safe signal)
+            project_fn           = self._project_fn,
             alive_threshold_seconds = self.alive_threshold_seconds,  # bug 65d1247f: same threshold the peer-EDGE gate uses (:1029-30) → display agrees with edge logic
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both

@@ -225,6 +225,26 @@ def _iso_or_none( value ):
     return value.isoformat() if isinstance( value, datetime.datetime ) else None
 
 
+def _project_or_none( project_fn, sid ):
+    """
+    Ask the project seam for one seat's project name.
+
+    Requires:
+        - project_fn is a callable taking a session id, or None
+
+    Ensures:
+        - returns the string project_fn returns for sid
+        - returns None when project_fn is None, returns anything but a non-empty string, or raises
+    """
+    if project_fn is None:
+        return None
+    try:
+        project = project_fn( sid )
+    except Exception:
+        return None
+    return project if isinstance( project, str ) and project else None
+
+
 def build_snapshot( fleet_view, bridge_mtimes, now,
                     live_seconds         = DEFAULT_LIVE_SECONDS,
                     quiet_seconds        = DEFAULT_QUIET_SECONDS,
@@ -237,7 +257,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     count_dm_as_liveness = True,
                     hold_mtimes          = None,
                     transcript_mtimes    = None,
-                    alive_threshold_seconds = None ):
+                    alive_threshold_seconds = None,
+                    project_fn           = None ):
     """
     Build the JSON-able fleet snapshot with per-session hierarchy, live rows only by default.
 
@@ -259,6 +280,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         - each row keeps state and liveness as separate keys plus the two hierarchy keys and the last activity time (ISO text or None): { session_id, persona, state, holding_on, stuck, liveness{...}, role, manager, last_activity_ts }
         - role = "manager" if the session id (prefix-tolerantly) belongs to the injected manager set (list_managers_fn) or its persona is in the declared roster (`declared_managers`, compared case-insensitively through canonical_persona_key, from `COSA_VOICE_MANAGERS__<PROJECT>`; a declared manager badges as manager even before its first spawn), else "worker"
         - manager = resolve_manager_fn(sid).manager_persona only when its source is "lineage"; for declared, unresolved or error sources it is None; a guessed manager is never shown, and None lands the row in the "Unmanaged" group rather than mis-parenting a worker
+        - project_fn (default None) is called with a session id and returns that seat's project name; a row's `project` is its answer, or None when project_fn is None, returns a non-string, or raises
         - the seams list_managers_fn and resolve_manager_fn (both default None) keep this function pure and fully testable with fakes; with neither injected every row is role="worker", manager=None (flat, back-compatible)
         - session_count reflects the emitted rows (post-prune), not the input size
         - never raises: a throwing list_managers_fn degrades to an empty manager set (all workers); a throwing resolve_manager_fn degrades that row to manager=None
@@ -351,6 +373,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             "role"       : role,
             "manager"    : manager,
             "last_activity_ts" : _iso_or_none( view.get( "last_activity_ts" ) ),
+            "project"    : _project_or_none( project_fn, sid ),
         } )
     return {
         "generated_at"  : now.isoformat(),
