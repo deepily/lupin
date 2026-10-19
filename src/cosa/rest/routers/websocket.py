@@ -453,7 +453,8 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
           `cc_transcript_state {state: "refused", reason: "not_found"}` and nothing else: no
           watcher is registered and no tailer is started
         - a stale non-null `file_epoch` is answered with `epoch_mismatch` and nothing else
-        - the tailer is created at most once per seat
+        - the tailer is created at most once per seat while one is running; a tailer that
+          stopped itself is replaced by a new one for the next first watcher
         - the watcher is registered even when the tailer already exists
     """
     websocket_manager = get_websocket_manager()
@@ -501,7 +502,10 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
 
     is_first = websocket_manager.add_cc_transcript_watcher( cc_session_id, session_id )
 
-    if is_first and cc_session_id not in _cc_transcript_tailers:
+    # A tailer that stopped itself after the grace period keeps its entry, so only a live one
+    # counts as "already there".
+    existing = _cc_transcript_tailers.get( cc_session_id )
+    if is_first and ( existing is None or not existing.running ):
         # The predicate closes the loop the sync `disconnect()` path would otherwise leave
         # open: it can drop a watcher but cannot await a stop, so the tailer checks for
         # itself and terminates after the grace period.

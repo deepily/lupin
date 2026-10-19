@@ -279,13 +279,16 @@ class FakeTailer:
         self.has_watchers  = has_watchers
         self.started_at    = None
         self.stopped       = False
+        self.running       = False
         FakeTailer.instances.append( self )
 
     def start( self, from_offset=0 ):
         self.started_at = from_offset
+        self.running    = True
 
     async def stop( self ):
         self.stopped = True
+        self.running = False
 
 
 @pytest.fixture
@@ -413,6 +416,32 @@ async def test_a_second_admin_watching_the_same_seat_shares_one_tailer( router_m
 
     assert len( fake_tailer.instances ) == 1, "a second watcher started a second tailer"
     assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
+
+
+@pytest.mark.asyncio
+async def test_a_first_watcher_after_the_tailer_stopped_itself_gets_a_new_tailer( router_module, manager, fake_tailer, epoch_is ):
+    """
+    A tailer that ends its own loop must not shadow the next first watcher.
+
+    The self-stop leaves its entry in the registry. A first watcher arriving afterwards would
+    find the entry, start nothing, and sit on a seat that sends no frames.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    first = fake_tailer.instances[ 0 ]
+    manager.drop_all_cc_transcript_watches( BROWSER )
+    first.running = False
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 2, "the second first-watcher got no tailer"
+    assert router_module._cc_transcript_tailers[ SEAT ] is fake_tailer.instances[ 1 ]
+    assert fake_tailer.instances[ 1 ].running is True
 
 
 @pytest.mark.asyncio
