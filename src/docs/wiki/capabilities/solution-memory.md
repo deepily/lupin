@@ -2,7 +2,7 @@
 capability: solution-memory
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.memory.solution_snapshot.SolutionSnapshot@0aad412255
+  - cosa.memory.solution_snapshot.SolutionSnapshot@d344daeddd
   - cosa.memory.snapshot_manager_interface.SolutionSnapshotManagerInterface@4420372f1f
   - cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory.create_from_config_manager@2e94505a85
   - cosa.memory.postgres_solution_manager.PostgresSolutionManager.save_snapshot@db62fbcce8

@@ -2,7 +2,7 @@
 capability: solution-manager-backend
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.memory.postgres_solution_manager.PostgresSolutionManager@8b941e0c94
+  - cosa.memory.postgres_solution_manager.PostgresSolutionManager@c3a5f3f131
   - cosa.memory.solution_manager_factory.SolutionSnapshotManagerFactory@75ad062323
   - cosa.memory.solution_manager_factory.ManagerType@1894b2c710
   - cosa.memory.snapshot_manager_interface.PerformanceMetrics@dba6d0c92e
@@ -12,8 +12,8 @@ pins:
   - cosa.memory.two_tier_question_search.snapshot_to_pg_record@49cf1d5417
   - cosa.memory.two_tier_question_search.pg_similarity_search@0574a1359f
   - cosa.memory.two_tier_question_search.update_canonical_synonyms@0c89bbc823
-  - cosa.memory.input_and_output_table.InputAndOutputTable@2668ebca1f
-  - cosa.memory.query_log_table.QueryLogTable@6e7334745c
+  - cosa.memory.input_and_output_table.InputAndOutputTable@435742516d
+  - cosa.memory.query_log_table.QueryLogTable@cebc583dcf
 ---
 # Solution manager backend
 

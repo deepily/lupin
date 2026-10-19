@@ -77,6 +77,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[claude-code-dispatch]] — `ClaudeCodeDispatcher`: runs one bounded or interactive Claude Code task and returns its result. `cosa.orchestration.claude_code`
 - [[agy-runtime]] — one prompt through Google's `agy` command-line agent and one raw answer back, with a pinned binary fingerprint. `cosa.orchestration.agy`
 - [[embedding-caches-and-pool]] — the question and text embedding caches, the OpenAI embedding manager, engine accessors and the bounded embedding pool. `cosa.memory`
+- [[embedding-engine-info]] — the embedding dimension read and each engine's describe report, including the remote engines block. `cosa.memory` (embedding_provider, local_embedding_engine)
 - [[solution-manager-backend]] — the Postgres snapshot manager, its factory and converters, the two-tier search helpers and the input-output and query-log tables. `cosa.memory`
 - [[training-corpus-and-trainer-tools]] — the training corpus fingerprint and the privilege, environment and GPU helpers `peft_trainer` runs. `cosa.training`
 - [[worktree-lifecycle]] — how git worktrees are made for each spawned seat and each BFE or TFE job. Teardown, the reaper and the janitor remove them. `cosa.agents.shared` (seat_teardown, worktree_reaper, worktree_refusal_ledger, worktree_straggler_tickets), `cosa.utils` (seat_worktree, worktree_artifacts)

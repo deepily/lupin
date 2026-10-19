@@ -6,7 +6,7 @@ pins:
   - cosa.memory.gister.Gister@3d25be9a94
   - cosa.memory.gist_normalizer.GistNormalizer@89a2f4cd02
   - cosa.memory.gist_cache_table.GistCacheTable@da02ff991f
-  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@3e62512d2d
+  - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@aa4481ee9c
   - cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository@d5abda0d75
   - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@7e7ebe0bb4
   - cosa.rest.multimodal_munger.MultiModalMunger@053090eb91
