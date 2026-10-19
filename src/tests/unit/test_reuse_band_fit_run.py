@@ -406,3 +406,34 @@ def test_the_derive_command_writes_a_file_the_flip_reader_accepts_and_never_over
     assert f"sha256 {got}" in text and "30 needs" in text
     assert len( frun.load_flip_needs( out, got ) ) == 30
     assert bf.cli( args ) == 2 and "FileExistsError" in capsys.readouterr().err
+
+
+# ---- guards on main ------------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "command", [ [ "estimate" ], [ "canary", "--ceiling", "1500000" ], [ "report", "--out", "o.json", "--code-sha", "c" ] ] )
+def test_the_reserved_fresh_needs_hash_is_refused_by_every_command_before_anything_is_opened( setup, capsys, command ):
+    fresh = e2e.FRESH_SHA_PREFIX + "0" * 56
+    args  = [ command[ 0 ], "--needs", str( setup.needs ), "--needs-sha", fresh ] + ( [ "--root", str( setup.root ), "--data", str( setup.data ), "--ledger", str( setup.ledger ) ] if command[ 0 ] != "estimate" else [] ) + command[ 1: ]
+    assert bf.cli( args, stage_factory=lambda root: FakeStage() ) == 2
+    assert "reserved fresh-needs file" in capsys.readouterr().err and not setup.data.exists()
+
+
+@pytest.mark.parametrize( "command", [ "canary", "run" ] )
+def test_the_ceiling_cap_applies_to_the_canary_and_to_the_full_run( setup, capsys, command ):
+    assert bf.cli( setup.args( command, "--ceiling", "8640001" ), stage_factory=lambda root: FakeStage() ) == 2
+    assert "is above 8640000" in capsys.readouterr().err and not setup.data.exists()
+
+
+@pytest.mark.parametrize( "command", [ "canary", "run" ] )
+def test_a_need_whose_excluded_symbol_is_not_an_entry_is_refused_before_any_spend( tmp_path, capsys, monkeypatch, command ):
+    monkeypatch.setattr( rr, "StandIn", Jittery )
+    s = Setup( tmp_path )
+    s.rows[ 7 ][ "exclude" ] = "no.such.symbol"
+    s.sha = put( s.needs, { "format": frun.NEEDS_FORMAT, "needs": s.rows } )
+    assert bf.cli( s.args( command, "--ceiling", "1500000" ), stage_factory=lambda root: FakeStage() ) == 2
+    err = capsys.readouterr().err
+    assert "n07 (no.such.symbol)" in err and "not a sendable entry" in err and not ( s.data / "e2e-results" ).exists()
+
+
+def test_the_quantile_and_the_population_limits_are_the_ones_written_down_before_the_run():
+    assert ( bf.QUANTILE, bf.POP_LOW, bf.POP_HIGH, bf.REPEATS ) == ( 0.95, 0.1, 0.9, 5 )
