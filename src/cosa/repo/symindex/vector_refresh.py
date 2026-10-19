@@ -42,6 +42,7 @@ FOLDER         = "refresh"
 SCRIPT_NAME    = "reuse-vector-refresh.sh"
 STATE_NAME     = "refresh-state.json"
 LOG_NAME       = "refresh.log"
+ENV_FILE_REL   = ".lupin/reuse-vector-refresh.env"
 LOCK_OWNER     = "reuse-vector-refresh"
 ATTEMPTS       = 2
 EXIT_OK        = 0
@@ -197,20 +198,36 @@ def _fail( state_path, previous, now, error, log, code ):
     return code, { "ran": False, "outcome": "failed", "reason": error }
 
 
-def cron_lines( root, python, log_path ):
+def env_file_path( environ ):
+    """
+    Name the owner-only file that holds the test login for this host.
+
+    Requires:
+        - environ maps names to values; the home folder entry may be absent
+
+    Ensures:
+        - returns the absolute path under the home folder, ENV_FILE_REL
+        - the verb push-test-mock-login of lupin-vm.sh writes the same path
+    """
+    return os.path.join( environ.get( "HOME" ) or os.path.expanduser( "~" ), ENV_FILE_REL )
+
+
+def cron_lines( root, python, log_path, env_path ):
     """
     Build the two cron lines.
 
     Requires:
         - root is the main checkout path; python is the interpreter path
+        - env_path is the credential file, from env_file_path
 
     Ensures:
         - returns [ daily line, reboot line ], each ending with CRON_TAG
+        - each line sets REUSE_VECTOR_REFRESH_ENV to env_path
         - the daily line is inside the 10:00 to 13:00 window
         - each line runs the wrapper script, which sources the credential file named in REUSE_VECTOR_REFRESH_ENV
         - the reboot line gives a slow start 240 seconds before the run, after the librarian's 120
     """
-    run = f"cd {root} && LUPIN_ROOT={root} REUSE_VECTOR_REFRESH_PYTHON={python} {root}/src/scripts/{SCRIPT_NAME} >> {log_path} 2>&1 {CRON_TAG}"
+    run = f"cd {root} && LUPIN_ROOT={root} REUSE_VECTOR_REFRESH_PYTHON={python} REUSE_VECTOR_REFRESH_ENV={env_path} {root}/src/scripts/{SCRIPT_NAME} >> {log_path} 2>&1 {CRON_TAG}"
     return lt.cron_lines_for( run, CRON_SCHEDULE, 240 )
 
 
@@ -246,7 +263,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     except CandidateError as e:
         print( json.dumps( { "error": e.code, "detail": e.detail } ), file=out )
         return EXIT_NAMED
-    lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ) )
+    lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ), env_file_path( environ ) )
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK

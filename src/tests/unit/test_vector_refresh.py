@@ -241,11 +241,24 @@ def test_a_manual_build_refuses_while_the_lock_is_held_and_writes_nothing( world
 
 
 def test_the_cron_lines_are_tagged_inside_the_window_and_the_reboot_line_starts_after_the_librarians():
-    daily, reboot = vr.cron_lines( "/main", "/py", "/log" )
-    assert daily.startswith( "47 10 * * * cd /main && LUPIN_ROOT=/main REUSE_VECTOR_REFRESH_PYTHON=/py /main/src/scripts/reuse-vector-refresh.sh >> /log 2>&1" )
+    daily, reboot = vr.cron_lines( "/main", "/py", "/log", "/h/.lupin/x.env" )
+    assert daily.startswith( "47 10 * * * cd /main && LUPIN_ROOT=/main REUSE_VECTOR_REFRESH_PYTHON=/py REUSE_VECTOR_REFRESH_ENV=/h/.lupin/x.env /main/src/scripts/reuse-vector-refresh.sh >> /log 2>&1" )
     assert reboot.startswith( "@reboot sleep 240 && cd /main" )
     assert daily.endswith( vr.CRON_TAG ) and reboot.endswith( vr.CRON_TAG ) and vr.CRON_TAG != lt.CRON_TAG
     assert lt.CRON_SCHEDULE.split()[ 1 ] == "10" and vr.CRON_SCHEDULE.split()[ 1 ] == "10"
+
+
+def test_the_env_file_is_under_the_home_folder_and_falls_back_to_the_users_home( monkeypatch ):
+    assert vr.env_file_path( { "HOME": "/h" } ) == "/h/.lupin/reuse-vector-refresh.env"
+    monkeypatch.setattr( vr.os.path, "expanduser", lambda p: "/fallback" )
+    assert vr.env_file_path( {} ) == "/fallback/.lupin/reuse-vector-refresh.env"
+
+
+def test_the_install_writes_the_env_file_path_of_the_host_it_runs_on_into_both_lines( world, cron ):
+    env = { **cron[ "env" ], "HOME": "/home/someone" }
+    run_main( world, [ "--install", "--python", "/py" ], environ=env, crontab_cmd=cron[ "cmd" ] )
+    mine = [ l for l in cron[ "file" ].read_text().splitlines() if vr.CRON_TAG in l ]
+    assert len( mine ) == 2 and all( "REUSE_VECTOR_REFRESH_ENV=/home/someone/.lupin/reuse-vector-refresh.env " in l for l in mine )
 
 
 def test_refresh_dir_sits_under_the_data_dir( world ):

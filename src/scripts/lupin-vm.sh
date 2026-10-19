@@ -176,6 +176,14 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           replaces the line if present, appends it if not, and says only set /
                           replaced / unchanged. It does not recreate the container. The Cloud SQL
                           lupin_test role and the template database must already exist.
+  push-test-mock-login [local|vm]
+                          write the test login the daily vector refresh needs into an owner-only
+                          (mode 600) env file at ~/.lupin/reuse-vector-refresh.env on this host (local,
+                          the default) or on the VM (vm). Reads Secret Manager lupin-test-mock-jobs-email
+                          and lupin-test-mock-jobs-password with your own gcloud login. The values travel
+                          on stdin: they are never in a command line, a log or this verb's output. It says
+                          only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
+                          file in REUSE_VECTOR_REFRESH_ENV.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -1235,6 +1243,60 @@ TLEOF
                 $SSH_KEEPALIVE --command "$RCMD_TL"
             unset tl_value
             log "done. The container reads the env file at create: recreate it to apply (lupin-vm.sh deploy, or svc up -d --force-recreate)."
+        fi
+        ;;
+
+    push-test-mock-login)
+        # Decision 2e2324dd. Cron never reads ~/.bashrc, so the daily vector refresh gets its login from an
+        # owner-only file instead. The two values ride on stdin; the writer below holds no secret.
+        require_project
+        TM_WHERE="${1:-local}"
+        case "$TM_WHERE" in local|vm) ;; *) die "push-test-mock-login takes local or vm, not '$TM_WHERE'" ;; esac
+        TM_EMAIL_SECRET="lupin-test-mock-jobs-email"
+        TM_PASSWORD_SECRET="lupin-test-mock-jobs-password"
+        TM_REL=".lupin/reuse-vector-refresh.env"
+        read -r -d '' RCMD_TM <<'TMEOF' || true
+set -e
+umask 077
+d="$HOME/${rel%/*}"; f="$HOME/$rel"
+IFS= read -r em
+IFS= read -r pw
+[ -n "$em" ] && [ -n "$pw" ] || { echo "no value arrived on stdin" >&2; exit 4; }
+mkdir -p "$d"
+new=$(mktemp "$d/.tmp-login.XXXXXX")
+trap 'rm -f "$new"' EXIT
+printf "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL='%s'\nLUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD='%s'\n" "$em" "$pw" > "$new"
+chmod 600 "$new"
+if cmp -s "$new" "$f" && [ "$(stat -c '%a' "$f")" = 600 ]; then echo "$f: unchanged"; exit 0; fi
+had=no; [ -e "$f" ] && had=yes
+mv -f "$new" "$f"
+if [ "$had" = yes ]; then echo "$f: replaced"; else echo "$f: set"; fi
+TMEOF
+        RCMD_TM="rel='$TM_REL'
+$RCMD_TM"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would read Secret Manager $TM_EMAIL_SECRET and $TM_PASSWORD_SECRET with your gcloud login, then write ~/$TM_REL ($TM_WHERE, mode 600) with the values on stdin. The command, which holds no secret:"
+            printf '%s\n' "$RCMD_TM" | sed 's/^/    /'
+        else
+            tm_email="$( gcloud secrets versions access latest --secret="$TM_EMAIL_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TM_EMAIL_SECRET (needs your IAM access to it)"
+            tm_password="$( gcloud secrets versions access latest --secret="$TM_PASSWORD_SECRET" --project="$LUPIN_GCP_PROJECT_ID" | tr -d '\r\n' )" \
+                || die "could not read Secret Manager $TM_PASSWORD_SECRET (needs your IAM access to it)"
+            [ -n "$tm_email" ] || die "Secret Manager $TM_EMAIL_SECRET has no value; add one first"
+            [ -n "$tm_password" ] || die "Secret Manager $TM_PASSWORD_SECRET has no value; add one first"
+            # The file is sourced by a shell inside single quotes: refuse a quote, which would end the string. Neither value is printed.
+            case "$tm_email$tm_password" in
+                *\'*) die "a value of $TM_EMAIL_SECRET or $TM_PASSWORD_SECRET holds a single quote, which the env file cannot carry" ;;
+            esac
+            if [ "$TM_WHERE" = vm ]; then
+                { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | gcloud compute ssh "$VM_NAME" \
+                    --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                    $SSH_KEEPALIVE --command "$RCMD_TM"
+            else
+                { printf '%s\n' "$tm_email"; printf '%s\n' "$tm_password"; } | bash -c "$RCMD_TM"
+            fi
+            unset tm_email tm_password
+            log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
         fi
         ;;
 

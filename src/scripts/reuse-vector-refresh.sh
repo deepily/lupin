@@ -15,6 +15,8 @@
 # The purpose-line jobs are submitted with the test credentials, so the environment needs
 # LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and _PASSWORD. Cron's environment is bare: put them in a file
 # that only the owner can read and name it in REUSE_VECTOR_REFRESH_ENV; this script sources it.
+# Write that file with: lupin-vm.sh push-test-mock-login [local|vm]. It reads the two Secret Manager secrets
+# and writes ~/.lupin/reuse-vector-refresh.env, mode 600. --install names that file in both cron lines.
 #
 # A Claude seat never installs. A person installs from the main checkout, so the cron lines name that
 # checkout and not a worktree.
