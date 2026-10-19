@@ -434,7 +434,8 @@ def main( argv=None ):
         - argv is a list of directory paths, or None to use the default roots
 
     Ensures:
-        - returns 0 when every pyc this interpreter reads is checked-hash, 1 otherwise
+        - returns 0 when every pyc this interpreter reads is checked-hash, 1 when some are not
+        - returns 2 when the census found no pycs at all: it measured nothing, so it does not say clean
         - writes exactly one ledger line per invocation, so an unexplained mode change
           can later be checked against a record instead of against inference
         - prints the roots it actually scanned, so the scope is visible beside the verdict
@@ -460,6 +461,9 @@ def main( argv=None ):
         print( f"\n{len( offenders )} pyc(s) are not checked-hash. First 10:" )
         for path in offenders[ :10 ]: print( f"    {path}" )
         return 1
+    if not counts:
+        print( "\nscanned 0 pycs: nothing was measured, so this is not a clean result" )
+        return 2
     return 0
 
 

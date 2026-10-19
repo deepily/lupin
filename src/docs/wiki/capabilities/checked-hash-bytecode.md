@@ -7,7 +7,7 @@ pins:
   - cosa.utils.checked_hash_pyc.converted_count@6a814792ab
   - cosa.utils.checked_hash_pyc.is_installed@109d72aec5
   - cosa.utils.checked_hash_pyc.ledger_path@b88b2e7245
-  - cosa.utils.checked_hash_pyc.main@a4e91ece85
+  - cosa.utils.checked_hash_pyc.main@5820dbf05e
   - cosa.utils.checked_hash_pyc.pyc_mode@c23f20aba6
   - cosa.utils.checked_hash_pyc.record@6d1ec24d65
   - cosa.utils.checked_hash_pyc.to_checked_hash@091ed7d69f
@@ -25,7 +25,7 @@ pins:
 - `to_checked_hash( data, source_bytes )` rewrites a timestamp header.
 - `census( roots )` returns `( counts, offenders )` for this interpreter's pycs. It skips vendored trees and pytest-rewritten pycs.
 - `record`, `ledger_path` and `actor` append one line to `io/pyc-mode-ledger.jsonl` under `LUPIN_ROOT`.
-- `main` runs the census, writes one ledger line, and exits 0 only with no offenders.
+- `main` runs the census and writes one ledger line. It exits 0 only when it found pycs and none are offenders. It exits 1 for offenders, and 2 when it found no pycs at all, printing `scanned 0 pycs`.
 
 ## Don't
 - Don't use a bare truth test on `install()`. `ALREADY_INSTALLED` and `UNSUPPORTED_INTERPRETER` raise `TypeError` in a boolean context.
