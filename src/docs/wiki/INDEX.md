@@ -251,6 +251,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[arbiter-context-pressure-writer]] — the 8001 loop that publishes per-persona context headroom against a budget policy. `lupin_arbiter_app` (context_pressure_writer)
 - [[arbiter-health-watcher]] — the 8001 container health watch: unhealthy, flapping and crash-loop edges, the reload-blindness check and the self-blind alert. `lupin_arbiter_app` (health_watcher)
 - [[arbiter-local-snapshot-store]] — the in-process section-keyed store behind the 8001 arbiter's /state route. `lupin_arbiter_app` (local_snapshot_store)
+- [[arbiter-fleet-loop-factories]] — the builders behind the fleet arbiter loop: job factory, escalation and refusal sinks, warm-up wrapper, worktree janitor and straggler step. `lupin_arbiter_app` (fleet_arbiter_loop)
 - [[heartbeat-context-pressure]] — Transcript-based context pressure, liveness and fleet table. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-fleet-view]] — Per-session fleet view, liveness verdicts, snapshot and table rendering. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-idle-roster-and-managers]] — Idle classification and roster, manager lineage and active-manager resolution. `cosa.agents` (heartbeat_arbiter)
