@@ -41,7 +41,7 @@ def test_each_finder_answers_with_the_snapshot_of_the_row_whose_own_column_match
 @pytest.mark.parametrize( "finder", [ "find_exact_verbatim", "find_exact_normalized", "find_exact_gist" ] )
 def test_each_finder_ignores_the_other_two_columns_and_near_misses( repo, finder ):
     others = { "find_exact_verbatim": ( "how old are you", "age" ), "find_exact_normalized": ( "How old are you?", "age" ), "find_exact_gist": ( "How old are you?", "how old are you" ) }[ finder ]
-    for text in others + ( "", "How Old Are You?", "how old are you ", "ag" ):
+    for text in others + ( "", "How Old Are You?", "how old are you ", "ag", "age ", " age" ):
         assert getattr( repo, finder )( text ) is None, ( finder, text )
 
 

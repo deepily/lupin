@@ -20,7 +20,7 @@ def test_the_embedding_cache_check_matches_the_whole_text_only( db_session ):
     repo.cache_embedding( "hello world", _vec() )
     db_session.flush()
     assert repo.has_cached_embedding( "hello world" ) is True
-    assert [ repo.has_cached_embedding( t ) for t in ( "hello", "hello world!", "Hello World", "" ) ] == [ False ] * 4
+    assert [ repo.has_cached_embedding( t ) for t in ( "hello", "hello world!", "Hello World", "", " hello world", "hello world " ) ] == [ False ] * 6
 
 
 def test_the_question_embedding_check_matches_the_whole_question_only( db_session ):
