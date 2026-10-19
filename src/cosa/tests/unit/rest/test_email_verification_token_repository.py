@@ -54,6 +54,18 @@ class TestEmailVerificationTokenRepository( unittest.TestCase ):
             delta = kwargs[ "expires_at" ] - datetime.now( timezone.utc )
             self.assertTrue( timedelta( hours=23 ) < delta <= timedelta( hours=24 ) )
 
+    def test_create_token_without_hours_expires_in_24_hours( self ):
+        """
+        Ensures:
+            - create_token with no hours uses the 24-hour class default
+        """
+        repo, _ = _repo()
+        with patch.object( repo, "create", return_value="created" ) as mock_create:
+            repo.create_token( token="tok", user_id=uuid.uuid4() )
+            _, kwargs = mock_create.call_args
+            delta = kwargs[ "expires_at" ] - datetime.now( timezone.utc )
+            self.assertTrue( timedelta( hours=23, minutes=59 ) < delta <= timedelta( hours=24 ) )
+
     def test_get_by_token( self ):
         """
         Ensures:
