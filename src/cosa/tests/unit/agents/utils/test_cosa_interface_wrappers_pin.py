@@ -104,8 +104,9 @@ def test_an_extra_this_module_does_not_forward_is_refused( mod, kind ):
     unsupported = [ x for x in ( "priority", "response_default", "progress_group_id" ) if x not in spec[ kind ] and x not in FUNCS[ kind ][ 2 ] ]
     assert unsupported
     for name in unsupported:
-        with patch.object( ci, "_dispatcher", d ), pytest.raises( TypeError ):
-            call( ci, kind, **{ name: "x" } )
+        for value in ( "x", None ):
+            with patch.object( ci, "_dispatcher", d ), pytest.raises( TypeError ):
+                call( ci, kind, **{ name: value } )
 
 
 @pytest.mark.parametrize( "mod, kind", CASES )
