@@ -84,9 +84,21 @@ def test_a_file_with_the_right_content_but_a_loose_mode_is_rewritten_to_600( run
     assert _mode( run.file ) == "0o600" and "replaced" in done.stdout
 
 
-def test_no_temporary_file_is_left_behind( run ):
+def test_no_temporary_file_is_left_behind_by_the_first_run_or_by_an_unchanged_second_run( run ):
     run( "push-test-mock-login" )
     assert [ p.name for p in run.file.parent.iterdir() ] == [ run.file.name ]
+    again, _ = run( "push-test-mock-login" )
+    assert "unchanged" in again.stdout                                          # the path that exits before the move
+    assert [ p.name for p in run.file.parent.iterdir() ] == [ run.file.name ]
+
+
+@pytest.mark.parametrize( "email,password", [ ( EMAIL + "\r", ODD_VALUE ), ( EMAIL, ODD_VALUE + "\r" ), ( EMAIL + "\r", ODD_VALUE + "\r" ) ] )
+def test_a_secret_ending_in_a_carriage_return_is_written_without_it( run, email, password ):
+    done, _ = run( "push-test-mock-login", email=email, password=password )
+    assert done.returncode == 0, done.stderr
+    raw = run.file.read_bytes()
+    assert b"\r" not in raw and raw.count( b"\n" ) == 2
+    assert _sourced( run.file ) == f"{EMAIL}\n{ODD_VALUE}"
 
 
 def test_the_vm_run_writes_on_the_vm_by_ssh_and_the_values_are_in_no_command_line( run ):
