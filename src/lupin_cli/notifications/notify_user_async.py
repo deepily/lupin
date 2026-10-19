@@ -40,7 +40,8 @@ from cosa.utils.config_loader import get_api_config, load_api_key
 # Import constants (fallbacks)
 from lupin_cli.notifications.notification_types import (
     DEFAULT_SERVER_URL,
-    ENV_SERVER_URL
+    ENV_SERVER_URL,
+    validate_server_environment
 )
 
 
@@ -313,48 +314,19 @@ def notify_user_async(
 
 def validate_environment() -> bool:
     """
-    Validate environment setup for notification system.
+    Validate environment setup for the notification system.
 
     Requires:
-        - urllib.parse module is available
+        - validate_server_environment is importable from notification_types
 
     Ensures:
-        - Returns True if all environment checks pass
-        - Returns False if any validation issues found
-        - Prints detailed validation results
+        - Returns whatever validate_server_environment returns
+        - Prints the validation result
 
     Raises:
-        - None (handles all exceptions gracefully)
-
-    Returns:
-        bool: True if environment is properly configured
+        - None
     """
-
-    issues = []
-
-    # Check server URL
-    server_url = os.getenv( ENV_SERVER_URL, DEFAULT_SERVER_URL )
-    if not server_url.startswith( ('http://', 'https://') ):
-        issues.append( f"{ENV_SERVER_URL} must start with http:// or https://" )
-
-    # Validate URL format
-    try:
-        import urllib.parse
-        parsed = urllib.parse.urlparse( server_url )
-        if not parsed.netloc:
-            issues.append( f"Invalid server URL format: {server_url}" )
-    except Exception as e:
-        issues.append( f"Error parsing server URL: {e}" )
-
-    if issues:
-        print( "❌ Environment validation failed:" )
-        for issue in issues:
-            print( f"  - {issue}" )
-        return False
-
-    print( "✅ Environment validation passed" )
-    print( f"  Server URL: {server_url}" )
-    return True
+    return validate_server_environment()
 
 
 def main():
