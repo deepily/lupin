@@ -13,6 +13,8 @@ Based on patterns from:
 
 from typing import Optional
 
+from cosa.agents.io_models.utils.json_object_recovery import parse_fenced_json
+
 
 CLARIFICATION_SYSTEM_PROMPT = """You are a research query analyst. Your task is to analyze user queries and determine if clarification is needed before research can begin.
 
@@ -147,22 +149,7 @@ def parse_clarification_response( response_text: str ) -> dict:
     Raises:
         ValueError: If response cannot be parsed as JSON
     """
-    import json
-
-    text = response_text.strip()
-
-    # Handle markdown code blocks
-    if text.startswith( "```json" ):
-        text = text[ 7: ]
-    if text.startswith( "```" ):
-        text = text[ 3: ]
-    if text.endswith( "```" ):
-        text = text[ :-3 ]
-
-    try:
-        return json.loads( text.strip() )
-    except json.JSONDecodeError as e:
-        raise ValueError( f"Could not parse clarification response as JSON: {e}" )
+    return parse_fenced_json( response_text, "clarification" )
 
 
 def quick_smoke_test():

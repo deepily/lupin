@@ -25,6 +25,7 @@
 // refreshes ONCE, after every row has been attempted.
 
 import type { EventBus } from "../shared/EventBus";
+import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor } from "../render/taskListModel";
@@ -220,17 +221,14 @@ export interface HoldingAreaStoreOptions {
  */
 class HoldingAreaStoreImpl implements HoldingAreaStore {
   private readonly bus      : EventBus;
+  private readonly poller : PushPoller;
   private readonly api      : HoldingAreaApiClient;
   private readonly endpoint : string;
   private readonly nowFn    : () => number;
   private readonly actorProvider : () => string | null;
-  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
-  private readonly clearIntervalFn : ( handle: number ) => void;
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      : Promise<void> | null = null;
-  private pollHandle    : number | null = null;
-  private unsubscribePush : ( () => void ) | null = null;
 
   /**
    * Builds the store from a bus, an API client and optional runtime hooks.
@@ -238,16 +236,20 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   constructor( opts: HoldingAreaStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
     /* c8 ignore next */ // production-default fallback: the canonical endpoint; tests inject an explicit one.
     this.endpoint = opts.endpoint ?? HOLDING_AREA_ENDPOINT;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
     /* c8 ignore next */ // production-default fallback: an unauthenticated construction records "anonymous"; tests inject an explicit provider.
     this.actorProvider = opts.actorProvider ?? ( () => null );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    this.poller = createPushPoller( {
+      bus              : this.bus,
+      setIntervalFn,
+      clearIntervalFn,
+      intervalMs       : HOLDING_AREA_POLL_INTERVAL_MS,
+      refresh          : () => this.refresh(),
+      refreshAfterWrite: () => this.refreshAfterWrite(),
+    } );
   }
 
   /**
@@ -286,27 +288,14 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
    * Refreshes now, then on an interval and on each task-store-changed event.
    */
   startPolling(): void {
-    this.stopPolling();
-    void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), HOLDING_AREA_POLL_INTERVAL_MS );
-    // Server push (row 8796333b slice 2): "the store changed, re-read". refreshAfterWrite(), not
-    // refresh(), so a push landing during a read gets a read that began after it; the poll stays
-    // as the safety net. A burst of pushes costs at most two reads.
-    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
+    this.poller.start();
   }
 
   /**
    * Cancels the poll timer and unsubscribes from the task-store-changed event.
    */
   stopPolling(): void {
-    if ( this.pollHandle !== null ) {
-      this.clearIntervalFn( this.pollHandle );
-      this.pollHandle = null;
-    }
-    if ( this.unsubscribePush !== null ) {
-      this.unsubscribePush();
-      this.unsubscribePush = null;
-    }
+    this.poller.stop();
   }
 
   /**

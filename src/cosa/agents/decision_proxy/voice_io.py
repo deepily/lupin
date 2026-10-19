@@ -12,7 +12,7 @@ Dependency Rule:
 """
 
 from cosa.agents.decision_proxy.cosa_interface import SENDER_ID
-from cosa.agents.utils.sync_notify import notify as _sync_notify
+from cosa.agents.utils.sync_notify import notify as _sync_notify, build_notify_kwargs
 
 
 def notify( message, priority="low", host=None, port=None, target_user=None, debug=False ):
@@ -30,14 +30,4 @@ def notify( message, priority="low", host=None, port=None, target_user=None, deb
     Returns:
         bool: True if notification was sent successfully
     """
-    kwargs = {
-        "message"   : message,
-        "sender_id" : SENDER_ID,
-        "priority"  : priority,
-        "debug"     : debug,
-    }
-    if host is not None: kwargs[ "host" ] = host
-    if port is not None: kwargs[ "port" ] = port
-    if target_user is not None: kwargs[ "target_user" ] = target_user
-
-    return _sync_notify( **kwargs )
+    return _sync_notify( **build_notify_kwargs( message, SENDER_ID, priority, host, port, target_user, debug ) )

@@ -70,6 +70,7 @@ import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictio
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import type { PredictionVoteStore } from "../stores/PredictionVoteStore";
 import type { PredictionVoteDir } from "../shared/types";
+import { cssEscape } from "./dom";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -862,18 +863,6 @@ function formatResponse(response: ActionRequiredResponse | undefined): string {
     .map(([header, value]) => `${header}: ${typeof value === "string" ? value : value.join(", ")}`)
     .join("; ");
 }
-
-/**
- * Escapes a string for use in a CSS selector, using the built-in CSS.escape when it exists.
- */
-/* c8 ignore start */ // CSS.escape polyfill — defensive cross-environment helper (production browsers + happy-dom + Node). c8 reports phantom branches inside the regex character class + the optional-chaining short-circuits which depend on the runtime CSS provider; the cssEscape-fallback test exercises both arms but c8's V8 instrumentation of regex/optional-chaining branches is implementation-dependent. Mirrors NotificationsListRenderer.ts:423 (same defensive helper, same ignore).
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
-}
-/* c8 ignore stop */
 
 // ---------------------------------------------------------------------------
 // Factory

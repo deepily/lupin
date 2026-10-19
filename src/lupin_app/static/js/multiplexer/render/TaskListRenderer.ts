@@ -54,6 +54,7 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The slice of the task list store the renderer uses.
@@ -164,16 +165,6 @@ export interface TaskListRendererOptions {
   recorder?     : TaskRowRecorderLike;
   /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
   getAuthToken? : () => string | null;
-}
-
-/**
- * Creates a paragraph with the task list message class and the given text.
- */
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `task-list-message ${className}`;
-  p.textContent = text;
-  return p;
 }
 
 /**
@@ -438,18 +429,11 @@ class TaskListRendererImpl implements TaskListRenderer {
   unmount(): void {
     this.rows?.dispose();   // tear down any open body overlay + its Esc listener
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.noticesEl = null;
@@ -485,7 +469,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     // on screen. Legacy pays the same cost the same way (notifications.js:12057).
     if ( composite && composite.status === "auth_required" ) {
       this.clearNotices();
-      this.container.replaceChildren( messageEl( "task-list-signin", "🔒 Sign-in required." ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-signin", "🔒 Sign-in required." ) );
       this.setCountText( "Live: 0" );
       return;
     }
@@ -513,7 +497,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.paintNotices( renderTruncationBanner( composite, TASK_LIST_QUERY, this.heldHeaderCount() ) );
 
     if ( openTasks.length === 0 ) {
-      this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-empty", "✅ No open tasks." ) );
     } else {
       const model = groupTasksByOwner( openTasks );
       this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
@@ -658,14 +642,14 @@ class TaskListRendererImpl implements TaskListRenderer {
   private renderUnreachable(): void {
     /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
     if ( this.container === null ) return;
-    const indicator = messageEl( "task-list-unreachable", "⚠️ Store unreachable." );
+    const indicator = messageEl( "task-list", "task-list-unreachable", "⚠️ Store unreachable." );
 
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
       this.paintRows( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
       this.setCountText( taskListCountText( this.lastGoodTasks ) );
     } else {
-      this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
+      this.container.replaceChildren( indicator, messageEl( "task-list", "task-list-empty", "No tasks loaded yet." ) );
       this.setCountText( "Live: 0" );
     }
   }

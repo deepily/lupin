@@ -11,8 +11,7 @@ Functions:
     extract_intent_xml: Regex extracts <intent>...</intent> from raw LLM response
 """
 
-import re
-
+from cosa.agents.io_models.utils.util_xml_pydantic import extract_tagged_xml
 from cosa.crud_for_dataframes.xml_models import CRUDIntent
 from cosa.crud_for_dataframes.storage import DataFrameStorage
 from cosa.crud_for_dataframes import crud_operations
@@ -233,21 +232,7 @@ def extract_intent_xml( raw_response ):
         - Returns the <intent>...</intent> XML string if found
         - Raises ValueError if no intent XML block is found
     """
-    if not raw_response or not raw_response.strip():
-        raise ValueError( "Empty response from LLM" )
-
-    text = raw_response.strip()
-
-    # Remove markdown code fences if present
-    text = re.sub( r"```(?:xml)?\s*", "", text )
-    text = re.sub( r"```\s*$", "", text, flags=re.MULTILINE )
-
-    # Extract <intent>...</intent> block
-    match = re.search( r"<intent\s*>.*?</intent>", text, re.DOTALL )
-    if match:
-        return match.group( 0 )
-
-    raise ValueError( f"No <intent>...</intent> block found in LLM response. Response starts with: {raw_response[ :100 ]}" )
+    return extract_tagged_xml( raw_response, "intent" )
 
 
 def quick_smoke_test():

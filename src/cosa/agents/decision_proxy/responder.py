@@ -47,7 +47,8 @@ class DecisionResponder( BaseResponder ):
         - All decisions are logged regardless of action
     """
 
-    LOG_PREFIX = "[DecisionResponder]"
+    LOG_PREFIX  = "[DecisionResponder]"
+    STATS_TITLE = "Decision Proxy Statistics"
 
     def __init__(
         self,
@@ -481,13 +482,3 @@ class DecisionResponder( BaseResponder ):
                 result[ "conformal" ] = wrapper.get_status()
 
         return result
-
-    def print_stats( self ):
-        """Print decision proxy statistics."""
-        print( f"\n{'=' * 50}" )
-        print( "Decision Proxy Statistics" )
-        print( f"{'=' * 50}" )
-        for key, value in self.stats.items():
-            label = key.replace( "_", " " ).title()
-            print( f"  {label:30s} : {value}" )
-        print( f"{'=' * 50}" )

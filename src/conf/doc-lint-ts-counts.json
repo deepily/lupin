@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "rules_stamp": "5aa083b0b82e3fea",
+  "rules_stamp": "26e3a4805d8921fb",
   "files": {
     "src/cosa/repo/symindex/ts_extract.js": 2,
     "src/lupin_app/static/html/admin/js/admin-snapshots.js": 6,
@@ -168,7 +168,7 @@
     "src/lupin_app/static/js/multiplexer/stores/SessionTranscriptStore.ts": 43,
     "src/lupin_app/static/js/multiplexer/stores/StripReconnectRehydrator.ts": 12,
     "src/lupin_app/static/js/multiplexer/stores/SubmitJobsStore.ts": 110,
-    "src/lupin_app/static/js/multiplexer/stores/TaskListStore.ts": 115,
+    "src/lupin_app/static/js/multiplexer/stores/TaskListStore.ts": 113,
     "src/lupin_app/static/js/multiplexer/stores/TaskRequestStore.ts": 70,
     "src/lupin_app/static/js/multiplexer/stores/TtsQueueStore.ts": 113,
     "src/lupin_app/static/js/multiplexer/stores/ViewStateStore.ts": 14,

@@ -51,6 +51,7 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The pane's messages. Carbon-copied from notifications.js `renderEpicBoard`.
@@ -110,16 +111,6 @@ export interface EpicBoardRendererOptions {
   recorder?     : TaskRowRecorderLike;
   /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
   getAuthToken? : () => string | null;
-}
-
-/**
- * Creates a paragraph with the task list message class and the given text.
- */
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `task-list-message ${ className }`;
-  p.textContent = text;
-  return p;
 }
 
 /**
@@ -277,18 +268,11 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
@@ -333,14 +317,14 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     const composite = this.store.composite();
 
     if ( composite && composite.status === "auth_required" ) {
-      this.container.replaceChildren( messageEl( "task-list-signin", EPIC_BOARD_SIGNIN_MESSAGE ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-signin", EPIC_BOARD_SIGNIN_MESSAGE ) );
       this.setCount( 0 );
       return;
     }
 
     if ( composite && composite.status === "query_unavailable" ) {
       this.container.replaceChildren(
-        messageEl( "task-list-query-unavailable", EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE ) );
+        messageEl( "task-list", "task-list-query-unavailable", EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE ) );
       this.setCount( 0 );
       return;
     }
@@ -350,7 +334,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
       // Zeroing it would ASSERT there are no epics; leaving it says the last
       // known figure is the last thing anyone measured. The message beside it
       // already says the rows are not being shown.
-      this.container.replaceChildren( messageEl( "task-list-unreachable", EPIC_BOARD_UNREACHABLE_MESSAGE ) );
+      this.container.replaceChildren( messageEl( "task-list", "task-list-unreachable", EPIC_BOARD_UNREACHABLE_MESSAGE ) );
       return;
     }
 

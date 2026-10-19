@@ -33,6 +33,7 @@ if src_path not in sys.path:
 
 # Now cosa is importable
 import cosa.utils.util as cu
+from cosa.utils.admin_script_helpers import run_create_script, validate_table
 from cosa.rest.sqlite_database import get_auth_db_connection, get_auth_db_path
 
 
@@ -173,65 +174,8 @@ def validate_schema( conn ):
     Returns:
         dict: {"success": bool, "field_count": int, "index_count": int, "error": str}
     """
-    try:
-        cursor = conn.cursor()
+    return validate_table( conn, "api_keys", 7, 4 )
 
-        # Check table exists
-        cursor.execute( """
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='api_keys'
-        """ )
-        table_result = cursor.fetchone()
-
-        if not table_result:
-            return {
-                "success": False,
-                "error": "Table 'api_keys' not found"
-            }
-
-        # Count fields
-        cursor.execute( "PRAGMA table_info(api_keys)" )
-        fields = cursor.fetchall()
-        field_count = len( fields )
-
-        # Expected: 7 fields (id, user_id, key_hash, description, created_at, last_used_at, is_active)
-        expected_fields = 7
-        if field_count != expected_fields:
-            return {
-                "success": False,
-                "error": f"Expected {expected_fields} fields, found {field_count}",
-                "field_count": field_count
-            }
-
-        # Count indexes (excluding SQLite's automatic PRIMARY KEY index)
-        cursor.execute( """
-            SELECT name FROM sqlite_master
-            WHERE type='index' AND tbl_name='api_keys'
-            AND name NOT LIKE 'sqlite_autoindex%'
-        """ )
-        indexes = cursor.fetchall()
-        index_count = len( indexes )
-
-        # Expected: 4 indexes (key_hash, user_id, is_active, user_active composite)
-        expected_indexes = 4
-        if index_count != expected_indexes:
-            return {
-                "success": False,
-                "error": f"Expected {expected_indexes} indexes, found {index_count}",
-                "index_count": index_count
-            }
-
-        return {
-            "success": True,
-            "field_count": field_count,
-            "index_count": index_count
-        }
-
-    except sqlite3.Error as e:
-        return {
-            "success": False,
-            "error": f"Validation query failed: {e}"
-        }
 
 
 def main():
@@ -241,33 +185,8 @@ def main():
     Returns:
         int: 0 on success, 1 on error
     """
-    print( "==================================================" )
-    print( "  API Keys Table Creation Script" )
-    print( "  Phase 2.5 Notification Authentication" )
-    print( "==================================================" )
-    print()
+    return run_create_script( "API Keys Table Creation Script", "Phase 2.5 Notification Authentication", "API keys table created", create_api_keys_table )
 
-    try:
-        success = create_api_keys_table()
-
-        if success:
-            print()
-            print( "==================================================" )
-            print( "  ✓ SUCCESS: API keys table created" )
-            print( "==================================================" )
-            return 0
-        else:
-            print()
-            print( "==================================================" )
-            print( "  ✗ FAILED: See errors above" )
-            print( "==================================================" )
-            return 1
-
-    except Exception as e:
-        print( f"\n✗ FATAL ERROR: {e}", file=sys.stderr )
-        import traceback
-        traceback.print_exc()
-        return 1
 
 
 if __name__ == "__main__":

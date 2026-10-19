@@ -26,6 +26,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { AuthStateChangePayload } from "../shared/types";
 import { renderNavBar } from "./templates/navBar";
+import { teardownScaffold } from "./dom";
 
 /**
  * The narrow auth surface the nav bar needs.
@@ -118,12 +119,8 @@ class NavBarRendererImpl implements NavBarRenderer {
    * Unsubscribes from the bus and clears the root. Safe to call more than once.
    */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, null, this.root );
+    this.root = null;
     this.mounted = false;
   }
 

@@ -31,6 +31,7 @@ from cosa.agents.notification_proxy.config import (
     LLM_SCRIPT_MATCHER_BATCH_TEMPLATE,
 )
 import cosa.utils.util as cu
+from cosa.agents.utils.proxy_agents.base_responder import print_stats_table
 
 # Transport budget for out-of-process HTTP calls to `:7999` (row 204911ca).
 # ~30s = 1.60x the observed maximum reload window of 18.76s — a multiplier with
@@ -497,13 +498,7 @@ class NotificationResponder:
 
     def print_stats( self ):
         """Print summary statistics."""
-        print( f"\n{'=' * 50}" )
-        print( "Notification Proxy Statistics" )
-        print( f"{'=' * 50}" )
-        for key, value in self.stats.items():
-            label = key.replace( "_", " " ).title()
-            print( f"  {label:30s} : {value}" )
-        print( f"{'=' * 50}" )
+        print_stats_table( "Notification Proxy Statistics", self.stats )
 
 
 # ============================================================================

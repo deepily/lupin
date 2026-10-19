@@ -12,6 +12,8 @@ Pattern: Same 3-part structure as visual.py (Mermaid prompts)
   - Supporting constants
 """
 
+from .visual import build_visual_prompt
+
 
 # =============================================================================
 # Diagram Pattern Hints
@@ -88,19 +90,11 @@ def get_d2_prompt( visual_type: str, visual_description: str, slide_title: str =
     Returns:
         str: User message for Claude API
     """
-    suggested_pattern = _suggest_d2_pattern( visual_description )
-
-    parts = []
-
-    if slide_title:
-        parts.append( f"Slide title: {slide_title}" )
-
-    parts.append( f"Visual type: {visual_type}" )
-    parts.append( f"Suggested D2 pattern: {suggested_pattern}" )
-    parts.append( f"\nDescription:\n{visual_description}" )
-    parts.append( "\nGenerate a D2 diagram for this slide. Output ONLY the d2 code block." )
-
-    return "\n".join( parts )
+    return build_visual_prompt(
+        visual_type, visual_description, slide_title,
+        "Suggested D2 pattern", _suggest_d2_pattern( visual_description ),
+        "Generate a D2 diagram for this slide. Output ONLY the d2 code block."
+    )
 
 
 def _suggest_d2_pattern( description: str ) -> str:

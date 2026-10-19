@@ -173,3 +173,85 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
         len( response_content ), body,
     )
     return None
+
+
+def strip_json_fence( response_text: str, single_leading: bool = False ) -> str:
+    """
+    Remove one leading ```json (or bare ```) marker and one trailing ``` marker.
+
+    Requires:
+        - response_text is a string
+        - single_leading is a bool
+
+    Ensures:
+        - returns the text between the markers, stripped of surrounding whitespace
+        - text without a fence comes back stripped and otherwise unchanged
+        - with single_leading False, a ```json marker followed directly by a bare ``` loses both
+        - with single_leading True, only the ```json marker goes and the bare ``` stays
+        - never raises
+
+    Notes:
+        - The two modes keep the two behaviours the copies had: the Deep Research parsers
+          removed both leading markers, the Presentation metadata extractors only one.
+        - This is a plain strip. It does not drop prose after the closing fence and does not
+          hunt for a balanced object; `recover_json_object` does both.
+    """
+    text = response_text.strip()
+
+    if text.startswith( "```json" ):
+        text = text[ 7: ]
+        if single_leading: return _strip_trailing_fence( text )
+    if text.startswith( "```" ):
+        text = text[ 3: ]
+
+    return _strip_trailing_fence( text )
+
+
+def _strip_trailing_fence( text: str ) -> str:
+    """Drop one trailing ``` marker, then surrounding whitespace."""
+    if text.endswith( "```" ): text = text[ :-3 ]
+
+    return text.strip()
+
+
+def parse_fenced_json( response_text: str, label: str ) -> dict:
+    """
+    Parse a model response that holds one JSON document, optionally fenced.
+
+    Requires:
+        - response_text is a string
+        - label is a short noun for the error message, such as "planning"
+
+    Ensures:
+        - returns whatever `json.loads` returns for the fence-stripped text
+
+    Raises:
+        - ValueError( "Could not parse <label> response as JSON: ..." ) when the text is not JSON
+    """
+    try:
+        return json.loads( strip_json_fence( response_text ) )
+    except json.JSONDecodeError as e:
+        raise ValueError( f"Could not parse {label} response as JSON: {e}" )
+
+
+def extract_json_metadata( response_content: str, defaults: dict ) -> dict:
+    """
+    Pull a few top-level keys out of a fenced JSON response, with a default for each.
+
+    Requires:
+        - response_content is a string
+        - defaults maps each wanted key to the value to use when the key is absent
+
+    Ensures:
+        - returns { key: parsed.get( key, default ) } for every key in defaults, in order
+        - returns {} when the text is not JSON
+
+    Raises:
+        - AttributeError when the JSON is valid but not an object (a list has no `.get`)
+    """
+    try:
+        parsed = json.loads( strip_json_fence( response_content, single_leading=True ) )
+    except json.JSONDecodeError:
+        return {}
+
+    return { key: parsed.get( key, default ) for key, default in defaults.items() }
