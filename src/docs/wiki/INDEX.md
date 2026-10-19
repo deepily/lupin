@@ -249,6 +249,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[arbiter-app-service]] — the standalone 8001 arbiter app: /health, /state, loop wiring and the DM-push hop. `lupin_arbiter_app` (app)
 - [[arbiter-live-notify]] — the arbiter's best-effort live notify, DM push and tmux wake hops, their outcome values and the dedup window. `lupin_arbiter_app` (arbiter_live_notify)
 - [[arbiter-context-pressure-writer]] — the 8001 loop that publishes per-persona context headroom against a budget policy. `lupin_arbiter_app` (context_pressure_writer)
+- [[arbiter-health-watcher]] — the 8001 container health watch: unhealthy, flapping and crash-loop edges, the reload-blindness check and the self-blind alert. `lupin_arbiter_app` (health_watcher)
 - [[heartbeat-context-pressure]] — Transcript-based context pressure, liveness and fleet table. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-fleet-view]] — Per-session fleet view, liveness verdicts, snapshot and table rendering. `cosa.agents` (heartbeat_arbiter)
 - [[heartbeat-idle-roster-and-managers]] — Idle classification and roster, manager lineage and active-manager resolution. `cosa.agents` (heartbeat_arbiter)
