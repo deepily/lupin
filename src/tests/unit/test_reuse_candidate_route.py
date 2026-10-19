@@ -312,9 +312,10 @@ def test_the_stage_from_the_environment_refreshes_through_the_incremental_build_
                         ( "LUPIN_REUSE_JEV_RUN_NAME", "cand-refresh" ), ( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", "/vec" ), ( "LUPIN_REUSE_CANDIDATE_QUERY_CACHE_DIR", "/qc" ),
                         ( "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR", "/pp" ) ):
         monkeypatch.setenv( key, str( value ) )
+    from cosa.repo.symindex import candidate_build as cb
     seen = {}
-    monkeypatch.setattr( rt.cb, "make_job_writer", lambda root, base_url, environ: seen.update( writer=( root, base_url ) ) or "the-writer" )
-    monkeypatch.setattr( rt.cb, "run", lambda root, writer, client, environ=None: seen.update( run=( root, writer, type( client ).__name__, environ ) ) or { "rows": 1 } )
+    monkeypatch.setattr( cb, "make_job_writer", lambda root, base_url, environ: seen.update( writer=( root, base_url ) ) or "the-writer" )
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None: seen.update( run=( root, writer, type( client ).__name__, environ ) ) or { "rows": 1 } )
     stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
     assert stage._refresher() == { "rows": 1 }
     assert seen[ "writer" ][ 0 ] == env[ 0 ] and seen[ "writer" ][ 1 ] == stage.base_url
