@@ -1462,6 +1462,61 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
         return False
 
 
+def _get_dict_field( session_id, key ):
+    """
+    Read one dict-valued key from a session's bridge file.
+
+    Requires:
+        - session_id is a string (full UUID or 8-char prefix)
+        - key is the bridge field name
+
+    Ensures:
+        - Returns the value when the bridge exists and the field is a non-empty dict
+        - Returns None for a missing bridge, parse error, unreadable file, or a missing, null, empty or non-dict field
+        - Never raises for those cases
+    """
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return None
+
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        value = data.get( key )
+        if isinstance( value, dict ) and value:
+            return value
+        return None
+    except ( json.JSONDecodeError, OSError ):
+        return None
+
+
+def _set_str_field( session_id, key, value ):
+    """
+    Write one string-coerced field to a session's bridge file, keeping every other field.
+
+    Requires:
+        - session_id and value are non-empty (falsy of either returns False)
+        - key is the bridge field name
+
+    Ensures:
+        - Returns True when the bridge was found and atomic_write_json succeeded
+        - Returns False for an empty argument, a missing bridge, a parse error or a write failure
+        - Stores str( value ) under key and preserves all other fields (read-modify-write)
+    """
+    if not session_id or not value:
+        return False
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ key ] = str( value )
+        return atomic_write_json( path, data )
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
 def set_owner_user_id( session_id, owner_user_id ):
     """
     Write `owner_user_id` to the bridge file for a given session_id.
@@ -1488,18 +1543,7 @@ def set_owner_user_id( session_id, owner_user_id ):
     Returns:
         bool: True on successful write
     """
-    if not session_id or not owner_user_id:
-        return False
-    path = find_session_path_by_id( session_id )
-    if not path:
-        return False
-    try:
-        with open( path ) as f:
-            data = json.load( f )
-        data[ "owner_user_id" ] = str( owner_user_id )
-        return atomic_write_json( path, data )
-    except ( json.JSONDecodeError, OSError ):
-        return False
+    return _set_str_field( session_id, "owner_user_id", owner_user_id )
 
 
 def set_user_id( session_id, user_id ):
@@ -1528,18 +1572,7 @@ def set_user_id( session_id, user_id ):
     Returns:
         bool: True on successful write
     """
-    if not session_id or not user_id:
-        return False
-    path = find_session_path_by_id( session_id )
-    if not path:
-        return False
-    try:
-        with open( path ) as f:
-            data = json.load( f )
-        data[ "user_id" ] = str( user_id )
-        return atomic_write_json( path, data )
-    except ( json.JSONDecodeError, OSError ):
-        return False
+    return _set_str_field( session_id, "user_id", user_id )
 
 
 def get_voice_persona( session_id ):
@@ -1567,19 +1600,7 @@ def get_voice_persona( session_id ):
         dict or None: The persona dict (with keys voice_id, name, icon, color,
             borrowed, assigned_at) when present; None otherwise
     """
-    path = find_session_path_by_id( session_id )
-    if not path:
-        return None
-
-    try:
-        with open( path ) as f:
-            data = json.load( f )
-        persona = data.get( "voice_persona" )
-        if isinstance( persona, dict ) and persona:
-            return persona
-        return None
-    except ( json.JSONDecodeError, OSError ):
-        return None
+    return _get_dict_field( session_id, "voice_persona" )
 
 
 def set_voice_persona( session_id, persona ):
@@ -1646,19 +1667,7 @@ def get_idle_detection( session_id ):
     Returns:
         dict or None: The idle_detection dict when present; None otherwise
     """
-    path = find_session_path_by_id( session_id )
-    if not path:
-        return None
-
-    try:
-        with open( path ) as f:
-            data = json.load( f )
-        block = data.get( "idle_detection" )
-        if isinstance( block, dict ) and block:
-            return block
-        return None
-    except ( json.JSONDecodeError, OSError ):
-        return None
+    return _get_dict_field( session_id, "idle_detection" )
 
 
 def set_idle_detection_field( session_id, **fields ):
