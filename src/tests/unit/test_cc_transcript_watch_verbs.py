@@ -445,6 +445,31 @@ async def test_a_first_watcher_after_the_tailer_stopped_itself_gets_a_new_tailer
 
 
 @pytest.mark.asyncio
+async def test_a_first_watcher_while_the_old_tailer_still_runs_shares_it( router_module, manager, fake_tailer, epoch_is ):
+    """
+    A tailer that has not stopped is kept when a new first watcher arrives.
+
+    The last watcher can drop with no reaper run yet. Replacing a running tailer would leave two
+    polling the same file and emitting every block twice.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    first = fake_tailer.instances[ 0 ]
+    manager.drop_all_cc_transcript_watches( BROWSER )
+    assert first.running is True, "precondition failed"
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 1, "a running tailer was replaced"
+    assert router_module._cc_transcript_tailers[ SEAT ] is first
+
+
+@pytest.mark.asyncio
 async def test_a_null_epoch_is_accepted_so_a_first_watch_needs_no_rest_call( router_module, manager, fake_tailer, epoch_is ):
     """
     `file_epoch: null` means "whatever file is current" — the client learns it from the first
