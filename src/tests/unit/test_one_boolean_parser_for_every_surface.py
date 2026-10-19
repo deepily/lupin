@@ -47,6 +47,10 @@ import cosa.rest.task_approval_settings as approval
 # The one function permitted to parse a boolean. Everything else must delegate to it.
 THE_ONE_PARSER = "_as_bool_or_none"
 
+# The shared reader that three of the settings go through. It calls the parser itself, so a
+# function that calls it delegates just as one that calls the parser does (row 83fd572c, exact:25).
+THE_SHARED_RESOLVER = "_resolve_bool_setting"
+
 # Words that only ever appear in a boolean parse. Kept here rather than imported from
 # the module so that widening the module's own TRUE_WORDS cannot silently widen what
 # this guard tolerates.
@@ -239,13 +243,14 @@ def test_the_denominator_is_stated_out_loud():
     )
 
     booleans_swept = [ fn.name for fn in functions
-                       if any( isinstance( n, ast.Call ) and _named( n.func ) == THE_ONE_PARSER
+                       if any( isinstance( n, ast.Call ) and _named( n.func ) in ( THE_ONE_PARSER, THE_SHARED_RESOLVER )
                                for n in ast.walk( fn ) ) ]
 
     # The three boolean SETTINGS this module reads. Written out because the count is the
     # claim: three settings, three delegating readers, zero hand-rolled parses.
     assert set( booleans_swept ) >= {
         "get_enforcement_active", "default_mint_status", "get_manager_pull_disabled",
+        "get_sword_of_damocles_active",
     }, (
         f"expected all three boolean readers to delegate; only {booleans_swept} do."
     )

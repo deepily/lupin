@@ -1134,6 +1134,35 @@ class TaskRepository( BaseRepository[TaskItem] ):
             ) )
         return query
 
+    def _count_grouped_by( self, column, **filters ) -> dict:
+        """
+        Count the admitted set per value of one column in a single `GROUP BY`.
+
+        Requires:
+            - column is a mapped TaskItem column
+            - filters carries every key the public grouped counts take: the ten scalar filters,
+              `updated_since`, `updated_until`, `include_terminal`, `owed_only`, `hide_parked` and `now`
+
+        Ensures:
+            - returns { column value: count } over only the values present, never zero-filled
+            - the scalar and owed filters are the same helpers `count_tasks` and `query_tasks` use,
+              so the breakdown selects the identical admitted set
+            - a missing filter key raises KeyError rather than silently widening the set
+        """
+        query = self.session.query( column, func.count( TaskItem.id ) )
+
+        query = self._apply_scalar_filters(
+            query, filters[ "owner_persona" ], filters[ "status" ], filters[ "gate_class" ], filters[ "urgency" ],
+            filters[ "accountable_manager" ], filters[ "project" ], filters[ "item_class" ],
+            filters[ "correlation_key" ], filters[ "id_prefix" ],
+            updated_since=filters[ "updated_since" ], updated_until=filters[ "updated_until" ],
+            blocked_by_persona=filters[ "blocked_by_persona" ]
+        )
+        query = self._apply_owed_filter( query, filters[ "owed_only" ], filters[ "hide_parked" ], filters[ "status" ],
+                                         filters[ "include_terminal" ], filters[ "now" ] )
+
+        return { value : count for value, count in query.group_by( column ).all() }
+
     def count_tasks_by_status(
         self,
         owner_persona       : Optional[str] = None,
@@ -1170,20 +1199,14 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - {} when nothing matches
             - no `ORDER BY`, `LIMIT` or `OFFSET`; a breakdown is order- and page-independent
         """
-        query = self.session.query( TaskItem.status, func.count( TaskItem.id ) )
-
-        query = self._apply_scalar_filters(
-            query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until,
-            blocked_by_persona=blocked_by_persona
+        return self._count_grouped_by(
+            TaskItem.status,
+            owner_persona=owner_persona, status=status, gate_class=gate_class, urgency=urgency,
+            accountable_manager=accountable_manager, project=project, item_class=item_class,
+            correlation_key=correlation_key, id_prefix=id_prefix, blocked_by_persona=blocked_by_persona,
+            updated_since=updated_since, updated_until=updated_until, include_terminal=include_terminal,
+            owed_only=owed_only, hide_parked=hide_parked, now=now
         )
-        # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
-        # the identical admitted set, or the sum-parity gate is comparing two
-        # different populations and its green means nothing.
-        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
-
-        return { row_status : row_count for row_status, row_count in query.group_by( TaskItem.status ).all() }
 
     def count_tasks_by_priority(
         self,
@@ -1220,16 +1243,14 @@ class TaskRepository( BaseRepository[TaskItem] ):
               an absent priority is absent, never a 0 bucket, so "no P0 rows" cannot be mistaken for "P0 was not measured"
             - keys are the raw stored priority strings; VALID_PRIORITIES is the authority on which exist
         """
-        query = self.session.query( TaskItem.priority, func.count( TaskItem.id ) )
-        query = self._apply_scalar_filters(
-            query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix,
-            updated_since=updated_since, updated_until=updated_until,
-            blocked_by_persona=blocked_by_persona
+        return self._count_grouped_by(
+            TaskItem.priority,
+            owner_persona=owner_persona, status=status, gate_class=gate_class, urgency=urgency,
+            accountable_manager=accountable_manager, project=project, item_class=item_class,
+            correlation_key=correlation_key, id_prefix=id_prefix, blocked_by_persona=blocked_by_persona,
+            updated_since=updated_since, updated_until=updated_until, include_terminal=include_terminal,
+            owed_only=owed_only, hide_parked=hide_parked, now=now
         )
-        query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
-
-        return { row_priority : row_count for row_priority, row_count in query.group_by( TaskItem.priority ).all() }
 
     def count_tasks_by_project(
         self,
