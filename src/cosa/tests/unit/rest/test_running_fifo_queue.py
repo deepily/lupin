@@ -1456,6 +1456,13 @@ class TestHandleBaseAgent( _RFQBase ):
         self.assertIs( out, job )
         self.assertEqual( out.answer, "raw answer" )
 
+    def test_ephemeral_weather_keeps_the_placeholder_answer_and_is_not_serialized( self ):
+        rq = self.build()
+        job = _WeatherFake( id_hash="b4w" ); self._enqueue( rq, job )
+        out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        self.assertEqual( out.answer, "no code executed by non-serializing/ephemeral objects" )
+        rq.snapshot_mgr.save_snapshot.assert_not_called()
+
     def test_ephemeral_receptionist_not_serialized( self ):
         rq = self.build()
         job = _ReceptionistFake( id_hash="b4" ); self._enqueue( rq, job )

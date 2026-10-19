@@ -413,6 +413,13 @@ class TestQueuedAndFactory:
                                                   StageTrace( trace_dir="/tmp/unused" ) )
         assert agent.snapshotable is flag
 
+    def test_a_replay_job_is_not_given_a_snapshotable_flag( self ) -> None:
+        """A replay's job is a stored snapshot; only agent jobs carry the flag the queue reads."""
+        snapshot = FakeSnapshot( id_hash="stored-2" )
+        QueuedExecutor( FakeTodoQueue() ).submit( _work( "replay", snapshot, snapshotable=False ),
+                                                  StageTrace( trace_dir="/tmp/unused" ) )
+        assert not hasattr( snapshot, "snapshotable" )
+
     @pytest.mark.parametrize( "kind", [ "agent", "replay", "receptionist" ] )
     def test_every_kind_is_queued( self, kind: str ) -> None:
         """No per-kind policy lives here: what the flow hands over gets queued.
