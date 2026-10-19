@@ -31,10 +31,12 @@ import zlib
 
 from cosa.repo.doc_lint import jev_transport
 from cosa.repo.symindex import build as sx_build
+from cosa.repo.symindex import candidate_build as cb
 from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex import wiki_lint as wl
 from cosa.repo.symindex.paths import data_dir, default_out_dir
 from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_for
+from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import reuse_redact
 
@@ -306,6 +308,7 @@ def _candidate_stage( top ):
     Ensures:
         - returns a CandidateStage on the live vector set, the query cache and the purpose lines of the repository's data folder
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
+        - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
 
     Raises:
         - ReuseError CANDIDATE_STAGE_UNCONFIGURED naming the storage error when a key is missing
@@ -322,7 +325,12 @@ def _candidate_stage( top ):
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
-    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes )
+
+    def refresher():
+        """Ensures: runs the incremental vector build for this repository under its lock."""
+        return cb.run( top, cb.make_job_writer( top, base_url, os.environ ), vector_build.EndpointClient(), environ=os.environ )
+
+    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, refresher=refresher )
 
 
 def append_call_log( ctx, session_id, record ):
@@ -1216,6 +1224,8 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
         - an error block names it and holds no manifest hash, so a failed stage never claims a vector set
         - ranking_text and wiki_ids are the two inputs a replay cannot rebuild from the snapshot
         - a widened run records K as the wide size, the extra ids as widened_ids, and a failed widening as widen_error
+        - a lookup that refreshed the vector set, or answered from a stale one, records freshness: the state, and for a stale set the
+          error, the count of lost ids and the note "answered from a stale set, N ids lost"; a fresh set adds no key
     """
     asked = len( routed[ "deciding" ] ) if error is None else 0
     base  = { "arm": client.arm, "K": client.K, "ranking_text": ranking_text, "redactions": len( redactions ), "entries_total": total, "entries_asked": asked, "entries_not_asked": total - asked }
@@ -1225,6 +1235,7 @@ def _candidate_receipt( stage, error, client, ranking_text, redactions, total, r
             "ids": stage[ "ids" ], "widened_ids": stage[ "widened_ids" ] if "widened_ids" in stage else [], "ranking_hash": stage[ "ranking_hash" ],
             "stage_key": stage[ "stage_key" ], "wiki": stage[ "wiki" ], "wiki_ids": stage[ "wiki_ids" ] }
     if widen_error is not None: out[ "widen_error" ] = widen_error
+    if "freshness" in stage and stage[ "freshness" ][ "state" ] in ( "refreshed", "stale" ): out[ "freshness" ] = stage[ "freshness" ]
     return out
 
 
@@ -1272,7 +1283,7 @@ def _run_question( ctx, tool, query, need, exclude_id, write, prepared, sweep_on
     stage, stage_error, widen_error = None, None, None
     if staged is not None and entries and not hard:
         try:
-            stage = staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id )
+            stage = staged.shortlist( _ranking, every, sha_, ctx.pages, exclude_id=exclude_id, index_manifest=fr.index_manifest( sx_build.read_header( gen ) ) )
         except CandidateError as e:
             stage_error = { "code": e.code, "detail": e.detail }
             flags       = flags | { "CALL_FAILED" }

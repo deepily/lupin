@@ -12,6 +12,7 @@ import pathlib
 import urllib.error
 import urllib.request
 
+from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates import search as cs_search
 from cosa.repo.symindex.candidates import vector_store as vs
 from cosa.repo.symindex.candidates import wiki_list
@@ -44,13 +45,14 @@ class CandidateStage:
         - vectors_dir holds the live vector set, as the server sees the same path
         - embed_client has embed( texts, content_type, role ) and info()
         - arm is one of the names in the arms tuple, and K a positive integer
+        - refresher is None, or a function with no arguments that runs the incremental vector build under the build lock
 
     Ensures:
         - holds no state between lookups except the fact that a stage key was uploaded
     """
 
     def __init__( self, base_url, api_key, vectors_dir, query_cache_dir, embed_client, purposes_path=None, K=DEFAULT_K, arm=DEFAULT_ARM,
-                  fusion=None, timeout=TIMEOUT_SECONDS, urlopen=urllib.request.urlopen ):
+                  fusion=None, timeout=TIMEOUT_SECONDS, urlopen=urllib.request.urlopen, refresher=None ):
         """Hold the endpoints, folders and settings, and check the arm and K."""
         if arm not in ARMS: raise ValueError( f"arm must be one of {sorted( ARMS )}, got {arm!r}" )
         if not isinstance( K, int ) or isinstance( K, bool ) or K < 1: raise ValueError( f"K must be a positive integer, got {K!r}" )
@@ -60,6 +62,30 @@ class CandidateStage:
         self.K, self.arm, self.fusion = K, arm, fusion
         self.timeout, self._urlopen = timeout, urlopen
         self._uploaded = set()
+        self._refresher = refresher
+
+    def freshen( self, index_manifest ):
+        """
+        Bring the live vector set up to the index before a lookup, when it is behind.
+
+        Requires:
+            - index_manifest is the index generation's manifest name, from freshness.index_manifest
+            - a refresher was given
+
+        Ensures:
+            - returns { state: "fresh" } and runs nothing when the set's build info names this index manifest
+            - otherwise runs the refresher once, and returns { state: "refreshed" } when it finishes
+            - a refresher that fails with a named candidate error, a bad root, an operating-system error or a runtime error
+              returns { state: "stale", error: <the failure> }; the lookup then answers from the set on disk
+            - a set with no build info counts as behind
+        """
+        info = fr.read_build_info( self.vectors_dir )
+        if info is not None and info[ "index_manifest" ] == index_manifest: return { "state": "fresh" }
+        try:
+            self._refresher()
+        except ( CandidateError, ValueError, OSError, RuntimeError ) as e:
+            return { "state": "stale", "error": f"{type( e ).__name__}: {e}" }
+        return { "state": "refreshed" }
 
     def manifest( self ):
         """
@@ -131,7 +157,7 @@ class CandidateStage:
         return hashlib.sha256( canonical( { "v": STAGE_VERSION, "index_sha": index_sha, "entries": len( entries ),
                                             "purposes": hashlib.sha256( canonical( purposes ).encode( "utf-8" ) ).hexdigest(), "fusion": self.fusion } ).encode( "utf-8" ) ).hexdigest()[ :32 ]
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None, index_manifest=None ):
         """
         Choose the candidates for a need.
 
@@ -141,9 +167,12 @@ class CandidateStage:
             - index_sha identifies those entries, and pages is the list page_candidates returns
             - wiki_ids is None, or the wiki list a receipt recorded, which then replaces the one built from pages
             - K is None for the client's own K, or the size of this one shortlist, such as the widened size when the first set sat inside the band
+            - index_manifest is None, or the index generation's manifest name; with a refresher and without cache_only it is compared with the set's build info first
 
         Ensures:
-            - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, wiki_ids, ranking_hash }
+            - returns { ids, ranking, lists, manifest_hash, embed_models, arm, K, widened, stage_key, wiki, wiki_ids, ranking_hash, freshness }
+        - freshness.state is "unchecked" without a refresher, an index manifest or with cache_only; otherwise "fresh", "refreshed" or "stale"
+        - a stale answer skips the vector ids the index lost, and freshness holds ids_lost and a note naming the count
             - ids are the shortlist sorted by id, without exclude_id, at most K of them
             - ranking is the fused order of those ids
             - lists names each list that fed the fusion with its size and its first ids
@@ -158,6 +187,8 @@ class CandidateStage:
             - CandidateError CANDIDATE_SEARCH_FAILED for any failure of the call, naming the server's error
         """
         if not ranking_text.strip(): raise CandidateError( EMPTY_NEED, "the need holds no word once the redacted spans are removed" )
+        check    = self._refresher is not None and index_manifest is not None and not cache_only
+        fresh    = self.freshen( index_manifest ) if check else { "state": "unchecked" }
         manifest = self.manifest()
         vectors  = self._vectors( ranking_text, manifest, cache_only )
         wiki     = ( wiki_list.wiki_ranked_ids( ranking_text, pages ) if wiki_ids is None else list( wiki_ids ) ) if self.arm in WIKI_ARMS else []
@@ -167,6 +198,7 @@ class CandidateStage:
         asked    = K + ( 1 if exclude_id is not None else 0 )
         body     = { "stage_key": key, "need": ranking_text, "K": asked, "vectors_dir": self.vectors_dir, "query_vectors": vectors, "wiki": wiki,
                      "expect_manifest_hash": manifest[ "manifest_hash" ] }
+        if fresh[ "state" ] == "stale": body[ "skip_lost_ids" ] = True
         status, answer = self._call( "POST", "/api/reuse-candidates/search", body )
         if status == 409 and answer.get( "error" ) == STAGE_UNKNOWN and not cache_only:
             upload = { "key": key, "entries": entries, "purposes": purposes or None, "fusion": self.fusion }
@@ -176,9 +208,12 @@ class CandidateStage:
         if status == 409 and answer.get( "error" ) == VECTOR_SET_REPLACED:
             raise CandidateError( VECTOR_SET_REPLACED, answer.get( "detail", "" ) )
         if status != 200: raise CandidateError( CANDIDATE_SEARCH_FAILED, f"{answer.get( 'error' )}: {answer.get( 'detail' )}" )
+        if fresh[ "state" ] == "stale":
+            lost  = answer[ "ids_lost" ]
+            fresh = { **fresh, "ids_lost": lost, "note": f"answered from a stale set, {lost} ids lost" }
         ranking = [ i for i in answer[ "ranking" ] if i != exclude_id ][ :K ]
         lists   = { name: { "size": answer[ "list_sizes" ][ name ], "head": answer[ "lists" ][ name ] } for name in sorted( answer[ "lists" ] ) }
         return { "ids": sorted( ranking ), "ranking": ranking, "lists": lists, "manifest_hash": answer[ "manifest_hash" ],
                  "embed_models": { kind: manifest[ "engines" ][ kind ][ "model" ] for kind in ( "code", "prose" ) },
                  "arm": self.arm, "K": K, "widened": False, "stage_key": key, "wiki": len( wiki ), "wiki_ids": wiki,
-                 "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest() }
+                 "ranking_hash": hashlib.sha256( ranking_text.encode( "utf-8" ) ).hexdigest(), "freshness": fresh }

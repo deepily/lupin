@@ -35,7 +35,7 @@ class RankedStage:
 
     def manifest( self ): return { "manifest_hash": MANIFEST }
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None, index_manifest=None ):
         K = self.K if K is None else K
         self.calls.append( { "K": K, "cache_only": cache_only, "wiki_ids": wiki_ids, "exclude_id": exclude_id } )
         if self.fail_wide and K > self.K: raise CandidateError( "CANDIDATE_SEARCH_FAILED", "stand-in failure" )

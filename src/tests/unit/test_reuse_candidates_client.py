@@ -256,3 +256,110 @@ def test_the_purpose_file_is_optional_and_a_missing_one_is_an_empty_mapping( wor
     assert bridge.seen[ 1 ][ 2 ][ "purposes" ] is None
     r2 = make( purposes_path="/nonexistent/purposes.jsonl" ).shortlist( "settings", ENTRIES, "idx-3", PAGES )
     assert r2[ "ids" ]
+
+
+# ── freshen on demand: compare the index with the set's build info before a lookup ──
+
+from cosa.repo.symindex.candidates import freshness as fr
+
+HEADER = { "manifest": { "m.py": [ 1, 2 ] }, "symbols_sha": "sha-1" }
+INDEX  = fr.index_manifest( HEADER )
+
+
+class Refresher:
+    """Counts calls; each call runs `action`, set to what the build would change."""
+
+    def __init__( self, action=None ): self.calls, self.action = 0, action
+    def __call__( self ):
+        self.calls += 1
+        if self.action is not None: self.action()
+
+
+class GhostLoader( Loader ):
+    """A loader whose set holds one id the index lacks."""
+
+    def __call__( self, folder ):
+        loaded     = super().__call__( folder )
+        loaded.ids = [ "py:a", "py:b", "gone::g" ]
+        return loaded
+
+
+def stamp( root, header=None ): fr.write_build_info( root / "vectors", HEADER if header is None else header, "2026-10-18T00:00:00+00:00" )
+
+
+def test_a_set_built_from_this_index_is_fresh_and_nothing_is_refreshed( world ):
+    make, bridge, _, root, *_ = world
+    stamp( root )
+    refresher = Refresher()
+    got = lookup( make( refresher=refresher ), index_manifest=INDEX )
+    assert refresher.calls == 0 and got[ "freshness" ] == { "state": "fresh" }
+    assert all( "skip_lost_ids" not in body for _, _, body, _ in bridge.seen )
+
+
+def test_a_set_behind_the_index_is_refreshed_before_anything_is_sent( world ):
+    make, bridge, _, root, *_ = world
+    stamp( root, { "manifest": { "m.py": [ 9, 9 ] }, "symbols_sha": "old" } )
+    seen_at_call = []
+    refresher    = Refresher( lambda: ( seen_at_call.append( len( bridge.seen ) ), stamp( root ) ) )
+    got = lookup( make( refresher=refresher ), index_manifest=INDEX )
+    assert refresher.calls == 1 and seen_at_call == [ 0 ] and got[ "freshness" ] == { "state": "refreshed" }
+    assert all( "skip_lost_ids" not in body for _, _, body, _ in bridge.seen )
+
+
+def test_a_set_with_no_build_info_counts_as_behind( world ):
+    make, _, _, _, *_ = world
+    refresher = Refresher()
+    got = lookup( make( refresher=refresher ), index_manifest=INDEX )
+    assert refresher.calls == 1 and got[ "freshness" ][ "state" ] == "refreshed"
+
+
+def test_the_manifest_is_read_after_the_refresh_so_the_lookup_uses_the_fresh_set( world ):
+    make, bridge, _, root, manifest, _ = world
+    def rewrite():
+        newer = dict( manifest, rows=4 )
+        newer[ "manifest_hash" ] = vs.manifest_hash( { k: v for k, v in newer.items() if k != "manifest_hash" } )
+        ( root / "vectors" / "manifest.json" ).write_text( json.dumps( newer ), encoding="utf-8" )
+        stamp( root )
+        self_hash.append( newer[ "manifest_hash" ] )
+    self_hash = []
+    try: lookup( make( refresher=Refresher( rewrite ) ), index_manifest=INDEX )
+    except CandidateError: pass                                                        # the fake loader still holds the old hash; only the request body matters
+    assert bridge.seen[ -1 ][ 2 ][ "expect_manifest_hash" ] == self_hash[ 0 ] != manifest[ "manifest_hash" ]
+
+
+@pytest.mark.parametrize( "failure", [ CandidateError( "BUILD_LOCK_HELD", "another build holds it" ), ValueError( "a worktree" ), OSError( "disk" ), RuntimeError( "boom" ) ] )
+def test_a_failed_refresh_answers_from_the_stale_set_and_counts_the_lost_ids( world, monkeypatch, failure ):
+    make, bridge, _, root, manifest, _ = world
+    monkeypatch.setitem( router._held, "search", ResidentSearch( root, GhostLoader( manifest_hash=manifest[ "manifest_hash" ] ) ) )
+    stamp( root, { "manifest": { "m.py": [ 9, 9 ] }, "symbols_sha": "old" } )
+    def fail(): raise failure
+    got = lookup( make( refresher=Refresher( fail ) ), index_manifest=INDEX )
+    fresh = got[ "freshness" ]
+    assert fresh[ "state" ] == "stale" and type( failure ).__name__ in fresh[ "error" ]
+    assert fresh[ "ids_lost" ] == 1 and fresh[ "note" ] == "answered from a stale set, 1 ids lost"
+    assert "gone::g" not in got[ "ranking" ] and all( body[ "skip_lost_ids" ] is True for m, p, body, _ in bridge.seen if p.endswith( "search" ) )
+
+
+def test_a_stale_set_with_nothing_lost_says_zero( world ):
+    make, _, _, root, *_ = world
+    def fail(): raise RuntimeError( "no" )
+    got = lookup( make( refresher=Refresher( fail ) ), index_manifest=INDEX )
+    assert got[ "freshness" ][ "ids_lost" ] == 0 and got[ "freshness" ][ "note" ] == "answered from a stale set, 0 ids lost"
+
+
+def test_a_ghost_id_without_a_failed_refresh_is_still_refused( world, monkeypatch ):
+    make, _, _, root, manifest, _ = world
+    monkeypatch.setitem( router._held, "search", ResidentSearch( root, GhostLoader( manifest_hash=manifest[ "manifest_hash" ] ) ) )
+    stamp( root )
+    with pytest.raises( CandidateError ) as e: lookup( make( refresher=Refresher() ), index_manifest=INDEX )
+    assert e.value.code == rcand.CANDIDATE_SEARCH_FAILED and "VECTOR_IDS_NOT_IN_INDEX" in e.value.detail
+
+
+def test_no_refresher_no_index_manifest_or_a_replay_read_is_unchecked( world ):
+    make, _, _, root, *_ = world
+    refresher = Refresher()
+    assert lookup( make() , index_manifest=INDEX )[ "freshness" ] == { "state": "unchecked" }
+    assert lookup( make( refresher=refresher ) )[ "freshness" ] == { "state": "unchecked" }
+    lookup( make( refresher=refresher ), index_manifest=INDEX )                         # warms the query cache, refreshes once
+    again = refresher.calls
+    assert lookup( make( refresher=refresher ), index_manifest=INDEX, cache_only=True )[ "freshness" ] == { "state": "unchecked" } and refresher.calls == again

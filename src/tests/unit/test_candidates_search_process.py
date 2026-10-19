@@ -197,6 +197,37 @@ class TestIndexAgainstVectors:
         code, body = run_main( request, lambda d: Ghosty() )
         assert code == 2 and body[ "error" ] == search.VECTOR_IDS_NOT_INDEX and "gone::g" in body[ "detail" ]
 
+    def test_skip_lost_ids_drops_ghosts_from_every_list_and_counts_them( self, generation ):
+        class Ghosty( FakeSet ):
+            def __init__( self ):
+                super().__init__()
+                self.ids = [ "py:a", "py:b", "gone::g" ]
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] }, skip_lost_ids=True )
+        code, body = run_main( request, lambda d: Ghosty() )
+        assert code == 0 and body[ "ids_lost" ] == 1
+        assert "gone::g" not in body[ "lists" ][ "vector_prose" ] and body[ "lists" ][ "vector_prose" ] == [ "py:b", "py:a" ]
+        assert len( body[ "scores" ][ "vector_prose" ] ) == 2 and "gone::g" not in body[ "shortlist" ] + body[ "ranking" ]
+
+    def test_skip_lost_ids_with_no_ghost_reports_zero_and_without_the_flag_the_key_is_absent( self, generation ):
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] } )
+        code, body = run_main( request )
+        assert code == 0 and "ids_lost" not in body
+        code, body = run_main( dict( request, skip_lost_ids=True ) )
+        assert code == 0 and body[ "ids_lost" ] == 0
+
+    def test_skip_lost_ids_must_be_a_boolean( self, generation ):
+        code, body = run_main( request_for( generation, skip_lost_ids="yes" ) )
+        assert code == 2 and body[ "error" ] == search.REQUEST_ERROR and "skip_lost_ids" in body[ "detail" ]
+
+    def test_a_false_skip_flag_still_refuses_ghosts( self, generation ):
+        class Ghosty( FakeSet ):
+            def __init__( self ):
+                super().__init__()
+                self.ids = [ "py:a", "py:b", "gone::g" ]
+        request = request_for( generation, vectors_dir="/v", query_vectors={ "prose": [ 0.0, 1.0 ] }, skip_lost_ids=False )
+        code, body = run_main( request, lambda d: Ghosty() )
+        assert code == 2 and body[ "error" ] == search.VECTOR_IDS_NOT_INDEX
+
     def test_index_ids_without_a_vector_are_counted( self, generation ):
         class Short( FakeSet ):
             def __init__( self ):

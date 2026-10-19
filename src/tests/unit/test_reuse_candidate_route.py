@@ -25,18 +25,21 @@ class FakeStage:
 
     arm, K = "B2w", 128
 
-    def __init__( self, ids=( MATH_ID, FEEDS_ID ), manifest_hash=MANIFEST, error=None ):
-        self.ids, self.manifest_hash, self.error, self.calls = list( ids ), manifest_hash, error, []
+    def __init__( self, ids=( MATH_ID, FEEDS_ID ), manifest_hash=MANIFEST, error=None, freshness=None ):
+        self.ids, self.manifest_hash, self.error, self.freshness, self.calls = list( ids ), manifest_hash, error, freshness, []
 
     def manifest( self ): return { "manifest_hash": self.manifest_hash }
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None ):
-        self.calls.append( { "ranking_text": ranking_text, "entries": len( entries ), "exclude_id": exclude_id, "cache_only": cache_only, "wiki_ids": wiki_ids } )
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, index_manifest=None ):
+        self.calls.append( { "ranking_text": ranking_text, "entries": len( entries ), "exclude_id": exclude_id, "cache_only": cache_only, "wiki_ids": wiki_ids,
+                            "index_manifest": index_manifest } )
         if self.error is not None: raise CandidateError( self.error, "stand-in failure" )
         ids = sorted( i for i in self.ids if i != exclude_id )
-        return { "ids": ids, "ranking": ids, "lists": { "code": { "size": len( ids ), "head": ids } }, "manifest_hash": self.manifest_hash,
-                 "embed_models": { "code": "c-model", "prose": "p-model" }, "arm": self.arm, "K": self.K, "widened": False, "stage_key": "k" * 32,
-                 "wiki": 0, "wiki_ids": [] if wiki_ids is None else list( wiki_ids ), "ranking_hash": "r" * 64 }
+        out = { "ids": ids, "ranking": ids, "lists": { "code": { "size": len( ids ), "head": ids } }, "manifest_hash": self.manifest_hash,
+                "embed_models": { "code": "c-model", "prose": "p-model" }, "arm": self.arm, "K": self.K, "widened": False, "stage_key": "k" * 32,
+                "wiki": 0, "wiki_ids": [] if wiki_ids is None else list( wiki_ids ), "ranking_hash": "r" * 64 }
+        if self.freshness is not None: out[ "freshness" ] = self.freshness
+        return out
 
 
 def ctx_with( env, fake, stage, size=10 ):
@@ -268,3 +271,51 @@ def test_a_candidate_stage_block_with_no_ids_is_a_named_corrupt_receipt_not_a_cr
     path.write_text( json.dumps( rec, sort_keys=True ), encoding="utf-8" )
     with pytest.raises( rt.ReuseError, match="RECEIPT_CORRUPT" ): rt.load_receipt( ctx, r[ "receipt_id" ] )
     assert rt.replay_impl( r[ "receipt_id" ], ctx )[ "error" ] == "RECEIPT_CORRUPT"
+
+
+# ── freshen on demand: what the receipt says ──
+
+STALE = { "state": "stale", "error": "RuntimeError: no", "ids_lost": 2, "note": "answered from a stale set, 2 ids lost" }
+
+
+def test_the_stage_is_asked_with_the_index_manifest_of_the_ensured_index( env ):
+    need  = "read an RSS feed [cand-manifest]"
+    stage = FakeStage()
+    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT } ), stage ) )
+    got = stage.calls[ 0 ][ "index_manifest" ]
+    assert isinstance( got, str ) and len( got ) == 64
+
+
+@pytest.mark.parametrize( "fresh", [ STALE, { "state": "refreshed" } ] )
+def test_a_stale_or_refreshed_stage_is_stamped_on_the_receipt( env, fresh ):
+    need = "read an RSS feed [cand-stamp]"
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT } ), FakeStage( freshness=fresh ) ) )
+    assert receipt_of( env, r )[ "candidate_stage" ][ "freshness" ] == fresh
+
+
+@pytest.mark.parametrize( "fresh", [ None, { "state": "fresh" }, { "state": "unchecked" } ] )
+def test_a_fresh_or_unchecked_stage_adds_no_key_to_the_receipt( env, fresh ):
+    need = "read an RSS feed [cand-nokey]"
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT } ), FakeStage( freshness=fresh ) ) )
+    assert "freshness" not in receipt_of( env, r )[ "candidate_stage" ]
+
+
+def test_a_stale_stamp_does_not_move_the_receipt_id_or_break_replay( env ):
+    need = "read an RSS feed [cand-stamp-replay]"
+    ctx  = ctx_with( env, PackedFake( need, { FEEDS_TEXT: HIT } ), FakeStage( freshness=STALE ) )
+    r    = rt.check_exists_impl( need, ctx )
+    assert rt.replay_impl( r[ "receipt_id" ], ctx )[ "status" ] == "ok"
+
+
+def test_the_stage_from_the_environment_refreshes_through_the_incremental_build_with_the_stages_own_inputs( monkeypatch, env ):
+    for key, value in ( ( "LUPIN_REUSE_DATA_DIR", env[ 1 ] ), ( "LUPIN_REUSE_OUT_DIR", env[ 2 ] ), ( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ), ( "LUPIN_REUSE_JEV_TOKEN_CEILING", "1000" ),
+                        ( "LUPIN_REUSE_JEV_RUN_NAME", "cand-refresh" ), ( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", "/vec" ), ( "LUPIN_REUSE_CANDIDATE_QUERY_CACHE_DIR", "/qc" ),
+                        ( "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR", "/pp" ) ):
+        monkeypatch.setenv( key, str( value ) )
+    seen = {}
+    monkeypatch.setattr( rt.cb, "make_job_writer", lambda root, base_url, environ: seen.update( writer=( root, base_url ) ) or "the-writer" )
+    monkeypatch.setattr( rt.cb, "run", lambda root, writer, client, environ=None: seen.update( run=( root, writer, type( client ).__name__, environ ) ) or { "rows": 1 } )
+    stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
+    assert stage._refresher() == { "rows": 1 }
+    assert seen[ "writer" ][ 0 ] == env[ 0 ] and seen[ "writer" ][ 1 ] == stage.base_url
+    assert seen[ "run" ][ :3 ] == ( env[ 0 ], "the-writer", "EndpointClient" )

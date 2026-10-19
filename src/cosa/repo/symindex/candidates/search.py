@@ -44,6 +44,7 @@ def validate_request( request, with_index=True ):
         - returns None when need is a string, K a positive int, index_dir a string (index_dir is not required when with_index is False)
         - checks fusion, when present, holds k and depth as positive ints of at most FUSION_MAX and head as an int from 0 to depth
         - checks purposes, vectors_dir and wiki when present are a string, a string and a list of strings
+        - checks skip_lost_ids, when present, is a boolean
         - checks query_vectors is a non-empty dict of lists of numbers, each finite and within float32 range, when vectors_dir is set
         - compares each value with the float32 limit directly, so a 400-digit integer is refused and never converted
 
@@ -57,6 +58,7 @@ def validate_request( request, with_index=True ):
     if not is_count( request[ "K" ], 1 ): bad( "K is not a positive integer" )
     if with_index and not isinstance( request[ "index_dir" ], str ): bad( "index_dir is not a string" )
     if request.get( "purposes" ) is not None and not isinstance( request[ "purposes" ], str ): bad( "purposes is not a string" )
+    if "skip_lost_ids" in request and not isinstance( request[ "skip_lost_ids" ], bool ): bad( "skip_lost_ids is not a boolean" )
     wiki = request.get( "wiki" )
     if wiki is not None and not ( isinstance( wiki, list ) and all( isinstance( w, str ) for w in wiki ) ): bad( "wiki is not a list of strings" )
     if "fusion" in request:
@@ -166,15 +168,17 @@ def answer_for_stage( request, stage, load_vectors ):
         - manifest_hash is the vector set's, or None when no vectors were asked for
         - index_ids_without_vectors counts index entries the set has no row for, or is None without vectors
         - the shortlist holds at most K ids
+        - with skip_lost_ids true, vector ids the index lacks are left out of every cosine list and counted in ids_lost,
+          and the answer carries ids_lost; without it such an id is refused
 
     Raises:
         - CandidateError BAD_SEARCH_REQUEST for an unknown matrix or a wrong vector width
         - CandidateError VECTOR_SET_UNAVAILABLE when the loader raises an OSError
         - CandidateError VECTOR_SET_CORRUPT when a matrix has a different row count from the ids
-        - CandidateError VECTOR_IDS_NOT_IN_INDEX when the set holds an id the index lacks
+        - CandidateError VECTOR_IDS_NOT_IN_INDEX when the set holds an id the index lacks and skip_lost_ids is not true
         - CandidateError HEAD_EXCEEDS_LIMIT when the heads of the lists do not fit in K
     """
-    extra, scores, manifest_hash, without_vectors = {}, {}, None, None
+    extra, scores, manifest_hash, without_vectors, lost = {}, {}, None, None, []
     if request.get( "vectors_dir" ) is not None:
         try:
             vectors = load_vectors( request[ "vectors_dir" ] )
@@ -183,7 +187,8 @@ def answer_for_stage( request, stage, load_vectors ):
         manifest_hash = vectors.manifest_hash
         index_ids     = set( stage.ids )
         ghosts        = sorted( i for i in vectors.ids if i not in index_ids )
-        if ghosts: raise CandidateError( VECTOR_IDS_NOT_INDEX, f"{len( ghosts )} vector ids are not in the index, first {ghosts[ :3 ]}" )
+        if ghosts and request.get( "skip_lost_ids" ) is not True: raise CandidateError( VECTOR_IDS_NOT_INDEX, f"{len( ghosts )} vector ids are not in the index, first {ghosts[ :3 ]}" )
+        lost            = ghosts
         without_vectors = len( index_ids.difference( vectors.ids ) )
         for name in sorted( request[ "query_vectors" ] ):
             if name not in vectors.matrices: raise CandidateError( REQUEST_ERROR, f"the vector set has no matrix {name}" )
@@ -192,13 +197,14 @@ def answer_for_stage( request, stage, load_vectors ):
                 raise CandidateError( VECTOR_SET_CORRUPT, f"matrix {name} has {rows} rows for {len( vectors.ids )} ids" )
             if len( request[ "query_vectors" ][ name ] ) != width:
                 raise CandidateError( REQUEST_ERROR, f"query vector {name} has {len( request[ 'query_vectors' ][ name ] )} values, the matrix has {width}" )
-            pairs          = cosine_ranked( vectors.ids, vectors.matrices[ name ], request[ "query_vectors" ][ name ] )
+            pairs          = [ p for p in cosine_ranked( vectors.ids, vectors.matrices[ name ], request[ "query_vectors" ][ name ] ) if p[ 0 ] in index_ids ]
             extra[ f"vector_{name}" ]  = [ doc_id for doc_id, _ in pairs ]
             scores[ f"vector_{name}" ] = [ score for _, score in pairs ]
     if request.get( "wiki" ): extra[ "wiki" ] = list( request[ "wiki" ] )
     result = cs.shortlist( request[ "need" ], stage, request[ "K" ], extra )
     result[ "scores" ].update( scores )
     result.update( { "K": request[ "K" ], "manifest_hash": manifest_hash, "bm25": stage.manifest(), "index_ids_without_vectors": without_vectors } )
+    if request.get( "skip_lost_ids" ) is True: result[ "ids_lost" ] = len( lost )
     return result
 
 
