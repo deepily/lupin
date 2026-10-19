@@ -382,18 +382,41 @@ def stratified_sample(
 # Per-request field accessors — one seam each, so a contract-field rename is a
 # single edit rather than a scatter of `.get()` calls across the metrics.
 # ---------------------------------------------------------------------------
-def response_path( record: Dict[ str, Any ] ) -> Optional[ str ]:
-    """The `path` field of a record's response, or None when the record is not ok."""
+def _ok_field( record: Dict[ str, Any ], key: str ) -> Optional[ Any ]:
+    """
+    Return payload[ key ] for an ok record, or None when the record is not ok.
+
+    Requires:
+        - record carries "ok" and, when ok, a dict "payload"
+    """
     if not record[ "ok" ]:
         return None
-    return record[ "payload" ].get( "path" )
+    return record[ "payload" ].get( key )
+
+
+def _reported_field( record: Dict[ str, Any ], key: str ) -> Optional[ Any ]:
+    """
+    Return payload[ key ] for any 200 response, ok or errored, else None.
+
+    Gated on the HTTP status rather than on `ok`, so an errored record can still be read.
+
+    Ensures:
+        - returns None for a non-200 status_code or a payload that is not a dict
+    """
+    if record.get( "status_code" ) != 200:
+        return None
+    payload = record.get( "payload" )
+    return payload.get( key ) if isinstance( payload, dict ) else None
+
+
+def response_path( record: Dict[ str, Any ] ) -> Optional[ str ]:
+    """The `path` field of a record's response, or None when the record is not ok."""
+    return _ok_field( record, "path" )
 
 
 def response_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """The `route_reason` field of a record's response, or None when the record is not ok."""
-    if not record[ "ok" ]:
-        return None
-    return record[ "payload" ].get( "route_reason" )
+    return _ok_field( record, "route_reason" )
 
 
 def is_receptionist_degrade( record: Dict[ str, Any ] ) -> bool:
@@ -450,10 +473,7 @@ def reported_route_reason( record: Dict[ str, Any ] ) -> Optional[ str ]:
           instrument refused to read its own evidence at two independent layers, the denominator and this
           accessor, and either one alone was enough to silence it.
     """
-    if record.get( "status_code" ) != 200:
-        return None
-    payload = record.get( "payload" )
-    return payload.get( "route_reason" ) if isinstance( payload, dict ) else None
+    return _reported_field( record, "route_reason" )
 
 
 def response_status( record: Dict[ str, Any ] ) -> Optional[ str ]:
@@ -464,10 +484,7 @@ def response_status( record: Dict[ str, Any ] ) -> Optional[ str ]:
     answered request. Returns None for a non-200 or an unparseable body. Nothing reported a status in
     either case, and the caller must not read that silence as a terminal outcome.
     """
-    if record.get( "status_code" ) != 200:
-        return None
-    payload = record.get( "payload" )
-    return payload.get( "status" ) if isinstance( payload, dict ) else None
+    return _reported_field( record, "status" )
 
 
 def is_outcome_observed( record: Dict[ str, Any ] ) -> bool:
@@ -567,9 +584,7 @@ def matched_command( record: Dict[ str, Any ] ) -> Optional[ str ]:
     Seam for the would-be-wrong oracle. On the replay path no router runs, so `command` reports the matched
     snapshot's routing command. If the server reports it under a different field, this is the one line to change.
     """
-    if not record[ "ok" ]:
-        return None
-    return record[ "payload" ].get( "command" )
+    return _ok_field( record, "command" )
 
 
 def first_useful_ms( record: Dict[ str, Any ] ) -> Optional[ float ]:
@@ -583,9 +598,7 @@ def first_useful_ms( record: Dict[ str, Any ] ) -> Optional[ float ]:
 
 def response_trace_id( record: Dict[ str, Any ] ) -> Optional[ str ]:
     """The `trace_id` of a record's response, or None when the record is not ok."""
-    if not record[ "ok" ]:
-        return None
-    return record[ "payload" ].get( "trace_id" )
+    return _ok_field( record, "trace_id" )
 
 
 # ---------------------------------------------------------------------------
