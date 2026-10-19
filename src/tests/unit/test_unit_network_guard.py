@@ -71,7 +71,11 @@ def _run_pytest( target, mode, extra_env=None ):
         [ sys.executable, "-m", "pytest", str( target ), "-q", "-p", "no:cacheprovider" ],
         capture_output=True, text=True, timeout=180, env=env, cwd=PROJECT_ROOT,
     )
-    return proc.returncode, proc.stdout + proc.stderr
+    output = proc.stdout + proc.stderr
+    # pytest shows a failing test's captured stdout, so a red run carries the inner run's whole
+    # output and the exit code, not just the one assertion that tripped (row 02c04fc2).
+    print( f"[inner pytest, mode={mode}] exit code {proc.returncode}\n{output}" )
+    return proc.returncode, output
 
 
 @pytest.fixture
