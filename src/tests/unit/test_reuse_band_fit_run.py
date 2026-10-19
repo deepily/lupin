@@ -29,11 +29,13 @@ SHORTLIST = IDS[ :40 ]
 class Jittery( rr.StandIn ):
     """Answers each request with the stand-in's numbers moved by a small, changing step."""
 
-    steps, lock = itertools.count(), threading.Lock()
+    steps, lock, posts = itertools.count(), threading.Lock(), 0
 
     def post_with_meta( self, body ):
         response, meta = super().post_with_meta( body )
-        with Jittery.lock: n = next( Jittery.steps )
+        with Jittery.lock:
+            n = next( Jittery.steps )
+            Jittery.posts += 1
         delta = 0.02 * ( n % 3 - 1 )
         for answer in response[ "answers" ].values():
             p = answer[ "probabilities" ]
@@ -88,6 +90,7 @@ class Setup:
 @pytest.fixture
 def setup( tmp_path, monkeypatch ):
     monkeypatch.setattr( rr, "StandIn", Jittery )
+    Jittery.posts = 0
     return Setup( tmp_path )
 
 
@@ -462,12 +465,37 @@ def test_a_stage_on_another_vector_set_than_the_pinned_one_is_refused_before_any
     assert f"the vector set is {'c' * 64}, the run is pinned to {'b' * 64}" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()
 
 
-def test_a_vector_set_replaced_mid_run_stops_it_with_the_error_recorded( setup, capsys ):
-    stage = Swapping( after=1 )                                    # the lookup's shortlist is the first; the next ask finds another set
+def test_a_vector_set_replaced_between_the_lookup_and_the_first_repeat_stops_the_run_with_no_send_after_it( setup, capsys ):
+    stage = Swapping( after=1 )                                    # the lookup's shortlist is the first; the repeat's own check finds another set
     assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ), stage_factory=lambda root: stage ) == 2
     assert "pinned to" in capsys.readouterr().err
     record = setup.result( "canary" )
-    assert record[ "state" ] == "error" and [ s[ "status" ] for s in record[ "searches" ] ][ :1 ] == [ "complete" ] and record[ "searches" ][ -1 ][ "status" ] == "error" and record[ "searches" ][ -1 ][ "causes" ] == [ "ERROR:DriverRefused" ]
+    assert [ ( s[ "member" ], s[ "question" ], s[ "status" ], s[ "causes" ] ) for s in record[ "searches" ] ] == [ ( "n00", "lookup", "complete", [] ), ( "n00", "r1", "error", [ "ERROR:DriverRefused" ] ) ]
+    lookup, repeat = record[ "searches" ]
+    assert record[ "state" ] == "error" and lookup[ "tokens" ] > 0 and repeat[ "tokens" ] == 0 and repeat[ "requests" ] == 0
+    assert record[ "totals" ][ "spent_tokens" ] == lookup[ "tokens" ]                       # nothing was spent after the swap
+
+
+def test_a_vector_set_replaced_before_the_lookup_stops_the_run_before_the_lookup_sends_anything( setup, capsys ):
+    class SwapAtRead( FakeStage ):
+        reads = 0
+        def manifest( self ):
+            self.reads += 1
+            return { "manifest_hash": self.manifest_hash if self.reads <= 2 else "c" * 64 }       # the start check and the stamp read it; the lookup's check is the third
+
+    stage = SwapAtRead()
+    assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ), stage_factory=lambda root: stage ) == 2
+    assert "pinned to" in capsys.readouterr().err
+    record = setup.result( "canary" )
+    assert [ ( s[ "question" ], s[ "status" ], s[ "causes" ] ) for s in record[ "searches" ] ] == [ ( "lookup", "error", [ "ERROR:DriverRefused" ] ) ]
+    assert Jittery.posts == 0 and record[ "totals" ][ "spent_tokens" ] == 0
+
+
+@pytest.mark.parametrize( "command", [ "canary", "run" ] )
+def test_a_run_without_the_manifest_hash_flag_is_refused_by_the_parser( setup, command ):
+    args = [ a for a in setup.args( command, "--ceiling", "1500000" ) if a not in ( "--manifest-hash", "b" * 64 ) ]
+    with pytest.raises( SystemExit ): bf.cli( args, stage_factory=lambda root: FakeStage() )
+    assert not setup.data.exists()
 
 
 def test_check_manifest_passes_when_nothing_is_pinned():
