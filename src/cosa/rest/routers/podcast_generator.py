@@ -39,7 +39,7 @@ What a caller sends instead:
 
 from fastapi import APIRouter
 
-from cosa.rest.routers._retired_doors import gone, tombstone_description
+from cosa.rest.routers._retired_doors import check_tombstone_router, gone, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -97,8 +97,6 @@ def quick_smoke_test():
         print( "  PASS" )
 
         print( "Testing router configuration..." )
-        assert router.prefix == "/api/podcast-generator"
-        assert "podcast-generator" in router.tags
         print( f"  Prefix: {router.prefix}" )
         print( "  PASS" )
 
@@ -107,10 +105,8 @@ def quick_smoke_test():
         # twice-prefixed and the door would answer 404 — the one answer a tombstone must
         # never give.
         print( "Testing the retired route..." )
-        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_ASK
-        paths = { route.path for route in router.routes }
-        assert paths == { "/api/podcast-generator/submit" }, f"mounted at {paths}"
-        assert RETIRED_DOORS[ "/api/podcast-generator/submit" ] == V2_ASK
+        from cosa.rest.routers._retired_doors import V2_ASK
+        check_tombstone_router( router, "/api/podcast-generator", "podcast-generator", "/api/podcast-generator/submit", V2_ASK )
         print( "  PASS" )
 
         print( "\nAll Podcast Generator Router smoke tests passed" )
