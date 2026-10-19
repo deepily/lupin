@@ -206,6 +206,39 @@ class AgentBase( RunnableCode, abc.ABC ):
         """
         pass
     
+    @staticmethod
+    def _restore_from_data( agent_cls, data: dict, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':
+        """
+        Build an agent from a serialized state dict and copy the remaining saved fields onto it.
+
+        Requires:
+            - data is the dict loaded from a serialized JSON state file
+            - every key in positional_keys and keyword_keys is present in data
+            - agent_cls takes the positional_keys values in order, then the keyword_keys as keywords
+
+        Ensures:
+            - Returns an agent_cls instance built from those keys
+            - Every other key in data is set as an attribute on it, overwriting the constructor's value
+            - Prints one line for each key the constructor already used
+
+        Raises:
+            - KeyError if a constructor key is missing from data
+        """
+        restored_agent = agent_cls(
+            *[ data[ key ] for key in positional_keys ],
+            **{ key: data[ key ] for key in keyword_keys }
+        )
+
+        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
+        keys_to_skip = [ *positional_keys, *keyword_keys ]
+        for k, v in data.items():
+            if k not in keys_to_skip:
+                setattr( restored_agent, k, v )
+            else:
+                print( f"Skipping key [{k}], it's already been set" )
+
+        return restored_agent
+
     def serialize_to_json( self, subtopic: Optional[str]=None ) -> None:
         """
         Serialize agent state to a JSON file for persistence.

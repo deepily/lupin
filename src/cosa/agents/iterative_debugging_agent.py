@@ -337,20 +337,7 @@ class IterativeDebuggingAgent( AgentBase ):
         with open( file_path, 'r' ) as file:
             data = json.load( file )
         
-        # Create a new object instance with the parsed data
-        restored_agent = IterativeDebuggingAgent(
-            data[ "error_message" ], data[ "path_to_code" ],
-            debug=data[ "debug" ], verbose=data[ "verbose" ]
-        )
-        # Set the remaining attributes from the parsed data, skipping the ones that we've already set
-        keys_to_skip = [ "error_message", "path_to_code", "debug", "verbose" ]
-        for k, v in data.items():
-            if k not in keys_to_skip:
-                setattr( restored_agent, k, v )
-            else:
-                print( f"Skipping key [{k}], it's already been set" )
-        
-        return restored_agent
+        return AgentBase._restore_from_data( IterativeDebuggingAgent, data, ( "error_message", "path_to_code" ), ( "debug", "verbose" ) )
     
     def is_code_runnable( self ) -> bool:
         """
