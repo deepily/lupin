@@ -41,10 +41,9 @@ Example:
 """
 
 import argparse
-import asyncio
-import sys
 
 import cosa.utils.util as cu
+from cosa.agents.utils.chained_cli import add_deep_research_arguments, add_mode_arguments, run_chained_cli
 
 # User-visible args: the canonical list of args that end users should see
 # and interact with. Engineering params (models, debug, etc.) are excluded.
@@ -96,56 +95,7 @@ Mode Options:
 """
     )
 
-    # Required arguments
-    parser.add_argument(
-        "--query", "-q",
-        type     = str,
-        required = True,
-        help     = "Research topic/question for Deep Research"
-    )
-
-    parser.add_argument(
-        "--user-email", "-u",
-        type     = str,
-        required = True,
-        help     = "User email for output directories (multi-tenancy)"
-    )
-
-    # Deep Research options
-    parser.add_argument(
-        "--budget", "-b",
-        type    = float,
-        default = None,
-        help    = "Maximum budget in USD for Deep Research (default: unlimited)"
-    )
-
-    parser.add_argument(
-        "--lead-model",
-        type    = str,
-        default = None,
-        help    = "Model for DR lead agent (default: claude-opus-4-6)"
-    )
-
-    parser.add_argument(
-        "--no-confirm",
-        action  = "store_true",
-        help    = "Skip confirmation prompts in Deep Research (auto-approve)"
-    )
-
-    parser.add_argument(
-        "--audience",
-        type    = str,
-        choices = [ "beginner", "general", "expert", "academic" ],
-        default = None,
-        help    = "Target audience level (default: academic from config)"
-    )
-
-    parser.add_argument(
-        "--audience-context",
-        type    = str,
-        default = None,
-        help    = "Custom audience description (e.g., 'AI architect familiar with LLMs')"
-    )
+    add_deep_research_arguments( parser )
 
     # Presentation Generator options
     parser.add_argument(
@@ -171,38 +121,7 @@ Mode Options:
         help    = "Presentation theme name (default: 'default' from config)"
     )
 
-    # Mode options
-    parser.add_argument(
-        "--cli-mode",
-        action  = "store_true",
-        help    = "Force CLI text mode (default: voice-driven)"
-    )
-
-    parser.add_argument(
-        "--dry-run",
-        action  = "store_true",
-        help    = "Show plan without executing"
-    )
-
-    # Debug options
-    parser.add_argument(
-        "--debug", "-d",
-        action  = "store_true",
-        help    = "Enable debug output"
-    )
-
-    parser.add_argument(
-        "--verbose", "-v",
-        action  = "store_true",
-        help    = "Enable verbose output"
-    )
-
-    parser.add_argument(
-        "--user-visible-args",
-        action  = "store_true",
-        default = False,
-        help    = "Print user-visible argument names as JSON and exit"
-    )
+    add_mode_arguments( parser )
 
     return parser.parse_args()
 
@@ -353,22 +272,7 @@ async def run_pipeline( args: argparse.Namespace ) -> int:
 
 def main():
     """Main entry point."""
-    # Handle --user-visible-args early (before argparse enforces required args)
-    if "--user-visible-args" in sys.argv:
-        import json
-        print( json.dumps( USER_VISIBLE_ARGS ) )
-        sys.exit( 0 )
-
-    args = parse_args()
-
-    # Handle dry run
-    if args.dry_run:
-        show_dry_run( args )
-        sys.exit( 0 )
-
-    # Run the pipeline
-    exit_code = asyncio.run( run_pipeline( args ) )
-    sys.exit( exit_code )
+    run_chained_cli( parse_args, show_dry_run, run_pipeline, USER_VISIBLE_ARGS )
 
 
 if __name__ == "__main__":
