@@ -49,6 +49,40 @@ def remove_xml_escapes( xml_string: str ) -> str:
     return xml_string.replace( "&gt;", ">" ).replace( "&lt;", "<" ).replace( "&amp;", "&" )
 
 
+def extract_tagged_xml( raw_response: str, tag: str ) -> str:
+    """
+    Extract the <tag>...</tag> block from raw LLM response text.
+
+    Handles clean XML, XML wrapped in markdown code fences, and XML with
+    preamble or explanation text before or after it.
+
+    Requires:
+        - raw_response is a string (may contain noise around the XML), or None
+        - tag is the element name, with no angle brackets
+
+    Ensures:
+        - Returns the first <tag>...</tag> block, tags included
+
+    Raises:
+        - ValueError if raw_response is empty or blank
+        - ValueError if no <tag>...</tag> block is found
+    """
+    if not raw_response or not raw_response.strip():
+        raise ValueError( "Empty response from LLM" )
+
+    text = raw_response.strip()
+
+    # Remove markdown code fences if present
+    text = re.sub( r"```(?:xml)?\s*", "", text )
+    text = re.sub( r"```\s*$", "", text, flags=re.MULTILINE )
+
+    match = re.search( rf"<{tag}\s*>.*?</{tag}>", text, re.DOTALL )
+    if match:
+        return match.group( 0 )
+
+    raise ValueError( f"No <{tag}>...</{tag}> block found in LLM response. Response starts with: {raw_response[ :100 ]}" )
+
+
 class XMLParsingError( Exception ):
     """
     Custom exception for XML parsing errors.

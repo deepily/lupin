@@ -11,8 +11,7 @@ Functions:
     extract_calc_intent_xml: Regex extracts <calc_intent>...</calc_intent> from raw LLM response
 """
 
-import re
-
+from cosa.agents.io_models.utils.util_xml_pydantic import extract_tagged_xml
 from cosa.agents.calculator.xml_models import CalcIntent
 from cosa.agents.calculator import calc_operations
 
@@ -262,21 +261,7 @@ def extract_calc_intent_xml( raw_response ):
         - Returns the <calc_intent>...</calc_intent> XML string if found
         - Raises ValueError if no calc_intent XML block is found
     """
-    if not raw_response or not raw_response.strip():
-        raise ValueError( "Empty response from LLM" )
-
-    text = raw_response.strip()
-
-    # Remove markdown code fences if present
-    text = re.sub( r"```(?:xml)?\s*", "", text )
-    text = re.sub( r"```\s*$", "", text, flags=re.MULTILINE )
-
-    # Extract <calc_intent>...</calc_intent> block
-    match = re.search( r"<calc_intent\s*>.*?</calc_intent>", text, re.DOTALL )
-    if match:
-        return match.group( 0 )
-
-    raise ValueError( f"No <calc_intent>...</calc_intent> block found in LLM response. Response starts with: {raw_response[ :100 ]}" )
+    return extract_tagged_xml( raw_response, "calc_intent" )
 
 
 def quick_smoke_test():
