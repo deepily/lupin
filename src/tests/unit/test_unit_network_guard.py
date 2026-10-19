@@ -380,6 +380,8 @@ def test_a_connect_to_the_wildcard_address_reaches_this_host_so_it_counts_as_loo
 @pytest.mark.parametrize( "address, local", [
     ( ( "8.8.8.8", 53 ), False ),
     ( ( "10.0.0.5", 80 ), False ),
+    ( ( "8.127.0.1", 80 ), False ),
+    ( ( "1127.0.0.1", 80 ), False ),
     ( ( "127.1.2.3", 80 ), True ),
     ( "/tmp/a.sock", True ),
     ( ( ), True ),
