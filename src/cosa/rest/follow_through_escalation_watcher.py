@@ -91,6 +91,8 @@ class FollowThroughEscalationWatcher( StoppableDaemonMixin ):
     Enabled means the INI flag `follow through escalation enabled` is True.
     """
 
+    THREAD_NAME = "FollowThroughEscalationWatcher"
+
     def __init__(
         self,
         config_mgr,
@@ -315,19 +317,3 @@ class FollowThroughEscalationWatcher( StoppableDaemonMixin ):
             except Exception as e:
                 du.print_banner( f"Follow-through escalation watcher loop caught exception (continuing): {e!r}", prepend_nl=True )
             self._stop_event.wait( timeout=self._tick_seconds() )
-
-    def start( self ) -> bool:
-        """
-        Spawn the daemon thread only if the flag is enabled and none is running.
-
-        Returns True if a thread was started, else False (the no-op rollout gate:
-        a disabled watcher never spawns).
-        """
-        if not self._enabled():
-            return False
-        if self._thread is not None and self._thread.is_alive():
-            return False
-        self._stop_event.clear()
-        self._thread = threading.Thread( target=self._loop, daemon=True, name="FollowThroughEscalationWatcher" )
-        self._thread.start()
-        return True

@@ -43,6 +43,8 @@ class TaskChaseConsumer( StoppableDaemonMixin ):
     consumer is inert unless `task store chase enabled` is True.
     """
 
+    THREAD_NAME = "TaskChaseConsumer"
+
     def __init__(
         self,
         config_mgr,
@@ -165,19 +167,3 @@ class TaskChaseConsumer( StoppableDaemonMixin ):
             except Exception as e:
                 du.print_banner( f"Task-chase consumer loop caught exception (continuing): {e!r}", prepend_nl=True )
             self._stop_event.wait( timeout=self._interval_seconds() )
-
-    def start( self ) -> bool:
-        """
-        Spawn the daemon thread, only if the flag is enabled and none is running.
-
-        Returns True if a thread was started, else False. A disabled consumer never
-        spawns, which is the no-op rollout gate.
-        """
-        if not self._enabled():
-            return False
-        if self._thread is not None and self._thread.is_alive():
-            return False
-        self._stop_event.clear()
-        self._thread = threading.Thread( target=self._loop, daemon=True, name="TaskChaseConsumer" )
-        self._thread.start()
-        return True
