@@ -523,6 +523,48 @@ class AgentBase( RunnableCode, abc.ABC ):
         return self.answer_conversational
 
 
+def run_agent_smoke( agent_cls, question: str, label: str, error_context: str ) -> None:
+    """
+    Walk one agent through prompt, code and formatter on one question, printing each step.
+
+    Requires:
+        - agent_cls takes question, debug, verbose and auto_debug keyword arguments
+        - label names the agent in the banner and the summary lines
+        - error_context completes "Error during ..." when a step raises
+
+    Ensures:
+        - Prints a banner, then one line per completed step
+        - Catches any exception, prints it, and still prints the closing line
+        - Never raises
+    """
+    du.print_banner( f"{label} Smoke Test", prepend_nl=True )
+
+    try:
+        print( f"Testing question: '{question}'" )
+        agent = agent_cls( question=question, debug=True, verbose=False, auto_debug=False )
+        print( f"✓ {label} created successfully" )
+
+        # Run through the complete agent workflow
+        print( "Running prompt..." )
+        agent.run_prompt()
+        print( "✓ Prompt execution completed" )
+
+        print( "Running code..." )
+        agent.run_code()
+        print( "✓ Code execution completed" )
+
+        print( "Running formatter..." )
+        agent.run_formatter()
+        print( "✓ Formatter execution completed" )
+
+        print( f"✓ Final response: {agent.answer_conversational}" )
+
+    except Exception as e:
+        print( f"✗ Error during {error_context}: {e}" )
+
+    print( f"\n✓ {label} smoke test completed" )
+
+
 def quick_smoke_test():
     """
     Critical smoke test for AgentBase, the foundation functionality of all v010 agents.

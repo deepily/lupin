@@ -1,4 +1,4 @@
-from cosa.agents.agent_base import AgentBase
+from cosa.agents.agent_base import AgentBase, run_agent_smoke
 
 class DateAndTimeAgent( AgentBase ):
     """
@@ -57,38 +57,7 @@ class DateAndTimeAgent( AgentBase ):
     
 def quick_smoke_test():
     """Quick smoke test to validate DateAndTimeAgent functionality."""
-    import cosa.utils.util as du
-    
-    du.print_banner( "DateAndTimeAgent Smoke Test", prepend_nl=True )
-    
-    # Test with a single question for completion
-    question = "What time is it in Washington DC?"
-    
-    try:
-        print( f"Testing question: '{question}'" )
-        date_agent = DateAndTimeAgent( question=question, debug=True, verbose=False, auto_debug=False )
-        print( "✓ DateAndTimeAgent created successfully" )
-        
-        # Run through the complete agent workflow
-        print( "Running prompt..." )
-        date_agent.run_prompt()
-        print( "✓ Prompt execution completed" )
-        
-        print( "Running code..." )
-        date_agent.run_code()
-        print( "✓ Code execution completed" )
-        
-        print( "Running formatter..." )
-        date_agent.run_formatter()
-        print( "✓ Formatter execution completed" )
-        
-        print( f"✓ Final response: {date_agent.answer_conversational}" )
-        
-    except Exception as e:
-        print( f"✗ Error during agent execution: {e}" )
-    
-    print( "\n✓ DateAndTimeAgent smoke test completed" )
-
+    run_agent_smoke( DateAndTimeAgent, "What time is it in Washington DC?", "DateAndTimeAgent", "agent execution" )
 
 if __name__ == "__main__":
     quick_smoke_test()
