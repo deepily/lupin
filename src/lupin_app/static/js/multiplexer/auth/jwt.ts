@@ -77,14 +77,21 @@ export function jwtExpiryMs( token: string ): number | null {
   return claims.exp * 1000;
 }
 
-// Email claim, or null if absent/empty/malformed.
-/** The token's `email` claim, or null when it is missing, empty or the token is malformed. */
-/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function jwtEmail( token: string ): string | null {
+/**
+ * A non-empty string claim, or null when it is missing, empty, or not a string.
+ */
+function stringClaim( token: string, key: "email" | "sub" ): string | null {
   const claims = decodeJwtClaims( token );
   if ( claims === null ) return null;
-  if ( typeof claims.email !== "string" || claims.email === "" ) return null;
-  return claims.email;
+  const value = claims[ key ];
+  if ( typeof value !== "string" || value === "" ) return null;
+  return value;
+}
+
+// Email claim, or null if absent/empty/malformed.
+/** The token's `email` claim, or null when it is missing, empty or the token is malformed. */
+export function jwtEmail( token: string ): string | null {
+  return stringClaim( token, "email" );
 }
 
 // Role strings from the `roles` claim; [] if absent, not an array, or malformed.
@@ -112,8 +119,5 @@ export function jwtRoles( token: string ): string[] {
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function jwtSub( token: string ): string | null {
-  const claims = decodeJwtClaims( token );
-  if ( claims === null ) return null;
-  if ( typeof claims.sub !== "string" || claims.sub === "" ) return null;
-  return claims.sub;
+  return stringClaim( token, "sub" );
 }

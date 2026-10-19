@@ -116,3 +116,14 @@ test( "jwtSub returns null when claims cannot be decoded or sub is missing, empt
   assert.equal( jwtSub( jwtWith( { sub: "" } ) ), null );
   assert.equal( jwtSub( jwtWith( { sub: 42 } ) ), null );
 } );
+
+test( "jwtEmail and jwtSub each read only their own claim when both are present", () => {
+  const token = jwtWith( { sub: "user-id-1", email: "who@lupin.ai" } );
+  assert.equal( jwtEmail( token ), "who@lupin.ai" );
+  assert.equal( jwtSub( token ), "user-id-1" );
+});
+
+test( "jwtEmail and jwtSub return null for a claim set that holds only the other one", () => {
+  assert.equal( jwtEmail( jwtWith( { sub: "user-id-1" } ) ), null );
+  assert.equal( jwtSub( jwtWith( { email: "who@lupin.ai" } ) ), null );
+});
