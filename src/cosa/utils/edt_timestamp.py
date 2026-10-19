@@ -110,9 +110,13 @@ def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Opt
     tz, error = resolve_tz( tz_name )
     # The stamp keeps its shape, because is_already_stamped and split_leading_stamp parse it.
     # So the UTC fallback is named on stderr, once per bad name.
-    if error is not None and tz_name not in _WARNED_TZ_NAMES:
-        _WARNED_TZ_NAMES.add( tz_name )
-        print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
+    # Keyed on repr, because a caller can pass an unhashable value and this function never raises.
+    if error is not None and repr( tz_name ) not in _WARNED_TZ_NAMES:
+        _WARNED_TZ_NAMES.add( repr( tz_name ) )
+        try:
+            print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
+        except ( OSError, ValueError ):
+            pass   # a closed or broken stderr must not cost the caller its stamp
     return f"[{format_outreach_ts( dt, tz )}]"
 
 

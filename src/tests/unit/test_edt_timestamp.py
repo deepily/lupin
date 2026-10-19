@@ -17,6 +17,8 @@ import os
 import re
 import sys
 
+import pytest
+
 # Bootstrap
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
@@ -101,6 +103,31 @@ def test_a_bad_timezone_name_is_reported_once_on_stderr_and_not_in_the_stamp( mo
     assert len( [ l for l in lines if "Not/AZone" in l ] ) == 1, "the same bad name was reported more than once"
     assert len( [ l for l in lines if "Also/Bad" in l ] )  == 1, "a second bad name was not reported"
     assert "rendering UTC" in err
+
+
+@pytest.mark.parametrize( "bad_name", [ [ "America/New_York" ], { "tz": 1 }, 7 ] )
+def test_an_unhashable_or_non_string_timezone_name_still_never_raises( monkeypatch, capsys, bad_name ):
+    """A caller can hand over any value; the warned-names set must not be where it breaks."""
+    import cosa.utils.edt_timestamp as edt
+    monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
+    when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
+
+    assert format_edt_timestamp( when, tz_name=bad_name ) == "[2026.06.24 at 18:44:09]"
+    assert format_edt_timestamp( when, tz_name=bad_name ) == "[2026.06.24 at 18:44:09]"
+    assert len( capsys.readouterr().err.splitlines() ) == 1, "reported once per value"
+
+
+def test_a_closed_stderr_does_not_break_the_stamp( monkeypatch ):
+    import cosa.utils.edt_timestamp as edt
+    monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
+
+    class _Closed:
+        def write( self, text ): raise ValueError( "I/O operation on closed file." )
+        def flush( self ): raise ValueError( "I/O operation on closed file." )
+
+    monkeypatch.setattr( edt.sys, "stderr", _Closed() )
+    when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
+    assert format_edt_timestamp( when, tz_name="Not/AZone" ) == "[2026.06.24 at 18:44:09]"
 
 
 def test_a_good_timezone_name_prints_nothing( monkeypatch, capsys ):
