@@ -19,7 +19,7 @@ Two helpers for reading a unit run: one catches a test that dials out, the other
 - `unit_network_guard` holds the outbound-dial guard state in one module.
 - `arm()` patches `socket.connect` and `connect_ex` once. It returns True only when it did.
 - `set_current_test( node_id, exempt )` records the running test. `network_guard( real )` wraps one socket method.
-- `is_loopback` treats non-tuple addresses, `127.*`, `::1`, `localhost`, `0.0.0.0` and `""` as local.
+- `is_loopback` treats non-tuple addresses, `127.*`, `::1`, `localhost`, `0.0.0.0` and `""` as local. That is correct on Linux, where a connect to the wildcard address reaches this host.
 - `caller_frames` names up to six non-library frames.
 - `diagnose( exit_code, output, project_root=None, where_hint=None )` returns a dict or None. The dict has `state`, `where`, `cause_class`, `detail`, `remedy` and `uncommitted_suspects`.
 - `render` prints the block. `main` is the shell entry with `--exit-code`, `--output-file`, `--project-root` and `--where-hint`.

@@ -57,6 +57,8 @@ def is_loopback( address ):
         - returns True for loopback: TestClient and the real-socket arms in
           test_model_server_liveness.py bind 127.0.0.1, and a guard that
           breaks legitimate tests gets switched off, which is worse than no guard
+        - returns True for "0.0.0.0" and "": on Linux a connect to the wildcard address
+          reaches this host (the peer reads 127.0.0.1), so they are local, not routed
     """
     if not isinstance( address, tuple ) or not address:
         return True
