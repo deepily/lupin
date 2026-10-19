@@ -84,6 +84,35 @@ OUTPUT FORMAT:
 # Prompt Builder
 # =============================================================================
 
+def build_visual_prompt(
+    visual_type: str, visual_description: str, slide_title: str,
+    hint_label: str, hint_value: str, instruction: str
+) -> str:
+    """
+    Assemble the user message shared by the d2, matplotlib and Mermaid prompt builders.
+
+    Requires:
+        - all arguments are strings; slide_title may be empty
+        - hint_label names the hint line, such as "Suggested Mermaid type"
+
+    Ensures:
+        - Returns the optional title line, the visual type, the hint line, the description
+          and the closing instruction, one per line, in that order
+        - Leaves the title line out when slide_title is empty
+    """
+    parts = []
+
+    if slide_title:
+        parts.append( f"Slide title: {slide_title}" )
+
+    parts.append( f"Visual type: {visual_type}" )
+    parts.append( f"{hint_label}: {hint_value}" )
+    parts.append( f"\nDescription:\n{visual_description}" )
+    parts.append( f"\n{instruction}" )
+
+    return "\n".join( parts )
+
+
 def get_mermaid_prompt( visual_type: str, visual_description: str, slide_title: str = "" ) -> str:
     """
     Build user message for Mermaid diagram generation.
@@ -98,20 +127,11 @@ def get_mermaid_prompt( visual_type: str, visual_description: str, slide_title: 
     Returns:
         str: User message for Claude API
     """
-    # Suggest diagram type based on keywords in description
-    suggested_type = _suggest_diagram_type( visual_description )
-
-    parts = []
-
-    if slide_title:
-        parts.append( f"Slide title: {slide_title}" )
-
-    parts.append( f"Visual type: {visual_type}" )
-    parts.append( f"Suggested Mermaid type: {suggested_type}" )
-    parts.append( f"\nDescription:\n{visual_description}" )
-    parts.append( "\nGenerate a Mermaid diagram for this slide. Output ONLY the mermaid code block." )
-
-    return "\n".join( parts )
+    return build_visual_prompt(
+        visual_type, visual_description, slide_title,
+        "Suggested Mermaid type", _suggest_diagram_type( visual_description ),
+        "Generate a Mermaid diagram for this slide. Output ONLY the mermaid code block."
+    )
 
 
 def _suggest_diagram_type( description: str ) -> str:
