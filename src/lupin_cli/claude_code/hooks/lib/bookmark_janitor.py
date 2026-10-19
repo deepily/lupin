@@ -25,8 +25,8 @@ Rules inherited from the dm-inbox janitor (they must not be weakened):
   * Classify by session id, never per-file mtime. A live session can hold a stale
     ledger of one family beside a current one of another, and a per-file rule would
     reap the first and break it.
-  * Compare [:8] prefixes. The dm-inbox names truncate the id to 8 chars and these
-    three carry the full id. The truncation over-matches (a prefix collision makes
+  * Compare [:8] prefixes. The dm-inbox and ask-answer names truncate the id to 8 chars;
+    the task-store map and acked ledger names carry the full id. The truncation over-matches (a prefix collision makes
     more files look live), which is the safe direction. A full-id compare would make
     a truncated peer name miss every live id.
   * Negative or unreadable age means not-provable-age, so keep. A future mtime

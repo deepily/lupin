@@ -13,7 +13,6 @@ A context reset leaves no trace in the logs by itself. The SessionStart hook wri
 - When the source is `clear` it writes a `{"marker": "context_cleared", "source": "clear"}` line to the `session_start` log stream and returns True.
 - For any other source, or none, it writes nothing and returns False.
 - The source is the authoritative lifecycle signal. The heuristic that watches the session id rotate under-reports.
-- The DM-verbosity pilot reads the marker to match a context reset with a change in DM length.
 
 ## Don't
 - Don't infer a clear from a changed session id. Use the payload's `source`.
