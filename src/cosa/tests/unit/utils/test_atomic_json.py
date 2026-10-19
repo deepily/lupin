@@ -63,3 +63,17 @@ def test_load_returns_empty_dict_for_anything_unusable( tmp_path, content ):
     target = tmp_path / "s.json"
     if content is not None: target.write_text( content )
     assert aj.load_json_section( target, "refused" ) == {}
+
+
+def test_write_puts_the_temp_file_in_the_targets_own_directory( tmp_path, monkeypatch ):
+    """A rename is atomic only inside one directory, so the temp file must sit beside the target."""
+    from pathlib import Path
+    moved   = []
+    replace = Path.replace
+    def spy( self, target ):
+        moved.append( ( self.parent, Path( target ).parent ) )
+        return replace( self, target )
+    monkeypatch.setattr( Path, "replace", spy )
+    target = tmp_path / "deep" / "ledger.json"
+    aj.write_json_atomic( target, {} )
+    assert moved == [ ( target.parent, target.parent ) ]
