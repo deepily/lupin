@@ -14,6 +14,7 @@
 // refreshAfterWrite(); the poll stays as the safety net. It emits `store_finished_tasks_changed`.
 
 import type { EventBus } from "../shared/EventBus";
+import { createPushPoller, resolveRuntimeDefaults, type PushPoller } from "./polling";
 import type { StoreFinishedTasksChangedPayload } from "../shared/types";
 import {
   FINISHED_STATUSES,
@@ -84,18 +85,15 @@ export interface FinishedTasksStoreOptions {
  */
 class FinishedTasksStoreImpl implements FinishedTasksStore {
   private readonly bus : EventBus;
+  private readonly poller : PushPoller;
   private readonly api : FinishedTasksApiClient;
   private readonly nowFn : () => number;
-  private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
-  private readonly clearIntervalFn : ( handle: number ) => void;
 
   private cache      : Record<string, ReadonlyArray<FinishedTaskEvent>> = {};
   private lastError  : string | null = null;
   private days       : number = FINISHED_WINDOW_DEFAULT_DAYS;
   private inFlight   = false;
   private inFlightRun : Promise<void> | null = null;
-  private pollHandle : number | null = null;
-  private unsubscribePush : ( () => void ) | null = null;
 
   /**
    * Builds the store from a bus, an API client and optional clock and timer hooks.
@@ -103,12 +101,16 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
   constructor( opts: FinishedTasksStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: pairs with the setInterval default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
+    this.poller = createPushPoller( {
+      bus              : this.bus,
+      setIntervalFn,
+      clearIntervalFn,
+      intervalMs       : FINISHED_TASKS_POLL_INTERVAL_MS,
+      refresh          : () => this.refresh(),
+      refreshAfterWrite: () => this.refreshAfterWrite(),
+    } );
   }
 
   /**
@@ -216,26 +218,14 @@ class FinishedTasksStoreImpl implements FinishedTasksStore {
    * Refreshes now, then on an interval and on each task-store-changed event.
    */
   startPolling(): void {
-    this.stopPolling();
-    void this.refresh();
-    this.pollHandle = this.setIntervalFn( () => void this.refresh(), FINISHED_TASKS_POLL_INTERVAL_MS );
-    // Server push: re-read through refreshAfterWrite(), never refresh(), whose in-flight guard
-    // would drop a push that lands during a read. A burst costs at most two reads.
-    this.unsubscribePush = this.bus.on( "task_store_changed", () => void this.refreshAfterWrite() );
+    this.poller.start();
   }
 
   /**
    * Cancels the poll timer and unsubscribes from the task-store-changed event.
    */
   stopPolling(): void {
-    if ( this.pollHandle !== null ) {
-      this.clearIntervalFn( this.pollHandle );
-      this.pollHandle = null;
-    }
-    if ( this.unsubscribePush !== null ) {
-      this.unsubscribePush();
-      this.unsubscribePush = null;
-    }
+    this.poller.stop();
   }
 
   /**

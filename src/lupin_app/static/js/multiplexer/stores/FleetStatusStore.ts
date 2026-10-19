@@ -17,6 +17,7 @@
 // `store_fleet_size_cap_changed`, so a save never rebuilds the table.
 
 import type { EventBus } from "../shared/EventBus";
+import { resolveRuntimeDefaults } from "./polling";
 import type { StoreFleetSizeCapChangedPayload, StoreFleetStatusChangedPayload } from "../shared/types";
 import type { FleetComposite } from "../render/fleetModel";
 
@@ -142,12 +143,10 @@ class FleetStatusStoreImpl implements FleetStatusStore {
   constructor( opts: FleetStatusStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
-    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? ( () => Date.now() );
-    /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
-    this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
-    /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
-    this.clearIntervalFn = opts.clearIntervalFn ?? ( ( h ) => globalThis.clearInterval( h ) );
+    const { nowFn, setIntervalFn, clearIntervalFn } = resolveRuntimeDefaults( opts );
+    this.nowFn = nowFn;
+    this.setIntervalFn   = setIntervalFn;
+    this.clearIntervalFn = clearIntervalFn;
     /* c8 ignore next */ // production-default fallback: console.error is the runtime sink; tests inject a collector.
     this.errorFn         = opts.errorFn ?? ( ( m ) => console.error( `[FleetStatusStore] ${m}` ) );
   }
