@@ -1013,42 +1013,50 @@ class MultiModalMunger:
             - None
         """
     
-        code = raw_transcription.lower()
-        print( "BEFORE code:", code )
+        # Strip the phrase "space, " as well as commas and dashes.
+        return self._munge_punctuation( raw_transcription, mode, "code", r'space, |[,-]' )
 
-        # Remove "space, ", commas, and periods.
-        code = re.sub( r'space, |[,-]', '', code.lower() )
-        # print( ",.", code )
+    def _munge_punctuation( self, raw_transcription: str, mode: str, label: str, strip_pattern: str ) -> tuple[str, str]:
+        """
+        Shared body of the Python and SQL punctuation transforms.
+
+        Requires:
+            - raw_transcription is a string
+            - label is the word in the before and after debug prints ("code", "sql")
+            - strip_pattern is a regex whose matches are deleted first
+            - Punctuation and number dictionaries loaded
+
+        Ensures:
+            - Returns tuple of (code, mode)
+            - Lowercases, strips strip_pattern, maps punctuation and number words
+            - Joins adjacent digits and normalizes spacing around punctuation
+
+        Raises:
+            - None
+        """
+        code = raw_transcription.lower()
+        print( f"BEFORE {label}:", code )
+
+        code = re.sub( strip_pattern, '', code )
 
         # Translate punctuation mark words into single characters.
         for key, value in self.punctuation.items():
             code = code.replace( key, value )
-        # print( "punct", code )
-        
-            # Decode numbers
+
+        # Decode numbers
         for key, value in self.numbers.items():
             code = code.replace( key, value )
-        # print( "numbers", code )
-        
+
         # Remove space between any two single digits
         code = re.sub( r"(?<=\d) (?=\d)", "", code )
-        # print( "single digits", code)
-        
-        # remove exactly one space between individual letters too
-        # code = re.sub( r'(?<=\w) (?=\w)', '', code )
-        # print( "letters", code )
-        
+
         # Remove extra spaces around punctuation.
         code = self._remove_spaces_around_punctuation( code )
-        # print( "punct spaces", code )
-        
-        # Remove extra spaces.
-        # code = " ".join( code.split() )
-        
+
         code = self._remove_dashed_spellings( code )
-        
-        print( "AFTER code:", code )
-        
+
+        print( f"AFTER {label}:", code )
+
         return code, mode
     
     # def munge_python_proofread( self, raw_transcription, mode ):
@@ -1120,41 +1128,8 @@ class MultiModalMunger:
         Raises:
             - None (handles all input gracefully)
         """
-        code = raw_transcription.lower()
-        print( "BEFORE sql:", code )
-        
-        # Remove commas, and periods.
-        code = re.sub( r'|[,-]', '', code.lower() )
-        # print( ",.", code )
-        
-        # Translate punctuation mark words into single characters.
-        for key, value in self.punctuation.items():
-            code = code.replace( key, value )
-        # print( "punct", code )
-        
-            # Decode numbers
-        for key, value in self.numbers.items():
-            code = code.replace( key, value )
-        # print( "numbers", code )
-        
-        # Remove space between any two single digits
-        code = re.sub( r"(?<=\d) (?=\d)", "", code )
-        # print( "single digits", code )
-        
-        # remove exactly one space between individual letters too
-        # code = re.sub( r'(?<=\w) (?=\w)', '', code )
-        
-        # Remove extra spaces from punctuation.
-        code = self._remove_spaces_around_punctuation( code )
-        
-        # Remove extra spaces.
-        # code = " ".join( code.split() )
-        
-        code = self._remove_dashed_spellings( code )
-        
-        print( "AFTER sql:", code )
-        
-        return code, mode
+        # The empty first alternative matches nothing: only commas and dashes go.
+        return self._munge_punctuation( raw_transcription, mode, "sql", r'|[,-]' )
     # def do_ddg_search( self, raw_transcription, mode ):
     #
     #     transcription, mode = self.munge_text_punctuation( raw_transcription, mode )
