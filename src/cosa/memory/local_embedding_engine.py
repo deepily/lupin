@@ -24,6 +24,37 @@ import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 
 
+def _loaded_dtype_name( model ):
+    """
+    Name the dtype of a loaded model's parameters.
+
+    Requires:
+        - model is None or a torch module with at least one parameter
+
+    Ensures:
+        - returns None when model is None
+        - otherwise returns the parameter dtype name, e.g. "float16"
+    """
+    if model is None: return None
+    return str( next( model.parameters() ).dtype ).replace( "torch.", "" )
+
+
+def _enforce_dtype( model, model_dtype ):
+    """
+    Cast a loaded model to the requested dtype when the loader did not apply it.
+
+    Requires:
+        - model is a torch module with at least one parameter
+        - model_dtype is a torch dtype
+
+    Ensures:
+        - returns a model whose parameters are model_dtype
+        - a model already in model_dtype is returned untouched
+    """
+    if next( model.parameters() ).dtype == model_dtype: return model
+    return model.to( model_dtype )
+
+
 class CodeEmbeddingEngine:
     """
     Singleton engine for code embedding using nomic-ai/CodeRankEmbed.
@@ -124,6 +155,7 @@ class CodeEmbeddingEngine:
                 device=self._device,
                 model_kwargs={ "torch_dtype": model_dtype }
             )
+            self._model = _enforce_dtype( self._model, model_dtype )
 
             timer.print( "Done!", use_millis=True )
 
@@ -251,6 +283,8 @@ class CodeEmbeddingEngine:
         Ensures:
             - returns model id, revision, dtype, device, prefixes and dimensions
             - revision is None until the model has been loaded
+            - dtype is the INI value until load (what the engine will use), then
+              the dtype of the loaded parameters (what it did use)
             - never loads the model and never touches the GPU
         """
         revision = None
@@ -258,7 +292,7 @@ class CodeEmbeddingEngine:
         return {
             "model"           : self._model_name,
             "revision"        : revision,
-            "dtype"           : self._dtype_str,
+            "dtype"           : self._dtype_str if self._model is None else _loaded_dtype_name( self._model ),
             "device"          : self._device,
             "query_prefix"    : self._query_prefix,
             "document_prefix" : "",
@@ -368,6 +402,7 @@ class ProseEmbeddingEngine:
                 trust_remote_code=True,
                 torch_dtype=model_dtype
             ).to( self._device ).eval()
+            self._model = _enforce_dtype( self._model, model_dtype )
 
             timer.print( "Done!", use_millis=True )
 
@@ -553,6 +588,8 @@ class ProseEmbeddingEngine:
         Ensures:
             - returns model id, revision, dtype, device, prefixes and dimensions
             - revision is None until the model has been loaded
+            - dtype is the INI value until load (what the engine will use), then
+              the dtype of the loaded parameters (what it did use)
             - never loads the model and never touches the GPU
         """
         revision = None
@@ -560,7 +597,7 @@ class ProseEmbeddingEngine:
         return {
             "model"           : self._model_name,
             "revision"        : revision,
-            "dtype"           : self._dtype_str,
+            "dtype"           : self._dtype_str if self._model is None else _loaded_dtype_name( self._model ),
             "device"          : self._device,
             "query_prefix"    : self._query_prefix,
             "document_prefix" : self._document_prefix,
