@@ -4851,6 +4851,24 @@ def _reuse_unavailable( e ) -> dict:
     return { "status": "error", "error": "REUSE_TOOLS_UNAVAILABLE", "detail": f"{type( e ).__name__}: {e}" }
 
 
+def _reuse_call( impl_name, root, *args ) -> dict:
+    """
+    Run one reuse_tools implementation for a wrapper, or say why it cannot run.
+
+    Requires:
+        - impl_name names a function in lupin_mcp.reuse_tools that takes ( *args, ctx )
+    Ensures:
+        - imports reuse_tools and builds its context for root; if either fails, returns _reuse_unavailable
+        - otherwise returns reuse_tools.<impl_name>( *args, ctx )
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    return getattr( reuse_tools, impl_name )( *args, ctx )
+
+
 @mcp.tool
 @_offloaded_tool
 def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
@@ -4866,12 +4884,7 @@ def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
         need: what the new code would do
         root: repository root to check; default is the git root of the working directory
     """
-    try:
-        from lupin_mcp import reuse_tools
-        ctx = reuse_tools.context_from_environment( root )
-    except Exception as e:
-        return _reuse_unavailable( e )
-    return reuse_tools.check_exists_impl( need, ctx )
+    return _reuse_call( "check_exists_impl", root, need )
 
 
 @mcp.tool
@@ -4887,12 +4900,7 @@ def fetch_similar( entry: str, root: Optional[ str ] = None ) -> dict:
         entry: symbol id
         root: repository root; default is the git root of the working directory
     """
-    try:
-        from lupin_mcp import reuse_tools
-        ctx = reuse_tools.context_from_environment( root )
-    except Exception as e:
-        return _reuse_unavailable( e )
-    return reuse_tools.fetch_similar_impl( entry, ctx )
+    return _reuse_call( "fetch_similar_impl", root, entry )
 
 
 @mcp.tool
@@ -4905,12 +4913,7 @@ def read_capability( names: list, root: Optional[ str ] = None ) -> dict:
         names: capability slugs, for example ["task-store"]
         root: repository root; default is the git root of the working directory
     """
-    try:
-        from lupin_mcp import reuse_tools
-        ctx = reuse_tools.context_from_environment( root )
-    except Exception as e:
-        return _reuse_unavailable( e )
-    return reuse_tools.read_capability_impl( names, ctx )
+    return _reuse_call( "read_capability_impl", root, names )
 
 
 @mcp.tool
@@ -4927,12 +4930,7 @@ def replay( receipt_id: str, root: Optional[ str ] = None ) -> dict:
         receipt_id: id returned by another reuse tool
         root: repository root; default is the git root of the working directory
     """
-    try:
-        from lupin_mcp import reuse_tools
-        ctx = reuse_tools.context_from_environment( root )
-    except Exception as e:
-        return _reuse_unavailable( e )
-    return reuse_tools.replay_impl( receipt_id, ctx )
+    return _reuse_call( "replay_impl", root, receipt_id )
 
 
 # The server-side call log is a second FastMCP middleware beside BridgeLivenessMiddleware. A failure
