@@ -76,7 +76,7 @@ def fetch_board( settings, api_key, max_rows, include_terminal=False ):
           clean, which is the false green this scan exists to prevent
         - never raises on an empty board
     """
-    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=include_terminal, request=_request )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=include_terminal, request=_request, page_size=PAGE_SIZE )
 
 
 def fetch_known_epic_keys( settings, api_key ):

@@ -64,7 +64,7 @@ def fetch_board( settings, api_key, max_rows ):
           rows than were fetched — the caller must surface that, never absorb it
         - never raises on an empty board
     """
-    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request, page_size=PAGE_SIZE )
 
 
 def main( argv=None ):

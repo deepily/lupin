@@ -73,7 +73,7 @@ def fetch_board( settings, api_key, max_rows ):
         - raises on a non-2xx rather than returning an empty board (an unchecked 401
           scans clean, which is a false green)
     """
-    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request, page_size=PAGE_SIZE )
 
 
 def examine( rows, now ):

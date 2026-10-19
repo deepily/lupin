@@ -132,7 +132,7 @@ def _request( method, url, api_key, timeout, body=None ):
 FETCH_BOARD_PAGE_SIZE = 500    # the router caps `limit` at 500 (`le=500`) but defaults to 100: a ceiling, tunable in 0..500
 
 
-def fetch_board( settings, api_key, max_rows, include_terminal=True, request=None ):
+def fetch_board( settings, api_key, max_rows, include_terminal=True, request=None, page_size=None ):
     """
     Page the whole task board and return ( rows, truncated ).
 
@@ -141,6 +141,8 @@ def fetch_board( settings, api_key, max_rows, include_terminal=True, request=Non
         - max_rows is a positive int
         - request, when given, has _request's signature ( method, url, api_key, timeout ) and its
           ( ok, status, body ) return; the default is this module's _request, looked up at call time
+        - page_size, when given, is a positive int no larger than the router's 500 cap; the default is
+          FETCH_BOARD_PAGE_SIZE
 
     Ensures:
         - returns ( rows, truncated ) where `truncated` is True iff the board has more rows than
@@ -151,6 +153,7 @@ def fetch_board( settings, api_key, max_rows, include_terminal=True, request=Non
         - asks for terminal rows only when include_terminal is true
     """
     if request is None: request = _request
+    if page_size is None: page_size = FETCH_BOARD_PAGE_SIZE
     rows      = [ ]
     offset    = 0
     truncated = False
@@ -160,7 +163,7 @@ def fetch_board( settings, api_key, max_rows, include_terminal=True, request=Non
         # `--max-rows` a page-stop threshold, not a cap: `--max-rows 100` fetched 500 rows and then
         # reported "truncated at 100 rows". `max( 1, … )` is reachable only via a direct non-positive
         # max_rows; the break below keeps the subtraction at 1 or more on every later pass.
-        limit = max( 1, min( FETCH_BOARD_PAGE_SIZE, max_rows - len( rows ) ) )
+        limit = max( 1, min( page_size, max_rows - len( rows ) ) )
         query = ( f"include_terminal={'true' if include_terminal else 'false'}"
                   f"&unscoped_audit=true&hide_parked=false"
                   f"&limit={limit}&offset={offset}" )

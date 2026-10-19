@@ -98,3 +98,9 @@ def test_without_a_request_argument_it_uses_the_module_request_looked_up_at_call
     monkeypatch.setattr( tsc, "_request", request )
     assert tsc.fetch_board( SETTINGS, "key", 10 )[ 0 ] == [ { "id": "a" } ]
     assert len( calls ) == 1
+
+
+def test_a_page_size_argument_caps_the_limit_of_the_first_request():
+    request, calls = _pager( [ _page( [ "a" ] ) ] )
+    tsc.fetch_board( SETTINGS, "key", 1000, request=request, page_size=100 )
+    assert "limit=100&" in calls[ 0 ][ 1 ]
