@@ -28,6 +28,7 @@ resolve_tz returns an error string the caller may journal once.
 """
 import datetime
 import re
+import sys
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -42,6 +43,9 @@ DEFAULT_TZ_NAME     = "America/New_York"
 # one optional leading space. Used by the DM chokepoint to stay IDEMPOTENT (bug
 # f49a8b34 / bc8d9d82): a body the arbiter (or any caller) already stamped must NOT
 # be re-wrapped into a "[outer] [inner]" double-stamp.
+# Timezone names already reported on stderr, so a bad name in a loop is named once and not per call.
+_WARNED_TZ_NAMES = set()
+
 _LEADING_EDT_STAMP_RE = re.compile( r"^ ?\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\]" )
 
 
@@ -98,12 +102,17 @@ def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Opt
         - returns "[" + format_outreach_ts( dt, resolve_tz( tz_name ) ) + "]"
           (e.g. "[2026.06.24 at 18:44:09]"); DST handled by the tz database
         - dt=None renders "now" in the resolved tz
-        - an invalid tz_name renders the instant in UTC (degrade-safe)
+        - an invalid tz_name renders the instant in UTC (degrade-safe) and is named once on stderr; the stamp itself carries no marker
         - never raises
     """
     if dt is None:
         dt = datetime.datetime.now( datetime.timezone.utc )
-    tz, _error = resolve_tz( tz_name )
+    tz, error = resolve_tz( tz_name )
+    # The stamp keeps its shape, because is_already_stamped and split_leading_stamp parse it.
+    # So the UTC fallback is named on stderr, once per bad name.
+    if error is not None and tz_name not in _WARNED_TZ_NAMES:
+        _WARNED_TZ_NAMES.add( tz_name )
+        print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
     return f"[{format_outreach_ts( dt, tz )}]"
 
 

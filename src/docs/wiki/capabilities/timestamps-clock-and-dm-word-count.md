@@ -2,7 +2,7 @@
 capability: timestamps-clock-and-dm-word-count
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.utils.edt_timestamp.format_edt_timestamp@000b7a9ae9
+  - cosa.utils.edt_timestamp.format_edt_timestamp@52aca53faf
   - cosa.utils.edt_timestamp.format_outreach_ts@3334fdcfcc
   - cosa.utils.edt_timestamp.is_already_stamped@1e3153252f
   - cosa.utils.edt_timestamp.resolve_tz@8fb01f1025
@@ -34,5 +34,5 @@ pins:
 - Do not treat a bracket like `[URGENT]` as a stamp. Only `[YYYY.MM.DD at HH:MM:SS]` at the start matches.
 
 ## Invariants
-- `format_edt_timestamp` and `resolve_tz` never raise on a bad zone name. The stamp is then in UTC, with no marker in the stamp itself.
+- `format_edt_timestamp` and `resolve_tz` never raise on a bad zone name. The stamp is then in UTC and carries no marker, because two readers parse its shape. `format_edt_timestamp` names the bad zone once on stderr.
 - The stamp has no zone abbreviation. `get_current_datetime` has no `days_offset`: only `get_current_datetime_raw` and `get_current_date` take one.

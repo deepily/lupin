@@ -83,6 +83,33 @@ def test_format_edt_timestamp_bracketed_winter_explicit_tz():
     assert format_edt_timestamp( JAN, "America/New_York" ) == "[2026.01.11 at 16:28:46]"
 
 
+def test_a_bad_timezone_name_is_reported_once_on_stderr_and_not_in_the_stamp( monkeypatch, capsys ):
+    """
+    A bad zone is named on stderr once per name; the stamp keeps its shape.
+    """
+    import cosa.utils.edt_timestamp as edt
+    monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
+    when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
+
+    first  = format_edt_timestamp( when, tz_name="Not/AZone" )
+    second = format_edt_timestamp( when, tz_name="Not/AZone" )
+    other  = format_edt_timestamp( when, tz_name="Also/Bad" )
+
+    err = capsys.readouterr().err
+    assert first == second == other == "[2026.06.24 at 18:44:09]"
+    lines = err.splitlines()
+    assert len( [ l for l in lines if "Not/AZone" in l ] ) == 1, "the same bad name was reported more than once"
+    assert len( [ l for l in lines if "Also/Bad" in l ] )  == 1, "a second bad name was not reported"
+    assert "rendering UTC" in err
+
+
+def test_a_good_timezone_name_prints_nothing( monkeypatch, capsys ):
+    import cosa.utils.edt_timestamp as edt
+    monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
+    format_edt_timestamp( datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc ) )
+    assert capsys.readouterr().err == ""
+
+
 def test_format_edt_timestamp_invalid_tz_degrades_to_utc():
     # Degrade-safe: an unknown tz never raises — renders the instant in UTC.
     assert format_edt_timestamp( JUNE, "Not/AZone" ) == "[2026.06.11 at 21:28:46]"
