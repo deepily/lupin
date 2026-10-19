@@ -1627,18 +1627,9 @@ class TFEOrchestrator:
         When disabled, the context is a no-op and emits a warning if the
         current working tree has uncommitted changes (safety guard).
         """
-        from cosa.agents.shared.worktree_context import WorktreeContext
-        async with WorktreeContext( job_id=self.job_id, debug=self.debug ) as wt:
-            if wt.enabled:
-                self._worktree_cwd = wt.path
-                if self.debug: print( f"[TFEOrchestrator] Worktree isolation active: {wt.path}" )
-            else:
-                self._worktree_cwd = None
-                await self._warn_on_uncommitted_changes_if_any()
-            try:
-                yield wt
-            finally:
-                self._worktree_cwd = None
+        from cosa.agents.shared.worktree_context import worktree_scope
+        async with worktree_scope( self, "TFEOrchestrator" ) as wt:
+            yield wt
 
     async def _warn_on_uncommitted_changes_if_any( self ) -> None:
         """

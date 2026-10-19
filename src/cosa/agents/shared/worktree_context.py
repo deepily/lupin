@@ -30,6 +30,7 @@ Behaviour:
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 import cosa.utils.util as cu
@@ -324,6 +325,35 @@ class WorktreeContext:
             }
         except Exception as e:
             return { "success": False, "stdout": "", "stderr": str( e ), "returncode": -1 }
+
+
+@asynccontextmanager
+async def worktree_scope( orchestrator, label ):
+    """
+    Give an expediter orchestrator worktree isolation for the span of the block.
+
+    Requires:
+        - orchestrator has job_id, debug, _worktree_cwd and an async
+          _warn_on_uncommitted_changes_if_any()
+        - label is the class name shown in the debug print
+
+    Ensures:
+        - yields the WorktreeContext
+        - orchestrator._worktree_cwd is the worktree path while isolation is active
+        - when isolation is off, _worktree_cwd is None and the uncommitted-changes warning runs
+        - orchestrator._worktree_cwd is None on exit, even if the block raised
+    """
+    async with WorktreeContext( job_id=orchestrator.job_id, debug=orchestrator.debug ) as wt:
+        if wt.enabled:
+            orchestrator._worktree_cwd = wt.path
+            if orchestrator.debug: print( f"[{label}] Worktree isolation active: {wt.path}" )
+        else:
+            orchestrator._worktree_cwd = None
+            await orchestrator._warn_on_uncommitted_changes_if_any()
+        try:
+            yield wt
+        finally:
+            orchestrator._worktree_cwd = None
 
 
 # ==========================================================================
