@@ -595,6 +595,113 @@ class AgentNotificationDispatcher:
             return { "answers": {} }
 
 
+_UNSET = object()
+
+
+def make_interface_functions( namespace, notify_extras=(), ask_extras=(), feedback_extras=(), choices_extras=(), push_session_name=True ):
+    """
+    Build the four async wrappers an agent's cosa_interface module exposes.
+
+    Each wrapper copies the module's identity onto the module's dispatcher, then awaits one dispatcher method.
+    Everything is read from `namespace` on every call, never captured, because callers assign `SENDER_ID`, `TARGET_USER` and `SESSION_NAME` at run time and tests patch `_dispatcher`.
+
+    Requires:
+        - namespace is the calling module's globals(), holding _dispatcher, SENDER_ID and TARGET_USER
+        - namespace also holds SESSION_NAME when push_session_name is True
+        - each *_extras is a tuple naming the optional keywords that wrapper forwards, drawn from priority, response_default and progress_group_id
+
+    Ensures:
+        - Returns ( notify_progress, ask_confirmation, get_feedback, present_choices ), all coroutine functions
+        - Each wrapper forwards its named extras on every call (None when the caller gave none) and nothing else
+        - An extra the module does not forward raises TypeError when the caller passes it, even as None
+        - Only notify_progress copies SESSION_NAME onto the dispatcher, and only when push_session_name is True
+    """
+
+    def extras_for( fn_name, supported, given ):
+        for name, value in given.items():
+            if value is not _UNSET and name not in supported:
+                raise TypeError( f"{fn_name}() got an unexpected keyword argument '{name}'" )
+        return { name: ( None if given[ name ] is _UNSET else given[ name ] ) for name in supported }
+
+    def push_identity( dispatcher ):
+        dispatcher.sender_id   = namespace[ "SENDER_ID" ]
+        dispatcher.target_user = namespace[ "TARGET_USER" ]
+
+    async def notify_progress(
+        message: str,
+        priority: str = "medium",
+        abstract: Optional[ str ] = None,
+        session_name: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        queue_name: Optional[ str ] = None,
+        progress_group_id: Optional[ str ] = _UNSET
+    ) -> None:
+        """
+        Send fire-and-forget progress notification.
+
+        Non-blocking: the dispatcher runs it in a thread pool.
+        """
+        extras     = extras_for( "notify_progress", notify_extras, { "progress_group_id": progress_group_id } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        if push_session_name: dispatcher.session_name = namespace[ "SESSION_NAME" ]
+        await dispatcher.notify_progress(
+            message, priority=priority, abstract=abstract,
+            session_name=session_name, job_id=job_id, queue_name=queue_name, **extras
+        )
+
+    async def ask_confirmation(
+        question: str,
+        default: str = "no",
+        timeout: int = 60,
+        abstract: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET
+    ) -> bool:
+        """Ask a yes/no question and return boolean result."""
+        extras     = extras_for( "ask_confirmation", ask_extras, { "priority": priority } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.ask_confirmation(
+            question, default=default, timeout=timeout, abstract=abstract, job_id=job_id, **extras
+        )
+
+    async def get_feedback(
+        prompt: str,
+        timeout: int = 300,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET,
+        response_default: Optional[ str ] = _UNSET
+    ) -> Optional[ str ]:
+        """Get open-ended feedback from user via voice."""
+        extras     = extras_for( "get_feedback", feedback_extras, { "priority": priority, "response_default": response_default } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.get_feedback( prompt, timeout=timeout, job_id=job_id, **extras )
+
+    async def present_choices(
+        questions: list,
+        timeout: int = 120,
+        title: Optional[ str ] = None,
+        abstract: Optional[ str ] = None,
+        job_id: Optional[ str ] = None,
+        priority: Optional[ str ] = _UNSET,
+        response_default: Optional[ str ] = _UNSET
+    ) -> dict:
+        """Present multiple-choice questions and get user's selection."""
+        extras     = extras_for( "present_choices", choices_extras, { "priority": priority, "response_default": response_default } )
+        dispatcher = namespace[ "_dispatcher" ]
+        push_identity( dispatcher )
+        return await dispatcher.present_choices(
+            questions, timeout=timeout, title=title, abstract=abstract, job_id=job_id, **extras
+        )
+
+    wrappers = ( notify_progress, ask_confirmation, get_feedback, present_choices )
+    for wrapper in wrappers:
+        wrapper.__module__ = namespace[ "__name__" ]
+    return wrappers
+
+
 def quick_smoke_test():
     """Quick smoke test for AgentNotificationDispatcher."""
     import inspect
