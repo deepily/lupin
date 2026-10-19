@@ -346,3 +346,63 @@ def test_a_receipt_with_no_whole_need_is_refused( tmp_path ):
 def test_a_receipt_whose_draws_have_no_entry_inside_the_limits_is_refused_in_the_drivers_words( tmp_path ):
     write_results( tmp_path, [ result_file( "a", r, { "e": 0.0 } ) for r in range( 1, 6 ) ] )
     with pytest.raises( s1.DriverRefused, match="no entry has a mean overlap" ): bf.receipt( tmp_path, [ { "member": "a" } ], 0.95, 0.1, 0.9, "sha", "ns" )
+
+
+# ---- the needs the band is fitted on ------------------------------------------------------------
+
+def frozen_file( tmp_path, rows=None, fmt=e2e.NEEDS_FORMAT, name="frozen.json" ):
+    """Write a frozen needs file, 100 rows by default; return ( path, sha, rows )."""
+    rows = rows or [ { "member": f"cosa.wide.f{i:03d}", "need": f"A helper number {i} that does a distinct job.", "kind": "function" } for i in range( 100 ) ]
+    path = tmp_path / name
+    return path, put( path, { "format": fmt, "sample_sha256": "x", "needs": rows } ), rows
+
+
+def test_the_pick_is_the_same_for_the_same_seed_and_leaves_each_members_own_symbol_out( tmp_path ):
+    path, sha, rows = frozen_file( tmp_path )
+    one = bf.derive_needs( path, sha, 30, "seed-a" )
+    assert one == bf.derive_needs( path, sha, 30, "seed-a" ) and one[ "format" ] == frun.NEEDS_FORMAT and len( one[ "needs" ] ) == 30
+    assert [ n[ "id" ] for n in one[ "needs" ] ] == [ f"b{i:02d}" for i in range( 1, 31 ) ] and {n[ "kind" ] for n in one[ "needs" ]} == { "duplicate" }
+    by_member = { r[ "member" ]: r[ "need" ] for r in rows }
+    assert all( by_member[ n[ "exclude" ] ] == n[ "need" ] for n in one[ "needs" ] ) and len( { n[ "exclude" ] for n in one[ "needs" ] } ) == 30
+    assert [ n[ "exclude" ] for n in bf.derive_needs( path, sha, 30, "seed-b" )[ "needs" ] ] != [ n[ "exclude" ] for n in one[ "needs" ] ]
+
+
+def test_the_pick_ranks_by_the_hash_of_the_seed_and_the_member_not_by_file_order( tmp_path ):
+    import hashlib
+    path, sha, rows = frozen_file( tmp_path )
+    want = sorted( ( r[ "member" ] for r in rows ), key=lambda m: hashlib.sha256( f"s:{m}".encode() ).hexdigest() )[ :30 ]
+    assert [ n[ "exclude" ] for n in bf.derive_needs( path, sha, 30, "s" )[ "needs" ] ] == want and want != [ r[ "member" ] for r in rows ][ :30 ]
+
+
+@pytest.mark.parametrize( "count", [ 29, 101 ] )
+def test_a_count_outside_the_flip_minimum_and_the_file_is_refused( tmp_path, count ):
+    path, sha, _ = frozen_file( tmp_path )
+    with pytest.raises( s1.DriverRefused, match="between 30 and 100" ): bf.derive_needs( path, sha, count, "s" )
+
+
+@pytest.mark.parametrize( "seed", [ "", "  ", None ] )
+def test_an_empty_seed_is_refused( tmp_path, seed ):
+    path, sha, _ = frozen_file( tmp_path )
+    with pytest.raises( s1.DriverRefused, match="seed" ): bf.derive_needs( path, sha, 30, seed )
+
+
+def test_the_frozen_file_is_checked_by_hash_format_repeats_and_empty_needs( tmp_path ):
+    path, sha, rows = frozen_file( tmp_path )
+    with pytest.raises( e2e.FrozenInputRefused, match="sha256" ): bf.derive_needs( path, "1" * 64, 30, "s" )
+    with pytest.raises( e2e.FrozenInputRefused, match="reserved" ): bf.derive_needs( path, e2e.FRESH_SHA_PREFIX + "0" * 56, 30, "s" )
+    with pytest.raises( e2e.FrozenInputRefused, match="format" ): bf.derive_needs( *frozen_file( tmp_path, fmt="other", name="other.json" )[ :2 ], 30, "s" )
+    with pytest.raises( e2e.FrozenInputRefused, match="repeat" ): bf.derive_needs( *frozen_file( tmp_path, rows[ :99 ] + [ rows[ 0 ] ] )[ :2 ], 30, "s" )
+    with pytest.raises( e2e.FrozenInputRefused, match="empty" ): bf.derive_needs( *frozen_file( tmp_path, rows[ :99 ] + [ { **rows[ 99 ], "need": "  " } ] )[ :2 ], 30, "s" )
+
+
+def test_the_derive_command_writes_a_file_the_flip_reader_accepts_and_never_overwrites_it( tmp_path, capsys ):
+    path, sha, _ = frozen_file( tmp_path )
+    out  = tmp_path / "picked.json"
+    args = [ "derive-needs", "--frozen", str( path ), "--frozen-sha", sha, "--seed", "s", "--out", str( out ) ]
+    assert bf.cli( args ) == 0
+    text = capsys.readouterr().out
+    import hashlib
+    got  = hashlib.sha256( out.read_bytes() ).hexdigest()
+    assert f"sha256 {got}" in text and "30 needs" in text
+    assert len( frun.load_flip_needs( out, got ) ) == 30
+    assert bf.cli( args ) == 2 and "FileExistsError" in capsys.readouterr().err

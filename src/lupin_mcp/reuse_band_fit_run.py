@@ -12,6 +12,7 @@ Nothing here is chosen by the driver on its own: the quantile, the population li
 import argparse
 import contextlib
 import copy
+import hashlib
 import json
 import math
 import os
@@ -332,10 +333,40 @@ def check_ceiling( ceiling, estimated ):
     return ceiling
 
 
+def derive_needs( frozen_path, frozen_sha, count, seed ):
+    """
+    Pick the band fit's needs from the frozen end-to-end needs by a seed.
+
+    Requires:
+        - frozen_path names the frozen end-to-end needs file and frozen_sha is its sha256; count is a whole number of at least the flip driver's minimum
+        - seed is a non-empty string written down before the pick
+    Ensures:
+        - returns { format, needs } in the flip needs format, ordered by the sha256 of seed, a colon and the member id
+        - ids are b01, b02 and so on in that order; each need is a duplicate-kind need with its own member left out, as the end-to-end run asked it
+        - the reserved fresh-needs file is refused by its hash before it is opened, as the shared reader does for every caller
+    Raises:
+        - FrozenInputRefused for a wrong hash or format, a repeated member or need text, or an empty need
+        - DriverRefused for an empty seed or a count above the number of needs, or under the flip driver's minimum
+    """
+    if not isinstance( seed, str ) or not seed.strip(): raise s1.DriverRefused( "the seed is a non-empty string written down before the pick" )
+    record = e2e._read_checked( frozen_path, frozen_sha, "frozen needs file" )
+    if record[ "format" ] != e2e.NEEDS_FORMAT: raise e2e.FrozenInputRefused( f"frozen needs file format is {record[ 'format' ]!r}, expected {e2e.NEEDS_FORMAT!r}" )
+    rows = record[ "needs" ]
+    if len( { r[ "member" ] for r in rows } ) != len( rows ) or len( { r[ "need" ] for r in rows } ) != len( rows ): raise e2e.FrozenInputRefused( "the frozen needs repeat a member or a need text" )
+    if any( not isinstance( r[ "need" ], str ) or not r[ "need" ].strip() for r in rows ): raise e2e.FrozenInputRefused( "the frozen needs hold an empty need" )
+    if not rf.MIN_NEEDS <= count <= len( rows ): raise s1.DriverRefused( f"the pick takes between {rf.MIN_NEEDS} and {len( rows )} needs, got {count!r}" )
+    ranked = sorted( rows, key=lambda r: hashlib.sha256( f"{seed}:{r[ 'member' ]}".encode( "utf-8" ) ).hexdigest() )[ :count ]
+    return { "format": frun.NEEDS_FORMAT,
+             "needs": [ { "id": f"b{n:02d}", "need": r[ "need" ].strip(), "kind": "duplicate", "exclude": r[ "member" ] } for n, r in enumerate( ranked, 1 ) ] }
+
+
 def _parser():
     """Ensures: returns the command line parser."""
     ap  = argparse.ArgumentParser( description=__doc__ )
     sub = ap.add_subparsers( dest="command", required=True )
+    p   = sub.add_parser( "derive-needs" )
+    for flag in ( "--frozen", "--frozen-sha", "--seed", "--out" ): p.add_argument( flag, required=True )
+    p.add_argument( "--count", type=int, default=rf.MIN_NEEDS )
     for name in ( "estimate", "canary", "approve", "run", "report" ):
         p = sub.add_parser( name )
         p.add_argument( "--needs", required=True )
@@ -367,6 +398,7 @@ def main( argv=None, stage_factory=None ):
     Requires:
         - stage_factory is None for the live candidate stage of the tree, or a function of the tree's path for a stand-in run
     Ensures:
+        - derive-needs picks the needs from the frozen end-to-end needs by a seed and writes them once, printing the file's sha256
         - estimate prints the token estimate for the needs file's own count and sends nothing
         - canary asks the first five needs, approve records that a person read it, run asks the rest, and both stamp their result files with the stage
         - report writes the receipt under a name that must not exist, and prints the band
@@ -375,6 +407,11 @@ def main( argv=None, stage_factory=None ):
         - the refusals of the paths, the frozen needs, the ledger and the canary, before anything is sent
     """
     args  = _parser().parse_args( argv )
+    if args.command == "derive-needs":
+        record = derive_needs( args.frozen, args.frozen_sha, args.count, args.seed )
+        write_once( args.out, record )
+        print( f"{len( record[ 'needs' ] )} needs from {args.frozen_sha} by seed {args.seed!r}; sha256 {hashlib.sha256( pathlib.Path( args.out ).read_bytes() ).hexdigest()}" )
+        return 0
     items = frun.load_flip_needs( args.needs, args.needs_sha )
     spent = estimate( len( items ) )
     if args.command == "estimate":
