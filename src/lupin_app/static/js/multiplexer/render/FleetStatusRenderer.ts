@@ -44,6 +44,7 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The slice of the fleet store the renderer uses.
@@ -190,16 +191,6 @@ function buildSizeCapControls(): SizeCapEls {
 }
 
 /**
- * Creates a paragraph with the fleet status message class and the given text.
- */
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `fleet-status-message ${className}`;
-  p.textContent = text;
-  return p;
-}
-
-/**
  * Renders the fleet status panel with a header, size cap controls, and sessions.
  */
 class FleetStatusRendererImpl implements FleetStatusRenderer {
@@ -298,16 +289,9 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
    * Removes the subscriptions and collapse listener and empties the root.
    */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
@@ -333,13 +317,13 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     const composite = this.stores.fleet.composite();
 
     if ( composite && composite.status === "auth_required" ) {
-      this.container.replaceChildren( messageEl( "fleet-status-signin", "🔒 Sign-in required." ) );
+      this.container.replaceChildren( messageEl( "fleet-status", "fleet-status-signin", "🔒 Sign-in required." ) );
       this.setCount( 0 );
       return;
     }
 
     if ( !composite || composite.status === "unreachable" || !composite.fleet_arbiter ) {
-      this.container.replaceChildren( messageEl( "fleet-status-offline", "🛰️ Arbiter offline — last known: none." ) );
+      this.container.replaceChildren( messageEl( "fleet-status", "fleet-status-offline", "🛰️ Arbiter offline — last known: none." ) );
       this.setCount( 0 );
       return;
     }
@@ -359,10 +343,10 @@ class FleetStatusRendererImpl implements FleetStatusRenderer {
     }
 
     if ( sessions.length === 0 ) {
-      children.push( messageEl( "fleet-status-empty", "No active sessions." ) );
+      children.push( messageEl( "fleet-status", "fleet-status-empty", "No active sessions." ) );
     } else if ( visible.length === 0 ) {
       // Sessions exist but every one is offline and currently hidden.
-      children.push( messageEl( "fleet-status-empty", "No live sessions." ) );
+      children.push( messageEl( "fleet-status", "fleet-status-empty", "No live sessions." ) );
     } else {
       const model    = groupFleetByManager( visible );
       const personas : FleetPersonaMap =

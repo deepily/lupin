@@ -42,6 +42,7 @@ import {
 } from "./templates/sectionHeader";
 import { renderAgentSelect } from "../../shared/agent-select.js";
 import { renderArgQuestion, clearArgQuestion } from "../../shared/arg-interview.js";
+import { teardownScaffold } from "./dom";
 
 /** The one thing this pane writes on AudioStore (§6a ruling 3). */
 export interface QaTtsModeWriter {
@@ -167,16 +168,9 @@ class QaPaneRendererImpl implements QaPaneRenderer {
    * Allows the pane to be mounted again.
    */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.els    = null;
     this.header = null;
     this.renderedAgents = null;

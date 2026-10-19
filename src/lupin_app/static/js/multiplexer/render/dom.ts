@@ -160,15 +160,56 @@ function updateAndLocate<T extends KeyedEntry>(
   return found ?? el;
 }
 
-// CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.
 /**
  * Escapes a string for use inside a CSS selector.
+ *
+ * The one copy for every renderer. It uses the built-in CSS.escape, or a regex escape without one.
  */
 /* c8 ignore start */ // CSS.escape polyfill: production browsers always provide CSS.escape (Baseline 2020); the fallback regex path exists only for non-DOM Node contexts where keyedListMerge is never actually called (this module is consumed exclusively by browser-side renderer code).
-function cssEscape(value: string): string {
+export function cssEscape(value: string): string {
   if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
     return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
   }
   return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 /* c8 ignore stop */
+
+/**
+ * Builds the status paragraph a board renderer shows in place of its table.
+ *
+ * Requires:
+ *   - `prefix` is the board's message class stem, for example "task-list" or "fleet-status"
+ *
+ * Ensures:
+ *   - returns a <p> whose class is `<prefix>-message <className>` and whose text is `text`
+ */
+export function messageEl(prefix: string, className: string, text: string): HTMLParagraphElement {
+  const p = document.createElement("p");
+  p.className = `${prefix}-message ${className}`;
+  p.textContent = text;
+  return p;
+}
+
+/**
+ * Starts a renderer's `unmount()`: drops the bus and collapse listeners and the children.
+ *
+ * Requires:
+ *   - `unsubscribers` is the renderer's own list of off-functions (emptied here)
+ *
+ * Ensures:
+ *   - every off-function runs once, then the list is empty
+ *   - `collapseOff` runs when it is not null
+ *   - `root`'s children are removed when `root` is not null
+ *   - the caller still clears its own `collapseOff` and `root` fields
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on the multi-line function declaration: both null and non-null arms of each guard are tested.
+export function teardownScaffold(
+  unsubscribers: Array<() => void>,
+  collapseOff: (() => void) | null,
+  root: Element | null,
+): void {
+  for (const off of unsubscribers) off();
+  unsubscribers.length = 0;
+  if (collapseOff !== null) collapseOff();
+  if (root !== null) root.replaceChildren();
+}

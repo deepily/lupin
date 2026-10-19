@@ -35,7 +35,7 @@ import type {
 } from "../shared/types";
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
-import { keyedListMerge } from "./dom";
+import { keyedListMerge, cssEscape } from "./dom";
 import { formatDateKey } from "./time";
 import { projectFromSenderId } from "./senderProject";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
@@ -1571,16 +1571,6 @@ function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolea
     if (before.notifications[i] !== now.notifications[i]) return false;
   }
   return true;
-}
-
-/**
- * Escapes a value for a CSS selector, with a fallback when no built-in exists.
- */
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 
 /**

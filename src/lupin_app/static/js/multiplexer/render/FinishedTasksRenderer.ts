@@ -44,6 +44,7 @@ import {
   type AccordionCollapseStore,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { teardownScaffold } from "./dom";
 
 /**
  * The accordion id this pane persists its collapse under.
@@ -272,16 +273,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
    * Unsubscribes from events, runs the collapse teardown and empties the root.
    */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.controls  = null;
     this.countEl   = null;

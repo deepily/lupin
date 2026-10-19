@@ -17,6 +17,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreMissedChangedPayload } from "../shared/types";
 import { renderMissedBadge } from "./templates/missedBadge";
+import { teardownScaffold } from "./dom";
 
 /** The slice of the missed store the renderer uses: the count and the reset. */
 export interface MissedStoreLike {
@@ -91,12 +92,8 @@ class MissedBadgeRendererImpl implements MissedBadgeRenderer {
    * Removes the subscriptions and empties the root element.
    */
   unmount(): void {
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, null, this.root );
+    this.root = null;
     this.mounted = false;
   }
 

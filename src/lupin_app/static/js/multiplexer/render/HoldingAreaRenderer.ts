@@ -75,6 +75,7 @@ import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
 import { renderTruncationBanner } from "./templates/truncationBanner";
 import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
+import { teardownScaffold, messageEl } from "./dom";
 
 /**
  * The pane's sentinel messages, carbon-copied from notifications.js:12678-12681.
@@ -190,16 +191,6 @@ export interface HoldingAreaRendererOptions {
    * the rest of this pane want.
    */
   flowRatio?    : FlowRatioStoreLike;
-}
-
-/**
- * Builds a paragraph element with the holding area message class, an extra class and text.
- */
-function messageEl( className: string, text: string ): HTMLParagraphElement {
-  const p = document.createElement( "p" );
-  p.className = `holding-area-message ${ className }`;
-  p.textContent = text;
-  return p;
 }
 
 /** The plan id a plan approve button carries (its filer and plan data attributes). */
@@ -425,18 +416,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   unmount(): void {
     this.rows?.dispose();
     this.rows = null;
-    for ( const off of this.unsubscribers ) off();
-    this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
     this.pressGuard = null;
-    if ( this.collapseOff !== null ) {
-      this.collapseOff();
-      this.collapseOff = null;
-    }
-    if ( this.root !== null ) {
-      this.root.replaceChildren();
-      this.root = null;
-    }
+    teardownScaffold( this.unsubscribers, this.collapseOff, this.root );
+    this.collapseOff = null;
+    this.root        = null;
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
@@ -498,7 +482,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // groups: an empty page that the server cut short is not an empty queue.
     const banner = renderTruncationBanner( composite, HOLDING_AREA_QUERY, total );
     if ( total === 0 ) {
-      this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
+      this.container.replaceChildren( ...banner, messageEl( "holding-area", "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
       this.container.replaceChildren(
         ...banner,
@@ -1042,7 +1026,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private paintSentinel( text: string ): void {
     /* c8 ignore next */ // defensive: only reached from renderFromStore past its container-null guard.
     if ( this.container === null ) return;
-    this.container.replaceChildren( messageEl( "holding-area-sentinel", text ) );
+    this.container.replaceChildren( messageEl( "holding-area", "holding-area-sentinel", text ) );
     this.setCountText( HOLDING_AREA_COUNT_UNKNOWN );
   }
 

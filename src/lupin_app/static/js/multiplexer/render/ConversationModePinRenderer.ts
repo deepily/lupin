@@ -40,6 +40,7 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { SenderRecord, StoreSendersChangedPayload } from "../shared/types";
+import { cssEscape } from "./dom";
 
 interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
@@ -245,17 +246,6 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
     }, this.flashDurationMs);
     this.flashTimers.set(senderId, id);
   }
-}
-
-/**
- * Escapes a string for use in a CSS selector, using the built-in CSS.escape when it exists.
- */
-function cssEscape(value: string): string {
-  if (typeof globalThis !== "undefined" && typeof (globalThis as { CSS?: { escape?: (s: string) => string } }).CSS?.escape === "function") {
-    return (globalThis as { CSS: { escape: (s: string) => string } }).CSS.escape(value);
-  }
-  /* c8 ignore next */ // polyfill fallback for legacy / Node / pre-2017 browser runtimes lacking globalThis.CSS.escape; unreachable in happy-dom test env and modern browsers.
-  return value.replace(/[^a-zA-Z0-9_-]/g, (m) => "\\" + m);
 }
 
 /**
