@@ -247,7 +247,7 @@ class StandInStage:
 
     def manifest( self ): return { "manifest_hash": "0" * 64 }
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, index_manifest=None ):
         """Ensures: returns the client's answer shape with every entry's id except exclude_id."""
         ids = sorted( e[ "id" ] for e in entries if e[ "id" ] != exclude_id )
         return { "ids": ids, "ranking": ids, "lists": { "stand-in": { "size": len( ids ), "head": ids[ :20 ] } }, "manifest_hash": "0" * 64,
