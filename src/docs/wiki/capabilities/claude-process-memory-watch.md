@@ -20,7 +20,7 @@ pins:
 ---
 # Claude process memory watch
 
-`cosa.utils.cc_memory_watch` writes one line for each live Claude Code process over a memory threshold, so a kernel kill can be tied to a session. It kills nothing and notifies nobody. The wrapper `src/scripts/watch-cc-memory.sh` and the unit `lupin-cc-memory-watch.service` run it. `run_once` is in [[shared-utilities]].
+`cosa.utils.cc_memory_watch` writes one line for each live Claude Code process over a memory threshold, so a kernel kill can be tied to a session. It kills nothing and notifies nobody. The wrapper `src/scripts/watch-cc-memory.sh` runs it as `cosa.utils.cc_memory_watch`. The unit `lupin-cc-memory-watch.service` runs a deployed copy as `python3 -m cc_memory_watch`, with `PYTHONPATH` on the deploy directory. The installer owns the copy: `src/scripts/install-cc-memory-watch.sh` copies the module there, and `test_cc_memory_watch_deploy_parity.py` fails when the copy drifts. `run_once` is in [[shared-utilities]].
 
 ## What it does
 - `collect_samples` makes one pass over `/proc` and returns a `Sample` per Claude Code process. A process that exits mid-scan or has no `VmRSS` line is skipped, never reported at 0. `iter_pids` yields the numeric `/proc` entries.
