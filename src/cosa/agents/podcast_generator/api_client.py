@@ -29,6 +29,7 @@ from typing import Optional, Any
 from dataclasses import dataclass
 
 from .config import PodcastConfig
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
 from cosa.agents.shared.sdk_error_result import raise_error_result
 # D6-LENIENT JSON recovery — single source of truth lives in the parsing module
 from .prompts.script_generation import lenient_json_loads
@@ -113,7 +114,7 @@ class APIResponse:
 
 
 @dataclass
-class CostEstimate:
+class CostEstimate( BoundedCCCostEstimate ):
     """
     Cost tracking for script-phase LLM calls.
 
@@ -122,12 +123,6 @@ class CostEstimate:
     (`total_sdk_cost_usd`). Under the bounded-CC path the SDK telemetry is
     covered by the fixed Max plan and is not billed per token.
     """
-    total_input_tokens  : int   = 0
-    total_output_tokens : int   = 0
-    total_api_calls     : int   = 0
-    estimated_cost_usd  : float = 0.0
-    total_sdk_cost_usd  : float = 0.0
-
     # Pricing per million tokens (approximate, as of 2025)
     OPUS_INPUT_PRICE    : float = 15.0
     OPUS_OUTPUT_PRICE   : float = 75.0
@@ -157,27 +152,8 @@ class CostEstimate:
 
         self.estimated_cost_usd += cost
 
-    def add_sdk_cost( self, cost_usd: float ):
-        """
-        Accumulate the SDK-reported per-call cost telemetry.
 
-        Args:
-            cost_usd: `ResultMessage.total_cost_usd` for one call (telemetry only —
-                      covered by the Max plan, not billed per token)
-        """
-        self.total_sdk_cost_usd += cost_usd
-
-    def get_summary( self ) -> str:
-        """Get human-readable cost summary (with the Max-plan disclaimer)."""
-        return (
-            f"API Calls: {self.total_api_calls} | "
-            f"Tokens: {self.total_input_tokens:,} in, {self.total_output_tokens:,} out | "
-            f"Est. Cost: ${self.estimated_cost_usd:.4f} | "
-            f"SDK telemetry: ${self.total_sdk_cost_usd:.4f} (covered by Max plan — not billed per-token)"
-        )
-
-
-class PodcastAPIClient:
+class PodcastAPIClient( BoundedCCClientBase ):
     """
     Bounded-CC script-generation client (in-process Claude Agent SDK).
 
@@ -194,6 +170,14 @@ class PodcastAPIClient:
     Claude Agent SDK Max-subscription OAuth path. The former firewalled-key
     machinery was removed in the bounded-CC migration.
     """
+
+    CONFIG_CLASS        = PodcastConfig
+    COST_ESTIMATE_CLASS = CostEstimate
+    LABEL               = "PodcastAPIClient"
+    BANNER_NOUN         = "Script"
+    BANNER_FIELD        = "script_model"
+    JSON_MODEL_FIELD    = "script_model"
+    _logger             = logger
 
     def __init__(
         self,
@@ -219,22 +203,7 @@ class PodcastAPIClient:
         Raises:
             ImportError: if claude_agent_sdk is not installed
         """
-        if not SDK_AVAILABLE:
-            raise ImportError(
-                "claude_agent_sdk not installed. "
-                "Install with: pip install claude-agent-sdk"
-            )
-
-        self.config  = config or PodcastConfig()
-        self.debug   = debug
-        self.verbose = verbose
-
-        # Cost tracking
-        self.cost_estimate = CostEstimate()
-
-        if self.debug:
-            print( f"[PodcastAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[PodcastAPIClient] Script model: {self.config.script_model}" )
+        super().__init__( config, debug, verbose, SDK_AVAILABLE )
 
     async def call_for_analysis(
         self,
@@ -255,14 +224,7 @@ class PodcastAPIClient:
         Returns:
             APIResponse: Structured response with analysis
         """
-        return await self._call_api(
-            model         = self.config.script_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "analysis",
-        )
+        return await self._call_typed( self.config.script_model, "analysis", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_script(
         self,
@@ -285,14 +247,7 @@ class PodcastAPIClient:
         Returns:
             APIResponse: Structured response with script
         """
-        return await self._call_api(
-            model         = self.config.script_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "script_generation",
-        )
+        return await self._call_typed( self.config.script_model, "script_generation", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_revision(
         self,
@@ -313,56 +268,11 @@ class PodcastAPIClient:
         Returns:
             APIResponse: Structured response with revised script
         """
-        return await self._call_api(
-            model         = self.config.script_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "revision",
-        )
+        return await self._call_typed( self.config.script_model, "revision", system_prompt, user_message, max_tokens, temperature )
 
-    async def call_with_json_output(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int = 4096
-    ) -> dict:
-        """
-        Call the model expecting JSON output (lenient extraction).
-
-        Ensures:
-            - Strips markdown code fences
-            - Recovers a JSON object embedded in surrounding prose (bounded CC
-              completions can be chattier than `messages.create`)
-            - Raises ValueError only if no JSON object can be recovered
-
-        Args:
-            system_prompt: System prompt (should request JSON output)
-            user_message: User message
-            max_tokens: Retained for signature parity (unused on the bounded path)
-
-        Returns:
-            dict: Parsed JSON response
-
-        Raises:
-            ValueError: if no valid JSON object can be recovered
-        """
-        response = await self._call_api(
-            model         = self.config.script_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = 0.5,  # low → "precise" steer for structured output
-            call_type     = "json_output",
-        )
-
-        parsed = lenient_json_loads( response.content )
-        if parsed is None:
-            logger.error( "Failed to recover JSON object from response" )
-            logger.debug( f"Raw content: {response.content}" )
-            raise ValueError( "Response did not contain a recoverable JSON object" )
-        return parsed
+    def _recover_json( self, text ):
+        """Recover the JSON object from chatty model output with lenient_json_loads."""
+        return lenient_json_loads( text )
 
     async def _call_api(
         self,

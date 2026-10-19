@@ -33,6 +33,7 @@ from typing import Optional, Any
 from dataclasses import dataclass
 
 from .config import PresentationConfig
+from cosa.agents.shared.bounded_cc_client import BoundedCCClientBase, BoundedCCCostEstimate
 from .prompts.json_recovery import recover_json_object
 from cosa.agents.shared.sdk_error_result import raise_error_result
 
@@ -111,7 +112,7 @@ class APIResponse:
 
 
 @dataclass
-class CostEstimate:
+class CostEstimate( BoundedCCCostEstimate ):
     """
     Cost tracking for content-phase LLM calls.
 
@@ -119,12 +120,6 @@ class CostEstimate:
     and the SDK-reported telemetry (`total_sdk_cost_usd`). Under bounded Claude
     Code the SDK telemetry is covered by the fixed Max plan, not billed per token.
     """
-    total_input_tokens  : int   = 0
-    total_output_tokens : int   = 0
-    total_api_calls     : int   = 0
-    estimated_cost_usd  : float = 0.0
-    total_sdk_cost_usd  : float = 0.0
-
     # Pricing per million tokens (as of 2026-04)
     OPUS_INPUT_PRICE    : float = 15.0
     OPUS_OUTPUT_PRICE   : float = 75.0
@@ -159,27 +154,8 @@ class CostEstimate:
 
         self.estimated_cost_usd += cost
 
-    def add_sdk_cost( self, cost_usd: float ):
-        """
-        Accumulate the SDK-reported per-call cost telemetry.
 
-        Args:
-            cost_usd: `ResultMessage.total_cost_usd` for one call (telemetry only —
-                      covered by the Max plan, not billed per token)
-        """
-        self.total_sdk_cost_usd += cost_usd
-
-    def get_summary( self ) -> str:
-        """Get human-readable cost summary (with the Max-plan disclaimer)."""
-        return (
-            f"API Calls: {self.total_api_calls} | "
-            f"Tokens: {self.total_input_tokens:,} in, {self.total_output_tokens:,} out | "
-            f"Est. Cost: ${self.estimated_cost_usd:.4f} | "
-            f"SDK telemetry: ${self.total_sdk_cost_usd:.4f} (covered by Max plan — not billed per-token)"
-        )
-
-
-class PresentationAPIClient:
+class PresentationAPIClient( BoundedCCClientBase ):
     """
     Bounded-CC content-generation client (in-process Claude Agent SDK).
 
@@ -197,6 +173,14 @@ class PresentationAPIClient:
     machinery was removed in the bounded-CC migration. The Gemini path is
     separate and unaffected.
     """
+
+    CONFIG_CLASS        = PresentationConfig
+    COST_ESTIMATE_CLASS = CostEstimate
+    LABEL               = "PresentationAPIClient"
+    BANNER_NOUN         = "Content"
+    BANNER_FIELD        = "content_model"
+    JSON_MODEL_FIELD    = "content_model"
+    _logger             = logger
 
     def __init__(
         self,
@@ -222,22 +206,7 @@ class PresentationAPIClient:
         Raises:
             ImportError: if claude_agent_sdk is not installed
         """
-        if not SDK_AVAILABLE:
-            raise ImportError(
-                "claude_agent_sdk not installed. "
-                "Install with: pip install claude-agent-sdk"
-            )
-
-        self.config  = config or PresentationConfig()
-        self.debug   = debug
-        self.verbose = verbose
-
-        # Cost tracking
-        self.cost_estimate = CostEstimate()
-
-        if self.debug:
-            print( f"[PresentationAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
-            print( f"[PresentationAPIClient] Content model: {self.config.content_model}" )
+        super().__init__( config, debug, verbose, SDK_AVAILABLE )
 
     # =========================================================================
     # Public API Methods
@@ -251,11 +220,7 @@ class PresentationAPIClient:
         temperature: float = 0.7
     ) -> APIResponse:
         """Call Claude for narrative analysis."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="narrative_analysis",
-        )
+        return await self._call_typed( self.config.content_model, "narrative_analysis", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_outline(
         self,
@@ -265,11 +230,7 @@ class PresentationAPIClient:
         temperature: float = 0.7
     ) -> APIResponse:
         """Call Claude for slide outline generation."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="outline_generation",
-        )
+        return await self._call_typed( self.config.content_model, "outline_generation", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_elaboration(
         self,
@@ -279,11 +240,7 @@ class PresentationAPIClient:
         temperature: float = 0.7
     ) -> APIResponse:
         """Call Claude for full slide content elaboration."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="elaboration",
-        )
+        return await self._call_typed( self.config.content_model, "elaboration", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_mermaid(
         self,
@@ -293,11 +250,7 @@ class PresentationAPIClient:
         temperature: float = 0.3
     ) -> APIResponse:
         """Generate Mermaid diagram code (text output, not JSON)."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="mermaid",
-        )
+        return await self._call_typed( self.config.content_model, "mermaid", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_matplotlib(
         self,
@@ -307,11 +260,7 @@ class PresentationAPIClient:
         temperature: float = 0.2
     ) -> APIResponse:
         """Generate Matplotlib Python code (text output, not JSON)."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="matplotlib",
-        )
+        return await self._call_typed( self.config.content_model, "matplotlib", system_prompt, user_message, max_tokens, temperature )
 
     async def call_for_d2(
         self,
@@ -321,50 +270,11 @@ class PresentationAPIClient:
         temperature: float = 0.3
     ) -> APIResponse:
         """Generate d2 diagram code (text output, not JSON)."""
-        return await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=temperature, call_type="d2",
-        )
+        return await self._call_typed( self.config.content_model, "d2", system_prompt, user_message, max_tokens, temperature )
 
-    async def call_with_json_output(
-        self,
-        system_prompt: str,
-        user_message: str,
-        max_tokens: int = 4096
-    ) -> dict:
-        """
-        Call the model expecting JSON output, with strict parsing.
-
-        Ensures:
-            - Robustly recovers a JSON object from chatty output (fence-strip +
-              embedded-object extraction)
-            - Fails loudly (raises ValueError) if no JSON object can be recovered —
-              never substitutes a default (structured output is consumed downstream)
-
-        Args:
-            system_prompt: System prompt (should request JSON output)
-            user_message: User message
-            max_tokens: Retained for signature parity (unused on the bounded path)
-
-        Returns:
-            dict: Parsed JSON response
-
-        Raises:
-            ValueError: if no valid JSON object can be recovered
-        """
-        response = await self._call_api(
-            model=self.config.content_model, system_prompt=system_prompt,
-            user_message=user_message, max_tokens=max_tokens,
-            temperature=0.5, call_type="json_output",
-        )
-
-        parsed = recover_json_object( response.content )
-        if parsed is None:
-            logger.error( "Failed to recover JSON object from response" )
-            logger.debug( f"Raw content: {response.content}" )
-            raise ValueError( "Response did not contain a recoverable JSON object" )
-        return parsed
+    def _recover_json( self, text ):
+        """Recover the JSON object from chatty model output with recover_json_object."""
+        return recover_json_object( text )
 
     # =========================================================================
     # Internal Methods
