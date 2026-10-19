@@ -17,6 +17,7 @@ from lupin_mcp import reuse_e2e_run as e2r
 from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_flip_run as frun
 from lupin_mcp import reuse_stage1 as s1
+from lupin_mcp import reuse_stage1_run as rr
 
 FRESH_NEEDS_NAME    = "2026.10.14-wa-fresh-needs-30.json"
 FRESH_NEEDS_DIR     = "lupin/wa-john-2026.10.14"
@@ -342,10 +343,8 @@ def cli( argv=None ):
         - returns 2 after one line on the error stream for a refusal of the driver, the sweep or the frozen needs
         - the flip driver's own refusals are returned as it returns them
     """
-    try: return main( argv )
-    except ( s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, e2e.FrozenInputRefused ) as e:
-        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
-        return 2
+    return rr.run_cli( lambda: main( argv ),
+                       ( s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, e2e.FrozenInputRefused ) )
 
 
 if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive

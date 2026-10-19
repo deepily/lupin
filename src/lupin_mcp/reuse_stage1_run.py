@@ -237,6 +237,25 @@ def main( argv=None, loader=None ):
     return 0
 
 
+def run_cli( call, refusals ):
+    """
+    Run call as a command line: a refusal is one line on the error stream and exit code 2.
+
+    Requires:
+        - call is a callable taking no arguments that returns an exit code
+        - refusals is a tuple of exception classes
+
+    Ensures:
+        - returns call's own code when it works
+        - returns 2 after printing "refused (<class name>): <message>" to stderr for any exception in refusals
+        - any other error propagates untouched, so a crash is never read as a refusal
+    """
+    try: return call()
+    except refusals as e:
+        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
+        return 2
+
+
 def cli( argv=None, loader=None ):
     """
     Run main as a command line: a refusal the runner makes is one line and exit code 2.
@@ -246,10 +265,8 @@ def cli( argv=None, loader=None ):
         - returns 2 after one line on the error stream for a RunnerRefused, DriverRefused, KeyMissing, CanaryNotApproved, CanaryTripped or StageRefused
         - any other error propagates untouched, so a crash is never read as a refusal
     """
-    try: return main( argv, loader )
-    except ( RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused ) as e:
-        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
-        return 2
+    return run_cli( lambda: main( argv, loader ),
+                    ( RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused ) )
 
 
 if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive

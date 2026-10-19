@@ -229,11 +229,9 @@ def cli( argv=None, loader=None ):
         - returns 2 after one line on the error stream for a refusal of the runner, the driver, the frozen inputs or the ledger
         - any other error propagates untouched
     """
-    try: return main( argv, loader )
-    except ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
-             e2e.FrozenInputRefused, e2r.rl.AccountLimitReached, e2r.rl.LedgerUnreadable ) as e:
-        print( f"refused ({type( e ).__name__}): {e}", file=sys.stderr )
-        return 2
+    return rr.run_cli( lambda: main( argv, loader ),
+                       ( rr.RunnerRefused, s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, s1.CanaryTripped, s1.StageRefused,
+                         e2e.FrozenInputRefused, e2r.rl.AccountLimitReached, e2r.rl.LedgerUnreadable ) )
 
 
 if __name__ == "__main__":  # pragma: no cover -- the module entry point; cli is what the tests drive
