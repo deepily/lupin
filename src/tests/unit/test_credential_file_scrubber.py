@@ -361,3 +361,15 @@ def test_can_fail_control_the_same_assertion_goes_red_when_the_scrubber_is_bypas
     # Same survival check as arm 1, on the arm that proves the assertion can fail.
     surviving = open( path, encoding="utf-8" ).read()
     assert '"role":"user"' in surviving
+
+
+def test_scrub_roots_reports_a_file_that_vanished_after_the_scan_and_scrubs_the_rest( tmp_path, monkeypatch ):
+    import cosa.utils.credential_file_scrubber as scrubber
+    kept   = _write( tmp_path / "kept.jsonl", f'{{"a": "{PLANTED}"}}\n' )
+    _age( kept, DEFAULT_ACTIVE_WINDOW_SECONDS + 60 )
+    gone   = str( tmp_path / "gone.jsonl" )
+    monkeypatch.setattr( scrubber, "scan_for_values", lambda roots, values: { "paths": sorted( [ gone, kept ] ), "unreadable": [ ] } )
+    result = scrub_roots( [ str( tmp_path ) ], values=[ PLANTED ] )
+    assert result[ "unreadable" ] == [ gone ]
+    assert result[ "scrubbed" ] == [ kept ]
+    assert ( result[ "total_before" ], result[ "total_after" ] ) == ( 1, 0 )

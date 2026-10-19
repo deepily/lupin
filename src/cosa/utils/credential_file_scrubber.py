@@ -196,6 +196,44 @@ def is_recently_modified( path, window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS, no
     return ( now - os.stat( path ).st_mtime ) < window_seconds
 
 
+def _handle_found_file( path, values, excluded, window_seconds, dry_run, result ):
+    """
+    Scrub, skip or count one file found by the scan, recording the outcome in result.
+
+    Requires:
+        - result is the dict built by scrub_roots
+
+    Ensures:
+        - appends path to exactly one of skipped_excluded, skipped_active, would_scrub, scrubbed
+        - adds the file's counts to total_before and total_after
+
+    Raises:
+        - FileNotFoundError if the file vanished after the scan found it
+    """
+    if os.path.abspath( path ) in excluded:
+        count = count_value_occurrences( path, values )
+        result[ "skipped_excluded" ].append( path )
+        result[ "total_before" ] += count
+        result[ "total_after"  ] += count
+        return
+    if is_recently_modified( path, window_seconds ):
+        count = count_value_occurrences( path, values )
+        result[ "skipped_active" ].append( path )
+        result[ "total_before" ] += count
+        result[ "total_after"  ] += count
+        return
+    if dry_run:
+        count = count_value_occurrences( path, values )
+        result[ "would_scrub" ].append( path )
+        result[ "total_before" ] += count
+        result[ "total_after"  ] += count
+        return
+    outcome = scrub_file( path, values )
+    result[ "total_before" ] += outcome[ "before" ]
+    result[ "total_after"  ] += outcome[ "after" ]
+    result[ "scrubbed" ].append( path )
+
+
 def scrub_roots( roots, values=None, window_seconds=DEFAULT_ACTIVE_WINDOW_SECONDS,
                  exclude=(), dry_run=False ):
     """
@@ -214,6 +252,8 @@ def scrub_roots( roots, values=None, window_seconds=DEFAULT_ACTIVE_WINDOW_SECOND
           under skipped_active so the omission is visible
         - files grep could not open come back under "unreadable" — the hole in the
           count is reported, not swallowed
+        - a file that vanishes between the scan and its rewrite also comes back under
+          "unreadable"; the run carries on with the other files
         - dry_run counts without writing anything and names each file it would have
           rewritten — a dry run that reports a number and no paths cannot be checked
         - total_after is 0 once every found file has been scrubbed
@@ -244,28 +284,10 @@ def scrub_roots( roots, values=None, window_seconds=DEFAULT_ACTIVE_WINDOW_SECOND
     }
 
     for path in found:
-        if os.path.abspath( path ) in excluded:
-            count = count_value_occurrences( path, values )
-            result[ "skipped_excluded" ].append( path )
-            result[ "total_before" ] += count
-            result[ "total_after"  ] += count
-            continue
-        if is_recently_modified( path, window_seconds ):
-            count = count_value_occurrences( path, values )
-            result[ "skipped_active" ].append( path )
-            result[ "total_before" ] += count
-            result[ "total_after"  ] += count
-            continue
-        if dry_run:
-            count = count_value_occurrences( path, values )
-            result[ "would_scrub" ].append( path )
-            result[ "total_before" ] += count
-            result[ "total_after"  ] += count
-            continue
-        outcome = scrub_file( path, values )
-        result[ "total_before" ] += outcome[ "before" ]
-        result[ "total_after"  ] += outcome[ "after" ]
-        result[ "scrubbed" ].append( path )
+        try:
+            _handle_found_file( path, values, excluded, window_seconds, dry_run, result )
+        except FileNotFoundError:
+            result[ "unreadable" ].append( path )
 
     return result
 
