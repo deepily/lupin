@@ -470,6 +470,23 @@ class TestSimilarityMethods( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             a.get_code_similarity( empty )
 
+    def test_missing_embedding_messages_name_their_own_embedding( self ):
+        """Each public method keeps its own noun; a missing embedding on either side raises."""
+        with _embed_mocked():
+            a = SolutionSnapshot( question="q", solution_summary="s", code=[ "a = 1" ], debug=False )
+            empty = SolutionSnapshot( debug=False )
+        cases = [
+            ( a.get_question_similarity,         "Both snapshots must have a question embedding to compare." ),
+            ( a.get_solution_summary_similarity, "Both snapshots must have a solution summary embedding to compare." ),
+            ( a.get_code_similarity,             "Both snapshots must have a code embedding to compare." ),
+        ]
+        for method, message in cases:
+            with self.assertRaises( ValueError ) as raised:
+                method( empty )
+            self.assertEqual( str( raised.exception ), message )
+        with self.assertRaises( ValueError ):
+            empty.get_code_similarity( a )
+
 
 class TestCopyAndSerialization( unittest.TestCase ):
     """get_copy / to_jsons / for_current_user."""
