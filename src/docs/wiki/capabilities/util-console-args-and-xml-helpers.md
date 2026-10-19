@@ -4,8 +4,8 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.utils.util.add_to_path@515434116b
   - cosa.utils.util.generate_domain_names@5bc45fc92c
-  - cosa.utils.util.get_name_value_pairs@04afd5ce6d
-  - cosa.utils.util.get_name_value_pairs_v2@6858bef9f5
+  - cosa.utils.util.get_name_value_pairs@b4c3d91a27
+  - cosa.utils.util.get_name_value_pairs_v2@552209378a
   - cosa.utils.util.init@394b917b41
   - cosa.utils.util.print_banner@13cc8fb6d4
   - cosa.utils.util.print_list@da4fe0aee6
@@ -32,7 +32,7 @@ Console and argument helpers in `cosa.utils.util`, and the deprecated `util_xml`
 - `get_nested_list` returns the `<line>` tags inside a parent tag, default `code`. `rescue_code_using_tick_tick_tick_syntax` wraps a fenced python block in `<line>` tags, or returns an empty string.
 
 ## Don't
-- Do not rely on `get_name_value_pairs` for values that contain `=`. It keeps only the piece before the next separator.
+- A value may contain `=`. Both versions split on the first `=` only, so `url=http://h/?a=b` keeps `http://h/?a=b`.
 - Do not expect `get_value_by_xml_tag_name` to raise on a missing tag. With no default it returns an `Error:` text.
 
 ## Invariants

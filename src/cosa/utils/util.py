@@ -267,7 +267,7 @@ def get_name_value_pairs(arg_list: list[str], debug: bool = False, verbose: bool
         if debug: print("[{0}]th arg = [{1}]... ".format(i, arg_list[i]), end="")
 
         if "=" in arg:
-            pair = arg.split("=")
+            pair = arg.split("=", 1)
             name_value_pairs[pair[0]] = pair[1]
             if debug: print("done!")
         else:
@@ -468,7 +468,7 @@ def get_file_as_dictionary(path: str, lower_case: bool = False, omit_comments: b
         if omit_comments and (line.startswith("#") or line.startswith("//")):
             continue
 
-        pair = line.strip().split(" = ")
+        pair = line.strip().split(" = ", 1)
         if len(pair) > 1:
             if debug and verbose: print("[{}] = [{}]".format(pair[0], pair[1]))
             # Only pull pipes after the key and values have been stripped.
@@ -1167,7 +1167,7 @@ def get_name_value_pairs_v2(arg_list: list[str], decode_spaces: bool = True) -> 
         print(f"[{i}]th arg = [{arg_list[i]}]... ", end="")
 
         if "=" in arg:
-            pair = arg.split("=")
+            pair = arg.split("=", 1)
             value = pair[1].replace("+", " ") if decode_spaces else pair[1]
             name_value_pairs[pair[0]] = value
             print("done!")

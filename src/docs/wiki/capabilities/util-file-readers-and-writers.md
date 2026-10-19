@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.utils.util.find_files_with_prefix_and_suffix@4617985c84
   - cosa.utils.util.get_api_key@cdbd01816e
-  - cosa.utils.util.get_file_as_dictionary@355b9e3104
+  - cosa.utils.util.get_file_as_dictionary@5355f311d6
   - cosa.utils.util.get_file_as_json@5291b44f0a
   - cosa.utils.util.get_file_as_list@96ab9e208f
   - cosa.utils.util.get_file_as_source_code_with_line_numbers@224ad871ce
@@ -31,7 +31,7 @@ Small functions in `cosa.utils.util` that read and write files. Path helpers are
 - `is_jsonl( s )` is True when every line parses with `json.loads`.
 
 ## Don't
-- Do not rely on `get_file_as_dictionary` for values that contain ` = `. It keeps only the piece before the next separator.
+- A value may contain ` = `. `get_file_as_dictionary` splits on the first ` = ` only.
 - Do not pass a list you still need to `get_source_code_with_line_numbers`. It rewrites the list items in place.
 - Do not use `get_file_as_string` for non-ASCII files on a host whose default encoding is not UTF-8. `get_file_as_list` forces UTF-8.
 
