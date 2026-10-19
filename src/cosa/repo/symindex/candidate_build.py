@@ -117,7 +117,7 @@ def tree_path_refusal( index, out_dir, main_tree ):
     return None
 
 
-def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE, built_at=None, index=None, out_dir=None ):
+def run( root, writer, client, screen=None, config=None, environ=None, batch_size=pl.BATCH_SIZE, built_at=None, index=None, out_dir=None, skip_if_current=False ):
     """
     Write the missing purpose lines and rebuild the vector set.
 
@@ -142,6 +142,8 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
 
         - index, when given, is the symbols.jsonl read instead of the ensured index; nothing is built or written there
         - out_dir, when given, holds the purpose, vector, query-cache and lock files, and the storage environment overrides are ignored
+        - skip_if_current reads the live set's build info again once the lock is held; when it names this index manifest, nothing is
+          written and the answer is { skipped: "current", index_manifest, built_at }, so a caller that read the info before another build finished does not build twice
 
     Raises:
         - CandidateError BUILD_LOCK_HELD when another build holds the lock; nothing is written
@@ -157,6 +159,9 @@ def run( root, writer, client, screen=None, config=None, environ=None, batch_siz
     header    = sx_build.read_header( gen )
     entries   = sx_build.read_symbols( gen )
     with fr.refresh_lock( data / fr.LOCK_FILE ):
+        held      = fr.read_build_info( live ) if skip_if_current else None
+        if held is not None and held[ "index_manifest" ] == fr.index_manifest( header ):
+            return { "skipped": "current", "index_manifest": held[ "index_manifest" ], "built_at": held[ "built_at" ] }
         screen    = screen if screen is not None else pl.default_screen()
         report    = pl.write_purpose_lines( entries, writer, purpose / "purpose.jsonl", WRITER_VERSION, screen, batch_size=batch_size )
         new_dir   = live.with_name( live.name + ".new" )

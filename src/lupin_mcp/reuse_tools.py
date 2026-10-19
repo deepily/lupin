@@ -328,7 +328,7 @@ def _candidate_stage( top ):
     def refresher():
         """Ensures: runs the incremental vector build for this repository under its lock."""
         from cosa.repo.symindex import candidate_build as cb                       # imported here: it pulls in requests, which the install closure lacks
-        return cb.run( top, cb.make_job_writer( top, base_url, os.environ ), vector_build.EndpointClient(), environ=os.environ )
+        return cb.run( top, cb.make_job_writer( top, base_url, os.environ ), vector_build.EndpointClient(), environ=os.environ, skip_if_current=True )
 
     return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, refresher=refresher )
 

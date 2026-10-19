@@ -573,3 +573,41 @@ def test_sample_purposes_reads_the_named_index( world, tmp_path, monkeypatch ):
     monkeypatch.setattr( cb.sx_build, "read_symbols", lambda gen: read.append( gen ) or world[ "symbols" ] )
     report = cb.sample_purposes( world[ "root" ], answering_writer( [] ), tmp_path / "s.jsonl", 2, index=tmp_path / "g" / "symbols.jsonl" )
     assert read == [ tmp_path / "g" ] and len( report[ "ids" ] ) == 2
+
+
+# ── skip_if_current: the info is read again once the lock is held ──
+
+
+def test_skip_if_current_returns_without_work_when_the_live_set_names_this_index( world, tmp_path ):
+    first = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-18T00:00:00+00:00" )
+    calls, client = [], tvb.FakeClient()
+    again = cb.run( world[ "root" ], answering_writer( calls ), client, config=ConfigFor(), environ={}, skip_if_current=True )
+    assert again == { "skipped": "current", "index_manifest": first[ "index_manifest" ], "built_at": "2026-10-18T00:00:00+00:00" }
+    assert calls == [] and client.calls == []
+    assert vs.load_vectors( tmp_path / "data" / "vec" ).manifest_hash == first[ "manifest_hash" ]
+
+
+def test_skip_if_current_still_builds_when_the_index_moved_or_there_is_no_set( world, monkeypatch ):
+    built = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, skip_if_current=True )
+    assert "skipped" not in built and built[ "rows" ] == 2                                  # no live set yet
+    monkeypatch.setattr( cb.sx_build, "read_header", lambda gen: { "manifest": { "m.py": [ 9, 9 ] }, "symbols_sha": "sha-2" } )
+    moved = cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, skip_if_current=True )
+    assert "skipped" not in moved and moved[ "index_manifest" ] != built[ "index_manifest" ]
+
+
+def test_the_check_runs_inside_the_lock_so_a_build_that_finished_meanwhile_is_not_repeated( world, monkeypatch, tmp_path ):
+    from cosa.repo.symindex.candidates import freshness as fr
+    cb.run( world[ "root" ], answering_writer( [] ), tvb.FakeClient(), config=ConfigFor(), environ={}, built_at="2026-10-17T00:00:00+00:00" )
+    newer  = { "manifest": { "m.py": [ 9, 9 ] }, "symbols_sha": "sha-2" }
+    monkeypatch.setattr( cb.sx_build, "read_header", lambda gen: newer )                   # the caller sees an index the set is behind
+    real   = fr.refresh_lock
+    import contextlib
+    @contextlib.contextmanager
+    def peer_finishes_first( path ):
+        with real( path ):
+            fr.write_build_info( tmp_path / "data" / "vec", newer, "2026-10-18T00:00:00+00:00" )     # another build lands before this one holds the lock
+            yield
+    monkeypatch.setattr( cb.fr, "refresh_lock", peer_finishes_first )
+    calls = []
+    got   = cb.run( world[ "root" ], answering_writer( calls ), tvb.FakeClient(), config=ConfigFor(), environ={}, skip_if_current=True )
+    assert got[ "skipped" ] == "current" and got[ "built_at" ] == "2026-10-18T00:00:00+00:00" and calls == []

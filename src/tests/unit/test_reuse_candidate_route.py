@@ -315,8 +315,21 @@ def test_the_stage_from_the_environment_refreshes_through_the_incremental_build_
     from cosa.repo.symindex import candidate_build as cb
     seen = {}
     monkeypatch.setattr( cb, "make_job_writer", lambda root, base_url, environ: seen.update( writer=( root, base_url ) ) or "the-writer" )
-    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None: seen.update( run=( root, writer, type( client ).__name__, environ ) ) or { "rows": 1 } )
+    monkeypatch.setattr( cb, "run", lambda root, writer, client, environ=None, skip_if_current=False: seen.update( run=( root, writer, type( client ).__name__, environ, skip_if_current ) ) or { "rows": 1 } )
     stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
     assert stage._refresher() == { "rows": 1 }
     assert seen[ "writer" ][ 0 ] == env[ 0 ] and seen[ "writer" ][ 1 ] == stage.base_url
-    assert seen[ "run" ][ :3 ] == ( env[ 0 ], "the-writer", "EndpointClient" )
+    assert seen[ "run" ][ :3 ] == ( env[ 0 ], "the-writer", "EndpointClient" ) and seen[ "run" ][ 4 ] is True
+
+
+def test_without_the_test_credentials_the_real_refresher_fails_by_name_and_the_lookup_goes_stale( monkeypatch, env, tmp_path ):
+    """The real writer factory runs with no credential variables set."""
+    for key, value in ( ( "LUPIN_REUSE_DATA_DIR", env[ 1 ] ), ( "LUPIN_REUSE_OUT_DIR", env[ 2 ] ), ( "LUPIN_REUSE_JEV_PACK_SIZE", "50" ), ( "LUPIN_REUSE_JEV_TOKEN_CEILING", "1000" ),
+                        ( "LUPIN_REUSE_JEV_RUN_NAME", "cand-nocred" ), ( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", str( tmp_path / "vec" ) ), ( "LUPIN_REUSE_CANDIDATE_QUERY_CACHE_DIR", "/qc" ),
+                        ( "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR", "/pp" ) ):
+        monkeypatch.setenv( key, str( value ) )
+    monkeypatch.delenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL", raising=False )
+    monkeypatch.delenv( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD", raising=False )
+    stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
+    fresh = stage.freshen( "0" * 64 )                                                      # the set has no build info, so it counts as behind
+    assert fresh[ "state" ] == "stale" and "DEPENDENCY_MISSING" in fresh[ "error" ] and "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" in fresh[ "error" ]
