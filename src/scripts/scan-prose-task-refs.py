@@ -42,12 +42,13 @@ src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, FETCH_BOARD_PAGE_SIZE
+from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _shared_fetch_board
 
 from cosa.rest.task_store_prose_refs import scan_rows
 from cosa.rest.task_store_rules import TERMINAL_STATUSES
 
-PAGE_SIZE = 500      # the router's hard `le=500` cap; not a tunable
+PAGE_SIZE = FETCH_BOARD_PAGE_SIZE
 
 
 def fetch_board( settings, api_key, max_rows ):
@@ -63,35 +64,7 @@ def fetch_board( settings, api_key, max_rows ):
           rows than were fetched — the caller must surface that, never absorb it
         - never raises on an empty board
     """
-    rows      = [ ]
-    offset    = 0
-    truncated = False
-
-    while True:
-        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
-        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
-        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
-        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
-        # break below guarantees the subtraction is >= 1 on every later pass.
-        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
-        query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={limit}&offset={offset}" )
-        # _request NEVER raises — it returns ( ok, status, body ). An unchecked `ok` is how
-        # a 401 becomes an empty board that scans CLEAN, so it is raised here on purpose.
-        ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
-                                     api_key, settings[ "timeout_seconds" ] )
-        if not ok:
-            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
-        batch = page.get( "tasks", [ ] )
-        rows.extend( batch )
-        offset += len( batch )
-
-        if not page.get( "has_more" ) or not batch: break
-        if len( rows ) >= max_rows:
-            truncated = True
-            break
-
-    return ( rows, truncated )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request )
 
 
 def main( argv=None ):

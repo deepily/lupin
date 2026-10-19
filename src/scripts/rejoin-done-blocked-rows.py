@@ -41,7 +41,8 @@ src_path = os.path.join( lupin_root, "src" )
 if src_path not in sys.path: sys.path.insert( 0, src_path )
 
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
-from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, transition_task
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, _request, transition_task, FETCH_BOARD_PAGE_SIZE
+from lupin_cli.claude_code.hooks.lib.task_store_client import fetch_board as _shared_fetch_board
 
 from cosa.rest.task_store_rejoin import (
     VERDICT_REJOIN,
@@ -51,7 +52,7 @@ from cosa.rest.task_store_rejoin import (
 )
 from cosa.rest.task_store_rules import BLOCKED_STATUS
 
-PAGE_SIZE = 500      # the router's hard `le=500` cap; not a tunable
+PAGE_SIZE = FETCH_BOARD_PAGE_SIZE
 
 
 def fetch_board( settings, api_key, max_rows ):
@@ -72,33 +73,7 @@ def fetch_board( settings, api_key, max_rows ):
         - raises on a non-2xx rather than returning an empty board (an unchecked 401
           scans clean, which is a false green)
     """
-    rows      = [ ]
-    offset    = 0
-    truncated = False
-
-    while True:
-        # Ask for no more than the caller still has room for. A flat PAGE_SIZE here made
-        # `--max-rows` a page-stop THRESHOLD rather than a cap (row 9124b70a): `--max-rows 100`
-        # fetched 500 and then reported "truncated at 100 rows" — a figure the run never
-        # honoured. `max( 1, … )` is reachable only via a direct non-positive max_rows; the
-        # break below guarantees the subtraction is >= 1 on every later pass.
-        limit = max( 1, min( PAGE_SIZE, max_rows - len( rows ) ) )
-        query = ( f"include_terminal=true&unscoped_audit=true&hide_parked=false"
-                  f"&limit={limit}&offset={offset}" )
-        ok, status, page = _request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
-                                     api_key, settings[ "timeout_seconds" ] )
-        if not ok:
-            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
-        batch = page.get( "tasks", [ ] )
-        rows.extend( batch )
-        offset += len( batch )
-
-        if not page.get( "has_more" ) or not batch: break
-        if len( rows ) >= max_rows:
-            truncated = True
-            break
-
-    return ( rows, truncated )
+    return _shared_fetch_board( settings, api_key, max_rows, include_terminal=True, request=_request )
 
 
 def examine( rows, now ):

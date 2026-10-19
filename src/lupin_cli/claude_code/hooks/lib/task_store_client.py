@@ -129,6 +129,59 @@ def _request( method, url, api_key, timeout, body=None ):
     return True, status, parsed
 
 
+FETCH_BOARD_PAGE_SIZE = 500    # the router caps `limit` at 500 (`le=500`) but defaults to 100: a ceiling, tunable in 0..500
+
+
+def fetch_board( settings, api_key, max_rows, include_terminal=True, request=None ):
+    """
+    Page the whole task board and return ( rows, truncated ).
+
+    Requires:
+        - settings is load_task_store_settings()'s dict; api_key is a valid key
+        - max_rows is a positive int
+        - request, when given, has _request's signature ( method, url, api_key, timeout ) and its
+          ( ok, status, body ) return; the default is this module's _request, looked up at call time
+
+    Ensures:
+        - returns ( rows, truncated ) where `truncated` is True iff the board has more rows than
+          were fetched: the caller must surface that, never absorb it
+        - raises RuntimeError on any non-ok response: a 401 that returned an empty list would
+          scan clean, which is the false green the board scans exist to prevent
+        - never raises on an empty board
+        - asks for terminal rows only when include_terminal is true
+    """
+    if request is None: request = _request
+    rows      = [ ]
+    offset    = 0
+    truncated = False
+
+    while True:
+        # Ask for no more than the caller still has room for (row 9124b70a). A flat page size made
+        # `--max-rows` a page-stop threshold, not a cap: `--max-rows 100` fetched 500 rows and then
+        # reported "truncated at 100 rows". `max( 1, … )` is reachable only via a direct non-positive
+        # max_rows; the break below keeps the subtraction at 1 or more on every later pass.
+        limit = max( 1, min( FETCH_BOARD_PAGE_SIZE, max_rows - len( rows ) ) )
+        query = ( f"include_terminal={'true' if include_terminal else 'false'}"
+                  f"&unscoped_audit=true&hide_parked=false"
+                  f"&limit={limit}&offset={offset}" )
+        # request returns ( ok, status, body ) and never raises. An unchecked `ok` turns a 401 into
+        # an empty board that scans without findings, so a non-ok page is raised below.
+        ok, status, page = request( "GET", f"{settings[ 'api_base_url' ]}/api/tasks?{query}",
+                                    api_key, settings[ "timeout_seconds" ] )
+        if not ok:
+            raise RuntimeError( f"HTTP {status}: {page.get( 'error' ) or page.get( 'detail' ) or page}" )
+        batch = page.get( "tasks", [ ] )
+        rows.extend( batch )
+        offset += len( batch )
+
+        if not page.get( "has_more" ) or not batch: break
+        if len( rows ) >= max_rows:
+            truncated = True
+            break
+
+    return ( rows, truncated )
+
+
 def create_task( settings, api_key, payload ):
     """
     POST /api/tasks.
