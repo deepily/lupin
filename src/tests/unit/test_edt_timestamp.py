@@ -105,7 +105,7 @@ def test_a_bad_timezone_name_is_reported_once_on_stderr_and_not_in_the_stamp( mo
     assert "rendering UTC" in err
 
 
-@pytest.mark.parametrize( "bad_name", [ [ "America/New_York" ], { "tz": 1 }, 7 ] )
+@pytest.mark.parametrize( "bad_name", [ [ "America/New_York" ], { "tz": 1 }, 7, ( "a", [ ] ), b"UTC" ] )
 def test_an_unhashable_or_non_string_timezone_name_still_never_raises( monkeypatch, capsys, bad_name ):
     """A caller can hand over any value; the warned-names set must not be where it breaks."""
     import cosa.utils.edt_timestamp as edt
@@ -129,6 +129,21 @@ def test_a_closed_or_broken_stderr_does_not_break_the_stamp( monkeypatch, error 
     monkeypatch.setattr( edt.sys, "stderr", _Broken() )
     when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
     assert format_edt_timestamp( when, tz_name="Not/AZone" ) == "[2026.06.24 at 18:44:09]"
+
+
+def test_a_missing_stderr_skips_the_warning_and_keeps_stdout_clean( monkeypatch, capsys ):
+    """print( file=None ) would write the warning to stdout, where a caller may be parsing."""
+    import cosa.utils.edt_timestamp as edt
+    monkeypatch.setattr( edt, "_WARNED_TZ_NAMES", set() )
+    monkeypatch.setattr( edt.sys, "stderr", None )
+    when = datetime.datetime( 2026, 6, 24, 18, 44, 9, tzinfo=datetime.timezone.utc )
+    assert format_edt_timestamp( when, tz_name="Not/AZone" ) == "[2026.06.24 at 18:44:09]"
+    assert capsys.readouterr().out == ""
+
+
+def test_resolve_tz_treats_a_name_that_is_not_text_as_unknown():
+    tz, error = resolve_tz( ( "a", [ ] ) )
+    assert str( tz ) == "UTC" and "not text" in error
 
 
 def test_a_good_timezone_name_prints_nothing( monkeypatch, capsys ):

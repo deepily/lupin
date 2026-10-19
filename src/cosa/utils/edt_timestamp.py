@@ -59,10 +59,12 @@ def resolve_tz( tz_name: Optional[ str ] ):
     Ensures:
         - returns ( ZoneInfo, None ) for a valid name (None -> DEFAULT_TZ_NAME)
         - returns ( ZoneInfo("UTC"), <error string> ) for an invalid/unknown
-          name; the caller journals the error once, and rendering falls back to UTC
+          name, and for any name that is not text; the caller journals the error once, and rendering falls back to UTC
         - never raises
     """
     name = tz_name if tz_name else DEFAULT_TZ_NAME
+    if not isinstance( name, str ):
+        return ZoneInfo( "UTC" ), f"unknown timezone {name!r}: not text"
     try:
         return ZoneInfo( name ), None
     except Exception as e:
@@ -114,7 +116,8 @@ def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Opt
     if error is not None and repr( tz_name ) not in _WARNED_TZ_NAMES:
         _WARNED_TZ_NAMES.add( repr( tz_name ) )
         try:
-            print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
+            # print( file=None ) writes to stdout, so a missing stderr must skip the line, not redirect it
+            if sys.stderr is not None: print( f"[edt_timestamp] {error}; rendering UTC", file=sys.stderr )
         except ( OSError, ValueError ):
             pass   # a closed or broken stderr must not cost the caller its stamp
     return f"[{format_outreach_ts( dt, tz )}]"

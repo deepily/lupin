@@ -2,10 +2,10 @@
 capability: timestamps-clock-and-dm-word-count
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.utils.edt_timestamp.format_edt_timestamp@0b2abf3db7
+  - cosa.utils.edt_timestamp.format_edt_timestamp@1fbba38f75
   - cosa.utils.edt_timestamp.format_outreach_ts@3334fdcfcc
   - cosa.utils.edt_timestamp.is_already_stamped@1e3153252f
-  - cosa.utils.edt_timestamp.resolve_tz@8fb01f1025
+  - cosa.utils.edt_timestamp.resolve_tz@73e780a8b3
   - cosa.utils.edt_timestamp.split_leading_stamp@18f546ec90
   - cosa.utils.dm_text.dm_word_count@78c72de502
   - cosa.utils.util.get_current_date@3f0f1939c1
