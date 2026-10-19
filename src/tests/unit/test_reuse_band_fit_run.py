@@ -73,8 +73,9 @@ class Setup:
         self.out   = tmp_path / "band-fit.json"
 
     def args( self, *command ):
+        pin = [ "--manifest-hash", "b" * 64 ] if command[ 0 ] in ( "canary", "run" ) else []
         return [ command[ 0 ], "--needs", str( self.needs ), "--needs-sha", self.sha, "--root", str( self.root ), "--data", str( self.data ),
-                 "--ledger", str( self.ledger ) ] + list( command[ 1: ] )
+                 "--ledger", str( self.ledger ) ] + pin + list( command[ 1: ] )
 
     def run( self, stage=None ):
         stage = FakeStage() if stage is None else stage
@@ -283,7 +284,8 @@ def test_a_report_before_the_run_is_refused_and_names_the_missing_file( setup, c
 def test_a_canary_and_a_run_on_different_stages_are_refused_by_the_report( setup, capsys ):
     assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ), stage_factory=lambda root: FakeStage() ) == 0
     assert bf.cli( setup.args( "approve", "--by", "cheech", "--why", "read it" ) ) == 0
-    assert bf.cli( setup.args( "run", "--ceiling", "7200000" ), stage_factory=lambda root: FakeStage( manifest_hash="c" * 64 ) ) == 0
+    other = [ "c" * 64 if a == "b" * 64 else a for a in setup.args( "run", "--ceiling", "7200000" ) ]                       # pinned to the other set, so the run is allowed
+    assert bf.cli( other, stage_factory=lambda root: FakeStage( manifest_hash="c" * 64 ) ) == 0
     capsys.readouterr()
     assert bf.cli( setup.args( "report", "--out", str( setup.out ), "--code-sha", "abc123" ) ) == 2
     assert "ran on stage" in capsys.readouterr().err
@@ -413,7 +415,7 @@ def test_the_derive_command_writes_a_file_the_flip_reader_accepts_and_never_over
 @pytest.mark.parametrize( "command", [ [ "estimate" ], [ "canary", "--ceiling", "1500000" ], [ "report", "--out", "o.json", "--code-sha", "c" ] ] )
 def test_the_reserved_fresh_needs_hash_is_refused_by_every_command_before_anything_is_opened( setup, capsys, command ):
     fresh = e2e.FRESH_SHA_PREFIX + "0" * 56
-    args  = [ command[ 0 ], "--needs", str( setup.needs ), "--needs-sha", fresh ] + ( [ "--root", str( setup.root ), "--data", str( setup.data ), "--ledger", str( setup.ledger ) ] if command[ 0 ] != "estimate" else [] ) + command[ 1: ]
+    args  = [ command[ 0 ], "--needs", str( setup.needs ), "--needs-sha", fresh ] + ( [ "--root", str( setup.root ), "--data", str( setup.data ), "--ledger", str( setup.ledger ) ] if command[ 0 ] != "estimate" else [] ) + ( [ "--manifest-hash", "b" * 64 ] if command[ 0 ] == "canary" else [] ) + command[ 1: ]
     assert bf.cli( args, stage_factory=lambda root: FakeStage() ) == 2
     assert "reserved fresh-needs file" in capsys.readouterr().err and not setup.data.exists()
 
@@ -437,3 +439,37 @@ def test_a_need_whose_excluded_symbol_is_not_an_entry_is_refused_before_any_spen
 
 def test_the_quantile_and_the_population_limits_are_the_ones_written_down_before_the_run():
     assert ( bf.QUANTILE, bf.POP_LOW, bf.POP_HIGH, bf.REPEATS ) == ( 0.95, 0.1, 0.9, 5 )
+
+
+# ---- the vector set is pinned ----------------------------------------------------------------------
+
+class Swapping( FakeStage ):
+    """A stage whose vector set is replaced once it has made a number of shortlists."""
+
+    def __init__( self, after ):
+        super().__init__()
+        self.after, self.made = after, 0
+
+    def shortlist( self, *a, **kw ):
+        self.made += 1
+        return super().shortlist( *a, **kw )
+
+    def manifest( self ): return { "manifest_hash": self.manifest_hash if self.made < self.after else "c" * 64 }
+
+
+def test_a_stage_on_another_vector_set_than_the_pinned_one_is_refused_before_anything_is_opened( setup, capsys ):
+    assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ), stage_factory=lambda root: FakeStage( manifest_hash="c" * 64 ) ) == 2
+    assert f"the vector set is {'c' * 64}, the run is pinned to {'b' * 64}" in capsys.readouterr().err and not ( setup.data / "e2e-results" ).exists()
+
+
+def test_a_vector_set_replaced_mid_run_stops_it_with_the_error_recorded( setup, capsys ):
+    stage = Swapping( after=1 )                                    # the lookup's shortlist is the first; the next ask finds another set
+    assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ), stage_factory=lambda root: stage ) == 2
+    assert "pinned to" in capsys.readouterr().err
+    record = setup.result( "canary" )
+    assert record[ "state" ] == "error" and [ s[ "status" ] for s in record[ "searches" ] ][ :1 ] == [ "complete" ] and record[ "searches" ][ -1 ][ "status" ] == "error" and record[ "searches" ][ -1 ][ "causes" ] == [ "ERROR:DriverRefused" ]
+
+
+def test_check_manifest_passes_when_nothing_is_pinned():
+    assert bf.check_manifest( Swapping( after=0 ), None ) is None
+    assert bf.check_manifest( FakeStage(), "b" * 64 ) is None

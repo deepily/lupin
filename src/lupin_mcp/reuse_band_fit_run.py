@@ -135,25 +135,44 @@ def packed_context( ctx, stage ):
     return out
 
 
-def make_asks( stage, sink, repeats=REPEATS ):
+def check_manifest( stage, pinned ):
+    """
+    Refuse when the stage's vector set is not the pinned one.
+
+    Requires:
+        - pinned is None, or the manifest hash the run was started against
+    Ensures:
+        - returns None when pinned is None or equals the stage's manifest hash
+    Raises:
+        - DriverRefused naming both hashes otherwise
+    """
+    if pinned is None: return
+    got = stage.manifest()[ "manifest_hash" ]
+    if got != pinned: raise s1.DriverRefused( f"the vector set is {got}, the run is pinned to {pinned}" )
+
+
+def make_asks( stage, sink, repeats=REPEATS, pinned=None ):
     """
     Build the asks of a run: the lookup, then one ask per repeat.
 
     Requires:
-        - stage is a candidate stage; sink is a Sink; repeats is a whole number of 1 or more
+        - stage is a candidate stage; sink is a Sink; repeats is a whole number of 1 or more; pinned is None or a manifest hash
     Ensures:
         - returns { "lookup": ask, "r1": ask, ... }; the order is the order the run asks them in
+        - every ask first checks the stage's manifest hash against pinned, so a replaced vector set stops the run before the next send
         - lookup stores a receipt and notes its id in the sink; it is the only ask that writes one
         - rN replays that receipt as repeat N and returns a result shaped for the runner, whose rows hold the repeat and the overlap of every entry
         - rN for a need with no lookup receipt, or a replay that swept nothing, is an error result, so the search is incomplete and says why
     """
     def lookup( ctx, item ):
+        check_manifest( stage, pinned )
         result = rt._need_impl( item[ "need" ], item[ "exclude" ], packed_context( ctx, stage ), "choice", False, True )
         if result[ "status" ] == "ok": sink.rids[ item[ "member" ] ] = result[ "receipt_id" ]
         return result
 
     def make( index ):
         def ask( ctx, item ):
+            check_manifest( stage, pinned )
             if item[ "member" ] not in sink.rids: return { "status": "error", "error": "NO_LOOKUP_RECEIPT" }
             taken = []
             with capture_replays( taken ): out = rt.replay_impl( sink.rids[ item[ "member" ] ], packed_context( ctx, stage ), repeat=index )
@@ -377,7 +396,9 @@ def _parser():
         p.add_argument( "--ledger", required=True )
         p.add_argument( "--live", action="store_true" )
         p.add_argument( "--pack-size", type=int, default=50 )
-        if name in ( "canary", "run" ): p.add_argument( "--ceiling", type=int, required=True )
+        if name in ( "canary", "run" ):
+            p.add_argument( "--ceiling", type=int, required=True )
+            p.add_argument( "--manifest-hash", required=True )
         if name == "approve":
             p.add_argument( "--by", required=True )
             p.add_argument( "--why", required=True )
@@ -425,7 +446,8 @@ def main( argv=None, stage_factory=None ):
         return 0
     if args.command in ( "canary", "run" ): check_ceiling( args.ceiling, spent )
     stage = None if args.command == "approve" else ( stage_factory or rt._candidate_stage )( pathlib.Path( args.root ) )          # approving sends nothing, so it needs no stage
-    env   = e2r._open_env( args.root, args.data, args.ledger, args.live, make_asks( stage, Sink() ), args.pack_size )
+    if stage is not None: check_manifest( stage, args.manifest_hash )
+    env   = e2r._open_env( args.root, args.data, args.ledger, args.live, make_asks( stage, Sink(), pinned=args.manifest_hash if stage is not None else None ), args.pack_size )
     spec  = { "prefix": PREFIX, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
               "stamp": None if stage is None else { "stage": stage_record( stage ), "needs_sha": args.needs_sha } }
     if args.command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
