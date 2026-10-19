@@ -48,7 +48,7 @@ import os
 import time
 
 from cosa.config.configuration_manager import ConfigurationManager
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+from cosa.rest.flow_ratio_settings import settings_override_path, _SETTINGS_DIR_ENV, OVERRIDE_SUBDIR
 from cosa.rest.task_store_rules import NOT_APPROVED_STATUS, WONT_FIX_STATUS
 # 🔨 Imported as a MODULE, not as a `from … import PARK_STATUS`, so the park edge below
 # ASKS the rules module rather than restating its literal. Two pieces of code deciding
@@ -57,14 +57,10 @@ from cosa.rest.task_store_rules import NOT_APPROVED_STATUS, WONT_FIX_STATUS
 from cosa.rest import task_store_rules as rules
 from lupin_mcp.persona_normalization import canonical_persona_key
 
-# Same env var as flow_ratio_settings, for the mount reason in the docstring. Resolved
-# FIRST — the container sets it; `fleet_data_root()` is correct only on the host, where
-# it returns a real writable directory.
-_SETTINGS_DIR_ENV = "LUPIN_FLOW_RATIO_DIR"
-
-# The mount's leaf directory. The host fallback MUST append it, or the two branches name
-# two different files — the defect flow_ratio_settings carried for three days.
-OVERRIDE_SUBDIR   = "flow-ratio"
+# The env var and the mount's leaf directory come from flow_ratio_settings, which resolves
+# the path (`settings_override_path`) for both modules. The env var is resolved first — the
+# container sets it; `fleet_data_root()` is correct only on the host. The host fallback
+# appends the leaf, or the two branches name two different files.
 OVERRIDE_FILENAME = "task-approval-settings.json"
 
 # Where a stored value is said to come from in a parse complaint. The table, never a
@@ -352,10 +348,7 @@ def legacy_override_path():
           <fleet_data_root()>/flow-ratio/task-approval-settings.json
         - nothing but `import_legacy_override_file` calls it; no reader does
     """
-    override_dir = os.environ.get( _SETTINGS_DIR_ENV )
-    if override_dir:
-        return os.path.join( override_dir, OVERRIDE_FILENAME )
-    return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, OVERRIDE_FILENAME )
+    return settings_override_path( OVERRIDE_FILENAME )
 
 
 def import_legacy_override_file():
