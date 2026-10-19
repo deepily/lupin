@@ -28,7 +28,7 @@ def test_the_question_embedding_check_matches_the_whole_question_only( db_sessio
     repo.add_embedding( "what time is it", _vec() )
     db_session.flush()
     assert repo.has( "what time is it" ) is True
-    assert [ repo.has( q ) for q in ( "what time", "what time is it?", "What Time Is It", "" ) ] == [ False ] * 4
+    assert [ repo.has( q ) for q in ( "what time", "what time is it?", "What Time Is It", "", " what time is it", "what time is it " ) ] == [ False ] * 6
 
 
 def test_the_prediction_decision_check_agrees_with_the_inherited_check( db_session ):
