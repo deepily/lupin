@@ -142,7 +142,7 @@ def test_ac_d4_tolerates_a_series_with_no_resource_container():
     assert oracle.verify_ran_on_vertex( REGION, MODEL, 0, 100 )[ 0 ] == Verdict.PASS
 
 
-@pytest.mark.parametrize( "container", [ f"projects/{PROJECT}1", f"projects/other-{PROJECT}", f"other-{PROJECT}", f"projects/{PROJECT}/x" ] )
+@pytest.mark.parametrize( "container", [ f"projects/{PROJECT}1", f"projects/other-{PROJECT}", f"other-{PROJECT}", f"projects/{PROJECT}/x", f"folders/{PROJECT}", f"projects/{PROJECT}/" ] )
 def test_ac_d4_a_longer_project_id_that_contains_ours_is_not_our_project( container ):
     """An id that merely contains ours belongs to another project."""
     oracle, _ = _oracle( [ { "timeSeries": [ _series( container=container ) ] } ] )
