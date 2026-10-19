@@ -4049,3 +4049,53 @@ def test_ask_records_the_parent_on_the_trace_the_executor_sees( tmp_path, notifi
     f = _make_flow( tmp_path, FakeCache(), FakeRouter(), FakeExpeditor(), exe, FakePending(), notifier )
     f.ask( "what time is it", parent_id_hash=sent, **_CTX )
     assert seen == [ recorded ]
+
+
+# ──────────────────────────────────── the read guard runs before a replay is queued
+
+def _replay_flow( tmp_path, notifier, snap, exe ):
+    cache = FakeCache( lookup_result=_lookup( is_replay_hit=True, snapshot=snap ) )
+    return _make_flow( tmp_path, cache, FakeRouter( "agent router go to math" ), FakeExpeditor(),
+                       exe, FakePending(), notifier )
+
+
+def test_a_replay_is_judged_by_the_read_guard_before_the_executor_sees_it( tmp_path, notifier, monkeypatch ):
+    """
+    The queued executor does not check whether a row may be served; the flow does, first.
+
+    Order is recorded across the two calls. A guard that ran after the hand-off
+    would leave the same final state and serve the row.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    snap   = _snapshot( routing_command="agent router go to math" )
+    events = [ ]
+
+    class _Exe( FakeExecutor ):
+        def submit( self, work, trace ):
+            events.append( ( "submit", work.kind, work.job ) )
+            return super().submit( work, trace )
+
+    real_guard = AskFlow._may_serve.__func__
+
+    def _spy_guard( cls, trace, snapshot, why ):
+        events.append( ( "guard", why, snapshot ) )
+        return real_guard( cls, trace, snapshot, why )
+
+    monkeypatch.setattr( AskFlow, "_may_serve", classmethod( _spy_guard ) )
+    f = _replay_flow( tmp_path, notifier, snap, _Exe( _outcome( status="done", answer="6", answer_raw="6" ) ) )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert events[ 0 ] == ( "guard", "exact_hit", snap )
+    assert events[ 1 ] == ( "submit", "replay", snap )
+
+
+def test_a_replay_of_a_row_the_user_marked_wrong_never_reaches_the_executor( tmp_path, notifier, monkeypatch ):
+    monkeypatch.setattr( flow_mod, "resolve", lambda command, crud_enabled: FakeSpec( label="math" ) )
+    snap = _snapshot( routing_command="agent router go to math", answer_is_correct=False )
+    exe  = FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None, job_id=_SCOPED_JOB_ID ) )
+    f    = _replay_flow( tmp_path, notifier, snap, exe )
+
+    f.ask( "what is 3 plus 3", **_CTX )
+
+    assert [ w for w in exe.works if w.kind == "replay" ] == [ ], "a refused row was queued as a replay"
