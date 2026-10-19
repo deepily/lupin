@@ -33,7 +33,7 @@ Created 2026-05-31 by Sam 🎙️ (CoSA coverage campaign, memory group, provide
 import unittest
 from unittest.mock import Mock, patch
 
-from cosa.memory.embedding_provider import EmbeddingProvider, get_embedding_provider
+from cosa.memory.embedding_provider import EmbeddingProvider, embedding_dimensions, get_embedding_provider
 
 _VEC = [ 0.1 ] * 768
 
@@ -471,6 +471,21 @@ class TestPropertiesAndMetrics( unittest.TestCase ):
         provider._record_metric( "prose", "openai", 5.0, 768 )
         provider.reset_metrics()
         self.assertEqual( provider._metrics, {} )
+
+
+class TestEmbeddingDimensionsHelper( unittest.TestCase ):
+    """embedding_dimensions: the one read of the 'embedding dimensions' key."""
+
+    def test_reads_key_as_int( self ):
+        cfg = Mock()
+        cfg.get.return_value = "1024"
+        self.assertEqual( embedding_dimensions( cfg ), 1024 )
+        cfg.get.assert_called_once_with( "embedding dimensions", default="768" )
+
+    def test_default_is_768_when_key_unset( self ):
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None: default
+        self.assertEqual( embedding_dimensions( cfg ), 768 )
 
 
 if __name__ == "__main__":

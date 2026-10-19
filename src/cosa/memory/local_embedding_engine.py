@@ -471,20 +471,7 @@ class ProseEmbeddingEngine:
         Returns:
             List of embedding vectors
         """
-        self._load_model()
-
-        prefixed = [ f"{self._query_prefix} {q}" for q in queries ]
-
-        if self.debug and self.verbose:
-            timer = sw.Stopwatch( msg=f"Encoding {len( queries )} prose queries..." )
-
-        with self._inference_lock:
-            result = self._run_with_cuda_retry( lambda: self._encode_batch( prefixed ) )
-
-        if self.debug and self.verbose:
-            timer.print( "Done!", use_millis=True )
-
-        return result.tolist()
+        return self._encode_with_prefix( queries, self._query_prefix, "queries" )
 
     def encode_document( self, documents: List[ str ] ) -> List[ List[ float ] ]:
         """
@@ -505,12 +492,28 @@ class ProseEmbeddingEngine:
         Returns:
             List of embedding vectors
         """
+        return self._encode_with_prefix( documents, self._document_prefix, "documents" )
+
+    def _encode_with_prefix( self, texts: List[ str ], prefix: str, noun: str ) -> List[ List[ float ] ]:
+        """
+        Encode texts after prepending a role prefix to each.
+
+        Requires:
+            - texts is a list of non-empty strings
+            - prefix is the role prefix string
+            - noun is the plural word for the debug banner ("queries", "documents")
+
+        Ensures:
+            - Returns list of matryoshka_dim unit-length embeddings
+            - Thread-safe: serializes inference via _inference_lock
+            - CUDA OOM: gc.collect + empty_cache, retries once
+        """
         self._load_model()
 
-        prefixed = [ f"{self._document_prefix} {d}" for d in documents ]
+        prefixed = [ f"{prefix} {t}" for t in texts ]
 
         if self.debug and self.verbose:
-            timer = sw.Stopwatch( msg=f"Encoding {len( documents )} prose documents..." )
+            timer = sw.Stopwatch( msg=f"Encoding {len( texts )} prose {noun}..." )
 
         with self._inference_lock:
             result = self._run_with_cuda_retry( lambda: self._encode_batch( prefixed ) )

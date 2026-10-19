@@ -24,6 +24,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.snapshot_manager_interface import SolutionSnapshotManagerInterface
+from cosa.memory.embedding_provider import embedding_dimensions
 from cosa.memory.solution_snapshot import SolutionSnapshot
 from cosa.memory.two_tier_question_search import (
     pg_hierarchical_search,
@@ -109,7 +110,7 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=debug, verbose=verbose )
 
         _cfg                  = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-        self._embedding_dim   = int( _cfg.get( "embedding dimensions", default="768" ) )
+        self._embedding_dim   = embedding_dimensions( _cfg )
 
         if self.debug:
             print( f"PostgresSolutionManager configured:" )

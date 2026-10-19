@@ -1,6 +1,6 @@
 import cosa.utils.util as du
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider
+from cosa.memory.embedding_provider import get_embedding_provider, embedding_dimensions
 
 from cosa.memory.question_embeddings_table import QuestionEmbeddingsTable
 from cosa.memory.solution_snapshot import SolutionSnapshot as ss
@@ -50,7 +50,7 @@ class InputAndOutputTable():
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
 
         # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
         # The question-embedding cache table generates query/input embeddings.
         self._question_embeddings_tbl = QuestionEmbeddingsTable( debug=self.debug, verbose=self.verbose )
@@ -304,11 +304,7 @@ class InputAndOutputTable():
         Raises:
             - None
         """
-        from cosa.rest.db.database import get_db
-        from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
-        with get_db() as session:
-            rows = InputAndOutputRepository( session ).get_all_io( max_rows=max_rows )
-            return [ self._io_row_to_dict( r ) for r in rows ]
+        return self._rows_as_dicts( "get_all_io", max_rows )
 
     def get_io_stats_by_input_type( self, max_rows: int=1000 ) -> dict[str, int]:
         """
@@ -341,10 +337,26 @@ class InputAndOutputTable():
         Raises:
             - None
         """
+        return self._rows_as_dicts( "get_all_qnr", max_rows )
+
+    def _rows_as_dicts( self, fetch_name: str, max_rows: int ) -> list[dict]:
+        """
+        Fetch rows with one repository getter and project each to the 5-key record shape.
+
+        Requires:
+            - fetch_name names a InputAndOutputRepository method taking max_rows
+            - max_rows is a positive integer
+
+        Ensures:
+            - Returns the getter's rows as _io_row_to_dict records, in order
+
+        Raises:
+            - AttributeError if fetch_name is not a repository method
+        """
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.input_and_output_repository import InputAndOutputRepository
         with get_db() as session:
-            rows = InputAndOutputRepository( session ).get_all_qnr( max_rows=max_rows )
+            rows = getattr( InputAndOutputRepository( session ), fetch_name )( max_rows=max_rows )
             return [ self._io_row_to_dict( r ) for r in rows ]
 
     @staticmethod
