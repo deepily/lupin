@@ -52,6 +52,10 @@ class CrudForDataFramesAgent( AgentBase ):
     # fixtures do) still has the attribute and keeps the ask.
     lineage_is_test_suite = False
 
+    # The schema a domain subclass works on; None on the base agent. __init__ copies it to
+    # self.default_schema_type, so a subclass sets this one constant and needs no __init__.
+    DEFAULT_SCHEMA_TYPE = None
+
     def __init__( self, question="", question_gist="", last_question_asked="",
                   push_counter=-1,
                   routing_command="agent router go to crud for dataframes",
@@ -68,6 +72,7 @@ class CrudForDataFramesAgent( AgentBase ):
             - self.storage is initialized for per-user parquet I/O
             - self.prompt is built with available lists (XML injected by PromptTemplateProcessor)
             - self.crud_intent is None (set in run_prompt)
+            - self.default_schema_type is the class constant DEFAULT_SCHEMA_TYPE
         """
         super().__init__(
             df_path_key          = None,
@@ -106,6 +111,8 @@ class CrudForDataFramesAgent( AgentBase ):
         # NO xml_response_tag_names — using CRUDIntent.from_xml() directly
 
         if self.debug: print( f"CrudForDataFramesAgent: prompt length={len( self.prompt )}, user={user_email}" )
+
+        self.default_schema_type = self.DEFAULT_SCHEMA_TYPE
 
     def run_prompt( self, include_raw_response=False ):
         """
@@ -333,6 +340,41 @@ class CrudForDataFramesAgent( AgentBase ):
         if self.debug: print( f"User confirmation response: [{selected}]" )
 
         return selected is not None and selected.strip().lower().startswith( "yes" )
+
+
+def smoke_check_schema_agent( agent_cls, schema_type ):
+    """
+    Smoke-check a domain CRUD agent class and print the result.
+
+    Requires:
+        - agent_cls is a domain subclass of CrudForDataFramesAgent
+        - schema_type is the schema its DEFAULT_SCHEMA_TYPE should name
+
+    Ensures:
+        - returns True when the constant matches and the class inherits the base agent, else False
+        - a failure prints the error and its traceback and is returned, never raised
+        - the full constructor is not run: it needs config and an LLM
+    """
+    name = agent_cls.__name__
+    print( f"Testing {name} module..." )
+
+    try:
+        assert agent_cls.DEFAULT_SCHEMA_TYPE == schema_type
+        print( f"  ✓ DEFAULT_SCHEMA_TYPE is '{schema_type}'" )
+
+        # Verify inheritance
+        assert issubclass( agent_cls, CrudForDataFramesAgent )
+        print( "  ✓ Inherits from CrudForDataFramesAgent" )
+
+        print( "  ○ Full constructor: requires config + LLM (tested in unit tests)" )
+        print( f"✓ {name} module smoke test PASSED" )
+        return True
+
+    except Exception as e:
+        print( f"✗ {name} module smoke test FAILED: {e}" )
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def quick_smoke_test():

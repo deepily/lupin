@@ -142,6 +142,21 @@ def get_defaults( schema_type ):
     return dict( get_schema( schema_type )[ "defaults" ] )
 
 
+def get_columns_by_dtype( schema_type, dtype ):
+    """
+    Get column names with a given dtype for a schema type.
+
+    Requires:
+        - schema_type is a valid schema type string
+        - dtype is a dtype string such as 'date', 'time' or 'datetime'
+
+    Ensures:
+        - Returns list of column names whose dtype is dtype, in definition order
+    """
+    schema = get_schema( schema_type )
+    return [ col for col, meta in schema[ "columns" ].items() if meta[ "dtype" ] == dtype ]
+
+
 def get_date_columns( schema_type ):
     """
     Get column names with dtype 'date' for a schema type.
@@ -152,8 +167,7 @@ def get_date_columns( schema_type ):
     Ensures:
         - Returns list of column names whose dtype is 'date'
     """
-    schema = get_schema( schema_type )
-    return [ col for col, meta in schema[ "columns" ].items() if meta[ "dtype" ] == "date" ]
+    return get_columns_by_dtype( schema_type, "date" )
 
 
 def get_time_columns( schema_type ):
@@ -166,8 +180,7 @@ def get_time_columns( schema_type ):
     Ensures:
         - Returns list of column names whose dtype is 'time'
     """
-    schema = get_schema( schema_type )
-    return [ col for col, meta in schema[ "columns" ].items() if meta[ "dtype" ] == "time" ]
+    return get_columns_by_dtype( schema_type, "time" )
 
 
 def get_datetime_columns( schema_type ):
@@ -180,8 +193,7 @@ def get_datetime_columns( schema_type ):
     Ensures:
         - Returns list of column names whose dtype is 'datetime'
     """
-    schema = get_schema( schema_type )
-    return [ col for col, meta in schema[ "columns" ].items() if meta[ "dtype" ] == "datetime" ]
+    return get_columns_by_dtype( schema_type, "datetime" )
 
 
 def validate_schema_type( schema_type ):

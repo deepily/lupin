@@ -246,19 +246,22 @@ def builder_sha256():
     with open( __file__, "rb" ) as f: return hashlib.sha256( f.read() ).hexdigest()
 
 
-def write_pool( rows, facts, out ):
+def write_pool( rows, facts, out, builder_sha=None ):
     """
     Write the pool and its manifest.
 
     Requires:
-        - rows and facts come from build_pool; out is the pool path
+        - rows and facts come from build_pool (or a sibling builder such as dart_pool_builder); out is the pool path
+        - builder_sha is the sha256 of the calling builder's own file, or None for this module's
 
     Ensures:
         - out holds the rows as the seeder writes them: sorted keys, one per line
         - out + ".manifest.json" holds facts plus builder_sha256 and pool_sha256 (of the bytes just written)
+        - builder_sha256 in the manifest is builder_sha when given, else this module's own sha
     """
+    if builder_sha is None: builder_sha = builder_sha256()
     labelled_set_seeder.write_jsonl( out, rows )
-    labelled_set_seeder.write_json( out + ".manifest.json", dict( facts, builder_sha256=builder_sha256(), pool_sha256=labelled_set_seeder.sha256_file( out ) ) )
+    labelled_set_seeder.write_json( out + ".manifest.json", dict( facts, builder_sha256=builder_sha, pool_sha256=labelled_set_seeder.sha256_file( out ) ) )
 
 
 def build_parser():

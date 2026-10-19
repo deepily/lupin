@@ -40,6 +40,7 @@ from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
+from lupin_arbiter_app.poll_loop import run_poll_loop
 
 
 # ── seams ───────────────────────────────────────────────────────────────────
@@ -88,7 +89,30 @@ def _parse_inspect_result( returncode: int, stdout: Optional[ str ] ) -> Optiona
         return None
 
 
-def docker_inspect_health( container: str, timeout_seconds: float ) -> Optional[ dict ]:   # pragma: no cover - real subprocess IO boundary
+def _docker_inspect( container: str, fmt: str, timeout_seconds: float, parse: Callable ) -> Any:
+    """
+    Run a bounded `docker inspect <container> --format <fmt>` and parse the result.
+
+    Requires:
+        - container names a container; fmt is a Go template for --format
+        - parse( returncode, stdout ) maps the command result to a value or None
+
+    Ensures:
+        - returns parse's answer when the command ran
+        - returns None when the command timed out, failed to start or raised an OS error
+        - never raises
+    """
+    try:
+        proc = subprocess.run(
+            [ "docker", "inspect", container, "--format", fmt ],
+            capture_output = True, text = True, timeout = timeout_seconds,
+        )
+    except ( subprocess.TimeoutExpired, subprocess.SubprocessError, OSError ):
+        return None
+    return parse( proc.returncode, proc.stdout )
+
+
+def docker_inspect_health( container: str, timeout_seconds: float ) -> Optional[ dict ]:
     """
     Run a bounded `docker inspect` for `.State.Health` and parse the result.
 
@@ -103,14 +127,7 @@ def docker_inspect_health( container: str, timeout_seconds: float ) -> Optional[
           blind detector
         - never raises (every failure mode maps to None)
     """
-    try:
-        proc = subprocess.run(
-            [ "docker", "inspect", container, "--format", "{{json .State.Health}}" ],
-            capture_output = True, text = True, timeout = timeout_seconds,
-        )
-    except ( subprocess.TimeoutExpired, subprocess.SubprocessError, OSError ):
-        return None
-    return _parse_inspect_result( proc.returncode, proc.stdout )
+    return _docker_inspect( container, "{{json .State.Health}}", timeout_seconds, _parse_inspect_result )
 
 
 # ── crash-loop signal: docker .State.RestartCount ────────────────────────────
@@ -140,7 +157,7 @@ def _parse_restart_count( returncode: int, stdout: Optional[ str ] ) -> Optional
         return None
 
 
-def docker_inspect_restart_count( container: str, timeout_seconds: float ) -> Optional[ int ]:   # pragma: no cover - real subprocess IO boundary
+def docker_inspect_restart_count( container: str, timeout_seconds: float ) -> Optional[ int ]:
     """
     Run a bounded `docker inspect` for RestartCount, then parse it with _parse_restart_count.
 
@@ -152,14 +169,7 @@ def docker_inspect_restart_count( container: str, timeout_seconds: float ) -> Op
           container, non-zero exit, unparseable)
         - never raises (every failure mode maps to None)
     """
-    try:
-        proc = subprocess.run(
-            [ "docker", "inspect", container, "--format", "{{.RestartCount}}" ],
-            capture_output = True, text = True, timeout = timeout_seconds,
-        )
-    except ( subprocess.TimeoutExpired, subprocess.SubprocessError, OSError ):
-        return None
-    return _parse_restart_count( proc.returncode, proc.stdout )
+    return _docker_inspect( container, "{{.RestartCount}}", timeout_seconds, _parse_restart_count )
 
 
 # ── reload-blindness signal: docker .Config.Env ──────────────────────────────
@@ -183,29 +193,35 @@ def _parse_env_value( env_list: Optional[ list ], key: str ) -> Optional[ str ]:
     return value
 
 
-def docker_inspect_env( container: str, timeout_seconds: float ) -> Optional[ list ]:   # pragma: no cover - real subprocess IO boundary
+def _parse_env_result( returncode: int, stdout: Optional[ str ] ) -> Optional[ list ]:
     """
-    Run a bounded `docker inspect` for `.Config.Env`; return the env list, or None on failure.
+    Pure: map a `docker inspect` of `.Config.Env` result to the env list, or None.
 
-    The command is `docker inspect <container> --format '{{json .Config.Env}}'`.
-    It never raises.
+    Ensures:
+        - returncode != 0 gives None
+        - empty stdout, or the text null, gives None
+        - JSON that does not parse gives None
+        - otherwise the parsed JSON, which is the list of name=value strings
     """
-    try:
-        proc = subprocess.run(
-            [ "docker", "inspect", container, "--format", "{{json .Config.Env}}" ],
-            capture_output = True, text = True, timeout = timeout_seconds,
-        )
-    except ( subprocess.TimeoutExpired, subprocess.SubprocessError, OSError ):
+    if returncode != 0:
         return None
-    if proc.returncode != 0:
-        return None
-    raw = ( proc.stdout or "" ).strip()
+    raw = ( stdout or "" ).strip()
     if not raw or raw == "null":
         return None
     try:
         return json.loads( raw )
     except json.JSONDecodeError:
         return None
+
+
+def docker_inspect_env( container: str, timeout_seconds: float ) -> Optional[ list ]:
+    """
+    Run a bounded `docker inspect` for `.Config.Env`; return the env list, or None on failure.
+
+    The command is `docker inspect <container> --format '{{json .Config.Env}}'`.
+    It never raises.
+    """
+    return _docker_inspect( container, "{{json .Config.Env}}", timeout_seconds, _parse_env_result )
 
 
 def assess_reload_blindness( container: str, env_inspect_fn: Callable[ [ str ], Optional[ list ] ],
@@ -644,12 +660,7 @@ class HealthWatcherLoop:
 
         One bad poll never exits the loop, because the observer must keep observing.
         """
-        while not self._stop.is_set():
-            try:
-                self.poll_once()
-            except Exception as e:                           # per-poll guard
-                self._log( "poll_error", error=str( e ) )
-            self._clock.sleep( self._interval_seconds )
+        run_poll_loop( self._stop, self.poll_once, self._log, self._clock, self._interval_seconds )
 
     def start( self ) -> None:
         """Spawn the daemon poll thread."""

@@ -66,15 +66,37 @@ def extract( root, texts ):
     Raises:
         - RuntimeError from the extractor
     """
+    return extract_with( root, texts, "ts-counts-", tsdoc_lint.run_extractor )
+
+
+def extract_with( root, texts, prefix, run_extractor ):
+    """
+    Run an extractor over texts written to a scratch tree.
+
+    Requires:
+        - root is a git working tree that holds the extractor script
+        - texts maps repo-relative paths to file text
+        - prefix names the scratch folder
+        - run_extractor( root, names, source_root=scratch ) returns { name: record }, as tsdoc_lint.run_extractor does
+
+    Ensures:
+        - returns { path: record } for every path given
+        - a path Node cannot be given by name is written under the stand-in name scratch_names gives
+        - the scratch tree is removed afterwards, also when the extractor fails
+        - no texts start no process
+
+    Raises:
+        - RuntimeError from the extractor
+    """
     if not texts: return {}
-    scratch = tempfile.mkdtemp( prefix="ts-counts-" )
+    scratch = tempfile.mkdtemp( prefix=prefix )
     names   = scratch_names( texts )
     try:
         for path, text in texts.items():
             full = os.path.join( scratch, names[ path ] )
             os.makedirs( os.path.dirname( full ), exist_ok=True )
             with open( full, "w", encoding="utf-8" ) as handle: handle.write( text )
-        by_name = tsdoc_lint.run_extractor( root, [ names[ path ] for path in texts ], source_root=scratch )
+        by_name = run_extractor( root, [ names[ path ] for path in texts ], source_root=scratch )
         return { path: by_name[ names[ path ] ] for path in texts }
     finally:
         shutil.rmtree( scratch, ignore_errors=True )

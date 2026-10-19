@@ -86,10 +86,9 @@ EXPECTED = {
     "tool_runners.run_markdownlint:runner#0"              : ( CRASH, CRASH ),
     "tool_runners._ruff_check:runner#0"                   : ( CRASH, CRASH ),
     "ts_counts._disk_text:open#0"                         : OFF,
-    "ts_counts.extract:open#0"                            : ( CRASH, CRASH ),
+    "ts_counts.extract_with:open#0"                       : ( CRASH, CRASH ),
     "ts_counts.main:open#0"                               : OFF,
     "ts_counts.main:open#1"                               : OFF,
-    "ts_doc_exists.extract:open#0"                        : ( CRASH, CRASH ),
     "ts_doc_exists.main:open#0"                           : OFF,
     "ts_doc_exists.main:open#1"                           : OFF,
     "ts_doc_exists.run_extractor:subprocess.run#0"        : ( CRASH, CRASH ),
@@ -110,14 +109,12 @@ EXPECTED = {
     "range_gate.main:tempfile.mkdtemp#0"                     : RANGE,
     "range_gate.main:open#0"                                 : RANGE,
     "range_gate.main:subprocess.run#0"                       : RANGE,
-    "ts_counts.extract:tempfile.mkdtemp#0"                   : ( CRASH, CRASH ),
-    "ts_doc_exists.extract:tempfile.mkdtemp#0"               : ( CRASH, CRASH ),
+    "ts_counts.extract_with:tempfile.mkdtemp#0"                  : ( CRASH, CRASH ),
     "links.markdown_link_findings:os.path.exists#0"          : SAFE,
     "links.design_path_findings:os.path.exists#0"            : SAFE,
     "tool_runners.find_tool:os.path.exists#0"                : SAFE,
     "tool_runners.find_tool:os.path.exists#1"                : SAFE,
-    "ts_counts.extract:shutil.rmtree#0"                   : SAFE,
-    "ts_doc_exists.extract:shutil.rmtree#0"               : SAFE,
+    "ts_counts.extract_with:shutil.rmtree#0"                 : SAFE,
     "range_gate.working_epoch_text:os.path.exists#0"         : RANGE,
     "range_gate.check_commit:os.path.exists#0"               : RANGE,
     "range_gate.sweep_stale:os.path.exists#0"                : RANGE,
@@ -365,11 +362,11 @@ def test_the_module_list_is_every_module_the_gate_imports_from_its_package():
 
 def test_every_place_the_gate_reads_a_file_or_starts_a_process_has_a_row():
     sites = [ site for site, _path, _first, _last in _sites() ]
-    assert len( sites ) == len( set( sites ) ) == 64 and sorted( sites ) == sorted( EXPECTED )
+    assert len( sites ) == len( set( sites ) ) == 61 and sorted( sites ) == sorted( EXPECTED )
     lines = [ ( path, site.split( ":" )[ 1 ].split( "#" )[ 0 ], first ) for site, path, first, _last in _sites() ]
     assert len( lines ) == len( set( lines ) )                                                    # one place of a kind on a line, so a frame names its place
-    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 11, 19, 6 ]
-    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 28
+    assert [ sum( 1 for row in EXPECTED.values() if row == kind ) for kind in ( OFF, RANGE, SAFE ) ] == [ 11, 19, 5 ]
+    assert sum( 1 for row in EXPECTED.values() if row not in ( OFF, RANGE, SAFE ) ) == 26
 
 
 def test_every_place_on_the_gates_path_answers_an_oserror_and_a_decode_error_as_its_row_says( scenarios, monkeypatch ):

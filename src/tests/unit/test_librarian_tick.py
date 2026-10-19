@@ -264,6 +264,10 @@ def test_cron_lines_carry_the_tag_the_schedule_and_the_reboot_catch_up():
     assert daily.endswith( lt.CRON_TAG ) and reboot.endswith( lt.CRON_TAG )
 
 
+def test_cron_lines_for_pairs_the_daily_line_with_a_reboot_line_that_sleeps_first():
+    assert lt.cron_lines_for( "run-it # tag", "5 4 * * *", 90 ) == [ "5 4 * * * run-it # tag", "@reboot sleep 90 && run-it # tag" ]
+
+
 def test_merge_lines_keeps_other_lines_replaces_ours_and_is_idempotent_and_removes_on_empty():
     lines = lt.cron_lines( "/main", "/py", "/log" )
     other = "0 3 * * * /usr/bin/other-job\n# a comment line\n"

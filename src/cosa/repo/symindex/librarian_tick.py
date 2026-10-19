@@ -343,6 +343,22 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
     return ( 2 if counts[ "pending" ] else 0 ), summary
 
 
+def cron_lines_for( run, schedule, boot_delay_seconds ):
+    """
+    Pair a daily cron line with a slow-start reboot line for one command.
+
+    Requires:
+        - run is the full shell command, already ending with its cron tag
+        - schedule is a five-field cron schedule; boot_delay_seconds is a non-negative integer
+
+    Ensures:
+        - returns [ daily line, reboot line ]
+        - the daily line is the schedule, a space, then run
+        - the reboot line is "@reboot sleep <boot_delay_seconds> && " then run
+    """
+    return [ f"{schedule} {run}", f"@reboot sleep {boot_delay_seconds} && {run}" ]
+
+
 def cron_lines( root, python, log_path ):
     """
     Build the two cron lines.
@@ -355,7 +371,7 @@ def cron_lines( root, python, log_path ):
         - the reboot line gives a slow start 120 seconds before the run
     """
     run = f"cd {root} && LUPIN_ROOT={root} PYTHONPATH={root}/src {python} -m cosa.repo.symindex.librarian_tick >> {log_path} 2>&1 {CRON_TAG}"
-    return [ f"{CRON_SCHEDULE} {run}", f"@reboot sleep 120 && {run}" ]
+    return cron_lines_for( run, CRON_SCHEDULE, 120 )
 
 
 def merge_lines( current, lines, tag=CRON_TAG ):

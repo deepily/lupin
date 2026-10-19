@@ -245,3 +245,36 @@ def tombstone_description( path: str ) -> str:
     """
     return f"GONE (410). Use {RETIRED_DOORS[ path ]}. REMOVE BY {REMOVE_BY}."
 
+
+
+def check_tombstone_router( router, prefix: str, tag: str, path: str, target: str ) -> str:
+    """
+    Check that a retired door's router mounts its one tombstone where the table says.
+
+    The router carries a prefix. A decorator handed the full path would mount the door
+    twice-prefixed, and it would answer 404, which a tombstone must never do.
+
+    Requires:
+        - router is the APIRouter of a retired door
+        - prefix and tag are what the router declares; path is the full path in RETIRED_DOORS
+        - target is the replacement door the table names for that path
+
+    Ensures:
+        - returns the refusal text for path
+        - the router has that prefix and tag, and exactly one route, at path
+        - RETIRED_DOORS maps path to target
+        - the refusal names target and carries the removal date text
+
+    Raises:
+        - AssertionError listing every check that failed
+    """
+    problems = []
+    if router.prefix != prefix: problems.append( f"prefix is {router.prefix}, not {prefix}" )
+    if tag not in router.tags: problems.append( f"tag {tag} is not in {router.tags}" )
+    paths = [ route.path for route in router.routes ]
+    if paths != [ path ]: problems.append( f"mounted at {paths}, not at {[ path ]}" )
+    if RETIRED_DOORS.get( path ) != target: problems.append( f"RETIRED_DOORS maps {path} to {RETIRED_DOORS.get( path )}, not {target}" )
+    detail = refusal_detail( path ) if path in RETIRED_DOORS else ""
+    if target not in detail or "REMOVE BY" not in detail: problems.append( f"refusal does not name {target} and REMOVE BY: {detail!r}" )
+    if problems: raise AssertionError( "; ".join( problems ) )
+    return detail

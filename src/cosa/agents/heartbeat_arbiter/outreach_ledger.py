@@ -22,9 +22,9 @@ Each entry has these fields:
                          "last_attempt_ts": iso, "last_outcome": str }, ... }
 """
 import json
-import os
-import uuid
 from pathlib import Path
+
+from cosa.utils.atomic_json import write_json_atomic
 
 
 def read_pending( path ) -> dict:
@@ -69,12 +69,7 @@ def write_pending( path, entries: dict ) -> None:
           cannot persist must fail loud at the write site — the caller's
           journaled swallow makes it visible, not silent)
     """
-    path = Path( path )
-    path.parent.mkdir( parents=True, exist_ok=True )
-    tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"
-    with open( tmp, "w" ) as f:
-        json.dump( entries, f, default=str )
-    tmp.replace( path )
+    write_json_atomic( path, entries )
 
 
 def add_pending( path, outreach_id: str, *, message: str, kind: str, case,

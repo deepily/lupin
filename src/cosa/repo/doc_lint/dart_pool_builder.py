@@ -26,7 +26,7 @@ import argparse
 import hashlib
 import sys
 
-from cosa.repo.doc_lint import dart_pairs, labelled_set_seeder, pool_builder
+from cosa.repo.doc_lint import dart_pairs, pool_builder
 
 UNATTACHED = "<unattached>"
 
@@ -172,8 +172,7 @@ def write_pool( rows, facts, out ):
         - out holds the rows as the seeder writes them: sorted keys, one per line
         - out + ".manifest.json" holds facts plus builder_sha256 and pool_sha256 (of the bytes just written)
     """
-    labelled_set_seeder.write_jsonl( out, rows )
-    labelled_set_seeder.write_json( out + ".manifest.json", dict( facts, builder_sha256=builder_sha256(), pool_sha256=labelled_set_seeder.sha256_file( out ) ) )
+    pool_builder.write_pool( rows, facts, out, builder_sha=builder_sha256() )
 
 
 def build_parser():

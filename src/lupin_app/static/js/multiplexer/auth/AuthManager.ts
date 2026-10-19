@@ -309,8 +309,7 @@ export class AuthManagerImpl implements AuthManager {
     // Prefer the in-memory token; fall back to the stored access token. The
     // email claim is stable across refresh, so an expired-but-present token
     // still yields the correct address — usable before hydration completes.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return null;
     return jwtEmail(accessToken);
   }
@@ -322,8 +321,7 @@ export class AuthManagerImpl implements AuthManager {
    */
   isCurrentUserAdmin(): boolean {
     // Same token source as getCurrentUserEmail: roles are stable across refresh.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return false;
     return jwtRoles(accessToken).includes("admin");
   }
@@ -333,10 +331,16 @@ export class AuthManagerImpl implements AuthManager {
    */
   getCurrentUserId(): string | null {
     // Same token source as getCurrentUserEmail: the sub claim is stable across refresh.
-    const accessToken =
-      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    const accessToken = this.currentAccessToken();
     if (accessToken === null) return null;
     return jwtSub(accessToken);
+  }
+
+  /**
+   * The access token the claim readers decode: the in-memory one, else the stored one.
+   */
+  private currentAccessToken(): string | null {
+    return this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
   }
 
   // Reconstruct a Token from the canonical raw token strings, deriving expiry

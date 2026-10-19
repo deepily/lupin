@@ -179,7 +179,7 @@ def test_extract_removes_its_scratch_tree_after_a_run_and_after_a_failed_run( tm
         d.mkdir()
         made.append( d )
         return str( d )
-    monkeypatch.setattr( ts_doc_exists.tempfile, "mkdtemp", mk )
+    monkeypatch.setattr( ts_counts.tempfile, "mkdtemp", mk )
     monkeypatch.setattr( ts_doc_exists, "run_extractor", lambda root, files, source_root=None: { f: rec( f, [] ) for f in files } )
     ts_doc_exists.extract( "/r", { "a.ts": "x\n" } )
     def boom( root, files, source_root=None ): raise RuntimeError( "node died" )

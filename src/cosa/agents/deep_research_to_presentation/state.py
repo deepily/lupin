@@ -10,6 +10,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
+from cosa.agents.chained_pipeline_state import ChainedResultMixin
+
 
 class PipelineState( Enum ):
     """Pipeline execution state."""
@@ -24,7 +26,7 @@ class PipelineState( Enum ):
 
 
 @dataclass
-class ChainedResult:
+class ChainedResult( ChainedResultMixin ):
     """
     Result from the chained Deep Research → Presentation Generation pipeline.
 
@@ -45,6 +47,9 @@ class ChainedResult:
         started_at: Pipeline start timestamp
         completed_at: Pipeline completion timestamp
     """
+
+    PARTIAL_STATES   = ( PipelineState.DEEP_RESEARCH_DONE, PipelineState.FAILED )
+    PRIMARY_ARTIFACT = "yaml_path"
 
     # Primary outputs
     research_path    : Optional[ str ] = None
@@ -74,14 +79,6 @@ class ChainedResult:
     def is_success( self ) -> bool:
         """Check if pipeline completed successfully."""
         return self.state == PipelineState.COMPLETED and self.error is None
-
-    def is_partial( self ) -> bool:
-        """Check if pipeline completed partially (research done, presentation generation failed)."""
-        return (
-            self.state in [ PipelineState.DEEP_RESEARCH_DONE, PipelineState.FAILED ]
-            and self.research_path is not None
-            and self.yaml_path is None
-        )
 
     def get_summary( self ) -> str:
         """Get a human-readable summary of the result."""

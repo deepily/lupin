@@ -40,6 +40,7 @@ import threading
 from datetime import datetime, timezone
 
 import cosa.utils.util as du
+from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 
 
 ADVISORY_ACTOR = "turn-age-watchdog"   # the system actor naming the advisory source
@@ -153,7 +154,7 @@ def age_seconds( timestamp, now ):
     return ( now - parsed ).total_seconds()
 
 
-class TurnAgeWatchdog:
+class TurnAgeWatchdog( StoppableDaemonMixin ):
     """
     Standalone held-turn detector daemon, inert unless the INI flag is True.
 
@@ -442,9 +443,3 @@ class TurnAgeWatchdog:
         self._thread = threading.Thread( target=self._loop, daemon=True, name="TurnAgeWatchdog" )
         self._thread.start()
         return True
-
-    def stop( self, timeout: float = 5.0 ) -> None:
-        """Signal the daemon to exit and join it (idempotent — safe if never started)."""
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join( timeout=timeout )

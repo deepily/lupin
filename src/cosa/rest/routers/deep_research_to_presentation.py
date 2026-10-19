@@ -23,7 +23,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from cosa.rest.routers._retired_doors import RETIRED_DOORS, gone, refusal_detail, tombstone_description
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, check_tombstone_router, gone, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -106,8 +106,7 @@ def quick_smoke_test():
 
         # Test 2: Router configuration
         print( "Testing router configuration..." )
-        assert router.prefix == "/api/deep-research-to-presentation"
-        assert "deep-research-to-presentation" in router.tags
+        detail = check_tombstone_router( router, "/api/deep-research-to-presentation", "deep-research-to-presentation", "/api/deep-research-to-presentation/submit", "/api/v2/submit" )
         print( f"✓ Router prefix: {router.prefix}" )
 
         # Test 3: the door is a tombstone, mounted at the path the table names
@@ -118,17 +117,10 @@ def quick_smoke_test():
         # twice-prefixed and the door would answer 404 — the one answer a tombstone must
         # never give.
         print( "Testing the retired route..." )
-        paths = [ r.path for r in router.routes ]
-        assert paths == [ "/api/deep-research-to-presentation/submit" ], paths
-        assert "/api/deep-research-to-presentation/submit" in RETIRED_DOORS
-        assert RETIRED_DOORS[ "/api/deep-research-to-presentation/submit" ] == "/api/v2/submit"
-        print( f"✓ Routes: {paths} -> {RETIRED_DOORS[ '/api/deep-research-to-presentation/submit' ]}" )
+        print( f"✓ Routes: {[ r.path for r in router.routes ]} -> {RETIRED_DOORS[ '/api/deep-research-to-presentation/submit' ]}" )
 
         # Test 4: the refusal names its replacement and its removal date
         print( "Testing the refusal..." )
-        detail = refusal_detail( "/api/deep-research-to-presentation/submit" )
-        assert "/api/v2/submit" in detail
-        assert "REMOVE BY" in detail
         print( f"✓ {detail}" )
 
         print( "\n✓ Smoke test completed successfully" )

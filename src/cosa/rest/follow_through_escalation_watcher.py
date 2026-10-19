@@ -45,6 +45,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import cosa.utils.util as du
+from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from lupin_mcp.persona_normalization import canonical_persona_key
@@ -83,7 +84,7 @@ def is_awaiting_manager( item ) -> bool:
     return False
 
 
-class FollowThroughEscalationWatcher:
+class FollowThroughEscalationWatcher( StoppableDaemonMixin ):
     """
     One-shot aged-escalation backstop for awaiting:manager items, inert unless enabled.
 
@@ -330,9 +331,3 @@ class FollowThroughEscalationWatcher:
         self._thread = threading.Thread( target=self._loop, daemon=True, name="FollowThroughEscalationWatcher" )
         self._thread.start()
         return True
-
-    def stop( self, timeout: float = 5.0 ) -> None:
-        """Signal the daemon to exit and join it (idempotent — safe if never started)."""
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join( timeout=timeout )

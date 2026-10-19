@@ -39,6 +39,7 @@ import sys
 import argparse
 from pathlib import Path
 
+from cosa.repo.cli_common import add_common_output_args
 from cosa.repo.branch_analyzer import BranchChangeAnalyzer, BranchAnalyzerError
 
 
@@ -87,45 +88,11 @@ def create_parser() -> argparse.ArgumentParser:
         help    = 'Head branch for comparison - what you are comparing TO (default: HEAD = current branch, auto-resolved to actual name)'
     )
 
-    # Configuration
-    parser.add_argument(
-        '--config',
-        type    = str,
-        default = None,
-        metavar = 'FILE',
-        help    = 'Configuration file path (default: embedded default_config.yaml)'
-    )
-
-    # Output format
-    parser.add_argument(
-        '--output',
-        type    = str,
-        choices = ['console', 'json', 'markdown'],
-        default = None,
-        metavar = 'FORMAT',
-        help    = 'Output format: console, json, markdown (default: console from config)'
-    )
-
-    # Save output
-    parser.add_argument(
-        '--save-output',
-        type    = str,
-        default = None,
-        metavar = 'FILE',
-        help    = 'Save output to file instead of printing to stdout'
-    )
-
-    # Verbosity
-    parser.add_argument(
-        '--verbose', '-v',
-        action  = 'store_true',
-        help    = 'Verbose output (show progress and details)'
-    )
-
-    parser.add_argument(
-        '--debug', '-d',
-        action  = 'store_true',
-        help    = 'Debug mode (show internal operations)'
+    add_common_output_args(
+        parser,
+        output_default = None,
+        output_help    = 'Output format: console, json, markdown (default: console from config)',
+        verbose_help   = 'Verbose output (show progress and details)'
     )
 
     return parser

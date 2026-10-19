@@ -28,7 +28,7 @@ What a caller sends instead:
 
 from fastapi import APIRouter
 
-from cosa.rest.routers._retired_doors import gone, tombstone_description
+from cosa.rest.routers._retired_doors import check_tombstone_router, gone, tombstone_description
 import cosa.utils.util as cu
 
 
@@ -112,8 +112,6 @@ def quick_smoke_test():
 
         # Test 2: Router configuration
         print( "Testing router configuration..." )
-        assert router.prefix == "/api/presentation-generator"
-        assert "presentation-generator" in router.tags
         print( f"  Prefix: {router.prefix}" )
         print( "  PASS" )
 
@@ -125,10 +123,8 @@ def quick_smoke_test():
         # handed the full path would mount it twice-prefixed and the door would answer 404
         # — the one answer a tombstone must never give.
         print( "Testing the retired route..." )
-        from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_SUBMIT
-        paths = { route.path for route in router.routes }
-        assert paths == { "/api/presentation-generator/submit" }, f"mounted at {paths}"
-        assert RETIRED_DOORS[ "/api/presentation-generator/submit" ] == V2_SUBMIT
+        from cosa.rest.routers._retired_doors import V2_SUBMIT
+        check_tombstone_router( router, "/api/presentation-generator", "presentation-generator", "/api/presentation-generator/submit", V2_SUBMIT )
         print( "  PASS" )
 
         print( "\nAll Presentation Generator Router smoke tests passed" )

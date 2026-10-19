@@ -26,6 +26,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
+from cosa.utils.atomic_json import load_json_section
+
 STRAGGLER_KEY_PREFIX  = "worktree:"
 STRAGGLER_AGE_HOURS   = 24.0
 NO_CREATOR_OWNER      = "maria"
@@ -191,13 +193,7 @@ def load_state( state_path: str ) -> dict:
     Ensures:
         - {} when absent, corrupt or unreadable; never raises
     """
-    try:
-        with open( state_path, "r", encoding="utf-8" ) as fh:
-            data = json.load( fh )
-        trees = data.get( "trees" ) if isinstance( data, dict ) else None
-        return trees if isinstance( trees, dict ) else {}
-    except ( OSError, ValueError ):
-        return {}
+    return load_json_section( state_path, "trees" )
 
 
 def write_state( state_path: str, trees: dict, now: datetime ) -> None:

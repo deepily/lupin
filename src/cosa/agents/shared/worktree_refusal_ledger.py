@@ -22,6 +22,8 @@ import os
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
+from cosa.utils.atomic_json import load_json_section
+
 # "evacuation_failed" (row aec2319f): the janitor now moves a tree's ignored data out
 # instead of refusing, so a refusal for held files is what is left when that move fails.
 REFUSAL_REASONS  = ( "ignored_files_present", "ignored_check_failed", "evacuation_failed" )
@@ -72,13 +74,7 @@ def load_ledger( ledger_path: str ) -> dict:
         - returns the recorded { path: [ blockers ] }, or {} when the file is absent
         - a corrupt or unreadable file returns {} (the next change rewrites it), never raises
     """
-    try:
-        with open( ledger_path, "r", encoding="utf-8" ) as fh:
-            data = json.load( fh )
-        refused = data.get( "refused" ) if isinstance( data, dict ) else None
-        return refused if isinstance( refused, dict ) else {}
-    except ( OSError, ValueError ):
-        return {}
+    return load_json_section( ledger_path, "refused" )
 
 
 def write_ledger( ledger_path: str, refused: dict, now: datetime ) -> None:

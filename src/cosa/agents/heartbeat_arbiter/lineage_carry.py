@@ -19,9 +19,9 @@ Same file family and idioms as `outreach_ledger` (io/arbiter/, reads that
 degrade to empty, atomic per-writer tmp-write then rename).
 """
 import json
-import os
-import uuid
 from pathlib import Path
+
+from cosa.utils.atomic_json import write_json_atomic
 
 
 def read_carry( path ) -> dict:
@@ -66,12 +66,7 @@ def write_carry( path, mapping: dict ) -> None:
         - raises OSError if the target is not writable (the caller journals
           `lineage_carry_error` — visible, never silent)
     """
-    path = Path( path )
-    path.parent.mkdir( parents=True, exist_ok=True )
-    tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"
-    with open( tmp, "w" ) as f:
-        json.dump( mapping, f, default=str )
-    tmp.replace( path )
+    write_json_atomic( path, mapping )
 
 
 def quick_smoke_test():
