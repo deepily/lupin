@@ -37,6 +37,41 @@ _VALID_CATEGORIES = (
 _VALID_VERDICTS = ( "fixed", "failed", "unclear" )
 
 
+def _parse_fenced_clusters_block( text: Optional[ str ], fence: "re.Pattern" ) -> Optional[ dict ]:
+    """
+    Parse one fenced block of text as a JSON object that holds a 'clusters' dict.
+
+    Requires:
+        - text is a string (or None)
+        - fence is a compiled pattern with a named group "body"
+
+    Ensures:
+        - Returns the parsed dict when the fence matches, the body is JSON, and it is an object
+          whose 'clusters' value is a dict
+        - Returns None in every other case
+        - Never raises
+    """
+    if not text:
+        return None
+
+    m = fence.search( text )
+    if not m:
+        return None
+
+    body = m.group( "body" ).strip()
+    try:
+        parsed = json.loads( body )
+    except ( json.JSONDecodeError, ValueError ):
+        return None
+
+    if not isinstance( parsed, dict ):
+        return None
+    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
+        return None
+
+    return parsed
+
+
 def parse_diagnosis_block( text: Optional[ str ] ) -> Optional[ dict ]:
     """
     Extract + parse the `tfe-diagnosis` fenced JSON block from Claude Code output.
@@ -53,25 +88,7 @@ def parse_diagnosis_block( text: Optional[ str ] ) -> Optional[ dict ]:
             - top-level 'clusters' key missing
         - Never raises
     """
-    if not text:
-        return None
-
-    m = _DIAGNOSIS_FENCE.search( text )
-    if not m:
-        return None
-
-    body = m.group( "body" ).strip()
-    try:
-        parsed = json.loads( body )
-    except ( json.JSONDecodeError, ValueError ):
-        return None
-
-    if not isinstance( parsed, dict ):
-        return None
-    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
-        return None
-
-    return parsed
+    return _parse_fenced_clusters_block( text, _DIAGNOSIS_FENCE )
 
 
 def validate_diagnosis_payload( payload: Optional[ dict ] ) -> tuple:
@@ -157,25 +174,7 @@ def parse_result_block( text: Optional[ str ] ) -> Optional[ dict ]:
         - Returns None if no fence, no JSON, or schema-invalid at top level
         - Never raises
     """
-    if not text:
-        return None
-
-    m = _RESULT_FENCE.search( text )
-    if not m:
-        return None
-
-    body = m.group( "body" ).strip()
-    try:
-        parsed = json.loads( body )
-    except ( json.JSONDecodeError, ValueError ):
-        return None
-
-    if not isinstance( parsed, dict ):
-        return None
-    if "clusters" not in parsed or not isinstance( parsed[ "clusters" ], dict ):
-        return None
-
-    return parsed
+    return _parse_fenced_clusters_block( text, _RESULT_FENCE )
 
 
 def validate_result_payload( payload: Optional[ dict ] ) -> tuple:
