@@ -2,9 +2,10 @@
 capability: repo-tools-loc-cli-entrypoints
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.repo.run_branch_analyzer.create_parser@c6a3ddcd10
+  - cosa.repo.cli_common.add_common_output_args@fc38a5427c
+  - cosa.repo.run_branch_analyzer.create_parser@e46ef2e7d1
   - cosa.repo.run_branch_analyzer.main@2f6aea5c65
-  - cosa.repo.run_directory_analyzer.create_parser@00747a318e
+  - cosa.repo.run_directory_analyzer.create_parser@a180dc56f1
   - cosa.repo.run_directory_analyzer.main@8cba583006
   - cosa.repo.run_git_loc_delta.create_parser@05a41bac91
   - cosa.repo.run_git_loc_delta.main@3aacb7c06c
@@ -18,6 +19,8 @@ Four `python -m cosa.repo.<name>` entry points over the tools in [[branch-and-di
 ## Branch and directory
 - `run_branch_analyzer`: `--repo-path`, `--base`, `--head`, `--config`, `--output console|json|markdown`, `--save-output`, `-v`, `-d`. Flags left unset fall back to the config file. Exit 0, 1 on error, 130 on Ctrl-C, and 2 for bad arguments.
 - `run_directory_analyzer`: `--path` (default `.`), `--config`, `--output` (default console), `--save-output`, `-v`, `-d`. Exit 0, 1 on any error, 130 on Ctrl-C, and 2 for bad arguments.
+
+- Both parsers get `--config`, `--output`, `--save-output`, `-v` and `-d` from `add_common_output_args`, added after their own path arguments. The callers differ only in the `--output` default and two help sentences.
 
 ## Daily delta, one repo
 - `run_git_loc_delta` picks one mode: `--today` (the default), `--since` and `--until` (either may stand alone), or `--branch [NAME]` against `--base` (default main).

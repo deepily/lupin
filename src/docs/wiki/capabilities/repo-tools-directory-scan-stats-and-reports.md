@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.repo.directory_analyzer.directory_scanner.FileInfo@2dbffbe1c7
   - cosa.repo.directory_analyzer.statistics_collector.DirectoryStatisticsCollector@1bd79c4503
-  - cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter@f2d393c1c2
+  - cosa.repo.directory_analyzer.report_formatter.DirectoryReportFormatter@17192843be
   - cosa.repo.directory_analyzer.exceptions.DirectoryAnalyzerError@41f91599ec
   - cosa.repo.directory_analyzer.exceptions.ScannerError@92710a4651
   - cosa.repo.directory_analyzer.exceptions.ConfigurationError@dc59565579
@@ -24,6 +24,7 @@ The parts around `DirectoryScanner` and `DirectoryAnalyzer` (see [[branch-and-di
 - `get_summary()` returns `overall` (`total_lines`, `total_files`), `by_file_type` (largest first, each with `total`, `files`, `percentage`) and `language_details`. `reset()` clears everything.
 
 ## `DirectoryReportFormatter`
+- It extends `BaseReportFormatter` from the branch analyzer, which does the shared setup. It reads the `file_type`, `lines`, `files` and `percent` widths, with defaults 18, 12, 8 and 8.
 - `format_console( stats, directory_path, scan_stats=None )`, `format_json( ... )` and `format_markdown( ... )` return strings and never print.
 - When `scan_stats` from `DirectoryScanner.get_scan_stats()` is passed, the console report adds a scan summary when any skip count is above zero. It prints skipped files, binary files, large files and directories, but never the unreadable-file count.
 - JSON adds `metadata` unless `json_output.include_metadata` is false. Markdown adds its Directory and Generated lines unless `markdown_output.include_timestamp` is false.

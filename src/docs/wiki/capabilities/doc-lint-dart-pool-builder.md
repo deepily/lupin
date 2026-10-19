@@ -8,7 +8,7 @@ pins:
   - cosa.repo.doc_lint.dart_pool_builder.dart_rows@e5a3c6ac4e
   - cosa.repo.doc_lint.dart_pool_builder.build_dart_pool@c9c002ebca
   - cosa.repo.doc_lint.dart_pool_builder.builder_sha256@4b6a27c6b0
-  - cosa.repo.doc_lint.dart_pool_builder.write_pool@2d26f3d527
+  - cosa.repo.doc_lint.dart_pool_builder.write_pool@73dfeca305
   - cosa.repo.doc_lint.dart_pool_builder.build_parser@c0f3cac4fb
   - cosa.repo.doc_lint.dart_pool_builder.main@09f8c0eb64
 ---
@@ -24,5 +24,5 @@ Builds the pool of Dart doc blocks that the labelled-set seeder's plan step draw
 ## Rows and output
 - `dart_rows` returns one file's rows and its unattached count. A row is `{ id, file, symbol, old }` with ids `<file>::<symbol>`. A block that names no declaration is left out and counted.
 - `build_dart_pool` keeps one row per distinct doc text and returns the facts the manifest records.
-- `write_pool` writes the rows, sorted keys one per line, and a `.manifest.json` with the facts and the builder and pool hashes. `builder_sha256` hashes this module's own file.
+- `write_pool` hands the rows to `pool_builder.write_pool` with this module's own hash. The output is sorted-key rows, one per line, and a `.manifest.json` with the facts and both hashes. `builder_sha256` hashes this module's own file.
 - `build_parser` and `main` build one pool. `main` returns 0, or 2 after printing why it refused.

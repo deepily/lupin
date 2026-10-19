@@ -13,7 +13,7 @@ pins:
   - cosa.repo.doc_lint.pool_builder.drop_duplicates@ec4ce4c596
   - cosa.repo.doc_lint.pool_builder.build_pool@3bc0dfb113
   - cosa.repo.doc_lint.pool_builder.builder_sha256@4b6a27c6b0
-  - cosa.repo.doc_lint.pool_builder.write_pool@2d26f3d527
+  - cosa.repo.doc_lint.pool_builder.write_pool@6d3a8141b7
   - cosa.repo.doc_lint.pool_builder.build_parser@637276283a
   - cosa.repo.doc_lint.pool_builder.main@ffb483566e
 ---
@@ -34,4 +34,5 @@ Builds the pool of Python docstrings that the labelled-set seeder's plan step dr
 ## Pool and manifest
 - `build_pool` sorts rows by file and source order, so one commit always gives the same rows, and returns the facts the manifest records. An empty include or an empty pool raises `ValueError`.
 - `write_pool` writes sorted-key rows, one per line, and a `.manifest.json` with the facts, `builder_sha256` and `pool_sha256`. `builder_sha256` hashes this module's own file.
+- `write_pool` takes an optional `builder_sha`. The manifest records it, or this module's hash when it is `None`. [[doc-lint-dart-pool-builder]] passes its own.
 - `build_parser` and `main` build one pool and return 0, or 2 after printing why it refused.

@@ -3,7 +3,8 @@ capability: repo-tools-branch-stats-and-reports
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.repo.branch_analyzer.statistics_collector.StatisticsCollector@0fa052f565
-  - cosa.repo.branch_analyzer.report_formatter.ReportFormatter@993f343407
+  - cosa.repo.branch_analyzer.report_formatter.BaseReportFormatter@7f4c9eebb3
+  - cosa.repo.branch_analyzer.report_formatter.ReportFormatter@895701e1af
   - cosa.repo.branch_change_analysis.analyze_diff@2b79547464
   - cosa.repo.branch_change_analysis.get_file_type@cc68e7cc74
   - cosa.repo.branch_change_analysis.is_javascript_comment@053d509a34
@@ -19,7 +20,8 @@ The output side of `BranchChangeAnalyzer` (see [[branch-and-directory-loc-analys
 - `reset()` empties every count.
 
 ## `ReportFormatter`
-- `ReportFormatter( config )` reads column widths, border characters and the `json_output` and `markdown_output` sections.
+- `BaseReportFormatter( config )` reads the border characters, number settings and the `json_output` and `markdown_output` sections. It calls `_read_column_widths`, which raises `NotImplementedError` unless a subclass overrides it.
+- `ReportFormatter` overrides it to read the `file_type`, `counts` and `net_change` widths, with defaults 15, 10 and 12.
 - `format_console`, `format_json` and `format_markdown` each take `( stats, base_branch, head_branch, repo_path=".", ... )` and return a string. They never print.
 - Console output has a banner, the overall block, a file-type table and one block per language present. JSON holds the branches, the absolute repository path and `statistics`, plus `metadata` (time, format, version) unless `json_output.include_metadata` is false. Markdown uses tables, and a repository-and-time block unless `markdown_output.include_timestamp` is false.
 

@@ -2,8 +2,8 @@
 capability: doc-lint-jev-transport
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.repo.doc_lint.jev_transport.JevConfigError@b12e1d0fa3
-  - cosa.repo.doc_lint.jev_transport.JevCallError@e8a93c112e
+  - cosa.repo.doc_lint.jev_transport.JevConfigError@49756aa91e
+  - cosa.repo.doc_lint.jev_transport.JevCallError@906f2317fd
   - cosa.repo.doc_lint.jev_transport.JevBudgetSpent@79cf17ee40
   - cosa.repo.doc_lint.jev_transport.CallBudget@fbed5fc7fa
   - cosa.repo.doc_lint.jev_transport.request_ids@b215935908
@@ -33,3 +33,4 @@ The one door the judge harness uses to reach Jev, TypeSafe's yes/no model. [[doc
 ## Budget and errors
 - `CallBudget` caps HTTP attempts across all threads of one sweep. `take` counts one attempt or raises `JevBudgetSpent` without counting, and `used` never exceeds the limit.
 - `JevConfigError` means no key or a refused request. `JevCallError` means no usable answer after retries.
+- Both extend a private `_JevError`, which holds the message, the HTTP status and the attempt log. They are siblings, so catching one never catches the other.

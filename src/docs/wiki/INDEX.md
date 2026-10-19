@@ -356,6 +356,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[repo-tools-candidate-arms-metrics]] — recall, twin rank and verdict replay scores for each arm. `cosa.repo.symindex.candidates` (arm_metrics)
 - [[repo-tools-candidate-arms-run-inputs]] — reading needs, the stored snapshot and cached judge answers for a measurement. `cosa.repo.symindex.candidates` (arm_run)
 - [[repo-tools-candidate-arms-measure]] — measuring one arm and writing its partial results page. `cosa.repo.symindex.candidates` (arm_run)
+- [[repo-tools-candidate-arms-all-run]] — measuring all five candidate arms on one index and vector set and writing the results page. `cosa.repo.symindex.candidates` (arm_run)
 - [[repo-tools-candidate-arms-report]] — building the final arm comparison page. `cosa.repo.symindex.candidates` (arm_report)
 - [[rest-routers-admin-users]] — the admin-only `/admin/users` routes: list, details, roles, status, password reset, create, delete and batch delete. `cosa.rest.routers` (admin)
 - [[rest-routers-admin-user-models]] — the request and reply models behind the admin user routes. `cosa.rest.routers` (admin)

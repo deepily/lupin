@@ -6,7 +6,8 @@ pins:
   - cosa.repo.symindex.librarian_tick.read_create_cap@07366a14f6
   - cosa.repo.symindex.librarian_tick.read_enabled@48426a4325
   - cosa.repo.symindex.librarian_tick.read_persona@49b37e40f0
-  - cosa.repo.symindex.librarian_tick.cron_lines@8e578a387c
+  - cosa.repo.symindex.librarian_tick.cron_lines_for@f736281e58
+  - cosa.repo.symindex.librarian_tick.cron_lines@ab28a46f8d
   - cosa.repo.symindex.librarian_tick.merge_lines@029adb24e5
   - cosa.repo.symindex.librarian_tick.load_crontab_lock@b5f0cfe1ba
   - cosa.repo.symindex.librarian_tick.edit_crontab@0df0429592
@@ -25,6 +26,7 @@ How the tick ([[repo-tools-symindex-librarian-tick-run]]) reads its settings and
 
 ## Cron lines
 - `cron_lines( root, python, log_path )` returns a daily line at `17 10 * * *` and an `@reboot sleep 120 &&` line. Each ends with the tag `# wiki-librarian-tick`.
+- `cron_lines_for( run, schedule, boot_delay_seconds )` pairs a daily line with an `@reboot sleep <delay> &&` line for one command. `cron_lines` passes it 120 seconds, and the vector refresh passes 240.
 - `merge_lines( current, lines, tag )` drops every tagged line from a crontab text and puts the new ones last. Untagged lines keep their text and order.
 - `status_text` answers `not installed`, `installed: 2 lines`, or `partly installed: n lines` for any other count.
 
