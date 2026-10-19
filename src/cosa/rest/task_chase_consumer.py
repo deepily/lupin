@@ -27,6 +27,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import cosa.utils.util as du
+from cosa.utils.stoppable_daemon import StoppableDaemonMixin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 
@@ -34,7 +35,7 @@ from cosa.rest.db.repositories.task_repository import TaskRepository
 CHASE_ACTOR = "task-chase-consumer"   # the system actor stamped on 'chased' events
 
 
-class TaskChaseConsumer:
+class TaskChaseConsumer( StoppableDaemonMixin ):
     """
     Daemon that chases overdue blocked items without ever auto-transitioning them.
 
@@ -180,9 +181,3 @@ class TaskChaseConsumer:
         self._thread = threading.Thread( target=self._loop, daemon=True, name="TaskChaseConsumer" )
         self._thread.start()
         return True
-
-    def stop( self, timeout: float = 5.0 ) -> None:
-        """Signal the daemon to exit and join it (idempotent — safe if never started)."""
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join( timeout=timeout )

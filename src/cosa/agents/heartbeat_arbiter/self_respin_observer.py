@@ -31,6 +31,8 @@ import threading
 from dataclasses import dataclass
 from enum        import Enum
 
+from cosa.utils.stoppable_daemon import StoppableDaemonMixin
+
 
 # The on-disk marker filename shape: <MARKER_PREFIX><session_id>.json, living
 # under fleet_data_root() (never the repo root — the same placement discipline
@@ -1236,7 +1238,7 @@ def _default_seat_lookup( record ):   # pragma: no cover - bridge/lineage IO bou
 # mirroring TurnAgeWatchdog: INI-gated (default OFF → start() no-ops, sweep_once
 # does zero work), injectable seams, one-shot-per-alarm flood guard, daemon lifecycle.
 # ---------------------------------------------------------------------------
-class SelfRespinObserverLoop:
+class SelfRespinObserverLoop( StoppableDaemonMixin ):
     """
     Standing self-respin liveness loop that alarms on dead seats and sweeps done markers.
 
@@ -1546,12 +1548,6 @@ class SelfRespinObserverLoop:
         self._thread = threading.Thread( target=self._loop, daemon=True, name="SelfRespinObserverLoop" )
         self._thread.start()
         return True
-
-    def stop( self, timeout: float = 5.0 ) -> None:
-        """Signal the daemon to exit and join it (idempotent — safe if never started)."""
-        self._stop_event.set()
-        if self._thread is not None and self._thread.is_alive():
-            self._thread.join( timeout=timeout )
 
 
 # ---------------------------------------------------------------------------
