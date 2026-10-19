@@ -36,4 +36,4 @@ Small helpers that other code imports directly. Config loading, redaction and sp
 - `vertex_env.compose_vertex_env` composes the Vertex environment for one process and raises on any hazard.
 
 ## Search tools
-- `cosa.tools.search_kagi.KagiSearch` wraps Kagi; `search_lupin.LupinSearch` is the vendor-neutral wrapper. See [[web-search-tools]].
+- `cosa.tools.search_kagi.KagiSearch` wraps Kagi; `search_lupin_v010.LupinSearch` is the vendor-neutral wrapper. See [[web-search-tools]].
