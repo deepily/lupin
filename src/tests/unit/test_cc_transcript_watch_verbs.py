@@ -526,6 +526,28 @@ def test_the_live_epoch_ignores_a_tailer_that_is_not_running_or_names_another_fi
 
 
 @pytest.mark.asyncio
+async def test_a_second_watcher_never_starts_a_tailer_even_if_the_old_one_is_not_running( router_module, manager, fake_tailer, epoch_is ):
+    """
+    Only the first watcher of a seat may start its tailer.
+
+    A later watcher joins whatever is there. Starting one for every watcher would put a second
+    poll loop on a seat that already has a watcher served by the first.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].running = False
+
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER_2, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+
+    assert len( fake_tailer.instances ) == 1, "a second watcher started a tailer"
+    assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
+
+
+@pytest.mark.asyncio
 async def test_a_null_epoch_is_accepted_so_a_first_watch_needs_no_rest_call( router_module, manager, fake_tailer, epoch_is ):
     """
     `file_epoch: null` means "whatever file is current" — the client learns it from the first
