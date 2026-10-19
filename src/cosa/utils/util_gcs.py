@@ -104,26 +104,25 @@ def validate_gcs_credentials( debug: bool = False ) -> bool:
 
 def validate_gcs_bucket_access( bucket_uri: str, debug: bool = False ) -> bool:
     """
-    Pre-flight check for GCS bucket write access.
+    Pre-flight check that a GCS bucket exists and its metadata can be read.
 
-    Performs a lightweight check to verify the bucket exists and is writable
-    without actually writing data.
+    It is not a write check. A True answer does not prove the caller may create objects.
 
     Requires:
         - bucket_uri is a valid GCS bucket URI (gs://bucket-name/ or gs://bucket-name)
         - GCS credentials are configured
 
     Ensures:
-        - Returns True if bucket is accessible for writing
+        - Returns True if the bucket exists and bucket.reload() succeeds
         - Returns False if bucket doesn't exist, access denied, or SDK unavailable
-        - Does not modify bucket contents
+        - Does not modify bucket contents and does not test write permission
 
     Args:
         bucket_uri: GCS bucket URI (e.g., 'gs://lupin-deep-research-test/')
         debug: Enable debug output
 
     Returns:
-        bool: True if bucket is accessible for writing
+        bool: True if the bucket exists and can be read
     """
     if not GCS_AVAILABLE:
         if debug: print( "[GCS] google-cloud-storage SDK not installed" )
