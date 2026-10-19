@@ -42,32 +42,14 @@ In the base class's closing-tag loop the `break` sits outside its `if`, so only 
 is ever reached. This model always uses `<response>`, and the base class is left as it is.
 """
 
-import re
-
 from typing import ClassVar
 
 from pydantic import Field, field_validator
 
-from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.util_xml_pydantic import (
+    BaseXMLModel, CdataSafeXMLMixin, CDATA_OPEN, CDATA_CLOSE, BARE_AMPERSAND
+)
 
-
-# The CDATA wrapper. `]]>` occurs ZERO times in 2,977 corpus bodies, so the one
-# sequence that could break the wrapper does not appear in this traffic.
-CDATA_OPEN  = "<![CDATA["
-CDATA_CLOSE = "]]>"
-
-_CDATA_SPAN = re.compile( re.escape( CDATA_OPEN ) + r".*?" + re.escape( CDATA_CLOSE ), re.DOTALL )
-
-# The base class's repair, reproduced so it can be applied OUTSIDE CDATA spans
-# only. Kept character-identical on purpose: if the base rule ever changes, this
-# should be updated to match rather than quietly diverging from it.
-_BARE_AMPERSAND = re.compile( r"&(?!amp;|lt;|gt;|quot;|apos;|#)" )
-
-# The sentinel a lifted CDATA span leaves behind. Deliberately built from
-# characters the base class never rewrites — no ampersand, no angle bracket —
-# so that its repairs cannot damage the placeholder while the payload is away.
-_SENTINEL    = "__CDATA_SPAN_{}__"
-_SENTINEL_RE = re.compile( r"__CDATA_SPAN_(\d+)__" )
 
 # What an empty path slot may come back as. Models reach for a null word rather
 # than leaving a tag blank, and a delivered line reading "N/A" is worse than no
@@ -78,7 +60,7 @@ NULL_ISH = {
 }
 
 
-class DmTutorResponse( BaseXMLModel ):
+class DmTutorResponse( CdataSafeXMLMixin, BaseXMLModel ):
     """
     The tutor's response: its reasoning, the headline, two supports, one pointer.
 
@@ -254,7 +236,7 @@ class DmTutorResponse( BaseXMLModel ):
             - from_xml( self.to_xml() ) round-trips every payload byte-exact
         """
         thoughts = (
-            _BARE_AMPERSAND.sub( "&amp;", self.thoughts )
+            BARE_AMPERSAND.sub( "&amp;", self.thoughts )
             .replace( "<", "&lt;" )
             .replace( ">", "&gt;" )
         )
@@ -268,50 +250,6 @@ class DmTutorResponse( BaseXMLModel ):
 
         lines.append( f"</{root_tag}>" )
         return "\n".join( lines )
-
-    @classmethod
-    def from_xml( cls, xml_string ):
-        """
-        Parse, keeping the base class's ampersand repair out of CDATA spans.
-
-        The base class escapes every bare `&` before parsing, which is wrong inside CDATA, where nothing is unescaped.
-        This method lifts every CDATA span out behind a sentinel and hands the remainder to the base class.
-        Its other repairs still apply (prefix, suffix and entity fixing), and the spans are restored verbatim.
-
-        Requires:
-            - xml_string is a string
-
-        Ensures:
-            - CDATA payloads survive byte-exact, ampersands included
-            - all non-CDATA text still receives the base class's repairs
-            - a document with no CDATA behaves exactly as the base class does
-
-        Raises:
-            - XMLParsingError when the document cannot be parsed (unchanged)
-            - ValidationError when a required slot is missing or empty
-        """
-        spans = []
-
-        def _lift( match ):
-            spans.append( match.group( 0 )[ len( CDATA_OPEN ) : -len( CDATA_CLOSE ) ] )
-            return _SENTINEL.format( len( spans ) - 1 )
-
-        parsed = super().from_xml( _CDATA_SPAN.sub( _lift, xml_string ) )
-
-        if not spans: return parsed
-
-        def _restore( match ):
-            index = int( match.group( 1 ) )
-            # An out-of-range index means the model invented a sentinel. Leave it
-            # alone rather than guessing: the caller's business, not ours.
-            return spans[ index ] if index < len( spans ) else match.group( 0 )
-
-        for field_name in cls.model_fields:
-            value = getattr( parsed, field_name, None )
-            if isinstance( value, str ) and "__CDATA_SPAN_" in value:
-                object.__setattr__( parsed, field_name, _SENTINEL_RE.sub( _restore, value ) )
-
-        return parsed
 
     @classmethod
     def get_example_for_template( cls ):
