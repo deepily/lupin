@@ -152,6 +152,37 @@ def test_contract_field_requires_six_columns():
     assert _run( f"pfv_contract_field '{five}' 4" ).returncode == 2
 
 
+def _failing_tool_path( tmp_path, tool, status ):
+    """
+    Put a stand-in tool that exits with `status` first on the search path.
+
+    Ensures:
+        - returns the search path string with the stand-in's folder in front
+    """
+    fake_bin = tmp_path / f"fake-{tool}"
+    fake_bin.mkdir()
+    shim = fake_bin / tool
+    shim.write_text( f"#!/bin/bash\nexit {status}\n" )
+    shim.chmod( 0o755 )
+    return f"{fake_bin}:{os.environ[ 'PATH' ]}"
+
+
+@pytest.mark.parametrize( "tool, status", [ ( "awk", 7 ), ( "cut", 9 ) ] )
+def test_row_field_answers_3_and_names_the_tool_when_awk_or_cut_fails( tmp_path, tool, status ):
+    """
+    A failed awk or cut gives return 3 and a stderr line naming the tool.
+
+    Before this, a failed awk read as a short row and the caller skipped it silently.
+    """
+    six = TAB.join( [ "LUPIN_ROOT", "BOTH", "push-env", "PATH_VM", "REQUIRED", "note" ] )
+    path = _failing_tool_path( tmp_path, tool, status )
+    r = _run( f"PATH='{path}'; pfv_contract_field '{six}' 1" )
+    assert r.returncode == 3
+    assert r.stdout == ""
+    assert f"pfv_row_field: {tool} failed (exit {status})" in r.stderr
+    assert "LUPIN_ROOT" in r.stderr   # names the row it could not read
+
+
 def test_contract_field_reads_the_real_shipped_contract():
     """Proven against the file it exists to read, not only against fixtures."""
     r = _run( f"pfv_parse_manifest '{os.path.join( PROJECT_ROOT, 'src/conf/env-contract.tsv' )}'" )

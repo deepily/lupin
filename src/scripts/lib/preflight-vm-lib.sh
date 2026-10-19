@@ -59,16 +59,28 @@ pfv_manifest_field() {
 # Ensures:
 #   - prints the field with NO trailing newline
 #   - returns 2 and prints nothing when the row has fewer than $3 fields
+#   - returns 3 and prints nothing to stdout when awk or cut itself fails; stderr
+#     names the tool and its exit status. A failed tool is not a short row, and
+#     reading it as one dropped a contract row without a word (row 5c1413eb)
 #   - the arity floor is a PARAMETER, not a constant, so the manifest (5 columns)
 #     and the env contract (6 columns) share one implementation and cannot drift
 #     into two subtly different parsers — which is the very defect class this
 #     whole body of work exists to remove
 pfv_row_field() {
     local row="$1" idx="$2" min="$3"
-    local n
-    n="$( printf '%s' "$row" | awk -F'\t' '{ print NF }' )"
+    local n field rc
+    n="$( printf '%s' "$row" | awk -F'\t' '{ print NF }' )"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "pfv_row_field: awk failed (exit $rc) counting the fields of: $row" >&2
+        return 3
+    fi
     [ "$n" -ge "$min" ] 2>/dev/null || return 2
-    printf '%s' "$( printf '%s' "$row" | cut -d"$( printf '\t' )" -f"$idx" )"
+    field="$( printf '%s' "$row" | cut -d"$( printf '\t' )" -f"$idx" )"; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "pfv_row_field: cut failed (exit $rc) reading field $idx of: $row" >&2
+        return 3
+    fi
+    printf '%s' "$field"
 }
 
 # ── pfv_contract_field ───────────────────────────────────────────────────────
@@ -167,14 +179,19 @@ pfv_req_effective() {
 #     deliberately distinguished from the unreadable case above
 #   - malformed rows (fewer than 6 fields) are SKIPPED, not guessed at; the
 #     contract's own well-formedness is check A1's assertion, not this one's
+#   - returns 1 when awk or cut fails on a row, with the cause on stderr; the
+#     names printed before the failure are not a complete set and must be
+#     discarded. A tool failure is never read as a malformed row
 pfv_contract_push_env_names() {
-    local contract="$1" row name surface writer
+    local contract="$1" row name surface writer rc
     [ -r "$contract" ] || return 1
     while IFS= read -r row; do
         [ -n "$row" ] || continue
-        name="$( pfv_contract_field "$row" 1 )" || continue
-        surface="$( pfv_contract_field "$row" 2 )"
-        writer="$(  pfv_contract_field "$row" 3 )"
+        name="$( pfv_contract_field "$row" 1 )"; rc=$?
+        [ "$rc" -eq 2 ] && continue
+        [ "$rc" -eq 0 ] || return 1
+        surface="$( pfv_contract_field "$row" 2 )" || return 1
+        writer="$(  pfv_contract_field "$row" 3 )" || return 1
         case "$surface" in HOST|BOTH) ;; *) continue ;; esac
         case "$writer"  in *push-env*) ;; *) continue ;; esac
         printf '%s\n' "$name"
