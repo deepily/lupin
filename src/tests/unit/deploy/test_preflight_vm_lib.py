@@ -16,6 +16,7 @@ assertion in this file is one that cannot fail.
 The Python in this file is itself 100%-covered when the suite runs.
 """
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -152,17 +153,32 @@ def test_contract_field_requires_six_columns():
     assert _run( f"pfv_contract_field '{five}' 4" ).returncode == 2
 
 
-def _failing_tool_path( tmp_path, tool, status ):
+def _failing_tool_path( tmp_path, tool, status, only_call=None ):
     """
-    Put a stand-in tool that exits with `status` first on the search path.
+    Put a stand-in tool first on the search path that exits with `status`.
+
+    Requires:
+        - only_call is None (every call fails) or the 1-based call that fails
 
     Ensures:
+        - with only_call set, every other call runs the real tool
         - returns the search path string with the stand-in's folder in front
     """
     fake_bin = tmp_path / f"fake-{tool}"
     fake_bin.mkdir()
+    real = shutil.which( tool )
+    counter = tmp_path / f"calls-{tool}"
+    counter.write_text( "0" )
     shim = fake_bin / tool
-    shim.write_text( f"#!/bin/bash\nexit {status}\n" )
+    if only_call is None:
+        body = f"exit {status}\n"
+    else:
+        body = (
+            f'n=$(( $(cat {counter}) + 1 )); echo $n > {counter}\n'
+            f'[ "$n" -eq {only_call} ] && exit {status}\n'
+            f'exec {real} "$@"\n'
+        )
+    shim.write_text( "#!/bin/bash\n" + body )
     shim.chmod( 0o755 )
     return f"{fake_bin}:{os.environ[ 'PATH' ]}"
 
@@ -181,6 +197,33 @@ def test_row_field_answers_3_and_names_the_tool_when_awk_or_cut_fails( tmp_path,
     assert r.stdout == ""
     assert f"pfv_row_field: {tool} failed (exit {status})" in r.stderr
     assert "LUPIN_ROOT" in r.stderr   # names the row it could not read
+
+
+@pytest.mark.parametrize( "tool, status", [ ( "awk", 7 ), ( "cut", 9 ) ] )
+@pytest.mark.parametrize( "call", [ 1, 2, 3 ] )
+def test_name_collector_fails_when_any_one_field_read_fails( tmp_path, tool, status, call ):
+    """
+    The name collector returns 1 when only the Nth awk or cut call fails.
+
+    Calls 1, 2 and 3 of a tool are the name, surface and writer reads of the first row.
+    """
+    contract = tmp_path / "contract.tsv"
+    contract.write_text( TAB.join( [ "LUPIN_ROOT", "BOTH", "push-env", "PATH_VM", "REQUIRED", "note" ] ) + "\n" )
+    path = _failing_tool_path( tmp_path, tool, status, only_call=call )
+    r = _run( f"PATH='{path}'; pfv_contract_push_env_names '{contract}'" )
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert f"pfv_row_field: {tool} failed (exit {status})" in r.stderr
+
+
+def test_name_collector_control_the_real_tools_print_the_name( tmp_path ):
+    """The same contract with no failing call prints the name, so the cases above can fail."""
+    contract = tmp_path / "contract.tsv"
+    contract.write_text( TAB.join( [ "LUPIN_ROOT", "BOTH", "push-env", "PATH_VM", "REQUIRED", "note" ] ) + "\n" )
+    path = _failing_tool_path( tmp_path, "awk", 7, only_call=99 )
+    r = _run( f"PATH='{path}'; pfv_contract_push_env_names '{contract}'" )
+    assert r.returncode == 0
+    assert r.stdout == "LUPIN_ROOT\n"
 
 
 def test_contract_field_reads_the_real_shipped_contract():
