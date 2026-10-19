@@ -175,28 +175,41 @@ def recover_json_object( response_content: str ) -> Optional[ Any ]:
     return None
 
 
-def strip_json_fence( response_text: str ) -> str:
+def strip_json_fence( response_text: str, single_leading: bool = False ) -> str:
     """
     Remove one leading ```json (or bare ```) marker and one trailing ``` marker.
 
     Requires:
         - response_text is a string
+        - single_leading is a bool
 
     Ensures:
         - returns the text between the markers, stripped of surrounding whitespace
         - text without a fence comes back stripped and otherwise unchanged
+        - with single_leading False, a ```json marker followed directly by a bare ``` loses both
+        - with single_leading True, only the ```json marker goes and the bare ``` stays
         - never raises
 
     Notes:
-        - This is the plain strip the Deep Research parsers and the Presentation
-          metadata extractors each carried. It does not drop prose after the closing
-          fence and does not hunt for a balanced object; `recover_json_object` does both.
+        - The two modes keep the two behaviours the copies had: the Deep Research parsers
+          removed both leading markers, the Presentation metadata extractors only one.
+        - This is a plain strip. It does not drop prose after the closing fence and does not
+          hunt for a balanced object; `recover_json_object` does both.
     """
     text = response_text.strip()
 
-    if text.startswith( "```json" ): text = text[ 7: ]
-    if text.startswith( "```" ):     text = text[ 3: ]
-    if text.endswith( "```" ):       text = text[ :-3 ]
+    if text.startswith( "```json" ):
+        text = text[ 7: ]
+        if single_leading: return _strip_trailing_fence( text )
+    if text.startswith( "```" ):
+        text = text[ 3: ]
+
+    return _strip_trailing_fence( text )
+
+
+def _strip_trailing_fence( text: str ) -> str:
+    """Drop one trailing ``` marker, then surrounding whitespace."""
+    if text.endswith( "```" ): text = text[ :-3 ]
 
     return text.strip()
 
@@ -237,7 +250,7 @@ def extract_json_metadata( response_content: str, defaults: dict ) -> dict:
         - AttributeError when the JSON is valid but not an object (a list has no `.get`)
     """
     try:
-        parsed = json.loads( strip_json_fence( response_content ) )
+        parsed = json.loads( strip_json_fence( response_content, single_leading=True ) )
     except json.JSONDecodeError:
         return {}
 

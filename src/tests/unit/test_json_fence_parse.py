@@ -36,6 +36,33 @@ class TestStripJsonFence:
         assert strip_json_fence( '```json\n{"a": 1}\n```\nNote.' ) == '{"a": 1}\n```\nNote.'
 
 
+class TestDoubleLeadingMarker:
+    """```json directly followed by a bare ``` is where the two old behaviours differ."""
+
+    EDGE = '```json```{"total_slides": 3}```'
+
+    def test_default_mode_removes_both_leading_markers( self ):
+        assert strip_json_fence( self.EDGE ) == '{"total_slides": 3}'
+
+    def test_single_leading_mode_keeps_the_second_marker( self ):
+        assert strip_json_fence( self.EDGE, single_leading = True ) == '```{"total_slides": 3}'
+
+    def test_single_leading_mode_still_strips_a_lone_bare_fence( self ):
+        assert strip_json_fence( '```\n{"a": 1}\n```', single_leading = True ) == '{"a": 1}'
+
+    def test_deep_research_parsers_use_the_default_mode( self ):
+        assert parse_planning_response( self.EDGE )      == { "total_slides": 3 }
+        assert parse_clarification_response( self.EDGE ) == { "total_slides": 3 }
+        assert parse_subagent_response( self.EDGE )      == { "total_slides": 3 }
+        assert parse_fenced_json( self.EDGE, "x" )       == { "total_slides": 3 }
+
+    def test_presentation_extractors_use_the_single_leading_mode( self ):
+        """The old if/elif body returned {} here; the helper must keep doing so."""
+        assert extract_outline_metadata( self.EDGE )   == {}
+        assert extract_narrative_metadata( self.EDGE ) == {}
+        assert extract_json_metadata( self.EDGE, { "total_slides": 0 } ) == {}
+
+
 class TestParseFencedJson:
 
     def test_returns_parsed_document( self ):
