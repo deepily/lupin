@@ -5,7 +5,7 @@ pins:
   - cosa.rest.job_persistence.is_agentic_job_type@bc8b85c8ae
   - cosa.rest.job_persistence.persist_job_created_from_metadata@5f170025d1
   - cosa.rest.job_persistence.persist_job_started_from_metadata@bab8c7c15c
-  - cosa.rest.job_persistence.persist_job_stalled_from_metadata@30547f5b38
+  - cosa.rest.job_persistence.persist_job_stalled_from_metadata@b3eac8b3d4
   - cosa.rest.job_persistence.persist_job_failed_from_metadata@8dd7662712
   - cosa.rest.job_persistence.persist_job_cancelled@3bf4ec24d2
   - cosa.rest.job_persistence.persist_job_paused_state@7f019a3215

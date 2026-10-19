@@ -7,8 +7,9 @@ pins:
   - cosa.rest.cc_transcript_tailer.CcTranscriptTailer.poll_once@c3bf6dc23c
   - cosa.rest.cc_transcript_tailer.read_backlog@dc430655e2
   - cosa.rest.cc_transcript_tailer.resolve_transcript_path@26e6df1fcf
-  - cosa.rest.routers.cc_transcript.get_cc_transcript@5d260a1ab5
+  - cosa.rest.routers.cc_transcript.get_cc_transcript@a4ec37c902
   - cosa.rest.routers.websocket.handle_cc_transcript_verb@92ea280a22
+  - cosa.rest.routers.websocket.live_cc_transcript_epoch@4b5326a8e5
 ---
 # Session transcript console
 
@@ -16,10 +17,9 @@ Shows another Claude Code seat's transcript as display blocks: a REST backlog pl
 
 ## How a seat is read
 - `resolve_transcript_path` reads the seat's session bridge by exact id and returns `transcript_path` verbatim, or "" if the file is missing here.
-- `map_records` keeps only `assistant` and `user` records. A block's `kind` comes from the content type, not the role.
-- A `tool_result` block carries `name` only when its call was seen in the same index. A budget of 0 means unbounded.
-- `read_backlog` serves the last N bytes, a page before an offset, or a forward window. `get_cc_transcript` defaults to the configured tail.
-- A seat with no resolvable file answers 200 with empty blocks and `watchable: false`.
+- `map_records` keeps only `assistant` and `user` records. A block's `kind` comes from the content type, not the role. A `tool_result` block carries `name` only when its call was seen in the same index. A budget of 0 means unbounded.
+- `read_backlog` serves the last N bytes, a page before an offset, or a forward window. `get_cc_transcript` defaults to the configured tail. A seat with no resolvable file answers 200 with empty blocks and `watchable: false`.
+- `live_cc_transcript_epoch( cc_session_id, file_epoch )` gives the running tailer's `<name>#<time>` epoch after a truncation, else the file's epoch. The backlog and the roster both report it.
 
 ## Live tail
 - `handle_cc_transcript_verb` handles `cc_transcript_watch` and `cc_transcript_unwatch` on the queue socket. One shared `CcTranscriptTailer` serves each seat.

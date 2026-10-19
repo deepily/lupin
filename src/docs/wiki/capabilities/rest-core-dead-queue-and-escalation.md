@@ -7,7 +7,7 @@ pins:
   - cosa.rest.dead_queue_watchdog.is_eligible_for_auto_fix@f0097393c3
   - cosa.rest.dead_queue_watchdog.init_watchdog@39ab8bffe4
   - cosa.rest.dead_queue_watchdog.get_watchdog@15daed4a28
-  - cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher@5ce1fef8da
+  - cosa.rest.follow_through_escalation_watcher.FollowThroughEscalationWatcher@45177fd7e8
   - cosa.rest.follow_through_escalation_watcher.is_awaiting_manager@9cb7bb7bba
 ---
 # Failed-job triage and aged escalation

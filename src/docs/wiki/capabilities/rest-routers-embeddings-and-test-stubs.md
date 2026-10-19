@@ -9,7 +9,7 @@ pins:
   - cosa.rest.routers.embeddings.EmbedInfoResponse@3e01d25c27
   - cosa.rest.routers.embeddings.generate_embedding@2725c9bfda
   - cosa.rest.routers.embeddings.generate_embeddings_batch@5d37400a00
-  - cosa.rest.routers.embeddings.get_info@99da32374b
+  - cosa.rest.routers.embeddings.get_info@ef3739f404
   - cosa.rest.routers.jobs.get_static_dir@afe0b3c731
   - cosa.rest.routers.jobs.delete_snapshot@c557af3503
   - cosa.rest.routers.jobs.get_answer@0ffdcd93e3
@@ -22,7 +22,7 @@ The `/api/embeddings` HTTP door to the server's embedding provider, plus three s
 ## What it does
 - `generate_embedding` takes `EmbedRequest` (`text`, `content_type` of `prose` or `code`, optional `role` of `query` or `document`) and returns `EmbedResponse` (`embedding`, `dimensions`).
 - `generate_embeddings_batch` takes `EmbedBatchRequest` and returns `EmbedBatchResponse` (`embeddings`, `dimensions`, `count`). An empty `texts` list answers 400.
-- `get_info` (`GET /api/embeddings/info`) returns `EmbedInfoResponse`: `provider`, `dimensions`, `status` (always `ready`) and the `engines` block. It loads no model.
+- `get_info` (`GET /api/embeddings/info`) returns `EmbedInfoResponse`: `provider`, `dimensions`, `status` (always `ready`) and the `engines` block. It loads no model. It answers 503 with the reason when the model server cannot be read.
 - All three accept an API key or a JWT. Inference runs off the event loop. On generate and batch, a role the provider cannot honour answers 422. `get_info` takes no role.
 - `mock_job_health` (`GET /api/mock-job/health`) returns `{ status: "ok", available: true, description }` and queues nothing.
 - `get_static_dir` returns `static_dir` from `lupin_app.main`. No route in `jobs.py` depends on it.

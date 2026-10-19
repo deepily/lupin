@@ -7,9 +7,7 @@ pins:
   - cosa.rest.routers.arbiter.push_fleet_snapshot@f6577f319e
   - cosa.rest.routers.arbiter.FleetSizeCapIn@d17fd69d33
   - cosa.rest.routers.arbiter.get_fleet_size_cap@7238366e4a
-  - cosa.rest.routers.arbiter.refuse_api_key_cap_writer@9d4e167301
   - cosa.rest.routers.arbiter.SkeletonCrewIn@4977e28e7b
-  - cosa.rest.routers.arbiter.refuse_api_key_flipper@8300acad49
   - cosa.rest.routers.arbiter.put_skeleton_crew@25f4dc62c1
 ---
 # Arbiter snapshot, fleet-size cap and skeleton crew routes
@@ -22,7 +20,7 @@ Three groups of `/api/arbiter` routes: the cached fleet snapshot, the fleet-size
 - `get_fleet_size_cap` returns `{ cap, ceiling, live, skeleton_crew }`, read fresh on every call. The disk value of `cap` wins over the cached configuration.
 - `FleetSizeCapIn` is the PUT body: one `cap` of 1 or more. The upper bound is the live `cc session fleet size cap maximum`, so a value above it is a 422.
 - `put_skeleton_crew` takes `SkeletonCrewIn` (`on`, a strict boolean, no extra fields). It writes the switch file and the configuration file, then tells live sessions by an acknowledged broadcast. It returns the same body as the cap route.
-- `refuse_api_key_cap_writer` and `refuse_api_key_flipper` run before the admin check. They answer 403 to a caller that sends an API key and no `Authorization` header.
+- `refuse_api_key_cap_writer` and `refuse_api_key_flipper` are module-level dependencies built by one factory. They run before the admin check and answer 403 to a caller that sends an API key and no `Authorization` header.
 
 ## Don't
 - Don't expect an API key to change the cap or the switch. Only an admin login can.

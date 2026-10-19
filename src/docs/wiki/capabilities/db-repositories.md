@@ -2,7 +2,7 @@
 capability: db-repositories
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.rest.db.repositories.base.BaseRepository@6839b17f66
+  - cosa.rest.db.repositories.base.BaseRepository@ce36f54f9a
   - cosa.rest.db.repositories.base.BaseRepository.create@992f632f47
   - cosa.rest.db.repositories.base.BaseRepository.update@72bd449052
   - cosa.rest.db.database.get_db@63596843e9

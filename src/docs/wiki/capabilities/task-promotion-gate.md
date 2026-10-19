@@ -10,7 +10,7 @@ pins:
   - cosa.rest.task_request_pledge.refusal_for_pledge@2ce217bd57
   - cosa.rest.task_priority_firewall.refusal_for_priority_change@1f0df9b9e2
   - cosa.rest.task_priority_firewall.refusal_for_priority_create@34849a5153
-  - cosa.rest.task_approval_settings.get_manager_pull_disabled@5304aa9f44
+  - cosa.rest.task_approval_settings.get_manager_pull_disabled@371e6cbe19
 ---
 # Task promotion gate
 

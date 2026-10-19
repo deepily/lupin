@@ -6,7 +6,7 @@ pins:
   - cosa.rest.task_store_rules.validate_create_status@06e2c5966d
   - cosa.rest.task_store_rules.is_unscoped@b9acf708e0
   - cosa.rest.task_store_owed.owed_status_clause@e10dfec0cc
-  - cosa.rest.task_store_owed.park_is_active@9f096d7729
+  - cosa.rest.task_store_owed.park_is_active@e0649091de
   - cosa.rest.task_store_rejoin.classify_blocked_row@adcf2351f2
   - cosa.rest.task_chase_consumer.TaskChaseConsumer.sweep_once@80a7268a04
   - cosa.rest.task_store_change_notifier.record_appended_event@7b9f6b43b5

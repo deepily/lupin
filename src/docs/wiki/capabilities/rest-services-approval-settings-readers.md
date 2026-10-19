@@ -7,12 +7,12 @@ pins:
   - cosa.rest.task_approval_settings.get_approver_accounts@4ad2c43bd3
   - cosa.rest.task_approval_settings.approver_persona_for_account@1f3cbef07e
   - cosa.rest.task_approval_settings.is_approver@a0dd84f55f
-  - cosa.rest.task_approval_settings.get_enforcement_active@e26f34c68c
+  - cosa.rest.task_approval_settings.get_enforcement_active@42855cfdbc
   - cosa.rest.task_approval_settings.default_mint_status@6609720a60
   - cosa.rest.task_approval_settings.get_admission_window_seconds@3c10e20ab5
-  - cosa.rest.task_approval_settings.get_sword_of_damocles_active@b9d2274f80
+  - cosa.rest.task_approval_settings.get_sword_of_damocles_active@e253975ed5
   - cosa.rest.task_approval_settings.import_legacy_override_file@728a59ccaf
-  - cosa.rest.task_approval_settings.legacy_override_path@fec0682074
+  - cosa.rest.task_approval_settings.legacy_override_path@d1e21310b7
   - cosa.rest.task_actor_identity.identity_for_account@2c5c300e47
   - cosa.rest.task_actor_identity.recorded_actor@10c0ac3606
 ---

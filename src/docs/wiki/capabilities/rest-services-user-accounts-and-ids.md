@@ -8,8 +8,8 @@ pins:
   - cosa.rest.user_service.get_user_by_email@f83d08afa7
   - cosa.rest.user_service.update_user_password@ba9d67e58c
   - cosa.rest.user_service.reset_password_with_token@9630db6e11
-  - cosa.rest.user_service.mark_email_verified@517c290718
-  - cosa.rest.user_service.deactivate_user@bc2d15ef50
+  - cosa.rest.user_service.mark_email_verified@30d88578b2
+  - cosa.rest.user_service.deactivate_user@63d9e4b254
   - cosa.rest.user_id_generator.email_to_system_id@0ec85066ea
   - cosa.rest.user_id_generator.email_to_user_uuid@ab62e5a52a
   - cosa.rest.user_id_generator.system_id_to_display_name@f0f708ffad

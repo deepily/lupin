@@ -2,9 +2,10 @@
 capability: rest-core-flow-ratio-settings
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.rest.flow_ratio_settings.override_path@7408f4df33
-  - cosa.rest.flow_ratio_settings.get_window_hours@9a72604fae
-  - cosa.rest.flow_ratio_settings.get_allow_below@8ab5c1f391
+  - cosa.rest.flow_ratio_settings.settings_override_path@ccb75150dd
+  - cosa.rest.flow_ratio_settings.override_path@f6c4683cc4
+  - cosa.rest.flow_ratio_settings.get_window_hours@dabc60bcf2
+  - cosa.rest.flow_ratio_settings.get_allow_below@873d45af3b
   - cosa.rest.flow_ratio_settings.get_enforcement_active@74f3e59fae
   - cosa.rest.flow_ratio_settings.set_overrides@4bcbd8dc1e
   - cosa.rest.flow_ratio_settings.clear_overrides@1087dde9bd
@@ -16,7 +17,8 @@ The window, threshold and enforcement switch for the closed-to-new task ratio ga
 
 ## Layers
 - A persisted override file wins. A non-numeric stored window or threshold skips the INI and takes the built-in fallback. The INI keys `task flow ratio window hours`, `task flow ratio allow below` and `task flow ratio enforcement active` are the boot default. A built-in fallback is last.
-- `override_path` is `$LUPIN_FLOW_RATIO_DIR/flow-ratio-settings.json` when that variable is set, else `flow-ratio/flow-ratio-settings.json` under the fleet data root.
+- `settings_override_path( filename )` is `$LUPIN_FLOW_RATIO_DIR/<filename>` when that variable is set, else `flow-ratio/<filename>` under the fleet data root. The approval settings module uses it too.
+- `override_path` is that path for `flow-ratio-settings.json`.
 
 ## Reads
 - `get_window_hours` returns an int inside the allowed range.

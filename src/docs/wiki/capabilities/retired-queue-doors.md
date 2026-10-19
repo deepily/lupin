@@ -5,6 +5,7 @@ pins:
   - cosa.rest.routers._retired_doors.refusal_detail@28e39ec43b
   - cosa.rest.routers._retired_doors.gone@f7af6a87f6
   - cosa.rest.routers._retired_doors.tombstone_description@0b40abed5f
+  - cosa.rest.routers._retired_doors.check_tombstone_router@551beb6d8e
 ---
 # Retired queue doors
 
@@ -14,6 +15,7 @@ The old routes that put work on the queue now answer `410 Gone` and name the doo
 - `RETIRED_DOORS` maps each retired path to its replacement. It held 16 doors when counted on 7 Oct 2026: 3 go to `/api/v2/ask`, 11 to `/api/v2/submit` and 2 to `/api/v2/resume-job`.
 - Question-shaped doors (`/api/push`, `/api/job-history/{job_id}/retry`, `/api/podcast-generator/submit`) point at `ask`. The two resume-from-checkpoint doors point at `resume-job`. Work whose command is already decided points at `submit`.
 - `gone( path )` raises `HTTPException( 410 )`. `refusal_detail` builds its text: the path, the replacement, and `REMOVE BY 2026-12-31`. `tombstone_description` gives `/docs` a one-line description with the same replacement and date.
+- `check_tombstone_router( router, prefix, tag, path, target )` is a test helper. It raises `AssertionError` unless the router has that prefix and tag and exactly one route at `path`, and the table maps `path` to `target`. It returns the refusal text.
 - Eleven router modules call `gone( ... )` from a handler. They are the queues router (five doors), the Claude Code pair and the three research doors. One module each serves the podcast, presentation, SWE-team, bug-fix, mock-job and test-suite doors.
 
 ## Invariants

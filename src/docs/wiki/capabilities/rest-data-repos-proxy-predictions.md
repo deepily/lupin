@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.db.repositories.proxy_decision_repository.ProxyDecisionRepository@094813f6d3
   - cosa.rest.db.repositories.proxy_decision_repository.TrustStateRepository@8da1dfa0cf
-  - cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository@2b0033edfa
+  - cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository@a2f2705ea5
   - cosa.rest.db.repositories.prediction_log_repository.PredictionLogRepository@59c7a3a2fc
 ---
 # Decision proxy and prediction repositories

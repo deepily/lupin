@@ -7,7 +7,7 @@ pins:
   - cosa.rest.db.auto_migrate.run_migrations_to_head@f45791ac43
   - cosa.rest.db.schema_drift.find_missing_columns@e7952a8c24
   - cosa.rest.db.schema_drift.emit_startup_drift_alarm@5a9d566cd7
-  - cosa.rest.db.repositories.base.BaseRepository@6839b17f66
+  - cosa.rest.db.repositories.base.BaseRepository@ce36f54f9a
   - cosa.rest.postgres_models.Base@5515a96e30
   - cosa.rest.sqlite_database.get_auth_db_path@fbe9ae52dc
 ---

@@ -5,9 +5,9 @@ pins:
   - cosa.rest.task_store_owed.is_owed@319c7ddeea
   - cosa.rest.task_store_owed.owed_clause@87b78da66f
   - cosa.rest.task_store_owed.owed_status_row@611dcd037a
-  - cosa.rest.task_store_owed.park_is_active_clause@ec588723c9
-  - cosa.rest.task_store_owed.holding_is_active@b6901f5324
-  - cosa.rest.task_store_owed.holding_is_active_clause@46d422abb3
+  - cosa.rest.task_store_owed.park_is_active_clause@864745dfc0
+  - cosa.rest.task_store_owed.holding_is_active@5596b48b4e
+  - cosa.rest.task_store_owed.holding_is_active_clause@4e88128e59
   - cosa.rest.task_store_owed.park_reason_is_stale@70782a8dc6
   - cosa.rest.task_store_owed.park_reason_is_stale_clause@e45ac59bfe
   - cosa.rest.task_store_owed.item_blocker_ids@eaf86ee994

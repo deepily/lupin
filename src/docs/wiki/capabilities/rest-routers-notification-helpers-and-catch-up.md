@@ -5,8 +5,8 @@ pins:
   - cosa.rest.routers.notifications.get_notification_queue@419a0b0054
   - cosa.rest.routers.notifications.get_websocket_manager@5c65f1b7d1
   - cosa.rest.routers.notifications.get_local_timestamp@41b941186c
-  - cosa.rest.routers.notifications.get_formatted_time_display@2950a28315
-  - cosa.rest.routers.notifications.get_formatted_date_display@1db4634ca1
+  - cosa.rest.routers.notifications.get_formatted_time_display@015516485d
+  - cosa.rest.routers.notifications.get_formatted_date_display@7b9acad9ef
   - cosa.rest.routers.notifications.resolve_sender_id@da26ad8ca8
   - cosa.rest.routers.notifications.get_undelivered_notifications@5da1b0c642
   - cosa.rest.routers.notifications.get_awaiting_response_notifications@056633c87d

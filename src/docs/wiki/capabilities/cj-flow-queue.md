@@ -2,13 +2,13 @@
 capability: cj-flow-queue
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.rest.running_fifo_queue.RunningFifoQueue@57f3de9795
+  - cosa.rest.running_fifo_queue.RunningFifoQueue@076878a61e
   - cosa.rest.running_fifo_queue.RunningFifoQueue.get_pool_status@3a08a734df
   - cosa.rest.queue_consumer.start_todo_producer_run_consumer_thread@f6dc7ec19a
   - cosa.rest.queue_protocol.QueueableJob@92f93edba8
   - cosa.rest.job_state.JobState@516480b31e
   - cosa.rest.job_state.validate_transition@e52a308c3e
-  - cosa.rest.job_persistence.persist_job_completed_from_metadata@e3834ece8e
+  - cosa.rest.job_persistence.persist_job_completed_from_metadata@70e1cb34aa
   - cosa.rest.job_persistence.mark_interrupted_jobs@dbe7ae3549
   - cosa.rest.dead_queue_watchdog.DeadQueueWatchdog@58bfca263c
 ---
@@ -20,6 +20,7 @@ The queues every job passes through: todo, running, done and dead. `TodoFifoQueu
 - `RunningFifoQueue._process_job` branches on type. An `AgenticJobBase` is submitted to a thread pool and the consumer returns at once. An `AgentBase` or a `SolutionSnapshot` runs inline on the consumer thread, so the pool never blocks it.
 - The pool size is the INI key `cj flow max concurrent agentic jobs`: 1 when there is no config. Resolved through `ConfigurationManager` on 7 Oct 2026, it is 3 in `[Lupin: Production]`, `[Lupin: Development]` and `[Lupin: Testing]` (Testing sets none and inherits Development). It is 1 in `[Lupin: Baseline]`. Re-read the INI before relying on it.
 - A monopolize job runs on its own single-worker executor, not the shared pool. It is left out of `inflight_agentic_jobs` and shown as `monopolize_inflight` and `monopolize_id`. While one holds the pool and monopolize is enabled, the consumer defers other intake. It admits only that job's own child jobs, which run on the shared pool beside it. At most one monopolizer runs at a time; a child that itself monopolizes is deferred like any other job.
+- After an agent job runs, the queue writes a solution snapshot. It skips receptionist, weather and CRUD agents, and any agent whose `snapshotable` is false. The v2 queued executor sets that flag from the flow.
 - `JobState` is the one lifecycle enum, with a fixed transition table: pending, queued, scheduled, paused, running, completed, failed, interrupted, cancelled and stalled. `stalled` is the only resumable state.
 - `job_persistence` writes agentic jobs to Postgres at each step. At startup `mark_interrupted_jobs` marks every job that cannot come back as `interrupted`. `restore_pending_jobs` re-enqueues the rest (future-scheduled, downtime catch-up and immediate) through the v2 `AskFlow`.
 - `init_watchdogs` initializes both watchdogs. `DeadQueueWatchdog` evaluates a dead-queue push for an automatic bug-fix run. `TestSuiteCompletionWatchdog` does the same for a failed test suite on a done-queue push, and `test fix expediter auto fix enabled` is `false` in the INI.

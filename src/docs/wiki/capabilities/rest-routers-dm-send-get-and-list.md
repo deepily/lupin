@@ -3,9 +3,9 @@ capability: rest-routers-dm-send-get-and-list
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.routers.dm.DmSendRequest@fe90a26355
-  - cosa.rest.routers.dm.post_dm_send@5d4e8da5b2
+  - cosa.rest.routers.dm.post_dm_send@1f50a12d3f
   - cosa.rest.routers.dm.DmRespondRequest@8b037ad530
-  - cosa.rest.routers.dm.post_dm_respond@607430f85f
+  - cosa.rest.routers.dm.post_dm_respond@8d2b716f91
   - cosa.rest.routers.dm.execute_dm_get@d0c435e5f8
   - cosa.rest.routers.dm.get_dm@e32e059549
   - cosa.rest.routers.dm.resolve_dm_list_scope@d759ae6e51

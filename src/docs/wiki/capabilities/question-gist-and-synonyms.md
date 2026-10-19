@@ -8,8 +8,8 @@ pins:
   - cosa.memory.gist_cache_table.GistCacheTable@da02ff991f
   - cosa.memory.canonical_synonyms_table.CanonicalSynonymsTable@aa4481ee9c
   - cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository@d5abda0d75
-  - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@7e7ebe0bb4
-  - cosa.rest.multimodal_munger.MultiModalMunger@053090eb91
+  - cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository@f97a2a943d
+  - cosa.rest.multimodal_munger.MultiModalMunger@8ed16b51bf
 ---
 # Question gist and synonyms
 

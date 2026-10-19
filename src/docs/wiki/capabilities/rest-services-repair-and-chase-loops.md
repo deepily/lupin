@@ -14,7 +14,7 @@ pins:
   - cosa.rest.test_suite_completion_watchdog.get_watchdog@1f4e3d610e
   - cosa.rest.test_suite_completion_watchdog.reset_watchdog@498534d70c
   - cosa.rest.watchdogs.init_watchdogs@0b559c36aa
-  - cosa.rest.task_chase_consumer.TaskChaseConsumer@565d30235b
+  - cosa.rest.task_chase_consumer.TaskChaseConsumer@cd8512f7dc
 ---
 # Repair limits, watchdogs and the chase daemon
 

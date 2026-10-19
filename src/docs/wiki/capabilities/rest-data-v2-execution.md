@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.rest.v2.executor.Executor@e26eb9c73e
   - cosa.rest.v2.executor.InlineExecutor@177640a44d
-  - cosa.rest.v2.executor.QueuedExecutor@6190d45bca
+  - cosa.rest.v2.executor.QueuedExecutor@772dbd3941
   - cosa.rest.v2.executor.Outcome@9d66c5eefa
   - cosa.rest.v2.executor.Work@08666d1ed4
   - cosa.rest.v2.flow.AskFlow@0c61303bd8
@@ -20,7 +20,7 @@ The classes that run a v2 request once the flow has decided what it is. `AskFlow
 - `Work` is a frozen record of one unit: `kind` (`replay`, `agent` or `receptionist`), the `job`, the requester's `user_id`, `user_email` and `session_id`, and `snapshotable`.
 - `Executor` is a protocol with one method, `submit( work, trace )`, that returns an `Outcome`.
 - `InlineExecutor` runs on the calling thread. A replay copies the cached snapshot for the current user first, so the shared cached row is never changed. An agent runs through `do_all()`.
-- `QueuedExecutor` stamps the requester's id and email on the job, scopes its id, pushes it to the todo queue and answers `waiting`. `queue_position` is the queue size right after the push. It is not kept current. A queue that refuses the push gives `failed`.
+- `QueuedExecutor` stamps the requester's id and email on the job, scopes its id, pushes it to the todo queue and answers `waiting`. `queue_position` is the queue size right after the push. It is not kept current. A queue that refuses the push gives `failed`. For an agent or receptionist job it also copies `work.snapshotable` onto the job, and the queue skips the answer cache write when that is false.
 - `Outcome.status` is `done`, `waiting` or `failed`. A done agent also carries `code`, `code_example` and `code_returns`, so a write-back can persist a replayable row. They are `None` when the agent ran no prompt.
 - `PendingEntry` is one parked request, held by `PendingRequests`. `claim` moves its `status` from `pending` to `answering`, and `release_turn` sets it back to `pending`. `set_status` writes `running`, then `done` or `failed`. An entry past its time to live is deleted by `get` or `sweep`; `expired` is never written.
 - `SubmitRefused( route_reason, message, details=None )` is what a job builder raises when it declines to build. The flow reports it as a `failed` result carrying that reason, the message as `error` and the details as `submit_details`.
