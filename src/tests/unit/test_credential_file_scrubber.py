@@ -373,3 +373,14 @@ def test_scrub_roots_reports_a_file_that_vanished_after_the_scan_and_scrubs_the_
     assert result[ "unreadable" ] == [ gone ]
     assert result[ "scrubbed" ] == [ kept ]
     assert ( result[ "total_before" ], result[ "total_after" ] ) == ( 1, 0 )
+
+
+def test_scrub_roots_still_aborts_on_a_permission_error_after_the_scan( tmp_path, monkeypatch ):
+    import cosa.utils.credential_file_scrubber as scrubber
+    locked = _write( tmp_path / "locked.jsonl", f'{{"a": "{PLANTED}"}}\n' )
+    _age( locked, DEFAULT_ACTIVE_WINDOW_SECONDS + 60 )
+    def refuse( path, values ): raise PermissionError( 13, "Permission denied", path )
+    monkeypatch.setattr( scrubber, "scan_for_values", lambda roots, values: { "paths": [ locked ], "unreadable": [ ] } )
+    monkeypatch.setattr( scrubber, "scrub_file", refuse )
+    with pytest.raises( PermissionError ):
+        scrub_roots( [ str( tmp_path ) ], values=[ PLANTED ] )
