@@ -43,6 +43,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
+from lupin_arbiter_app.poll_loop import run_poll_loop
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
@@ -316,12 +317,7 @@ class ContextPressureWriterLoop:
 
         One bad tick never exits the loop (the observer invariant).
         """
-        while not self._stop.is_set():
-            try:
-                self.poll_once()
-            except Exception as e:                           # per-tick guard
-                self._log_fn( "poll_error", error=str( e ) )
-            self._clock.sleep( self._interval_seconds )
+        run_poll_loop( self._stop, self.poll_once, self._log_fn, self._clock, self._interval_seconds )
 
     def start( self ) -> None:
         """Spawn the daemon tick thread."""
