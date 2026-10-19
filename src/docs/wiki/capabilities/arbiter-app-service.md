@@ -17,12 +17,13 @@ This is the standalone out-of-band fleet watcher on port 8001. It runs apart fro
 - `/health` always answers. Its `status` stays "ok" while the process answers; the `loops` map and the `degraded` flag show a dead loop.
 - `/state` is the read-only composite of the loop sections in the 8001-local store. A section no loop has written yet reads as an explicit "awaiting" placeholder.
 - `assemble_app` is the testable wiring. The fleet arbiter loop is always wired. The health watcher and the context-pressure writer are wired only when their INI switches are on.
+- No route and no poll calls port 7999. Only the best-effort escalation hops do. The module's one `cosa.rest` import is the environment roster reader that `assemble_app` uses.
 - All loops write sections of one shared store. `assemble_app` makes no HTTP call and builds no job until the runner starts.
 - `create_production_app` is the uvicorn factory target. It builds the config, the commons gateway and the outreach hops, then hands them to `assemble_app`.
 - `build_dm_push_fn` returns the DM-push hop, or None when `arbiter outreach dm push enabled` is off. `resolve_arbiter_project` names the project, falling back to "lupin".
 
 ## Don't
-- Don't import `cosa.rest` or call the dev server from this module. The fleet-stall path must work with that server down.
+- Don't call the dev server from `/health` or `/state`. The fleet-stall path must work with that server down.
 - Don't read `status` from `/health` as proof the loops run. Read `degraded`.
 - Don't build the DM-push hop without a project. The server answers 422 and drops the push.
 

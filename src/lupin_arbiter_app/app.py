@@ -13,9 +13,9 @@ through the injectable `fleet_arbiter_loop`.
 
 Two design seams:
     - The :8001-local section-keyed `snapshot_store` on app.state. The loops write
-      their own sections and /state reads the composite. This module imports nothing
-      from cosa.rest or the :7999 server and makes no outbound HTTP, so the
-      fleet-stall path stays in-process.
+      their own sections and /state reads the composite. The routes make no outbound
+      HTTP. The module's one cosa.rest import is the environment roster reader that
+      assemble_app uses, so the fleet-stall path stays in-process.
     - The injectable `health_loop`. Unit tests pass a fake (no real threads or
       docker); production builds the real one in create_production_app().
 """
@@ -60,7 +60,7 @@ def create_app(
           app.state (default: a fresh LocalSnapshotStore)
         - the lifespan start()s every provided background loop on boot and stop()s
           them (in reverse) on shutdown; absent loops are no-ops
-        - this module makes no :7999/:8000 import or HTTP; /health never raises
+        - create_app makes no :7999/:8000 import or HTTP; /health never raises
           (no I/O, no dependency on the monitored servers)
     """
     now_fn     = now_fn if now_fn is not None else _utcnow
