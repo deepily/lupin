@@ -20,7 +20,7 @@ Durable at-least-once paths that hand a session the answers and peer DMs it miss
 - `reconcile_answers` is its pure core. It orders answers oldest first and moves the cursor to the latest `responded_at`.
 - `read_hwm` and `write_hwm` load and save the high-water mark; `write_hwm` returns False on `OSError`.
 - `append_surfaced_id` and `read_surfaced_log` keep a side-log so a live-surfaced answer is not shown twice.
-- `surface_dm_inbox` does the same for peer DMs at the start of a turn. `reconcile_context` is its pure core, and its own `read_hwm` and `write_hwm` use `.dm-inbox-hwm-<session_id>.json`.
+- `surface_dm_inbox` does the same for peer DMs at the start of a turn. `reconcile_context` is its pure core, and its own `read_hwm` and `write_hwm` use `.dm-inbox-hwm-<sid8>.json`, where sid8 is the first eight characters of the session id.
 ## Don't
 - Don't add first-run suppression to the answer path. A returning session must get everything owed.
 - Don't read the listener's service-account user id for the fetch; use the persona.

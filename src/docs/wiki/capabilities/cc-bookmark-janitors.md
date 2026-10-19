@@ -22,7 +22,7 @@ Reclaim per-session bookmark files once their sessions are gone. Bookmarks are m
 - `report_bookmark_files` classifies and tallies without deleting. `sweep_and_reclaim_bookmark_files` deletes what the rule proves orphaned and aged.
 - `dm_inbox_hwm_janitor` does the same for `.dm-inbox-hwm-<sid8>.json`: `hwm_sid8`, `classify_hwm_file`, `report_hwm_files` and `sweep_and_reclaim_hwm_files`.
 ## Don't
-- Don't compare full session ids. The filenames hold the first eight characters.
+- Don't compare full session ids. The ask-answer and DM-inbox names are cut to eight characters, while the task-store map and acked ledger names carry the full id.
 ## Invariants
 - The janitors bias to keep. No live-session set keeps everything, and an empty set is never read as nothing alive.
 - An unreadable or future mtime is not provable age and is kept.
