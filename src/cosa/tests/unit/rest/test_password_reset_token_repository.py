@@ -16,6 +16,7 @@ from unittest.mock import patch, MagicMock
 from cosa.rest.db.repositories.password_reset_token_repository import (
     PasswordResetTokenRepository,
 )
+from cosa.rest.postgres_models import PasswordResetToken
 
 
 def _repo():
@@ -130,6 +131,23 @@ class TestPasswordResetTokenRepository( unittest.TestCase ):
         session.query.return_value.filter.return_value.delete.return_value = 3
         self.assertEqual( repo.cleanup_expired(), 3 )
         session.flush.assert_called_once()
+
+
+    def test_cleanup_expired_filters_on_expiry_or_used_and_deletes_without_syncing( self ):
+        """
+        Pins the delete criterion: rows past expires_at, or flagged used, nothing else.
+
+        The mocked query cannot check the filter's contents, so the compiled criterion is read.
+        """
+        repo, session = _repo()
+        session.query.return_value.filter.return_value.delete.return_value = 2
+        repo.cleanup_expired()
+        session.query.assert_called_once_with( PasswordResetToken )
+        criterion = str( session.query.return_value.filter.call_args[ 0 ][ 0 ] )
+        self.assertIn( "password_reset_tokens.expires_at <", criterion )
+        self.assertIn( " OR ", criterion )
+        self.assertIn( "password_reset_tokens.used = true", criterion )
+        session.query.return_value.filter.return_value.delete.assert_called_once_with( synchronize_session=False )
 
 
 if __name__ == "__main__":

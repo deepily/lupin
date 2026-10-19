@@ -47,6 +47,24 @@ class BaseRepository(Generic[ModelType]):
         self.model = model
         self.session = session
 
+    def _set_flag( self, entity: Optional[ModelType], field: str, value: bool ) -> bool:
+        """
+        Set one boolean attribute on an already-looked-up entity and flush.
+
+        Requires:
+            - entity is the looked-up row or None
+            - field names a boolean attribute of the model
+
+        Ensures:
+            - returns False and changes nothing when entity is None
+            - otherwise sets the attribute, flushes the session and returns True
+        """
+        if entity:
+            setattr( entity, field, value )
+            self.session.flush()
+            return True
+        return False
+
     def get_by_id( self, id: Any ) -> Optional[ModelType]:
         """
         Get entity by primary key.
