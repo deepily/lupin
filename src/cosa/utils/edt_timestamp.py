@@ -38,14 +38,14 @@ from zoneinfo import ZoneInfo
 OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
 DEFAULT_TZ_NAME     = "America/New_York"
 
+# Timezone names already reported on stderr, so a bad name in a loop is named once and not per call.
+_WARNED_TZ_NAMES = set()
+
 # A body that ALREADY leads with a bracketed EDT stamp of the exact shape this
 # module emits — "[YYYY.MM.DD at HH:MM:SS]" — anchored at string start, tolerating
 # one optional leading space. Used by the DM chokepoint to stay IDEMPOTENT (bug
 # f49a8b34 / bc8d9d82): a body the arbiter (or any caller) already stamped must NOT
 # be re-wrapped into a "[outer] [inner]" double-stamp.
-# Timezone names already reported on stderr, so a bad name in a loop is named once and not per call.
-_WARNED_TZ_NAMES = set()
-
 _LEADING_EDT_STAMP_RE = re.compile( r"^ ?\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\]" )
 
 
