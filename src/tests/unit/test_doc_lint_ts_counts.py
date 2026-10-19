@@ -158,6 +158,17 @@ def test_extract_with_uses_the_given_prefix_and_extractor_and_starts_nothing_for
     assert ts_counts.extract_with( str( repo ), {}, "pre-", never ) == {} and made == [ "pre-" ]
 
 
+def test_extract_names_its_scratch_folder_with_the_counts_prefix( repo, tmp_path, monkeypatch ):
+    prefixes = []
+    def mk( prefix ):
+        prefixes.append( prefix )
+        return str( tmp_path )
+    monkeypatch.setattr( ts_counts.tempfile, "mkdtemp", mk )
+    monkeypatch.setattr( tsdoc_lint, "run_extractor", lambda root, files, source_root=None: { f: [] for f in files } )
+    ts_counts.extract( str( repo ), { "a.ts": "x\n" } )
+    assert prefixes == [ "ts-counts-" ]
+
+
 def test_extract_removes_the_scratch_tree_when_the_extractor_fails( repo, monkeypatch ):
     seen = {}
     def boom( root, files, source_root=None ):

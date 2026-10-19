@@ -53,6 +53,18 @@ def test_a_path_missing_from_the_table_fails_without_a_key_error():
     assert "refusal does not name" in str( caught.value )
 
 
+def test_a_refusal_without_the_removal_date_is_named( monkeypatch ):
+    monkeypatch.setattr( rd, "refusal_detail", lambda path: f"{path} is GONE. Use {rd.V2_ASK}." )
+    with pytest.raises( AssertionError, match="refusal does not name" ):
+        check( router() )
+
+
+def test_a_refusal_that_drops_the_target_is_named( monkeypatch ):
+    monkeypatch.setattr( rd, "refusal_detail", lambda path: f"{path} is GONE. REMOVE BY 2026-12-31." )
+    with pytest.raises( AssertionError, match="refusal does not name" ):
+        check( router() )
+
+
 def test_every_problem_is_listed_in_one_error():
     with pytest.raises( AssertionError ) as caught:
         check( router( prefix="/x", tags=( "y", ), paths=( "/z", ) ) )
