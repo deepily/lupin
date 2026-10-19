@@ -217,6 +217,9 @@ class QueuedExecutor:
             # Lineage (row 4cbd4858): an ask made on behalf of a monopolizing job carries that
             # job's id on the trace; stamping it is what lets Gate B admit this job through
             # the hold. Absent, the job is untouched and stays foreign, exactly as before.
+            # The queue decides whether to write the answer cache; only the flow knows whether
+            # this result is a reusable answer. A replay's job is a stored snapshot, not an agent.
+            if work.kind != "replay": job.snapshotable = work.snapshotable
             parent_id_hash = trace.fields.get( "parent_id_hash" )
             if parent_id_hash: job.spawned_by_id_hash = parent_id_hash
             self.todo_queue.push( job )

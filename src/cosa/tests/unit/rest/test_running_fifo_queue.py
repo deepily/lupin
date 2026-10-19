@@ -45,6 +45,7 @@ class _Job:
             solution_summary="summary", thoughts="thoughts", runtime_stats={},
             answer_is_correct=None, question="what time is it?",
             brake_terminal_claimed=False,   # protocol member (row cdfedc41) — read directly by the brake
+            snapshotable=True,              # AgentBase default; the queued executor sets it per job
             _do_all_return="output", _do_all_exc=None, _code_ok=True, _fmt_ok=True,
             _code_response={ "return_code": 0, "output": "ok" }, _formatted="fmt",
         )
@@ -1444,6 +1445,16 @@ class TestHandleBaseAgent( _RFQBase ):
         rq._confirm_correctness = MagicMock()
         out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
         self.assertIsInstance( out, _SnapFake )
+
+    def test_a_job_the_flow_marked_not_snapshotable_is_not_written_to_the_cache( self ):
+        rq = self.build()
+        job = _AgentBaseFake( id_hash="b4a", snapshotable=False ); self._enqueue( rq, job )
+        rq._confirm_correctness = MagicMock()
+        out = rq._handle_base_agent( job, "q", rfq.sw.Stopwatch( "t" ) )
+        rq.snapshot_mgr.save_snapshot.assert_not_called()
+        rq._confirm_correctness.assert_not_called()
+        self.assertIs( out, job )
+        self.assertEqual( out.answer, "raw answer" )
 
     def test_ephemeral_receptionist_not_serialized( self ):
         rq = self.build()

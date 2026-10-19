@@ -1541,7 +1541,8 @@ class RunningFifoQueue( FifoQueue ):
             serialize_snapshot = (
                 not isinstance( running_job, ReceptionistAgent ) and
                 not isinstance( running_job, WeatherAgent ) and
-                not isinstance( running_job, CrudForDataFramesAgent )
+                not isinstance( running_job, CrudForDataFramesAgent ) and
+                running_job.snapshotable
             )
             if serialize_snapshot:
 
@@ -1582,8 +1583,9 @@ class RunningFifoQueue( FifoQueue ):
                 pprint.pprint( running_job.runtime_stats )
             else:
                 print( f"NOT adding to snapshot manager" )
-                # Only overwrite answer for truly ephemeral agents (not CRUD which sets answer in run_formatter)
-                if not isinstance( running_job, CrudForDataFramesAgent ):
+                # Only overwrite answer for truly ephemeral agents. CRUD sets its answer in run_formatter,
+                # and a job the flow marked not snapshotable keeps the answer it produced.
+                if isinstance( running_job, ( ReceptionistAgent, WeatherAgent ) ):
                     running_job.answer = "no code executed by non-serializing/ephemeral objects"
 
             # Emit job state transition (run -> done) with completion metadata for ALL agents
