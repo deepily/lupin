@@ -53,7 +53,7 @@ class FakeStage:
 
     def manifest( self ): return { "manifest_hash": self.manifest_hash }
 
-    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None ):
+    def shortlist( self, ranking_text, entries, index_sha, pages, exclude_id=None, cache_only=False, wiki_ids=None, K=None, index_manifest=None ):
         if self.error is not None:
             from cosa.repo.symindex.candidates.errors import CandidateError
             raise CandidateError( self.error, "stand-in failure" )
