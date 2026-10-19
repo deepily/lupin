@@ -69,6 +69,13 @@ class TestReleaseGpuMemory( unittest.TestCase ):
         self.assertEqual( next( model.parameters() ).device.type, "cpu" )
         self.assertEqual( tuple( model( up.torch.zeros( 1, 2 ) ).shape ), ( 1, 2 ) )
 
+    def test_garbage_collection_runs_with_and_without_a_model( self ):
+        for model in ( None, MagicMock() ):
+            with patch.object( up.torch.cuda, "is_available", return_value=False ), \
+                 patch.object( up.gc, "collect" ) as collect:
+                up.release_gpu_memory( model )
+            collect.assert_called_once_with()
+
     def test_none_model_skips_move_and_no_cache_when_cuda_absent( self ):
         with patch.object( up.torch.cuda, "is_available", return_value=False ), \
              patch.object( up.torch.cuda, "empty_cache" ) as empty:
