@@ -285,12 +285,12 @@ def gather( results, members, repeats=REPEATS ):
 def _read( path ): return json.loads( pathlib.Path( path ).read_text( encoding="utf-8" ) )
 
 
-def receipt( data, items, q, low, high, code_sha, needs_sha ):
+def receipt( data, items, q, low, high, code_sha, needs_sha, prefix=PREFIX ):
     """
     Build the receipt of a finished run.
 
     Requires:
-        - the canary and the run result files are in data; items are the needs file's items
+        - the canary and the run result files, named by prefix, are in data; items are the needs file's items
     Ensures:
         - returns the receipt: format, names, inputs, the fitted band with its sensitivity, token totals, the needs that fell short and the raw draws
         - the band is the one fit_band gives, and every draw in the file is the overlap Jev gave in that repeat
@@ -298,7 +298,7 @@ def receipt( data, items, q, low, high, code_sha, needs_sha ):
         - DriverRefused when the canary or the run has no result file, the two disagree on the stage they ran, no need has all its repeats,
           or the labelled set refuses the band
     """
-    paths = [ pathlib.Path( data ) / "e2e-results" / f"{PREFIX}-{part}.json" for part in ( "canary", "run" ) ]
+    paths = [ pathlib.Path( data ) / "e2e-results" / f"{prefix}-{part}.json" for part in ( "canary", "run" ) ]
     for p in paths:
         if not p.exists(): raise s1.DriverRefused( f"no result file {p}; run the canary and the run first" )
     results = [ _read( p ) for p in paths ]
@@ -345,6 +345,22 @@ def live_stage( top ):
     stage = rt._candidate_stage( top )
     stage._refresher = None
     return stage
+
+
+def one_prefix( text ):
+    """
+    Read the one ledger prefix of a command line.
+
+    Requires:
+        - text is the --prefix option
+    Ensures:
+        - returns the prefix when it is a lowercase name of 1 to 16 letters, digits and dashes that is not stage two's
+    Raises:
+        - DriverRefused for a bad prefix or several
+    """
+    names = e2r._prefixes( text )
+    if len( names ) != 1: raise s1.DriverRefused( f"the band fit takes one prefix only, got {text!r}" )
+    return names[ 0 ]
 
 
 def stage_record( stage ):
@@ -405,6 +421,7 @@ def _parser():
         p.add_argument( "--needs", required=True )
         p.add_argument( "--needs-sha", required=True )
         if name == "estimate": continue
+        p.add_argument( "--prefix", default=PREFIX )
         p.add_argument( "--root", required=True )
         p.add_argument( "--data", required=True )
         p.add_argument( "--ledger", required=True )
@@ -452,9 +469,10 @@ def main( argv=None, stage_factory=None ):
     if args.command == "estimate":
         print( f"{len( items )} needs x {1 + REPEATS} asks x {PER_ASK_ENTRIES} entries x {TOKENS_PER_ENTRY} tokens = {spent} tokens; ceiling {int( e2r.ESTIMATE_FACTOR * spent )}" )
         return 0
+    prefix = one_prefix( args.prefix )
     data, ledger = rr.check_paths( args.root, args.data, args.ledger, args.live )
     if args.command == "report":
-        rec = receipt( data, items, args.quantile, args.pop_low, args.pop_high, args.code_sha, args.needs_sha )
+        rec = receipt( data, items, args.quantile, args.pop_low, args.pop_high, args.code_sha, args.needs_sha, prefix )
         write_once( args.out, rec )
         print( f"band={rec[ 'band' ][ 'band' ]} raw={rec[ 'band' ][ 'raw' ]:.6f} population={rec[ 'band' ][ 'population' ]} needs={len( rec[ 'needs_whole' ] )} short={len( rec[ 'needs_short' ] )} spent={rec[ 'spent_tokens' ]}" )
         return 0
@@ -462,7 +480,7 @@ def main( argv=None, stage_factory=None ):
     stage = None if args.command == "approve" else ( stage_factory or live_stage )( pathlib.Path( args.root ) )          # approving sends nothing, so it needs no stage
     if stage is not None: check_manifest( stage, args.manifest_hash )
     env   = e2r._open_env( args.root, args.data, args.ledger, args.live, make_asks( stage, Sink(), pinned=args.manifest_hash if stage is not None else None ), args.pack_size )
-    spec  = { "prefix": PREFIX, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
+    spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
               "stamp": None if stage is None else { "stage": stage_record( stage ), "needs_sha": args.needs_sha } }
     if args.command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
     if args.command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )

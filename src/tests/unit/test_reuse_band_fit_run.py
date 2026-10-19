@@ -516,3 +516,23 @@ def test_the_command_line_builds_its_stage_with_live_stage_by_default( setup, mo
     monkeypatch.setattr( bf, "live_stage", lambda top: seen.append( top ) or FakeStage() )
     assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ) ) == 0
     assert seen == [ setup.root ]
+
+
+def test_a_prefix_names_the_ledger_runs_and_result_files_so_a_second_attempt_starts_fresh( setup, capsys ):
+    extra = [ "--prefix", "bandfit2" ]
+    for step in ( ( "canary", "--ceiling", "1500000" ), ( "approve", "--by", "cheech", "--why", "read it" ), ( "run", "--ceiling", "7140000" ) ):
+        assert bf.cli( setup.args( *step, *extra ), stage_factory=lambda root: FakeStage() ) == 0
+    assert sorted( p.name for p in ( setup.data / "e2e-results" ).glob( "*.json" ) ) == [ "bandfit2-canary.canary.json", "bandfit2-canary.json", "bandfit2-run.json" ]
+    capsys.readouterr()
+    assert bf.cli( setup.args( "report", "--out", str( setup.out ), "--code-sha", "abc123", *extra ) ) == 0
+    assert json.loads( setup.out.read_text( encoding="utf-8" ) )[ "ledger_runs" ] == [ "bandfit2-canary", "bandfit2-run" ]
+
+
+@pytest.mark.parametrize( "prefix", [ "a,b", "Bad", "s2", "" ] )
+def test_a_prefix_that_is_several_or_not_a_lowercase_name_is_refused_before_anything_is_opened( setup, capsys, prefix ):
+    assert bf.cli( setup.args( "canary", "--ceiling", "1500000", "--prefix", prefix ), stage_factory=lambda root: FakeStage() ) == 2
+    assert "prefix" in capsys.readouterr().err and not setup.data.exists()
+
+
+def test_the_default_prefix_is_bandfit():
+    assert bf.PREFIX == "bandfit"
