@@ -151,40 +151,7 @@ class DeepResearchToPresentationJob( AgenticJobBase ):
         Returns:
             str: Conversational answer summarizing pipeline results
         """
-        if self.debug:
-            print( f"[DeepResearchToPresentationJob] Starting do_all() for: {self.query[ :50 ]}..." )
-
-        self.state      = JobState.RUNNING
-        self.started_at = cu.get_current_datetime_iso()
-
-        try:
-            result = asyncio.run( self._execute() )
-
-            self.state        = JobState.COMPLETED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.result       = result
-            self.answer_conversational = result
-
-            if self.debug:
-                duration = self.get_execution_duration_seconds()
-                print( f"[DeepResearchToPresentationJob] Completed in {duration:.1f}s" )
-
-            return result
-
-        except Exception as e:
-            self.state        = JobState.FAILED
-            self.completed_at = cu.get_current_datetime_iso()
-            self.error        = str( e )
-            self.answer_conversational = f"Research→Presentation pipeline failed: {str( e )}"
-
-            if self.debug:
-                print( f"[DeepResearchToPresentationJob] Failed: {e}" )
-                import traceback
-                traceback.print_exc()
-
-            # Re-raise so the agentic-pool Future captures the exception.
-            # Backlog item 5 (2026-04-29): canonical Future contract.
-            raise
+        return self._run_execute( "DeepResearchToPresentationJob", self.query[ :50 ], "Research→Presentation pipeline failed" )
 
     def _make_agent( self ):
         """
