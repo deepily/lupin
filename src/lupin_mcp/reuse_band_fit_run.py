@@ -333,6 +333,20 @@ def write_once( path, record ):
         os.unlink( temporary )
 
 
+def live_stage( top ):
+    """
+    Build the production candidate stage with its refresher switched off.
+
+    Requires:
+        - top is the tree the run asks about
+    Ensures:
+        - returns the stage rt._candidate_stage builds, whose refresher is None, so a lookup never rebuilds or swaps the vector set the run is pinned to
+    """
+    stage = rt._candidate_stage( top )
+    stage._refresher = None
+    return stage
+
+
 def stage_record( stage ):
     """Ensures: returns the stage's arm, K and vector-set hash, which each result file carries."""
     return { "arm": stage.arm, "K": stage.K, "manifest_hash": stage.manifest()[ "manifest_hash" ] }
@@ -445,7 +459,7 @@ def main( argv=None, stage_factory=None ):
         print( f"band={rec[ 'band' ][ 'band' ]} raw={rec[ 'band' ][ 'raw' ]:.6f} population={rec[ 'band' ][ 'population' ]} needs={len( rec[ 'needs_whole' ] )} short={len( rec[ 'needs_short' ] )} spent={rec[ 'spent_tokens' ]}" )
         return 0
     if args.command in ( "canary", "run" ): check_ceiling( args.ceiling, spent )
-    stage = None if args.command == "approve" else ( stage_factory or rt._candidate_stage )( pathlib.Path( args.root ) )          # approving sends nothing, so it needs no stage
+    stage = None if args.command == "approve" else ( stage_factory or live_stage )( pathlib.Path( args.root ) )          # approving sends nothing, so it needs no stage
     if stage is not None: check_manifest( stage, args.manifest_hash )
     env   = e2r._open_env( args.root, args.data, args.ledger, args.live, make_asks( stage, Sink(), pinned=args.manifest_hash if stage is not None else None ), args.pack_size )
     spec  = { "prefix": PREFIX, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,

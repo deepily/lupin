@@ -501,3 +501,18 @@ def test_a_run_without_the_manifest_hash_flag_is_refused_by_the_parser( setup, c
 def test_check_manifest_passes_when_nothing_is_pinned():
     assert bf.check_manifest( Swapping( after=0 ), None ) is None
     assert bf.check_manifest( FakeStage(), "b" * 64 ) is None
+
+
+def test_the_live_stage_has_no_refresher_so_a_lookup_cannot_rebuild_the_pinned_vector_set( monkeypatch, tmp_path ):
+    from lupin_mcp import reuse_candidates
+    built = reuse_candidates.CandidateStage( "http://x", "k", tmp_path, tmp_path, object(), refresher=lambda: pytest.fail( "the refresher ran" ) )
+    monkeypatch.setattr( rt, "_candidate_stage", lambda top: built )
+    stage = bf.live_stage( tmp_path )
+    assert stage is built and stage._refresher is None
+
+
+def test_the_command_line_builds_its_stage_with_live_stage_by_default( setup, monkeypatch ):
+    seen = []
+    monkeypatch.setattr( bf, "live_stage", lambda top: seen.append( top ) or FakeStage() )
+    assert bf.cli( setup.args( "canary", "--ceiling", "1500000" ) ) == 0
+    assert seen == [ setup.root ]
