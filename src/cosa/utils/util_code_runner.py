@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import uuid
@@ -45,7 +46,7 @@ def _ensure_proper_appendages( code: list[str], always_appended: list[str] ) -> 
     # Instantiate an ordered dictionary using the code list to populate the keys and the values. The key string should have all of the spaces removed and lowercased
     code_dict = { line.replace( " ", "" ).lower(): line for i, line in enumerate( code ) }
     # Print the dictionary in Json format
-    if debug: print( du.get_debug_json( code_dict ) )
+    if debug: print( json.dumps( code_dict, indent=2 ) )
     
     # Iterate through the always_appended list and check if the key is in the code dictionary
     for line in always_appended:

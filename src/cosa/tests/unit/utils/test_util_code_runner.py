@@ -78,6 +78,16 @@ class TestPureHelpers( unittest.TestCase ):
         # appended canonical pair lands at the tail.
         self.assertEqual( out, [ "x = 1", "result = test()", "print( result )" ] )
 
+    def test_ensure_proper_appendages_debug_prints_normalized_keys_as_json( self ):
+        """Debug mode prints the key dict as JSON and returns the usual result."""
+        import io, json
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with patch.object( ucr, "debug", True ), redirect_stdout( buf ):
+            out = _ensure_proper_appendages( [ "A = 1" ], [ "print( a )" ] )
+        self.assertEqual( out, [ "A = 1", "print( a )" ] )
+        self.assertEqual( json.loads( buf.getvalue() ), { "a=1": "A = 1" } )
+
     def test_ensure_proper_appendages_no_overlap_preserves_all( self ):
         """With no normalized collisions, every original line is kept then appendages added."""
         code            = [ "a = 1", "b = 2" ]
