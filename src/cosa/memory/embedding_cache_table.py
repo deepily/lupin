@@ -11,6 +11,7 @@ get_db() session (commit on success / rollback on error).
 from typing import Optional
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
+from cosa.memory.embedding_provider import embedding_dimensions
 
 
 class EmbeddingCacheTable:
@@ -40,7 +41,7 @@ class EmbeddingCacheTable:
         self._config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
         # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
     def has_cached_embedding( self, normalized_text: str ) -> bool:
         """

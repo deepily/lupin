@@ -609,9 +609,7 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.question_embedding or not other_snapshot.question_embedding:
-            raise ValueError( "Both snapshots must have a question embedding to compare." )
-        return np.dot( self.question_embedding, other_snapshot.question_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "question_embedding", "question embedding" )
     
     def get_solution_summary_similarity( self, other_snapshot: 'SolutionSnapshot' ) -> float:
         """
@@ -627,10 +625,7 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.solution_embedding or not other_snapshot.solution_embedding:
-            raise ValueError( "Both snapshots must have a solution summary embedding to compare." )
-        
-        return np.dot( self.solution_embedding, other_snapshot.solution_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "solution_embedding", "solution summary embedding" )
     
     def get_code_similarity( self, other_snapshot: 'SolutionSnapshot' ) -> float:
         """
@@ -646,10 +641,26 @@ class SolutionSnapshot( RunnableCode ):
         Raises:
             - ValueError if either embedding is missing
         """
-        if not self.code_embedding or not other_snapshot.code_embedding:
-            raise ValueError( "Both snapshots must have a code embedding to compare." )
-        
-        return np.dot( self.code_embedding, other_snapshot.code_embedding ) * 100
+        return self._embedding_similarity( other_snapshot, "code_embedding", "code embedding" )
+
+    def _embedding_similarity( self, other_snapshot: 'SolutionSnapshot', attr: str, label: str ) -> float:
+        """
+        Dot-product similarity of one named embedding on two snapshots.
+
+        Requires:
+            - attr names an embedding attribute on SolutionSnapshot
+            - label is the noun used in the error message
+
+        Ensures:
+            - Returns similarity score as percentage (0-100)
+
+        Raises:
+            - ValueError if either embedding is missing
+        """
+        mine, theirs = getattr( self, attr ), getattr( other_snapshot, attr )
+        if not mine or not theirs:
+            raise ValueError( f"Both snapshots must have a {label} to compare." )
+        return self.get_embedding_similarity( mine, theirs )
     
     def to_jsons( self, verbose: bool=True ) -> str:
         """

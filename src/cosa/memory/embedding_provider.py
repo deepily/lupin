@@ -65,6 +65,20 @@ class EmbeddingProviderUnreachable( RuntimeError ):
     """
 
 
+def embedding_dimensions( config_mgr ):
+    """
+    Read the standardized embedding dimension from config.
+
+    Requires:
+        - config_mgr is a ConfigurationManager
+
+    Ensures:
+        - Returns the "embedding dimensions" value as an int
+        - Returns 768 when the key is unset; the default lives here only
+    """
+    return int( config_mgr.get( "embedding dimensions", default="768" ) )
+
+
 class EmbeddingProvider:
     """
     Routing layer that delegates embedding generation to the configured engine.
@@ -742,12 +756,12 @@ class EmbeddingProvider:
             - Returns the configured embedding dimensions (default 768)
             - Same value for all providers (OpenAI uses MRL truncation)
         """
-        return int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        return embedding_dimensions( self._config_mgr )
 
     @property
     def code_dimensions( self ):
         """Return the embedding dimension for the code engine."""
-        return int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        return embedding_dimensions( self._config_mgr )
 
     def _record_metric( self, content_type, provider, delta_ms, dims ):
         """Record timing metric for a provider/content_type pair."""

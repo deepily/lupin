@@ -113,7 +113,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[web-client-task-forms-request]] — the shared task-request and argument-interview scripts. `src/lupin_app/static/js`
 - [[web-client-notifications-script]] — the older notifications page script and the chunk sequencer. `src/lupin_app/static/js`
 - [[web-client-testkit]] — the accordion and parity harnesses and fixtures used by the multiplexer tests. `src/lupin_app/static/js`
-- [[web-client-experimental-tts]] — the experimental and failed-integration TTS scripts. `src/lupin_app/static/js`
+- [[web-client-experimental-tts]] — the experimental TTS scripts. `src/lupin_app/static/js`
 - [[deep-research-door]] — the deep-research router: it serves finished reports and a health check, and no longer accepts jobs. `cosa.rest.routers` (deep_research, _retired_doors)
 - [[app-bootstrap-and-static]] — how `lupin_app` builds the FastAPI app: startup root check, `/static` serving and cache-busting asset tokens. `lupin_app` (main, bootstrap_helpers, versioned_static, asset_tokens)
 - [[app-startup-tasks-and-asset-tools]] — the speech model loader and background loops `lifespan` starts, and the static-file helpers of the asset token check. `lupin_app.main`, `lupin_app.asset_tokens`

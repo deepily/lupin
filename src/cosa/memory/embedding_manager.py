@@ -8,6 +8,7 @@ import cosa.utils.util as du
 import cosa.utils.util_stopwatch as sw
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.embedding_cache_table import EmbeddingCacheTable
+from cosa.memory.embedding_provider import embedding_dimensions
 from cosa.memory.gist_normalizer import GistNormalizer
 from threading import Lock
 
@@ -290,7 +291,7 @@ class EmbeddingManager:
                 print( f"Using OpenAI API endpoint: https://api.openai.com/v1" )
             
             # Generate embedding for text_for_embedding (normalized or exact)
-            embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+            embedding_dim = embedding_dimensions( self._config_mgr )
             response = embedding_client.embeddings.create(
                 input=text_for_embedding,
                 model=embedding_model,

@@ -16,6 +16,7 @@ through QueryLogRepository on a short-lived get_db() session per call.
 from typing import Optional, Dict, Any
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
+from cosa.memory.embedding_provider import embedding_dimensions
 
 
 class QueryLogTable:
@@ -48,7 +49,7 @@ class QueryLogTable:
         self._config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
         # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
     @staticmethod
     def _vector_or_none( embeddings: Optional[Dict[str, list[float]]], key: str ) -> Optional[list[float]]:

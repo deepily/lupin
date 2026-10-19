@@ -1,5 +1,5 @@
 from cosa.memory.embedding_manager import EmbeddingManager
-from cosa.memory.embedding_provider import get_embedding_provider
+from cosa.memory.embedding_provider import get_embedding_provider, embedding_dimensions
 
 from cosa.config.configuration_manager import ConfigurationManager
 
@@ -36,7 +36,7 @@ class QuestionEmbeddingsTable():
         self._embedding_provider = get_embedding_provider( debug=debug, verbose=verbose )
 
         # Get standardized embedding dimension from config
-        self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
+        self._embedding_dim = embedding_dimensions( self._config_mgr )
 
     def has( self, question: str ) -> bool:
         """
