@@ -30,6 +30,8 @@ The ``dot`` default is unchanged and stays correct for callers whose thresholds 
 (proxy decisions, input_and_output). Cosine is opt-in per caller, not a global re-scale. The index
 opclass (``vector_ip_ops``) is still inner product. A cosine search does not use that index, which
 is irrelevant at snapshot-table scale.
+
+The module also holds embedding_where, which reads one stored vector by an exact key.
 """
 
 from typing import Any, List, Optional, Tuple
@@ -105,3 +107,21 @@ def dot_topk(
 
     results.sort( key=lambda pair: pair[ 0 ], reverse=True )
     return results
+
+
+def embedding_where( session: Session, model, column, value ) -> Optional[ List[ float ] ]:
+    """
+    Read the stored embedding of the first row whose column equals a value.
+
+    Requires:
+        - session is an active session; model has an ``embedding`` column
+        - column is a column of model; value is the exact key to match
+
+    Ensures:
+        - returns the embedding as a list of floats
+        - returns None when no row matches, or the matching row has a null embedding
+    """
+    row = session.query( model ).filter( column == value ).first()
+    if row is None or row.embedding is None:
+        return None
+    return list( row.embedding )

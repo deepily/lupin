@@ -139,12 +139,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             True if deactivated, False if not found
         """
-        key = self.get_by_id( key_id )
-        if key:
-            key.is_active = False
-            self.session.flush()
-            return True
-        return False
+        return self._set_flag( self.get_by_id( key_id ), "is_active", False )
 
     def activate( self, key_id: uuid.UUID ) -> bool:
         """
@@ -160,12 +155,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             True if activated, False if not found
         """
-        key = self.get_by_id( key_id )
-        if key:
-            key.is_active = True
-            self.session.flush()
-            return True
-        return False
+        return self._set_flag( self.get_by_id( key_id ), "is_active", True )
 
     def update_last_used( self, key_id: uuid.UUID ) -> bool:
         """

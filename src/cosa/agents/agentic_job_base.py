@@ -16,6 +16,7 @@ Examples:
     - PodcastGenerationJob: Audio generation from content (future)
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 import uuid
 from datetime import datetime
@@ -248,6 +249,65 @@ class AgenticJobBase( ABC ):
             str: Conversational answer for the queue system
         """
         pass
+
+    def _run_execute( self, label: str, subject: str, failure_prefix: str ) -> str:
+        """
+        Run the async _execute() to completion, keeping the job state and timestamps current.
+
+        The shared body of do_all for jobs whose work is one async _execute().
+
+        Requires:
+            - label is the job's name for debug lines, such as "SweTeamJob"
+            - subject is the short text shown after "Starting do_all() for:"
+            - failure_prefix starts the stored answer when the run fails
+            - the subclass implements _execute() as a coroutine function
+
+        Ensures:
+            - state is the running state, with started_at set, while _execute() runs
+            - on success: state is the completed state, completed_at set, result and
+              answer_conversational hold the returned text, which is returned
+            - on failure: state is the failed state, completed_at set, error holds str( e ),
+              answer_conversational is "<failure_prefix>: <error>", and the
+              exception is raised again so the pool future sees it
+            - with debug on, prints a start line, then the duration or the failure and its traceback
+
+        Raises:
+            - whatever _execute() raises
+        """
+        if self.debug:
+            print( f"[{label}] Starting do_all() for: {subject}..." )
+
+        self.state      = JobState.RUNNING
+        self.started_at = cu.get_current_datetime_iso()
+
+        try:
+            result = asyncio.run( self._execute() )
+
+            self.state        = JobState.COMPLETED
+            self.completed_at = cu.get_current_datetime_iso()
+            self.result       = result
+            self.answer_conversational = result
+
+            if self.debug:
+                duration = self.get_execution_duration_seconds()
+                print( f"[{label}] Completed in {duration:.1f}s" )
+
+            return result
+
+        except Exception as e:
+            self.state        = JobState.FAILED
+            self.completed_at = cu.get_current_datetime_iso()
+            self.error        = str( e )
+            self.answer_conversational = f"{failure_prefix}: {str( e )}"
+
+            if self.debug:
+                print( f"[{label}] Failed: {e}" )
+                import traceback
+                traceback.print_exc()
+
+            # Re-raise so the agentic-pool Future captures the exception.
+            # Backlog item 5: canonical Future contract.
+            raise
 
     @abstractmethod
     async def _execute( self ) -> str:

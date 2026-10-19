@@ -83,6 +83,24 @@ def extract_tagged_xml( raw_response: str, tag: str ) -> str:
     raise ValueError( f"No <{tag}>...</{tag}> block found in LLM response. Response starts with: {raw_response[ :100 ]}" )
 
 
+# The CDATA wrapper. The closing sequence `]]>` occurs zero times in 2,977 corpus bodies,
+# so the one sequence that could break the wrapper does not appear in this traffic.
+CDATA_OPEN  = "<![CDATA["
+CDATA_CLOSE = "]]>"
+
+CDATA_SPAN = re.compile( re.escape( CDATA_OPEN ) + r".*?" + re.escape( CDATA_CLOSE ), re.DOTALL )
+
+# The base class's repair, reproduced so it can be applied outside CDATA spans only.
+# It is kept character-identical to the base rule: if that rule changes, update this one to match.
+BARE_AMPERSAND = re.compile( r"&(?!amp;|lt;|gt;|quot;|apos;|#)" )
+
+# The sentinel a lifted CDATA span leaves behind. It is built from characters the base class
+# never rewrites (no ampersand, no angle bracket), so its repairs cannot damage the placeholder
+# while the payload is away.
+CDATA_SENTINEL    = "__CDATA_SPAN_{}__"
+CDATA_SENTINEL_RE = re.compile( r"__CDATA_SPAN_(\d+)__" )
+
+
 class XMLParsingError( Exception ):
     """
     Custom exception for XML parsing errors.
@@ -400,6 +418,57 @@ class BaseXMLModel( BaseModel ):
     def __repr__( self ) -> str:
         """Developer-friendly representation."""
         return f"{self.__class__.__name__}({dict(self)})"
+
+
+class CdataSafeXMLMixin:
+    """
+    Parse a response that carries CDATA spans without letting the base repair touch them.
+
+    List this mixin before BaseXMLModel in the bases.
+    """
+
+    @classmethod
+    def from_xml( cls, xml_string ):
+        """
+        Parse, keeping the base class's ampersand repair away from CDATA spans.
+
+        The base class escapes every bare `&`, which corrupts CDATA, so each CDATA span
+        is lifted out behind a sentinel. The rest goes to the base class for its other
+        repairs, and the spans are then restored verbatim.
+
+        Requires:
+            - xml_string is a string
+
+        Ensures:
+            - CDATA payloads survive byte-exact, ampersands included
+            - all non-CDATA text still receives the base class's repairs
+            - a document with no CDATA behaves exactly as the base class does
+
+        Raises:
+            - XMLParsingError when the document cannot be parsed (unchanged)
+        """
+        spans = []
+
+        def _lift( match ):
+            spans.append( match.group( 0 )[ len( CDATA_OPEN ) : -len( CDATA_CLOSE ) ] )
+            return CDATA_SENTINEL.format( len( spans ) - 1 )
+
+        parsed = super().from_xml( CDATA_SPAN.sub( _lift, xml_string ) )
+
+        if not spans: return parsed
+
+        def _restore( match ):
+            index = int( match.group( 1 ) )
+            # An out-of-range index means the model invented a sentinel. Leave it
+            # alone rather than guessing: the validator's business, not ours.
+            return spans[ index ] if index < len( spans ) else match.group( 0 )
+
+        for field_name in cls.model_fields:
+            value = getattr( parsed, field_name, None )
+            if isinstance( value, str ) and "__CDATA_SPAN_" in value:
+                object.__setattr__( parsed, field_name, CDATA_SENTINEL_RE.sub( _restore, value ) )
+
+        return parsed
 
 
 class XMLUtilities:

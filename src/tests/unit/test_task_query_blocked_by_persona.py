@@ -90,7 +90,7 @@ def test_NEGATIVE_CONTROL_without_the_filter_no_containment_is_added():
 def test_every_repository_method_passes_the_filter_to_the_shared_helper():
     source = inspect.getsource( repository_module )
     total, missing = _calls_missing_the_argument( source, None, _is_helper_call )
-    assert total == 5, f"expected five callers of _apply_scalar_filters, found {total}"
+    assert total == 4, f"expected four callers of _apply_scalar_filters, found {total}"  # the two grouped counts share `_count_grouped_by`
     assert not missing, f"callers that drop {FILTER}: lines {missing}"
 
 

@@ -308,6 +308,47 @@ def update_user_password( user_id: str, old_password: str, new_password: str ) -
         return False, f"Password update failed: {e}"
 
 
+def _apply_user_update( user_id: str, repo_method: str, ok_message: str, fail_label: str ) -> Tuple[bool, str]:
+    """
+    Run one UserRepository update by name for a user id and map the result to a message.
+
+    Requires:
+        - repo_method names a UserRepository method taking a user UUID and returning the user or None
+        - ok_message is the success text; fail_label starts the failure text ("<fail_label>: <error>")
+
+    Ensures:
+        - returns (False, "User ID required") for an empty id
+        - returns (False, "Invalid user ID format") for a malformed id, opening no session
+        - returns (False, "User not found") when the repository returns a falsy result
+        - returns (True, ok_message) otherwise
+        - returns (False, "<fail_label>: <error>") on any other exception
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    if not user_id:
+        return False, "User ID required"
+
+    try:
+        # Convert string to UUID
+        user_uuid = uuid.UUID( user_id )
+
+        with get_db() as session:
+            user_repo = UserRepository( session )
+
+            updated_user = getattr( user_repo, repo_method )( user_uuid )
+
+            if not updated_user:
+                return False, "User not found"
+
+            return True, ok_message
+
+    except ValueError:
+        return False, "Invalid user ID format"
+    except Exception as e:
+        return False, f"{fail_label}: {e}"
+
+
 def deactivate_user( user_id: str ) -> Tuple[bool, str]:
     """
     Deactivate user account (soft delete).
@@ -327,28 +368,7 @@ def deactivate_user( user_id: str ) -> Tuple[bool, str]:
     Returns:
         tuple: (success: bool, message: str)
     """
-    if not user_id:
-        return False, "User ID required"
-
-    try:
-        # Convert string to UUID
-        user_uuid = uuid.UUID( user_id )
-
-        with get_db() as session:
-            user_repo = UserRepository( session )
-
-            # Deactivate user using repository
-            updated_user = user_repo.deactivate( user_uuid )
-
-            if not updated_user:
-                return False, "User not found"
-
-            return True, "User deactivated successfully"
-
-    except ValueError:
-        return False, "Invalid user ID format"
-    except Exception as e:
-        return False, f"Deactivation failed: {e}"
+    return _apply_user_update( user_id, "deactivate", "User deactivated successfully", "Deactivation failed" )
 
 
 def mark_email_verified( user_id: str ) -> Tuple[bool, str]:
@@ -374,28 +394,7 @@ def mark_email_verified( user_id: str ) -> Tuple[bool, str]:
         if success:
             print( "Email verified!" )
     """
-    if not user_id:
-        return False, "User ID required"
-
-    try:
-        # Convert string to UUID
-        user_uuid = uuid.UUID( user_id )
-
-        with get_db() as session:
-            user_repo = UserRepository( session )
-
-            # Mark email verified using repository
-            updated_user = user_repo.mark_email_verified( user_uuid )
-
-            if not updated_user:
-                return False, "User not found"
-
-            return True, "Email verified successfully"
-
-    except ValueError:
-        return False, "Invalid user ID format"
-    except Exception as e:
-        return False, f"Email verification failed: {e}"
+    return _apply_user_update( user_id, "mark_email_verified", "Email verified successfully", "Email verification failed" )
 
 
 def reset_password_with_token( user_id: str, new_password: str ) -> Tuple[bool, str]:

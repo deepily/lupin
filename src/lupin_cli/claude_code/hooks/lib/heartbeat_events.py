@@ -133,6 +133,51 @@ def _now_iso():
     return datetime.datetime.now( datetime.timezone.utc ).isoformat( timespec="seconds" )
 
 
+def _append_record( session_id, record, base_dir=None ):
+    """
+    Append one JSON line to the session's events file; never raises.
+
+    Requires:
+        - session_id is a string
+        - record is a JSON-serializable dict
+
+    Ensures:
+        - Creates the fleet dir if missing (parents, idempotent)
+        - Appends exactly one JSON line and returns True
+        - Returns False on any OSError, TypeError or ValueError, writing nothing
+    """
+    try:
+        path = events_path( session_id, base_dir=base_dir )
+        path.parent.mkdir( parents=True, exist_ok=True )
+        with open( path, "a" ) as f:
+            f.write( json.dumps( record ) + "\n" )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        return False
+
+
+def _emit_kind( kind, session_id, persona, ts, base_dir ):
+    """
+    Append one kind-tagged event record (no `outcome` key); never raises.
+
+    Requires:
+        - kind is one of the EVENT_KIND_* strings
+        - session_id is a string; persona is a string or None; ts is an ISO-8601 string or None
+
+    Ensures:
+        - Writes schema_version, session_id, persona, ts (now when None) and kind
+        - Returns True on a successful append, False on any write or serialization failure
+    """
+    record = {
+        "schema_version" : SCHEMA_VERSION,
+        "session_id"     : session_id,
+        "persona"        : persona,
+        "ts"             : ts if ts is not None else _now_iso(),
+        "kind"           : kind,
+    }
+    return _append_record( session_id, record, base_dir )
+
+
 def emit_outcome( session_id, persona, outcome, poke_count, cap,
                   work_owed=None, awaiting=None, reason=None, ts=None, base_dir=None ):
     """
@@ -156,31 +201,24 @@ def emit_outcome( session_id, persona, outcome, poke_count, cap,
         - Returns True on a successful append; False on a skipped outcome or
           any write / serialization failure, and never raises into the caller
     """
-    try:
-        if outcome not in EMITTED_OUTCOMES:
-            return False
-
-        record = {
-            "schema_version" : SCHEMA_VERSION,
-            "session_id"     : session_id,
-            "persona"        : persona,
-            "ts"             : ts if ts is not None else _now_iso(),
-            "outcome"        : outcome,
-            "poke_count"     : poke_count,
-            "cap"            : cap,
-            "work_owed"      : work_owed,
-            "awaiting"       : awaiting,
-        }
-        if outcome == OUTCOME_POKE and reason is not None:
-            record[ "reason" ] = reason
-
-        path = events_path( session_id, base_dir=base_dir )
-        path.parent.mkdir( parents=True, exist_ok=True )
-        with open( path, "a" ) as f:
-            f.write( json.dumps( record ) + "\n" )
-        return True
-    except ( OSError, TypeError, ValueError ):
+    if outcome not in EMITTED_OUTCOMES:
         return False
+
+    record = {
+        "schema_version" : SCHEMA_VERSION,
+        "session_id"     : session_id,
+        "persona"        : persona,
+        "ts"             : ts if ts is not None else _now_iso(),
+        "outcome"        : outcome,
+        "poke_count"     : poke_count,
+        "cap"            : cap,
+        "work_owed"      : work_owed,
+        "awaiting"       : awaiting,
+    }
+    if outcome == OUTCOME_POKE and reason is not None:
+        record[ "reason" ] = reason
+
+    return _append_record( session_id, record, base_dir )
 
 
 def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
@@ -204,21 +242,7 @@ def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
           failure, and never raises into the caller (fire-and-forget; TTS unaffected)
         - The event is the strongest cc-native passive liveness beacon
     """
-    try:
-        record = {
-            "schema_version" : SCHEMA_VERSION,
-            "session_id"     : session_id,
-            "persona"        : persona,
-            "ts"             : ts if ts is not None else _now_iso(),
-            "kind"           : EVENT_KIND_IDLE_PROMPT,
-        }
-        path = events_path( session_id, base_dir=base_dir )
-        path.parent.mkdir( parents=True, exist_ok=True )
-        with open( path, "a" ) as f:
-            f.write( json.dumps( record ) + "\n" )
-        return True
-    except ( OSError, TypeError, ValueError ):
-        return False
+    return _emit_kind( EVENT_KIND_IDLE_PROMPT, session_id, persona, ts, base_dir )
 
 
 def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
@@ -244,21 +268,7 @@ def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
           failure, and never raises into the caller (best-effort; a write failure
           must never break the reap)
     """
-    try:
-        record = {
-            "schema_version" : SCHEMA_VERSION,
-            "session_id"     : session_id,
-            "persona"        : persona,
-            "ts"             : ts if ts is not None else _now_iso(),
-            "kind"           : EVENT_KIND_REAPED,
-        }
-        path = events_path( session_id, base_dir=base_dir )
-        path.parent.mkdir( parents=True, exist_ok=True )
-        with open( path, "a" ) as f:
-            f.write( json.dumps( record ) + "\n" )
-        return True
-    except ( OSError, TypeError, ValueError ):
-        return False
+    return _emit_kind( EVENT_KIND_REAPED, session_id, persona, ts, base_dir )
 
 
 def emit_task_transition( session_id, persona=None, ts=None, base_dir=None ):
@@ -284,21 +294,7 @@ def emit_task_transition( session_id, persona=None, ts=None, base_dir=None ):
           failure, and never raises into the caller (fire-and-forget; the task tool
           call is unaffected)
     """
-    try:
-        record = {
-            "schema_version" : SCHEMA_VERSION,
-            "session_id"     : session_id,
-            "persona"        : persona,
-            "ts"             : ts if ts is not None else _now_iso(),
-            "kind"           : EVENT_KIND_TASK_TRANSITION,
-        }
-        path = events_path( session_id, base_dir=base_dir )
-        path.parent.mkdir( parents=True, exist_ok=True )
-        with open( path, "a" ) as f:
-            f.write( json.dumps( record ) + "\n" )
-        return True
-    except ( OSError, TypeError, ValueError ):
-        return False
+    return _emit_kind( EVENT_KIND_TASK_TRANSITION, session_id, persona, ts, base_dir )
 
 
 def read_events( session_id, base_dir=None ):

@@ -29,7 +29,7 @@ class TestValidateServerEnvironment:
     def test_an_unset_variable_falls_back_to_the_default_url( self, monkeypatch, capsys ):
         result, out = run( monkeypatch, None, capsys )
         assert result is True
-        assert f"  Server URL: {nt.DEFAULT_SERVER_URL}" in out
+        assert "  Server URL: http://localhost:7999\n" in out
 
     @pytest.mark.parametrize( "bad", [ "ftp://x.com", "localhost:7999", "" ] )
     def test_a_url_without_an_http_scheme_fails_with_the_scheme_message( self, monkeypatch, capsys, bad ):

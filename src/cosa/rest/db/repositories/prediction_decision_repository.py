@@ -88,22 +88,6 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
             threshold_pct=threshold * 100.0, clamp=True,
         )
 
-    def exists( self, id: str ) -> bool:
-        """
-        Existence check by id.
-
-        Requires:
-            - id is a string
-
-        Ensures:
-            - returns True iff a row with that id exists
-        """
-        return self.session.query(
-            self.session.query( PredictionDecision ).filter(
-                PredictionDecision.id == id
-            ).exists()
-        ).scalar()
-
     def delete_all( self ) -> int:
         """
         Delete every row in prediction_decisions (test reset; the table is kept).

@@ -32,36 +32,16 @@ handling is not relied on: our model always uses `<response>` as its root tag. A
 is lifted out with its CDATA span, so the stripper never sees it.
 """
 
-import re
-
 from typing import ClassVar
 
 from pydantic import Field, field_validator
 
-from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel
+from cosa.agents.io_models.utils.util_xml_pydantic import (
+    BaseXMLModel, CdataSafeXMLMixin, CDATA_OPEN, CDATA_CLOSE, BARE_AMPERSAND
+)
 
 
-# The CDATA wrapper. `]]>` occurs ZERO times in 2,977 corpus bodies, so the one
-# sequence that could break the wrapper does not appear in this traffic — and the
-# Phase 1 extractor would freeze it as a literal anyway.
-CDATA_OPEN  = "<![CDATA["
-CDATA_CLOSE = "]]>"
-
-_CDATA_SPAN = re.compile( re.escape( CDATA_OPEN ) + r".*?" + re.escape( CDATA_CLOSE ), re.DOTALL )
-
-# The base class's repair, reproduced so it can be applied OUTSIDE CDATA spans
-# only. Kept character-identical on purpose: if the base rule ever changes, this
-# should be updated to match rather than quietly diverging from it.
-_BARE_AMPERSAND = re.compile( r"&(?!amp;|lt;|gt;|quot;|apos;|#)" )
-
-# The sentinel a lifted CDATA span leaves behind. Deliberately built from
-# characters the base class never rewrites — no ampersand, no angle bracket —
-# so that its repairs cannot damage the placeholder while the payload is away.
-_SENTINEL = "__CDATA_SPAN_{}__"
-_SENTINEL_RE = re.compile( r"__CDATA_SPAN_(\d+)__" )
-
-
-class DmCompressionResponse( BaseXMLModel ):
+class DmCompressionResponse( CdataSafeXMLMixin, BaseXMLModel ):
     """
     The rewriter's response: its reasoning, and the compressed body.
 
@@ -130,7 +110,7 @@ class DmCompressionResponse( BaseXMLModel ):
             - from_xml( self.to_xml() ).compressed == self.compressed, exactly
         """
         thoughts = (
-            _BARE_AMPERSAND.sub( "&amp;", self.thoughts )
+            BARE_AMPERSAND.sub( "&amp;", self.thoughts )
             .replace( "<", "&lt;" )
             .replace( ">", "&gt;" )
         )
@@ -141,49 +121,6 @@ class DmCompressionResponse( BaseXMLModel ):
             f"  <compressed>{CDATA_OPEN}{self.compressed}{CDATA_CLOSE}</compressed>\n"
             f"</{root_tag}>"
         )
-
-    @classmethod
-    def from_xml( cls, xml_string ):
-        """
-        Parse, keeping the base class's ampersand repair away from CDATA spans.
-
-        The base class escapes every bare `&`, which corrupts CDATA, so each CDATA span
-        is lifted out behind a sentinel. The rest goes to the base class for its other
-        repairs, and the spans are then restored verbatim.
-
-        Requires:
-            - xml_string is a string
-
-        Ensures:
-            - CDATA payloads survive byte-exact, ampersands included
-            - all non-CDATA text still receives the base class's repairs
-            - a document with no CDATA behaves exactly as the base class does
-
-        Raises:
-            - XMLParsingError when the document cannot be parsed (unchanged)
-        """
-        spans = []
-
-        def _lift( match ):
-            spans.append( match.group( 0 )[ len( CDATA_OPEN ) : -len( CDATA_CLOSE ) ] )
-            return _SENTINEL.format( len( spans ) - 1 )
-
-        parsed = super().from_xml( _CDATA_SPAN.sub( _lift, xml_string ) )
-
-        if not spans: return parsed
-
-        def _restore( match ):
-            index = int( match.group( 1 ) )
-            # An out-of-range index means the model invented a sentinel. Leave it
-            # alone rather than guessing: the validator's business, not ours.
-            return spans[ index ] if index < len( spans ) else match.group( 0 )
-
-        for field_name in cls.model_fields:
-            value = getattr( parsed, field_name, None )
-            if isinstance( value, str ) and "__CDATA_SPAN_" in value:
-                object.__setattr__( parsed, field_name, _SENTINEL_RE.sub( _restore, value ) )
-
-        return parsed
 
     @classmethod
     def get_example_for_template( cls ):

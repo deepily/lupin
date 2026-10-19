@@ -172,6 +172,17 @@ def test_report_leaves_out_those_lines_when_there_are_none( repo ):
 
 # ---- surviving mutants: scratch cleanup, parse message, census result ------------------------
 
+def test_extract_names_its_scratch_folder_with_the_export_prefix( tmp_path, monkeypatch ):
+    prefixes = []
+    def mk( prefix ):
+        prefixes.append( prefix )
+        return str( tmp_path )
+    monkeypatch.setattr( ts_counts.tempfile, "mkdtemp", mk )
+    monkeypatch.setattr( ts_doc_exists, "run_extractor", lambda root, files, source_root=None: { f: rec( f, [] ) for f in files } )
+    ts_doc_exists.extract( "/r", { "a.ts": "x\n" } )
+    assert prefixes == [ "ts-exports-" ]
+
+
 def test_extract_removes_its_scratch_tree_after_a_run_and_after_a_failed_run( tmp_path, monkeypatch ):
     made = []
     def mk( prefix ):

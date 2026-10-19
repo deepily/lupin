@@ -4,6 +4,7 @@ Base repository pattern implementation with common CRUD operations.
 Provides generic repository class that can be extended for specific models.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar, Generic, Optional, List, Type, Any
 from sqlalchemy.orm import Session
 from cosa.rest.postgres_models import Base
@@ -46,6 +47,24 @@ class BaseRepository(Generic[ModelType]):
         """
         self.model = model
         self.session = session
+
+    def _set_flag( self, entity: Optional[ModelType], field: str, value: bool ) -> bool:
+        """
+        Set one boolean attribute on an already-looked-up entity and flush.
+
+        Requires:
+            - entity is the looked-up row or None
+            - field names a boolean attribute of the model
+
+        Ensures:
+            - returns False and changes nothing when entity is None
+            - otherwise sets the attribute, flushes the session and returns True
+        """
+        if entity:
+            setattr( entity, field, value )
+            self.session.flush()
+            return True
+        return False
 
     def get_by_id( self, id: Any ) -> Optional[ModelType]:
         """
@@ -199,6 +218,37 @@ class BaseRepository(Generic[ModelType]):
         Returns:
             True if exists, False otherwise
         """
+        return self._exists_where( self.model.id, id )
+
+    def _exists_where( self, column, value ) -> bool:
+        """
+        Check whether any row has the given value in a column.
+
+        Requires:
+            - column is a column of self.model; value is what it must equal
+
+        Ensures:
+            - returns True iff a row with column == value exists
+            - no entity is loaded
+        """
         return self.session.query(
-            self.session.query( self.model ).filter( self.model.id == id ).exists()
+            self.session.query( self.model ).filter( column == value ).exists()
         ).scalar()
+
+    def _delete_older_than( self, column, days_old: int ) -> int:
+        """
+        Delete every row whose timestamp column is older than a number of days.
+
+        Requires:
+            - column is a timezone-aware timestamp column of self.model
+            - days_old is a non-negative number of days
+
+        Ensures:
+            - rows with column earlier than now minus days_old are deleted, and the session is flushed
+            - newer rows are untouched
+            - returns the number of rows deleted
+        """
+        cutoff_date = datetime.now( timezone.utc ) - timedelta( days=days_old )
+        result = self.session.query( self.model ).filter( column < cutoff_date ).delete( synchronize_session=False )
+        self.session.flush()
+        return result

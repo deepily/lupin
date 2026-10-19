@@ -25,7 +25,7 @@ from lupin_cli.notifications.notification_models import (
 
 # Shared utilities
 from cosa.agents.utils.sender_id import build_sender_id
-from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher
+from cosa.agents.utils.agent_notification_dispatcher import AgentNotificationDispatcher, make_interface_functions
 
 logger = logging.getLogger( __name__ )
 
@@ -61,59 +61,7 @@ TARGET_USER: Optional[ str ] = None
 # Primary Interface Functions
 # =============================================================================
 
-async def notify_progress(
-    message: str,
-    priority: str = "medium",
-    abstract: Optional[ str ] = None,
-    session_name: Optional[ str ] = None,
-    job_id: Optional[ str ] = None,
-    queue_name: Optional[ str ] = None
-) -> None:
-    """
-    Send fire-and-forget progress notification.
-
-    Args:
-        message: Progress message to announce
-        priority: "low", "medium", "high", or "urgent"
-        abstract: Optional supplementary context
-        session_name: Optional human-readable session name
-        job_id: Agentic job ID for routing to job cards
-        queue_name: Optional queue where job is running
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    await _dispatcher.notify_progress(
-        message, priority=priority, abstract=abstract,
-        session_name=session_name, job_id=job_id, queue_name=queue_name
-    )
-
-
-async def ask_confirmation(
-    question: str,
-    default: str = "no",
-    timeout: int = 60,
-    abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
-) -> bool:
-    """
-    Ask a yes/no question and return boolean result.
-
-    Args:
-        question: The yes/no question to ask
-        default: Default answer if timeout
-        timeout: Seconds to wait for response
-        abstract: Optional supplementary context
-        job_id: Agentic job ID for routing
-
-    Returns:
-        bool: True if user said yes, False otherwise
-    """
-    _dispatcher.sender_id   = SENDER_ID
-    _dispatcher.target_user = TARGET_USER
-    return await _dispatcher.ask_confirmation(
-        question, default=default, timeout=timeout,
-        abstract=abstract, job_id=job_id
-    )
+notify_progress, ask_confirmation, _get_feedback, _present_choices = make_interface_functions( globals(), push_session_name=False )
 
 
 def quick_smoke_test():

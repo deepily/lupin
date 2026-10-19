@@ -22,7 +22,7 @@ All models inherit from BaseXMLModel and include quick_smoke_test() methods.
 """
 
 import time
-from typing import Optional, List, Union, Literal
+from typing import Optional, List, Union, Literal, ClassVar
 from pydantic import Field, field_validator, model_validator
 
 from cosa.agents.io_models.utils.util_xml_pydantic import BaseXMLModel, XMLParsingError
@@ -578,7 +578,128 @@ class ReceptionistResponse( BaseXMLModel ):
         )
 
 
-class CodeResponse( BaseXMLModel ):
+class CodeLinesMixin:
+    """
+    Behaviour shared by the response models with a list of code lines in a `code` field.
+
+    A before-validator turns the xmltodict code structure into a list of strings.
+
+    The class also reads the first function name and writes the nested line tags.
+
+    XML_FIELDS sets the element order.
+    """
+
+    # Subclass override point: element order of to_xml(); 'code' is written as nested line tags
+    XML_FIELDS: ClassVar[ tuple ] = ( 'thoughts', 'code', 'returns', 'example', 'explanation' )
+
+    @model_validator( mode='before' )
+    @classmethod
+    def process_xml_data( cls, data ):
+        """
+        Process XML data before field validation.
+
+        Handles xmltodict structures and converts them to proper field types.
+
+        Args:
+            data: Raw data from xmltodict or direct construction
+
+        Returns:
+            Processed data ready for field validation
+        """
+        if not isinstance( data, dict ):
+            return data
+
+        # Process code field if present
+        if 'code' in data and isinstance( data['code'], dict ):
+            data['code'] = cls._extract_lines_from_dict( data['code'] )
+
+        return data
+
+    @classmethod
+    def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
+        """
+        Extract code lines from the nested structure xmltodict produces for a code element.
+
+        xmltodict turns repeated line tags into {'line': ['a', 'b']} and a single one into {'line': 'a'}.
+        Each entry becomes a string and a None entry becomes an empty string.
+        A dict without a line key gives an empty list.
+
+        Args:
+            code_dict: Dictionary from xmltodict parsing
+
+        Returns:
+            List of code lines as strings
+        """
+        if 'line' in code_dict:
+            lines = code_dict['line']
+            if isinstance( lines, list ):
+                return [str(line) if line is not None else "" for line in lines]
+            else:
+                return [str(lines) if lines is not None else ""]
+        else:
+            return []
+
+    def get_function_name( self ) -> Optional[str]:
+        """
+        Extract function name from code if present.
+
+        Returns:
+            Function name or None if no function definition found
+        """
+        import re
+        for line in self.code:
+            match = re.search( r'def\s+(\w+)\s*\(', line.strip() )
+            if match:
+                return match.group( 1 )
+        return None
+
+    def to_xml( self, root_tag: str = 'response', pretty: bool = True ) -> str:
+        """
+        Generate XML with proper nested structure for prompts.
+
+        Overrides BaseXMLModel.to_xml() to handle the nested code
+        structure that prompt templates expect.
+
+        Args:
+            root_tag: Root XML element name (default: 'response')
+            pretty: Whether to format XML with indentation (default: True)
+
+        Returns:
+            Formatted XML string matching prompt template structure
+        """
+        import xmltodict
+
+        data = {}
+        for name in self.XML_FIELDS:
+            data[ name ] = { 'line': self.code } if name == 'code' else getattr( self, name )
+
+        return xmltodict.unparse( {root_tag: data}, pretty=pretty )
+
+
+class CommaListMixin:
+    """Reads a comma-separated `matches` string as a list of names."""
+
+    def get_matches_list( self ) -> List[ str ]:
+        """
+        Get matches as a list of filenames.
+
+        Requires:
+            - self.matches is a string (guaranteed by Pydantic)
+
+        Ensures:
+            - Returns list of trimmed, non-empty filename strings
+            - Returns empty list if matches is empty or whitespace-only
+
+        Returns:
+            List of filename strings
+        """
+        if not self.matches or not self.matches.strip():
+            return []
+
+        return [ m.strip() for m in self.matches.split( ',' ) if m.strip() ]
+
+
+class CodeResponse( CodeLinesMixin, BaseXMLModel ):
     """
     Code generation response model.
     
@@ -603,57 +724,6 @@ class CodeResponse( BaseXMLModel ):
     returns: str = Field( ..., description="Return type description" )
     example: str = Field( ..., description="Usage example" )
     explanation: str = Field( ..., description="Code explanation" )
-    
-    @model_validator( mode='before' )
-    @classmethod
-    def process_xml_data( cls, data ):
-        """
-        Process XML data before field validation.
-        
-        Handles xmltodict structures and converts them to proper field types.
-        
-        Args:
-            data: Raw data from xmltodict or direct construction
-            
-        Returns:
-            Processed data ready for field validation
-        """
-        if not isinstance( data, dict ):
-            return data
-            
-        # Process code field if present
-        if 'code' in data and isinstance( data['code'], dict ):
-            data['code'] = cls._extract_lines_from_dict( data['code'] )
-            
-        return data
-    
-    @classmethod
-    def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
-        """
-        Extract code lines from the nested structure xmltodict produces for a code element.
-
-        xmltodict turns repeated line tags into {'line': ['a', 'b']} and a single one into {'line': 'a'}.
-        Each entry becomes a string and a None entry becomes an empty string.
-        A dict without a line key gives an empty list.
-
-        Args:
-            code_dict: Dictionary from xmltodict parsing
-
-        Returns:
-            List of code lines as strings
-        """
-        if 'line' in code_dict:
-            lines = code_dict['line']
-            if isinstance( lines, list ):
-                # Multiple lines
-                return [str(line) if line is not None else "" for line in lines]
-            else:
-                # Single line
-                return [str(lines) if lines is not None else ""]
-        else:
-            # No line tags found - might be direct text content
-            # This handles edge cases where code is directly in <code>text</code>
-            return []
     
     @field_validator( 'code' )
     @classmethod
@@ -710,46 +780,6 @@ class CodeResponse( BaseXMLModel ):
             line.strip().startswith( ('import ', 'from ') ) 
             for line in self.code if line.strip()
         )
-    
-    def get_function_name( self ) -> Optional[str]:
-        """
-        Extract function name from code if present.
-        
-        Returns:
-            Function name or None if no function definition found
-        """
-        import re
-        for line in self.code:
-            match = re.search( r'def\s+(\w+)\s*\(', line.strip() )
-            if match:
-                return match.group( 1 )
-        return None
-    
-    def to_xml( self, root_tag: str = 'response', pretty: bool = True ) -> str:
-        """
-        Generate XML with proper nested structure for prompts.
-        
-        Overrides BaseXMLModel.to_xml() to handle the nested code
-        structure that prompt templates expect.
-        
-        Args:
-            root_tag: Root XML element name (default: 'response')
-            pretty: Whether to format XML with indentation (default: True)
-            
-        Returns:
-            Formatted XML string matching prompt template structure
-        """
-        import xmltodict
-        
-        data = {
-            'thoughts': self.thoughts,
-            'code': {'line': self.code},  # Creates nested <line> tags
-            'returns': self.returns,
-            'example': self.example,
-            'explanation': self.explanation
-        }
-        
-        return xmltodict.unparse( {root_tag: data}, pretty=pretty )
     
     @classmethod
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -934,6 +964,8 @@ class CalendarResponse( CodeResponse ):
     Used by calendaring agents that need to preserve the original question context.
     """
     
+    XML_FIELDS: ClassVar[ tuple ] = ( 'question', 'thoughts', 'code', 'returns', 'example', 'explanation' )
+
     question: str = Field( ..., description="Original question being answered" )
     
     @field_validator( 'question' )
@@ -943,34 +975,6 @@ class CalendarResponse( CodeResponse ):
         if not v or not v.strip():
             raise ValueError( "Question cannot be empty" )
         return v.strip()
-    
-    def to_xml( self, root_tag: str = 'response', pretty: bool = True ) -> str:
-        """
-        Generate XML with proper field order and nested structure for calendar prompts.
-        
-        Overrides CodeResponse.to_xml() to ensure proper field ordering
-        that matches the calendar prompt template structure.
-        
-        Args:
-            root_tag: Root XML element name (default: 'response')
-            pretty: Whether to format XML with indentation (default: True)
-            
-        Returns:
-            Formatted XML string matching calendar prompt template structure
-        """
-        import xmltodict
-        
-        # Specific field order matching calendar prompt template
-        data = {
-            'question': self.question,
-            'thoughts': self.thoughts,
-            'code': {'line': self.code},  # Creates nested <line> tags
-            'returns': self.returns,
-            'example': self.example,
-            'explanation': self.explanation
-        }
-        
-        return xmltodict.unparse( {root_tag: data}, pretty=pretty )
     
     @classmethod 
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -1155,7 +1159,7 @@ class BrainstormIdeas( BaseXMLModel ):
         )
 
 
-class CodeBrainstormResponse( BaseXMLModel ):
+class CodeBrainstormResponse( CodeLinesMixin, BaseXMLModel ):
     """
     Code generation response with brainstorming process.
 
@@ -1179,56 +1183,6 @@ class CodeBrainstormResponse( BaseXMLModel ):
     example: str = Field( ..., description="Usage example" )
     returns: str = Field( ..., description="Return type description" )
     explanation: str = Field( ..., description="Code explanation" )
-    
-    @model_validator( mode='before' )
-    @classmethod
-    def process_xml_data( cls, data ):
-        """
-        Process XML data before field validation.
-        
-        Handles xmltodict structures and converts them to proper field types.
-        
-        Args:
-            data: Raw data from xmltodict or direct construction
-            
-        Returns:
-            Processed data ready for field validation
-        """
-        if not isinstance( data, dict ):
-            return data
-            
-        # Process code field if present (reuse logic from CodeResponse)
-        if 'code' in data and isinstance( data['code'], dict ):
-            data['code'] = cls._extract_lines_from_dict( data['code'] )
-            
-        return data
-    
-    @classmethod
-    def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
-        """
-        Extract code lines from the nested structure xmltodict produces for a code element.
-
-        xmltodict turns repeated line tags into {'line': ['a', 'b']} and a single one into {'line': 'a'}.
-        Each entry becomes a string and a None entry becomes an empty string.
-        A dict without a line key gives an empty list.
-
-        Args:
-            code_dict: Dictionary from xmltodict parsing
-
-        Returns:
-            List of code lines as strings
-        """
-        if 'line' in code_dict:
-            lines = code_dict['line']
-            if isinstance( lines, list ):
-                # Multiple lines
-                return [str(line) if line is not None else "" for line in lines]
-            else:
-                # Single line
-                return [str(lines) if lines is not None else ""]
-        else:
-            # No line tags found - might be direct text content
-            return []
     
     
     @field_validator( 'code' )
@@ -1318,20 +1272,6 @@ class CodeBrainstormResponse( BaseXMLModel ):
             line.strip().startswith( ('import ', 'from ') ) 
             for line in self.code if line.strip()
         )
-    
-    def get_function_name( self ) -> Optional[str]:
-        """
-        Extract function name from code if present.
-        
-        Returns:
-            Function name or None if no function definition found
-        """
-        import re
-        for line in self.code:
-            match = re.search( r'def\s+(\w+)\s*\(', line.strip() )
-            if match:
-                return match.group( 1 )
-        return None
     
     @classmethod
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -1906,7 +1846,7 @@ class IterativeDebuggingMinimalistResponse( BaseXMLModel ):
         )
 
 
-class IterativeDebuggingFullResponse( BaseXMLModel ):
+class IterativeDebuggingFullResponse( CodeLinesMixin, BaseXMLModel ):
     """
     Pydantic model for IterativeDebuggingAgent XML responses in full mode.
 
@@ -1915,36 +1855,13 @@ class IterativeDebuggingFullResponse( BaseXMLModel ):
     Used by IterativeDebuggingAgent in full mode for debugging with complete solutions.
     """
     
+    XML_FIELDS: ClassVar[ tuple ] = ( 'thoughts', 'code', 'example', 'returns', 'explanation' )
+
     thoughts: str = Field( ..., description="Debugging analysis and reasoning" )
     code: List[str] = Field( ..., description="Complete fixed code as list of lines" )
     example: str = Field( ..., description="Example usage of the fixed code" )
     returns: str = Field( ..., description="Expected return value or output" )
     explanation: str = Field( ..., description="Detailed explanation of the fix" )
-    
-    @model_validator( mode='before' )
-    @classmethod
-    def process_xml_data( cls, data ):
-        """Process XML data before field validation."""
-        if not isinstance( data, dict ):
-            return data
-            
-        # Process code field if present (reuse logic from CodeResponse)
-        if 'code' in data and isinstance( data['code'], dict ):
-            data['code'] = cls._extract_lines_from_dict( data['code'] )
-            
-        return data
-    
-    @classmethod
-    def _extract_lines_from_dict( cls, code_dict: dict ) -> List[str]:
-        """Extract code lines from xmltodict nested structure."""
-        if 'line' in code_dict:
-            lines = code_dict['line']
-            if isinstance( lines, list ):
-                return [str(line) if line is not None else "" for line in lines]
-            else:
-                return [str(lines) if lines is not None else ""]
-        else:
-            return []
     
     @field_validator( 'code' )
     @classmethod
@@ -1980,41 +1897,6 @@ class IterativeDebuggingFullResponse( BaseXMLModel ):
             line.strip().startswith( ('import ', 'from ') ) 
             for line in self.code if line.strip()
         )
-    
-    def get_function_name( self ) -> Optional[str]:
-        """Extract function name from code if present."""
-        import re
-        for line in self.code:
-            match = re.search( r'def\s+(\w+)\s*\(', line.strip() )
-            if match:
-                return match.group( 1 )
-        return None
-    
-    def to_xml( self, root_tag: str = 'response', pretty: bool = True ) -> str:
-        """
-        Generate XML with proper nested structure for debugging prompts.
-        
-        Overrides BaseXMLModel.to_xml() to handle the nested code
-        structure that debugging prompt templates expect.
-        
-        Args:
-            root_tag: Root XML element name (default: 'response')
-            pretty: Whether to format XML with indentation (default: True)
-            
-        Returns:
-            Formatted XML string matching debugging prompt template structure
-        """
-        import xmltodict
-        
-        data = {
-            'thoughts': self.thoughts,
-            'code': {'line': self.code},  # Creates nested <line> tags
-            'example': self.example,
-            'returns': self.returns,
-            'explanation': self.explanation
-        }
-        
-        return xmltodict.unparse( {root_tag: data}, pretty=pretty )
     
     @classmethod
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -2755,7 +2637,7 @@ class QualifierClassification( BaseXMLModel ):
             return False
 
 
-class FuzzyFileMatchResponse( BaseXMLModel ):
+class FuzzyFileMatchResponse( CommaListMixin, BaseXMLModel ):
     """
     Fuzzy file matching response model.
 
@@ -2808,25 +2690,6 @@ class FuzzyFileMatchResponse( BaseXMLModel ):
         return cls(
             matches='2026.01.15-claude-code-analysis.md, 2026.01.10-ai-tools.md'
         )
-
-    def get_matches_list( self ) -> List[ str ]:
-        """
-        Get matches as a list of filenames.
-
-        Requires:
-            - self.matches is a string (guaranteed by Pydantic)
-
-        Ensures:
-            - Returns list of trimmed, non-empty filename strings
-            - Returns empty list if matches is empty or whitespace-only
-
-        Returns:
-            List of filename strings
-        """
-        if not self.matches or not self.matches.strip():
-            return []
-
-        return [ m.strip() for m in self.matches.split( ',' ) if m.strip() ]
 
     @classmethod
     def quick_smoke_test( cls, debug: bool = False ) -> bool:
@@ -2888,7 +2751,7 @@ class FuzzyFileMatchResponse( BaseXMLModel ):
             return False
 
 
-class TFEResumeMatchResponse( BaseXMLModel ):
+class TFEResumeMatchResponse( CommaListMixin, BaseXMLModel ):
     """
     TFE resume fuzzy-match response model: ranked job IDs for a described stalled job.
 
@@ -2920,25 +2783,6 @@ class TFEResumeMatchResponse( BaseXMLModel ):
         return cls(
             matches='tfe-7c25082a::user@example.com, tfe-3b8c92d1::user@example.com'
         )
-
-    def get_matches_list( self ) -> List[ str ]:
-        """
-        Get matches as a list of job IDs.
-
-        Requires:
-            - self.matches is a string (guaranteed by Pydantic)
-
-        Ensures:
-            - Returns list of trimmed, non-empty job ID strings
-            - Returns empty list if matches is empty or whitespace-only
-
-        Returns:
-            List of TFE job ID strings in rank order
-        """
-        if not self.matches or not self.matches.strip():
-            return []
-
-        return [ m.strip() for m in self.matches.split( ',' ) if m.strip() ]
 
     @classmethod
     def quick_smoke_test( cls, debug: bool = False ) -> bool:

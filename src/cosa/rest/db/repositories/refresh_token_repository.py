@@ -10,10 +10,10 @@ import uuid
 
 from sqlalchemy.orm import Session
 from cosa.rest.postgres_models import RefreshToken
-from cosa.rest.db.repositories.base import BaseRepository
+from cosa.rest.db.repositories.token_base import TokenRepositoryBase
 
 
-class RefreshTokenRepository(BaseRepository[RefreshToken]):
+class RefreshTokenRepository(TokenRepositoryBase[RefreshToken]):
     """
     Repository for RefreshToken model with JWT refresh token operations.
 
@@ -203,16 +203,7 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
             deleted = token_repo.cleanup_expired()
             # deleted = 150 (removed 150 old tokens)
         """
-        cutoff_date = datetime.now( timezone.utc )
-
-        # Delete expired tokens OR revoked tokens
-        result = self.session.query( RefreshToken ).filter(
-            ( RefreshToken.expires_at < cutoff_date ) |
-            ( RefreshToken.revoked == True )
-        ).delete( synchronize_session=False )
-
-        self.session.flush()
-        return result
+        return self._delete_expired_or( RefreshToken.revoked )
 
     def update_last_used( self, jti: uuid.UUID, ip_address: Optional[str] = None ) -> Optional[RefreshToken]:
         """
@@ -264,17 +255,7 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
             else:
                 # Token is revoked, expired, or doesn't exist
         """
-        token = self.get_by_jti( jti )
-        if not token:
-            return False
-
-        if token.revoked:
-            return False
-
-        if token.expires_at < datetime.now( timezone.utc ):
-            return False
-
-        return True
+        return self._is_live( self.get_by_jti( jti ), "revoked" )
 
     def count_active_for_user( self, user_id: uuid.UUID ) -> int:
         """

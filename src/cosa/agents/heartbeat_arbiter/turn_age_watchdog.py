@@ -165,6 +165,8 @@ class TurnAgeWatchdog( StoppableDaemonMixin ):
     the job poll, so it has no arbiter_job.py coupling.
     """
 
+    THREAD_NAME = "TurnAgeWatchdog"
+
     def __init__(
         self,
         config_mgr,
@@ -427,19 +429,3 @@ class TurnAgeWatchdog( StoppableDaemonMixin ):
             except Exception as e:
                 du.print_banner( f"Turn-age watchdog loop caught exception (continuing): {e!r}", prepend_nl=True )
             self._stop_event.wait( timeout=self._tick_seconds() )
-
-    def start( self ) -> bool:
-        """
-        Spawn the daemon thread, only if the flag is enabled and no thread runs.
-
-        Returns True if a thread was started, else False. That is the no-op
-        rollout gate: a disabled watchdog never spawns.
-        """
-        if not self._enabled():
-            return False
-        if self._thread is not None and self._thread.is_alive():
-            return False
-        self._stop_event.clear()
-        self._thread = threading.Thread( target=self._loop, daemon=True, name="TurnAgeWatchdog" )
-        self._thread.start()
-        return True

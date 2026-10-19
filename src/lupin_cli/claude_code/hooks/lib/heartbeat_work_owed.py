@@ -397,6 +397,27 @@ def _inbound_age_seconds( entry, now_epoch ):
     return _iso_age_seconds( ts, now_epoch )
 
 
+def _debounced_need( items, last_ts, now_epoch, threshold_seconds ):
+    """
+    Return whether an outstanding item exists and its last stamp is undated or old (pure).
+
+    Requires:
+        - items is an iterable of entries (falsy ones are ignored) or None
+        - last_ts is an ISO-8601 str or None; now_epoch is POSIX seconds; threshold_seconds is the debounce window
+
+    Ensures:
+        - Returns False when no truthy item is present
+        - Otherwise True when last_ts is None or unparseable, else True iff its age >= threshold_seconds
+        - Pure: no clock, no IO
+    """
+    if not [ i for i in ( items or [ ] ) if i ]:
+        return False
+    age = _iso_age_seconds( last_ts, now_epoch )
+    if age is None:
+        return True
+    return age >= threshold_seconds
+
+
 def manager_needs_verification( outstanding_delegations, last_verification_ts,
                                 now_epoch,
                                 threshold_seconds=VERIFICATION_DEBOUNCE_SECONDS ):
@@ -425,13 +446,7 @@ def manager_needs_verification( outstanding_delegations, last_verification_ts,
           due, mirroring "verify at least every 10 min"
         - Pure: no clock, no IO; never raises on well-formed input
     """
-    workers = [ d for d in ( outstanding_delegations or [ ] ) if d ]
-    if not workers:
-        return False
-    age = _iso_age_seconds( last_verification_ts, now_epoch )
-    if age is None:
-        return True
-    return age >= threshold_seconds
+    return _debounced_need( outstanding_delegations, last_verification_ts, now_epoch, threshold_seconds )
 
 
 def manager_needs_spinup_check( backlog_count, idle_capacity, last_spinup_check_ts,
@@ -506,13 +521,7 @@ def manager_needs_question_surface( open_operator_gates, last_surfaced_questions
         - Boundary: age exactly == threshold owes (>=)
         - Pure: no clock, no IO; never raises on well-formed input
     """
-    gates = [ g for g in ( open_operator_gates or [ ] ) if g ]
-    if not gates:
-        return False
-    age = _iso_age_seconds( last_surfaced_questions_ts, now_epoch )
-    if age is None:
-        return True
-    return age >= threshold_seconds
+    return _debounced_need( open_operator_gates, last_surfaced_questions_ts, now_epoch, threshold_seconds )
 
 
 def partition_inbound_by_age( inbound, now_epoch,

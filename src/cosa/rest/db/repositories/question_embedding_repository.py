@@ -10,6 +10,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from cosa.rest.db.repositories.base import BaseRepository
+from cosa.rest.db.repositories.vector_search import embedding_where
 from cosa.rest.db.vector_store_models import QuestionEmbedding
 
 
@@ -38,11 +39,7 @@ class QuestionEmbeddingRepository( BaseRepository[QuestionEmbedding] ):
         Ensures:
             - returns True iff a row with that exact question exists
         """
-        return self.session.query(
-            self.session.query( QuestionEmbedding ).filter(
-                QuestionEmbedding.question == question
-            ).exists()
-        ).scalar()
+        return self._exists_where( QuestionEmbedding.question, question )
 
     def get_embedding( self, question: str ) -> Optional[List[float]]:
         """
@@ -55,12 +52,7 @@ class QuestionEmbeddingRepository( BaseRepository[QuestionEmbedding] ):
             - returns the stored embedding as a list of floats, or None on a miss
             - does not generate on a miss (the memory layer owns generation)
         """
-        row = self.session.query( QuestionEmbedding ).filter(
-            QuestionEmbedding.question == question
-        ).first()
-        if row is None or row.embedding is None:
-            return None
-        return list( row.embedding )
+        return embedding_where( self.session, QuestionEmbedding, QuestionEmbedding.question, question )
 
     def add_embedding( self, question: str, embedding: List[float] ) -> QuestionEmbedding:
         """

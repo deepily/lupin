@@ -177,6 +177,42 @@ assert PARK_STATUS not in TERMINAL_STATUSES, (
 # Self-contained BY DESIGN. Does not call twin (b); shares no helper with it.
 # See the module docstring: the parity gate perturbs one side and requires RED.
 
+def _is_active_until( expected_status, status, next_chase_ts, now ) -> bool:
+    """
+    True when `status` is `expected_status` and its chase is still in the future.
+
+    Requires:
+        - expected_status is the status string this check answers for
+        - status is a status string; next_chase_ts is an ISO-8601 string, a datetime, or None
+        - now is a datetime (naive treated as UTC)
+
+    Ensures:
+        - a different status -> False, checked first so an unrelated row skips the chase arithmetic
+        - chase strictly after now -> True
+        - chase equal to or before now -> False (due, so the row surfaces)
+        - chase None, unparseable or of another type -> False (a row whose chase cannot be read must surface)
+        - never raises
+    """
+    if status != expected_status:
+        return False
+
+    if isinstance( next_chase_ts, datetime ):
+        chase_ts = next_chase_ts
+    elif isinstance( next_chase_ts, str ):
+        try:
+            chase_ts = datetime.fromisoformat( next_chase_ts.strip().replace( "Z", "+00:00" ) )
+        except ValueError:
+            return False
+    else:
+        return False
+
+    if chase_ts.tzinfo is None:
+        chase_ts = chase_ts.replace( tzinfo=timezone.utc )
+    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
+
+    return chase_ts > comparison_now
+
+
 def park_is_active( status, next_chase_ts, now ) -> bool:
     """
     True when the row is parked and its chase has not yet come due.
@@ -201,24 +237,7 @@ def park_is_active( status, next_chase_ts, now ) -> bool:
         - parked and next_chase_ts unparseable -> False (same rationale)
         - never raises
     """
-    if status != PARK_STATUS:
-        return False
-
-    if isinstance( next_chase_ts, datetime ):
-        chase_ts = next_chase_ts
-    elif isinstance( next_chase_ts, str ):
-        try:
-            chase_ts = datetime.fromisoformat( next_chase_ts.strip().replace( "Z", "+00:00" ) )
-        except ValueError:
-            return False
-    else:
-        return False
-
-    if chase_ts.tzinfo is None:
-        chase_ts = chase_ts.replace( tzinfo=timezone.utc )
-    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
-
-    return chase_ts > comparison_now
+    return _is_active_until( PARK_STATUS, status, next_chase_ts, now )
 
 
 def is_owed( status, next_chase_ts, now ) -> bool:
@@ -327,24 +346,33 @@ def holding_is_active( status, next_chase_ts, now ) -> bool:
           not hide indefinitely)
         - never raises
     """
-    if status != NOT_APPROVED_STATUS:
-        return False
+    return _is_active_until( NOT_APPROVED_STATUS, status, next_chase_ts, now )
 
-    if isinstance( next_chase_ts, datetime ):
-        chase_ts = next_chase_ts
-    elif isinstance( next_chase_ts, str ):
-        try:
-            chase_ts = datetime.fromisoformat( next_chase_ts.strip().replace( "Z", "+00:00" ) )
-        except ValueError:
-            return False
-    else:
-        return False
 
-    if chase_ts.tzinfo is None:
-        chase_ts = chase_ts.replace( tzinfo=timezone.utc )
+def _active_clause( model, now, status_value ):
+    """
+    SQL boolean expression: the row has `status_value` and a non-NULL chase after `now`.
+
+    Requires:
+        - model is the mapped TaskItem class (or an alias) exposing `status` and `next_chase_ts`
+        - now is a datetime (naive treated as UTC)
+        - status_value is the status string the clause answers for
+
+    Ensures:
+        - returns a SQLAlchemy boolean expression, never a Python bool
+        - the status test is the first conjunct
+        - the `isnot( None )` conjunct is needed beside `>`: a comparison with NULL yields NULL, not
+          False, and three-valued logic would drop the row from both sides of a filter
+    """
+    from sqlalchemy import and_
+
     comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
 
-    return chase_ts > comparison_now
+    return and_(
+        model.status == status_value,
+        model.next_chase_ts.isnot( None ),
+        model.next_chase_ts > comparison_now,
+    )
 
 
 def park_is_active_clause( model, now ):
@@ -363,15 +391,7 @@ def park_is_active_clause( model, now ):
           from both sides of a filter; it must land on the owed side, matching twin (a)'s NULL branch
         - the status test is the first conjunct, mirroring twin (a)'s guard
     """
-    from sqlalchemy import and_
-
-    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
-
-    return and_(
-        model.status == PARK_STATUS,
-        model.next_chase_ts.isnot( None ),
-        model.next_chase_ts > comparison_now,
-    )
+    return _active_clause( model, now, PARK_STATUS )
 
 
 def holding_is_active_clause( model, now ):
@@ -391,15 +411,7 @@ def holding_is_active_clause( model, now ):
         - True for a holding-area row whose chase is still in the future
         - False for an expired, absent or unparseable chase, so the row surfaces
     """
-    from sqlalchemy import and_
-
-    comparison_now = now.replace( tzinfo=timezone.utc ) if now.tzinfo is None else now
-
-    return and_(
-        model.status == NOT_APPROVED_STATUS,
-        model.next_chase_ts.isnot( None ),
-        model.next_chase_ts > comparison_now,
-    )
+    return _active_clause( model, now, NOT_APPROVED_STATUS )
 
 
 def item_blocker_ids( blocked_by ):

@@ -468,6 +468,33 @@ def get_approvers():
     return frozenset( names )
 
 
+def _resolve_bool_setting( override_key, ini_key, fallback ):
+    """
+    Read one boolean switch: the stored override, then the INI key, then the fallback.
+
+    Requires:
+        - override_key is a key `_read_overrides()` always carries
+        - ini_key is the INI key name for the same switch
+        - fallback is a bool
+
+    Ensures:
+        - returns a bool, never raises
+        - the first layer that parses to a bool wins
+        - an unparseable value is reported by `_as_bool_or_none` under its own layer label
+          and falls through, because it is not a decision
+        - the fallback answers only when neither layer decided
+    """
+    value = _as_bool_or_none( _read_overrides()[ override_key ],
+                              STORE_LABEL )
+    if value is not None: return value
+
+    value = _as_bool_or_none( _ini_value( ini_key, "string", None ),
+                              f"config key '{ini_key}'" )
+    if value is not None: return value
+
+    return fallback
+
+
 def get_enforcement_active():
     """
     Whether the approval gate refuses, or merely advises.
@@ -484,15 +511,7 @@ def get_enforcement_active():
           membership test and came out False, silently, which is indistinguishable from a
           deliberate "off". `test_one_boolean_parser_for_every_surface.py` requires one parser.
     """
-    value = _as_bool_or_none( _read_overrides()[ "enforcement_active" ],
-                              STORE_LABEL )
-    if value is not None: return value
-
-    value = _as_bool_or_none( _ini_value( INI_KEY_ENFORCEMENT, "string", None ),
-                              f"config key '{INI_KEY_ENFORCEMENT}'" )
-    if value is not None: return value
-
-    return FALLBACK_ENFORCEMENT_ACTIVE
+    return _resolve_bool_setting( "enforcement_active", INI_KEY_ENFORCEMENT, FALLBACK_ENFORCEMENT_ACTIVE )
 
 
 def get_approver_accounts():
@@ -1170,15 +1189,7 @@ def get_manager_pull_disabled():
     (`test_one_boolean_parser_for_every_surface.py`) is a predicate over the module's own
     syntax, so a new surface trips it where a list of today's readers would not.
     """
-    value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
-                              STORE_LABEL )
-    if value is not None: return value
-
-    value = _as_bool_or_none( _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None ),
-                              f"config key '{INI_KEY_MANAGER_PULL_DISABLED}'" )
-    if value is not None: return value
-
-    return FALLBACK_MANAGER_PULL_DISABLED
+    return _resolve_bool_setting( "manager_pull_disabled", INI_KEY_MANAGER_PULL_DISABLED, FALLBACK_MANAGER_PULL_DISABLED )
 
 
 def actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
@@ -1465,15 +1476,7 @@ def get_sword_of_damocles_active():
         - FALLBACK is False (fails open) — see the constant
         - never raises
     """
-    value = _as_bool_or_none( _read_overrides()[ "sword_of_damocles_active" ],
-                              STORE_LABEL )
-    if value is not None: return value
-
-    value = _as_bool_or_none( _ini_value( INI_KEY_SWORD_OF_DAMOCLES, "string", None ),
-                              f"config key '{INI_KEY_SWORD_OF_DAMOCLES}'" )
-    if value is not None: return value
-
-    return FALLBACK_SWORD_OF_DAMOCLES_ACTIVE
+    return _resolve_bool_setting( "sword_of_damocles_active", INI_KEY_SWORD_OF_DAMOCLES, FALLBACK_SWORD_OF_DAMOCLES_ACTIVE )
 
 
 # The keys the server will write. A key absent from here cannot be written through the

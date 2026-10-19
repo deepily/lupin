@@ -1254,6 +1254,8 @@ class SelfRespinObserverLoop( StoppableDaemonMixin ):
     logic is unit-provable with fakes.
     """
 
+    THREAD_NAME = "SelfRespinObserverLoop"
+
     def __init__(
         self,
         config_mgr,
@@ -1533,21 +1535,9 @@ class SelfRespinObserverLoop( StoppableDaemonMixin ):
                 self._log_skip( f"self-respin observer loop caught exception (continuing): {e!r}" )
             self._stop_event.wait( timeout=self._tick_seconds() )
 
-    def start( self ) -> bool:
-        """
-        Spawn the daemon thread only if a flag is enabled and no thread runs.
-
-        The flags are the observer's and the stale-MCP delivery's. Returns True if a
-        thread was started, else False (the no-op rollout gate).
-        """
-        if not ( self._enabled() or self._stale_mcp_enabled() ):
-            return False
-        if self._thread is not None and self._thread.is_alive():
-            return False
-        self._stop_event.clear()
-        self._thread = threading.Thread( target=self._loop, daemon=True, name="SelfRespinObserverLoop" )
-        self._thread.start()
-        return True
+    def _should_start( self ) -> bool:
+        """Return whether the observer's flag or the stale-MCP delivery's flag lets the thread start."""
+        return self._enabled() or self._stale_mcp_enabled()
 
 
 # ---------------------------------------------------------------------------

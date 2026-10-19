@@ -126,6 +126,30 @@ class TestBaseReportFormatter:
         assert "[Named] Initialized" in capsys.readouterr().out
 
 
+class TestColumnWidthsAndShared:
+    """The branch widths and the settings both formatters share."""
+
+    def test_every_column_width_default_and_override( self ):
+        """Ensures: each of the three widths has its own default and its own config key."""
+        d = ReportFormatter( {} )
+        assert ( d.col_file_type, d.col_counts, d.col_net_change ) == ( 15, 10, 12 )
+        f = ReportFormatter( { "formatting": { "column_widths": { "file_type": 1, "counts": 2, "net_change": 3 } } } )
+        assert ( f.col_file_type, f.col_counts, f.col_net_change ) == ( 1, 2, 3 )
+
+    def test_shared_defaults_and_the_other_config_sections( self ):
+        """Ensures: separator, border width and the json and markdown sections come from config."""
+        d = ReportFormatter( {} )
+        assert ( d.separator_char, d.border_width, d.fmt_config, d.json_config, d.markdown_config ) == ( "-", 80, {}, {}, {} )
+        cfg = { "formatting": { "separator_char": "~" }, "json_output": { "a": 1 }, "markdown_output": { "b": 2 } }
+        f = ReportFormatter( cfg )
+        assert ( f.separator_char, f.json_config, f.markdown_config, f.config ) == ( "~", { "a": 1 }, { "b": 2 }, cfg )
+
+    def test_debug_line_names_this_class( self, capsys ):
+        """Ensures: the init line is tagged with the branch class name."""
+        ReportFormatter( {}, debug=True )
+        assert capsys.readouterr().out == "[ReportFormatter] Initialized with console/JSON/markdown support\n"
+
+
 class TestFormatConsole:
     """Console rendering: banner, branch context, summary, breakdowns."""
 
