@@ -274,6 +274,53 @@ def test_the_denominator_is_stated_out_loud():
 # shape. The arm now kills.
 
 
+def _parser_calls_in( fn ):
+    """
+    The calls to the one parser that a function makes itself.
+
+    Requires:
+        - fn is an ast.FunctionDef / ast.AsyncFunctionDef
+
+    Ensures:
+        - returns the ast.Call nodes whose target is the one parser, under either spelling
+    """
+    return [ node for node in ast.walk( fn )
+             if isinstance( node, ast.Call ) and _named( node.func ) == THE_ONE_PARSER ]
+
+
+def test_the_shared_resolver_itself_calls_the_one_parser_once_per_layer():
+    """
+    The resolver has two layers, the stored override and the INI key, and parses both.
+
+    The denominator test counts a call to the resolver as delegation without looking
+    inside it. A resolver that parsed nothing, or parsed with `== "true"`, stayed green.
+    """
+    resolver = [ fn for fn in _module_functions() if fn.name == THE_SHARED_RESOLVER ]
+    assert len( resolver ) == 1, (
+        f"expected exactly one {THE_SHARED_RESOLVER}, found {len( resolver )}. With none, "
+        f"every reader that calls it delegates to nothing."
+    )
+
+    calls = _parser_calls_in( resolver[ 0 ] )
+    assert len( calls ) == 2, (
+        f"{THE_SHARED_RESOLVER} makes {len( calls )} calls to {THE_ONE_PARSER}; it needs "
+        f"one for the stored override and one for the INI key."
+    )
+
+
+@pytest.mark.parametrize( "source, expected", [
+    ( "def _resolve_bool_setting( k ):\n    return _read_overrides()[ k ]", 0 ),
+    ( 'def _resolve_bool_setting( k ):\n    return _read_overrides()[ k ] == "true"', 0 ),
+    ( "def _resolve_bool_setting( k ):\n    return _as_bool_or_none( _read_overrides()[ k ], 'x' )", 1 ),
+    ( "def _resolve_bool_setting( k ):\n    return approval._as_bool_or_none( raw, 'x' )", 1 ),
+] )
+def test_the_resolver_call_count_sees_a_planted_resolver( source, expected ):
+    """
+    Prove the counter: a resolver with no parser counts zero, one that delegates counts.
+    """
+    assert len( _parser_calls_in( ast.parse( source ).body[ 0 ] ) ) == expected
+
+
 def _refusal_builders():
     """
     Every function whose job is to build a refusal message.
