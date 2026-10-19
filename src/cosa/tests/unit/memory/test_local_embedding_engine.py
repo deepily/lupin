@@ -153,21 +153,6 @@ class TestCodeEmbeddingEngine( unittest.TestCase ):
 
     def test_load_model_casts_a_model_the_loader_left_in_float32( self ):
         """The INI says float16; a loader that returns float32 is cast, and describe() says float16."""
-        engine = _build_prose( device="cpu", debug=False )
-        fake_model = _loaded_model( torch.float32 )
-        recast     = _loaded_model( torch.float16 )
-        fake_model.to.return_value = recast
-        recast.config = Mock( _commit_hash="abc" )
-        with patch( "transformers.AutoTokenizer" ), \
-             patch( "transformers.AutoModel" ) as mock_model:
-            mock_model.from_pretrained.return_value.to.return_value.eval.return_value = fake_model
-            engine._load_model()
-        fake_model.to.assert_called_once_with( torch.float16 )
-        self.assertIs( engine._model, recast )
-        self.assertEqual( engine.describe()[ "dtype" ], "float16" )
-
-    def test_load_model_casts_a_model_the_loader_left_in_float32( self ):
-        """The INI says float16; a loader that returns float32 is cast, and describe() says float16."""
         engine = _build_code( device="cpu", debug=False )
         fake_model = _loaded_model( torch.float32 )
         recast     = _loaded_model( torch.float16 )
@@ -371,6 +356,21 @@ class TestProseEmbeddingEngine( unittest.TestCase ):
             engine._load_model()
         self.assertIsNotNone( engine._model )
         mock_vram.assert_not_called()                            # 348->exit
+
+    def test_load_model_casts_a_model_the_loader_left_in_float32( self ):
+        """The INI says float16; a loader that returns float32 is cast, and describe() says float16."""
+        engine = _build_prose( device="cpu", debug=False )
+        fake_model = _loaded_model( torch.float32 )
+        recast     = _loaded_model( torch.float16 )
+        fake_model.to.return_value = recast
+        recast.config = Mock( _commit_hash="abc" )
+        with patch( "transformers.AutoTokenizer" ), \
+             patch( "transformers.AutoModel" ) as mock_model:
+            mock_model.from_pretrained.return_value.to.return_value.eval.return_value = fake_model
+            engine._load_model()
+        fake_model.to.assert_called_once_with( torch.float16 )
+        self.assertIs( engine._model, recast )
+        self.assertEqual( engine.describe()[ "dtype" ], "float16" )
 
     def test_load_model_short_circuits_when_loaded( self ):
         """_load_model returns immediately when already loaded."""
