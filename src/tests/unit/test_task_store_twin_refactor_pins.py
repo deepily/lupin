@@ -93,7 +93,7 @@ def test_neither_layer_decides_so_the_fallback_answers( monkeypatch, getter_name
 FILTERS = dict( owner_persona="p1", status="s1", gate_class="g1", urgency="u1", accountable_manager="m1",
                 project="pr1", item_class="c1", correlation_key="k1", id_prefix="ab12", blocked_by_persona="b1",
                 updated_since=NOW - timedelta( days=1 ), updated_until=NOW, include_terminal=True,
-                owed_only=True, hide_parked=True, now=NOW )
+                owed_only=True, hide_parked=False, now=NOW )
 
 
 @pytest.mark.parametrize( "method, column, rows", [
@@ -117,7 +117,7 @@ def test_each_grouped_count_forwards_all_sixteen_filters_and_groups_on_its_colum
     assert query.group_by.call_args.args[ 0 ] is column
     assert seen[ "scalar" ] == ( ( "p1", "s1", "g1", "u1", "m1", "pr1", "c1", "k1", "ab12" ),
                                  dict( updated_since=FILTERS[ "updated_since" ], updated_until=NOW, blocked_by_persona="b1" ) )
-    assert seen[ "owed" ] == ( True, True, "s1", True, NOW )
+    assert seen[ "owed" ] == ( True, False, "s1", True, NOW )
 
 
 def test_the_two_grouped_counts_keep_the_same_public_signature():
