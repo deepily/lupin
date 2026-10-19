@@ -21,7 +21,7 @@ Measures all five arms on one index, one needs file and one vector set. The sing
 - `select_fusion_constants` tries each `( k, depth, head )` in `FUSION_GRID`. It scores the arm named by `SELECTION_ARM` at `SELECTION_K` by mean repeat-1 recall, and `arms.select_fusion` picks.
 - `run_all_arms( env, snapshot_paths, needs_path, fresh_sha, manifest_path, vset, purposes, pages, query_for, redactor, code_sha )` measures each arm in turn. It uses the snapshot the cache answers best, and every arm ranks the same entries for the same redacted text.
 - Fusion constants come from `select_fusion_constants`. If no measured arm fuses a vector list, nothing is embedded, the module defaults are used, and no vector choice is made.
-- It returns a dict for the page builder: `meta`, `fusion`, `measured`, `t3`, `reference`, the entry counts and the cache `misses`. It measures nothing else.
+- It returns a dict for the page builder: `meta`, `fusion`, `measured`, `t3`, `reference`, the entry counts and the cache `misses`. The page builder reads this dict and measures nothing.
 
 ## The page
 - `render_all_arms_page( result, redactable )` returns the shared report plus the pooled-items recall table, the fusion selection, and the entry and empty-purpose counts.

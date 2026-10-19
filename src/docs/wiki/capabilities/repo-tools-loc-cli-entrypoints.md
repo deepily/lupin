@@ -19,7 +19,6 @@ Four `python -m cosa.repo.<name>` entry points over the tools in [[branch-and-di
 ## Branch and directory
 - `run_branch_analyzer`: `--repo-path`, `--base`, `--head`, `--config`, `--output console|json|markdown`, `--save-output`, `-v`, `-d`. Flags left unset fall back to the config file. Exit 0, 1 on error, 130 on Ctrl-C, and 2 for bad arguments.
 - `run_directory_analyzer`: `--path` (default `.`), `--config`, `--output` (default console), `--save-output`, `-v`, `-d`. Exit 0, 1 on any error, 130 on Ctrl-C, and 2 for bad arguments.
-
 - Both parsers get `--config`, `--output`, `--save-output`, `-v` and `-d` from `add_common_output_args`, added after their own path arguments. The callers differ only in the `--output` default and two help sentences.
 
 ## Daily delta, one repo
