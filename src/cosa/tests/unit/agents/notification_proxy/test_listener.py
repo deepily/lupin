@@ -304,7 +304,7 @@ class TestKeptBehaviour:
         assert "[Listener] Max reconnection attempts (10) reached. Giving up." in out
 
     def test_constructor_arguments_reach_the_base_unchanged( self ):
-        l = WebSocketListener( "e@x.y", "pw", "wise penguin", _noop_handler, host="h.example", port=1234, debug=True, verbose=True )
-        assert ( l.host, l.port, l.debug, l.verbose ) == ( "h.example", 1234, True, True )
-        quiet = _make( debug=False, verbose=False )
-        assert ( quiet.debug, quiet.verbose ) == ( False, False )
+        l = WebSocketListener( "e@x.y", "pw", "wise penguin", _noop_handler, host="h.example", port=1234, debug=True, verbose=False )
+        assert ( l.host, l.port, l.debug, l.verbose ) == ( "h.example", 1234, True, False )
+        flipped = WebSocketListener( "e@x.y", "pw", "wise penguin", _noop_handler, debug=False, verbose=True )
+        assert ( flipped.debug, flipped.verbose ) == ( False, True )
