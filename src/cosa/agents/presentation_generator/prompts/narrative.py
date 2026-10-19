@@ -14,6 +14,7 @@ import logging
 from typing import List, Optional
 
 from .json_recovery import recover_json_object
+from cosa.agents.io_models.utils.json_object_recovery import extract_json_metadata
 
 logger = logging.getLogger( __name__ )
 
@@ -328,22 +329,7 @@ def extract_narrative_metadata( response_content: str ) -> dict:
     Returns:
         dict with total_proposed_slides and narrative_assessment, or empty dict
     """
-    content = response_content.strip()
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    try:
-        parsed = json.loads( content.strip() )
-        return {
-            "total_proposed_slides" : parsed.get( "total_proposed_slides", 0 ),
-            "narrative_assessment"  : parsed.get( "narrative_assessment", "" ),
-        }
-    except json.JSONDecodeError:
-        return {}
+    return extract_json_metadata( response_content, { "total_proposed_slides" : 0, "narrative_assessment" : "" } )
 
 
 # =============================================================================
