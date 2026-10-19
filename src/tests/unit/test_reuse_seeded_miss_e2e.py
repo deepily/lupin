@@ -249,3 +249,11 @@ def test_a_run_where_no_seeded_miss_occurs_exits_one_and_prints_fail( tmp_path, 
     assert "did not produce a candidate-route miss" in report[ "candidates" ][ "reason" ]
     assert sm.main( [ "--work", str( tmp_path / "w2" ) ] ) == 1
     assert "overall FAIL" in capsys.readouterr().out
+
+
+def test_the_stand_in_stage_takes_the_widening_size_and_reports_it():
+    """The widening path asks the stage for a K of its own; the stand-in answers with it."""
+    entries = [ { "id": "a" }, { "id": "b" } ]
+    stage   = sm.StandInStage()
+    assert stage.shortlist( "need", entries, "sha", [], K=300 )[ "K" ] == 300
+    assert stage.shortlist( "need", entries, "sha", [] )[ "K" ] == stage.K
