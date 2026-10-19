@@ -52,3 +52,36 @@ def test_the_shared_page_helper_filters_on_any_column_it_is_given( db_session, a
     assert len( repo._page_by( AuthAuditLog.event_type, "mfa", 10, 0 ) ) == 2
     assert len( repo._page_by( AuthAuditLog.user_id, who, 10, 0 ) ) == 1
     assert repo._page_by( AuthAuditLog.event_type, "no-such-type", 10, 0 ) == []
+
+
+def _attempt( repo, days_ago ):
+    return repo.create( email="x@example.com", ip_address="10.0.0.1", attempt_time=NOW - timedelta( days=days_ago ) )
+
+
+def test_audit_cleanup_deletes_only_rows_older_than_the_cutoff_and_counts_them( db_session, auth_tables ):
+    repo, who = AuthAuditLogRepository( db_session ), uuid.uuid4()
+    before = db_session.query( AuthAuditLog ).count()
+    for days in ( 100, 91, 89, 5 ):
+        repo.create( event_type="cleanup-probe", user_id=who, success=True, event_time=NOW - timedelta( days=days ) )
+    assert repo.cleanup_old() == 2                                              # default 90 days
+    left = db_session.query( AuthAuditLog ).filter( AuthAuditLog.user_id == who ).count()
+    assert left == 2 and db_session.query( AuthAuditLog ).count() == before + 2
+    assert repo.cleanup_old( days_old=1 ) >= 2                                  # explicit retention
+    assert db_session.query( AuthAuditLog ).filter( AuthAuditLog.user_id == who ).count() == 0
+
+
+def test_failed_attempt_cleanup_deletes_only_rows_older_than_the_cutoff_and_counts_them( db_session, auth_tables ):
+    repo = FailedLoginAttemptRepository( db_session )
+    for days in ( 100, 31, 29, 2 ):
+        _attempt( repo, days )
+    probe = db_session.query( FailedLoginAttempt ).filter( FailedLoginAttempt.email == "x@example.com" )
+    assert repo.cleanup_old() == 2 and probe.count() == 2                       # default 30 days
+    assert repo.cleanup_old( days_old=1 ) == 2 and probe.count() == 0           # explicit retention
+
+
+def test_the_shared_cleanup_returns_zero_when_nothing_is_old_enough_and_takes_any_timestamp_column( db_session, auth_tables ):
+    repo = AuthAuditLogRepository( db_session )
+    repo.create( event_type="shared-probe", user_id=uuid.uuid4(), success=True, event_time=NOW - timedelta( days=2 ) )
+    assert repo._delete_older_than( AuthAuditLog.event_time, 10 ) == 0
+    assert repo._delete_older_than( AuthAuditLog.event_time, 1 ) == 1
+    assert db_session.query( AuthAuditLog ).filter( AuthAuditLog.event_type == "shared-probe" ).count() == 0

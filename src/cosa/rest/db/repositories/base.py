@@ -4,6 +4,7 @@ Base repository pattern implementation with common CRUD operations.
 Provides generic repository class that can be extended for specific models.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar, Generic, Optional, List, Type, Any
 from sqlalchemy.orm import Session
 from cosa.rest.postgres_models import Base
@@ -215,3 +216,21 @@ class BaseRepository(Generic[ModelType]):
         return self.session.query(
             self.session.query( self.model ).filter( column == value ).exists()
         ).scalar()
+
+    def _delete_older_than( self, column, days_old: int ) -> int:
+        """
+        Delete every row whose timestamp column is older than a number of days.
+
+        Requires:
+            - column is a timezone-aware timestamp column of self.model
+            - days_old is a non-negative number of days
+
+        Ensures:
+            - rows with column earlier than now minus days_old are deleted, and the session is flushed
+            - newer rows are untouched
+            - returns the number of rows deleted
+        """
+        cutoff_date = datetime.now( timezone.utc ) - timedelta( days=days_old )
+        result = self.session.query( self.model ).filter( column < cutoff_date ).delete( synchronize_session=False )
+        self.session.flush()
+        return result

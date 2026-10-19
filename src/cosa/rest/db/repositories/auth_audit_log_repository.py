@@ -244,11 +244,4 @@ class AuthAuditLogRepository(BaseRepository[AuthAuditLog]):
             # Cleanup old logs (run daily via cron)
             deleted = audit_repo.cleanup_old( days_old=90 )
         """
-        cutoff_date = datetime.now( timezone.utc ) - timedelta( days=days_old )
-
-        result = self.session.query( AuthAuditLog ).filter(
-            AuthAuditLog.event_time < cutoff_date
-        ).delete( synchronize_session=False )
-
-        self.session.flush()
-        return result
+        return self._delete_older_than( AuthAuditLog.event_time, days_old )
