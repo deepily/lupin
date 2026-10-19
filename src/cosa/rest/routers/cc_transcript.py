@@ -164,11 +164,28 @@ async def get_cc_transcript(
         budget        = settings[ "block_budget_bytes" ],
     )
     body[ "cc_session_id" ] = cc_session_id
+    body[ "file_epoch" ]    = _live_epoch( cc_session_id, body[ "file_epoch" ] )
     body[ "watchable" ]     = True
     return body
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _live_epoch( cc_session_id, file_epoch ):
+    """
+    Return the epoch the seat's frames carry now, which a truncation refines.
+
+    Requires:
+        - file_epoch is the bare epoch of the seat's transcript file, or "" when it has none
+
+    Ensures:
+        - returns file_epoch unchanged when it is falsy, so a seat with no file stays epoch-less
+        - otherwise returns what the websocket router's live tailer reports for the seat
+    """
+    if not file_epoch: return file_epoch
+    from cosa.rest.routers.websocket import live_cc_transcript_epoch
+    return live_cc_transcript_epoch( cc_session_id, file_epoch )
+
 
 async def _fetch_fleet_state():
     """
@@ -234,6 +251,6 @@ def _project_seats( sessions ):
             "project"              : session.get( "project" ),
             "last_ts"              : session.get( "last_ts" ) or session.get( "last_seen" ) or session.get( "last_activity_ts" ),
             "transcript_watchable" : bool( transcript_path ),
-            "file_epoch"           : epoch_for_path( transcript_path ) or None,
+            "file_epoch"           : _live_epoch( session_id, epoch_for_path( transcript_path ) ) or None,
         } )
     return rows

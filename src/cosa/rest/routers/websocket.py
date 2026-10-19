@@ -441,6 +441,28 @@ async def handle_cc_transcript_verb( websocket, session_id, message ):
     await _start_watching_cc_transcript( websocket, session_id, cc_session_id, message )
 
 
+def live_cc_transcript_epoch( cc_session_id, file_epoch ):
+    """
+    Return the epoch the seat's frames carry now, given the epoch its file name gives.
+
+    After an in-place truncation the running tailer stamps frames `<name>#<unixtime>`.
+    Every door that names an epoch must say the same string. Otherwise the client sees a new epoch
+    on each frame and clears its buffer on every append.
+
+    Requires:
+        - file_epoch is the bare epoch of the seat's current transcript file
+
+    Ensures:
+        - returns the running tailer's epoch when it refines file_epoch (starts with `<file_epoch>#`)
+        - otherwise returns file_epoch: no tailer, a stopped tailer, or one still on another file
+        - never raises
+    """
+    tailer = _cc_transcript_tailers.get( cc_session_id )
+    if tailer is not None and tailer.running and tailer.file_epoch.startswith( f"{file_epoch}#" ):
+        return tailer.file_epoch
+    return file_epoch
+
+
 async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, message ):
     """
     Register a watcher and start the seat's tailer if it is the first.
@@ -486,7 +508,7 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
         } )
         return
 
-    current_epoch   = epoch_for_path( current_path )
+    current_epoch   = live_cc_transcript_epoch( cc_session_id, epoch_for_path( current_path ) )
 
     # A client that does not yet know the epoch sends null and learns it from the first
     # frame, so a FIRST watch needs no prior REST call. A non-null epoch that no longer

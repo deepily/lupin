@@ -280,6 +280,7 @@ class FakeTailer:
         self.started_at    = None
         self.stopped       = False
         self.running       = False
+        self.file_epoch    = ""
         FakeTailer.instances.append( self )
 
     def start( self, from_offset=0 ):
@@ -467,6 +468,61 @@ async def test_a_first_watcher_while_the_old_tailer_still_runs_shares_it( router
 
     assert len( fake_tailer.instances ) == 1, "a running tailer was replaced"
     assert router_module._cc_transcript_tailers[ SEAT ] is first
+
+
+@pytest.mark.asyncio
+async def test_a_watch_naming_the_tailers_truncation_epoch_is_accepted( router_module, manager, fake_tailer, epoch_is ):
+    """
+    After an in-place truncation the tailer stamps frames with name#unixtime.
+
+    A client holding that epoch from a frame is accepted on reconnect.
+    Judged against the bare name, it was refused and the pane cleared on every append.
+    """
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].file_epoch = f"{SEAT}#1760000000"
+
+    socket = FakeSocket()
+    await router_module.handle_cc_transcript_verb( socket, BROWSER_2, {
+        "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": f"{SEAT}#1760000000" } )
+
+    assert socket.of_type( "cc_transcript_state" ) == [ ]
+    assert manager.cc_transcript_watchers_of( SEAT ) == { BROWSER, BROWSER_2 }
+
+
+@pytest.mark.asyncio
+async def test_a_mismatch_reply_carries_the_tailers_truncation_epoch( router_module, manager, fake_tailer, epoch_is ):
+    epoch_is( SEAT )
+    manager.session_is_admin[ BROWSER ]   = True
+    manager.session_is_admin[ BROWSER_2 ] = True
+    await router_module.handle_cc_transcript_verb(
+        FakeSocket(), BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT } )
+    fake_tailer.instances[ 0 ].file_epoch = f"{SEAT}#1760000000"
+
+    socket = FakeSocket()
+    await router_module.handle_cc_transcript_verb( socket, BROWSER_2, {
+        "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": "an-older-epoch" } )
+
+    assert socket.of_type( "cc_transcript_state" )[ 0 ][ "file_epoch" ] == f"{SEAT}#1760000000"
+
+
+def test_the_live_epoch_ignores_a_tailer_that_is_not_running_or_names_another_file( router_module, fake_tailer ):
+    tailer = fake_tailer( SEAT, None )
+    router_module._cc_transcript_tailers[ SEAT ] = tailer
+    tailer.file_epoch = f"{SEAT}#1760000000"
+
+    tailer.running = False
+    assert router_module.live_cc_transcript_epoch( SEAT, SEAT ) == SEAT, "a stopped tailer's epoch was used"
+
+    tailer.running = True
+    assert router_module.live_cc_transcript_epoch( SEAT, "another-file" ) == "another-file", (
+        "a tailer one poll behind a /clear overrode the current file"
+    )
+    assert router_module.live_cc_transcript_epoch( SEAT, SEAT ) == f"{SEAT}#1760000000"
+    assert router_module.live_cc_transcript_epoch( OTHER_SEAT, OTHER_SEAT ) == OTHER_SEAT
 
 
 @pytest.mark.asyncio

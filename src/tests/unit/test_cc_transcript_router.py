@@ -268,6 +268,27 @@ def test_the_body_names_the_seat_and_the_epoch_it_belongs_to( app, transcript ):
     assert set( body ) == { "cc_session_id", "file_epoch", "offset", "next_offset", "blocks", "watchable" }
 
 
+class _LiveTailer:
+    """A running tailer that has already seen the file truncated in place."""
+    running    = True
+    file_epoch = f"{SEAT}#1760000000"
+
+
+def test_the_backlog_and_the_roster_report_the_tailers_truncation_epoch( app, transcript, monkeypatch ):
+    """
+    Backlog and roster name the epoch that append frames carry after a truncation.
+
+    Answering the bare name would make a client clear and re-read on every append.
+    """
+    from cosa.rest.routers import websocket as ws_module
+    monkeypatch.setattr( ws_module, "_cc_transcript_tailers", { SEAT: _LiveTailer() } )
+    monkeypatch.setattr( module, "_fetch_fleet_state", _fleet_state_stub( [ { "session_id": SEAT } ] ) )
+
+    client = _as_admin( app )
+    assert client.get( f"/api/cc-transcript/{SEAT}" ).json()[ "file_epoch" ] == f"{SEAT}#1760000000"
+    assert client.get( "/api/cc-transcript-roster" ).json()[ "seats" ][ 0 ][ "file_epoch" ] == f"{SEAT}#1760000000"
+
+
 # ── A3.4 / A3.7: the roster projection ────────────────────────────────────────
 
 def _fleet_state_stub( sessions, status="ok" ):
