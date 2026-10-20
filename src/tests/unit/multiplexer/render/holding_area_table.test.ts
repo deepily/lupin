@@ -112,7 +112,7 @@ function legacyAttr( pattern: RegExp ): string {
 
 /** A filer group with no plans: every row is its own ungrouped row (plans are covered in holding_area_plan_approve.test.ts). */
 function flatGroup( filer: string, tasks: TaskItem[] ): HeldFilerGroup {
-  return { filer, tasks, plans: [], ungrouped: tasks };
+  return { filer, label: filer, by: "creator", tasks, plans: [], ungrouped: tasks };
 }
 
 function heldTask( id: string, filer: string, title = "a held row" ): TaskItem {

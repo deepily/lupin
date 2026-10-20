@@ -43,7 +43,7 @@ before( () => {
 const NOTIFICATIONS_HTML = resolve( HERE, "../../../lupin_app/static/html/notifications.html" );
 
 type GroupUI = Record<string, unknown> & {
-  _groupHeldRows: ( tasks: unknown, by: string, keep?: Set<string> ) => Array<{ filer: string; tasks: Array<Record<string, unknown>> }>;
+  _groupHeldRows: ( tasks: unknown, by: string, keep?: Set<string> ) => Array<{ filer: string; label: string; by: string; tasks: Array<Record<string, unknown>> }>;
   _groupHeldRowsByFiler: ( tasks: unknown ) => unknown;
   _taskAssigneeLabel: ( task: unknown ) => string;
   _heldRowIdsForFiler: ( filer: string ) => string[];
@@ -80,7 +80,7 @@ const ROWS = (): Array<Record<string, unknown>> => [
   held( "11111111-0000-0000-0000-000000000005", "mr radio 2222bbbb", "mr radio" ),
 ];
 
-const labels = ( gs: Array<{ filer: string }> ): string[] => gs.map( ( g ) => g.filer );
+const labels = ( gs: Array<{ label: string }> ): string[] => gs.map( ( g ) => g.label );
 
 function togglePageDOM(): void {
   // The real page's toggle block, up to its closing tag.
@@ -99,7 +99,7 @@ const pressedBy = (): string[] =>
     .filter( ( b ) => b.getAttribute( "aria-pressed" ) === "true" ).map( ( b ) => b.dataset.groupBy as string );
 
 const shownGroups = (): string[] =>
-  Array.from( document.querySelectorAll<HTMLElement>( ".holding-area-group" ) ).map( ( g ) => g.dataset.filer as string );
+  Array.from( document.querySelectorAll( ".holding-area-group .holding-area-filer" ) ).map( ( e ) => e.textContent as string );
 
 beforeEach( () => { togglePageDOM(); window.localStorage.clear(); } );
 
@@ -179,6 +179,69 @@ test( "pane: Approve all ids in an assignee group are that assignee's rows", () 
   const ui = newUI();
   ui.renderHoldingArea( { status: "", tasks: ROWS() } );
   ui._setHoldingGroupBy( "assignee" );
-  assert.deepEqual( ui._heldRowIdsForFiler( "Maria" ).sort(),
+  const id = ( ui as GroupUI & { _heldGroupId: ( by: string, label: string ) => string } )._heldGroupId( "assignee", "Maria" );
+  assert.deepEqual( ui._heldRowIdsForFiler( id ).sort(),
     [ "11111111-0000-0000-0000-000000000001", "11111111-0000-0000-0000-000000000003" ] );
+} );
+
+// ───────────────────── one name, two modes, no shared state ─────────────────────
+
+const SHARED = (): Array<Record<string, unknown>> => [
+  { ...held( "22222222-0000-0000-0000-000000000001", "maria 0e61abe3", "tiberius" ), correlation_key: "epic:plan" },
+  { ...held( "22222222-0000-0000-0000-000000000002", "maria 0e61abe3", "tiberius" ), correlation_key: "epic:plan" },
+  { ...held( "22222222-0000-0000-0000-000000000003", "sam 1111aaaa",   "maria" ),    correlation_key: "epic:plan" },
+  { ...held( "22222222-0000-0000-0000-000000000004", "sam 1111aaaa",   "maria" ),    correlation_key: "epic:plan" },
+];
+
+const groupNamed = ( label: string ): HTMLElement => {
+  const el = Array.from( document.querySelectorAll<HTMLElement>( ".holding-area-group" ) )
+    .find( ( g ) => g.querySelector( ".holding-area-filer" )!.textContent === label );
+  assert.ok( el, `no group labelled ${ label }` );
+  return el;
+};
+
+const planNamed = ( key: string ): HTMLElement =>
+  Array.from( document.querySelectorAll<HTMLElement>( ".holding-plan-group" ) ).find( ( e ) => e.dataset.plan === key )!;
+
+test( "model: the same label under the two modes is two identities", () => {
+  const ui = newUI() as GroupUI & { _heldGroupId: ( by: string, label: string ) => string };
+  assert.notEqual( ui._heldGroupId( "creator", "Maria" ), ui._heldGroupId( "assignee", "Maria" ) );
+  assert.equal( ui._heldGroupId( "creator", "Maria" ), "Maria", "creator ids stay the bare label" );
+  const c = ui._groupHeldRows( SHARED(), "creator" ).find( ( g ) => g.label === "Maria" )!;
+  const a = ui._groupHeldRows( SHARED(), "assignee" ).find( ( g ) => g.label === "Maria" )!;
+  assert.notEqual( c.filer, a.filer );
+  assert.deepEqual( [ c.by, a.by ], [ "creator", "assignee" ] );
+} );
+
+test( "pane: opening Maria the creator does not open Maria the assignee, or the reverse", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( { status: "", tasks: SHARED() } );
+  groupNamed( "Maria" ).querySelector<HTMLElement>( ".holding-area-group-header" )!.click();
+  assert.equal( groupNamed( "Maria" ).classList.contains( "collapsed" ), false, "creator group opened" );
+  ui._setHoldingGroupBy( "assignee" );
+  assert.equal( groupNamed( "Maria" ).classList.contains( "collapsed" ), true, "assignee Maria starts shut" );
+  groupNamed( "Maria" ).querySelector<HTMLElement>( ".holding-area-group-header" )!.click();
+  ui._setHoldingGroupBy( "creator" );
+  assert.equal( groupNamed( "Maria" ).classList.contains( "collapsed" ), true, "an absent mode's open state is dropped, not carried over" );
+} );
+
+test( "pane: opening a plan under Maria the creator does not open the plan under Maria the assignee", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( { status: "", tasks: SHARED() } );
+  planNamed( "epic:plan" ).querySelector<HTMLElement>( ".holding-plan-header" )!.click();
+  assert.equal( planNamed( "epic:plan" ).classList.contains( "collapsed" ), false );
+  ui._setHoldingGroupBy( "assignee" );
+  assert.equal( planNamed( "epic:plan" ).classList.contains( "collapsed" ), true, "the other mode's plan starts shut" );
+  planNamed( "epic:plan" ).querySelector<HTMLElement>( ".holding-plan-header" )!.click();
+  ui._setHoldingGroupBy( "creator" );
+  assert.equal( planNamed( "epic:plan" ).classList.contains( "collapsed" ), true, "an absent mode's open state is dropped, not carried over" );
+} );
+
+test( "pane: the batch tooltips say 'assigned to' in assignee mode and 'filed' in creator mode", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( { status: "", tasks: SHARED() } );
+  const title = (): string => groupNamed( "Maria" ).querySelector<HTMLElement>( ".holding-approve-all" )!.title;
+  assert.match( title(), /^Approve every row Maria filed — / );
+  ui._setHoldingGroupBy( "assignee" );
+  assert.match( title(), /^Approve every row assigned to Maria — / );
 } );

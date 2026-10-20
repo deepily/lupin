@@ -15,6 +15,7 @@ import {
   type HoldingAreaStoreLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer";
 import {
+  heldGroupId,
   groupHeldRows,
   groupHeldRowsByFiler,
   taskAssigneeLabel,
@@ -46,7 +47,7 @@ const ROWS = (): TaskItem[] => [
 ];
 
 const shape = ( groups: ReturnType<typeof groupHeldRows> ): Array<[ string, string[] ]> =>
-  groups.map( ( g ) => [ g.filer, g.tasks.map( ( t ) => t.id as string ).sort() ] );
+  groups.map( ( g ) => [ g.label, g.tasks.map( ( t ) => t.id as string ).sort() ] );
 
 // ───────────────────────────── the model ─────────────────────────────
 
@@ -88,9 +89,9 @@ test( "model: a plan inside an assignee group is made from that assignee's rows 
     { ...held( "p3", "sam 0e61abe3", "tiberius" ), correlation_key: "epic:x" },
   ] as TaskItem[];
   const groups = groupHeldRows( rows, "assignee" );
-  const maria  = groups.find( ( g ) => g.filer === "Maria" )!;
+  const maria  = groups.find( ( g ) => g.label === "Maria" )!;
   assert.deepEqual( maria.plans.map( ( p ) => p.ids ), [ [ "p1", "p2" ] ] );
-  assert.deepEqual( groups.find( ( g ) => g.filer === "Tiberius" )!.plans, [], "one row is not a plan" );
+  assert.deepEqual( groups.find( ( g ) => g.label === "Tiberius" )!.plans, [], "one row is not a plan" );
 } );
 
 test( "model: taskAssigneeLabel display-cases, strips a trailing session id, defaults to Unassigned", () => {
@@ -109,8 +110,7 @@ test( "model: a non-array input yields no groups in either mode", () => {
 
 // ───────────────────────────── the pane ─────────────────────────────
 
-function mount(): { root: HTMLElement; groups: () => string[]; press: ( by: string ) => void; calls: string[] } {
-  const rows  = ROWS();
+function mount( rows: TaskItem[] = ROWS() ): { root: HTMLElement; groups: () => string[]; press: ( by: string ) => void; calls: string[] } {
   const calls: string[] = [];
   const bus   = createEventBusForTesting();
   const store: HoldingAreaStoreLike = {
@@ -125,7 +125,7 @@ function mount(): { root: HTMLElement; groups: () => string[]; press: ( by: stri
   mounted.push( () => renderer.unmount() );
   return {
     root, calls,
-    groups: () => Array.from( root.querySelectorAll<HTMLElement>( ".holding-area-group" ) ).map( ( g ) => g.dataset.filer as string ),
+    groups: () => Array.from( root.querySelectorAll( ".holding-area-group .holding-area-filer" ) ).map( ( e ) => e.textContent as string ),
     press : ( by ) => ( root.querySelector( `[data-testid="multiplexer-holding-group-by-${ by }"]` ) as HTMLButtonElement ).click(),
   };
 }
@@ -182,10 +182,77 @@ test( "pane: with storage blocked the toggle still works for this page view", ()
 test( "pane: Approve all in an assignee group reaches that assignee's rows, not the creator's", async () => {
   const h = mount();
   h.press( "assignee" );
-  const group = h.root.querySelector<HTMLElement>( '.holding-area-group[data-filer="Maria"]' )!;
+  const group = Array.from( h.root.querySelectorAll<HTMLElement>( ".holding-area-group" ) )
+    .find( ( g ) => g.querySelector( ".holding-area-filer" )!.textContent === "Maria" )!;
   const btn   = group.querySelector<HTMLButtonElement>( ".holding-approve-all" )!;
   btn.click();                       // arms
   btn.click();                       // confirms
   await new Promise( ( r ) => setTimeout( r, 50 ) );
   assert.deepEqual( h.calls.filter( ( c ) => c.includes( "->" ) ).sort(), [ "r1->queued", "r3->queued" ] );
+} );
+
+// ───────────────────── one name, two modes, no shared state ─────────────────────
+
+// "Maria" is the creator of two rows and the assignee of two others, and both pairs share one plan key.
+const SHARED = (): TaskItem[] => [
+  { ...held( "m1", "maria 0e61abe3", "tiberius" ), correlation_key: "epic:plan" },
+  { ...held( "m2", "maria 0e61abe3", "tiberius" ), correlation_key: "epic:plan" },
+  { ...held( "t1", "sam 1111aaaa",   "maria" ),    correlation_key: "epic:plan" },
+  { ...held( "t2", "sam 1111aaaa",   "maria" ),    correlation_key: "epic:plan" },
+] as TaskItem[];
+
+const groupEl = ( root: HTMLElement, label: string ): HTMLElement => {
+  const el = Array.from( root.querySelectorAll<HTMLElement>( ".holding-area-group" ) )
+    .find( ( g ) => g.querySelector( ".holding-area-filer" )!.textContent === label );
+  assert.ok( el, `no group labelled ${ label }` );
+  return el;
+};
+
+test( "model: the same label under the two modes is two identities", () => {
+  assert.notEqual( heldGroupId( "creator", "Maria" ), heldGroupId( "assignee", "Maria" ) );
+  assert.equal( heldGroupId( "creator", "Maria" ), "Maria", "creator ids stay the bare label" );
+  const c = groupHeldRows( SHARED(), "creator" ).find( ( g ) => g.label === "Maria" )!;
+  const a = groupHeldRows( SHARED(), "assignee" ).find( ( g ) => g.label === "Maria" )!;
+  assert.notEqual( c.filer, a.filer );
+  assert.deepEqual( [ c.by, a.by ], [ "creator", "assignee" ] );
+  assert.deepEqual( c.tasks.map( ( t ) => t.id ), [ "m1", "m2" ] );
+  assert.deepEqual( a.tasks.map( ( t ) => t.id ), [ "t1", "t2" ] );
+} );
+
+test( "pane: opening Maria the creator does not open Maria the assignee, or the reverse", () => {
+  const h = mount( SHARED() );
+  groupEl( h.root, "Maria" ).querySelector<HTMLElement>( ".holding-area-group-header" )!.click();
+  assert.equal( groupEl( h.root, "Maria" ).classList.contains( "collapsed" ), false, "creator group opened" );
+  h.press( "assignee" );
+  assert.equal( groupEl( h.root, "Maria" ).classList.contains( "collapsed" ), true, "assignee Maria starts shut" );
+  groupEl( h.root, "Maria" ).querySelector<HTMLElement>( ".holding-area-group-header" )!.click();
+  h.press( "creator" );
+  assert.equal( groupEl( h.root, "Maria" ).classList.contains( "collapsed" ), true, "an absent mode's open state is dropped, not carried over" );
+} );
+
+test( "pane: opening a plan under Maria the creator does not open the plan under Maria the assignee", () => {
+  const h = mount( SHARED() );
+  const open = ( plan: string ): void => {
+    const p = Array.from( h.root.querySelectorAll<HTMLElement>( ".holding-plan-group" ) ).find( ( e ) => e.dataset.plan === plan )!;
+    p.querySelector<HTMLElement>( ".holding-plan-header" )!.click();
+  };
+  const isOpen = ( plan: string ): boolean => {
+    const p = Array.from( h.root.querySelectorAll<HTMLElement>( ".holding-plan-group" ) ).find( ( e ) => e.dataset.plan === plan )!;
+    return !p.classList.contains( "collapsed" );
+  };
+  open( "epic:plan" );
+  assert.equal( isOpen( "epic:plan" ), true );
+  h.press( "assignee" );
+  assert.equal( isOpen( "epic:plan" ), false, "the other mode's plan starts shut" );
+  open( "epic:plan" );
+  h.press( "creator" );
+  assert.equal( isOpen( "epic:plan" ), false, "an absent mode's open state is dropped, not carried over" );
+} );
+
+test( "pane: the batch tooltips say 'assigned to' in assignee mode and 'filed' in creator mode", () => {
+  const h = mount( SHARED() );
+  const title = (): string => groupEl( h.root, "Maria" ).querySelector<HTMLElement>( ".holding-approve-all" )!.title;
+  assert.match( title(), /^Approve every row Maria filed — /u );
+  h.press( "assignee" );
+  assert.match( title(), /^Approve every row assigned to Maria — /u );
 } );

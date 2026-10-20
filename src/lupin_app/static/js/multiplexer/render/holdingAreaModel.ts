@@ -20,9 +20,17 @@ export interface HeldPlan {
   ids   : string[];
 }
 
-/** One filer's bucket of held rows: every row, split into plans and the rows that are in none. */
+/**
+ * One group of held rows: every row, split into plans and the rows that are in none.
+ *
+ * `filer` is the group's identity and keys every set and data attribute downstream.
+ * `label` is the text the operator reads. In creator mode the two are equal. In assignee mode
+ * the identity carries a prefix, so "Maria" the creator and "Maria" the assignee never share state.
+ */
 export interface HeldFilerGroup {
   filer     : string;
+  label     : string;
+  by        : HoldingGroupBy;
   tasks     : TaskItem[];
   plans     : HeldPlan[];
   ungrouped : TaskItem[];
@@ -71,9 +79,20 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
   // title-cases its filer labels; the Finished-Tasks WHO column does not. Folding the
   // casing into the shared helper would silently re-case a column that reads the
   // store's own spelling today.
-  const stripped = personaLabel( task && task.created_by ? String( task.created_by ) : null, "—" );
-  if ( stripped === "—" ) return stripped;
-  return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
+  return personaDisplay( task && task.created_by ? String( task.created_by ) : null, "—" );
+}
+
+/**
+ * A persona string as the pane shows it: session id stripped, each word capitalised.
+ *
+ * Both group labels go through this, so the strip and the casing exist once.
+ *
+ * Ensures:
+ *   - returns `fallback` (capitalised) for a blank or absent value
+ *   - never throws
+ */
+function personaDisplay( raw: string | null, fallback: string ): string {
+  return personaLabel( raw, fallback ).replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
 }
 
 /** What the pane groups on: the creator (`created_by`) or the assignee (`owner_persona`). */
@@ -95,8 +114,20 @@ export const HOLDING_UNASSIGNED_LABEL = "Unassigned";
  *   - never throws
  */
 export function taskAssigneeLabel( task: TaskItem | null | undefined ): string {
-  const stripped = personaLabel( task && task.owner_persona ? String( task.owner_persona ) : null, HOLDING_UNASSIGNED_LABEL );
-  return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
+  return personaDisplay( task && task.owner_persona ? String( task.owner_persona ) : null, HOLDING_UNASSIGNED_LABEL );
+}
+
+/** The mark that opens every assignee group's identity. No creator label can start with it. */
+const ASSIGNEE_ID_PREFIX = "\u0001assignee\u0001";
+
+/**
+ * A group's identity from its mode and label.
+ *
+ * Creator groups keep the bare label. Assignee groups carry a prefix, so the same name
+ * under the two modes is two groups with separate open, armed and in-flight state.
+ */
+export function heldGroupId( by: HoldingGroupBy, label: string ): string {
+  return by === "assignee" ? `${ ASSIGNEE_ID_PREFIX }${ label }` : label;
 }
 
 /**
@@ -149,7 +180,8 @@ export function groupHeldRowsByFiler( tasks: unknown, keep: ReadonlySet<string> 
  * That field is the group's identity downstream: its data attribute, open state and plan ids.
  *
  * Ensures:
- *   - everything `groupHeldRowsByFiler` ensures, with "filer" read as "the group label"
+ *   - everything `groupHeldRowsByFiler` ensures, with "filer" read as "the group identity"
+ *   - `label` is the display text and `by` is the mode, creator for any unknown value
  *   - an unknown `by` is treated as "creator"
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
@@ -157,19 +189,21 @@ export function groupHeldRows( tasks: unknown, by: HoldingGroupBy, keep: Readonl
   const rows      = Array.isArray( tasks ) ? tasks : [];
   const labelFor  = by === "assignee" ? taskAssigneeLabel : taskFilerLabel;
 
-  const byFiler = new Map<string, TaskItem[]>();
+  const mode    : HoldingGroupBy = by === "assignee" ? "assignee" : "creator";
+  const byFiler = new Map<string, { label: string; tasks: TaskItem[] }>();
   rows.forEach( ( raw ) => {
     const task   = ( raw ?? {} ) as TaskItem;
-    const filer  = labelFor( task );
+    const label  = labelFor( task );
+    const filer  = heldGroupId( mode, label );
     const bucket = byFiler.get( filer );
-    if ( bucket ) bucket.push( task );
-    else byFiler.set( filer, [ task ] );
+    if ( bucket ) bucket.tasks.push( task );
+    else byFiler.set( filer, { label, tasks: [ task ] } );
   } );
 
   return Array.from( byFiler.keys() )
-    .sort( ( a, b ) => a.localeCompare( b ) )
+    .sort( ( a, b ) => ( byFiler.get( a ) as { label: string } ).label.localeCompare( ( byFiler.get( b ) as { label: string } ).label ) )
     .map( ( filer ) => {
-      const sorted = ( byFiler.get( filer ) as TaskItem[] ).slice().sort( ( a, b ) => {
+      const sorted = ( byFiler.get( filer ) as { tasks: TaskItem[] } ).tasks.slice().sort( ( a, b ) => {
         const pr = priorityRank( a.priority ) - priorityRank( b.priority );
         if ( pr !== 0 ) return pr;
         return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
@@ -194,7 +228,7 @@ export function groupHeldRows( tasks: unknown, by: HoldingGroupBy, keep: Readonl
         } ) );
       const planned   = new Set( plans.map( ( p ) => p.key ) );
       const ungrouped = sorted.filter( ( t ) => !( t.correlation_key && t.id && planned.has( String( t.correlation_key ) ) ) );
-      return { filer, tasks : sorted, plans, ungrouped };
+      return { filer, label : ( byFiler.get( filer ) as { label: string } ).label, by : mode, tasks : sorted, plans, ungrouped };
     } );
 }
 

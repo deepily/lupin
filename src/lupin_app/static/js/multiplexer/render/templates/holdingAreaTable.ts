@@ -32,11 +32,16 @@
 // src/tests/unit/multiplexer/render/holding_area_table.test.ts, which slices
 // both strings out of the legacy source and compares the substituted result.
 
-import { holdingPlanId, type HeldFilerGroup, type HeldPlan } from "../holdingAreaModel";
+import { holdingPlanId, type HeldFilerGroup, type HeldPlan, type HoldingGroupBy } from "../holdingAreaModel";
 import type { TaskItem } from "../taskListModel";
 import { renderRowTableHead } from "./rowDisclosure";
 import { renderDisclosedRow } from "./taskRowDisclosed";
 import { groupRequestBadgeText, groupRequestBadgeLabel } from "../../../shared/task-request.js";
+
+/** The tooltip phrase for whose rows a group holds: "Rachel filed", or "assigned to Rachel". */
+function holdingGroupWhose( label: string, by: HoldingGroupBy ): string {
+  return by === "assignee" ? `assigned to ${ label }` : `${ label } filed`;
+}
 
 /**
  * The batch-approve tooltip for one filer. Carbon copy of
@@ -46,8 +51,8 @@ import { groupRequestBadgeText, groupRequestBadgeLabel } from "../../../shared/t
  * justified to the operator: it is the non-destructive direction, so an
  * over-approved row can be demoted straight back.
  */
-export function holdingApproveAllTitle( filer: string ): string {
-  return `Approve every row ${ filer } filed — reversible, a row approved by mistake can be demoted straight back`;
+export function holdingApproveAllTitle( filer: string, by: HoldingGroupBy = "creator" ): string {
+  return `Approve every row ${ holdingGroupWhose( filer, by ) } — reversible, a row approved by mistake can be demoted straight back`;
 }
 
 /**
@@ -60,8 +65,8 @@ export function holdingApproveAllTitle( filer: string ): string {
  * the right tool whenever the reasons differ; this one is deliberately the
  * blunt instrument and is labelled as such.
  */
-export function holdingWontFixAllTitle( filer: string ): string {
-  return `Close every row ${ filer } filed as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ`;
+export function holdingWontFixAllTitle( filer: string, by: HoldingGroupBy = "creator" ): string {
+  return `Close every row ${ holdingGroupWhose( filer, by ) } as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ`;
 }
 
 /** The batch reason box's placeholder. Carbon copy. */
@@ -116,7 +121,7 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
 
   const filerEl = document.createElement( "span" );
   filerEl.className   = "holding-area-filer";
-  filerEl.textContent = group.filer;
+  filerEl.textContent = group.label;
   header.appendChild( filerEl );
 
   const countEl = document.createElement( "span" );
@@ -138,9 +143,9 @@ function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivE
   }
 
   header.appendChild( batchButton(
-    "holding-approve-all", group.filer, "Approve all", holdingApproveAllTitle( group.filer ) ) );
+    "holding-approve-all", group.filer, "Approve all", holdingApproveAllTitle( group.label, group.by ) ) );
   header.appendChild( batchButton(
-    "holding-wont-fix-all", group.filer, "Won't fix all", holdingWontFixAllTitle( group.filer ) ) );
+    "holding-wont-fix-all", group.filer, "Won't fix all", holdingWontFixAllTitle( group.label, group.by ) ) );
 
   const reason = document.createElement( "input" );
   reason.type        = "text";

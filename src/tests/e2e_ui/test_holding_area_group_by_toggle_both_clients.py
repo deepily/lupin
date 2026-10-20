@@ -92,7 +92,7 @@ def _open_mux( page ):
 
 
 def _groups( page, pane ):
-    return page.locator( f"{pane} .holding-area-group" ).evaluate_all( "els => els.map( e => e.dataset.filer )" )
+    return page.locator( f"{pane} .holding-area-group" ).locator( ".holding-area-filer" ).evaluate_all( "els => els.map( e => e.textContent )" )
 
 
 def _drive( page, pane, button ):

@@ -9,6 +9,9 @@
 // a test type belongs here iff its shell script delegates to "$@" (i.e., accepts
 // the file path as the first arg rather than fanning out to a fixed suite).
 // Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
+// Opens every holding-area assignee group's identity, so no creator label can collide with one.
+const HOLDING_ASSIGNEE_ID_PREFIX = '\u0001assignee\u0001';
+
 const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
 
 // Delete-handler routing for job cards. Replaces the prior `_isHistory` boolean
@@ -11442,7 +11445,8 @@ class NotificationsUI {
          *       report to show, or absent
          *
          * Ensures:
-         *     - returns [ { filer, tasks, plans, ungrouped } ], filers sorted alphabetically
+         *     - returns [ { filer, label, by, tasks, plans, ungrouped } ], groups sorted alphabetically by label;
+         *       `filer` is the group's identity and `label` the text shown
          *     - `tasks` is EVERY row of the filer; within it rows sort by priority then
          *       title (status is uniform here — every row is not_approved)
          *     - `plans` is [ { key, title, tasks, ids } ], keys sorted alphabetically;
@@ -11456,15 +11460,17 @@ class NotificationsUI {
          */
         const rows = Array.isArray( tasks ) ? tasks : [];
         const kept = keep instanceof Set ? keep : new Set();
+        const mode    = by === 'assignee' ? 'assignee' : 'creator';
         const byFiler = new Map();
         rows.forEach( raw => {
             const task  = raw || {};
-            const filer = by === 'assignee' ? this._taskAssigneeLabel( task ) : this._taskFilerLabel( task );
-            if ( byFiler.has( filer ) ) byFiler.get( filer ).push( task );
-            else byFiler.set( filer, [ task ] );
+            const label = mode === 'assignee' ? this._taskAssigneeLabel( task ) : this._taskFilerLabel( task );
+            const filer = this._heldGroupId( mode, label );
+            if ( byFiler.has( filer ) ) byFiler.get( filer ).tasks.push( task );
+            else byFiler.set( filer, { label, tasks : [ task ] } );
         } );
-        return Array.from( byFiler.keys() ).sort( ( a, b ) => a.localeCompare( b ) ).map( filer => {
-            const sorted = byFiler.get( filer ).slice().sort( ( a, b ) => {
+        return Array.from( byFiler.keys() ).sort( ( a, b ) => byFiler.get( a ).label.localeCompare( byFiler.get( b ).label ) ).map( filer => {
+            const sorted = byFiler.get( filer ).tasks.slice().sort( ( a, b ) => {
                 const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
                 if ( pr !== 0 ) return pr;
                 return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
@@ -11487,7 +11493,7 @@ class NotificationsUI {
                 } ) );
             const planned   = new Set( plans.map( p => p.key ) );
             const ungrouped = sorted.filter( t => !( t.correlation_key && t.id && planned.has( String( t.correlation_key ) ) ) );
-            return { filer, tasks : sorted, plans, ungrouped };
+            return { filer, label : byFiler.get( filer ).label, by : mode, tasks : sorted, plans, ungrouped };
         } );
     }
 
@@ -11900,8 +11906,25 @@ class NotificationsUI {
          *     - absent/blank -> "—"
          *     - Pure: no DOM, no side effects
          */
-        const raw = task && task.created_by ? String( task.created_by ).trim() : "";
-        if ( !raw ) return "—";
+        return this._personaDisplayLabel( task && task.created_by, "—" );
+    }
+
+    /**
+     * Returns a persona string as shown: session id stripped, each word capitalized.
+     *
+     * Gives the fallback when the value is blank or absent.
+     */
+    _personaDisplayLabel( value, fallback ) {
+        /**
+         * Both holding-area group labels go through here, so the strip and the casing exist once.
+         *
+         * Ensures:
+         *     - "mr radio" -> "Mr Radio"; a trailing session id is stripped; no id -> the whole string, display-cased
+         *     - blank or absent -> the fallback
+         *     - Pure: no DOM, no side effects
+         */
+        const raw = value ? String( value ).trim() : "";
+        if ( !raw ) return fallback;
 
         // Anchored at the END. A leading-word rule cannot express a two-word persona.
         const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
@@ -11925,10 +11948,22 @@ class NotificationsUI {
          *     - absent/blank -> "Unassigned" (a group heading, so not a dash)
          *     - Pure: no DOM, no side effects
          */
-        const raw = task && task.owner_persona ? String( task.owner_persona ).trim() : "";
-        if ( !raw ) return "Unassigned";
-        const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
-        return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
+        return this._personaDisplayLabel( task && task.owner_persona, "Unassigned" );
+    }
+
+    /**
+     * Returns a holding-area group's identity from its mode and label.
+     *
+     * Creator groups keep the bare label. Assignee groups carry a prefix.
+     */
+    _heldGroupId( by, label ) {
+        /**
+         * An assignee group's identity carries a prefix.
+         *
+         * The same name under the two modes is two groups, with separate open, armed and in-flight state.
+         * No creator label can start with the prefix.
+         */
+        return by === 'assignee' ? `${HOLDING_ASSIGNEE_ID_PREFIX}${label}` : label;
     }
 
     /**
@@ -16851,7 +16886,8 @@ class NotificationsUI {
          * extension's event loop.
          *
          * Requires:
-         *     - filer is the display label; tasks is that filer's held rows
+         *     - filer is the group's identity (see _heldGroupId): the label itself for a creator group, the label behind a prefix for an assignee group; tasks is the group's held rows
+         *     - an assignee group's batch tooltips say "assigned to" in place of "filed"
          *     - plans is the filer's plan sub-groups and ungrouped the rows in none of them
          *       (see _groupHeldRowsByFiler); both default to "no plans, every row ungrouped"
          *
@@ -16862,8 +16898,9 @@ class NotificationsUI {
          *       table, which is omitted when there are none
          *     - the filer's batch controls still cover every row, grouped or not
          */
-        const key   = this._escapeTaskAttr( filer );
-        const label = this.escapeHtml( filer );
+        const key      = this._escapeTaskAttr( filer );
+        const assignee = filer.startsWith( HOLDING_ASSIGNEE_ID_PREFIX );
+        const label    = this.escapeHtml( assignee ? filer.slice( HOLDING_ASSIGNEE_ID_PREFIX.length ) : filer );
         const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
 
         const planList = Array.isArray( plans ) ? plans : [];
@@ -16888,7 +16925,7 @@ class NotificationsUI {
         const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge"`
             + ` role="img" aria-label="${this.escapeHtml( requestLabel )}">${this.escapeHtml( requestText )}</span>`;
 
-        return `
+        const html = `
             <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">
                 <div class="holding-area-group-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
                      title="Click to show or hide this filer's held rows">
@@ -16904,6 +16941,8 @@ class NotificationsUI {
                     <span class="holding-area-group-status" data-filer="${key}"></span>
                 </div>${planHtml}${table}
             </div>`;
+        // The two tooltips above read "<label> filed"; an assignee group's rows were assigned, not filed.
+        return assignee ? html.split( `row ${label} filed` ).join( `row assigned to ${label}` ) : html;
     }
 
     /**
