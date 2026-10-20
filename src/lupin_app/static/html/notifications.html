@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=6d883862e740">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=eaf9e50e4063">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=65de0f651c88">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=9572f302493b">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=864498666830">
 </head>
 <body>
@@ -1019,6 +1019,17 @@
                 <button class="toggle-button" id="holding-area-toggle">▼</button>
             </div>
             <div class="section-content" id="holding-area-section">
+                <!-- Picks whether the rows below group by creator or by assignee; the choice is per browser. -->
+                <div id="holding-group-toggle" class="holding-group-toggle" role="group"
+                     aria-label="Group held rows by" data-testid="holding-group-toggle">
+                    <span class="holding-group-toggle-label">Group by</span>
+                    <button type="button" class="holding-group-toggle-btn" data-group-by="creator"
+                            data-testid="holding-group-by-creator" aria-pressed="true"
+                            title="Group by who CREATED the row (created_by)">Creator</button>
+                    <button type="button" class="holding-group-toggle-btn" data-group-by="assignee"
+                            data-testid="holding-group-by-assignee" aria-pressed="false"
+                            title="Group by who the row is ASSIGNED to (owner_persona)">Assignee</button>
+                </div>
                 <!-- Operator controls for the ratio gate. MOVED HERE FROM THE TASK LIST
                      2026-09-04 on Rick's ruling: the gate runs at CREATE time, upstream of
                      both panes (ratio_gate_advisory inside create_task — "evaluated BEFORE
@@ -1563,7 +1574,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=111a38ee0145"></script>
+    <script src="/static/js/notifications.js?v=28b0d95098af"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
     <script src="/static/js/broadcast-panel.js?v=02bdb607cf2a"></script>

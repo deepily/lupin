@@ -1041,6 +1041,9 @@ class NotificationsUI {
         this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
         this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
         this._holdingAreaControlsWired  = false;                            // event-delegation guard (this pane had NO listener at all)
+        this.HOLDING_GROUP_BY_KEY       = 'lupin.holdingArea.groupBy';      // localStorage key: "creator" | "assignee" (row 30257e87)
+        this._holdingAreaGroupBy        = 'creator';                        // what the holding-area groups are keyed on; restored on first paint
+        this._holdingAreaLastComposite  = null;                             // the last composite painted, so the toggle repaints without a fetch
         this._taskListPressInFlight     = false;                            // a repaint mid-press replaces the pressed node and eats the click
         this._taskListPendingComposite  = null;                             // the paint held for the length of that press
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
@@ -11404,6 +11407,15 @@ class NotificationsUI {
      * Plans stay inside one filer. Rows sort by priority then title, and filers sort alphabetically. Touches no DOM.
      */
     _groupHeldRowsByFiler( tasks, keep ) {
+        return this._groupHeldRows( tasks, 'creator', keep );
+    }
+
+    /**
+     * Groups held rows by creator or by assignee.
+     *
+     * `by` is "creator" or "assignee"; anything else means creator. The label lands in `filer` either way.
+     */
+    _groupHeldRows( tasks, by, keep ) {
         /**
          * Group held rows BY FILER, which is what the triage session actually needs.
          *
@@ -11418,8 +11430,14 @@ class NotificationsUI {
          * TWO plans, one under each, so an "approve all" can never reach a row
          * another person filed.
          *
+         * `by` picks the field the groups are keyed on. "creator" is the filer
+         * grouping above; "assignee" buckets on `owner_persona`, or "Unassigned" when
+         * blank. The label is returned in `filer` in both modes, since that is the
+         * group's identity downstream.
+         *
          * Requires:
          *     - tasks is an array of row objects (foreign wire data; any shape)
+         *     - by is "creator" or "assignee"; any other value behaves as "creator"
          *     - keep is a Set of plan ids (see _holdingPlanId) whose last run left a
          *       report to show, or absent
          *
@@ -11441,7 +11459,7 @@ class NotificationsUI {
         const byFiler = new Map();
         rows.forEach( raw => {
             const task  = raw || {};
-            const filer = this._taskFilerLabel( task );
+            const filer = by === 'assignee' ? this._taskAssigneeLabel( task ) : this._taskFilerLabel( task );
             if ( byFiler.has( filer ) ) byFiler.get( filer ).push( task );
             else byFiler.set( filer, [ task ] );
         } );
@@ -11890,6 +11908,26 @@ class NotificationsUI {
 
         // A non-match leaves `stripped === raw`, which is the deliberate fall-through:
         // render it whole rather than guess where the name stops.
+        return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
+    }
+
+    /**
+     * Returns the display name of a task's assignee, or "Unassigned".
+     */
+    _taskAssigneeLabel( task ) {
+        /**
+         * The assignee's display name, from `owner_persona`.
+         *
+         * `_taskFilerLabel` answers who created a row; this answers who would do it.
+         *
+         * Ensures:
+         *     - "maria" -> "Maria"; "mr radio" -> "Mr Radio"
+         *     - absent/blank -> "Unassigned" (a group heading, so not a dash)
+         *     - Pure: no DOM, no side effects
+         */
+        const raw = task && task.owner_persona ? String( task.owner_persona ).trim() : "";
+        if ( !raw ) return "Unassigned";
+        const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
         return stripped.replace( /\b[a-z]/g, c => c.toUpperCase() );
     }
 
@@ -16406,6 +16444,8 @@ class NotificationsUI {
         if ( !container ) return;
 
         this._wireHoldingAreaControls();
+        this._holdingAreaLastComposite = composite;
+        this._syncHoldingGroupToggle();
         // Reports of plans that ended PARTLY refused; see _handleHoldingPlanApproveClick.
         // Created with the pane, before any plan header exists to press, so the click handler can rely on all three.
         if ( !( this._holdingPlanReports instanceof Map ) ) this._holdingPlanReports = new Map();
@@ -16424,7 +16464,7 @@ class NotificationsUI {
             return;
         }
 
-        const groups = this._groupHeldRowsByFiler( composite && composite.tasks, new Set( this._holdingPlanReports.keys() ) );
+        const groups = this._groupHeldRows( composite && composite.tasks, this._holdingAreaGroupBy, new Set( this._holdingPlanReports.keys() ) );
         const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
 
         if ( countEl ) countEl.textContent = String( total );
@@ -16921,8 +16961,37 @@ class NotificationsUI {
         } );
         this._wireVerbSelects( container );
 
+        // The Creator / Assignee toggle sits above the container, so it has its own listener.
+        try { this._holdingAreaGroupBy = localStorage.getItem( this.HOLDING_GROUP_BY_KEY ) === "assignee" ? "assignee" : "creator"; } catch ( e ) { /* storage blocked: default holds */ }
+        const toggle = document.getElementById( "holding-group-toggle" );
+        if ( toggle ) toggle.addEventListener( "click", ( e ) => {
+            const btn = e.target && e.target.closest ? e.target.closest( "[data-group-by]" ) : null;
+            if ( btn ) this._setHoldingGroupBy( btn.dataset.groupBy );
+        } );
+
         this._holdingAreaControlsWired = true;
         this.log( "Holding-area control delegation wired" );
+    }
+
+    /**
+     * Marks the button for the current grouping as pressed.
+     */
+    _syncHoldingGroupToggle() {
+        document.querySelectorAll( "#holding-group-toggle [data-group-by]" ).forEach( btn => {
+            btn.setAttribute( "aria-pressed", btn.dataset.groupBy === this._holdingAreaGroupBy ? "true" : "false" );
+        } );
+    }
+
+    /**
+     * Switches the grouping, saves the choice and repaints from the last composite.
+     */
+    _setHoldingGroupBy( by ) {
+        if ( by !== "creator" && by !== "assignee" ) return;
+        if ( by === this._holdingAreaGroupBy ) return;
+        this._holdingAreaGroupBy = by;
+        try { localStorage.setItem( this.HOLDING_GROUP_BY_KEY, by ); } catch ( e ) { /* storage blocked: holds for this page view */ }
+        this._syncHoldingGroupToggle();
+        this.renderHoldingArea( this._holdingAreaLastComposite );
     }
 
     /**

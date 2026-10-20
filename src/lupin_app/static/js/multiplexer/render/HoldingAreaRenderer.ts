@@ -42,7 +42,7 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
-import { groupHeldRowsByFiler, holdingPlanId } from "./holdingAreaModel";
+import { groupHeldRows, holdingPlanId, type HoldingGroupBy } from "./holdingAreaModel";
 import { holdingGroupChevron, holdingPlanApproveLabel, holdingPlanChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
@@ -193,6 +193,25 @@ export interface HoldingAreaRendererOptions {
   flowRatio?    : FlowRatioStoreLike;
 }
 
+/** The localStorage key for the grouping choice, which is a per-viewer convenience. */
+export const HOLDING_GROUP_BY_STORAGE_KEY = "lupin.holdingArea.groupBy";
+
+/** The two groupings and the words on their buttons. */
+const HOLDING_GROUP_BY_CHOICES: ReadonlyArray<{ by: HoldingGroupBy; label: string; title: string }> = [
+  { by: "creator",  label: "Creator",  title: "Group by who CREATED the row (created_by)" },
+  { by: "assignee", label: "Assignee", title: "Group by who the row is ASSIGNED to (owner_persona)" },
+];
+
+/** The saved choice, or "creator" when none is saved or storage is unavailable. */
+function readSavedGroupBy(): HoldingGroupBy {
+  try {
+    return window.localStorage.getItem( HOLDING_GROUP_BY_STORAGE_KEY ) === "assignee" ? "assignee" : "creator";
+  } catch ( _e ) {
+    /* c8 ignore next */ // storage blocked (private window) — the pane works without it.
+    return "creator";
+  }
+}
+
 /** The plan id a plan approve button carries (its filer and plan data attributes). */
 function planButtonId( button: HTMLElement ): string {
   return holdingPlanId( button.dataset.filer ?? "", button.dataset.plan ?? "" );
@@ -225,6 +244,10 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private collapseOff: ( () => void ) | null = null;
   private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
+
+  // What the groups are keyed on. Per viewer, restored from localStorage.
+  private groupBy       : HoldingGroupBy = "creator";
+  private groupToggleEl : HTMLElement | null = null;
 
   // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE. Disabling both batch
   // buttons is the operator-facing affordance and it is genuinely load-bearing —
@@ -388,7 +411,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     // Parity A-2 #8 — appended to the header's title AFTER wireRequestPane put the badge
     // behind the count, so the order reads count · badge · Gate, as legacy's <h3> does.
-    const body: HTMLElement[] = [];
+    // The Creator / Assignee toggle sits first, above the ratio cluster.
+    this.groupBy = readSavedGroupBy();
+    const body: HTMLElement[] = [ this.buildGroupToggle() ];
     if ( this.flowRatio !== null ) {
       const flow = createFlowRatioPanel( { bus: this.bus, store: this.flowRatio } );
       this.countEl.parentElement!.appendChild( flow.readout );
@@ -423,10 +448,62 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.root        = null;
     this.container = null;
     this.countEl = null;
+    this.groupToggleEl = null;
     this.updatedEl = null;
     this.header = null;
     this.requests = null;
     this.mounted = false;
+  }
+
+  /**
+   * Builds the Creator / Assignee toggle.
+   *
+   * Two buttons in one labelled group; the pressed one has aria-pressed true.
+   */
+  private buildGroupToggle(): HTMLElement {
+    const wrap = document.createElement( "div" );
+    wrap.className = "holding-group-toggle";
+    wrap.setAttribute( "role", "group" );
+    wrap.setAttribute( "aria-label", "Group held rows by" );
+    wrap.setAttribute( "data-testid", "multiplexer-holding-group-toggle" );
+    const lead = document.createElement( "span" );
+    lead.className   = "holding-group-toggle-label";
+    lead.textContent = "Group by";
+    wrap.appendChild( lead );
+    for ( const choice of HOLDING_GROUP_BY_CHOICES ) {
+      const btn = document.createElement( "button" );
+      btn.type        = "button";
+      btn.className   = "holding-group-toggle-btn";
+      btn.textContent = choice.label;
+      btn.title       = choice.title;
+      btn.dataset.groupBy = choice.by;
+      btn.setAttribute( "data-testid", `multiplexer-holding-group-by-${ choice.by }` );
+      btn.addEventListener( "click", () => this.setGroupBy( choice.by ) );
+      wrap.appendChild( btn );
+    }
+    this.groupToggleEl = wrap;
+    this.syncGroupToggle();
+    return wrap;
+  }
+
+  /** Marks the button for the current grouping as pressed and the other as not. */
+  private syncGroupToggle(): void {
+    for ( const btn of Array.from( this.groupToggleEl!.querySelectorAll<HTMLButtonElement>( "button" ) ) ) {
+      btn.setAttribute( "aria-pressed", btn.dataset.groupBy === this.groupBy ? "true" : "false" );
+    }
+  }
+
+  /** Switches the grouping, remembers it, and repaints. */
+  private setGroupBy( by: HoldingGroupBy ): void {
+    if ( by === this.groupBy ) return;
+    this.groupBy = by;
+    try {
+      window.localStorage.setItem( HOLDING_GROUP_BY_STORAGE_KEY, by );
+    } catch ( _e ) {
+      /* c8 ignore next */ // storage blocked — the choice holds for this page view only.
+    }
+    this.syncGroupToggle();
+    this.renderFromStore( false );
   }
 
   /**
@@ -469,7 +546,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       return;
     }
 
-    const groups = groupHeldRowsByFiler( composite!.tasks, new Set( this.planReports.keys() ) );
+    const groups = groupHeldRows( composite!.tasks, this.groupBy, new Set( this.planReports.keys() ) );
     const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
 
     this.setCountText( String( total ) );

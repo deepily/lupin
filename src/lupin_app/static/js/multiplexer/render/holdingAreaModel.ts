@@ -76,6 +76,29 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
   return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
 }
 
+/** What the pane groups on: the creator (`created_by`) or the assignee (`owner_persona`). */
+export type HoldingGroupBy = "creator" | "assignee";
+
+/** The label of the group that holds rows with no assignee. */
+export const HOLDING_UNASSIGNED_LABEL = "Unassigned";
+
+/**
+ * The assignee's display name, from `owner_persona`.
+ *
+ * `taskFilerLabel` answers who created a row; this answers who would do it.
+ * A blank `owner_persona` reads "Unassigned" because a dash heading names nobody.
+ *
+ * Ensures:
+ *   - "maria"       → "Maria"
+ *   - "mr radio"    → "Mr Radio"
+ *   - absent/blank  → "Unassigned"
+ *   - never throws
+ */
+export function taskAssigneeLabel( task: TaskItem | null | undefined ): string {
+  const stripped = personaLabel( task && task.owner_persona ? String( task.owner_persona ) : null, HOLDING_UNASSIGNED_LABEL );
+  return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
+}
+
 /**
  * Group held rows BY FILER, which is what the triage session actually needs.
  *
@@ -115,12 +138,29 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function groupHeldRowsByFiler( tasks: unknown, keep: ReadonlySet<string> = new Set() ): HeldFilerGroup[] {
-  const rows = Array.isArray( tasks ) ? tasks : [];
+  return groupHeldRows( tasks, "creator", keep );
+}
+
+/**
+ * Group held rows by creator or by assignee.
+ *
+ * Creator mode is `groupHeldRowsByFiler` exactly. Assignee mode buckets on `owner_persona`.
+ * The bucket label lands in the `filer` field in both modes.
+ * That field is the group's identity downstream: its data attribute, open state and plan ids.
+ *
+ * Ensures:
+ *   - everything `groupHeldRowsByFiler` ensures, with "filer" read as "the group label"
+ *   - an unknown `by` is treated as "creator"
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function groupHeldRows( tasks: unknown, by: HoldingGroupBy, keep: ReadonlySet<string> = new Set() ): HeldFilerGroup[] {
+  const rows      = Array.isArray( tasks ) ? tasks : [];
+  const labelFor  = by === "assignee" ? taskAssigneeLabel : taskFilerLabel;
 
   const byFiler = new Map<string, TaskItem[]>();
   rows.forEach( ( raw ) => {
     const task   = ( raw ?? {} ) as TaskItem;
-    const filer  = taskFilerLabel( task );
+    const filer  = labelFor( task );
     const bucket = byFiler.get( filer );
     if ( bucket ) bucket.push( task );
     else byFiler.set( filer, [ task ] );

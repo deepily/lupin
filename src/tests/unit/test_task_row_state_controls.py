@@ -1109,9 +1109,14 @@ def test_the_holding_pane_is_grouped_by_filer_not_owner( client_src, client_code
     organising principle is who put them there.
     """
     assert "_groupHeldRowsByFiler" in client_src
-    grouper = function_body( client_code, "_groupHeldRowsByFiler( tasks, keep ) {" )
+    # Row 30257e87 — the filer grouping is now the "creator" mode of _groupHeldRows, and the
+    # old name stays as the wrapper that always asks for it.
+    wrapper = function_body( client_code, "_groupHeldRowsByFiler( tasks, keep ) {" )
+    assert "'creator'" in wrapper, "the filer grouping must stay the creator mode"
+    grouper = function_body( client_code, "_groupHeldRows( tasks, by, keep ) {" )
     assert "_taskFilerLabel" in grouper
-    assert "owner_persona" not in grouper, "the holding area groups on the owner, not the filer"
+    assert "_taskAssigneeLabel" in grouper, "assignee mode must key on the assignee label"
+    assert "owner_persona" not in grouper, "the grouper reads the label helpers, never the field directly"
 
 
 # ------------------------------------------------- the epic board acts, it does not only report
