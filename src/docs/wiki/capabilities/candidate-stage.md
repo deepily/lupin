@@ -17,7 +17,7 @@ The candidate stage ranks the symbol index so that `check_exists` asks Jev about
 ## How the lookup uses it
 - `lupin_mcp.reuse_tools` builds a `CandidateStage` client (`lupin_mcp.reuse_candidates`) only on the packed path, when `LUPIN_REUSE_JEV_PACK_SIZE` is set. Without it every `check_exists` sweeps all entries.
 - The client reads the live vector set from the INI storage folders. It asks the Lupin server's resident search for the shortlist, because the cosa-voice process cannot import numpy.
-- It defaults to arm `B2w` and K 128. A policy with a band asks again at K 512 when the first sweep sits near a cut-off, and sweeps the extra entries. The shipped policy has no band, so it never does.
+- It defaults to the concat-vector arm (Rick's ruling) and K 128. The INI key `reuse candidate shortlist arm`, or the variable `LUPIN_REUSE_CANDIDATE_ARM`, names another arm; `B2w` is the one that takes the wiki list. A policy with a band asks again at K 512 when the first sweep sits near a cut-off, and sweeps the extra entries. The shipped policy has no band, so it never does.
 - `check_exists` sweeps only the shortlist, route `candidates`. `fetch_similar` always sweeps every entry, route `full`.
 - A stage that fails on its first call answers `UNCERTAIN_READ_SOURCE` with `CALL_FAILED` in its causes, and nothing is swept. If only the widening call fails, the first sweep's decision stands with `CALL_FAILED` added. The receipt's `candidate_stage` block names the error.
 - `lupin_mcp.reuse_redact` blanks emails, URLs, IP addresses, absolute paths and credential-shaped tokens in the need before anything is asked. Known lupin routes are kept.

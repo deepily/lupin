@@ -103,12 +103,18 @@ def test_the_key_header_and_body_carry_what_the_server_needs( world ):
     lookup( make( K=2, fusion=SMALL ) )
     method, path, body, headers = bridge.seen[ -1 ]
     assert headers[ "X-api-key" ] == "k" and body[ "K" ] == 2 and body[ "expect_manifest_hash" ] == manifest[ "manifest_hash" ]
-    assert body[ "vectors_dir" ] == str( root / "vectors" ) and set( body[ "query_vectors" ] ) == { "prose", "code" } and body[ "need" ] == "profile"
+    assert body[ "vectors_dir" ] == str( root / "vectors" ) and set( body[ "query_vectors" ] ) == { "concat" } and body[ "need" ] == "profile"
+
+
+def test_the_stage_with_no_arm_given_runs_b1_and_sends_no_wiki_list( world ):
+    make, bridge, *_ = world
+    r = lookup( make() )
+    assert rcand.DEFAULT_ARM == "B1" and r[ "arm" ] == "B1" and r[ "wiki" ] == 0 and bridge.seen[ -1 ][ 2 ][ "wiki" ] == []
 
 
 def test_the_result_names_what_a_receipt_records( world ):
     make, _, _, _, manifest, _ = world
-    r = lookup( make() )
+    r = lookup( make( arm="B2w" ) )
     assert r[ "manifest_hash" ] == manifest[ "manifest_hash" ] and r[ "arm" ] == "B2w" and r[ "K" ] == 128 and r[ "widened" ] is False
     assert r[ "embed_models" ] == { "code": "code-m", "prose": "prose-m" } and len( r[ "ranking_hash" ] ) == 64 and r[ "wiki" ] == 1
     assert set( r[ "lists" ] ) >= { "code", "prose", "vector_prose", "vector_code", "wiki" }

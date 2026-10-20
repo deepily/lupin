@@ -28,7 +28,7 @@ RANKED = [ FEEDS_ID, MATH_ID, SERVE_ID ]
 class RankedStage:
     """The client's shortlist() and manifest(), cutting one fixed ranking at the K asked for."""
 
-    arm = "B2w"
+    arm = "B1"
 
     def __init__( self, K=1, fail_wide=False, ranking=None ):
         self.K, self.fail_wide, self.ranking, self.calls = K, fail_wide, list( RANKED if ranking is None else ranking ), []

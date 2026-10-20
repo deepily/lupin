@@ -46,7 +46,7 @@ class Jittery( rr.StandIn ):
 class FakeStage:
     """The candidate stage's interface: a fixed shortlist, the member left out."""
 
-    arm, K = "B2w", 128
+    arm, K = "B1", 128
 
     def __init__( self, ids=SHORTLIST, manifest_hash="b" * 64, error=None ):
         self.ids, self.manifest_hash, self.error = list( ids ), manifest_hash, error
@@ -217,7 +217,7 @@ def test_the_canary_asks_the_lookup_and_five_repeats_for_five_needs_and_each_rep
     record = setup.result( "canary" )
     assert record[ "questions" ] == [ "lookup", "r1", "r2", "r3", "r4", "r5" ] and len( record[ "searches" ] ) == 30
     assert all( s[ "status" ] == "complete" for s in record[ "searches" ] )
-    assert record[ "stage" ] == { "arm": "B2w", "K": 128, "manifest_hash": "b" * 64 } and record[ "needs_sha" ] == setup.sha
+    assert record[ "stage" ] == { "arm": "B1", "K": 128, "manifest_hash": "b" * 64 } and record[ "needs_sha" ] == setup.sha
     rep = next( s for s in record[ "searches" ] if s[ "member" ] == "n01" and s[ "question" ] == "r3" )                  # n01 is a distinct need, so nothing is left out of its shortlist
     row = rep[ "rows" ][ 0 ]
     assert row[ "repeat" ] == 3 and sorted( row[ "p_overlap" ] ) == sorted( SHORTLIST ) and row[ "asked" ] == len( SHORTLIST ) and row[ "failed" ] == []

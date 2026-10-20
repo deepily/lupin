@@ -23,7 +23,7 @@ MANIFEST = "a" * 64
 class FakeStage:
     """The candidate stage's interface: shortlist() and manifest(), with every call recorded."""
 
-    arm, K = "B2w", 128
+    arm, K = "B1", 128
 
     def __init__( self, ids=( MATH_ID, FEEDS_ID ), manifest_hash=MANIFEST, error=None, freshness=None ):
         self.ids, self.manifest_hash, self.error, self.freshness, self.calls = list( ids ), manifest_hash, error, freshness, []
@@ -62,7 +62,7 @@ def test_only_the_shortlist_is_asked_and_the_receipt_counts_what_was_not( env ):
     cs = rec[ "candidate_stage" ]
     assert cs[ "entries_total" ] == 3 and cs[ "entries_asked" ] == 2 and cs[ "entries_not_asked" ] == 1
     assert cs[ "entries_asked" ] + cs[ "entries_not_asked" ] == cs[ "entries_total" ] and cs[ "ids" ] == sorted( [ FEEDS_ID, MATH_ID ] )
-    assert cs[ "manifest_hash" ] == MANIFEST and cs[ "K" ] == 128 and cs[ "arm" ] == "B2w" and cs[ "ranking_text" ] == need and "error" not in cs
+    assert cs[ "manifest_hash" ] == MANIFEST and cs[ "K" ] == 128 and cs[ "arm" ] == "B1" and cs[ "ranking_text" ] == need and "error" not in cs
     assert rec[ "stats" ][ "stages" ][ 0 ][ "stage" ] == "candidates" and rec[ "stats" ][ "entries" ] == 2
 
 
@@ -198,7 +198,12 @@ def test_the_environment_builds_the_candidate_stage_and_a_missing_storage_key_is
     monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", "/vec" ); monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_QUERY_CACHE_DIR", "/qc" )
     monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_PURPOSE_DIR", "/pp" )
     stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
-    assert stage.vectors_dir == "/vec" and stage.query_cache_dir == "/qc" and str( stage.purposes_path ) == "/pp/purpose.jsonl" and stage.arm == "B2w" and stage.K == 128
+    assert stage.vectors_dir == "/vec" and stage.query_cache_dir == "/qc" and str( stage.purposes_path ) == "/pp/purpose.jsonl" and stage.arm == "B1" and stage.K == 128
+    monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_ARM", "B2w" )
+    assert rt.context_from_environment( env[ 0 ] ).candidate_stage.arm == "B2w"                # the arm key reaches the stage, so the default is not hard-wired
+    monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_ARM", "B9" )
+    with pytest.raises( ValueError, match="arm must be one of" ): rt.context_from_environment( env[ 0 ] )
+    monkeypatch.delenv( "LUPIN_REUSE_CANDIDATE_ARM" )
     monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_VECTORS_DIR", "relative" )
     with pytest.raises( rt.ReuseError, match="CANDIDATE_STAGE_UNCONFIGURED" ): rt.context_from_environment( env[ 0 ] )
 

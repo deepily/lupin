@@ -306,6 +306,7 @@ def _candidate_stage( top ):
 
     Ensures:
         - returns a CandidateStage on the live vector set, the query cache and the purpose lines of the repository's data folder
+        - the stage's arm is the INI key `reuse candidate shortlist arm` or its override variable, and the concat-vector default arm when neither is set
         - the server address and key are the ones the embeddings client resolves, pinned to the FastAPI server
         - the stage refreshes a vector set that is behind the index before a lookup, through candidate_build.run under its build lock
 
@@ -321,6 +322,7 @@ def _candidate_stage( top ):
         vectors  = storage_paths.candidate_dir( "vectors", data )
         cache    = storage_paths.candidate_dir( "query_cache", data )
         purposes = storage_paths.candidate_dir( "purpose", data ) / "purpose.jsonl"
+        arm      = storage_paths.shortlist_arm( reuse_candidates.DEFAULT_ARM )
     except CandidateError as e:
         raise ReuseError( "CANDIDATE_STAGE_UNCONFIGURED", str( e ) ) from e
     base_url, api_key, _prefix = EmbeddingProvider._resolve_http_target( True )
@@ -330,7 +332,7 @@ def _candidate_stage( top ):
         from cosa.repo.symindex import candidate_build as cb                       # imported here: it pulls in requests, which the install closure lacks
         return cb.run( top, cb.make_job_writer( top, base_url, os.environ ), vector_build.EndpointClient(), environ=os.environ, skip_if_current=True )
 
-    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, refresher=refresher )
+    return reuse_candidates.CandidateStage( base_url, api_key, vectors, cache, vector_build.EndpointClient(), purposes_path=purposes, arm=arm, refresher=refresher )
 
 
 def append_call_log( ctx, session_id, record ):

@@ -22,6 +22,7 @@ KEYS = {
     "container_root" : ( "reuse candidate container root",         "LUPIN_REUSE_CANDIDATE_CONTAINER_ROOT" )
 }
 HANDOFF_NOT_IN_CONTAINER = "HANDOFF_NOT_IN_CONTAINER"
+ARM_KEY                  = ( "reuse candidate shortlist arm", "LUPIN_REUSE_CANDIDATE_ARM" )      # not in the key table: a blank value means the shipped default, never an error
 
 
 def build_config():
@@ -176,3 +177,26 @@ def container_path( host_path, root, config=None, environ=None ):
     except ValueError:
         raise CandidateError( HANDOFF_NOT_IN_CONTAINER, f"{host_path} is outside {main}, which is what the container mounts" )
     return str( pathlib.PurePosixPath( container_root ) / rel.as_posix() )
+
+
+def shortlist_arm( default, config=None, environ=None ):
+    """
+    Return the shortlist search arm the shipped stage runs.
+
+    Requires:
+        - default is the arm name to use when neither source names one
+
+    Ensures:
+        - returns the override variable's value when set and not blank, else the INI value when not blank, else default
+        - the name is stripped and not checked here: the stage refuses an unknown arm
+
+    Raises:
+        - CandidateError DEPENDENCY_MISSING when the INI has to be read and no manager can be built
+    """
+    environ   = os.environ if environ is None else environ
+    env_value = environ.get( ARM_KEY[ 1 ], "" ).strip()
+    if env_value: return env_value
+    manager = config if config is not None else build_config()
+    value   = manager.get( ARM_KEY[ 0 ], silent=True )
+    value   = "" if value is None else str( value ).strip()
+    return value if value else default

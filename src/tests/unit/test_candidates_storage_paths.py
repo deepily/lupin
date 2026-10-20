@@ -87,6 +87,22 @@ def test_missing_or_empty_key_is_storage_key_missing( missing ):
     assert "reuse candidate vectors subdir" in e.value.detail
 
 
+def test_shortlist_arm_is_the_override_then_the_ini_then_the_default():
+    ini = FakeConfig( { **FULL, "reuse candidate shortlist arm": " B2 " } )
+    assert sp.shortlist_arm( "B1", ini, { "LUPIN_REUSE_CANDIDATE_ARM": " B2w " } ) == "B2w"
+    assert sp.shortlist_arm( "B1", ini, { "LUPIN_REUSE_CANDIDATE_ARM": "  " } ) == "B2"
+    assert sp.shortlist_arm( "B1", FakeConfig( { **FULL, "reuse candidate shortlist arm": "  " } ), {} ) == "B1"
+    assert sp.shortlist_arm( "B1", FakeConfig( FULL ), {} ) == "B1"
+
+
+def test_shortlist_arm_reads_os_environ_and_builds_the_config_when_none_is_given( monkeypatch ):
+    monkeypatch.setenv( "LUPIN_REUSE_CANDIDATE_ARM", "B2" )
+    assert sp.shortlist_arm( "B1", FakeConfig( FULL ) ) == "B2"
+    monkeypatch.delenv( "LUPIN_REUSE_CANDIDATE_ARM" )
+    monkeypatch.setattr( sp, "build_config", lambda: FakeConfig( { "reuse candidate shortlist arm": "B2w" } ) )
+    assert sp.shortlist_arm( "B1" ) == "B2w"
+
+
 def test_interpreter_with_no_value_is_dependency_missing():
     with pytest.raises( CandidateError ) as e:
         sp.search_interpreter( FakeConfig( FULL ), {} )

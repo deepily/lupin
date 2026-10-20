@@ -243,7 +243,7 @@ def write_docstring( root ):
 class StandInStage:
     """The candidate stage's interface, answering every entry but the excluded one, sorted by id."""
 
-    arm, K = "B2w", 128
+    arm, K = "B1", 128
 
     def manifest( self ): return { "manifest_hash": "0" * 64 }
 
