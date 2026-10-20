@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.18 evening to 2026.10.19 night - Session 88ab1868 (Cheech 🌿, manager; crew Sam, Chloé, Tiberius, Extra 1, all released by 19:34 EDT) | Reuse refresh fixed and on for dev, Plan 2 wiki rollup landed, Plan 2 status written up
+
+- **Landed**, not pushed before tonight's push: refresh fixes `7aa3e861f`, `a220c50aa`, `303e6476d`, `9de2025e1` and switch `34be17cce`; wiki rollup `0f723a0fc..994216bd0` (10 rows done); login-file command `9bc978045`, `e2324e90e`. Each had a named review pass.
+- **Dev**: the refresh job's login file (mode 600) and cron are installed, using Secret Manager per decision 2e2324dd. The first run is after boot on 2026-10-20.
+- **VM**: Cheech deployed it to `e2324e90e1`. Its cron install refused on four host-layout gaps, all on bug `d3550878`, for tomorrow.
+- **Plan 2 status**: about 70% done, and the shipped lookup's accuracy is not yet measured. Every open row is now titled "Plan 2". Explainer: io/tmp/2026.10.19-code-reuse-checker-status-explainer.md.
+- **Post-game**: `src/docs/post-games/v0.2.2/2026.10.19-cheech-reuse-refresh-and-wiki-rollup-post-game.md`.
+- **Memento sweep** (25 digested, 28 trashed, 11 kept): most seats recorded one rule. Doc-lint refuses long summaries, long sentences, all-caps words and bare row ids; reword, never waive.
+- **Files**: history.md, TODO.md, the post-game and its README line. Code arrived by the reviewed cherry-picks above.
+
 ## 2026.10.18 evening to 2026.10.19 noon - Session f29ced56 (Mr. Radio 🦉, manager; crew John, Clayton, Tiffany, Krishna, Rio, Maya, Arnold, Extra 2, Extra 3, all reaped by about 12:30 EDT) | P1 twin refactor landed in five batches; exact clone groups 129 → 34
 
 - **Landed by me** on the working branch, not pushed: batches 1 to 5, `bae2816ee`, `9d199912a`, `84d5d9950`, `d4339a618` and `553ab781c`. Each landing tree passed the full unit tier first. Batch 5 ran 38325 passed and 0 failed.

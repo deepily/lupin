@@ -16,6 +16,21 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-18 evening to 2026-10-19 night (Cheech 🌿 `88ab1868`)
+
+### Rick's rulings
+- 10-18 ~21:15, decision `19aea5ba`: freshen on demand. The lookup refreshes stale vectors under the build lock and answers from the fresh set.
+- 10-19 ~15:15, decision `2e2324dd`: the refresh job's login comes from Secret Manager. Rick created both secrets in one command.
+- 10-19 ~21:07, by voice: Cheech runs VM deploys, "not my job". This is saved as a memory.
+- 10-19 ~21:42, bug `d3550878`: fix the VM refresh install properly tomorrow, with one command for any host.
+- 10-19 ~22:20, by voice: every open plan row carries the plan's name ("Plan 2: …"), and status reports are written for a program manager.
+- 10-19 ~22:45, by voice: push and back up at session end.
+
+### Not ruled, waiting on Rick
+- Set the "good enough" accuracy bar (`84c3f892`) before the final test (`a9c46718`) reports.
+- Admit or hold the held rows: `a9c46718`, `fcbc72d3`, `b7fc7240`, `09ef7938`, `5c1413eb`, `9e2d7c1d`.
+- TODO.md is 1,134 lines, well past the ~200-line horizon signal. Archive at the next session with `/plan-todo archive`.
+
 ## 📚 Decisions log 2026-10-18 evening to 2026-10-19 noon (Mr. Radio 🦉 `f29ced56`)
 
 ### Rick's rulings
