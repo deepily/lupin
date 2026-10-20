@@ -8,6 +8,16 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.18 evening to 2026.10.19 noon - Session f29ced56 (Mr. Radio 🦉, manager; crew John, Clayton, Tiffany, Krishna, Rio, Maya, Arnold, Extra 2, Extra 3, all reaped by about 12:30 EDT) | P1 twin refactor landed in five batches; exact clone groups 129 → 34
+
+- **Landed by me** on the working branch, not pushed: batches 1 to 5, `bae2816ee`, `9d199912a`, `84d5d9950`, `d4339a618` and `553ab781c`. Each landing tree passed the full unit tier first. Batch 5 ran 38325 passed and 0 failed.
+- **Census** (6a9299126 → 553ab781c): exact groups 129 → 34, members 306 → 77, near pairs 256 → 144. None of the 34 is a missed merge. The 6 partial merges are row `6b74a018`.
+- **Review**: 7 slices failed their first review and were fixed before landing. Clayton's daemon-threads slice duplicated a helper that had already landed, so it was rebuilt on batch 4.
+- **Closed**: row `83fd572c` (receipt `553ab781c`), decision `999e405d` (the legacy notifications.js twins, skipped), and 28 janitor archive rows (all landed, checked with `git cherry`). Filed bug `cbeb4336`.
+- **Roster**: 9 → 0 under broadcast `90cccaf9`.
+- **Post-game**: `src/docs/post-games/v0.2.2/2026.10.19-mr-radio-twin-refactor-crew-post-game.md`.
+- **Files**: history.md, TODO.md, the post-game and its README line. Code arrived by the reviewed merges above.
+
 ## 2026.10.15 day - Session a5779b32 (Cheech 🌿, manager; crew Sam, Clayton, Rachel, Tiberius, Pocholo, Krishna, all released by 17:30 EDT) | Candidate-stage vectors rebuilt and matched to the stage, wiki pages for every package, `:8000` green on main
 
 - **Model server**: image 0.1.2 is live with the embeddings role field, on Rick's yes to gate `32b71742`. The batch cap is 16 texts and 32,000 characters, because vLLM holds 17 GB of the card.

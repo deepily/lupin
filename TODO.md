@@ -16,6 +16,17 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-18 evening to 2026-10-19 noon (Mr. Radio 🦉 `f29ced56`)
+
+### Rick's rulings
+- 10-19 morning, by voice: skip the legacy `notifications.js` twins (decision `999e405d`, closed).
+- 10-19, broadcast `90cccaf9`: cut manager rosters by 50%. Mr. Radio went from 9 seats to 0.
+- 10-19, by voice: a status turn that holds a gate must ask directly, never list it as "waiting on you".
+
+### Not ruled, waiting on Rick
+- Admit or hold the three held rows. They are `cbeb4336` (P2, docs router test red on the base), `6b74a018` (P3, partial twins) and `e674fe42` (P3, bridge JSON).
+- Push the working branch; the branch head is `553ab781c` plus later commits by peers.
+
 ## 📚 Decisions log 2026-10-15 day (Cheech 🌿 `a5779b32`)
 
 ### Rick's rulings
