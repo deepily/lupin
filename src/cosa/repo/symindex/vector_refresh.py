@@ -44,6 +44,7 @@ STATE_NAME     = "refresh-state.json"
 LOG_NAME       = "refresh.log"
 ENV_FILE_REL   = ".lupin/reuse-vector-refresh.env"
 LOCK_OWNER     = "reuse-vector-refresh"
+CARRIED_ENV    = ( "DEEPILY_DATA_DIR", "PLANNING_IS_PROMPTING_ROOT" )
 ATTEMPTS       = 2
 EXIT_OK        = 0
 EXIT_FAILED    = 1
@@ -212,22 +213,39 @@ def env_file_path( environ ):
     return os.path.join( environ.get( "HOME" ) or os.path.expanduser( "~" ), ENV_FILE_REL )
 
 
-def cron_lines( root, python, log_path, env_path ):
+def carried_env( environ ):
+    """
+    Pick the host settings a cron run needs and cron's bare environment lacks.
+
+    Requires:
+        - environ maps names to values
+
+    Ensures:
+        - returns { name: value } for each name in CARRIED_ENV that is set and not empty
+        - DEEPILY_DATA_DIR decides where the vector set lives; PLANNING_IS_PROMPTING_ROOT finds the crontab lock
+    """
+    return { name: environ[ name ] for name in CARRIED_ENV if environ.get( name ) }
+
+
+def cron_lines( root, python, log_path, env_path, carried=None ):
     """
     Build the two cron lines.
 
     Requires:
         - root is the main checkout path; python is the interpreter path
         - env_path is the credential file, from env_file_path
+        - carried is None or { name: value }, from carried_env
 
     Ensures:
         - returns [ daily line, reboot line ], each ending with CRON_TAG
         - each line sets REUSE_VECTOR_REFRESH_ENV to env_path
+        - each line sets every name in carried to its value, so a run sees the same data folder the install saw
         - the daily line is inside the 10:00 to 13:00 window
         - each line runs the wrapper script, which sources the credential file named in REUSE_VECTOR_REFRESH_ENV
         - the reboot line gives a slow start 240 seconds before the run, after the librarian's 120
     """
-    run = f"cd {root} && LUPIN_ROOT={root} REUSE_VECTOR_REFRESH_PYTHON={python} REUSE_VECTOR_REFRESH_ENV={env_path} {root}/src/scripts/{SCRIPT_NAME} >> {log_path} 2>&1 {CRON_TAG}"
+    extra = "".join( f"{name}={value} " for name, value in ( carried or {} ).items() )
+    run = f"cd {root} && LUPIN_ROOT={root} {extra}REUSE_VECTOR_REFRESH_PYTHON={python} REUSE_VECTOR_REFRESH_ENV={env_path} {root}/src/scripts/{SCRIPT_NAME} >> {log_path} 2>&1 {CRON_TAG}"
     return lt.cron_lines_for( run, CRON_SCHEDULE, 240 )
 
 
@@ -263,7 +281,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     except CandidateError as e:
         print( json.dumps( { "error": e.code, "detail": e.detail } ), file=out )
         return EXIT_NAMED
-    lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ), env_file_path( environ ) )
+    lines   = cron_lines( root, args.python, os.path.join( folder, LOG_NAME ), env_file_path( environ ), carried_env( environ ) )
     if args.print_install:
         print( "\n".join( lines ), file=out )
         return EXIT_OK

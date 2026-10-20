@@ -30,8 +30,20 @@ export PATH="${REUSE_VECTOR_REFRESH_PATH:-/usr/local/bin:/usr/bin:/bin:${PATH:-}
 SELF="$( readlink -f "${BASH_SOURCE[0]}" )"
 SELF_ROOT="$( cd "$( dirname "$SELF" )/../.." && pwd )"
 ROOT="${LUPIN_ROOT:-$SELF_ROOT}"
-PYTHON="${REUSE_VECTOR_REFRESH_PYTHON:-$ROOT/.venv/bin/python}"
-[ -x "$PYTHON" ] || PYTHON="$( command -v python3 )"
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+# Pick the first Python that can import the job. A venv can exist and still lack a package the job needs
+# (the test VM's .venv has no `requests`), so "executable" is not enough: try the import.
+PYTHON=""
+for CANDIDATE in "${REUSE_VECTOR_REFRESH_PYTHON:-}" "$ROOT/.venv/bin/python" "${HOME:-}/.venv-lupin-mcp/bin/python" "$( command -v python3 || true )"; do
+    [ -n "$CANDIDATE" ] && [ -x "$CANDIDATE" ] || continue
+    if "$CANDIDATE" -c "import cosa.repo.symindex.vector_refresh" >/dev/null 2>&1; then PYTHON="$CANDIDATE"; break; fi
+    echo "reuse-vector-refresh: $CANDIDATE cannot import cosa.repo.symindex.vector_refresh; trying the next Python" >&2
+done
+if [ -z "$PYTHON" ]; then
+    echo "reuse-vector-refresh: no Python can import cosa.repo.symindex.vector_refresh. Tried REUSE_VECTOR_REFRESH_PYTHON, $ROOT/.venv, ${HOME:-}/.venv-lupin-mcp and python3. Set REUSE_VECTOR_REFRESH_PYTHON to one that can." >&2
+    exit 1
+fi
 
 if [ -n "${REUSE_VECTOR_REFRESH_ENV:-}" ] && [ -r "$REUSE_VECTOR_REFRESH_ENV" ]; then
     set -a
@@ -43,5 +55,4 @@ fi
 export LUPIN_ROOT="$ROOT"
 # Cron's environment is bare. Default the ConfigurationManager arguments the way run-lupin-arbiter-app.sh does.
 export LUPIN_CONFIG_MGR_CLI_ARGS="${LUPIN_CONFIG_MGR_CLI_ARGS:-config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development}"
-export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 exec "$PYTHON" -m cosa.repo.symindex.vector_refresh --root "$ROOT" --python "$PYTHON" "$@"

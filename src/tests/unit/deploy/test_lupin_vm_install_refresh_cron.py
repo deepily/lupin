@@ -1,0 +1,87 @@
+"""
+Tests for the install-refresh-cron verb and the deploy sync step in lupin-vm.sh.
+
+All runs are --dry-run, so no gcloud is called: the verb prints the exact command it would send.
+"""
+import os
+import subprocess
+from pathlib import Path
+
+SCRIPT = Path( os.environ.get( "LUPIN_ROOT", os.getcwd() ) ) / "src" / "scripts" / "lupin-vm.sh"
+
+
+def vm( *args, env=None ):
+    base = { "PATH": os.environ[ "PATH" ], "HOME": "/nonexistent", "LUPIN_GCP_PROJECT_ID": "proj-x" }
+    return subprocess.run( [ "bash", str( SCRIPT ), "--dry-run", *args ], capture_output=True, text=True, env={ **base, **( env or {} ) } )
+
+
+def test_the_vm_install_sets_all_three_variables_from_the_known_vm_paths_and_not_from_the_callers_shell():
+    done = vm( "install-refresh-cron", "vm", env={ "DEEPILY_DATA_DIR": "/dev/box", "PLANNING_IS_PROMPTING_ROOT": "/dev/pip" } )
+    assert done.returncode == 0
+    assert "export LUPIN_ROOT='/mnt/lupin-data/lupin' DEEPILY_DATA_DIR='/mnt/lupin-data/projects-data' PLANNING_IS_PROMPTING_ROOT='/mnt/lupin-data/planning-is-prompting'" in done.stderr + done.stdout
+    assert "/dev/box" not in done.stdout + done.stderr
+    assert "reuse-vector-refresh.sh --install" in done.stdout + done.stderr and "reuse-vector-refresh.sh --status" in done.stdout + done.stderr
+
+
+def test_the_install_warns_when_the_test_login_file_is_missing_and_names_the_verb_that_writes_it():
+    out = vm( "install-refresh-cron", "vm" )
+    assert "push-test-mock-login vm" in out.stdout + out.stderr
+
+
+def test_local_carries_the_callers_two_variables_and_the_checkout_it_runs_from():
+    done = vm( "install-refresh-cron", env={ "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    text = done.stdout + done.stderr
+    assert done.returncode == 0 and f"DEEPILY_DATA_DIR='/d' PLANNING_IS_PROMPTING_ROOT='/p'" in text
+    assert f"LUPIN_ROOT='{SCRIPT.parent.parent.parent}'" in text and "push-test-mock-login local" in text
+
+
+def test_local_refuses_naming_the_missing_variable():
+    one = vm( "install-refresh-cron", "local", env={ "PLANNING_IS_PROMPTING_ROOT": "/p" } )
+    assert one.returncode == 1 and "needs DEEPILY_DATA_DIR" in one.stderr
+    two = vm( "install-refresh-cron", "local", env={ "DEEPILY_DATA_DIR": "/d" } )
+    assert two.returncode == 1 and "needs PLANNING_IS_PROMPTING_ROOT" in two.stderr
+
+
+def test_a_host_other_than_local_or_vm_is_refused():
+    done = vm( "install-refresh-cron", "mars" )
+    assert done.returncode == 1 and "takes local or vm, not 'mars'" in done.stderr
+
+
+def test_the_usage_lists_the_verb():
+    assert "install-refresh-cron [local|vm]" in vm( "help" ).stdout + vm( "help" ).stderr
+
+
+# ── deploy refreshes the sibling planning-is-prompting copy ──
+
+
+def pip_repo( tmp_path ):
+    repo = tmp_path / "pip"
+    repo.mkdir()
+    subprocess.run( [ "git", "init", "-q", str( repo ) ], check=True )
+    subprocess.run( [ "git", "-C", str( repo ), "-c", "user.email=a@b", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x" ], check=True )
+    return repo
+
+
+def deploy( env ):
+    # LUPIN_SKIP_PREFLIGHT keeps the dry run off the VM; the bundle step is a dry run too.
+    return vm( "deploy", env={ "LUPIN_SKIP_PREFLIGHT": "1", **env } )
+
+
+def test_deploy_pushes_the_local_planning_is_prompting_to_the_vms_sibling_path( tmp_path ):
+    repo = pip_repo( tmp_path )
+    done = deploy( { "PLANNING_IS_PROMPTING_ROOT": str( repo ) } )
+    text = done.stdout + done.stderr
+    assert f"archiving {repo} @ HEAD -> planning-is-prompting.tar.gz" in text
+    assert "refreshing the VM's planning-is-prompting" in text
+
+
+def test_deploy_warns_loudly_when_there_is_no_local_checkout_to_push( tmp_path ):
+    done = deploy( { "PLANNING_IS_PROMPTING_ROOT": str( tmp_path ) } )
+    assert "was NOT refreshed" in done.stdout + done.stderr
+    assert "archiving" not in done.stdout + done.stderr
+    assert "was NOT refreshed" in deploy( {} ).stdout + deploy( {} ).stderr
+
+
+def test_deploy_skips_the_refresh_on_request( tmp_path ):
+    done = deploy( { "PLANNING_IS_PROMPTING_ROOT": str( pip_repo( tmp_path ) ), "LUPIN_SKIP_PIP_SYNC": "1" } )
+    assert "planning-is-prompting sync SKIPPED" in done.stdout + done.stderr and "archiving" not in done.stdout + done.stderr

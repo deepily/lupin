@@ -184,6 +184,15 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           on stdin: they are never in a command line, a log or this verb's output. It says
                           only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
                           file in REUSE_VECTOR_REFRESH_ENV.
+  install-refresh-cron [local|vm]
+                          install the daily reuse-vector refresh cron lines on this host (local, the
+                          default) or on the VM (vm), with nothing set by hand. On the VM it sets
+                          LUPIN_ROOT, DEEPILY_DATA_DIR and PLANNING_IS_PROMPTING_ROOT from the known VM
+                          paths; locally it needs the last two already set, and says which is missing.
+                          The cron lines carry both, because cron never reads ~/.bashrc. The installer
+                          refuses, writing nothing, if no Python on the host can import the job. Warns
+                          if ~/.lupin/reuse-vector-refresh.env is absent (push-test-mock-login writes it).
+                          Ends by printing the cron status. A person runs it, never a Claude seat.
 
 Env: LUPIN_GCP_PROJECT_ID (required), LUPIN_VM_NAME, LUPIN_VM_ZONE
 
@@ -700,6 +709,20 @@ case "$SUBCMD" in
         #    deploy target must mirror the branch and may have drifted). Preserves untracked
         #    data/env/keys — no git clean.
         do_push_bundle "$DEPLOY_BRANCH" "reset"
+        # 1b. The VM's planning-is-prompting copy is a push-repo snapshot, and the refresh cron's lock module
+        #     (workflow/scripts/crontab_lock.py) arrived in it after the first snapshot. Refresh it from the
+        #     local checkout at its HEAD. A failure is a loud warning, not a stop: the app deploy is unaffected.
+        #     LUPIN_SKIP_PIP_SYNC=1 skips it.
+        if [ "${LUPIN_SKIP_PIP_SYNC:-0}" = "1" ]; then
+            log "planning-is-prompting sync SKIPPED (LUPIN_SKIP_PIP_SYNC=1)"
+        elif [ -z "${PLANNING_IS_PROMPTING_ROOT:-}" ] || [ ! -d "$PLANNING_IS_PROMPTING_ROOT/.git" ]; then
+            log "WARN: PLANNING_IS_PROMPTING_ROOT is not a git checkout here, so the VM's planning-is-prompting copy was NOT refreshed"
+        else
+            log "refreshing the VM's planning-is-prompting from $PLANNING_IS_PROMPTING_ROOT @ $( git -C "$PLANNING_IS_PROMPTING_ROOT" rev-parse --short HEAD )"
+            PIP_SYNC_ARGS=( push-repo "$PLANNING_IS_PROMPTING_ROOT" "$( basename "$VM_PIP_ROOT" )" )
+            [ "$DRY_RUN" -eq 1 ] && PIP_SYNC_ARGS=( --dry-run "${PIP_SYNC_ARGS[@]}" )
+            bash "${BASH_SOURCE[0]}" "${PIP_SYNC_ARGS[@]}" || log "WARN: the planning-is-prompting refresh FAILED; the VM copy may be stale (the refresh cron needs its crontab_lock.py)"
+        fi
         # 2-4. restart both servers, then verify. `systemctl --user` needs XDG_RUNTIME_DIR wired
         #      up for the non-interactive SSH session; the arbiter bounce is best-effort (a failure
         #      is warned, not fatal) and the :8001 /health probe is the real proof it came back.
@@ -1297,6 +1320,38 @@ $RCMD_TM"
             fi
             unset tm_email tm_password
             log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
+        fi
+        ;;
+
+    install-refresh-cron)
+        # The one command that installs the reuse-vector refresh cron. Cron and a non-interactive ssh shell never read
+        # ~/.bashrc, so the variables the job needs are set here, from known paths, not from the caller's shell.
+        require_project
+        IR_WHERE="${1:-local}"
+        case "$IR_WHERE" in local|vm) ;; *) die "install-refresh-cron takes local or vm, not '$IR_WHERE'" ;; esac
+        if [ "$IR_WHERE" = vm ]; then
+            IR_ROOT="$VM_ROOT"; IR_DATA="$VM_DEEPILY_DATA_DIR"; IR_PIP="$VM_PIP_ROOT"
+        else
+            IR_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
+            IR_DATA="${DEEPILY_DATA_DIR:-}"; IR_PIP="${PLANNING_IS_PROMPTING_ROOT:-}"
+            [ -n "$IR_DATA" ] || die "install-refresh-cron local needs DEEPILY_DATA_DIR set, so the cron lines can carry it"
+            [ -n "$IR_PIP" ] || die "install-refresh-cron local needs PLANNING_IS_PROMPTING_ROOT set, so the cron lines can carry it"
+        fi
+        RCMD_IR="set -e
+export LUPIN_ROOT='$IR_ROOT' DEEPILY_DATA_DIR='$IR_DATA' PLANNING_IS_PROMPTING_ROOT='$IR_PIP'
+[ -r \"\$HOME/.lupin/reuse-vector-refresh.env\" ] || echo \"WARN: \$HOME/.lupin/reuse-vector-refresh.env is missing, so the refresh cannot log in; run lupin-vm.sh push-test-mock-login $IR_WHERE\"
+cd '$IR_ROOT'
+bash src/scripts/reuse-vector-refresh.sh --install
+bash src/scripts/reuse-vector-refresh.sh --status"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would run on the $IR_WHERE host:"
+            printf '%s\n' "$RCMD_IR" | sed 's/^/    /'
+        elif [ "$IR_WHERE" = vm ]; then
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE --command "$RCMD_IR"
+        else
+            bash -c "$RCMD_IR"
         fi
         ;;
 

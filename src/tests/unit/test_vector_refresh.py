@@ -248,6 +248,23 @@ def test_the_cron_lines_are_tagged_inside_the_window_and_the_reboot_line_starts_
     assert lt.CRON_SCHEDULE.split()[ 1 ] == "10" and vr.CRON_SCHEDULE.split()[ 1 ] == "10"
 
 
+def test_carried_env_keeps_only_the_set_nonempty_host_settings():
+    assert vr.carried_env( { "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p", "HOME": "/h" } ) == { "DEEPILY_DATA_DIR": "/d", "PLANNING_IS_PROMPTING_ROOT": "/p" }
+    assert vr.carried_env( { "DEEPILY_DATA_DIR": "", "HOME": "/h" } ) == {}
+
+
+def test_the_cron_lines_carry_the_data_dir_and_the_lock_root_so_a_cron_run_sees_what_the_install_saw():
+    carried = { "DEEPILY_DATA_DIR": "/mnt/d", "PLANNING_IS_PROMPTING_ROOT": "/mnt/p" }
+    for line in vr.cron_lines( "/main", "/py", "/log", "/e", carried ):
+        assert "LUPIN_ROOT=/main DEEPILY_DATA_DIR=/mnt/d PLANNING_IS_PROMPTING_ROOT=/mnt/p REUSE_VECTOR_REFRESH_PYTHON=/py" in line
+    assert "DEEPILY_DATA_DIR" not in vr.cron_lines( "/main", "/py", "/log", "/e" )[ 0 ]
+
+
+def test_print_install_carries_the_callers_data_dir_into_both_lines( world ):
+    rc, out, _ = run_main( world, [ "--print-install" ], environ={ "DEEPILY_DATA_DIR": "/mnt/d", "PLANNING_IS_PROMPTING_ROOT": "/mnt/p" } )
+    assert rc == 0 and out.count( "DEEPILY_DATA_DIR=/mnt/d PLANNING_IS_PROMPTING_ROOT=/mnt/p" ) == 2
+
+
 def test_the_env_file_is_under_the_home_folder_and_falls_back_to_the_users_home( monkeypatch ):
     assert vr.env_file_path( { "HOME": "/h" } ) == "/h/.lupin/reuse-vector-refresh.env"
     monkeypatch.setattr( vr.os.path, "expanduser", lambda p: "/fallback" )
