@@ -382,20 +382,24 @@ def check_ceiling( ceiling, estimated ):
     return ceiling
 
 
-def derive_needs( frozen_path, frozen_sha, count, seed ):
+def derive_needs( frozen_path, frozen_sha, count, seed, known=None ):
     """
     Pick the band fit's needs from the frozen end-to-end needs by a seed.
 
     Requires:
         - frozen_path names the frozen end-to-end needs file and frozen_sha is its sha256; count is a whole number of at least the flip driver's minimum
         - seed is a non-empty string written down before the pick
+        - known is the set of sendable entry ids of the current index, or None to skip no member (a caller that has no index to ask)
     Ensures:
-        - returns { format, needs } in the flip needs format, ordered by the sha256 of seed, a colon and the member id
+        - returns { format, needs, skipped } in the flip needs format, ordered by the sha256 of seed, a colon and the member id
+        - a member that is not in known is left out before the pick, so the count is taken from the sendable members in seed order
+        - skipped lists the id of each left-out member in seed order, and is empty when known is None or every member is sendable
         - ids are b01, b02 and so on in that order; each need is a duplicate-kind need with its own member left out, as the end-to-end run asked it
         - the reserved fresh-needs file is refused by its hash before it is opened, as the shared reader does for every caller
     Raises:
         - FrozenInputRefused for a wrong hash or format, a repeated member or need text, or an empty need
         - DriverRefused for an empty seed or a count above the number of needs, or under the flip driver's minimum
+        - DriverRefused when the sendable members are fewer than count, naming how many were skipped
     """
     if not isinstance( seed, str ) or not seed.strip(): raise s1.DriverRefused( "the seed is a non-empty string written down before the pick" )
     record = e2e._read_checked( frozen_path, frozen_sha, "frozen needs file" )
@@ -404,9 +408,13 @@ def derive_needs( frozen_path, frozen_sha, count, seed ):
     if len( { r[ "member" ] for r in rows } ) != len( rows ) or len( { r[ "need" ] for r in rows } ) != len( rows ): raise e2e.FrozenInputRefused( "the frozen needs repeat a member or a need text" )
     if any( not isinstance( r[ "need" ], str ) or not r[ "need" ].strip() for r in rows ): raise e2e.FrozenInputRefused( "the frozen needs hold an empty need" )
     if not rf.MIN_NEEDS <= count <= len( rows ): raise s1.DriverRefused( f"the pick takes between {rf.MIN_NEEDS} and {len( rows )} needs, got {count!r}" )
-    ranked = sorted( rows, key=lambda r: hashlib.sha256( f"{seed}:{r[ 'member' ]}".encode( "utf-8" ) ).hexdigest() )[ :count ]
+    ordered = sorted( rows, key=lambda r: hashlib.sha256( f"{seed}:{r[ 'member' ]}".encode( "utf-8" ) ).hexdigest() )
+    skipped = [] if known is None else [ r[ "member" ] for r in ordered if r[ "member" ] not in known ]
+    ranked  = [ r for r in ordered if r[ "member" ] not in skipped ]
+    if len( ranked ) < count: raise s1.DriverRefused( f"only {len( ranked )} of {len( rows )} frozen members are sendable entries of the current index ({len( skipped )} skipped), under the {count} asked" )
     return { "format": frun.NEEDS_FORMAT,
-             "needs": [ { "id": f"b{n:02d}", "need": r[ "need" ].strip(), "kind": "duplicate", "exclude": r[ "member" ] } for n, r in enumerate( ranked, 1 ) ] }
+             "needs": [ { "id": f"b{n:02d}", "need": r[ "need" ].strip(), "kind": "duplicate", "exclude": r[ "member" ] } for n, r in enumerate( ranked[ :count ], 1 ) ],
+             "skipped": skipped }
 
 
 def _parser():
@@ -414,7 +422,7 @@ def _parser():
     ap  = argparse.ArgumentParser( description=__doc__ )
     sub = ap.add_subparsers( dest="command", required=True )
     p   = sub.add_parser( "derive-needs" )
-    for flag in ( "--frozen", "--frozen-sha", "--seed", "--out" ): p.add_argument( flag, required=True )
+    for flag in ( "--frozen", "--frozen-sha", "--seed", "--out", "--root", "--data" ): p.add_argument( flag, required=True )
     p.add_argument( "--count", type=int, default=rf.MIN_NEEDS )
     for name in ( "estimate", "canary", "approve", "run", "report" ):
         p = sub.add_parser( name )
@@ -451,6 +459,7 @@ def main( argv=None, stage_factory=None ):
         - stage_factory is None for the live candidate stage of the tree, or a function of the tree's path for a stand-in run
     Ensures:
         - derive-needs picks the needs from the frozen end-to-end needs by a seed and writes them once, printing the file's sha256
+        - derive-needs leaves out the frozen members that are not sendable entries of the index of --root, and records their ids in the file under skipped
         - estimate prints the token estimate for the needs file's own count and sends nothing
         - canary asks the first five needs, approve records that a person read it, run asks the rest, and both stamp their result files with the stage
         - report writes the receipt under a name that must not exist, and prints the band
@@ -460,9 +469,11 @@ def main( argv=None, stage_factory=None ):
     """
     args  = _parser().parse_args( argv )
     if args.command == "derive-needs":
-        record = derive_needs( args.frozen, args.frozen_sha, args.count, args.seed )
+        known = frun.sendable_ids( pathlib.Path( args.root ), pathlib.Path( args.data ) )
+        if known is None: raise s1.DriverRefused( f"the index of {args.root} cannot be read, so the frozen members cannot be checked against it" )
+        record = derive_needs( args.frozen, args.frozen_sha, args.count, args.seed, known )
         write_once( args.out, record )
-        print( f"{len( record[ 'needs' ] )} needs from {args.frozen_sha} by seed {args.seed!r}; sha256 {hashlib.sha256( pathlib.Path( args.out ).read_bytes() ).hexdigest()}" )
+        print( f"{len( record[ 'needs' ] )} needs from {args.frozen_sha} by seed {args.seed!r}, {len( record[ 'skipped' ] )} members skipped as not sendable; sha256 {hashlib.sha256( pathlib.Path( args.out ).read_bytes() ).hexdigest()}" )
         return 0
     items = frun.load_flip_needs( args.needs, args.needs_sha )
     spent = estimate( len( items ) )

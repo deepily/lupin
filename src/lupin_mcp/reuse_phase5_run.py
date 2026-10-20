@@ -279,6 +279,8 @@ def _parser():
     """Ensures: returns the command line parser."""
     ap  = argparse.ArgumentParser( description=__doc__ )
     sub = ap.add_subparsers( dest="command", required=True )
+    p = sub.add_parser( "check" )
+    for flag in ( "--projects-data", "--needs-sha", "--root", "--data" ): p.add_argument( flag, required=True )
     for name in ( "estimate", "sample", "sweep", "canary", "approve", "run", "report" ):
         p = sub.add_parser( name )
         p.add_argument( "--projects-data", required=True )
@@ -305,6 +307,7 @@ def main( argv=None ):
     Run one step of the fresh-needs confirmation.
 
     Ensures:
+        - check sends nothing: it prints each need whose excluded symbol is not a sendable entry of the index of --root, and returns 2 when there is one
         - estimate prints the three parts for the file's own count of needs; sample records the seed, members, arm and index once and prints the record
         - sweep, canary, approve, run and report need the recorded sample first, so a step that spends is refused without it
         - canary, approve, run and report hand the flip driver the fixed settings and return its code, 2 after a refusal of its own
@@ -320,6 +323,12 @@ def main( argv=None ):
     if args.command == "estimate":
         print( "\n".join( estimate_lines( parts, len( items ) ) ) )
         return 0
+    if args.command == "check":
+        known = frun.sendable_ids( Path( args.root ), Path( args.data ) )
+        if known is None: raise s1.DriverRefused( f"the index of {args.root} cannot be read, so the fresh needs cannot be checked against it" )
+        stale = frun.stale_excludes( items, known )
+        print( f"{len( items ) - len( stale )} of {len( items )} needs leave out a sendable entry or none" + ( f"; not sendable: {', '.join( stale )}" if stale else "" ) )
+        return 2 if stale else 0
     if args.command == "sample":
         print( json.dumps( write_sample( args.data, items, args ), sort_keys=True ) )
         return 0

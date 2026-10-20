@@ -156,6 +156,33 @@ def _check_options( args ):
     return prefixes[ 0 ]
 
 
+def sendable_ids( root, data ):
+    """
+    Read the ids of the entries the sweep sends for a tree.
+
+    Requires:
+        - root is the tree the run asks about; data is the run's data directory
+    Ensures:
+        - returns the set of sendable entry ids of the current index
+        - returns None when the tree is not one it can read: not a Lupin tree, or an index that cannot be made current
+    """
+    flags, entries = rt.prepare( rt.ReuseContext( root, data ) )[ :2 ]
+    if flags & { "NOT_LUPIN_TREE", "INDEX_STALE" }: return None
+    return { e[ "id" ] for e in entries }
+
+
+def stale_excludes( items, known ):
+    """
+    Name the needs whose excluded symbol is not among the known entry ids.
+
+    Requires:
+        - items are the needs file's items; known is the set sendable_ids returned
+    Ensures:
+        - returns [ "<member> (<excluded id>)" ] in file order; a need with no excluded symbol is never named
+    """
+    return [ f"{item[ 'member' ]} ({item[ 'exclude' ]})" for item in items if item[ "exclude" ] is not None and item[ "exclude" ] not in known ]
+
+
 def check_excludes( items, root, data ):
     """
     Refuse before any spend a need whose excluded symbol the sweep would not know.
@@ -168,10 +195,9 @@ def check_excludes( items, root, data ):
     Raises:
         - DriverRefused naming each need and its excluded id that is not a sendable entry
     """
-    flags, entries = rt.prepare( rt.ReuseContext( root, data ) )[ :2 ]
-    if flags & { "NOT_LUPIN_TREE", "INDEX_STALE" }: return None
-    known   = { e[ "id" ] for e in entries }
-    missing = [ f"{item[ 'member' ]} ({item[ 'exclude' ]})" for item in items if item[ "exclude" ] is not None and item[ "exclude" ] not in known ]
+    known = sendable_ids( root, data )
+    if known is None: return None
+    missing = stale_excludes( items, known )
     if missing: raise s1.DriverRefused( f"excluded symbol is not a sendable entry of this index, so the need would end UNKNOWN_ENTRY: {', '.join( missing )}" )
 
 

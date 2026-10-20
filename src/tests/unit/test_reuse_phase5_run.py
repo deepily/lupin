@@ -133,6 +133,32 @@ def test_estimate_command_prints_the_parts_for_the_files_own_count( scratch, cap
     assert "run: 368.0 M tokens" in out and "total: 454.0 M tokens" in out
 
 
+def check_args( scratch ): return [ "check", "--projects-data", scratch.projects_data, "--needs-sha", scratch.sha, "--root", str( scratch.root ), "--data", str( scratch.data ) ]
+
+
+def test_check_passes_when_every_excluded_symbol_is_a_sendable_entry_and_sends_nothing( scratch, capsys ):
+    before = scratch.ledger.read_text( encoding="utf-8" )
+    assert p5.cli( check_args( scratch ) ) == 0
+    assert "30 of 30 needs leave out a sendable entry or none" in capsys.readouterr().out
+    assert scratch.ledger.read_text( encoding="utf-8" ) == before and not ( scratch.data / "e2e-results" ).exists()
+
+
+def test_check_names_each_need_whose_excluded_symbol_the_index_lacks_and_returns_2( scratch, capsys, monkeypatch ):
+    rows = rows_of( 30 )
+    rows[ 4 ][ "exclude" ] = "cosa.wide.removed_by_the_refactor"
+    folder = Path( scratch.projects_data ) / p5.FRESH_NEEDS_DIR
+    scratch.sha = put( folder / p5.FRESH_NEEDS_NAME, { "format": frun.NEEDS_FORMAT, "needs": rows } )
+    monkeypatch.setattr( e2e, "FRESH_SHA_PREFIX", scratch.sha[ :8 ] )
+    assert p5.cli( check_args( scratch ) ) == 2
+    assert "29 of 30 needs" in ( out := capsys.readouterr().out ) and "n04 (cosa.wide.removed_by_the_refactor)" in out
+
+
+def test_check_refuses_an_index_it_cannot_read( scratch, capsys, tmp_path ):
+    args = check_args( scratch )
+    args[ args.index( "--root" ) + 1 ] = str( tmp_path / "not-a-tree" )
+    assert p5.cli( args ) == 2 and "cannot be read" in capsys.readouterr().err
+
+
 def test_sample_is_recorded_once_with_arm_and_index_and_the_same_call_repeats( scratch, capsys ):
     assert scratch.sample() == 0
     first = json.loads( capsys.readouterr().out )

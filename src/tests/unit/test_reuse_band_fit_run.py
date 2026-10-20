@@ -400,10 +400,48 @@ def test_the_frozen_file_is_checked_by_hash_format_repeats_and_empty_needs( tmp_
     with pytest.raises( e2e.FrozenInputRefused, match="empty" ): bf.derive_needs( *frozen_file( tmp_path, rows[ :99 ] + [ { **rows[ 99 ], "need": "  " } ] )[ :2 ], 30, "s" )
 
 
-def test_the_derive_command_writes_a_file_the_flip_reader_accepts_and_never_overwrites_it( tmp_path, capsys ):
-    path, sha, _ = frozen_file( tmp_path )
+def test_members_that_are_not_sendable_entries_are_skipped_before_the_pick_and_named_in_seed_order( tmp_path ):
+    import hashlib
+    path, sha, rows = frozen_file( tmp_path )
+    order   = sorted( ( r[ "member" ] for r in rows ), key=lambda m: hashlib.sha256( f"s:{m}".encode() ).hexdigest() )
+    gone    = { order[ 0 ], order[ 5 ], order[ 40 ] }                                  # two inside the first 30 of the seed order and one outside
+    known   = { r[ "member" ] for r in rows } - gone
+    picked  = bf.derive_needs( path, sha, 30, "s", known )
+    want    = [ m for m in order if m in known ][ :30 ]
+    assert [ n[ "exclude" ] for n in picked[ "needs" ] ] == want and not gone & set( want )
+    assert picked[ "skipped" ] == [ m for m in order if m in gone ] and bf.derive_needs( path, sha, 30, "s" )[ "skipped" ] == []
+    assert bf.derive_needs( path, sha, 30, "s", { r[ "member" ] for r in rows } )[ "skipped" ] == []
+
+
+def test_a_pick_with_too_few_sendable_members_is_refused_and_says_how_many_were_skipped( tmp_path ):
+    path, sha, rows = frozen_file( tmp_path )
+    known = { r[ "member" ] for r in rows[ :29 ] }
+    with pytest.raises( s1.DriverRefused, match=r"only 29 of 100 .* \(71 skipped\), under the 30 asked" ): bf.derive_needs( path, sha, 30, "s", known )
+
+
+def test_the_derive_command_skips_members_the_index_lacks_and_records_them_in_the_file( tmp_path, capsys, monkeypatch ):
+    path, sha, rows = frozen_file( tmp_path )
+    gone = { rows[ 3 ][ "member" ], rows[ 4 ][ "member" ] }
+    monkeypatch.setattr( frun, "sendable_ids", lambda root, data: { r[ "member" ] for r in rows } - gone )
     out  = tmp_path / "picked.json"
-    args = [ "derive-needs", "--frozen", str( path ), "--frozen-sha", sha, "--seed", "s", "--out", str( out ) ]
+    assert bf.cli( [ "derive-needs", "--frozen", str( path ), "--frozen-sha", sha, "--seed", "s", "--out", str( out ), "--root", "r", "--data", "d" ] ) == 0
+    written = json.loads( out.read_text( encoding="utf-8" ) )
+    assert sorted( written[ "skipped" ] ) == sorted( gone ) and not gone & { n[ "exclude" ] for n in written[ "needs" ] } and "2 members skipped" in capsys.readouterr().out
+
+
+def test_the_derive_command_refuses_an_index_it_cannot_read( tmp_path, capsys, monkeypatch ):
+    path, sha, _ = frozen_file( tmp_path )
+    monkeypatch.setattr( frun, "sendable_ids", lambda root, data: None )
+    out = tmp_path / "picked.json"
+    assert bf.cli( [ "derive-needs", "--frozen", str( path ), "--frozen-sha", sha, "--seed", "s", "--out", str( out ), "--root", "r", "--data", "d" ] ) == 2
+    assert "cannot be read" in capsys.readouterr().err and not out.exists()
+
+
+def test_the_derive_command_writes_a_file_the_flip_reader_accepts_and_never_overwrites_it( tmp_path, capsys, monkeypatch ):
+    path, sha, rows = frozen_file( tmp_path )
+    monkeypatch.setattr( frun, "sendable_ids", lambda root, data: { r[ "member" ] for r in rows } )
+    out  = tmp_path / "picked.json"
+    args = [ "derive-needs", "--frozen", str( path ), "--frozen-sha", sha, "--seed", "s", "--out", str( out ), "--root", "r", "--data", "d" ]
     assert bf.cli( args ) == 0
     text = capsys.readouterr().out
     import hashlib

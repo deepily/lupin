@@ -334,6 +334,18 @@ def test_the_exclude_check_names_every_missing_symbol_and_passes_a_tree_it_canno
     assert frun.check_excludes( items, tmp_path / "not-a-tree", tmp_path / "d2" ) is None
 
 
+def test_the_sendable_ids_are_the_entries_the_sweep_sends_and_a_tree_it_cannot_read_is_none( setup, tmp_path ):
+    known = frun.sendable_ids( setup.root, setup.data )
+    assert IDS[ 0 ] in known and "cosa.wide.nope" not in known and len( known ) >= len( IDS ) - 5
+    assert frun.sendable_ids( tmp_path / "not-a-tree", tmp_path / "d3" ) is None
+
+
+def test_the_stale_excludes_name_a_need_in_file_order_and_never_one_without_an_excluded_symbol():
+    items = [ { "member": "a", "exclude": "x" }, { "member": "b", "exclude": None }, { "member": "c", "exclude": "y" }, { "member": "d", "exclude": "x" } ]
+    assert frun.stale_excludes( items, { "y" } ) == [ "a (x)", "d (x)" ] and frun.stale_excludes( items, set() ) == [ "a (x)", "c (y)", "d (x)" ]
+    assert frun.stale_excludes( items, { "x", "y" } ) == []
+
+
 def test_a_row_written_before_the_question_was_recorded_reads_as_the_old_question():
     old_shape = [ { "member": "n00", "question": f"r{i}", "status": "complete", "rows": [ { "repeat": i, "route": "full", "verdict": "NEW", "shortlist": [] } ] } for i in range( 1, 6 ) ]
     items     = [ { "member": "n00", "need": "x", "exclude": None, "kind": "distinct" } ]
