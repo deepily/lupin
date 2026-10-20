@@ -16901,6 +16901,8 @@ class NotificationsUI {
         const key      = this._escapeTaskAttr( filer );
         const assignee = filer.startsWith( HOLDING_ASSIGNEE_ID_PREFIX );
         const label    = this.escapeHtml( assignee ? filer.slice( HOLDING_ASSIGNEE_ID_PREFIX.length ) : filer );
+        // How the batch tooltips say whose rows these are: "Rachel filed", or "assigned to Rachel".
+        const whose    = assignee ? `assigned to ${label}` : `${label} filed`;
         const ianaZone = this.getResolvedTimeZone ? this.getResolvedTimeZone() : undefined;
 
         const planList = Array.isArray( plans ) ? plans : [];
@@ -16925,7 +16927,7 @@ class NotificationsUI {
         const requestBadge  = requestText === "" ? "" : `<span class="task-request-badge holding-area-group-request-badge"`
             + ` role="img" aria-label="${this.escapeHtml( requestLabel )}">${this.escapeHtml( requestText )}</span>`;
 
-        const html = `
+        return `
             <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">
                 <div class="holding-area-group-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
                      title="Click to show or hide this filer's held rows">
@@ -16933,16 +16935,14 @@ class NotificationsUI {
                     <span class="holding-area-filer">${label}</span>
                     <span class="holding-area-group-count">${tasks.length}</span>${requestBadge}
                     <button type="button" class="task-action-btn holding-approve-all" data-filer="${key}"
-                            title="Approve every row ${label} filed — reversible, a row approved by mistake can be demoted straight back">Approve all</button>
+                            title="Approve every row ${whose} — reversible, a row approved by mistake can be demoted straight back">Approve all</button>
                     <button type="button" class="task-action-btn holding-wont-fix-all" data-filer="${key}"
-                            title="Close every row ${label} filed as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ">Won't fix all</button>
+                            title="Close every row ${whose} as won't-fix. TERMINAL, and every row gets the SAME reason — use the per-row control when the reasons differ">Won't fix all</button>
                     <input type="text" class="task-action-input holding-wont-fix-all-reason" data-filer="${key}"
                            placeholder="one reason, applied to every row below…" aria-label="Batch won't-fix reason">
                     <span class="holding-area-group-status" data-filer="${key}"></span>
                 </div>${planHtml}${table}
             </div>`;
-        // The two tooltips above read "<label> filed"; an assignee group's rows were assigned, not filed.
-        return assignee ? html.split( `row ${label} filed` ).join( `row assigned to ${label}` ) : html;
     }
 
     /**

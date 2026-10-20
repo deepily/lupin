@@ -245,3 +245,17 @@ test( "pane: the batch tooltips say 'assigned to' in assignee mode and 'filed' i
   ui._setHoldingGroupBy( "assignee" );
   assert.match( title(), /^Approve every row assigned to Maria — / );
 } );
+
+test( "pane: a row titled 'row Maria filed' keeps its title when the tooltips are reworded", () => {
+  const ui = newUI();
+  const rows = [ held( "33333333-0000-0000-0000-000000000001", "sam 1111aaaa", "maria" ) ];
+  rows[ 0 ].title = "row Maria filed";
+  ui.renderHoldingArea( { status: "", tasks: rows } );
+  ui._setHoldingGroupBy( "assignee" );
+  const group = groupNamed( "Maria" );
+  assert.match( group.querySelector<HTMLElement>( ".holding-approve-all" )!.title, /^Approve every row assigned to Maria — / );
+  assert.match( group.querySelector<HTMLElement>( ".holding-wont-fix-all" )!.title, /^Close every row assigned to Maria as won't-fix\./ );
+  const titles = Array.from( group.querySelectorAll( ".task-col-title" ) ).map( ( e ) => e.textContent );
+  assert.ok( titles.some( ( t ) => t !== null && t.includes( "row Maria filed" ) ), `the row title was rewritten: ${ JSON.stringify( titles ) }` );
+  assert.ok( ! titles.some( ( t ) => t !== null && t.includes( "assigned to" ) ), "the row title was rewritten to 'assigned to'" );
+} );

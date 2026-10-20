@@ -97,7 +97,8 @@ function legacyTitleAfter( marker: string ): string {
   assert.ok( at !== -1, `legacy marker ${ marker } not found in the group renderer` );
   const match = /title="([^"]*)"/.exec( body.slice( at ) );
   assert.ok( match, `no title attribute after ${ marker } in the legacy group renderer` );
-  return match[ 1 ];
+  // The batch tooltips read "${whose}", which is "${label} filed" for a creator group. This pins that wording.
+  return match[ 1 ].replace( "${whose}", "${label} filed" );
 }
 
 function legacyAttr( pattern: RegExp ): string {
