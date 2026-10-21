@@ -633,10 +633,7 @@ fi
 # deploy that is about to run is what ships them.
 DIST_REQUIRED="multiplexer console doc-podcast"
 dist_tier="BLOCK"; [ "$PHASE" = "pre" ] && dist_tier="WARN"
-dist_present=""
-for dist_name in $DIST_REQUIRED; do
-    [ -f "$REPO_ROOT/src/lupin_app/static/dist/$dist_name/manifest.json" ] && dist_present="$dist_present $dist_name"
-done
+dist_present="$( pfv_dist_present "$REPO_ROOT/src/lupin_app/static/dist" "$DIST_REQUIRED" )"
 dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" )"
 case "$dist_status" in
     OK)

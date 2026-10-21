@@ -1005,6 +1005,22 @@ pfv_deployed_ref_status() {
     echo "STALE"; return 1
 }
 
+# ── pfv_dist_present ─────────────────────────────────────────────────────────
+# List the bundles that hold a manifest.json under a dist folder.
+#
+# Requires:
+#   - $1 = the dist folder; $2 = space-separated bundle names to look for
+# Ensures:
+#   - echoes the names whose <dist>/<name>/manifest.json is a regular file, space-separated, in the order given
+#   - a folder with no manifest.json is NOT present: an empty folder serves nothing
+pfv_dist_present() {
+    local dist="$1" name out=""
+    for name in $2; do
+        [ -f "$dist/$name/manifest.json" ] && out="$out $name"
+    done
+    echo "${out# }"
+}
+
 # ── pfv_dist_status ──────────────────────────────────────────────────────────
 # Classify the built esbuild bundles on the VM checkout (bug 527fec6e).
 #

@@ -120,3 +120,51 @@ def test_deploy_runs_push_dist_after_the_code_sync():
     text = VM_SCRIPT.read_text()
     assert text.index( "do_push_bundle \"$DEPLOY_BRANCH\"" ) < text.index( "push-dist" , text.index( "# 1c." ) )
     assert "WARN: push-dist FAILED" in text
+
+
+def test_dist_present_lists_only_bundles_holding_a_manifest_file( tmp_path ):
+    ( tmp_path / "multiplexer" ).mkdir()
+    ( tmp_path / "multiplexer" / "manifest.json" ).write_text( "{}" )
+    ( tmp_path / "console" ).mkdir()
+    ( tmp_path / "doc-podcast" ).mkdir()
+    ( tmp_path / "doc-podcast" / "manifest.json" ).mkdir()
+    done = lib( f'pfv_dist_present "{tmp_path}" "multiplexer console doc-podcast absent"' )
+    assert done.stdout.split() == [ "multiplexer" ]
+
+
+def test_the_preflight_asks_the_lib_which_bundles_are_present():
+    assert 'dist_present="$( pfv_dist_present "$REPO_ROOT/src/lupin_app/static/dist" "$DIST_REQUIRED" )"' in PREFLIGHT.read_text()
+
+
+def stamp( tmp_path, built ):
+    """Give each bundle in a scratch checkout a built time, and one TypeScript source a time."""
+    script = scratch_checkout( tmp_path, declared_bundles() )
+    for name in declared_bundles():
+        ( tmp_path / "src" / "lupin_app" / "static" / "dist" / name / "manifest.json" ).write_text( f'{{ "built" : "{built}" }}' )
+    ts = tmp_path / "src" / "lupin_app" / "static" / "js" / "a.ts"
+    ts.parent.mkdir( parents=True )
+    ts.write_text( "" )
+    when = 1760000000
+    os.utime( ts, ( when, when ) )
+    return script
+
+
+def test_push_dist_prints_each_bundles_build_time_beside_the_newest_source_time( tmp_path ):
+    done = push_dist( stamp( tmp_path, "2026-12-01T00:00:00Z" ), "--dry-run" )
+    text = done.stdout + done.stderr
+    assert done.returncode == 0 and "WARN" not in text
+    for name in declared_bundles():
+        assert f"bundle {name}: built 2026-12-01T00:00:00Z, newest source 2025-10-09T08:53:20Z" in text
+
+
+def test_push_dist_warns_but_still_ships_a_bundle_built_before_the_newest_source( tmp_path ):
+    done = push_dist( stamp( tmp_path, "2025-01-01T00:00:00Z" ), "--dry-run" )
+    text = done.stdout + done.stderr
+    assert done.returncode == 0 and text.count( "WARN: older than the newest source; run npm run build" ) == 3
+    assert "tar -czf dist.tar.gz" in text
+
+
+def test_push_dist_with_no_source_files_says_unknown_and_does_not_warn( tmp_path ):
+    done = push_dist( scratch_checkout( tmp_path, declared_bundles() ), "--dry-run" )
+    text = done.stdout + done.stderr
+    assert "newest source unknown" in text and "WARN" not in text and "built unknown" in text

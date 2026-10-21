@@ -189,7 +189,8 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
                           file in REUSE_VECTOR_REFRESH_ENV.
   push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
-                          checkout to the VM checkout, which git cannot carry. Refuses, sending nothing, naming
+                          checkout to the VM checkout, which git cannot carry. Prints each bundle's build time beside the newest
+                          source time, warning only. Refuses, sending nothing, naming
                           any bundle not built here (npm run build). deploy runs it after the code sync.
   install-refresh-cron [local|vm]
                           install the daily reuse-vector refresh cron lines on this host (local, the
@@ -1346,6 +1347,16 @@ $RCMD_TM"
             [ -f "$PD_LOCAL/$PD_B/manifest.json" ] || PD_MISSING="$PD_MISSING $PD_B"
         done
         [ -z "$PD_MISSING" ] || die "push-dist: not built in $PD_LOCAL:$PD_MISSING (run: npm run build). Nothing was sent."
+        # Say how fresh each bundle is beside the newest TypeScript source (a warning only, never a refusal: a file's
+        # modified time says when it was saved, not whether the bundle matches it).
+        PD_SRC_NEWEST="$( find "$PD_LOCAL/../js" -name '*.ts' -printf '%T@\n' 2>/dev/null | sort -n | tail -1 || true )"
+        PD_SRC_TIME="$( [ -n "$PD_SRC_NEWEST" ] && date -u -d "@${PD_SRC_NEWEST%.*}" +%Y-%m-%dT%H:%M:%SZ || echo unknown )"
+        for PD_B in $DIST_BUNDLES; do
+            PD_BUILT="$( sed -n 's/.*"built"[^"]*"\([^"]*\)".*/\1/p' "$PD_LOCAL/$PD_B/manifest.json" )"
+            PD_NOTE=""
+            [ -n "$PD_BUILT" ] && [ "$PD_SRC_TIME" != unknown ] && [[ "$PD_BUILT" < "$PD_SRC_TIME" ]] && PD_NOTE="  WARN: older than the newest source; run npm run build"
+            log "bundle $PD_B: built ${PD_BUILT:-unknown}, newest source $PD_SRC_TIME$PD_NOTE"
+        done
         PD_DEST="$VM_ROOT/src/lupin_app/static/dist"
         if [ "$DRY_RUN" -eq 1 ]; then
             log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
