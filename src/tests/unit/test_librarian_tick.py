@@ -633,9 +633,32 @@ def mobile_corpus( **over ):
     return { "root": MOBILE_ROOT, "wiki_dir": MOBILE_ROOT + "/src/docs/wiki", "index_dir": "/idx/lupin-mobile", "owner": "tiffany", "manager": "tiffany", **over }
 
 
-def test_read_mobile_corpus_is_off_until_the_root_is_set():
-    assert lt.read_mobile_corpus( reader=lambda k: None ) is None
-    assert lt.read_mobile_corpus( reader=lambda k: "  " ) is None
+def test_read_mobile_corpus_is_off_when_the_root_is_blank_and_no_sibling_folder_exists( tmp_path ):
+    ( tmp_path / "lupin" ).mkdir()
+    assert lt.read_mobile_corpus( reader=lambda k: None, lupin_root=str( tmp_path / "lupin" ) ) is None
+    assert lt.read_mobile_corpus( reader=lambda k: "  ", lupin_root=str( tmp_path / "lupin" ) ) is None
+
+
+def test_a_blank_root_defaults_to_the_lupin_mobile_sibling_of_the_lupin_checkout( tmp_path ):
+    ( tmp_path / "lupin" ).mkdir()
+    ( tmp_path / "lupin-mobile" ).mkdir()
+    corpus = lt.read_mobile_corpus( reader=lambda k: None, lupin_root=str( tmp_path / "lupin" ) )
+    assert corpus[ "root" ] == str( tmp_path / "lupin-mobile" ) and corpus[ "wiki_dir" ] == str( tmp_path / "lupin-mobile" / "src" / "docs" / "wiki" )
+    assert corpus[ "owner" ] == "tiffany" and corpus[ "index_dir" ] is None
+
+
+def test_a_blank_root_without_lupin_root_derives_the_sibling_from_the_project_root( tmp_path, monkeypatch ):
+    import cosa.utils.util as cu
+    ( tmp_path / "lupin" ).mkdir()
+    ( tmp_path / "lupin-mobile" ).mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path / "lupin" ) )
+    assert lt.read_mobile_corpus( reader=lambda k: None )[ "root" ] == str( tmp_path / "lupin-mobile" )
+
+
+def test_a_configured_root_wins_over_the_sibling_default( tmp_path ):
+    ( tmp_path / "lupin" ).mkdir()
+    ( tmp_path / "lupin-mobile" ).mkdir()
+    assert lt.read_mobile_corpus( reader={ lt.MOBILE_ROOT_KEY: "/elsewhere" }.get, lupin_root=str( tmp_path / "lupin" ) )[ "root" ] == "/elsewhere"
 
 
 def test_read_mobile_corpus_defaults_the_owner_to_tiffany_the_manager_to_the_owner_and_the_index_to_none():
@@ -762,8 +785,23 @@ def test_main_runs_the_mobile_corpus_with_its_own_pending_file_and_reports_it( c
 
 
 def test_main_logs_that_the_mobile_corpus_is_skipped_when_its_root_is_not_set( cron, tmp_path, monkeypatch, pipeline ):
+    monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: None )
     code, out, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch, make_librarian=lambda env, p, log: FakeLibrarian(),
-                             export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+                             export_fn=lambda rows, path: report(), enabled_fn=lambda: True, mobile_corpus_fn=None )
     assert code == 0 and "lupin_mobile" not in json.loads( out )
     log = ( tmp_path / "data" / "repo" / "reuse-review" / "librarian" / lt.LOG_NAME ).read_text()
-    assert f"lupin-mobile corpus skipped: {lt.MOBILE_ROOT_KEY} is not set" in log
+    assert f"lupin-mobile corpus skipped: {lt.MOBILE_ROOT_KEY} is not set and no lupin-mobile folder sits beside {tmp_path / 'repo'}" in log
+
+
+def test_main_runs_the_sibling_lupin_mobile_when_the_root_key_is_blank( cron, tmp_path, monkeypatch, pipeline ):
+    ( tmp_path / "lupin-mobile" / "src" / "docs" / "wiki" / "capabilities" ).mkdir( parents=True )
+    ( tmp_path / "lupin-mobile" / "src" / "docs" / "wiki" / "capabilities" / "m.md" ).write_text( "# m\n" )
+    monkeypatch.setattr( lt, "read_value", lambda key, reader=None, errors=None: None )
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    seen = []
+    out, err = io.StringIO(), io.StringIO()
+    code = lt.main( [ "--force", "--root", str( tmp_path / "repo" ), "--python", "/py" ], environ=cron[ "env" ], now=NOON, out=out, err=err,
+                    crontab_cmd=cron[ "cmd" ], make_librarian=lambda env, p, log: FakeLibrarian(), export_fn=lambda r, p: report(),
+                    enabled_fn=lambda: True,
+                    make_mobile_librarian=lambda corpus, env, p, log: seen.append( corpus[ "root" ] ) or FakeLibrarian() )
+    assert code == 0 and seen == [ str( tmp_path / "lupin-mobile" ) ] and "lupin_mobile" in json.loads( out.getvalue() )

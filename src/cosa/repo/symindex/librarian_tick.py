@@ -64,6 +64,7 @@ MOBILE_OWNER_KEY    = "wiki librarian mobile owner persona"
 MOBILE_MANAGER_KEY  = "wiki librarian mobile accountable manager"
 MOBILE_PENDING_NAME = "pending-lupin-mobile.jsonl"
 MOBILE_PERSONA      = "tiffany"
+MOBILE_REPO_NAME    = "lupin-mobile"
 
 MISSES_NAME      = "misses.jsonl"
 PAGE_LIMIT       = 500
@@ -153,22 +154,27 @@ def read_persona( key, reader=None, default=DEFAULT_PERSONA ):
     return ( read_value( key, reader ) or "" ).strip() or default
 
 
-def read_mobile_corpus( reader=None ):
+def read_mobile_corpus( reader=None, lupin_root=None ):
     """
     Read the settings of the lupin-mobile corpus.
 
     Requires:
         - reader is a callable ( key ) returning a string or None, or None for the live disk reader
+        - lupin_root is the lupin checkout path, or None for cu.get_project_root()
 
     Ensures:
-        - returns None when `wiki librarian mobile repo root` is absent or blank, which switches the corpus off
+        - a blank or absent `wiki librarian mobile repo root` defaults to the lupin-mobile folder beside the lupin checkout
+        - returns None when that default folder does not exist, which skips the corpus; a configured root is taken as given
         - otherwise returns a dict with root, wiki_dir ( <root>/src/docs/wiki ), index_dir, owner and manager
         - index_dir is the configured folder, or None when the key is blank, which means the default folder beside the fleet data
         - owner defaults to MOBILE_PERSONA, and manager defaults to the owner
         - never raises
     """
     root = ( read_value( MOBILE_ROOT_KEY, reader ) or "" ).strip()
-    if not root: return None
+    if not root:
+        import cosa.utils.util as cu
+        root = os.path.join( os.path.dirname( os.path.abspath( lupin_root or cu.get_project_root() ) ), MOBILE_REPO_NAME )
+        if not os.path.isdir( root ): return None
     owner = read_persona( MOBILE_OWNER_KEY, reader, MOBILE_PERSONA )
     return { "root": root, "wiki_dir": os.path.join( root, WIKI_SUBPATH ), "owner": owner,
              "index_dir": ( read_value( MOBILE_INDEX_KEY, reader ) or "" ).strip() or None,
@@ -644,9 +650,9 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     librarian = ( make_librarian or _live_librarian )( environ, pending, log )
     from cosa.repo.symindex import vector_status
     check     = lambda: vector_status.check( root, now, librarian=librarian, environ=environ, log=log )
-    corpus    = ( mobile_corpus_fn or read_mobile_corpus )()
+    corpus    = ( mobile_corpus_fn or ( lambda: read_mobile_corpus( lupin_root=root ) ) )()
     mobile    = None
-    if corpus is None: log( f"lupin-mobile corpus skipped: {MOBILE_ROOT_KEY} is not set" )
+    if corpus is None: log( f"lupin-mobile corpus skipped: {MOBILE_ROOT_KEY} is not set and no {MOBILE_REPO_NAME} folder sits beside {root}" )
     else:
         mobile_librarian = ( make_mobile_librarian or _live_mobile_librarian )( corpus, environ, os.path.join( folder, MOBILE_PENDING_NAME ), log )
         mobile           = lambda: run_mobile( corpus, mobile_librarian, log )
