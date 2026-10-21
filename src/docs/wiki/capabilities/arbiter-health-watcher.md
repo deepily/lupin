@@ -10,6 +10,7 @@ pins:
   - lupin_arbiter_app.health_watcher.ContainerHealthTracker@e8b512386a
   - lupin_arbiter_app.health_watcher.RestartLoopTracker@04ab5b97f4
   - lupin_arbiter_app.health_watcher.HealthWatcherLoop@ea1fbeccba
+  - lupin_arbiter_app.poll_loop.run_poll_loop@42cc6fdf79
 ---
 # Arbiter health watcher
 
@@ -25,6 +26,8 @@ This is the container health watch of the 8001 arbiter service. Each poll inspec
 - `docker_inspect_health`, `docker_inspect_restart_count` and `docker_inspect_env` run a time-bounded `docker inspect`. They return None on any failure and never raise.
 - `assess_reload_blindness` reports "blind" when uvicorn reload is on, because the reloader hides worker crashes from `RestartCount`. An env that cannot be read gives "unknown".
 - After several polls in which every inspect fails, the watcher escalates that it is itself blind. `SystemClock` is the time seam.
+
+- `run_poll_loop` in `poll_loop.py` is the loop both arbiter observers share, this one and the context-pressure writer. It polls until `stop` is set and sleeps `interval_seconds` after every poll. A poll that raises is logged as `poll_error` and the loop goes on. It imports only the standard library, so the light venv needs nothing new.
 
 ## Don't
 - Don't read Docker's own health log for transitions. The watcher tracks its own successive observations.
