@@ -6,8 +6,12 @@ so the pile is somebody's owed work instead of nobody's surprise.
 
   * owner / accountable manager: a seat tree `seat-cc-<role>-<manager>-<n>` records its spawning manager
     in its name (session_spawner builds it from the manager's persona slug), and the seat's own persona
-    is gone once the seat is reaped. So both fields name that manager. A tree that records no creator goes
-    to NO_CREATOR_OWNER, who triages it, and the body says "no creator recorded".
+    is gone once the seat is reaped. So both fields name that manager.
+    A branch or tree is resolved by resolve_creator, in this order.
+    First the manager stamped on the branch at reap (git config `branch.<name>.lupin-manager`).
+    Then the creator ledger the PreToolUse hook writes when a worker runs `git worktree add`.
+    Then a seat tree's own name. Last the spawn lineage of a live worker whose persona the name begins with. A name none of them resolves goes to NO_CREATOR_OWNER,
+    who triages it, and the body lists the lookups that were tried.
   * dedupe: correlation key `worktree:<absolute tree path>`, one row per tree.
   * door: a direct repository write, not /api/tasks. The router would mint the row into the holding area,
     where the arbiter can never move it out again, so it could never close its own tickets.
@@ -23,6 +27,7 @@ idle threshold, the earliest a sweep could have refused it. The row body says th
 import json
 import os
 import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
@@ -48,7 +53,164 @@ def straggler_key( path: str ) -> str:
     return STRAGGLER_KEY_PREFIX + os.path.abspath( path )
 
 
-def owner_for_tree( path: str ) -> dict:
+MANAGER_STAMP_KEY = "branch.{branch}.lupin-manager"
+
+
+def _plain_run( argv, cwd=None, timeout=60 ):
+    """Run argv with subprocess; the default git runner of the stamp helpers."""
+    return subprocess.run( argv, cwd=cwd, capture_output=True, text=True, timeout=timeout )
+
+
+def _manager_words( name: str ) -> str:
+    """Return a persona in the store's key shape: "Mr. Radio" gives "mr radio"."""
+    from lupin_mcp.persona_normalization import canonical_persona_key
+    return canonical_persona_key( name.replace( "-", " " ) )
+
+
+def read_stamp( project_root: str, branch: str, run: Optional[ Callable ] = None ) -> Optional[ str ]:
+    """
+    Read the manager stamped on a branch.
+
+    Requires:
+        - project_root is a repository root; run is None or a runner taking ( argv, cwd=, timeout= )
+
+    Ensures:
+        - returns the value of git config `branch.<branch>.lupin-manager` in that repo, or None when it is
+          unset, blank, or git could not be run; never raises
+    """
+    run = run if run is not None else _plain_run
+    try:
+        done = run( [ "git", "config", "--get", MANAGER_STAMP_KEY.format( branch=branch ) ], cwd=project_root, timeout=60 )
+    except Exception:
+        return None
+    value = ( done.stdout or "" ).strip() if done.returncode == 0 else ""
+    return value or None
+
+
+def write_stamp( project_root: str, branch: str, manager: str, run: Optional[ Callable ] = None ) -> bool:
+    """
+    Stamp a branch with the manager that owns it.
+
+    Ensures:
+        - sets git config `branch.<branch>.lupin-manager` to manager; returns True on success
+        - returns False, changing nothing, when git fails; never raises
+        - the stamp is repo config, so it outlives the worktree and the branch's move to refs/archive
+    """
+    run = run if run is not None else _plain_run
+    try:
+        done = run( [ "git", "config", MANAGER_STAMP_KEY.format( branch=branch ), manager ], cwd=project_root, timeout=60 )
+    except Exception:
+        return False
+    return done.returncode == 0
+
+
+def read_creator_record( repo_root: str, tree_path: Optional[ str ], branch: Optional[ str ] ) -> Optional[ str ]:
+    """
+    Read the manager the creator ledger holds for a tree or a branch.
+
+    Requires:
+        - repo_root is the repository the ledger belongs to
+
+    Ensures:
+        - returns the manager recorded for tree_path, else for branch, else None
+        - returns None when the ledger is absent, unreadable or malformed; never raises
+    """
+    from lupin_cli.claude_code.hooks.lib.worktree_creator_record import ledger_path
+    try:
+        with open( ledger_path( repo_root ) ) as f: data = json.load( f )
+        for table, key in ( ( "trees", tree_path ), ( "branches", branch ) ):
+            entry = data[ table ].get( key ) if key else None
+            if isinstance( entry, dict ) and isinstance( entry.get( "manager" ), str ) and entry[ "manager" ]: return entry[ "manager" ]
+    except Exception:
+        return None
+    return None
+
+
+def spawn_registry_manager( persona: str ) -> Optional[ str ]:
+    """
+    Find the manager that spawned the live worker holding a persona.
+
+    Ensures:
+        - each live bridge whose voice persona is `persona` is resolved by manager_resolver.resolve_manager,
+          which reads the bridge's spawned_by and frozen spawned_by_persona, then the spawn manifests
+        - returns the store-shaped manager when every worker that resolves names the same one, else None
+        - returns None when two live workers of that persona name different managers; never raises
+    """
+    try:
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE
+        from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
+        key, found = _manager_words( persona ), set()
+        for _, data, _ in iter_live_bridges():
+            voice = data.get( "voice_persona" )
+            name  = voice.get( "name" ) if isinstance( voice, dict ) else None
+            sid   = data.get( "session_id" )
+            if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
+            lineage = resolve_manager( sid )
+            if lineage[ "source" ] == SOURCE_LINEAGE and lineage[ "manager_persona" ]: found.add( _manager_words( lineage[ "manager_persona" ] ) )
+        return found.pop() if len( found ) == 1 else None
+    except Exception:
+        return None
+
+
+def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Optional[ str ] = None,
+                     run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None,
+                     tree_path: Optional[ str ] = None ) -> dict:
+    """
+    Find the manager a tree or branch belongs to, trying each lookup in order.
+
+    Requires:
+        - name is the tree name (or the branch name minus its rescue stamp)
+        - branch and project_root, when both are given, enable the stamp lookup
+        - project_root, with tree_path or branch, enables the creator ledger lookup
+        - registry_fn is None (spawn_registry_manager) or takes a persona and returns a manager or None
+
+    Ensures:
+        - tries, in order: the branch stamp, the creator ledger, a seat tree's own name, the spawn lineage of
+          a live worker named by the first segment of `name`
+        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name"
+          or "spawn registry" for the lookup that answered, and manager is None with source None when none did
+        - tried lists every lookup attempted, so a row can say what was looked up; never raises
+    """
+    registry_fn = registry_fn if registry_fn is not None else spawn_registry_manager
+    tried       = []
+    if branch and project_root:
+        tried.append( "branch stamp" )
+        stamp = read_stamp( project_root, branch, run )
+        if stamp: return { "manager": _manager_words( stamp ), "source": "branch stamp", "tried": tried }
+    else:
+        tried.append( "branch stamp (no branch or repo root given)" )
+    if project_root and ( tree_path or branch ):
+        tried.append( "creator ledger" )
+        recorded = read_creator_record( project_root, tree_path, branch )
+        if recorded: return { "manager": _manager_words( recorded ), "source": "creator ledger", "tried": tried }
+    else:
+        tried.append( "creator ledger (no repo root, tree or branch given)" )
+    tried.append( "seat tree name" )
+    m = SEAT_TREE_RE.match( name )
+    if m: return { "manager": m.group( "manager" ).replace( "-", " " ), "source": "seat tree name", "tried": tried }
+    first = name.split( "-" )[ 0 ]
+    tried.append( f"spawn registry for '{first}'" )
+    try:
+        manager = registry_fn( first ) if first else None
+    except Exception:
+        manager = None
+    if manager: return { "manager": manager, "source": "spawn registry", "tried": tried }
+    return { "manager": None, "source": None, "tried": tried }
+
+
+def _owner_from( found: dict ) -> dict:
+    """
+    Return the owner dict for a resolve_creator result.
+
+    Ensures:
+        - returns { owner, accountable, creator_recorded, source, tried }
+    """
+    who = found[ "manager" ] if found[ "manager" ] else NO_CREATOR_OWNER
+    return { "owner": who, "accountable": who, "creator_recorded": found[ "manager" ] is not None,
+             "source": found[ "source" ], "tried": found[ "tried" ] }
+
+
+def owner_for_tree( path: str, registry_fn: Optional[ Callable ] = None ) -> dict:
     """
     Who owns the straggler row for a tree.
 
@@ -59,14 +221,14 @@ def owner_for_tree( path: str ) -> dict:
         - a seat tree `seat-cc-<role>-<manager-slug>-<n>` → owner and accountable are the
           manager slug with hyphens as spaces (the store's canonical key shape, e.g.
           "mr-radio" → "mr radio"), creator_recorded True
+        - a name whose first segment is a worker persona with a live spawn record → that worker's
+          spawning manager
         - anything else → both NO_CREATOR_OWNER, creator_recorded False
-        - returns { owner, accountable, creator_recorded }; never raises
+        - returns { owner, accountable, creator_recorded, source, tried }; never raises
     """
-    m = SEAT_TREE_RE.match( os.path.basename( os.path.normpath( path ) ) )
-    if m:
-        manager = m.group( "manager" ).replace( "-", " " )
-        return { "owner": manager, "accountable": manager, "creator_recorded": True }
-    return { "owner": NO_CREATOR_OWNER, "accountable": NO_CREATOR_OWNER, "creator_recorded": False }
+    norm = os.path.abspath( path )
+    root = norm.split( SANDBOX_SEGMENT )[ 0 ] if SANDBOX_SEGMENT in norm else None
+    return _owner_from( resolve_creator( os.path.basename( norm ), project_root=root, registry_fn=registry_fn, tree_path=norm ) )
 
 
 # ==========================================================================
@@ -81,17 +243,25 @@ ARCHIVE_KEY_PREFIX = "archive:"
 RESCUE_STAMP_RE    = re.compile( r"-\d{8}T\d{6}Z$" )
 
 
-def owner_for_branch( branch: str ) -> dict:
+def owner_for_branch( branch: str, project_root: Optional[ str ] = None, run: Optional[ Callable ] = None,
+                      registry_fn: Optional[ Callable ] = None ) -> dict:
     """
     Who owns the row for an archived branch.
 
+    Requires:
+        - project_root, when given, is the repository that holds the branch's config
+
     Ensures:
-        - the last path segment, minus a rescue stamp (`-YYYYMMDDTHHMMSSZ`), is read as a
-          tree name by owner_for_tree: `wt-rescue/seat-cc-author-cheech-2-20261002T135947Z`
-          belongs to cheech
-        - any other name has no recorded creator, exactly as owner_for_tree reports
+        - a manager stamped on the branch (git config `branch.<branch>.lupin-manager`, written when the reaper
+          retired the branch's tree) is read first
+        - otherwise the last path segment, minus a rescue stamp (`-YYYYMMDDTHHMMSSZ`), is resolved as a
+          tree name by resolve_creator: `wt-rescue/seat-cc-author-cheech-2-20261002T135947Z` belongs to cheech,
+          and `wt-rescue/arnold-review-ab12cd3-20261019T011500Z` to the manager who spawned arnold
+        - any other name has no recorded creator
+        - returns { owner, accountable, creator_recorded, source, tried }; never raises
     """
-    return owner_for_tree( RESCUE_STAMP_RE.sub( "", branch.rsplit( "/", 1 )[ -1 ] ) )
+    name = RESCUE_STAMP_RE.sub( "", branch.rsplit( "/", 1 )[ -1 ] )
+    return _owner_from( resolve_creator( name, project_root=project_root, branch=branch, run=run, registry_fn=registry_fn ) )
 
 
 def compose_archive_row( outcome: dict ) -> dict:
@@ -110,8 +280,8 @@ def compose_archive_row( outcome: dict ) -> dict:
     """
     branch  = outcome[ "branch" ]
     ref     = outcome[ "archive_ref" ]
-    who     = owner_for_branch( branch )
     root    = outcome.get( "repo_root" )
+    who     = owner_for_branch( branch, project_root=root )
     project = os.path.basename( os.path.normpath( root ) ) if root else "lupin"
     ahead   = outcome.get( "commits_ahead" )
     state   = ( "could not be checked for content already on the working branch"
@@ -126,7 +296,10 @@ def compose_archive_row( outcome: dict ) -> dict:
         "Merge what is green and reviewed, or close this row as dropped if the work is not wanted.",
     ]
     if not who[ "creator_recorded" ]:
-        lines += [ "", f"No creator recorded: the branch name does not identify a seat, so it is assigned to {NO_CREATOR_OWNER} for triage." ]
+        lines += [ "", f"No creator recorded: the branch name does not identify a seat, so it is assigned to {NO_CREATOR_OWNER} for triage.",
+                   f"Lookups tried, none answered: {'; '.join( who[ 'tried' ] )}." ]
+    else:
+        lines += [ "", f"Creator: {who[ 'owner' ]}, from the {who[ 'source' ]}." ]
     return {
         "title"           : f"[{project.upper()}] Archived unmerged branch: {branch}"[ :120 ],
         "body"            : "\n".join( lines ),
@@ -236,7 +409,8 @@ def compose_row( path: str, blockers: list, first_refused_at: str, estimated: bo
                "then removes the tree and closes this row as dropped." ]
     if not who[ "creator_recorded" ]:
         lines += [ "", "No creator recorded: this tree's name does not identify a seat, so it is "
-                       f"assigned to {NO_CREATOR_OWNER} for triage." ]
+                       f"assigned to {NO_CREATOR_OWNER} for triage.",
+                   f"Lookups tried, none answered: {'; '.join( who[ 'tried' ] )}." ]
     return {
         "title"           : f"[{project_for_tree( path ).upper()}] Refused worktree straggler: {name}",
         "body"            : "\n".join( lines ),

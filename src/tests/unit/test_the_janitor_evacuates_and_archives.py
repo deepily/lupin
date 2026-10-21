@@ -28,6 +28,16 @@ import cosa.agents.shared.worktree_reaper as wr
 NOW = datetime( 2026, 10, 2, 15, 0, 0, tzinfo=timezone.utc )
 
 
+@pytest.fixture( autouse=True )
+def _no_live_spawn_registry( monkeypatch ):
+    """Keep live session bridges out of the test.
+
+    A first name segment that is a real persona would otherwise resolve.
+    """
+    from cosa.agents.shared import worktree_straggler_tickets
+    monkeypatch.setattr( worktree_straggler_tickets, "spawn_registry_manager", lambda persona: None )
+
+
 def _git( cwd, *args ):
     return subprocess.run( [ "git", *args ], cwd=cwd, capture_output=True, text=True, timeout=60 )
 
