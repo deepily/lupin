@@ -267,3 +267,25 @@ def test_the_lookup_row_carries_the_first_ten_ranked_ids_and_the_replay_row_its_
     assert asks[ bf.LOOKUP ]( None, {} )[ "rows" ] == [ { "repeat": 0, "route": "candidates", "question": "choice", "verdict": "REUSE", "nearest": [ f"e{i:02d}" for i in range( 10 ) ], "shortlist": [ "e01", "e03" ] } ]
     assert asks[ "r2" ]( None, {} )[ "rows" ] == [ { "repeat": 2, "p_overlap": { "e00": 0.5 }, "route": "candidates", "question": "choice", "verdict": "NEW", "shortlist": [ "e02", "e07" ] } ]
 
+
+
+def lrow( verdict, nearest=(), shortlist=() ): return [ { **row( verdict, nearest, shortlist ), "repeat": 0 } ]
+
+
+def test_an_incomplete_lookup_that_still_holds_rows_is_left_out_of_recall_agreement_and_false_reuse():
+    items  = items_of( [ "duplicate", "distinct" ] )
+    done   = rec( "n0", "lookup", 1, rows=lrow( "REUSE", [ "x1" ], [ "x1" ] ) )
+    broken = rec( "n1", "lookup", 1, status="incomplete", rows=lrow( "REUSE", [ "y1" ], [ "y1" ] ) )
+    sweep  = { "searches": [ rec( "n0", "r1", 1, rows=lrow( "REUSE", [], [ "x1" ] ) ), rec( "n1", "r1", 1, rows=lrow( "REUSE", [], [ "y1" ] ) ) ] }
+    text   = "\\n".join( stg.report_lines( [ run_of( [ done, broken ] ) ], sweep, items, 2, 0.042 ) )
+    assert "final verdict agreement with the full search, 1 sampled needs: 1 of 1" in text           # the broken lookup agrees with its sweep, yet it is not counted
+    assert "1 sampled needs with picks, picks pooled: 1 of 1" in text
+    assert "false reuse (verdict REUSE on an absent need), 1 absent needs: no cases" in text          # n1 is the only absent need and its lookup did not finish
+
+
+def test_an_incomplete_full_sweep_that_still_holds_rows_is_left_out_of_recall_and_agreement():
+    items  = items_of( [ "duplicate", "duplicate" ] )
+    looks  = [ rec( "n0", "lookup", 1, rows=lrow( "REUSE", [ "x1" ], [ "x1" ] ) ), rec( "n1", "lookup", 1, rows=lrow( "REUSE", [ "y1" ], [ "y1" ] ) ) ]
+    sweep  = { "searches": [ rec( "n0", "r1", 1, rows=lrow( "REUSE", [], [ "x1" ] ) ), rec( "n1", "r1", 1, status="incomplete", rows=lrow( "REUSE", [], [ "y1" ] ) ) ] }
+    text   = "\\n".join( stg.report_lines( [ run_of( looks ) ], sweep, items, 2, 0.042 ) )
+    assert "final verdict agreement with the full search, 1 sampled needs: 1 of 1" in text and "1 sampled needs with picks, picks pooled: 1 of 1" in text
