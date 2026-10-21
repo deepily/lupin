@@ -322,3 +322,11 @@ def test_a_bad_prefix_is_refused_before_a_stage_is_built( scratch, capsys, bad )
     built = []
     assert p5.cli( stage_args( scratch, "stage-canary", "--ceiling", "1500000", "--prefix", bad ), stage_factory=lambda root: built.append( root ) ) == 2
     assert built == [] and "prefix" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize( "step", [ ( "stage-report", ), ( "stage-approve", "--by", "x", "--why", "y" ), ( "stage-run", "--ceiling", "7200000" ) ] )
+def test_a_prefix_that_leaves_the_results_folder_is_refused_by_the_report_the_approval_and_the_run( scratch, capsys, step ):
+    drive( scratch )
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, *step, "--prefix", "../x" ), stage_factory=lambda root: FakeStage() ) == 2
+    assert "prefix '../x' is not a lowercase name" in capsys.readouterr().err
