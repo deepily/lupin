@@ -6,8 +6,8 @@ pins:
   - cosa.repo.symindex.vector_refresh.missing_purpose_lines@473bc17736
   - cosa.repo.symindex.vector_refresh.check_fresh@7540f6914a
   - cosa.repo.symindex.vector_refresh.run_refresh@8cf82a8ace
-  - cosa.repo.symindex.vector_refresh.cron_lines@68dfe7a29a
-  - cosa.repo.symindex.vector_refresh.main@c5fcfeb527
+  - cosa.repo.symindex.vector_refresh.cron_lines@09adf82286
+  - cosa.repo.symindex.vector_refresh.main@126f014e2e
   - cosa.repo.symindex.vector_refresh.env_file_path@6220714314
   - cosa.repo.symindex.candidate_build.run@da5a8afe6b
   - cosa.repo.symindex.candidate_build.BoundedJobWriter@afaf8d075a
