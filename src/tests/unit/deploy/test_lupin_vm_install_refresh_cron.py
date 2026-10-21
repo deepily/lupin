@@ -85,3 +85,25 @@ def test_deploy_warns_loudly_when_there_is_no_local_checkout_to_push( tmp_path )
 def test_deploy_skips_the_refresh_on_request( tmp_path ):
     done = deploy( { "PLANNING_IS_PROMPTING_ROOT": str( pip_repo( tmp_path ) ), "LUPIN_SKIP_PIP_SYNC": "1" } )
     assert "planning-is-prompting sync SKIPPED" in done.stdout + done.stderr and "archiving" not in done.stdout + done.stderr
+
+
+def test_deploy_carries_on_to_the_restart_when_the_planning_is_prompting_sync_fails( tmp_path ):
+    # A real (not dry) run in a tiny scratch repo, with a gcloud stub that fails only the planning-is-prompting copy.
+    repo = tmp_path / "lupin"
+    ( repo / "src" / "scripts" ).mkdir( parents=True )
+    ( repo / "src" / "scripts" / "lupin-vm.sh" ).write_text( SCRIPT.read_text() )
+    git = [ "git", "-C", str( repo ), "-c", "user.email=a@b", "-c", "user.name=t" ]
+    subprocess.run( [ "git", "init", "-q", "-b", "main", str( repo ) ], check=True )
+    subprocess.run( [ *git, "add", "." ], check=True )
+    subprocess.run( [ *git, "commit", "-q", "-m", "x" ], check=True )
+    bindir, calls = tmp_path / "bin", tmp_path / "calls.log"
+    bindir.mkdir()
+    ( bindir / "gcloud" ).write_text( '#!/bin/bash\necho "$*" >> "$STUB_CALLS"\ncase "$*" in *planning-is-prompting.tar.gz*) exit 1;; esac\nexit 0\n' )
+    ( bindir / "gcloud" ).chmod( 0o755 )
+    env = { "PATH": f"{bindir}:{os.environ[ 'PATH' ]}", "HOME": str( tmp_path ), "LUPIN_GCP_PROJECT_ID": "proj-x", "LUPIN_SKIP_PREFLIGHT": "1",
+            "PLANNING_IS_PROMPTING_ROOT": str( pip_repo( tmp_path ) ), "STUB_CALLS": str( calls ) }
+    done = subprocess.run( [ "bash", str( repo / "src" / "scripts" / "lupin-vm.sh" ), "deploy", "main" ], capture_output=True, text=True, env=env )
+    text = done.stdout + done.stderr
+    assert "WARN: the planning-is-prompting refresh FAILED" in text
+    assert done.returncode == 0 and "restarting :7999 rest" in text
+    assert "docker compose" in calls.read_text()
