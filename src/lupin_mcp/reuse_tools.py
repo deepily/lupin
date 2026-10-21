@@ -34,7 +34,8 @@ from cosa.repo.symindex import build as sx_build
 from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex import wiki_lint as wl
 from cosa.repo.symindex.paths import data_dir, default_out_dir
-from cosa.repo.symindex.spec import NotARepo, git_toplevel, is_lupin_tree, spec_for
+from cosa.repo.symindex.paths import index_readable
+from cosa.repo.symindex.spec import NotARepo, git_toplevel, spec_for
 from cosa.repo.symindex.candidates import freshness as fr
 from cosa.repo.symindex.candidates.errors import CandidateError
 from lupin_mcp import reuse_redact
@@ -1035,13 +1036,13 @@ def prepare( ctx ):
     Ensures:
         - returns ( flags, entries, sha, gen ): flags is the set of pipeline causes that hold, entries the
           index symbols to ask about, as sendable() leaves them (defaults blanked, backstop drops removed), sha the index_sha, gen the live generation or None
-        - a tree that is not lupin gives NOT_LUPIN_TREE and no entries
+        - a tree that is neither lupin nor a registered repo with a built index (index_readable) gives NOT_LUPIN_TREE and no entries
         - a stale index that cannot be rebuilt gives INDEX_STALE and no entries
         - a tool missing from the index header gives DEPENDENCY_MISSING; the sweep still runs on what was indexed
         - no transport and no JEV_API_TOASTER in the environment gives KEY_UNREADABLE; the entries are still returned
     """
     flags = set()
-    if not is_lupin_tree( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
+    if not index_readable( ctx.root ): return { "NOT_LUPIN_TREE" }, [], "none", None
     spec = spec_for( ctx.root )
     try:
         gen = sx_build.ensure( ctx.root, ctx.out_dir )
