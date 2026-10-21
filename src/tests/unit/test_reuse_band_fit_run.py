@@ -7,6 +7,7 @@ The candidate stage is a stand-in with the client's interface. Nothing reaches J
 import itertools
 import json
 import threading
+import types
 
 import pytest
 
@@ -574,3 +575,10 @@ def test_a_prefix_that_is_several_or_not_a_lowercase_name_is_refused_before_anyt
 
 def test_the_default_prefix_is_bandfit():
     assert bf.PREFIX == "bandfit"
+
+
+def test_packed_context_carries_a_given_policy_on_a_copy_and_keeps_the_runs_own_when_none_is_given():
+    ctx = types.SimpleNamespace( pack_size=5, policy="own" )
+    given = bf.packed_context( ctx, FakeStage(), { "threshold": 0.3 } )
+    kept  = bf.packed_context( ctx, FakeStage() )
+    assert given.policy == { "threshold": 0.3 } and kept.policy == "own" and ctx.policy == "own"

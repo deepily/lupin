@@ -117,14 +117,15 @@ def overlaps( sweeps ):
     return out, bad
 
 
-def packed_context( ctx, stage ):
+def packed_context( ctx, stage, policy=None ):
     """
     Give a run's context the candidate stage and the packing the lookup ships with.
 
     Requires:
-        - ctx is the context a run builds for its asks; stage has the candidate stage's interface
+        - ctx is the context a run builds for its asks; stage has the candidate stage's interface; policy is None for the shipped decision policy, or a policy mapping
     Ensures:
         - returns a copy; the run's own context is not changed
+        - the copy decides by policy when one is given; when not, it keeps the run's own policy
         - packs are cut from the whole shortlist sorted by id, and the request shape is named for it
         - the copy keeps the run's budget, so every send counts against the run's ceiling
     """
@@ -132,6 +133,7 @@ def packed_context( ctx, stage ):
     out.candidate_stage = stage
     out.sweeper         = rp.packed_sweeper( ctx.pack_size, shape=rp.SHAPE_WHOLE )
     out.request_shape   = rp.SHAPE_WHOLE
+    if policy is not None: out.policy = policy
     return out
 
 
@@ -151,13 +153,14 @@ def check_manifest( stage, pinned ):
     if got != pinned: raise s1.DriverRefused( f"the vector set is {got}, the run is pinned to {pinned}" )
 
 
-def make_asks( stage, sink, repeats=REPEATS, pinned=None ):
+def make_asks( stage, sink, repeats=REPEATS, pinned=None, policy=None ):
     """
     Build the asks of a run: the lookup, then one ask per repeat.
 
     Requires:
-        - stage is a candidate stage; sink is a Sink; repeats is a whole number of 1 or more; pinned is None or a manifest hash
+        - stage is a candidate stage; sink is a Sink; repeats is a whole number of 1 or more; pinned is None or a manifest hash; policy is None for the shipped decision policy, or a policy mapping
     Ensures:
+        - every ask decides by policy; the replays decide by the policy their lookup receipt stored
         - returns { "lookup": ask, "r1": ask, ... }; the order is the order the run asks them in
         - every ask first checks the stage's manifest hash against pinned, so a replaced vector set stops the run before the next send
         - lookup stores a receipt and notes its id in the sink; it is the only ask that writes one
@@ -166,7 +169,7 @@ def make_asks( stage, sink, repeats=REPEATS, pinned=None ):
     """
     def lookup( ctx, item ):
         check_manifest( stage, pinned )
-        result = rt._need_impl( item[ "need" ], item[ "exclude" ], packed_context( ctx, stage ), "choice", False, True )
+        result = rt._need_impl( item[ "need" ], item[ "exclude" ], packed_context( ctx, stage, policy ), "choice", False, True )
         if result[ "status" ] == "ok": sink.rids[ item[ "member" ] ] = result[ "receipt_id" ]
         return result
 
@@ -175,7 +178,7 @@ def make_asks( stage, sink, repeats=REPEATS, pinned=None ):
             check_manifest( stage, pinned )
             if item[ "member" ] not in sink.rids: return { "status": "error", "error": "NO_LOOKUP_RECEIPT" }
             taken = []
-            with capture_replays( taken ): out = rt.replay_impl( sink.rids[ item[ "member" ] ], packed_context( ctx, stage ), repeat=index )
+            with capture_replays( taken ): out = rt.replay_impl( sink.rids[ item[ "member" ] ], packed_context( ctx, stage, policy ), repeat=index )
             if out[ "status" ] != "ok": return out
             if not taken: return { "status": "error", "error": "NO_SWEEP" }
             failed       = sorted( { i for sw in taken for i in sw[ "failed" ] } )

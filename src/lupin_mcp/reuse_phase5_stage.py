@@ -9,6 +9,7 @@ Nothing here opens the reserved fresh-needs file: the caller hands over items it
 import json
 import pathlib
 
+from cosa.repo.symindex import verdict as vd
 from cosa.repo.symindex.candidates import arm_metrics
 from lupin_mcp import reuse_band_fit_run as bf
 from lupin_mcp import reuse_e2e as e2e
@@ -22,21 +23,25 @@ ROUTE        = "candidates"
 QUESTION     = "choice"
 SWEEP_RESULT = "p5s-sample"
 SWEEP_ASK    = "r1"
+NO_BAND      = { k: v for k, v in vd.POLICY.items() if k != "band" }       # the shipped policy without its band, which never widens
+BAND_ON      = "band on"
+BAND_OFF     = "band off"
+UNRECORDED   = "not recorded"
 
 
-def stage_asks( stage, sink, repeats, pinned ):
+def stage_asks( stage, sink, repeats, pinned, policy=None ):
     """
     Build the asks of the stage mode: the lookup, then one replay per repeat.
 
     Requires:
-        - stage is a candidate stage with its refresher off; sink is a band Sink; pinned is the manifest hash the run was started against
+        - stage is a candidate stage with its refresher off; sink is a band Sink; pinned is the manifest hash the run was started against; policy is None for the shipped decision policy, or a policy mapping
     Ensures:
         - returns { "lookup": ask, "r1": ask, ... } on the band driver's asks, every one checking the pin before it sends
         - the lookup's row holds the verdict, the sorted shortlist ids and the first ten ids of the stage's ranking
         - each replay's row holds its verdict and sorted shortlist ids beside the overlaps, so the flip report reads it as it reads a flip run
         - an error result is returned as it is
     """
-    base = bf.make_asks( stage, sink, repeats, pinned )
+    base = bf.make_asks( stage, sink, repeats, pinned, policy )
 
     def lookup( ctx, item ):
         out = base[ bf.LOOKUP ]( ctx, item )
@@ -54,6 +59,16 @@ def stage_asks( stage, sink, repeats, pinned ):
         return ask
 
     return { bf.LOOKUP: lookup, **{ name: replay( name ) for name in base if name != bf.LOOKUP } }
+
+
+def policy_name( no_band ):
+    """
+    Name the verdict policy a run ran under.
+
+    Ensures:
+        - returns BAND_OFF when no_band is true, else BAND_ON, the words every result file and report carry
+    """
+    return BAND_OFF if no_band else BAND_ON
 
 
 def estimate_lines( needs, sample_tokens, dollars_per_million ):
@@ -154,14 +169,14 @@ def report_lines( runs, sweep, items, repeats, dollars_per_million ):
     Requires:
         - runs are the loaded result files of the stage canary and run; sweep is the loaded full-sweep result or None
     Ensures:
-        - returns the flip lines of the flip driver on the repeats only, then the other figures
+        - returns the verdict policy line first, taken from the results, then the flip lines of the flip driver on the repeats only, then the other figures
         - recall is worded as agreement with the full search, not as ground truth
         - without a sweep result it says that recall and verdict agreement are not measured yet
         - false reuse says plainly when the file has no absent needs
     """
     searches = [ s for run in runs for s in run[ "searches" ] ]
     lookups  = { s[ "member" ]: s[ "rows" ][ 0 ] for s in searches if s[ "question" ] == bf.LOOKUP and s[ "status" ] == "complete" and s[ "rows" ] }
-    lines    = frun.report_lines( [ s for s in searches if s[ "question" ] != bf.LOOKUP ], items, repeats )
+    lines    = [ f"verdict policy: {run_policy( runs[ 0 ] )}" ] + frun.report_lines( [ s for s in searches if s[ "question" ] != bf.LOOKUP ], items, repeats )
     if sweep is None: lines.append( "recall and verdict agreement: not measured yet; the full sweep of the sample has not run" )
     else:
         swept = { s[ "member" ]: s[ "rows" ][ 0 ] for s in sweep[ "searches" ] if s[ "question" ] == SWEEP_ASK and s[ "status" ] == "complete" and s[ "rows" ] }
@@ -179,6 +194,16 @@ def report_lines( runs, sweep, items, repeats, dollars_per_million ):
     return lines
 
 
+def run_policy( run ):
+    """
+    Read the verdict policy word of a result file.
+
+    Ensures:
+        - returns the word the file carries, or the not-recorded words for a file that predates the switch
+    """
+    return run[ "policy" ] if "policy" in run else UNRECORDED
+
+
 def check_results( runs, pinned, sample_sha, repeats ):
     """
     Refuse a report over results that are not this run's.
@@ -186,14 +211,17 @@ def check_results( runs, pinned, sample_sha, repeats ):
     Requires:
         - runs are the loaded result files of the stage canary and run
     Ensures:
-        - returns None when every run ran on the pinned vector set, carries the sample hash and holds a lookup and every repeat for each need
+        - returns None when every run ran on the pinned vector set, carries the sample hash, holds a lookup and every repeat for each need and ran under one verdict policy
+        - a run that carries no policy word predates the switch and counts as one policy with the others that carry none
     Raises:
-        - DriverRefused naming the first run that is not
+        - DriverRefused naming the first run that is not, or the policies when the runs differ
     """
     for run in runs:
         if run[ "stage" ][ "manifest_hash" ] != pinned: raise s1.DriverRefused( f"{run[ 'run_name' ]} ran on vector set {run[ 'stage' ][ 'manifest_hash' ]}, the report is pinned to {pinned}" )
         if "sample_sha256" not in run or run[ "sample_sha256" ] != sample_sha: raise s1.DriverRefused( f"{run[ 'run_name' ]} does not carry the recorded sample's hash {sample_sha}" )
         if len( run[ "questions" ] ) != 1 + repeats: raise s1.DriverRefused( f"{run[ 'run_name' ]} was run with {len( run[ 'questions' ] ) - 1} repeats per need, but the report was given {repeats}" )
+    names = { run_policy( run ) for run in runs }
+    if len( names ) > 1: raise s1.DriverRefused( f"the runs ran under different verdict policies: {', '.join( sorted( names ) )}" )
 
 
 def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
@@ -201,12 +229,12 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     Run one spending step of the stage mode: the canary, its approval or the run.
 
     Requires:
-        - args carry command (stage-canary, stage-approve or stage-run), prefix, root, data, ledger, live, pack_size, needs_sha, and manifest_hash and ceiling for the steps that take them
+        - args carry command (stage-canary, stage-approve or stage-run), prefix, root, data, ledger, live, pack_size, needs_sha, and manifest_hash, ceiling and no_band for the steps that take them
         - stage_factory is None for the live stage of the tree, or a function of the tree's path for a stand-in run
     Ensures:
         - a ceiling above the estimate times the estimate factor is refused, and a stage on another vector set than the pin is refused, before anything is opened
         - the results are named by the prefix, so another arm or policy can run again on the same sample under its own prefix
-        - the results are stamped with the sample hash, the stage and the needs hash
+        - the results are stamped with the sample hash, the stage, the needs hash and the verdict policy word: the shipped policy with its band, or with --no-band the same policy without the band
         - an approval sends nothing, so it builds no stage
     Raises:
         - DriverRefused for the checks above; the refusals of the runner, the ledger and the canary
@@ -217,9 +245,10 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     if command in ( "canary", "run" ): bf.check_ceiling( args.ceiling, spent )
     stage = None if command == "approve" else ( stage_factory or bf.live_stage )( pathlib.Path( args.root ) )
     if stage is not None: bf.check_manifest( stage, args.manifest_hash )
-    env   = e2r._open_env( args.root, args.data, args.ledger, args.live, stage_asks( stage, bf.Sink(), repeats, None if stage is None else args.manifest_hash ), args.pack_size )
+    no_band = stage is not None and args.no_band                                              # an approval builds no stage, so it has no policy
+    env   = e2r._open_env( args.root, args.data, args.ledger, args.live, stage_asks( stage, bf.Sink(), repeats, None if stage is None else args.manifest_hash, NO_BAND if no_band else None ), args.pack_size )
     spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
-              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha } }
+              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha, "policy": policy_name( no_band ) } }
     if command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
     if command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )
     elif command == "approve":

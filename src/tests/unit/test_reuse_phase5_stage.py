@@ -15,6 +15,8 @@ from lupin_mcp import reuse_phase5_run as p5
 from lupin_mcp import reuse_phase5_stage as stg
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
+from lupin_mcp import reuse_tools as rt
+from cosa.repo.symindex import verdict as vd
 from tests.unit.test_reuse_band_fit_run import FakeStage, Jittery
 from tests.unit.test_reuse_phase5_run import Scratch
 
@@ -204,7 +206,7 @@ def run_of( searches, manifest=PIN, sha="s" * 64, questions=( "lookup", "r1", "r
 def test_the_report_says_plainly_when_the_file_has_no_absent_needs_and_when_no_cost_can_be_counted():
     items = items_of( [ "duplicate", "duplicate" ] )
     lines = stg.report_lines( [ run_of( [] ) ], None, items, 2, 0.042 )
-    assert lines[ 0 ] == "no searches have run yet"
+    assert lines[ 0 ] == "verdict policy: not recorded" and lines[ 1 ] == "no searches have run yet"
     assert "false reuse: the file has no absent needs, so it is not measured" in lines
     assert "tokens per need: no need has its lookup and every repeat complete yet" in lines
     assert "recall and verdict agreement: not measured yet; the full sweep of the sample has not run" in lines
@@ -253,7 +255,7 @@ def test_the_report_refuses_a_full_sweep_result_stamped_for_another_sample( scra
 
 def test_an_error_result_is_returned_as_it_is_by_the_lookup_and_by_every_replay( monkeypatch ):
     err = { "status": "error", "error": "NO_LOOKUP_RECEIPT" }
-    monkeypatch.setattr( bf, "make_asks", lambda stage, sink, repeats, pinned: { bf.LOOKUP: lambda c, i: err, "r1": lambda c, i: err } )
+    monkeypatch.setattr( bf, "make_asks", lambda stage, sink, repeats, pinned, policy=None: { bf.LOOKUP: lambda c, i: err, "r1": lambda c, i: err } )
     asks = stg.stage_asks( None, bf.Sink(), 1, PIN )
     assert asks[ bf.LOOKUP ]( None, {} ) is err and asks[ "r1" ]( None, {} ) is err and list( asks ) == [ bf.LOOKUP, "r1" ]
 
@@ -262,7 +264,7 @@ def test_the_lookup_row_carries_the_first_ten_ranked_ids_and_the_replay_row_its_
     near  = [ { "id": f"e{i:02d}" } for i in range( 14 ) ]
     look  = { "status": "ok", "verdict": "REUSE", "nearest": near, "shortlist": [ { "id": "e03" }, { "id": "e01" } ] }
     rep   = { "status": "ok", "verdict": "NEW", "shortlist": [ { "id": "e07" }, { "id": "e02" } ], "rows": [ { "repeat": 2, "p_overlap": { "e00": 0.5 } } ] }
-    monkeypatch.setattr( bf, "make_asks", lambda stage, sink, repeats, pinned: { bf.LOOKUP: lambda c, i: look, "r2": lambda c, i: rep } )
+    monkeypatch.setattr( bf, "make_asks", lambda stage, sink, repeats, pinned, policy=None: { bf.LOOKUP: lambda c, i: look, "r2": lambda c, i: rep } )
     asks = stg.stage_asks( None, bf.Sink(), 2, PIN )
     assert asks[ bf.LOOKUP ]( None, {} )[ "rows" ] == [ { "repeat": 0, "route": "candidates", "question": "choice", "verdict": "REUSE", "nearest": [ f"e{i:02d}" for i in range( 10 ) ], "shortlist": [ "e01", "e03" ] } ]
     assert asks[ "r2" ]( None, {} )[ "rows" ] == [ { "repeat": 2, "p_overlap": { "e00": 0.5 }, "route": "candidates", "question": "choice", "verdict": "NEW", "shortlist": [ "e02", "e07" ] } ]
@@ -330,3 +332,72 @@ def test_a_prefix_that_leaves_the_results_folder_is_refused_by_the_report_the_ap
     capsys.readouterr()
     assert p5.cli( stage_args( scratch, *step, "--prefix", "../x" ), stage_factory=lambda root: FakeStage() ) == 2
     assert "prefix '../x' is not a lowercase name" in capsys.readouterr().err
+
+
+def results_of( s, prefix=stg.STAGE_PREFIX ):
+    """Load the canary and run result files of a prefix."""
+    return [ json.loads( ( s.data / "e2e-results" / f"{prefix}-{part}.json" ).read_text( encoding="utf-8" ) ) for part in ( "canary", "run" ) ]
+
+
+def test_no_band_is_the_shipped_policy_without_its_band_and_nothing_else():
+    assert "band" in vd.POLICY and "band" not in stg.NO_BAND
+    assert stg.NO_BAND == { k: v for k, v in vd.POLICY.items() if k != "band" } and stg.NO_BAND[ "threshold" ] == vd.POLICY[ "threshold" ]
+
+
+def test_the_policy_word_names_the_band_state():
+    assert stg.policy_name( False ) == "band on" and stg.policy_name( True ) == "band off"
+
+
+def spy_policies( monkeypatch ):
+    """Record the policy each lookup and replay context carries, then run the real code."""
+    seen, real_need, real_replay = [], rt._need_impl, rt.replay_impl
+    monkeypatch.setattr( rt, "_need_impl", lambda need, ex, ctx, *a: ( seen.append( ( "lookup", ctx.policy ) ), real_need( need, ex, ctx, *a ) )[ 1 ] )
+    monkeypatch.setattr( rt, "replay_impl", lambda rid, ctx, repeat=0: ( seen.append( ( "replay", ctx.policy ) ), real_replay( rid, ctx, repeat=repeat ) )[ 1 ] )
+    return seen
+
+
+def test_with_no_flag_the_stage_decides_by_the_shipped_policy_and_the_results_say_band_on( scratch, monkeypatch ):
+    seen = spy_policies( monkeypatch )
+    drive( scratch )
+    assert seen and {  policy for _, policy in seen } == { None }
+    assert [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band on", "band on" ]
+
+
+def test_no_band_makes_every_lookup_and_replay_decide_without_the_band_and_the_results_say_band_off( scratch, monkeypatch ):
+    seen = spy_policies( monkeypatch )
+    drive( scratch, steps=( ( "stage-canary", "--ceiling", "1500000", "--no-band" ), ( "stage-approve", "--by", "cheech", "--why", "read it" ), ( "stage-run", "--ceiling", "7200000", "--no-band" ) ) )
+    assert { k for k, _ in seen } == { "lookup", "replay" } and all( policy == stg.NO_BAND for _, policy in seen )
+    assert [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band off", "band off" ]
+
+
+def test_the_report_says_which_policy_ran_on_its_first_line( scratch, capsys ):
+    drive( scratch, steps=( ( "stage-canary", "--ceiling", "1500000", "--no-band" ), ( "stage-approve", "--by", "cheech", "--why", "read it" ), ( "stage-run", "--ceiling", "7200000", "--no-band" ) ) )
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, "stage-report" ) ) == 0
+    assert capsys.readouterr().out.splitlines()[ 0 ] == "verdict policy: band off"
+
+
+def test_a_report_over_a_canary_and_a_run_of_different_policies_is_refused( scratch, capsys ):
+    drive( scratch )
+    canary_path = scratch.data / "e2e-results" / "p5st-canary.json"
+    canary      = json.loads( canary_path.read_text( encoding="utf-8" ) )
+    canary_path.write_text( json.dumps( { **canary, "policy": "band off" } ), encoding="utf-8" )
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, "stage-report" ) ) == 2
+    assert "different verdict policies: band off, band on" in capsys.readouterr().err
+
+
+def test_a_result_with_no_policy_word_is_reported_as_not_recorded_and_still_reads( scratch, capsys ):
+    drive( scratch )
+    for part in ( "canary", "run" ):
+        path = scratch.data / "e2e-results" / f"p5st-{part}.json"
+        body = json.loads( path.read_text( encoding="utf-8" ) )
+        del body[ "policy" ]
+        path.write_text( json.dumps( body ), encoding="utf-8" )
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, "stage-report" ) ) == 0
+    assert capsys.readouterr().out.splitlines()[ 0 ] == "verdict policy: not recorded"
+
+
+def test_the_approval_takes_no_band_flag_because_it_builds_no_stage( scratch ):
+    with pytest.raises( SystemExit ): p5.cli( stage_args( scratch, "stage-approve", "--by", "x", "--why", "y", "--no-band" ) )
