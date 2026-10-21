@@ -28,7 +28,7 @@ The range gate replays a merge commit with its other parents as the incoming com
 
 Five record locations stay in warn mode: the root `history.md`, `TODO.md`, `bug-fix-queue.md`, `history/` and `todo-history/`. Their findings print with `(warn mode, commit allowed)`. The same name elsewhere is held like any page.
 
-If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. The gate may also end with an exit other than 0 or 3. The chain then prints `doc-lint gate exited N without a refusal verdict, commit ALLOWED` and the commit goes through. That covers a gate that cannot start, a killed gate, and a tree whose `gate.py` predates blocking and exits 1 on a finding. Findings printed above that line were not enforced; rebase such a tree.
+If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. The gate may also end with an exit other than 0 or 3. The chain then prints `doc-lint gate exited N without a refusal verdict, commit ALLOWED` and the commit goes through. That covers a gate that cannot start, a killed gate, and a `gate.py` that predates blocking. Findings printed above that line were not enforced; rebase.
 
 Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed, N undecodable`. A swept file that does not parse is refused and counted as unparsed. A swept file that is not UTF-8 is refused and counted as undecodable. No waiver covers either. A leading byte-order mark is ignored. Any other file that is not UTF-8 is skipped with a warning.
 
@@ -61,3 +61,7 @@ The findings are counted by the rule code in the working tree. So the gate refus
 A new file beside a deleted counted file may be a rename that git no longer pairs, because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all, the gate says the scope was not checked.
 
 The run prints `counted scope: N files checked, N at or below their count, N over, N waivers honoured, table ok|stale|absent|regenerated|malformed`.
+
+## Ongoing enforcement
+
+The `.claude/skills/reuse-reviewer/SKILL.md` skill judges reuse in review.

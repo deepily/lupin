@@ -479,6 +479,7 @@ One row per topic; every path below exists (checked by `src/tests/unit/test_clau
 | Test venues, suite lists and timings | `src/docs/doctrine/testing-venues.md` | choosing `:7999` or `:8000` for a named file |
 | Coverage and mutation testing | `src/docs/doctrine/coverage-and-mutation.md` | reading or producing a mutation run |
 | Docstring rules | `src/docs/docstring-standard.md` | writing a docstring |
+| Reuse review of a diff | `.claude/skills/reuse-reviewer/SKILL.md` | reviewing a diff that adds a function, method or class |
 | Doc viewer URLs, scopes, upload | `src/docs/wiki/capabilities/doc-viewer.md` | emitting a link or adding a scope |
 | Everything this file used to say | `src/docs/doctrine/claude-md-receipts-archive.md` | tracing where a rule came from |
 | Index of all documentation | `src/docs/README.md` | looking for a page |
