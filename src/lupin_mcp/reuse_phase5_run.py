@@ -16,6 +16,7 @@ from lupin_mcp import reuse_e2e as e2e
 from lupin_mcp import reuse_e2e_run as e2r
 from lupin_mcp import reuse_flip as rf
 from lupin_mcp import reuse_flip_run as frun
+from lupin_mcp import reuse_phase5_stage as stg
 from lupin_mcp import reuse_stage1 as s1
 from lupin_mcp import reuse_stage1_run as rr
 
@@ -202,14 +203,14 @@ def check_stamps( data, sha, strict ):
     return missing
 
 
-def canary_approved( data ):
+def canary_approved( data, prefix=PREFIX ):
     """
     Say whether the confirmation's canary has been run and approved.
 
     Ensures:
-        - returns true only when the canary's report exists and holds an approval
+        - returns true only when the canary's report for the prefix exists and holds an approval
     """
-    path = Path( data ) / "e2e-results" / f"{PREFIX}-canary.canary.json"
+    path = Path( data ) / "e2e-results" / f"{prefix}-canary.canary.json"
     return path.exists() and json.loads( path.read_text( encoding="utf-8" ) )[ "approved" ] is not None
 
 
@@ -252,7 +253,7 @@ def flip_argv( args, parts ):
     return argv
 
 
-def sweep( args, items, record, parts, sha ):
+def sweep( args, items, record, parts, sha, prefix=PREFIX ):
     """
     Run the sample's full sweeps: one new-question search per sampled need.
 
@@ -261,11 +262,11 @@ def sweep( args, items, record, parts, sha ):
     Ensures:
         - returns 0 after printing how the run ended, with the sample file's hash on the result
         - nothing is sent when a check refuses; the sample run is its own ledger run, p5s-sample, kept apart from the repeats
-        - the canary must be approved first, and the ceiling may not exceed the sample estimate times the estimate factor
+        - the canary of the prefix must be approved first, and the ceiling may not exceed the sample estimate times the estimate factor
     Raises:
         - CanaryNotApproved when the canary has not been approved; DriverRefused for a ceiling above the cap
     """
-    if not canary_approved( args.data ): raise s1.CanaryNotApproved( "the canary has not been approved, so the sample sweeps cannot spend" )
+    if not canary_approved( args.data, prefix ): raise s1.CanaryNotApproved( "the canary has not been approved, so the sample sweeps cannot spend" )
     cap = int( e2r.ESTIMATE_FACTOR * parts[ "sample" ] )
     if args.ceiling > cap: raise s1.DriverRefused( f"the sweep ceiling {args.ceiling} is above {cap}, the sample estimate times {e2r.ESTIMATE_FACTOR}" )
     chosen = [ i for i in items if i[ "member" ] in set( record[ "members" ] ) ]
@@ -279,6 +280,20 @@ def _parser():
     """Ensures: returns the command line parser."""
     ap  = argparse.ArgumentParser( description=__doc__ )
     sub = ap.add_subparsers( dest="command", required=True )
+    for name in ( "stage-estimate", "stage-canary", "stage-approve", "stage-run", "stage-sweep", "stage-report" ):
+        p = sub.add_parser( name )
+        p.add_argument( "--projects-data", required=True )
+        p.add_argument( "--needs-sha", required=True )
+        if name == "stage-estimate": continue
+        for flag in ( "--data", "--root", "--ledger" ): p.add_argument( flag, required=True )
+        p.add_argument( "--pack-size", type=int, default=50 )
+        p.add_argument( "--live", action="store_true" )
+        if name in ( "stage-canary", "stage-run", "stage-report" ): p.add_argument( "--manifest-hash", required=True )
+        if name in ( "stage-canary", "stage-run", "stage-sweep" ): p.add_argument( "--ceiling", type=int, required=True )
+        if name == "stage-approve":
+            p.add_argument( "--by", required=True )
+            p.add_argument( "--why", required=True )
+            p.add_argument( "--revised-estimate", type=int, default=None )
     p = sub.add_parser( "check" )
     for flag in ( "--projects-data", "--needs-sha", "--root", "--data" ): p.add_argument( flag, required=True )
     for name in ( "estimate", "sample", "sweep", "canary", "approve", "run", "report" ):
@@ -302,7 +317,7 @@ def _parser():
     return ap
 
 
-def main( argv=None ):
+def main( argv=None, stage_factory=None ):
     """
     Run one step of the fresh-needs confirmation.
 
@@ -314,6 +329,8 @@ def main( argv=None ):
         - each write of a canary, run or sweep result carries the sample file's sha256, so a run that stops partway still leaves a stamped file
         - a result whose hash differs is refused by every later step; one that carries none is refused by a step that spends and is named and skipped by report
         - report also prints the recorded sample
+        - the stage steps (stage-estimate, stage-canary, stage-approve, stage-run, stage-sweep, stage-report) measure the shipped candidate stage, pinned by --manifest-hash, with the repeats' flips, recall against the full sweep, verdict agreement, false reuse and tokens per need
+        - stage_factory is None for the live stage of the tree, or a function of the tree's path for a stand-in run
     Raises:
         - the refusals of the pinned hash, the seed, the sample record and the sample size, before anything is sent
     """
@@ -322,6 +339,9 @@ def main( argv=None ):
     parts = estimate_parts( len( items ) )
     if args.command == "estimate":
         print( "\n".join( estimate_lines( parts, len( items ) ) ) )
+        return 0
+    if args.command == "stage-estimate":
+        print( "\n".join( stg.estimate_lines( len( items ), parts[ "sample" ], DOLLARS_PER_MILLION ) ) )
         return 0
     if args.command == "check":
         known = frun.sendable_ids( Path( args.root ), Path( args.data ) )
@@ -334,6 +354,11 @@ def main( argv=None ):
         return 0
     record = read_sample( args.data, args.needs_sha )
     sha    = sample_sha( args.data )
+    if args.command.startswith( "stage-" ):
+        check_stamps( args.data, sha, strict=False )                                           # a result with another sample hash is refused; one with none is another mode's
+        if args.command == "stage-sweep": return sweep( args, items, record, parts, sha, stg.STAGE_PREFIX )
+        if args.command == "stage-report": return stg.report( args, items, sha, DOLLARS_PER_MILLION )
+        return stg.run_step( args, items, sha, stage_factory )
     missing = check_stamps( args.data, sha, strict=args.command != "report" )
     if args.command == "sweep": return sweep( args, items, record, parts, sha )
     skip = tuple( name[ len( PREFIX ) + 1: ] for name in missing if name.startswith( f"{PREFIX}-" ) )
@@ -343,7 +368,7 @@ def main( argv=None ):
     return code
 
 
-def cli( argv=None ):
+def cli( argv=None, stage_factory=None ):
     """
     Run main as a command line: a refusal is one line and exit code 2.
 
@@ -352,7 +377,7 @@ def cli( argv=None ):
         - returns 2 after one line on the error stream for a refusal of the driver, the sweep or the frozen needs
         - the flip driver's own refusals are returned as it returns them
     """
-    return rr.run_cli( lambda: main( argv ),
+    return rr.run_cli( lambda: main( argv, stage_factory ),
                        ( s1.DriverRefused, s1.KeyMissing, s1.CanaryNotApproved, e2e.FrozenInputRefused ) )
 
 
