@@ -14,7 +14,7 @@ The listener-side step that turns an operator broadcast into one injected remind
 - Every other line goes to all sessions.
 - With a roster of live personas, a directive counts only if one name resembles a roster persona. Otherwise it is prose and goes to all.
 - It injects a reminder wrapper and posts an ack to `broadcast-acks`. The status is `completed`, or `completed-with-withheld` when lines were withheld or an `@` token matched nobody.
-- The ack summary is cut to 200 characters and names the withheld count and each unresolved token.
+- The ack summary cuts the delivered body to 200 characters. The withheld count and each unresolved token are added in front of it, so the whole summary can run longer.
 
 ## Don't
 - Don't pass a body that holds a `system-reminder` tag. It is refused with the status `rejected-malformed` and nothing is injected.

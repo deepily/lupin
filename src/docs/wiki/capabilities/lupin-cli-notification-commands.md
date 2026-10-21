@@ -20,7 +20,7 @@ The command lines behind the three clients, the stream reader of the blocking on
 - `notify_user_async.main` adds `--sender-id`. It builds an `AsyncNotificationRequest`, so a bad value prints each field error and exits 1. Otherwise the exit code follows `response.success`.
 - `notify_user_sync.main` adds `--response-type`, `--response-default` and `--title`. The timeout defaults to 120. It prints the answer to stdout so a shell script can capture it, then exits with the response exit code.
 - `validate_environment` in the plain and async scripts just returns `validate_server_environment`, and `--validate-env` exits 0 or 1 on it.
-- `consume_sse_stream` reads the answer stream and returns the first terminal event, or `None` on a parse error or a timeout.
+- `consume_sse_stream` reads the answer stream and returns the first terminal event. A frame that is not valid JSON, or fails validation, is reported and skipped. It returns `None` on a timeout, a stream error, or a stream that ends with no result.
 - It records the notification id from the opening `ack` frame and keeps reading. It skips an unknown status and a frame that fails validation.
 - A timer cuts the stream five seconds after the timeout. A stream that sends bytes but never a full line would otherwise never return.
 - `NotificationTestSuite` sends real notifications through `notify_user` and records pass or fail with timing. `main` in `test_notifications.py` runs the full or `--quick` suite, or only the environment check with `--validate-only`.
