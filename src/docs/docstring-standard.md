@@ -1,6 +1,6 @@
 # Docstring standard
 
-The eight writing rules are not in this page yet. It covers only what the commit gate does.
+The eight writing rules are not in this page yet.
 
 Scripts: see [script-doc-comment-standard.md](script-doc-comment-standard.md).
 
@@ -28,7 +28,7 @@ The range gate replays a merge commit with its other parents as the incoming com
 
 Five record locations stay in warn mode: the root `history.md`, `TODO.md`, `bug-fix-queue.md`, `history/` and `todo-history/`. Their findings print with `(warn mode, commit allowed)`. The same name elsewhere is held like any page.
 
-If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. The gate may also end with an exit other than 0 or 3. The chain then prints `doc-lint gate exited N without a refusal verdict, commit ALLOWED` and the commit goes through. That covers a gate that cannot start, a killed gate, and a `gate.py` that predates blocking. Findings printed above that line were not enforced; rebase.
+If the gate itself crashes, it prints `GATE CRASHED, commit allowed` and the commit goes through. The gate may also end with an exit other than 0 or 3. The chain then prints `doc-lint gate exited N without a refusal verdict, commit ALLOWED` and the commit goes through. That covers a gate that cannot start, a killed gate, and a tree whose `gate.py` predates blocking and exits 1 on a finding. Findings printed above that line were not enforced; rebase such a tree.
 
 Every run prints the denominator: `swept scope: N files checked, N docstrings checked, N findings, N waivers honoured, N unparsed, N undecodable`. A swept file that does not parse is refused and counted as unparsed. A swept file that is not UTF-8 is refused and counted as undecodable. No waiver covers either. A leading byte-order mark is ignored. Any other file that is not UTF-8 is skipped with a warning.
 
@@ -44,7 +44,7 @@ doc-lint: waive <rule> -- <reason>
 
 The rule must be the one the refusal named. The reason must hold a word of three letters or more; `-`, `n/a` and `ok` do not count. A marker without a reason waives nothing, and the refusal says so. A marker naming another rule, or sitting on another line, waives nothing. For a one-line docstring the marker can follow the closing quotes.
 
-Use a waiver when the lint is wrong about this text, not to skip the rewrite. The gate prints how many waivers it honoured on every run.
+Use a waiver when the lint is wrong about this text, not to skip the rewrite.
 
 ## Files outside the swept scope: a count that only falls
 
