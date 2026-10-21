@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob@9e3e736da9
   - cosa.agents.bug_fix_expediter.job.BugFixExpediterJob.do_all@42afdb8dc9
-  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@3765b984a8
+  - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator@b4721b38ba
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_diagnosis@47e97bb180
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_proposal@c395c18198
   - cosa.agents.bug_fix_expediter.orchestrator.BFEOrchestrator.run_fix@01cb024310
@@ -36,5 +36,5 @@ BFE takes one dead (failed or interrupted) queue job and tries to fix the code t
 
 ## Worktree isolation
 - With `cosa worktree enabled` true, `worktree_scope` creates a worktree under the sandbox root, named by job id. Coder, Tester and git use it; the Lead does not.
-- With it off, the scope only warns about uncommitted changes. The orchestrator forgets the path on exit even if the caller raises. The directory is removed only when `cosa worktree auto cleanup` is true; the shipped INI has it false.
+- `worktree_scope` is the shared scope in [[expediter-worktree-scope]]. With it off, the scope only warns about uncommitted changes. The orchestrator forgets the path on exit even if the caller raises. The directory is removed only when `cosa worktree auto cleanup` is true; the shipped INI has it false.
 - Guide: `src/docs/agents/bug-fix-expediter-guide.md`; settings are the `bug fix expediter *` keys in `lupin-app.ini`.

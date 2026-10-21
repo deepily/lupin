@@ -2,7 +2,7 @@
 capability: agentic-job-contract
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.agentic_job_base.AgenticJobBase@028ecca7ff
+  - cosa.agents.agentic_job_base.AgenticJobBase@a1e585a11b
   - cosa.agents.agentic_job_base.AgenticJobBase.__init__@c9e3ac2365
   - cosa.agents.agentic_job_base.AgenticJobBase.do_all@1a00149391
   - cosa.agents.agentic_job_base.AgenticJobBase.base_id@5c2da75c6e
@@ -10,7 +10,7 @@ pins:
   - cosa.agents.agentic_job_base.AgenticJobBase.is_cacheable@01b6dc970e
   - cosa.agents.agentic_job_base.AgenticJobBase.notify_progress@b170b03671
   - cosa.agents.deep_research.job.DeepResearchJob.do_all@b9c361cc76
-  - cosa.agents.claude_code.job.ClaudeCodeJob@1b092e0e63
+  - cosa.agents.claude_code.job.ClaudeCodeJob@93cc5db2e6
 ---
 # Agentic job contract
 
@@ -19,7 +19,7 @@ pins:
 ## What a subclass provides
 - Two class attributes: `JOB_TYPE` (for example `"deep_research"`) and `JOB_PREFIX` (`"dr"`). The id is `{prefix}-{8 hex}`.
 - A `last_question_asked` property, `do_all()` and `async _execute()`. All three are abstract, so a class without them cannot be instantiated.
-- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error.
+- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error. `_run_execute( label, subject, failure_prefix )` holds that body for jobs with one `_execute()`: `ClaudeCodeJob`, the two chained jobs and `SweTeamJob` call it from `do_all`.
 - Thirteen production classes subclass it (grep of `src` outside tests at `08509073d`). They are `ClaudeCodeJob`, `DeepResearchJob`, `PodcastGeneratorJob`, `PresentationGeneratorJob`, `DeepResearchToPodcastJob`, `DeepResearchToPresentationJob`, `BugFixExpediterJob`, `TestFixExpediterJob`, `TestSuiteJob`, `SweTeamJob`, `HeartbeatPokerJob`, `ArbiterConsumerJob` and `MockAgenticJob`.
 
 ## What the base gives

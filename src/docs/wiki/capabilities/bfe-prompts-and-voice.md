@@ -7,11 +7,8 @@ pins:
   - cosa.agents.bug_fix_expediter.prompts.fix.build_fix_prompt@51b3568dad
   - cosa.agents.bug_fix_expediter.prompts.fix.build_verification_prompt@244bb5057b
   - cosa.agents.bug_fix_expediter.prompts.fix.build_redelegation_prompt@6c7918e942
-  - cosa.agents.bug_fix_expediter.cosa_interface.notify_progress@792a535c1d
-  - cosa.agents.bug_fix_expediter.cosa_interface.ask_confirmation@0ecc4641d7
-  - cosa.agents.bug_fix_expediter.cosa_interface.get_feedback@d9e1ff4c28
-  - cosa.agents.bug_fix_expediter.cosa_interface.present_choices@aea479611d
   - cosa.agents.bug_fix_expediter.voice_io.reconfigure@8265f4719a
+  - cosa.agents.utils.agent_notification_dispatcher.make_interface_functions@326b64aaa7
 ---
 # Bug fix expediter prompts and voice
 
@@ -26,7 +23,8 @@ These build the text each agent role receives and carry the questions the expedi
 - `build_redelegation_prompt` returns the tester's failure text to the coder and says not to edit test files.
 - `notify_progress` sends a progress message and does not wait. `ask_confirmation` returns a boolean, and `get_feedback` returns the user's spoken answer or `None`.
 - `present_choices` sends multiple-choice questions and returns the answers keyed by header.
-- All four voice functions set the module's sender id on a shared dispatcher before each call.
+- The four voice functions come from `make_interface_functions( globals(), ... )`. Each sets the module's sender id on a shared dispatcher before each call.
+- This agent forwards `progress_group_id` from `notify_progress`, `priority` from `ask_confirmation`, and `priority` and `response_default` from `get_feedback` and `present_choices`.
 - `voice_io.reconfigure` binds the shared `voice_io` layer to this agent's `cosa_interface` again.
 
 ## Don't

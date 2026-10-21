@@ -9,8 +9,7 @@ pins:
   - cosa.agents.utils.sender_id.detect_project@78436544c3
   - cosa.agents.utils.sender_id.detect_project_for_path@edd65d6a4d
   - cosa.agents.utils.sender_id.resolve_project_for_path@e843f0a26d
-  - cosa.agents.claude_code.cosa_interface.notify_progress@ba2c8f21cd
-  - cosa.agents.claude_code.cosa_interface.ask_confirmation@1a1a618d8f
+  - cosa.agents.utils.agent_notification_dispatcher.make_interface_functions@326b64aaa7
 ---
 # Agent feedback and project utilities
 
@@ -25,7 +24,7 @@ Three small helpers serve agentic jobs. One reads a spoken reply as approval or 
 - `detect_project_for_path` is the same walk. With no repository found it guesses the last path segment.
 - That guess is printed to standard error.
 - `detect_project` is `detect_project_for_path` applied to the current directory.
-- `notify_progress` sends a fire-and-forget progress notification for a job. `ask_confirmation` asks a yes or no question and returns a bool.
+- The Claude Code `cosa_interface` builds `notify_progress` and `ask_confirmation` with `make_interface_functions( globals(), push_session_name=False )`. The first sends a fire-and-forget note and the second returns a bool. The factory's other two wrappers are kept private there.
 
 ## Don't
 - Don't use the detect functions for a path you did not choose. They cannot tell a detection from a guess. Use `resolve_project_for_path`.

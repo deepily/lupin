@@ -2,8 +2,8 @@
 capability: bounded-claude-code-jobs
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.claude_code.job.ClaudeCodeJob@1b092e0e63
-  - cosa.agents.claude_code.job.ClaudeCodeJob.do_all@24cbb970c0
+  - cosa.agents.claude_code.job.ClaudeCodeJob@93cc5db2e6
+  - cosa.agents.claude_code.job.ClaudeCodeJob.do_all@53e24c548b
   - cosa.orchestration.claude_code.dispatcher.TaskType@516e546e49
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher@669f3fae51
   - cosa.orchestration.claude_code.dispatcher.ClaudeCodeDispatcher.dispatch@06780c00bc
@@ -14,7 +14,7 @@ pins:
 A `ClaudeCodeJob` runs one Claude Code task as a queue job. It rides the CJ Flow agentic pool, so it never blocks the inline fast lane. [[cj-flow-queue]] owns the queue.
 
 ## What it does
-- `ClaudeCodeJob` is an `AgenticJobBase` subclass; `do_all` runs the task and returns the conversational answer.
+- `ClaudeCodeJob` is an `AgenticJobBase` subclass; `do_all` runs the task through `AgenticJobBase._run_execute` and returns the conversational answer. A failure stores `Claude Code task failed: <error>` and is raised again.
 - `ClaudeCodeDispatcher.dispatch` routes on `TaskType`. `BOUNDED` runs to completion; `INTERACTIVE` is bidirectional and needs `claude-agent-sdk`.
 - Submit through `POST /api/v2/submit`, command `agent router go to claude code`, `args.task_type=BOUNDED`. A missing SDK fails only interactive tasks.
 

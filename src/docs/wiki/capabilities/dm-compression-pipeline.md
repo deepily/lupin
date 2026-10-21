@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.dm_compression.pipeline.compress_dm@343e1ffe61
   - cosa.agents.dm_compression.compressor.DmCompressionAgent@e95e554bc9
-  - cosa.agents.dm_compression.xml_models.DmCompressionResponse@b85c1205a0
+  - cosa.agents.dm_compression.xml_models.DmCompressionResponse@0774de615f
 ---
 # DM compression pipeline
 

@@ -3,7 +3,7 @@ capability: heartbeat-fleet-view
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.heartbeat_arbiter.fleet_data_model.build_fleet_view@9ec632a963
-  - cosa.agents.heartbeat_arbiter.fleet_render.build_snapshot@4df067f959
+  - cosa.agents.heartbeat_arbiter.fleet_render.build_snapshot@af0d3bd2bc
   - cosa.agents.heartbeat_arbiter.fleet_render.carry_forward_lineage@4587d703b1
   - cosa.agents.heartbeat_arbiter.fleet_render.compute_liveness@edf8ce8862
   - cosa.agents.heartbeat_arbiter.fleet_render.frame_signature@454cbc6423
@@ -21,7 +21,7 @@ Turns the heartbeat events, the commons roster and file times into one row per s
 - A `reaped` tombstone makes the row a member and lets the snapshot force it offline. Task-transition beacons are progress only and never count as liveness.
 - `compute_liveness` takes the freshest of up to seven signal ages and labels the row live, quiet, stale or offline. The ages stay separate columns.
 - The sent-DM age joins the union only when `count_dm` is true. Hold and transcript file times always join it.
-- `build_snapshot` adds role and manager to each row, sorted by session id. Offline rows are dropped unless `include_offline` is set.
+- `build_snapshot` adds role, manager, `last_activity_ts` (ISO text or `None`) and `project` to each row, sorted by session id. `project` is the answer of the injected `project_fn`, or `None` when there is none or it fails. Offline rows are dropped unless `include_offline` is set.
 - A session named in `process_dead` is forced offline. A manager is shown only when it came from spawn lineage.
 - `carry_forward_lineage` fills a missing manager from the last poll that resolved it and returns the next map, pruned to the current rows.
 - `prune_offline_rows` gives the published live-only view and recounts it.

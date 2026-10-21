@@ -4,9 +4,9 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.tfe_to_cc.prompts.bundle_phase1.build_diagnosis_bundle_prompt@4f0ca8fc85
   - cosa.agents.tfe_to_cc.prompts.bundle_phase3.build_fix_bundle_prompt@1d8aff2497
-  - cosa.agents.tfe_to_cc.prompts.output_contract.parse_diagnosis_block@fae8ac0c07
+  - cosa.agents.tfe_to_cc.prompts.output_contract.parse_diagnosis_block@bc266c8e21
   - cosa.agents.tfe_to_cc.prompts.output_contract.validate_diagnosis_payload@b664cf0770
-  - cosa.agents.tfe_to_cc.prompts.output_contract.parse_result_block@57be0d625b
+  - cosa.agents.tfe_to_cc.prompts.output_contract.parse_result_block@65da7a09a1
   - cosa.agents.tfe_to_cc.prompts.output_contract.validate_result_payload@380610e654
   - cosa.agents.tfe_to_cc.prompts.output_contract.parse_result_from_git_log@d995e0488b
   - cosa.agents.tfe_to_cc.prompts.output_contract.parse_diagnosis_fallback@1091fc2ed7
@@ -23,7 +23,7 @@ The prompt builders and reply parsers for running the test-fix expediter's diagn
 - Both builders raise `ValueError` on an empty list.
 
 ## Invariants
-- `parse_diagnosis_block` and `parse_result_block` never raise. They return `None` for no block, bad JSON or a missing `clusters` key.
+- `parse_diagnosis_block` and `parse_result_block` never raise. Both use one fenced-block parser. They return `None` for no block, bad JSON, a top level that is not an object, or a `clusters` value that is not a dictionary.
 - `validate_*_payload` return `( ok, issues )`. A `fixed` cluster must carry `commit_sha` as a non-empty string; `null` is rejected.
 - `parse_result_from_git_log` is the fallback when the result block is lost. It reads `fix(tfe): C<n>` lines, newest first. A cluster with no commit is `unclear`, since missing and failed look alike.
 - `parse_diagnosis_fallback` scrapes `Cluster Cn` headings and returns a payload only when it recovers a root cause and a category for a cluster.

@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.utils.proxy_agents.base_listener.BaseWebSocketListener@4e50b0aaba
   - cosa.agents.utils.proxy_agents.base_listener.BaseWebSocketListener.run@4b6bdc5716
-  - cosa.agents.utils.proxy_agents.base_responder.BaseResponder@2f8100ee7a
+  - cosa.agents.utils.proxy_agents.base_responder.BaseResponder@8a1bf94ce1
   - cosa.agents.utils.proxy_agents.base_responder.BaseResponder.submit_response@4398825b2a
   - cosa.agents.utils.proxy_agents.base_strategy.BaseStrategy@c7fe75f5cc
   - cosa.agents.utils.proxy_agents.rest_submitter.submit_notification_response@981676295e
@@ -29,7 +29,7 @@ The shared layer under the proxy agents: a WebSocket listener, a responder base 
 - `authorization` is the `Bearer` token of the last login, or `None` before the first.
 
 ## The responder and submitter
-- `BaseResponder` keeps a stats dict and leaves `handle_event` to the subclass. `route_to_strategies` skips an unavailable strategy and returns the first answer that is not `None`; the async variant also awaits a coroutine result.
+- `BaseResponder` keeps a stats dict, prints it under its `STATS_TITLE`, and leaves `handle_event` to the subclass. `route_to_strategies` skips an unavailable strategy and returns the first answer that is not `None`; the async variant also awaits a coroutine result.
 - `submit_response` calls `submit_notification_response` with the token from `authorization_fn`. The entry points set that function to read the listener's token when the answer is posted.
 - `submit_notification_response` posts `notification_id` and `response_value` to `/api/notify/response` with a 30 second timeout. Only HTTP 200 returns `True`; every other outcome is logged and returns `False`.
 

@@ -2,17 +2,15 @@
 capability: deep-research-voice-interface
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.deep_research.cosa_interface.ask_confirmation@1a1a618d8f
-  - cosa.agents.deep_research.cosa_interface.get_feedback@80d8cca785
-  - cosa.agents.deep_research.cosa_interface.notify_progress@792a535c1d
-  - cosa.agents.deep_research.cosa_interface.present_choices@e225a5ad4e
   - cosa.agents.deep_research.cosa_interface.reset_dispatch_context@906fca2640
+  - cosa.agents.utils.agent_notification_dispatcher.make_interface_functions@326b64aaa7
 ---
 # Deep research voice interface
 
 `cosa_interface.py` wraps the shared `AgentNotificationDispatcher` so [[deep-research]] can notify and ask the user, by voice or the UI card, without blocking the event loop.
 
 ## What it does
+- `make_interface_functions( globals(), ... )` builds the four wrappers below. It reads `SENDER_ID`, `TARGET_USER` and `SESSION_NAME` from the module on every call. This module forwards `progress_group_id` from `notify_progress` and `priority` from `present_choices`, and nothing else.
 - `notify_progress` sends a fire-and-forget message. It can carry an abstract, a job id, a queue name and a progress group id for in-place card updates.
 - `ask_confirmation` asks a yes/no question and returns a bool. The default answer applies on timeout.
 - `get_feedback` asks an open question and returns the transcribed answer, or `None`.

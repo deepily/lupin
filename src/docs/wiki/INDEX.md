@@ -10,6 +10,8 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[agent-llm-clients]] — the shared LLM client layer: model registry, client factory, completion and chat clients, token counting, prompt formatting, LLM exceptions. `cosa.agents` (llm_client, llm_client_factory, model_registry, base_llm_client, completion_client, token_counter, prompt_formatter, llm_exceptions)
 - [[bounded-claude-code-jobs]] — running a Claude Code task as a bounded or interactive CJ Flow job, and dispatching it. `cosa.agents.claude_code`, `cosa.orchestration.claude_code`
 - [[xml-io-models]] — the XML request and response models agents parse and emit. `cosa.agents.io_models`, `cosa.agents.dm_compression`, `cosa.agents.dm_tutor`, `cosa.crud_for_dataframes` (xml_models)
+- [[json-fenced-response-helpers]] — strip a code fence, parse a fenced JSON reply and pull a few keys with defaults. `cosa.agents.io_models.utils` (json_object_recovery)
+- [[xml-model-mixins]] — the code-lines, comma-list and CDATA mixins of the XML models, and the tag extractor the dispatchers share. `cosa.agents.io_models` (xml_models, utils.util_xml_pydantic)
 - [[dataframe-crud]] — CRUD over DataFrames, storage, schemas and the intent dispatcher. `cosa.crud_for_dataframes`
 - [[dataframe-crud-operations]] — list, update, mark-done and query functions, the spoken answer for each result and the calendar agent. `cosa.crud_for_dataframes` (crud_operations, dispatcher, calendar_crud_agent)
 - [[dataframe-crud-schemas-and-intent]] — the todo, calendar and generic column definitions, the parsed `CRUDIntent` and the intent prompt. `cosa.crud_for_dataframes` (schemas, xml_models, intent_extractor)
@@ -50,9 +52,14 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the packages it pins. `[[agent-llm-clients]]` is written too; its line is above.
 
 - [[agent-voice-io]] — how a job tells the user something or asks a question, and what it does when nobody can answer. `cosa.agents.utils` (voice_io, sender_id, sync_notify), `cosa.agents.deep_research` (cosa_interface, voice_io)
+- [[agent-smoke-helpers]] — the single-agent smoke walk and the module-list smoke suite runner. `cosa.agents` (agent_base), `cosa.agents.utils` (smoke_suite)
+- [[agent-ini-config-loader]] — read a config dataclass from INI keys, with the read type taken from each field. `cosa.agents.shared` (config_loader)
+- [[expediter-worktree-scope]] — the async scope that sets and clears an expediter orchestrator's worktree path. `cosa.agents.shared` (worktree_context)
+- [[proxy-shared-helpers]] — the notify keyword builder and the stats table printer the proxies share. `cosa.agents.utils` (sync_notify), `cosa.agents.utils.proxy_agents` (base_responder)
 - [[agentic-job-contract]] — `AgenticJobBase`: the fields and lifecycle every long-running queue job provides. `cosa.agents` (agentic_job_base), `cosa.agents.claude_code`, `cosa.agents.deep_research`
 - [[deep-research]] — answering a question from the web and saving a markdown report. `cosa.agents.deep_research` (cli, search_cache, seed_context)
 - [[generator-sdk-clients]] — the Claude Agent SDK client classes of the podcast, presentation and deep-research agents. `cosa.agents.podcast_generator`, `cosa.agents.presentation_generator`, `cosa.agents.deep_research` (api_client)
+- [[bounded-cc-client-base]] — the shared constructor, typed call, JSON call and cost tally of the podcast and presentation SDK clients. `cosa.agents.shared` (bounded_cc_client)
 - [[presentation-generation]] — turning a source document into a YAML deck, Marp Markdown and a pptx, with its review gates. `cosa.agents.presentation_generator` (job, deck_verdict)
 - [[presentation-visual-renderers]] — the seventh pipeline phase, which replaces each `VISUAL` marker in the Marp file with renderer output. `cosa.agents.presentation_generator.renderers`
 - [[podcast-generation]] — turning a research document into a two-host script and one MP3 per language. `cosa.agents.podcast_generator` (orchestrator)

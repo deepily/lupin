@@ -3,7 +3,7 @@ capability: presentation-cli
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.presentation_generator.__main__.main@403b5ac1b0
-  - cosa.agents.presentation_generator.__main__.run_all_smoke_tests@aaccbbd394
+  - cosa.agents.presentation_generator.__main__.run_all_smoke_tests@0aec798dbc
   - cosa.agents.presentation_generator.__main__.run_presentation_generation@0c79dce3b4
   - cosa.agents.presentation_generator.api_client.APIResponse@983d368321
 ---
@@ -17,7 +17,7 @@ pins:
 - It returns 0 when the job gives a non-empty summary and 1 on an empty result, an interrupt or an exception. With `--debug` the traceback is printed.
 - `--dry-run` is handed to the job as `dry_run`. The job then sends low-priority breadcrumb notifications and returns a mock summary, with no model calls.
 - `--user-email`, `--user-id`, `--session-id` and `--no-confirm` are hidden flags for the expeditor. The user and session defaults are `user@example.com` and `cli-session`.
-- `run_all_smoke_tests` calls `quick_smoke_test` in six modules: config, state, `cosa_interface`, `voice_io`, orchestrator and job. It prints a table and returns True only if none failed.
+- `run_all_smoke_tests` calls `quick_smoke_test` in six modules: config, state, `cosa_interface`, `voice_io`, orchestrator and job. It runs through `run_import_smoke_suite` ([[agent-smoke-helpers]]), cutting each error text to 80 characters. It prints a table and returns True only if none failed.
 - `APIResponse` is one content-phase model reply: content, model, token counts, a stop reason, the SDK cost and the raw response. The stop reason is `None` when the end state is unknown; it is not turned into `end_turn`.
 
 ## Don't

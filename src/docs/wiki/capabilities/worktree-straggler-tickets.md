@@ -5,7 +5,7 @@ pins:
   - cosa.agents.shared.worktree_straggler_tickets.RepositoryStragglerStore@a073439dbc
   - cosa.agents.shared.worktree_straggler_tickets.compose_archive_row@cf144d864e
   - cosa.agents.shared.worktree_straggler_tickets.compose_row@def6ab1c29
-  - cosa.agents.shared.worktree_straggler_tickets.load_state@8265de9464
+  - cosa.agents.shared.worktree_straggler_tickets.load_state@53db943f3b
   - cosa.agents.shared.worktree_straggler_tickets.open_archive_tickets@c63bfabe98
   - cosa.agents.shared.worktree_straggler_tickets.owner_for_branch@db8655adbc
   - cosa.agents.shared.worktree_straggler_tickets.owner_for_tree@7c67973f9f
@@ -31,4 +31,4 @@ A tree refused for more than a day, or an archived branch whose work never lande
 ## Invariants
 - The store writes to the task repository directly, and not through `/api/tasks`, so the arbiter can close its own rows.
 - Rows close as `dropped`, because a system actor has no honest receipt for `done`.
-- `load_state` returns an empty dictionary for an absent or corrupt file. `write_state` raises `OSError`, which the caller logs.
+- `load_state` returns an empty dictionary for an absent or corrupt file. It reads the `trees` section through `load_json_section` ([[utils-atomic-json]]). `write_state` raises `OSError`, which the caller logs.

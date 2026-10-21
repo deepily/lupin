@@ -8,7 +8,7 @@ pins:
   - cosa.agents.io_models.utils.xml_parser_factory.XmlParserFactory.parse_agent_response@254bd01546
   - cosa.agents.io_models.utils.xml_parser_factory.PydanticXmlParser.parse_xml_response@e49c7ce400
   - cosa.agents.io_models.utils.prompt_template_processor.PromptTemplateProcessor@01f5a736f5
-  - cosa.agents.io_models.xml_models.CodeResponse@7e3c5c85e9
+  - cosa.agents.io_models.xml_models.CodeResponse@c81386e483
   - cosa.agents.io_models.utils.json_object_recovery.recover_json_object@a4f876bc5e
   - cosa.agents.io_models.utils.json_object_recovery.extract_json_object@d7acf5ea59
   - cosa.agents.io_models.utils.fuzzy_file_prefilter.prefilter_docs_map_by_keywords@ea791b6269
@@ -21,7 +21,7 @@ Agents ask a model for XML, and `BaseXMLModel` subclasses turn the reply into va
 - `BaseXMLModel.from_xml( text )` parses, `to_xml()` writes (it leaves out `None` fields). The shared models are in `io_models/xml_models.py`. Nine other packages keep their own `xml_models.py` (calculator, decision_proxy, dm_compression, dm_quality_judge (also `xml_models_v2.py`), dm_tutor, notification_proxy, prediction_engine, runtime_argument_expeditor, crud_for_dataframes), and `lupin_mcp/commons_xml_models.py` is one more.
 - `XmlParserFactory.parse_agent_response( xml, routing_command, tag_names )` is the entry point. `PydanticXmlParser` maps a routing command such as `agent router go to math` to a model class and returns `model_dump()` (fields use underscores, `rephrased_answer` for `<rephrased-answer>`).
 - `PromptTemplateProcessor` fills the XML example in a prompt from each model's `get_example_for_template()`, from its own command-to-model map.
-- `recover_json_object( text )` pulls a JSON value out of a chatty reply. The podcast script parser and the podcast API client raise `ValueError` on `None`. So do the presentation generator's four callers (outline, narrative, elaboration, API client). The podcast analysis parser does not: it returns a default analysis dict.
+- The mixins and the tag extractor are on [[xml-model-mixins]]. `recover_json_object( text )` pulls a JSON value out of a chatty reply. The podcast script parser and the podcast API client raise `ValueError` on `None`. So do the presentation generator's four callers (outline, narrative, elaboration, API client). The podcast analysis parser does not: it returns a default analysis dict.
 - `prefilter_docs_map_by_keywords` narrows a path map to the best 50 before an LLM picks a file. Its one production caller is the runtime-argument expeditor; the podcast router function its docstring names, `match_research_docs`, is defined nowhere in `src`.
 
 ## Invariants

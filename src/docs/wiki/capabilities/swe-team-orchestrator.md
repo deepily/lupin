@@ -2,8 +2,8 @@
 capability: swe-team-orchestrator
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.swe_team.job.SweTeamJob@82140429b7
-  - cosa.agents.swe_team.job.SweTeamJob.do_all@98c373ef75
+  - cosa.agents.swe_team.job.SweTeamJob@2e50adced1
+  - cosa.agents.swe_team.job.SweTeamJob.do_all@ea4b930824
   - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator@6e88646c78
   - cosa.agents.swe_team.orchestrator.SweTeamOrchestrator.run@5b89c1bd41
   - cosa.agents.swe_team.safety_limits.SafetyGuard@e7424558e3
@@ -13,7 +13,7 @@ pins:
 ---
 # SWE Team orchestrator
 
-`SweTeamJob` (`JOB_TYPE` `swe_team`) runs one task through `SweTeamOrchestrator`. A Lead splits the task, a Coder does each piece, and a Tester checks it. Its safety guard, hooks and test runner are imported by [[fix-expediter-bfe]] and [[fix-expediter-tfe]].
+`SweTeamJob` (`JOB_TYPE` `swe_team`) runs one task through `SweTeamOrchestrator`. Its `do_all` calls `_run_execute`, and a failure stores `SWE Team task failed: <error>` and is raised again. A Lead splits the task, a Coder does each piece, and a Tester checks it. Its safety guard, hooks and test runner are imported by [[fix-expediter-bfe]] and [[fix-expediter-tfe]].
 
 ## The run
 - `run` returns the final summary, or `None` on failure. A `SafetyLimitError` or any other exception sets the state to failed and sends an urgent notification. In the delegation, verification and re-delegation calls, a result message with `is_error` raises through `raise_error_result`. The delegation and re-delegation calls catch it and record the CLI text as the task's error, so it fails the task. The verification call records it as a failed check, so the coder is asked again like after a failed test. None of the three fails the run by itself. The analysis and decomposition calls ignore a result message and fall back.

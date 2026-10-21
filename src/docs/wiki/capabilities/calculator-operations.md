@@ -9,7 +9,7 @@ pins:
   - cosa.agents.calculator.conversion_tables.find_category@3947951ee2
   - cosa.agents.calculator.conversion_tables.resolve_alias@23d7564be3
   - cosa.agents.calculator.dispatcher.dispatch@82a1c77171
-  - cosa.agents.calculator.dispatcher.extract_calc_intent_xml@e08bdb7c54
+  - cosa.agents.calculator.dispatcher.extract_calc_intent_xml@ceecc80a1a
   - cosa.agents.calculator.dispatcher.format_result_for_voice@4065d1225e
   - cosa.agents.calculator.xml_models.CalcIntent@7b3af6281a
 ---
@@ -19,7 +19,7 @@ The calculator turns a spoken request into one of four exact calculations: arith
 
 ## What it does
 - `CalcIntent` is the extracted intent. Every field is a string, because model output is text. Empty tags arrive as `None` and are coerced to empty strings.
-- `extract_calc_intent_xml` pulls the `calc_intent` block out of a raw reply, ignoring code fences and text around it. It raises `ValueError` when there is no block.
+- `extract_calc_intent_xml` pulls the `calc_intent` block out of a raw reply, ignoring code fences and text around it. It calls the shared `extract_tagged_xml` with the tag `calc_intent`, and raises `ValueError` when there is no block.
 - `dispatch` routes an intent to `arithmetic`, `convert`, `compare_prices` or `mortgage`. An unknown operation raises `ValueError`.
 - `format_result_for_voice` turns a result dict into a spoken sentence. An error result becomes "Sorry, there was a problem" plus the message.
 - `arithmetic` folds the operands left to right. Add and multiply take any count. Whole results come back as `int`, and the others are rounded to six places.

@@ -14,7 +14,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.events_tail.tail_fleet_events@9f216552b2
   - cosa.agents.heartbeat_arbiter.events_tail.tail_session_file@d6895d3c87
   - cosa.agents.heartbeat_arbiter.lineage_carry.read_carry@d99b7e63de
-  - cosa.agents.heartbeat_arbiter.lineage_carry.write_carry@b44b40ebb1
+  - cosa.agents.heartbeat_arbiter.lineage_carry.write_carry@841a588169
 ---
 # Heartbeat arbiter plumbing
 
@@ -30,7 +30,7 @@ The small parts under [[heartbeat-arbiter]]: the commons seam, the journal line 
 - `FleetEventAccumulator` keeps a bounded tail of event records per session across polls. `PingLedger` remembers the last ping per edge and drops edges that are no longer active.
 - `tail_session_file` reads only new complete lines from a byte offset. A shrunk file restarts at zero. `tail_fleet_events` does that for every session file.
 - `save_offsets` and `load_offsets` keep those offsets in a JSON file, so a restart does not replay old events. Both return a safe empty or false result on error.
-- `read_carry` and `write_carry` persist the map from session to last known manager, so a reaped worker's row stays under its manager after a restart.
+- `read_carry` and `write_carry` persist the map from session to last known manager. `write_carry` writes through `write_json_atomic` ([[utils-atomic-json]]). A reaped worker's row then stays under its manager after a restart.
 
 ## Don't
 - Do not expect `write_carry` to merge. The caller passes the already pruned map and the file is replaced.

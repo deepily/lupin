@@ -9,7 +9,7 @@ pins:
   - cosa.agents.heartbeat_arbiter.outreach_ledger.read_pending@d388fa0c00
   - cosa.agents.heartbeat_arbiter.outreach_ledger.record_attempt@0fddc36f55
   - cosa.agents.heartbeat_arbiter.outreach_ledger.remove_pending@69ad5dea3c
-  - cosa.agents.heartbeat_arbiter.outreach_ledger.write_pending@9509ee5a92
+  - cosa.agents.heartbeat_arbiter.outreach_ledger.write_pending@b8cfa1f89a
   - cosa.agents.heartbeat_arbiter.ping_throttle.backoff_for_attempt@6111a5a436
   - cosa.agents.heartbeat_arbiter.ping_throttle.edge_key@02b176eb11
   - cosa.agents.heartbeat_arbiter.ping_throttle.in_window@5203c800fa
@@ -32,7 +32,7 @@ The pure rules and the small ledger that keep [[heartbeat-arbiter]] from floodin
 - `digest_due` is true with no prior digest or once the cadence has passed, inclusive. A future stamp is not due.
 - `route_operator_gates` combines both. The digest list is empty until the cadence has elapsed, and the queue is never pushed.
 - `read_pending` returns the ledger of undelivered owner messages, or an empty dict on any error.
-- `write_pending` replaces the file atomically and raises `OSError` if it cannot write.
+- `write_pending` replaces the file atomically through `write_json_atomic` ([[utils-atomic-json]]) and raises `OSError` if it cannot write.
 - `add_pending` sets or refreshes one entry with one attempt. `record_attempt` bumps the attempt count and outcome, and does nothing for an unknown id. `remove_pending` deletes an entry.
 
 ## Don't

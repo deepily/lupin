@@ -2,7 +2,7 @@
 capability: notification-proxy
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.notification_proxy.responder.NotificationResponder@bbae59b303
+  - cosa.agents.notification_proxy.responder.NotificationResponder@a1de28efc4
   - cosa.agents.notification_proxy.responder.NotificationResponder.handle_event@23ea9bdd9a
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy@bf4c4fe8e4
   - cosa.agents.notification_proxy.strategies.expediter_rules.ExpediterRuleStrategy.can_handle@edfcb2354c
@@ -16,7 +16,7 @@ pins:
 The notification proxy answers questions that ask for a response by following a script for a test profile. It is a separate process, started with `python -m cosa.agents.notification_proxy`. It listens to `notification_queue_update` events. [[decision-proxy]] is the sibling that answers by earned trust instead of a script. This proxy has its own listener and responder. From [[proxy-agent-base]] it takes only the connection defaults, four reconnect constants and two credential helpers.
 
 ## Choosing an answer
-- `NotificationResponder.handle_event` routes `notification_queue_update` events to `_handle_notification_update`. That method skips a notification that asks for no response and one marked `human_only`. A response-requesting one with no id is counted as an error.
+- `NotificationResponder.handle_event` routes `notification_queue_update` events to `_handle_notification_update`. That method skips a notification that asks for no response and one marked `human_only`. A response-requesting one with no id is counted as an error. The statistics print through `print_stats_table` ([[proxy-shared-helpers]]).
 - In a dry run it sends a decline instead: `no` for a yes/no card and `cancel` for the rest.
 - Strategies are tried in order, and the first answer wins: the script matcher, then the rules, then the cloud fallback. If none answers, the notification is skipped.
 - The strategy mode picks which exist. `llm_script` (the default) builds the script matcher. `rules` builds no matcher. `auto` builds the matcher and also tries the rules when it gave no answer. The cloud fallback is built in every mode.

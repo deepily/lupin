@@ -2,7 +2,7 @@
 capability: heartbeat-self-respin-loop
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop@389b77362e
+  - cosa.agents.heartbeat_arbiter.self_respin_observer.SelfRespinObserverLoop@646f4b024b
   - cosa.agents.heartbeat_arbiter.self_respin_observer.sweep_returned_markers@1e86a59d16
   - cosa.agents.heartbeat_arbiter.self_respin_observer.build_respin_sample@ae2c8c0d35
   - cosa.agents.heartbeat_arbiter.self_respin_observer.collect_respin_samples@bd0c372ad5
@@ -15,7 +15,7 @@ pins:
 The standing loop that acts on the markers in [[heartbeat-self-respin-markers]]. It alarms on seats that did not come back, sweeps done markers, records a sample row per marker and tells managers about stale MCP processes.
 
 ## What it does
-- `SelfRespinObserverLoop` runs on a daemon thread, one pass per arbiter poll. `start` does nothing unless the observer flag or the stale-MCP flag is on.
+- `SelfRespinObserverLoop` runs on a daemon thread, one pass per arbiter poll. `start` comes from `StoppableDaemonMixin` ([[utils-stoppable-daemon]]). Its `_should_start` hook does nothing unless the observer flag or the stale-MCP flag is on.
 - `sweep_once` does nothing when the observer flag is off, except the stale-MCP half. When on, it sends one advisory per alarming marker and verdict, then sweeps.
 - An alarm that clears drops its one-shot key, so a later alarm advises again. A failed pass returns a zero summary and the thread survives.
 - `sweep_returned_markers` deletes markers confirmed `RETURNED` and older than the time to live. Pending and alarming markers stay.

@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.test_fix_expediter.job.TestFixExpediterJob@402076182b
   - cosa.agents.test_fix_expediter.job.TestFixExpediterJob.do_all@14c1dab6f0
-  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator@c4582ce640
+  - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator@4928d793a0
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase2_propose@a9dcce6363
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase5_git@6ee1c150b3
   - cosa.agents.test_fix_expediter.orchestrator.TFEOrchestrator.run_phase6_validation@b7f67e93c3
@@ -21,7 +21,7 @@ TFE takes the failures from one finished test-suite run, groups them into cluste
 - Clustering, `run_phase0_cluster`: `heuristic_seed` groups failures; `llm_refine` then enforces the cluster cap. No model call is wired: the orchestrator passes no `refine_fn`, so only the cap runs.
 - Over the cap, the `max_clusters - 1` largest clusters are kept and the rest merge into one "mixed" cluster. Shipped `max clusters` is 8 and `max proposals per cluster` is 1.
 - Diagnosis runs a Lead agent per cluster (`Read`, `Glob`, `Grep`, `Bash`, `plan` mode). Proposal, `run_phase2_propose`, uses a Lead with `Read`, `Glob`, `Grep` only.
-- The fix and git steps run inside `worktree_scope`; the rerun step runs outside it.
+- The fix and git steps run inside `worktree_scope` ([[expediter-worktree-scope]]); the rerun step runs outside it.
 - `TFEPhase` also has `PARTIAL` (some clusters fixed, others failed) besides completed, failed and skipped.
 
 ## The voice gate

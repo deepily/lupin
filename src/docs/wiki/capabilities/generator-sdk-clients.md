@@ -2,13 +2,11 @@
 capability: generator-sdk-clients
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.agents.podcast_generator.api_client.PodcastAPIClient@4878d9503a
-  - cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script@5a2c246c32
-  - cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_with_json_output@46b576922b
-  - cosa.agents.podcast_generator.api_client.CostEstimate@df68204a8c
-  - cosa.agents.presentation_generator.api_client.PresentationAPIClient@19d45c0fde
-  - cosa.agents.presentation_generator.api_client.PresentationAPIClient.call_with_json_output@3ce92a0be9
-  - cosa.agents.presentation_generator.api_client.CostEstimate@e225be7ff1
+  - cosa.agents.podcast_generator.api_client.PodcastAPIClient@eeac52f356
+  - cosa.agents.podcast_generator.api_client.PodcastAPIClient.call_for_script@92acc1bb1e
+  - cosa.agents.podcast_generator.api_client.CostEstimate@7c2fff6a57
+  - cosa.agents.presentation_generator.api_client.PresentationAPIClient@82a308bbe1
+  - cosa.agents.presentation_generator.api_client.CostEstimate@4a01d11bac
   - cosa.agents.deep_research.api_client.ResearchAPIClient@46fa8d5e14
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_subagent@0ae9dd8678
   - cosa.agents.deep_research.api_client.ResearchAPIClient.call_with_json_output@dc6725397a
@@ -28,7 +26,7 @@ The podcast, presentation and deep-research agents each have one client class th
 ## Invariants
 - `max_tokens` is accepted and ignored. `temperature` is turned into a sentence appended to the system prompt. In podcast and presentation, 0.75 and above reads creative and 0.55 and below precise. In research, the cut-offs are 0.9 and above, and 0.5 and below. It does not change sampling.
 - A call with no tools uses permission mode `"default"`. In `"plan"` mode the model writes a plan for the output and the JSON parser then fails. This happened on 4 Aug 2026 to a podcast job, `pg-efc6b2c8`, and to a presentation job. Only research calls that have tools use `"plan"`.
-- `call_with_json_output` raises `ValueError` when no JSON object can be recovered, and never returns a default. Podcast and presentation use `recover_json_object` ([[xml-io-models]]); research has its own `extract_json_object`.
+- `call_with_json_output` raises `ValueError` when no JSON object can be recovered. It never returns a default. Podcast and presentation share one in [[bounded-cc-client-base]], which calls at temperature 0.5 and recovers with `recover_json_object` ([[xml-io-models]]); research has its own `extract_json_object`.
 - Construction raises `ImportError` if `claude_agent_sdk` is missing. `close()` does nothing.
 - `sdk_cost_usd` is the SDK's telemetry, covered by the plan; the token prices in `CostEstimate` are approximate.
 

@@ -4,7 +4,7 @@ pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
   - cosa.agents.dm_tutor.agent.DmTutorAgent@0df11d62f4
   - cosa.agents.dm_tutor.agent.rewrite_dm@e214cc20a9
-  - cosa.agents.dm_tutor.xml_models.DmTutorResponse@188ffffb85
+  - cosa.agents.dm_tutor.xml_models.DmTutorResponse@661900ce46
   - cosa.agents.dm_tutor.tutor.build_prompt@37c8633209
   - cosa.agents.dm_tutor.tutor.extract@f146983f4e
   - cosa.agents.dm_tutor.tutor.rewrite_to_form@321ad34eb6
