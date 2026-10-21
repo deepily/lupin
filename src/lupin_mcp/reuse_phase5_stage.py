@@ -62,14 +62,17 @@ def stage_asks( stage, sink, repeats, pinned, policy=None ):
     return { bf.LOOKUP: lookup, **{ name: replay( name ) for name in base if name != bf.LOOKUP } }
 
 
-def policy_name( no_band ):
+def policy_name( policy ):
     """
     Name the verdict policy a run ran under.
 
+    Requires:
+        - policy is the policy mapping the run decided by
+
     Ensures:
-        - returns BAND_OFF when no_band is true, else BAND_ON, the words every result file and report carry
+        - returns BAND_ON when policy has a band, else BAND_OFF, the words every result file and report carry
     """
-    return BAND_OFF if no_band else BAND_ON
+    return BAND_ON if "band" in policy else BAND_OFF
 
 
 def estimate_lines( needs, sample_tokens, dollars_per_million ):
@@ -253,7 +256,7 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
         - the factor is stamped in the canary report and in the canary and run results
         - a stage on another vector set than the pin is refused, before anything is opened
         - the results are named by the prefix, so another arm or policy can run again on the same sample under its own prefix
-        - the results are stamped with the sample hash, the stage, the needs hash and the verdict policy word: the shipped policy with its band, or with --no-band the same policy without the band
+        - the results are stamped with the sample hash, the stage, the needs hash and the verdict policy word, named from the policy the run decided by: band on when it has a band, else band off. The shipped policy has no band, so --no-band changes nothing while it stays that way
         - an approval sends nothing, so it builds no stage
     Raises:
         - DriverRefused for the checks above; the refusals of the runner, the ledger and the canary
@@ -268,7 +271,7 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     no_band = stage is not None and args.no_band                                              # an approval builds no stage, so it has no policy
     env   = e2r._open_env( args.root, args.data, args.ledger, args.live, stage_asks( stage, bf.Sink(), repeats, None if stage is None else args.manifest_hash, NO_BAND if no_band else None ), args.pack_size )
     spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS, "factor": factor,
-              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha, "policy": policy_name( no_band ), "over_estimate_factor": factor } }
+              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha, "policy": policy_name( NO_BAND if no_band else vd.POLICY ), "over_estimate_factor": factor } }
     if command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
     if command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )
     elif command == "approve":

@@ -345,7 +345,7 @@ def test_no_band_is_the_shipped_policy_without_its_band_and_nothing_else():
 
 
 def test_the_policy_word_names_the_band_state():
-    assert stg.policy_name( False ) == "band on" and stg.policy_name( True ) == "band off"
+    assert stg.policy_name( dict( vd.POLICY, band=0.076 ) ) == "band on" and stg.policy_name( stg.NO_BAND ) == "band off" and stg.policy_name( vd.POLICY ) == "band off"
 
 
 def spy_policies( monkeypatch ):
@@ -356,10 +356,16 @@ def spy_policies( monkeypatch ):
     return seen
 
 
-def test_with_no_flag_the_stage_decides_by_the_shipped_policy_and_the_results_say_band_on( scratch, monkeypatch ):
+def test_with_no_flag_the_stage_decides_by_the_shipped_policy_and_the_results_say_band_off( scratch, monkeypatch ):
     seen = spy_policies( monkeypatch )
     drive( scratch )
-    assert seen and {  policy for _, policy in seen } == { None }
+    assert seen and {  policy for _, policy in seen } == { None } and "band" not in vd.POLICY       # the shipped policy has no band
+    assert [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band off", "band off" ]
+
+
+def test_with_no_flag_and_a_band_in_the_shipped_policy_the_results_say_band_on( scratch, monkeypatch ):
+    monkeypatch.setitem( vd.POLICY, "band", 0.076 )
+    drive( scratch )
     assert [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band on", "band on" ]
 
 
@@ -423,7 +429,7 @@ def test_the_factor_given_widens_the_ceiling_cap_and_is_stamped_in_the_canary_an
     folder = scratch.data / "e2e-results"
     canary = json.loads( ( folder / f"{stg.STAGE_PREFIX}-canary.canary.json" ).read_text() )
     run    = json.loads( ( folder / f"{stg.STAGE_PREFIX}-run.json" ).read_text() )
-    assert canary[ "over_estimate_factor" ] == 3.0 and run[ "over_estimate_factor" ] == 3.0 and [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band on", "band on" ]
+    assert canary[ "over_estimate_factor" ] == 3.0 and run[ "over_estimate_factor" ] == 3.0 and [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band off", "band off" ]
 
 
 @pytest.mark.parametrize( "bad", [ "0", "-2", "nan", "inf" ] )
