@@ -7,7 +7,7 @@ pins:
 ---
 # Hook memento verify tick
 
-`memento_io.py verify` checks that each memento record matches its out-of-repo mirror. Nothing called it, so findings went unseen. The Stop hook now runs it daily.
+`$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py verify` checks that each memento record matches its out-of-repo mirror. Nothing called it, so findings went unseen. The Stop hook now runs it daily.
 
 ## What it does
 - `verify_tick_line` runs the verify at most once a day, behind a time-to-live ledger. It returns one line, or an empty string when the ledger is fresh or every repo came back clean.
