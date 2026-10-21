@@ -119,6 +119,7 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[mcp-task-store-tools]] — the ten MCP tools a session uses to read and write the task store over HTTP. `lupin_mcp` (task_store_tools, cosa_voice_mcp)
 - [[mcp-commons-and-dm]] — the two ways a session talks to peers: the file blackboard (`commons_*`) and inline direct messages (`dm_*`). `lupin_mcp` (commons_store, commons_ask, cosa_voice_mcp)
 - [[mcp-commons-ask-async]] — the polling-mode question post behind the `commons_ask_async` tool. `lupin_mcp` (commons_ask)
+- [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
 - [[lupin-cli-notifications]] — the command-line clients that send a notification to the Lupin server, and the sync one that waits for the user's answer. `lupin_cli.notifications` (notify_user_sync, notify_user_async, notify_user, human_ask_containment)
 - [[task-promotion-gate]] — the rules for moving a row out of the holding area onto a board, and for who may set a priority. `cosa.rest` (task_promotion_gate, task_promotion_resolver, task_request_lifecycle, task_request_pledge, task_priority_firewall, task_approval_settings)
 - [[web-client-audio-and-tts]] — how the browser records speech for transcription and plays server-made speech through a queue. `src/lupin_app/static/js/multiplexer` (audio, render, shared, stores, wireTtsIntent)
