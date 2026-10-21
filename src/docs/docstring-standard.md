@@ -1,6 +1,21 @@
 # Docstring standard
 
-The eight writing rules are not in this page yet.
+This page holds the eight writing rules and what the commit gate does with them. The count rule for files outside the swept scope is in [docstring-counted-scope.md](docstring-counted-scope.md).
+
+## The eight rules
+
+The eight rules, each one checkable by a linter or a judge. `PEP 257` and Effective Dart already require the first two.
+
+1. **Lead with the claim.** The first sentence says what the thing does or decides. In code it is one line of at most 90 characters, followed by a blank line. `PEP 257` says the summary line "may be used by automatic indexing tools", and the symbol index depends on exactly that.
+2. **Say only what the signature doesn't.** Effective Dart: "focus on explaining what the reader doesn't already know."
+3. **One idea per sentence**, under 25 words.
+4. **No typographic emphasis.** No words in capitals. No glyphs from `EMPHASIS_GLYPHS` in `src/cosa/repo/doc_lint/rule_lists.py`: the warning sign, the red circle and the double arrow. In docs, bold is only for a term's first definition; in code comments, never.
+5. **No rhetoric.** No aphorisms, no "not X but Y" setups, and none of the phrases `deliberately`, `by construction`, `load-bearing` or `the point`. State the constraint and its consequence.
+6. **Every reference resolves.** A path, plus an anchor if needed, or no reference at all. No bare §, row, ruling or step IDs.
+7. **Current state only.** History goes to the commit message, `history.md`, or the R&D doc the `Design:` line points to. No dated `UPDATE` banners and no quoted conversations in code. A ruling becomes a one-line decision record in `docs/decisions/`, and the code links to it.
+8. **Fit the template.** Runbook: prerequisites, steps, verify, rollback. Reference page: at most 1,500 words. Capability page: at most 40 lines.
+
+The design-by-contract docstring keeps its shape. What changes is the text around the contract.
 
 Scripts: see [script-doc-comment-standard.md](script-doc-comment-standard.md).
 
@@ -45,22 +60,6 @@ doc-lint: waive <rule> -- <reason>
 The rule must be the one the refusal named. The reason must hold a word of three letters or more; `-`, `n/a` and `ok` do not count. A marker without a reason waives nothing, and the refusal says so. A marker naming another rule, or sitting on another line, waives nothing. For a one-line docstring the marker can follow the closing quotes.
 
 Use a waiver when the lint is wrong about this text, not to skip the rewrite.
-
-## Files outside the swept scope: a count that only falls
-
-Every other tracked Python file (tests, `rnd`, `src/lupin_mcp`) has a count of docstring-lint findings in `src/conf/doc-lint-counts.json`. A file at zero has no entry.
-
-A staged file whose count is above its entry is refused. The refusal prints the count, the entry and up to ten findings, those on lines you touched first. A new file has no entry, so it starts at zero. A renamed file keeps its entry. A copy does not.
-
-Fix it by rewording what you added, or waive a finding on its own line with the same marker as above. An honoured waiver lowers the count. A flat count passes, and so does a finding of one rule traded for one of another.
-
-The table may only fall. A staged table that raises an entry is refused. The one exception is the commit that regenerates the table after a rule change. It carries a new `rules_stamp`, and the table must equal a fresh count of the staged tree. A table cut under other rules refuses any commit that stages a counted file, until it is regenerated. The refusal prints the exact command. The stamp is read from the staged rule files, the ones being committed. A staged edit to a rule file or to the word list makes the table stale.
-
-The findings are counted by the rule code in the working tree. So the gate refuses a commit when any tracked rule file differs between the index and the working tree, and it names the files. The rule files are every tracked file in the `doc_lint` package, the word list and `pre-commit-chain.sh`, read from git at run time. Every run prints how many it compared. Stage the edit with `git add` or restore the file with `git checkout`, then commit again. This holds for swept files, counted files and the table. A commit that stages none of them is not stopped.
-
-A new file beside a deleted counted file may be a rename that git no longer pairs, because too much changed. The refusal says so. Rename the file in one commit and rewrite it in the next. With no table at all, the gate says the scope was not checked.
-
-The run prints `counted scope: N files checked, N at or below their count, N over, N waivers honoured, table ok|stale|absent|regenerated|malformed`.
 
 ## Ongoing enforcement
 
