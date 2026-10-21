@@ -126,3 +126,23 @@ def test_the_pre_tool_use_hook_records_the_creator_and_still_allows_the_call( da
         ptu.main()
     emit.assert_called_once_with( {} )
     assert _ledger( data_root )[ "trees" ][ "/repos/lupin/.claude/worktrees/rev-c9" ][ "manager" ] == "mr radio"
+
+
+def test_a_broken_or_missing_creator_module_lets_the_command_run( data_root, monkeypatch ):
+    import builtins, sys
+    real_import = builtins.__import__
+    def refuse( name, *args, **kwargs ):
+        if name.endswith( "worktree_creator_record" ): raise ImportError( "module is missing" )
+        return real_import( name, *args, **kwargs )
+    monkeypatch.delitem( sys.modules, "lupin_cli.claude_code.hooks.lib.worktree_creator_record", raising=False )
+    monkeypatch.setattr( builtins, "__import__", refuse )
+    payload = { "session_id": "s1", "cwd": CWD, "tool_name": "Bash", "tool_input": { "command": "git worktree add t" } }
+    emit, mod = MagicMock(), "lupin_cli.claude_code.hooks.pre_tool_use"
+    with contextlib.ExitStack() as stack:
+        for target, kw in ( ( f"{mod}.read_hook_input", { "return_value": payload } ), ( f"{mod}.log_payload", {} ), ( f"{mod}.touch_bridge_mtime", {} ),
+                            ( f"{mod}.resolve_stable_session_id", { "return_value": "s1" } ), ( f"{mod}.get_claude_session_id", { "return_value": "s1" } ),
+                            ( f"{mod}.drain_and_acknowledge", { "return_value": [] } ), ( f"{mod}.emit_json", { "new": emit } ) ):
+            stack.enter_context( patch( target, **kw ) )
+        ptu.main()                                                       # no SystemExit and no exception: the hook exits 0
+    emit.assert_called_once_with( {} )
+    assert not data_root.exists()
