@@ -5,6 +5,8 @@ Before the fix, 24 of 25 overnight archive rows landed on maria. Only a seat-cc-
 The tests hold the lookups in order. First the stamp on the branch, then a seat tree's name.
 Last, the spawn registry for a name that begins with a worker persona.
 """
+import json
+import os
 import subprocess
 from datetime import datetime, timezone
 
@@ -75,9 +77,9 @@ def test_a_worker_named_branch_goes_to_the_manager_who_spawned_that_worker( repo
 def test_a_bare_name_without_a_stamp_stays_with_maria_and_the_row_lists_the_lookups( repo, live_registry ):
     who = st.owner_for_branch( f"wt-rescue/rev-c9{STAMPS}", project_root=str( repo ) )
     assert ( who[ "owner" ], who[ "creator_recorded" ], who[ "source" ] ) == ( st.NO_CREATOR_OWNER, False, None )
-    assert who[ "tried" ] == [ "branch stamp", "seat tree name", "spawn registry for 'rev'" ]
+    assert who[ "tried" ] == [ "branch stamp", "creator ledger", "seat tree name", "spawn registry for 'rev'" ]
     body = st.compose_archive_row( _outcome( f"wt-rescue/rev-c9{STAMPS}", str( repo ) ) )[ "body" ]
-    assert "No creator recorded" in body and "branch stamp; seat tree name; spawn registry for 'rev'" in body
+    assert "No creator recorded" in body and "branch stamp; creator ledger; seat tree name; spawn registry for 'rev'" in body
 
 
 def test_the_seat_cc_case_is_unchanged( repo, live_registry ):
@@ -114,19 +116,87 @@ def test_stamp_helpers_survive_a_failing_runner():
     assert st.read_stamp( "/r", "b", run=lambda *a, **k: Fail ) is None and st.write_stamp( "/r", "b", "m", run=lambda *a, **k: Fail ) is False
 
 
-def _bridge( persona, by ): return ( None, { "voice_persona": { "name": persona }, "spawned_by_persona": by }, [] )
+# ── real-shaped bridges and manifests ───────────────────────────────────────
+#
+# The bridge keys below are the ones a live spawned worker's bridge file carries (listed from the live
+# session folder on 2026-10-20): `spawned_by` holds the manager's session id, and `spawned_by_persona` is absent
+# on a bridge written before the persona was frozen at spawn.
+
+def _live_bridge( persona, session_id, spawned_by=None, tmux=None, frozen=None, pid=0 ):
+    bridge = { "cc_pid": pid, "cwd": "/repos/lupin", "headless": spawned_by is not None, "role": "reviewer", "session_id": session_id,
+               "session_ids": [ session_id ], "stable_session_id": session_id, "speakerphone_on": False, "tmux_session": tmux,
+               "voice_persona": { "name": persona, "voice_id": "v", "icon": "x", "color": "#fff", "borrowed": False, "assigned_at": "2026-10-20T12:00:00+00:00" } }
+    if spawned_by: bridge[ "spawned_by" ] = spawned_by
+    if frozen: bridge[ "spawned_by_persona" ] = frozen
+    return bridge
 
 
-def test_the_spawn_registry_reads_live_bridges_and_refuses_to_guess( monkeypatch ):
+def _live_pids():
+    """Return the pids of this process and its ancestors.
+
+    Each is alive, and each names one bridge file.
+    """
+    pids, pid = [], os.getpid()
+    while pid > 1 and len( pids ) < 8:
+        pids.append( pid )
+        with open( f"/proc/{pid}/stat" ) as f: pid = int( f.read().rsplit( ")", 1 )[ 1 ].split()[ 1 ] )
+    return pids + [ 1 ]
+
+
+@pytest.fixture
+def sessions( tmp_path, monkeypatch ):
+    """A session folder the bridge reader and the manager resolver both look in."""
     import lupin_cli.claude_code.hooks.lib.session_bridge as sb
-    def set_bridges( *rows ): monkeypatch.setattr( sb, "iter_live_bridges", lambda: iter( rows ) )
-    set_bridges( _bridge( "Arnold", "Mr. Radio" ), _bridge( "Maya", "Tiberius" ), ( None, { "voice_persona": { "name": "Rio" } }, [] ), ( None, { "voice_persona": "x" }, [] ) )
-    assert st.spawn_registry_manager( "arnold" ) == "mr radio"                    # the same worker twice reads as one manager
-    assert st.spawn_registry_manager( "rio" ) is None                             # a bridge with no frozen manager
-    assert st.spawn_registry_manager( "nobody" ) is None
-    set_bridges( _bridge( "Arnold", "Mr. Radio" ), _bridge( "Arnold", "Tiberius" ) )
-    assert st.spawn_registry_manager( "arnold" ) is None                          # two managers: ambiguous
-    monkeypatch.setattr( sb, "iter_live_bridges", lambda: (_ for _ in ()).throw( OSError( "gone" ) ) )
+    from cosa.agents.heartbeat_arbiter import manager_resolver as mr
+    folder = tmp_path / "sessions"; folder.mkdir()
+    monkeypatch.setattr( sb, "SESSION_DIR", folder )
+    monkeypatch.setattr( mr, "SESSION_DIR", folder )
+    monkeypatch.setitem( mr.resolve_manager.__kwdefaults__, "session_dir", folder )
+    class Folder:
+        path, pids = folder, iter( _live_pids() )                                              # a bridge of a dead pid is skipped
+        def bridge( self, *a, **kw ):
+            data = _live_bridge( *a, pid=next( self.pids ), **kw )
+            ( folder / f"cc-{data[ 'cc_pid' ]}.json" ).write_text( json.dumps( data ) )
+        def manifest( self, manager_session_id, *session_names ):
+            ( folder / f"spawned-{manager_session_id}.json" ).write_text( json.dumps( [ { "session_name": n, "status": "spawned" } for n in session_names ] ) )
+    return Folder()
+
+
+def test_a_worker_bridge_with_only_spawned_by_resolves_through_the_managers_bridge( sessions ):
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111", tmux="cc-reviewer-mr-radio-1" )
+    assert st.spawn_registry_manager( "arnold" ) == "mr radio"
+
+
+def test_a_frozen_spawned_by_persona_wins_over_the_managers_current_persona( sessions ):
+    sessions.bridge( "tiberius", "mgr-1111", None )                                      # the manager session was recycled under another persona
+    sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111", frozen="Mr. Radio" )
+    assert st.spawn_registry_manager( "arnold" ) == "mr radio"
+
+
+def test_a_legacy_bridge_resolves_through_the_spawn_manifest( sessions ):
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.bridge( "clayton", "wrk-3333", tmux="cc-reviewer-mr-radio-2" )              # no spawned_by: written before the field
+    sessions.manifest( "mgr-1111", "cc-reviewer-mr-radio-2" )
+    assert st.spawn_registry_manager( "clayton" ) == "mr radio"
+
+
+def test_two_live_workers_of_one_persona_under_different_managers_resolve_to_nobody( sessions ):
+    sessions.bridge( "mr radio", "mgr-1111", None )
+    sessions.bridge( "tiberius", "mgr-4444", None )
+    sessions.bridge( "arnold", "wrk-2222", spawned_by="mgr-1111" )
+    sessions.bridge( "arnold", "wrk-5555", spawned_by="mgr-4444" )
+    assert st.spawn_registry_manager( "arnold" ) is None
+
+
+def test_an_unspawned_or_unknown_persona_resolves_to_nobody( sessions ):
+    sessions.bridge( "maria", "mgr-1111", None )
+    assert st.spawn_registry_manager( "maria" ) is None and st.spawn_registry_manager( "nobody" ) is None
+
+
+def test_a_broken_bridge_reader_resolves_to_nobody( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.session_bridge as sb
+    monkeypatch.setattr( sb, "iter_live_bridges", lambda: ( _ for _ in () ).throw( OSError( "gone" ) ) )
     assert st.spawn_registry_manager( "arnold" ) is None
 
 
@@ -173,3 +243,63 @@ def test_a_failed_stamp_is_reported_and_does_not_block_the_reap( repo, live_regi
     reaped = wr.drain_then_remove( str( tree ), project_root=str( repo ), now=NOW )
     assert reaped[ "removed" ] is True and reaped[ "creator_stamped" ] is None
     assert any( "could not stamp" in e for e in reaped[ "errors" ] )
+
+
+# ── the whole path: the worker makes the tree, the worker is gone, the janitor archives it ──
+
+def test_a_bare_worker_tree_is_recorded_at_creation_and_routed_after_the_worker_and_its_bridge_are_gone( repo, tmp_path, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import worktree_creator_record as wcr
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: None )                 # no live bridge, no manifest: nothing else can answer
+    tree = repo / ".claude" / "worktrees" / "rev-c9"
+
+    # create: the worker's hook runs before its Bash call; the seat carries the manager's persona in its environment
+    recorded = wcr.record_worktree_creator( "Bash", { "command": f"git worktree add --detach {tree} HEAD" }, str( repo ),
+                                            environ={ wcr.SPAWNED_BY_ENV: "Mr. Radio" } )
+    assert recorded == [ str( tree ) ]
+    _g( repo, "worktree", "add", "-q", "--detach", str( tree ), "HEAD" )
+    ( tree / "finding.md" ).write_text( "a review\n" )
+    _g( tree, "add", "-A" ); _g( tree, "commit", "-q", "-m", "review notes" )
+
+    # reap, then archive
+    reaped = wr.drain_then_remove( str( tree ), project_root=str( repo ), now=NOW )
+    assert reaped[ "removed" ] is True and reaped[ "creator_stamped" ] == "mr radio"
+    retired = wr.retire_branch( str( repo ), reaped[ "rescue_branch" ], "wip-v9", now=NOW )
+    assert retired[ "kept_reason" ] == "archived"
+
+    row = st.compose_archive_row( { **retired, "repo_root": str( repo ) } )
+    assert ( row[ "owner" ], row[ "accountable" ] ) == ( "mr radio", "mr radio" )
+    assert "from the branch stamp" in row[ "body" ] and "No creator recorded" not in row[ "body" ]
+
+
+def test_the_same_bare_tree_made_by_a_seat_no_manager_spawned_stays_with_maria( repo, tmp_path, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import worktree_creator_record as wcr
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: None )
+    tree = repo / ".claude" / "worktrees" / "rev-c9"
+    assert wcr.record_worktree_creator( "Bash", { "command": f"git worktree add --detach {tree} HEAD" }, str( repo ), environ={} ) == []
+    _g( repo, "worktree", "add", "-q", "--detach", str( tree ), "HEAD" )
+    ( tree / "f.md" ).write_text( "x\n" ); _g( tree, "add", "-A" ); _g( tree, "commit", "-q", "-m", "x" )
+    retired = wr.retire_branch( str( repo ), wr.drain_then_remove( str( tree ), project_root=str( repo ), now=NOW )[ "rescue_branch" ], "wip-v9", now=NOW )
+    row = st.compose_archive_row( { **retired, "repo_root": str( repo ) } )
+    assert row[ "owner" ] == st.NO_CREATOR_OWNER and "creator ledger" in row[ "body" ]
+
+
+def test_a_straggler_tree_is_routed_by_the_ledger_too( repo, tmp_path, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import worktree_creator_record as wcr
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    tree = repo / ".claude" / "worktrees" / "rev-c9"
+    wcr.record_worktree_creator( "Bash", { "command": f"git worktree add {tree}" }, str( repo ), environ={ wcr.SPAWNED_BY_ENV: "tiberius" } )
+    assert st.owner_for_tree( str( tree ) )[ "owner" ] == "tiberius"
+    assert st.owner_for_tree( str( repo / ".claude" / "worktrees" / "rev-zz" ) )[ "owner" ] == st.NO_CREATOR_OWNER
+
+
+def test_the_ledger_reader_ignores_a_missing_or_malformed_ledger( repo, tmp_path, monkeypatch ):
+    from lupin_cli.claude_code.hooks.lib import worktree_creator_record as wcr
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    assert st.read_creator_record( str( repo ), "/x", "b" ) is None
+    ledger = wcr.ledger_path( str( repo ) )
+    os.makedirs( os.path.dirname( ledger ) )
+    for text in ( "not json", json.dumps( { "trees": { "/x": "oops" } } ), json.dumps( { "branches": {} } ) ):
+        open( ledger, "w" ).write( text )
+        assert st.read_creator_record( str( repo ), "/x", "b" ) is None

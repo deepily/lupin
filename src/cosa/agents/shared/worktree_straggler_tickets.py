@@ -9,7 +9,8 @@ so the pile is somebody's owed work instead of nobody's surprise.
     is gone once the seat is reaped. So both fields name that manager.
     A branch or tree is resolved by resolve_creator, in this order.
     First the manager stamped on the branch at reap (git config `branch.<name>.lupin-manager`).
-    Then a seat tree's own name. Then the spawn registry, for a name that begins with a worker persona. A name none of them resolves goes to NO_CREATOR_OWNER,
+    Then the creator ledger the PreToolUse hook writes when a worker runs `git worktree add`.
+    Then a seat tree's own name. Last the spawn lineage of a live worker whose persona the name begins with. A name none of them resolves goes to NO_CREATOR_OWNER,
     who triages it, and the body lists the lookups that were tried.
   * dedupe: correlation key `worktree:<absolute tree path>`, one row per tree.
   * door: a direct repository write, not /api/tasks. The router would mint the row into the holding area,
@@ -103,44 +104,71 @@ def write_stamp( project_root: str, branch: str, manager: str, run: Optional[ Ca
     return done.returncode == 0
 
 
-def spawn_registry_manager( persona: str ) -> Optional[ str ]:
+def read_creator_record( repo_root: str, tree_path: Optional[ str ], branch: Optional[ str ] ) -> Optional[ str ]:
     """
-    Find the manager that spawned a worker persona, from the live session bridges.
+    Read the manager the creator ledger holds for a tree or a branch.
+
+    Requires:
+        - repo_root is the repository the ledger belongs to
 
     Ensures:
-        - returns the store-shaped manager name frozen at spawn (`spawned_by_persona`) on the bridge(s) whose
-          voice persona is `persona`, or None when no live bridge carries it
-        - returns None when two bridges of that persona name different managers (ambiguous: never guess)
-        - never raises
+        - returns the manager recorded for tree_path, else for branch, else None
+        - returns None when the ledger is absent, unreadable or malformed; never raises
+    """
+    from lupin_cli.claude_code.hooks.lib.worktree_creator_record import ledger_path
+    try:
+        with open( ledger_path( repo_root ) ) as f: data = json.load( f )
+        for table, key in ( ( "trees", tree_path ), ( "branches", branch ) ):
+            entry = data[ table ].get( key ) if key else None
+            if isinstance( entry, dict ) and isinstance( entry.get( "manager" ), str ) and entry[ "manager" ]: return entry[ "manager" ]
+    except Exception:
+        return None
+    return None
+
+
+def spawn_registry_manager( persona: str ) -> Optional[ str ]:
+    """
+    Find the manager that spawned the live worker holding a persona.
+
+    Ensures:
+        - each live bridge whose voice persona is `persona` is resolved by manager_resolver.resolve_manager,
+          which reads the bridge's spawned_by and frozen spawned_by_persona, then the spawn manifests
+        - returns the store-shaped manager when every worker that resolves names the same one, else None
+        - returns None when two live workers of that persona name different managers; never raises
     """
     try:
+        from cosa.agents.heartbeat_arbiter.manager_resolver import resolve_manager, SOURCE_LINEAGE
         from lupin_cli.claude_code.hooks.lib.session_bridge import iter_live_bridges
         key, found = _manager_words( persona ), set()
         for _, data, _ in iter_live_bridges():
             voice = data.get( "voice_persona" )
             name  = voice.get( "name" ) if isinstance( voice, dict ) else None
-            by    = data.get( "spawned_by_persona" )
-            if isinstance( name, str ) and isinstance( by, str ) and by.strip() and _manager_words( name ) == key:
-                found.add( _manager_words( by ) )
+            sid   = data.get( "session_id" )
+            if not ( isinstance( name, str ) and sid and _manager_words( name ) == key ): continue
+            lineage = resolve_manager( sid )
+            if lineage[ "source" ] == SOURCE_LINEAGE and lineage[ "manager_persona" ]: found.add( _manager_words( lineage[ "manager_persona" ] ) )
         return found.pop() if len( found ) == 1 else None
     except Exception:
         return None
 
 
 def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Optional[ str ] = None,
-                     run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None ) -> dict:
+                     run: Optional[ Callable ] = None, registry_fn: Optional[ Callable ] = None,
+                     tree_path: Optional[ str ] = None ) -> dict:
     """
     Find the manager a tree or branch belongs to, trying each lookup in order.
 
     Requires:
         - name is the tree name (or the branch name minus its rescue stamp)
         - branch and project_root, when both are given, enable the stamp lookup
+        - project_root, with tree_path or branch, enables the creator ledger lookup
         - registry_fn is None (spawn_registry_manager) or takes a persona and returns a manager or None
 
     Ensures:
-        - tries, in order: the branch stamp, a seat tree's own name, the spawn registry for the name's first segment
-        - returns { manager, source, tried } where source is "branch stamp", "seat tree name" or "spawn registry"
-          for the lookup that answered, and manager is None with source None when none did
+        - tries, in order: the branch stamp, the creator ledger, a seat tree's own name, the spawn lineage of
+          a live worker named by the first segment of `name`
+        - returns { manager, source, tried } where source is "branch stamp", "creator ledger", "seat tree name"
+          or "spawn registry" for the lookup that answered, and manager is None with source None when none did
         - tried lists every lookup attempted, so a row can say what was looked up; never raises
     """
     registry_fn = registry_fn if registry_fn is not None else spawn_registry_manager
@@ -151,6 +179,12 @@ def resolve_creator( name: str, project_root: Optional[ str ] = None, branch: Op
         if stamp: return { "manager": _manager_words( stamp ), "source": "branch stamp", "tried": tried }
     else:
         tried.append( "branch stamp (no branch or repo root given)" )
+    if project_root and ( tree_path or branch ):
+        tried.append( "creator ledger" )
+        recorded = read_creator_record( project_root, tree_path, branch )
+        if recorded: return { "manager": _manager_words( recorded ), "source": "creator ledger", "tried": tried }
+    else:
+        tried.append( "creator ledger (no repo root, tree or branch given)" )
     tried.append( "seat tree name" )
     m = SEAT_TREE_RE.match( name )
     if m: return { "manager": m.group( "manager" ).replace( "-", " " ), "source": "seat tree name", "tried": tried }
@@ -192,7 +226,9 @@ def owner_for_tree( path: str, registry_fn: Optional[ Callable ] = None ) -> dic
         - anything else → both NO_CREATOR_OWNER, creator_recorded False
         - returns { owner, accountable, creator_recorded, source, tried }; never raises
     """
-    return _owner_from( resolve_creator( os.path.basename( os.path.normpath( path ) ), registry_fn=registry_fn ) )
+    norm = os.path.abspath( path )
+    root = norm.split( SANDBOX_SEGMENT )[ 0 ] if SANDBOX_SEGMENT in norm else None
+    return _owner_from( resolve_creator( os.path.basename( norm ), project_root=root, registry_fn=registry_fn, tree_path=norm ) )
 
 
 # ==========================================================================

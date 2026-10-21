@@ -581,7 +581,8 @@ def drain_then_remove(
     #     registry can still say. Once the tree is gone the archive row has only the branch name
     #     (row 8ca4be22). Best effort: a failed stamp never blocks the reap.
     from cosa.agents.shared import worktree_straggler_tickets as st
-    creator = st.resolve_creator( os.path.basename( worktree_path ), project_root=project_root, branch=branch, run=run )
+    creator = st.resolve_creator( os.path.basename( worktree_path ), project_root=project_root, branch=branch, run=run,
+                                  tree_path=os.path.abspath( worktree_path ) )
     if creator[ "manager" ] and creator[ "source" ] != "branch stamp":
         if st.write_stamp( project_root, branch, creator[ "manager" ], run=run ):
             result[ "creator_stamped" ] = creator[ "manager" ]
