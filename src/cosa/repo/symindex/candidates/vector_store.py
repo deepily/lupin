@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import pathlib
+import secrets
 import shutil
 
 from cosa.repo.symindex.candidates.errors import (
@@ -291,6 +292,7 @@ def query_vectors( redacted_need, client, cache_dir, manifest ):
         - on a miss the engines are checked against the manifest first, then each distinct
           ( content type, role ) pair is embedded once with the roles the manifest records
         - the result is written to the cache and returned as { prose, code, concat }
+        - the write goes through a temporary file of its own name in the same folder, so two runs asking the same need at once both succeed
 
     Raises:
         - CandidateError QUERY_CACHE_CORRUPT when the need's cache file is not valid JSON or holds no hash
@@ -312,7 +314,7 @@ def query_vectors( redacted_need, client, cache_dir, manifest ):
         if pair not in by_pair: by_pair[ pair ] = client.embed( [ redacted_need ], pair[ 0 ], pair[ 1 ] )[ 0 ]
         vectors[ name ] = by_pair[ pair ]
     cache.mkdir( parents=True, exist_ok=True )
-    tmp = path.with_suffix( ".json.tmp" )
+    tmp = path.with_name( f"{path.name}.{os.getpid()}.{secrets.token_hex( 4 )}.tmp" )               # its own name, so a second writer of this need cannot take the file away
     tmp.write_text( json.dumps( { "manifest_hash": manifest[ "manifest_hash" ], "vectors": vectors } ), encoding="utf-8" )
     os.replace( tmp, path )
     return vectors

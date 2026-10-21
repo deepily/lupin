@@ -437,3 +437,17 @@ def test_a_manifest_that_is_json_but_not_a_sealed_manifest_is_corrupt_not_a_key_
     with pytest.raises( CandidateError ) as e:
         vs.load_vectors( built[ "dir" ] )
     assert e.value.code == VECTOR_SET_CORRUPT and "not a sealed manifest" in e.value.detail
+
+
+def test_two_writers_of_the_same_need_interleaving_both_succeed_and_leave_one_file( built, tmp_path, monkeypatch ):
+    cache, real, inner = tmp_path / "q", vs.os.replace, []
+
+    def replace_after_a_second_writer( src, dst ):
+        if not inner:
+            inner.append( None )                                                                            # only the first rename is overtaken
+            inner[ 0 ] = vs.query_vectors( "need", FakeClient(), cache, built[ "manifest" ] )              # a second run writes and renames this need before the first renames
+        return real( src, dst )
+
+    monkeypatch.setattr( vs.os, "replace", replace_after_a_second_writer )
+    first = vs.query_vectors( "need", FakeClient(), cache, built[ "manifest" ] )
+    assert first.keys() == inner[ 0 ].keys() and [ p.name for p in cache.iterdir() ] == [ f"{vs.query_key( 'need' )}.json" ]
