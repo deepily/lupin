@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import cosa.utils.util as du
@@ -332,13 +331,7 @@ class ReceptionistAgent( AgentBase ):
             - KeyError if required fields missing
         """
         
-        print( f"Restoring from {file_path}..." )
-        
-        # Read the file and parse JSON
-        with open( file_path, 'r' ) as file:
-            data = json.load( file )
-        
-        return AgentBase._restore_from_data( ReceptionistAgent, data, ( "question", ), ( "debug", "verbose", "auto_debug", "inject_bugs" ) )
+        return AgentBase._restore_from_file( ReceptionistAgent, file_path, ( "question", ), ( "debug", "verbose", "auto_debug", "inject_bugs" ) )
     
 def quick_smoke_test():
     """Quick smoke test to validate ReceptionistAgent functionality."""

@@ -105,3 +105,37 @@ class TestRestoreFromData:
         from cosa.agents.agent_base import AgentBase
         with pytest.raises( KeyError, match = "'x'" ):
             AgentBase._restore_from_data( self._Fake, { "a": 1 }, ( "a", ), ( "x", ) )
+
+
+@pytest.mark.parametrize( "cls, positional, keyword", [
+    ( ReceptionistAgent,        ( "question", ),                     ( "debug", "verbose", "auto_debug", "inject_bugs" ) ),
+    ( TodoListAgent,            ( "question", ),                     ( "debug", "verbose", "auto_debug", "inject_bugs" ) ),
+    ( IterativeDebuggingAgent,  ( "error_message", "path_to_code" ), ( "debug", "verbose" ) ),
+] )
+def test_each_agent_hands_its_file_and_keys_to_the_one_shared_reader( cls, positional, keyword, monkeypatch ):
+    from cosa.agents.agent_base import AgentBase
+
+    calls = []
+    monkeypatch.setattr( AgentBase, "_restore_from_file", staticmethod( lambda *args: calls.append( args ) or "sentinel" ) )
+
+    assert cls.restore_from_serialized_state( "/some/state.json" ) == "sentinel"
+    assert calls == [ ( cls, "/some/state.json", positional, keyword ) ]
+
+
+def test_the_shared_reader_prints_reads_and_passes_the_parsed_dict_on( tmp_path, capsys, monkeypatch ):
+    from cosa.agents.agent_base import AgentBase
+
+    seen = []
+    monkeypatch.setattr( AgentBase, "_restore_from_data", staticmethod( lambda *args: seen.append( args ) or "built" ) )
+
+    path = _write( tmp_path, { "question": "q" } )
+    assert AgentBase._restore_from_file( TodoListAgent, path, ( "question", ), ( "debug", ) ) == "built"
+    assert seen == [ ( TodoListAgent, { "question": "q" }, ( "question", ), ( "debug", ) ) ]
+    assert capsys.readouterr().out == f"Restoring from {path}...\n"
+
+
+def test_the_shared_reader_raises_on_a_missing_file( tmp_path ):
+    from cosa.agents.agent_base import AgentBase
+
+    with pytest.raises( FileNotFoundError ):
+        AgentBase._restore_from_file( TodoListAgent, str( tmp_path / "nope.json" ), ( "question", ), () )

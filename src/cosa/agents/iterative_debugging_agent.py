@@ -333,13 +333,7 @@ class IterativeDebuggingAgent( AgentBase ):
             - KeyError if required fields missing
         """
         
-        print( f"Restoring from {file_path}..." )
-        
-        # Read the file and parse JSON
-        with open( file_path, 'r' ) as file:
-            data = json.load( file )
-        
-        return AgentBase._restore_from_data( IterativeDebuggingAgent, data, ( "error_message", "path_to_code" ), ( "debug", "verbose" ) )
+        return AgentBase._restore_from_file( IterativeDebuggingAgent, file_path, ( "error_message", "path_to_code" ), ( "debug", "verbose" ) )
     
     def is_code_runnable( self ) -> bool:
         """

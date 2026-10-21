@@ -240,6 +240,31 @@ class AgentBase( RunnableCode, abc.ABC ):
 
         return restored_agent
 
+    @staticmethod
+    def _restore_from_file( agent_cls, file_path: str, positional_keys: tuple, keyword_keys: tuple ) -> 'AgentBase':
+        """
+        Read a serialized JSON state file and build an agent from it.
+
+        Requires:
+            - file_path points to a valid JSON file holding a dict
+            - positional_keys and keyword_keys meet the requirements of _restore_from_data
+
+        Ensures:
+            - Prints one "Restoring from" line naming file_path
+            - Returns what _restore_from_data returns for the parsed file
+
+        Raises:
+            - FileNotFoundError if file doesn't exist
+            - JSONDecodeError if invalid JSON
+            - KeyError if a constructor key is missing from the file
+        """
+        print( f"Restoring from {file_path}..." )
+
+        with open( file_path, 'r' ) as file:
+            data = json.load( file )
+
+        return AgentBase._restore_from_data( agent_cls, data, positional_keys, keyword_keys )
+
     def serialize_to_json( self, subtopic: Optional[str]=None ) -> None:
         """
         Serialize agent state to a JSON file for persistence.
