@@ -33,6 +33,9 @@ Drafted from the symbol index built at lupin `a7f2af593` (7,240 public symbols, 
 - [[rest-routers]] — the FastAPI routers and the v2 submit surface. `cosa.rest.routers`, `cosa.rest.v2`, `lupin_app` (main, bootstrap_helpers, asset_tokens, versioned_static)
 - [[configuration]] — INI configuration, the config cache registry and the doc-viewer manifest. `cosa.config`
 - [[shared-utilities]] — path and project-root helpers, memory watch, Vertex logging, checked-hash bytecode. `cosa.utils`, `cosa.tools`
+- [[utils-admin-script-helpers]] — the banner runner, table-shape check and key-file writer shared by the one-off admin scripts. `cosa.utils` (admin_script_helpers)
+- [[utils-atomic-json]] — the whole-file atomic JSON write and the never-raising section read. `cosa.utils` (atomic_json)
+- [[utils-stoppable-daemon]] — the start and stop of a polling daemon thread, shared by the arbiter and watcher classes. `cosa.utils` (stoppable_daemon)
 
 ## Quality tooling
 
