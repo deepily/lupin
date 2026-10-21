@@ -8,6 +8,8 @@ pins:
   - lupin_cli.notifications.notify_user_async.calculate_retry_intervals@ab0f5347c1
   - lupin_cli.notifications.notify_user.notify_user@90fc665e59
   - lupin_cli.notifications.human_ask_containment.refusal_for_human_ask@d540ec25ec
+  - lupin_cli.notifications.human_ask_containment.test_node_id@74fc5fc5b2
+  - lupin_cli.notifications.human_ask_containment.containment_is_waived@2b87e0c5a3
   - lupin_cli.notifications.notification_models.NotificationRequest@c139812a32
   - lupin_cli.notifications.notification_models.resolve_target_user@daa309c26d
 ---
@@ -25,6 +27,7 @@ The command-line side of notifications: scripts and functions that call `POST /a
 
 ## Invariants
 - A test must not block on a human. Under pytest, `notify_user_sync` raises `HumanAskInTestError` through `refusal_for_human_ask`. The guard reads `PYTEST_CURRENT_TEST`, which pytest sets itself, so a test cannot skip it by forgetting to opt in.
+- `test_node_id` returns the pytest node id in flight, or `None` outside a test. `containment_is_waived` is true only for the exact value `1`, ignoring surrounding spaces.
 - The only waiver is `LUPIN_ALLOW_HUMAN_ASK_IN_TESTS=1`, and only the exact value `1` works. Outside pytest the guard returns `None` and nothing is raised.
 - Network, validation and timeout failures of `notify_user_sync` come back as an exit code, not an exception. The recipient lookup is the exception: when no recipient is given and `resolve_target_user` finds none, its `ValueError` escapes `notify_user_sync`, `notify_user_async` and `notify_user` alike.
 - The sync client is the one blocking path. A fire-and-forget `notify_user_async` never waits for the user.

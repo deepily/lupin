@@ -122,6 +122,9 @@ Pages with two passes at one sha, one line each: `[[slug]]`, what it covers, the
 - [[mcp-commons-archiver]] — the rotation of aged commons entries into daily archive files. `lupin_mcp` (commons_archival)
 - [[mcp-broadcast-handler]] — the listener-side parse, injection and ack of an operator broadcast. `lupin_mcp` (broadcast_handler)
 - [[lupin-cli-notifications]] — the command-line clients that send a notification to the Lupin server, and the sync one that waits for the user's answer. `lupin_cli.notifications` (notify_user_sync, notify_user_async, notify_user, human_ask_containment)
+- [[lupin-cli-notification-models]] — the notification enums, stream events, response shapes, the async request and the sender-id helpers. `lupin_cli.notifications` (notification_models)
+- [[lupin-cli-notification-types]] — the plain notification type and priority enums and the server URL check. `lupin_cli.notifications` (notification_types)
+- [[lupin-cli-notification-commands]] — the three client command lines, the answer-stream reader and the end-to-end test script. `lupin_cli.notifications` (notify_user, notify_user_async, notify_user_sync, test_notifications)
 - [[task-promotion-gate]] — the rules for moving a row out of the holding area onto a board, and for who may set a priority. `cosa.rest` (task_promotion_gate, task_promotion_resolver, task_request_lifecycle, task_request_pledge, task_priority_firewall, task_approval_settings)
 - [[web-client-audio-and-tts]] — how the browser records speech for transcription and plays server-made speech through a queue. `src/lupin_app/static/js/multiplexer` (audio, render, shared, stores, wireTtsIntent)
 - [[web-client-jobs-and-session-panes]] — the seven renderers that draw the jobs, submit, Q&A, session strip, persona modal, nav bar and reading panes. `src/lupin_app/static/js/multiplexer/render`
