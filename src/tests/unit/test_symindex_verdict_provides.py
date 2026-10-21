@@ -39,7 +39,7 @@ def _ids( rows ): return [ r[ "id" ] for r in rows ]
 def test_decide_is_pinned_on_a_stored_case():
     answers  = [ { "id": "a", "probabilities": { "reuse": 0.95, "extend": 0.03, "unrelated": 0.02 } },
                  { "id": "b", "probabilities": { "reuse": 0.02, "extend": 0.02, "unrelated": 0.96 } } ]
-    got      = vd.decide( answers, [ "a", "b" ], [], set() )
+    got      = vd.decide( answers, [ "a", "b" ], [], set(), { k: v for k, v in vd.POLICY.items() if k != "band" } )
     assert got == { "verdict": "REUSE", "cause": None, "causes": [], "shortlist": [ { "id": "a", "p_overlap": 0.98, "confidence": 0.95, "choice": "reuse" } ],
                     "shortlist_total": 1,
                     "nearest": [ { "id": "a", "p_overlap": 0.98, "confidence": 0.95, "choice": "reuse" }, { "id": "b", "p_overlap": 0.04, "confidence": 0.96, "choice": "unrelated" } ],

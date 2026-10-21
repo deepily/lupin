@@ -162,3 +162,8 @@ def test_responses_that_never_reached_the_cache_count_their_tokens_when_the_entr
     assert tokens( r[ "stats" ] ) == ( 555 * ( rt.RETRIES + 1 ), 55 * ( rt.RETRIES + 1 ), 0 )              # Jev answered every attempt
 
 
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

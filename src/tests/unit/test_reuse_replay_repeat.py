@@ -126,3 +126,10 @@ def test_a_pair_replay_repeat_is_cached_under_replay_keys_and_not_measurement_ke
     texts = [ rt.entry_text( e ) for e in entries_of( env ) ]
     assert texts and all( cache.get( rp.pair_key( NEED, t, ctx.model, replay=1 ) ) is not None for t in texts )
     assert all( cache.get( rp.pair_key( NEED, t, ctx.model, run_index=1 ) ) is None for t in texts )
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

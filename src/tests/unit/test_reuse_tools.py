@@ -912,3 +912,10 @@ def test_a_receipt_written_from_a_worktree_is_readable_from_main( tmp_path, monk
     assert not list( seat.rglob( "receipts" ) )                                                         # nothing was written inside the worktree
     again = rt.load_receipt( ctx_main, r[ "receipt_id" ] )                                              # main reads the seat's receipt
     assert again[ "id" ] == r[ "receipt_id" ] and again[ "query" ] == NEED
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

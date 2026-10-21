@@ -20,7 +20,11 @@ def _ans( i, probs ): return { "id": i, "probabilities": probs }
 def _unrelated( n ): return [ _ans( f"u{i:04d}", _p( 0.05, 0.05, 0.9 ) ) for i in range( n ) ]
 
 
-def _decide( extra, failed=(), flags=(), n_unrelated=50, expect_extra=True, policy=vd.POLICY ):
+TABLE_POLICY = { k: v for k, v in vd.POLICY.items() if k != "band" }          # the table's boundaries are pinned without the band, which would turn a value at a cut-off into NEAR_CUTOFF
+
+
+def _decide( extra, failed=(), flags=(), n_unrelated=50, expect_extra=True, policy=None ):
+    if policy is None: policy = TABLE_POLICY
     rows     = _unrelated( n_unrelated ) + extra
     expected = [ r[ "id" ] for r in rows ] if expect_extra else [ r[ "id" ] for r in _unrelated( n_unrelated ) ]
     return vd.decide( rows, expected, failed, set( flags ), policy )
@@ -262,3 +266,12 @@ def test_a_strong_reuse_beside_a_doubtful_extend_is_reuse_and_without_a_strong_m
     old = { k: v for k, v in vd.POLICY.items() if k != "strong" }
     r   = _decide( [ _ans( "A", _p( 0.02, 0.95, 0.03 ) ), _ans( "B", _DOUBTFUL ) ], policy=old )           # no strong rule: B still decides
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE" )
+
+
+def test_the_shipped_band_is_the_measured_one_and_marks_an_answer_inside_it_of_a_cutoff():
+    assert vd.POLICY[ "band" ] == 0.076
+    inside  = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=vd.POLICY )                 # p_overlap 0.28, 0.02 from the cut of 0.3
+    assert inside[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NEAR_CUTOFF" in inside[ "causes" ]
+    far     = _decide( [ _ans( "far", _p( 0.02, 0.03, 0.95 ) ) ], policy=vd.POLICY )
+    assert "NEAR_CUTOFF" not in far[ "causes" ]
+    assert _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ] )[ "verdict" ] != "UNCERTAIN_READ_SOURCE"        # the table policy, with no band, decides it

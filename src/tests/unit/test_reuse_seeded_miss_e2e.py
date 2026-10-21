@@ -257,3 +257,10 @@ def test_the_stand_in_stage_takes_the_widening_size_and_reports_it():
     stage   = sm.StandInStage()
     assert stage.shortlist( "need", entries, "sha", [], K=300 )[ "K" ] == 300
     assert stage.shortlist( "need", entries, "sha", [] )[ "K" ] == stage.K
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

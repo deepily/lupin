@@ -21,6 +21,7 @@ from tests.unit.test_reuse_tools import FEEDS_TEXT, FakeJev, resp
 
 SHIPPED_WIDE_K = rt.WIDE_K                                                                # read at import, before the fixture below sets it to 3
 BAND   = dict( vd.POLICY, band=0.05 )
+NO_BAND = { k: v for k, v in vd.POLICY.items() if k != "band" }                          # a policy with no band, which never widens
 NEAR   = resp( 0.18, 0.12, 0.7 )                                                         # p_overlap 0.3, the shipped threshold itself, and confidence 0.6
 RANKED = [ FEEDS_ID, MATH_ID, SERVE_ID ]
 
@@ -80,10 +81,17 @@ def test_a_first_sweep_near_the_cutoff_asks_the_extra_entries_in_packs_of_their_
 def test_with_no_band_in_the_policy_nothing_widens( env ):
     need  = "read an RSS feed [wide-off]"
     stage = RankedStage()
-    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ) )
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ) )
     rec   = receipt_of( env, r )
     assert [ c[ "K" ] for c in stage.calls ] == [ 1 ] and rec[ "candidate_stage" ][ "widened" ] is False and "widened_ids" in rec[ "candidate_stage" ]
-    assert rec[ "candidate_stage" ][ "widened_ids" ] == [] and r[ "widened" ] is False and rec[ "policy" ] == vd.POLICY
+    assert rec[ "candidate_stage" ][ "widened_ids" ] == [] and r[ "widened" ] is False and rec[ "policy" ] == NO_BAND
+
+
+def test_the_shipped_policy_carries_the_band_so_a_context_with_no_policy_widens_a_near_answer( env ):
+    need  = "read an RSS feed [wide-shipped]"
+    stage = RankedStage()
+    r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ) )
+    assert vd.POLICY[ "band" ] == 0.076 and [ c[ "K" ] for c in stage.calls ] == [ 1, 3 ] and r[ "widened" ] is True
 
 
 def test_an_answer_far_from_every_cutoff_does_not_widen( env ):
@@ -131,7 +139,7 @@ def test_an_unpacked_context_never_widens( env ):
 def test_a_judged_entry_is_not_sent_again_when_the_run_widens( env ):
     need  = "read an RSS feed [wide-warm]"
     stage = RankedStage()
-    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ) )         # warm: only the first set is cached
+    rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=NO_BAND ) )         # warm: only the first set is cached
     fake  = PackedFake( need, { FEEDS_TEXT: NEAR } )
     rt.check_exists_impl( need, ctx_with( env, fake, RankedStage() ) )
     sent  = [ q[ "instructions" ] for b in fake.bodies for q in b[ "questions" ].values() ]
@@ -181,7 +189,7 @@ def test_a_replay_of_a_widened_receipt_names_changed_ids_and_changed_packs( env 
 
 def test_the_receipt_id_of_a_widened_run_differs_from_an_unwidened_one_of_the_same_need( env ):
     need = "read an RSS feed [wide-id]"
-    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=None ) )
+    a    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ) )
     b    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage() ) )
     assert a[ "receipt_id" ] != b[ "receipt_id" ] and rt._candidate_of( receipt_of( env, b )[ "candidate_stage" ] )[ "widened_ids" ] != ""
 
@@ -220,7 +228,7 @@ def test_the_shipped_wide_size_is_512():
 
 def test_an_empty_widened_ids_adds_no_key_to_the_candidate_block( env ):
     need = "read an RSS feed [wide-empty-key]"
-    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=None ) )
+    r    = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), RankedStage(), policy=NO_BAND ) )
     cs   = receipt_of( env, r )[ "candidate_stage" ]
     assert cs[ "widened_ids" ] == [] and "widened_ids" not in rt._candidate_of( cs )           # so no unwidened receipt id moves
 

@@ -338,3 +338,10 @@ def test_without_the_test_credentials_the_real_refresher_fails_by_name_and_the_l
     stage = rt.context_from_environment( env[ 0 ] ).candidate_stage
     fresh = stage.freshen( "0" * 64 )                                                      # the set has no build info, so it counts as behind
     assert fresh[ "state" ] == "stale" and "DEPENDENCY_MISSING" in fresh[ "error" ] and "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" in fresh[ "error" ]
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

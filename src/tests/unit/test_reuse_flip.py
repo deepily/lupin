@@ -231,3 +231,10 @@ def test_the_unstored_ask_with_no_question_sends_the_three_way_question_and_stor
     types = { q.get( "type" ) for body in fake.bodies for q in body[ "questions" ].values() }
     assert out[ "status" ] == "ok" and fake.bodies and types == { "choice" }                     # no Noul or Score question was sent
     assert not ( env[ 1 ] / "receipts" ).exists()
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

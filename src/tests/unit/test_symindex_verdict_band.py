@@ -25,7 +25,7 @@ def _decide( top, policy ):
 
 # A confidence bar of 0 keeps LOW_CONFIDENCE out of these cases: near a cut-off of 0.5 no answer can be confident, so under the
 # shipped bar of 0.9 that cause always holds first. The fitted policy moves the bar, so the band is tested on its own here.
-AT_HALF = dict( vd.POLICY, threshold=0.5 )                                # the arithmetic below is written around a cut-off of 0.5, not the shipped 0.3
+AT_HALF = dict( { k: v for k, v in vd.POLICY.items() if k != "band" }, threshold=0.5 )                                # the arithmetic below is written around a cut-off of 0.5, not the shipped 0.3
 BASE   = dict( AT_HALF, confidence=0.0 )
 BANDED = dict( BASE, band=BAND )
 

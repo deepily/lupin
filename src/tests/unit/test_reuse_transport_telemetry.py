@@ -315,3 +315,10 @@ def test_a_missing_key_stays_sticky_with_no_status():
     for _ in range( 2 ):
         with pytest.raises( jev_transport.JevConfigError ) as caught: t.post_with_meta( {} )
         assert caught.value.status is None
+
+
+@pytest.fixture( autouse=True )
+def pre_band_policy( monkeypatch ):
+    """Drop the shipped band: these tests cover routes and receipts, not the band."""
+    from cosa.repo.symindex import verdict as verdict_with_band
+    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

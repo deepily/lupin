@@ -18,12 +18,13 @@ PINNED  = { "packed": "9f37ab288d110bf280321db3d17d3311b001b2d6", "old": "95d85b
 
 @pytest.fixture( autouse=True )
 def policy_at_the_pinned_cut( monkeypatch ):
-    """Pins the threshold at 0.5, the cut the literals below were taken at.
+    """Pins the threshold at 0.5 and drops the band, the policy the literals below were taken at.
 
     Ensures:
-        - the receipt carries the policy, so the shipped 0.3 would move both hashes
+        - the receipt carries the policy, so the shipped 0.3 or the shipped band would move both hashes
     """
     monkeypatch.setitem( vd.POLICY, "threshold", 0.5 )
+    monkeypatch.delitem( vd.POLICY, "band" )                                                 # the literals were taken before the shipped policy had a band
 
 
 def receipt_sha( rec ): return rt.sha( rt.canonical( rec ), 40 )
