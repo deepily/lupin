@@ -19,6 +19,15 @@ SEAT  = "/repo/lupin/.claude/worktrees/seat-cc-author-mr-radio-1"
 HAND  = "/repo/lupin-mobile/.claude/worktrees/tiffany-doc-viewer"
 
 
+@pytest.fixture( autouse=True )
+def _no_live_spawn_registry( monkeypatch ):
+    """Keep live session bridges out of the test.
+
+    A first name segment that is a real persona would otherwise resolve.
+    """
+    monkeypatch.setattr( st, "spawn_registry_manager", lambda persona: None )
+
+
 class MemStore:
     """An in-memory store that records every call and honours find_open by key."""
 
@@ -55,12 +64,14 @@ def _sync( refused, state, store, log=None, now=NOW, idle=None, exists=lambda p:
 # ── owner / project / key ─────────────────────────────────────────────────────────────
 
 def test_a_seat_tree_is_owned_by_its_spawning_manager():
-    assert st.owner_for_tree( SEAT ) == { "owner": "mr radio", "accountable": "mr radio", "creator_recorded": True }
+    who = st.owner_for_tree( SEAT )
+    assert ( who[ "owner" ], who[ "accountable" ], who[ "creator_recorded" ], who[ "source" ] ) == ( "mr radio", "mr radio", True, "seat tree name" )
 
 
 @pytest.mark.parametrize( "path", [ HAND, "/r/.claude/worktrees/seat-rachel", "/r/.claude/worktrees/seat-cc-author-x" ] )
 def test_a_tree_with_no_recorded_creator_goes_to_maria( path ):
-    assert st.owner_for_tree( path ) == { "owner": "maria", "accountable": "maria", "creator_recorded": False }
+    who = st.owner_for_tree( path )
+    assert ( who[ "owner" ], who[ "accountable" ], who[ "creator_recorded" ], who[ "source" ] ) == ( "maria", "maria", False, None )
 
 
 def test_project_is_the_repo_holding_the_tree():

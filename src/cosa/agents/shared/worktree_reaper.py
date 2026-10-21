@@ -474,6 +474,8 @@ def drain_then_remove(
         - if uncommitted edits exist: they are committed to the worktree's branch as a labeled
           WIP commit before removal, never discarded; a detached HEAD is first given a rescue
           branch so the commit is reachable after removal
+        - before removal the branch is stamped with its manager (git config `branch.<name>.lupin-manager`) when
+          the tree's name or the spawn registry names one, so the archive row can route to that manager
         - the worktree directory is removed (git worktree remove); the branch ref is preserved
         - never runs `git push` and never runs `git branch -d/-D`
         - returns a result dict (below); never raises, every git failure is captured in errors[]
@@ -483,7 +485,8 @@ def drain_then_remove(
         { worktree_path, branch (where the work is preserved, or None), wip_committed (bool),
           wip_sha, rescue_branch (set iff HEAD was detached), removed (bool, directory removed),
           skipped_reason, ignored_blockers (ignored entries that refused removal),
-          evacuated_to (folder the ignored data went to), evacuated (the entries moved), errors }
+          evacuated_to (folder the ignored data went to), evacuated (the entries moved),
+          creator_stamped (the manager written to the branch's lupin-manager config, or None), errors }
     """
     run          = run if run is not None else _default_run
     project_root = project_root if project_root is not None else cu.get_project_root()
@@ -499,6 +502,7 @@ def drain_then_remove(
         "ignored_blockers" : [],
         "evacuated_to"     : None,
         "evacuated"        : [],
+        "creator_stamped"  : None,
         "errors"           : [],
     }
 
@@ -572,6 +576,17 @@ def drain_then_remove(
             return result
 
     result[ "branch" ] = branch
+
+    # 2b. Stamp the branch with the manager that owns it, while the tree's name and the spawn
+    #     registry can still say. Once the tree is gone the archive row has only the branch name
+    #     (row 8ca4be22). Best effort: a failed stamp never blocks the reap.
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    creator = st.resolve_creator( os.path.basename( worktree_path ), project_root=project_root, branch=branch, run=run )
+    if creator[ "manager" ] and creator[ "source" ] != "branch stamp":
+        if st.write_stamp( project_root, branch, creator[ "manager" ], run=run ):
+            result[ "creator_stamped" ] = creator[ "manager" ]
+        else:
+            result[ "errors" ].append( f"could not stamp {branch} with manager {creator[ 'manager' ]}" )
 
     # 3. Commit any uncommitted edits to the branch (D4 — always, never discard).
     status = _git( run, worktree_path, "status", "--porcelain" )
