@@ -9,6 +9,7 @@ pins:
   - cosa.repo.symindex.candidates.storage_paths.main_checkout@5967b0a20d
   - cosa.repo.symindex.candidates.storage_paths.handoff_dir@0c6e18e1da
   - cosa.repo.symindex.candidates.storage_paths.container_path@d87be61ec8
+  - cosa.repo.symindex.candidates.storage_paths.shortlist_arm@70d5d06fa0
 ---
 # Candidate storage paths
 
@@ -27,3 +28,7 @@ Every location of the candidate stage comes from an INI key, and an environment 
 - `main_checkout( root )` resolves a worktree to its parent checkout, which the containers mount.
 - `handoff_dir( root )` is where the purpose-line job's request and response files are exchanged. An INI value is relative to the main checkout; an override must be absolute.
 - `container_path( host_path, root )` translates a host path under the main checkout to the container's path, or raises `HANDOFF_NOT_IN_CONTAINER`.
+
+## Shortlist arm
+- `shortlist_arm( default, config=None, environ=None )` returns the search arm the shipped stage runs. `LUPIN_REUSE_CANDIDATE_ARM` wins when set and not blank. Otherwise the INI key `reuse candidate shortlist arm` is used, and otherwise `default`.
+- The name is stripped and not checked here, because the stage refuses an unknown arm. It raises `DEPENDENCY_MISSING` when the INI must be read and no manager can be built.
