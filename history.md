@@ -8,6 +8,21 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.20 night - Session 21e472f2 (Cheech 🌿, manager; crew Clayton, Pocholo, Rachel, all reaped by 22:45 EDT) | Plan 2 baseline measured, band 0.076 shipped, VM half-deployed
+
+- **Landed by me** on the working branch. Pocholo passed each one, with mutants.
+  - `114bb0878` and `6e777a9ea`: VM compose binds and doc-viewer scopes (row `d3550878`).
+  - `b7c9de011` and `87ef00867`: the stage `--prefix` option.
+  - `bcae78623`: verdict band 0.076 (row `25f53d5e`, closed).
+  - `aa0cf4905`: the results page draft.
+  - Touched tests 586 passed; census 491 passed, 4 skipped.
+- **Plan 2 final test baseline** (row `a9c46718`): band off, the one-embedding shortlist, 30 fresh needs. Found 22 of 25 (88%), false reuse 0 of 15, verdict-only flips 2 of 30 (6.7%). Central figures meet Rick's bars; the intervals are wide.
+- **Still owed**: three stage-only re-runs from main: the one-embedding shortlist without the band and with it, and the two-embedding shortlist with it.
+- **Not landed**: Rachel's mobile wiki lint (`a414c2385`, `34d76ed33`, `2fb2be822`) passed review. It conflicts with main in the librarian files and needs a rebase (row `874dff1a`).
+- **VM**: code is on the VM. The service restart and the fleet-cap restore (15 back to 2) are classifier-denied and wait on Rick (gate `9c5b9458`). The VM is still running.
+- **Classifier**: a chained `git status && git cherry-pick` was denied; a bare `git -C <repo> cherry-pick` matched the allow rule.
+- **Files**: history.md. Code arrived by the reviewed cherry-picks above.
+
 ## 2026.10.20 evening - Session e8e1c10f (Mr. Radio 🦉, manager; crew Krishna, John, Chloé, Tiberius, Rachel) | Checkpoint: Plan 1's ratchet-and-handover phase and two VM fixes landed
 
 - **Landed by me** on the working branch, as fast-forwards with `:8000` idle, not pushed. Each was reviewed by Chloé.
