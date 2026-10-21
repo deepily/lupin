@@ -289,6 +289,7 @@ def _parser():
         p.add_argument( "--pack-size", type=int, default=50 )
         p.add_argument( "--live", action="store_true" )
         if name in ( "stage-canary", "stage-run", "stage-report" ): p.add_argument( "--manifest-hash", required=True )
+        if name != "stage-sweep": p.add_argument( "--prefix", default=stg.STAGE_PREFIX )
         if name in ( "stage-canary", "stage-run", "stage-sweep" ): p.add_argument( "--ceiling", type=int, required=True )
         if name == "stage-approve":
             p.add_argument( "--by", required=True )

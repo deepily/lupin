@@ -201,22 +201,24 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     Run one spending step of the stage mode: the canary, its approval or the run.
 
     Requires:
-        - args carry command (stage-canary, stage-approve or stage-run), root, data, ledger, live, pack_size, needs_sha, and manifest_hash and ceiling for the steps that take them
+        - args carry command (stage-canary, stage-approve or stage-run), prefix, root, data, ledger, live, pack_size, needs_sha, and manifest_hash and ceiling for the steps that take them
         - stage_factory is None for the live stage of the tree, or a function of the tree's path for a stand-in run
     Ensures:
         - a ceiling above the estimate times the estimate factor is refused, and a stage on another vector set than the pin is refused, before anything is opened
+        - the results are named by the prefix, so another arm or policy can run again on the same sample under its own prefix
         - the results are stamped with the sample hash, the stage and the needs hash
         - an approval sends nothing, so it builds no stage
     Raises:
         - DriverRefused for the checks above; the refusals of the runner, the ledger and the canary
     """
     command = args.command[ len( "stage-" ): ]
+    prefix  = bf.one_prefix( args.prefix )
     spent   = bf.estimate( len( items ) )
     if command in ( "canary", "run" ): bf.check_ceiling( args.ceiling, spent )
     stage = None if command == "approve" else ( stage_factory or bf.live_stage )( pathlib.Path( args.root ) )
     if stage is not None: bf.check_manifest( stage, args.manifest_hash )
     env   = e2r._open_env( args.root, args.data, args.ledger, args.live, stage_asks( stage, bf.Sink(), repeats, None if stage is None else args.manifest_hash ), args.pack_size )
-    spec  = { "prefix": STAGE_PREFIX, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
+    spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
               "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha } }
     if command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
     if command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )
@@ -232,16 +234,17 @@ def report( args, items, sample_sha, dollars_per_million, repeats=bf.REPEATS ):
     Print the report of the stage mode from the result files, sending nothing.
 
     Requires:
-        - args carry data and manifest_hash
+        - args carry data, prefix and manifest_hash
     Ensures:
-        - reads the stage canary and run results that exist, and the full-sweep result when it exists
+        - reads the canary and run results of the prefix that exist, and the full-sweep result when it exists
         - returns 0 after printing the lines of report_lines
     Raises:
         - DriverRefused when no stage result exists, or check_results refuses one, or the sweep result carries another sample hash
     """
     folder = pathlib.Path( args.data ) / "e2e-results"
-    runs   = [ _load( p ) for p in ( folder / f"{STAGE_PREFIX}-{part}.json" for part in ( "canary", "run" ) ) if p.exists() ]
-    if not runs: raise s1.DriverRefused( f"no stage result in {folder}; run the stage canary first" )
+    prefix = bf.one_prefix( args.prefix )
+    runs   = [ _load( p ) for p in ( folder / f"{prefix}-{part}.json" for part in ( "canary", "run" ) ) if p.exists() ]
+    if not runs: raise s1.DriverRefused( f"no {prefix} result in {folder}; run the stage canary first" )
     check_results( runs, args.manifest_hash, sample_sha, repeats )
     swept = folder / f"{SWEEP_RESULT}.json"
     sweep = _load( swept ) if swept.exists() else None

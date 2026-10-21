@@ -128,7 +128,7 @@ def test_an_old_mode_result_with_another_sample_hash_is_refused_and_one_with_non
     folder = scratch.data / "e2e-results"
     folder.mkdir( parents=True )
     ( folder / "p5-canary.json" ).write_text( json.dumps( { "searches": [] } ), encoding="utf-8" )
-    assert p5.cli( stage_args( scratch, "stage-report" ) ) == 2 and "no stage result" in capsys.readouterr().err
+    assert p5.cli( stage_args( scratch, "stage-report" ) ) == 2 and "no p5st result" in capsys.readouterr().err
     ( folder / "p5-canary.json" ).write_text( json.dumps( { "searches": [], "sample_sha256": "1" * 64 } ), encoding="utf-8" )
     assert p5.cli( stage_args( scratch, "stage-report" ) ) == 2 and "carries sample hash" in capsys.readouterr().err
 
@@ -247,7 +247,7 @@ def test_the_report_refuses_a_full_sweep_result_stamped_for_another_sample( scra
     del swept[ "sample_sha256" ]
     path.write_text( json.dumps( swept ), encoding="utf-8" )
     capsys.readouterr()
-    args  = argparse.Namespace( data=str( scratch.data ), manifest_hash=PIN, projects_data=scratch.projects_data, needs_sha=scratch.sha )
+    args  = argparse.Namespace( data=str( scratch.data ), prefix=stg.STAGE_PREFIX, manifest_hash=PIN, projects_data=scratch.projects_data, needs_sha=scratch.sha )
     with pytest.raises( s1.DriverRefused, match="full-sweep result does not carry" ): stg.report( args, p5.load_items( args ), p5.sample_sha( scratch.data ), 0.042 )
 
 
@@ -289,3 +289,36 @@ def test_an_incomplete_full_sweep_that_still_holds_rows_is_left_out_of_recall_an
     sweep  = { "searches": [ rec( "n0", "r1", 1, rows=lrow( "REUSE", [], [ "x1" ] ) ), rec( "n1", "r1", 1, status="incomplete", rows=lrow( "REUSE", [], [ "y1" ] ) ) ] }
     text   = "\\n".join( stg.report_lines( [ run_of( looks ) ], sweep, items, 2, 0.042 ) )
     assert "final verdict agreement with the full search, 1 sampled needs: 1 of 1" in text and "1 sampled needs with picks, picks pooled: 1 of 1" in text
+
+
+def drive_prefixed( s, prefix, stage=None ):
+    stage = FakeStage() if stage is None else stage
+    for step in ( ( "stage-canary", "--ceiling", "1500000" ), ( "stage-approve", "--by", "cheech", "--why", "read it" ), ( "stage-run", "--ceiling", "7200000" ) ):
+        assert p5.cli( stage_args( s, *step, "--prefix", prefix ), stage_factory=lambda root: stage ) == 0
+
+
+def test_a_second_run_under_its_own_prefix_reuses_the_sample_and_leaves_the_first_results_alone( scratch, capsys ):
+    drive( scratch )
+    folder = scratch.data / "e2e-results"
+    first  = ( folder / f"{stg.STAGE_PREFIX}-run.json" ).read_bytes()
+    drive_prefixed( scratch, "p5st-b2" )
+    assert ( folder / "p5st-b2-canary.json" ).exists() and ( folder / "p5st-b2-run.json" ).exists() and ( folder / f"{stg.STAGE_PREFIX}-run.json" ).read_bytes() == first
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, "stage-report", "--prefix", "p5st-b2" ) ) == 0
+    assert "flip rate (old question, route candidates)" in capsys.readouterr().out
+
+
+def test_the_same_prefix_cannot_run_twice_and_a_report_reads_only_its_own_prefix( scratch, capsys ):
+    drive( scratch )
+    assert p5.cli( stage_args( scratch, "stage-canary", "--ceiling", "1500000" ), stage_factory=lambda root: FakeStage() ) == 2
+    capsys.readouterr()
+    assert p5.cli( stage_args( scratch, "stage-report", "--prefix", "p5st-b2" ) ) == 2
+    assert "no p5st-b2 result" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize( "bad", [ "P5ST", "a,b", "x" * 17 ] )
+def test_a_bad_prefix_is_refused_before_a_stage_is_built( scratch, capsys, bad ):
+    scratch.sample( arm="B1" )
+    built = []
+    assert p5.cli( stage_args( scratch, "stage-canary", "--ceiling", "1500000", "--prefix", bad ), stage_factory=lambda root: built.append( root ) ) == 2
+    assert built == [] and "prefix" in capsys.readouterr().err
