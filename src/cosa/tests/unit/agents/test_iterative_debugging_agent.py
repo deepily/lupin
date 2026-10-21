@@ -342,8 +342,8 @@ class TestIterativeDebuggingAgent( unittest.TestCase ):
              patch( "cosa.agents.iterative_debugging_agent.du.get_project_root", return_value="/root" ), \
              patch( "cosa.agents.iterative_debugging_agent.du.get_file_as_source_code_with_line_numbers", return_value="1: code" ), \
              patch( "cosa.agents.iterative_debugging_agent.du.get_file_as_string", return_value=_TEMPLATE ), \
-             patch( "cosa.agents.iterative_debugging_agent.open", mock_open(), create=True ), \
-             patch( "cosa.agents.iterative_debugging_agent.json.load", return_value=data ):
+             patch( "cosa.agents.agent_base.open", mock_open(), create=True ), \
+             patch( "cosa.agents.agent_base.json.load", return_value=data ):
             restored = IterativeDebuggingAgent.restore_from_serialized_state( "/tmp/idbg_state.json" )
 
         self.assertIsInstance( restored, IterativeDebuggingAgent )
