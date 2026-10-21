@@ -153,10 +153,3 @@ class TestChooseVectors:
 
     def test_missing_figure_never_wins( self ):
         assert am.choose_vectors( { "recall_128": None, "median_rank": None }, { "recall_128": 0.9, "median_rank": 1 } ) == "B1"
-
-
-@pytest.fixture( autouse=True )
-def pre_band_policy( monkeypatch ):
-    """Drop the shipped band: these tests cover routes and receipts, not the band."""
-    from cosa.repo.symindex import verdict as verdict_with_band
-    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

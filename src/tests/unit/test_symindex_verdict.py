@@ -268,10 +268,10 @@ def test_a_strong_reuse_beside_a_doubtful_extend_is_reuse_and_without_a_strong_m
     assert ( r[ "verdict" ], r[ "cause" ] ) == ( "UNCERTAIN_READ_SOURCE", "LOW_CONFIDENCE" )
 
 
-def test_the_shipped_band_is_the_measured_one_and_marks_an_answer_inside_it_of_a_cutoff():
-    assert vd.POLICY[ "band" ] == 0.076
-    inside  = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=vd.POLICY )                 # p_overlap 0.28, 0.02 from the cut of 0.3
-    assert inside[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NEAR_CUTOFF" in inside[ "causes" ]
-    far     = _decide( [ _ans( "far", _p( 0.02, 0.03, 0.95 ) ) ], policy=vd.POLICY )
-    assert "NEAR_CUTOFF" not in far[ "causes" ]
+def test_the_shipped_policy_has_no_band_so_a_row_near_the_cutoff_never_yields_near_cutoff():
+    assert "band" not in vd.POLICY                                                                  # off by Rick's ruling of 2026-10-21
+    near    = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=vd.POLICY )                 # p_overlap 0.28, 0.02 from the cut of 0.3
+    assert "NEAR_CUTOFF" not in near[ "causes" ] and near[ "verdict" ] != "UNCERTAIN_READ_SOURCE"
+    banded  = _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ], policy=dict( vd.POLICY, band=0.076 ) )   # the same row under a policy that carries the band
+    assert banded[ "verdict" ] == "UNCERTAIN_READ_SOURCE" and "NEAR_CUTOFF" in banded[ "causes" ]
     assert _decide( [ _ans( "in", _p( 0.14, 0.14, 0.72 ) ) ] )[ "verdict" ] != "UNCERTAIN_READ_SOURCE"        # the table policy, with no band, decides it

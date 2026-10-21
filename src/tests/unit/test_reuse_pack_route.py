@@ -290,10 +290,3 @@ def test_a_run_name_the_ledger_already_holds_is_refused_as_a_ledger_error_not_a_
                            token_ceiling=1_000_000, run_name="stage1-a", ledger=led )
     r = rt.check_exists_impl( "read an RSS feed", ctx )
     assert r[ "status" ] == "error" and r[ "error" ] == "SPEND_LEDGER" and posts == []
-
-
-@pytest.fixture( autouse=True )
-def pre_band_policy( monkeypatch ):
-    """Drop the shipped band: these tests cover routes and receipts, not the band."""
-    from cosa.repo.symindex import verdict as verdict_with_band
-    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

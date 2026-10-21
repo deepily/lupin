@@ -87,11 +87,11 @@ def test_with_no_band_in_the_policy_nothing_widens( env ):
     assert rec[ "candidate_stage" ][ "widened_ids" ] == [] and r[ "widened" ] is False and rec[ "policy" ] == NO_BAND
 
 
-def test_the_shipped_policy_carries_the_band_so_a_context_with_no_policy_widens_a_near_answer( env ):
+def test_the_shipped_policy_has_no_band_so_a_context_with_no_policy_never_widens_a_near_answer( env ):
     need  = "read an RSS feed [wide-shipped]"
     stage = RankedStage()
     r     = rt.check_exists_impl( need, ctx_with( env, PackedFake( need, { FEEDS_TEXT: NEAR } ), stage, policy=None ) )
-    assert vd.POLICY[ "band" ] == 0.076 and [ c[ "K" ] for c in stage.calls ] == [ 1, 3 ] and r[ "widened" ] is True
+    assert "band" not in vd.POLICY and [ c[ "K" ] for c in stage.calls ] == [ 1 ] and r[ "widened" ] is False
 
 
 def test_an_answer_far_from_every_cutoff_does_not_widen( env ):

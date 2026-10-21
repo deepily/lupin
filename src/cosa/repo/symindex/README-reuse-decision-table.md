@@ -65,7 +65,7 @@ sweeps the ids outside the first set in packs of their own, and decides over bot
 The receipt then holds `widened: true`, the wide `K`, `widened_ids` and a `widened` stage.
 A failed wide call keeps the first sweep, adds `CALL_FAILED` and records `candidate_stage.widen_error`.
 A replay sweeps the recorded `widened_ids` and never recomputes the widening.
-The shipped policy has no band, so nothing widens until a band is fitted.
+The shipped policy has no band, so nothing widens. Rick ruled the band off, to be fixed later. The value 0.076 and its fit receipt stay in the policy header comment in `verdict.py`. Adding `"band": 0.076` back turns it on.
 One call budget spans the sweep, so a spent budget leaves the later entries unasked and the verdict `UNCERTAIN_READ_SOURCE` with `CALL_FAILED`.
 `stats.stages` lists the stages that ran, and `stats.attempts_total` is their HTTP attempts.
 `stats.tokens_in` and `stats.tokens_out` sum the `usage` that Jev reported on each live answered call, across

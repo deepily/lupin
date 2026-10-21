@@ -340,7 +340,7 @@ def results_of( s, prefix=stg.STAGE_PREFIX ):
 
 
 def test_no_band_is_the_shipped_policy_without_its_band_and_nothing_else():
-    assert "band" in vd.POLICY and "band" not in stg.NO_BAND
+    assert "band" not in vd.POLICY and "band" not in stg.NO_BAND                                    # the band is off in the shipped policy (Rick, 2026-10-21), so the two coincide
     assert stg.NO_BAND == { k: v for k, v in vd.POLICY.items() if k != "band" } and stg.NO_BAND[ "threshold" ] == vd.POLICY[ "threshold" ]
 
 

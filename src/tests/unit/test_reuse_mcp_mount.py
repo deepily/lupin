@@ -215,10 +215,3 @@ def test_stdio_session_calls_each_reuse_tool_alongside_a_voice_tool( tmp_path ):
     logged = [ json.loads( l ) for f in ( tmp_path / "data" / "call-log" ).glob( "*.jsonl" ) for l in f.read_text( encoding="utf-8" ).splitlines() ]
     assert [ l[ "tool" ] for l in logged ] == [ "check_exists", "fetch_similar", "read_capability", "replay" ]
     assert logged[ 0 ][ "receipt_id" ] == first[ "receipt_id" ]
-
-
-@pytest.fixture( autouse=True )
-def pre_band_policy( monkeypatch ):
-    """Drop the shipped band: these tests cover routes and receipts, not the band."""
-    from cosa.repo.symindex import verdict as verdict_with_band
-    monkeypatch.delitem( verdict_with_band.POLICY, "band" )

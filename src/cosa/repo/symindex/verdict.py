@@ -12,8 +12,8 @@ import math
 STRONG_MATCH = 0.9      # the best entry's overlap and confidence must both reach this for a strong match to win
 
 # threshold 0.3 is the fitted cut (seed 20261014, rate 0.05): projects-data/lupin/reuse-review/negatives-2026.10.14/verdict-fit-receipt-band-0.076.json, sha256 43428afca1631f00aac4a41b8802773974166a8e0bd08acc2db11d5b34a8deb7; strong is not fitted
-# band 0.076 is the 95th percentile of how far a repeat sits from its entry's mean, over the 30 band-fit needs (receipt projects-data/lupin/reuse-review/e2e-results/bandfit-4-receipt.json); the receipt above records it as given, not fitted
-POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH, "band": 0.076 }
+# the band is off by Rick's ruling (see the row a9c46718 history): the shipped policy has no "band" key, so NEAR_CUTOFF never holds and the candidate stage never widens. Kept for the later fix: band 0.076, the 95th percentile of how far a repeat sits from its entry's mean over the 30 band-fit needs (receipt projects-data/lupin/reuse-review/e2e-results/bandfit-4-receipt.json; the receipt above records it as given, not fitted); to turn the band on, add "band": 0.076 back to the policy
+POLICY = { "threshold": 0.3, "confidence": 0.9, "floor": 0.3, "shortlist": 10, "sum_tolerance": 0.02, "strong": STRONG_MATCH }
 
 CAUSES  = ( "NOT_LUPIN_TREE", "DEPENDENCY_MISSING", "INDEX_STALE", "KEY_UNREADABLE", "CALL_FAILED", "MALFORMED_ANSWER", "LOW_CONFIDENCE", "NEAR_CUTOFF" )
 BAND_DECIMALS = 6       # the distance from a cut-off is rounded to this many places before it meets the band, as the stored numbers are
