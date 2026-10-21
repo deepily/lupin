@@ -429,3 +429,11 @@ def test_neither_corpus_clears_or_amends_the_other_corpus_rollups( tmp_path ):
     empty = KeyedStore( [ mobile_row, lupin_row ] )
     mobile_lib( tmp_path, empty ).sync( [], "dart-sha" )                    # mobile sync with no findings clears only its own row
     assert [ item for item, _ in empty.amended ] == [ "m1" ]
+
+
+def test_clearing_a_mobile_rollup_names_the_bare_package_in_the_note( tmp_path ):
+    title, body = lq.render_rollup( "lib.ui", [ dict( ORPHAN, package="lib.ui" ) ], lq.MOBILE_ROLLUP_PREFIX )
+    store = KeyedStore( [ { "id": "m1", "title": title, "body": body, "correlation_key": lq.MOBILE_CORRELATION_KEY } ] )
+    mobile_lib( tmp_path, store ).sync( [], "dart-sha" )
+    assert store.amended == [ ( "m1", lq.clear_note( "lib.ui", "dart-sha" ) ) ]
+    assert "for lib.ui at index" in store.amended[ 0 ][ 1 ]
