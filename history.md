@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.20 evening - Session e8e1c10f (Mr. Radio 🦉, manager; crew Krishna, John, Chloé, Tiberius, Rachel) | Checkpoint: Plan 1's ratchet-and-handover phase and two VM fixes landed
+
+- **Landed by me** on the working branch, as fast-forwards with `:8000` idle, not pushed. Each was reviewed by Chloé.
+  - `b21fbccd0`: bug `d3550878` (the Plan 2 VM refresh install), `lupin-vm.sh install-refresh-cron` for any host.
+  - `e7be2cc97`: bug `527fec6e`, `push-dist` ships the built page bundles to the VM, and a new preflight check refuses when one is missing.
+  - `973f28f20`: Plan 1's ratchet-and-handover phase (row `c0a35197`). The eight writing rules are now on `src/docs/docstring-standard.md`, the metrics page is regenerated, and reviewers are pointed at the reuse-reviewer skill. The full unit tier passed 38,450 before the rebase, and the range gate passed 7 of 7.
+- **VM**: Rick ruled "fix compose" for the safe.directory refusal. Cheech is deploying both VM fixes.
+- **Dropped**: the Dart claim-check row `3740dd5b`, on Rick's word. **Re-parked**: P0 `3a2f726b` until 10-23.
+- **Root litter**: `test_dispatcher_e2e` wrote four numerical-toolkit files into the repo root. They were deleted on Rick's yes, and bug `419a6b2e` is filed. `Using/snapshots/` is a reuse data-dir bug, `8b306654`.
+- **Open at checkpoint**: Rachel has `6b74a018` 2 of 6 groups. Tiberius has `cbeb4336` and `e674fe42`. John has the `c8d4b539` measurement. The post-game for the ratchet-and-handover phase is owed by me.
+- **Files**: history.md, TODO.md. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.18 evening to 2026.10.19 night - Session 88ab1868 (Cheech 🌿, manager; crew Sam, Chloé, Tiberius, Extra 1, all released by 19:34 EDT) | Reuse refresh fixed and on for dev, Plan 2 wiki rollup landed, Plan 2 status written up
 
 - **Landed**, not pushed before tonight's push: refresh fixes `7aa3e861f`, `a220c50aa`, `303e6476d`, `9de2025e1` and switch `34be17cce`; wiki rollup `0f723a0fc..994216bd0` (10 rows done); login-file command `9bc978045`, `e2324e90e`. Each had a named review pass.

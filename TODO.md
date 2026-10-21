@@ -16,6 +16,18 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-20 evening (Mr. Radio 🦉 `e8e1c10f`)
+
+### Rick's rulings
+- ~19:15: drop the Dart claim-check row (`3740dd5b`). It tested the old "keep every claim" standard, and Dart is not in the reuse index.
+- ~19:32: spawn a worker for the VM refresh (`d3550878`). ~19:35: Plan 1's ratchet-and-handover phase now, the VM podcast bug later.
+- ~19:50: re-park P0 `3a2f726b` until Plans 1 and 2 finish.
+- ~21:35, on Cheech's card: fix the VM compose safe.directory line, and do not override the preflight.
+- ~22:41: delete the four test-written files in the repo root.
+
+### Not ruled, waiting on Rick
+- Admit bugs `419a6b2e` (test litter, P3) and `8b306654` (reuse data dir resolved to "Using", P2).
+
 ## 📚 Decisions log 2026-10-18 evening to 2026-10-19 night (Cheech 🌿 `88ab1868`)
 
 ### Rick's rulings
