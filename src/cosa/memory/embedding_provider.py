@@ -79,6 +79,28 @@ def embedding_dimensions( config_mgr ):
     return int( config_mgr.get( "embedding dimensions", default="768" ) )
 
 
+def init_embedding_table_config( table, debug, verbose ):
+    """
+    Set the four attributes every embedding-backed table starts with.
+
+    Requires:
+        - table is a table instance being constructed
+        - LUPIN_CONFIG_MGR_CLI_ARGS names the configuration, as ConfigurationManager needs
+
+    Ensures:
+        - table.debug and table.verbose hold the arguments
+        - table._config_mgr is a new ConfigurationManager on LUPIN_CONFIG_MGR_CLI_ARGS
+        - table._embedding_dim is embedding_dimensions( table._config_mgr )
+
+    Raises:
+        - ConfigurationManager errors propagated
+    """
+    table.debug          = debug
+    table.verbose        = verbose
+    table._config_mgr    = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    table._embedding_dim = embedding_dimensions( table._config_mgr )
+
+
 class EmbeddingProvider:
     """
     Routing layer that delegates embedding generation to the configured engine.
