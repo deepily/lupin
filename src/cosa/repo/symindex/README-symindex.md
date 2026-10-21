@@ -34,6 +34,11 @@ Python: a class or function whose name does not start with `_`, at module level 
 TS/JS: every top-level function, class, public method and function-valued `const`; `private`,
 `protected` and `#private` members are left out. Ids are `<module path>.<qualified name>`, prefixed
 `<repo>:` for any tree that is not lupin.
+Dart: top-level functions, getters and setters, classes, mixins, enums, extensions and extension types,
+plus the methods and constructors of each. Typedefs, top-level variables and constants, and class fields
+(static consts included) are **skipped**. `dart_extract.dart` has no branch for them. They are never
+indexed, so the wiki lint can neither pin nor orphan them. A symbol is public when its name and its
+owner's name do not start with `_`.
 
 ## Pins
 
@@ -74,3 +79,4 @@ node_modules/.bin/c8 report --temp-directory /tmp/v8cov --include src/cosa/repo/
 - Routes: `APIRouter` and `FastAPI()` receivers with a literal path. A non-literal path, a route added with
   `add_api_route`, and a decorator on an attribute receiver (`self.router`) are not indexed.
 - The Firefox plugin's JS (a separate repository) is not indexed.
+- Dart typedefs and static consts (and every other top-level variable or field) are not indexed; see "What is a public symbol".

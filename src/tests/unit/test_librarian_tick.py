@@ -345,6 +345,7 @@ def test_status_text_names_none_one_and_two_lines():
 
 def run_main( args, cron, tmp_path, monkeypatch, **seams ):
     monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    seams.setdefault( "mobile_corpus_fn", lambda: None )                      # hermetic: never read the live INI for the mobile corpus
     out, err = io.StringIO(), io.StringIO()
     code = lt.main( [ *args, "--root", str( tmp_path / "repo" ), "--python", "/py" ], environ=cron[ "env" ], now=NOON, out=out, err=err,
                     crontab_cmd=cron[ "cmd" ], **seams )
@@ -621,3 +622,148 @@ def test_read_value_is_the_public_reader_and_gives_the_raw_text_the_reader_retur
     errors = []
     def broken( key ): raise OSError( "ini gone" )
     assert lt.read_value( "some key", reader=broken, errors=errors ) is None and errors == [ "ini gone" ]
+
+
+# ---- the lupin-mobile corpus ----
+
+MOBILE_ROOT = "/m/lupin-mobile"
+
+
+def mobile_corpus( **over ):
+    return { "root": MOBILE_ROOT, "wiki_dir": MOBILE_ROOT + "/src/docs/wiki", "index_dir": "/idx/lupin-mobile", "owner": "tiffany", "manager": "tiffany", **over }
+
+
+def test_read_mobile_corpus_is_off_until_the_root_is_set():
+    assert lt.read_mobile_corpus( reader=lambda k: None ) is None
+    assert lt.read_mobile_corpus( reader=lambda k: "  " ) is None
+
+
+def test_read_mobile_corpus_defaults_the_owner_to_tiffany_the_manager_to_the_owner_and_the_index_to_none():
+    corpus = lt.read_mobile_corpus( reader={ lt.MOBILE_ROOT_KEY: MOBILE_ROOT }.get )
+    assert corpus == { "root": MOBILE_ROOT, "wiki_dir": os.path.join( MOBILE_ROOT, "src", "docs", "wiki" ), "index_dir": None,
+                       "owner": "tiffany", "manager": "tiffany" }
+    other = lt.read_mobile_corpus( reader={ lt.MOBILE_ROOT_KEY: MOBILE_ROOT, lt.MOBILE_INDEX_KEY: " /idx ", lt.MOBILE_OWNER_KEY: "rio",
+                                            lt.MOBILE_MANAGER_KEY: "cheech" }.get )
+    assert other[ "index_dir" ] == "/idx" and other[ "owner" ] == "rio" and other[ "manager" ] == "cheech"
+
+
+def test_read_mobile_corpus_reads_the_ini_file_fresh( tmp_path, monkeypatch ):
+    from lupin_mcp import fleet_size_cap
+    ini = tmp_path / "lupin-app.ini"
+    ini.write_text( f"[Lupin: Development]\n{lt.MOBILE_ROOT_KEY} = {MOBILE_ROOT}\n{lt.MOBILE_OWNER_KEY} = rio\n" )
+    monkeypatch.setattr( fleet_size_cap, "config_file_path", lambda: str( ini ) )
+    assert lt.read_mobile_corpus()[ "owner" ] == "rio"
+    ini.write_text( "[Lupin: Development]\n" )
+    assert lt.read_mobile_corpus() is None
+
+
+@pytest.fixture
+def mobile_wiki( tmp_path, monkeypatch ):
+    wiki = tmp_path / "mobile" / "src" / "docs" / "wiki"
+    ( wiki / "capabilities" ).mkdir( parents=True )
+    ( wiki / "capabilities" / "a.md" ).write_text( "# a\n" )
+    seen = {}
+    monkeypatch.setattr( lt.build_mod, "ensure", lambda root, out: seen.update( root=root, out=out ) or "mobile-gen" )
+    monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "dart-sha", "counts": { "symbols": 9 } } )
+    monkeypatch.setattr( lt, "queue", lambda wiki_dir, gen: seen.update( wiki=str( wiki_dir ), gen=gen ) or [ { "kind": "orphan" } ] * 16 )
+    return types.SimpleNamespace( corpus=mobile_corpus( root=str( tmp_path / "mobile" ), wiki_dir=str( wiki ) ), seen=seen )
+
+
+def test_run_mobile_builds_the_dart_index_lints_its_wiki_and_syncs_with_the_dart_sha( mobile_wiki ):
+    lib = FakeLibrarian()
+    ok, summary = lt.run_mobile( mobile_wiki.corpus, lib, lambda line: None )
+    assert ok is True and summary[ "findings" ] == 16 and summary[ "created" ] == 1
+    assert mobile_wiki.seen[ "root" ] == mobile_wiki.corpus[ "root" ] and mobile_wiki.seen[ "out" ] == "/idx/lupin-mobile"
+    assert mobile_wiki.seen[ "wiki" ] == mobile_wiki.corpus[ "wiki_dir" ] and mobile_wiki.seen[ "gen" ] == "mobile-gen"
+    assert lib.index_sha == "dart-sha" and len( lib.seen ) == 16
+
+
+def test_run_mobile_without_an_index_dir_uses_the_default_folder_for_that_repo( mobile_wiki, monkeypatch ):
+    monkeypatch.setattr( lt.paths, "default_out_dir", lambda root: "default-for-" + str( root ) )
+    lt.run_mobile( { **mobile_wiki.corpus, "index_dir": None }, FakeLibrarian(), lambda line: None )
+    assert mobile_wiki.seen[ "out" ] == "default-for-" + mobile_wiki.corpus[ "root" ]
+
+
+def test_run_mobile_refuses_a_wiki_with_no_capability_page_before_building_anything( tmp_path, monkeypatch ):
+    def must_not_run( *a, **k ): raise AssertionError( "refused first" )
+    monkeypatch.setattr( lt.build_mod, "ensure", must_not_run )
+    lines = []
+    ok, summary = lt.run_mobile( mobile_corpus( wiki_dir=str( tmp_path / "none" ) ), FakeLibrarian(), lines.append )
+    assert ok is False and summary == { "reason": "no capability page" } and "lupin-mobile corpus refused" in lines[ 0 ]
+
+
+def test_run_mobile_refuses_an_index_with_no_symbols_before_the_sync( mobile_wiki, monkeypatch ):
+    monkeypatch.setattr( lt.build_mod, "read_header", lambda gen: { "symbols_sha": "x", "counts": { "symbols": 0 } } )
+    lib, lines = FakeLibrarian(), []
+    ok, summary = lt.run_mobile( mobile_wiki.corpus, lib, lines.append )
+    assert ok is False and summary[ "reason" ] == "no symbols in the index" and lib.seen is None and "no symbols" in lines[ 0 ]
+
+
+def test_run_mobile_reports_an_unreadable_store_as_not_ok( mobile_wiki ):
+    lines = []
+    ok, summary = lt.run_mobile( mobile_wiki.corpus, FakeLibrarian( error=RuntimeError( "down" ) ), lines.append )
+    assert ok is False and summary == { "reason": "down" } and "could not finish: down" in lines[ 0 ]
+
+
+def test_a_tick_shows_both_corpora_in_one_summary( tmp_path, pipeline ):
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON,
+                                 mobile=lambda: ( True, { "findings": 16, "pending": 0 } ) )
+    assert code == 0 and summary[ "findings" ] == 2 and summary[ "lupin_mobile" ] == { "findings": 16, "pending": 0 }
+    assert lt.read_state( str( tmp_path / "s.json" ) )[ "last_run_date" ] == "2026-10-14"
+
+
+def test_a_tick_without_a_mobile_corpus_has_no_lupin_mobile_key( tmp_path, pipeline ):
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON )
+    assert code == 0 and "lupin_mobile" not in summary
+
+
+def test_held_mobile_rows_make_the_exit_code_two( tmp_path, pipeline ):
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", str( tmp_path / "s.json" ), NOON,
+                                 mobile=lambda: ( True, { "findings": 16, "pending": 3 } ) )
+    assert code == 2 and summary[ "lupin_mobile" ][ "pending" ] == 3
+
+
+def test_a_failed_mobile_corpus_returns_one_and_leaves_the_state_so_the_next_tick_retries( tmp_path, pipeline ):
+    state = str( tmp_path / "s.json" )
+    code, summary = lt.run_tick( "r", str( tmp_path ), None, FakeLibrarian(), lambda r, p: report(), "m", state, NOON,
+                                 mobile=lambda: ( False, { "reason": "no symbols in the index" } ) )
+    assert code == 1 and summary == { "ran": False, "reason": "lupin-mobile: no symbols in the index" }
+    assert lt.read_state( state ) == {}
+
+
+def test_live_mobile_librarian_routes_rows_to_the_mobile_owner_key_and_title_prefix( monkeypatch, tmp_path ):
+    from lupin_cli.claude_code.hooks.lib import task_store_client, task_store_settings
+    monkeypatch.setattr( task_store_settings, "load_task_store_settings", lambda: { "api_base_url": "http://x", "timeout_seconds": 1.0 } )
+    monkeypatch.setattr( task_store_client, "read_api_key", lambda: "k" )
+    monkeypatch.setattr( lt, "read_value", lambda key, reader=None: { lt.CAP_KEY: "4" }.get( key ) )
+    sent = []
+    monkeypatch.setattr( lt, "notify_owner", lambda persona, text, environ: sent.append( ( persona, text ) ) or True )
+    lib = lt._live_mobile_librarian( mobile_corpus( owner="tiffany", manager="rio" ), {}, str( tmp_path / "p.jsonl" ), lambda line: None )
+    assert lib.owner == "tiffany" and lib.manager == "rio" and lib.max_creates == 4
+    assert lib.correlation_key == lq.MOBILE_CORRELATION_KEY and lib.rollup_prefix == lq.MOBILE_ROLLUP_PREFIX
+    assert isinstance( lib.store, lt.LiveStore )
+    lib.notify( "held" )
+    assert sent == [ ( "rio", "held" ) ]
+    lupin = lt._live_librarian( {}, str( tmp_path / "q.jsonl" ), lambda line: None )
+    assert lupin.owner == lt.DEFAULT_PERSONA and lupin.correlation_key == lq.CORRELATION_KEY and lupin.rollup_prefix == lq.ROLLUP_PREFIX
+
+
+def test_main_runs_the_mobile_corpus_with_its_own_pending_file_and_reports_it( cron, tmp_path, monkeypatch, pipeline ):
+    ( tmp_path / "mobile-wiki" / "capabilities" ).mkdir( parents=True )
+    ( tmp_path / "mobile-wiki" / "capabilities" / "m.md" ).write_text( "# m\n" )
+    pending = []
+    mobile  = FakeLibrarian( counts={ "created": 2, "amended": 0, "unchanged": 0, "cleared": 0, "waiting": 0, "deferred": 0, "pending": 0 } )
+    code, out, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch, make_librarian=lambda env, p, log: FakeLibrarian(),
+                             export_fn=lambda rows, path: report(), enabled_fn=lambda: True,
+                             mobile_corpus_fn=lambda: mobile_corpus( wiki_dir=str( tmp_path / "mobile-wiki" ) ),
+                             make_mobile_librarian=lambda corpus, env, p, log: pending.append( ( corpus[ "owner" ], p ) ) or mobile )
+    assert code == 0 and json.loads( out )[ "lupin_mobile" ][ "created" ] == 2
+    assert pending[ 0 ][ 0 ] == "tiffany" and pending[ 0 ][ 1 ].endswith( lt.MOBILE_PENDING_NAME ) and lt.PENDING_NAME not in pending[ 0 ][ 1 ]
+
+
+def test_main_logs_that_the_mobile_corpus_is_skipped_when_its_root_is_not_set( cron, tmp_path, monkeypatch, pipeline ):
+    code, out, _ = run_main( [ "--force" ], cron, tmp_path, monkeypatch, make_librarian=lambda env, p, log: FakeLibrarian(),
+                             export_fn=lambda rows, path: report(), enabled_fn=lambda: True )
+    assert code == 0 and "lupin_mobile" not in json.loads( out )
+    log = ( tmp_path / "data" / "repo" / "reuse-review" / "librarian" / lt.LOG_NAME ).read_text()
+    assert f"lupin-mobile corpus skipped: {lt.MOBILE_ROOT_KEY} is not set" in log

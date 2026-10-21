@@ -13,6 +13,12 @@ one line and exits before it builds anything or reads the store.
 Installing the cron lines goes through the shared crontab lock and nothing else. Without that
 lock module the installer refuses and writes nothing.
 
+The tick also lints a second corpus, the lupin-mobile wiki, once its repo root is set in the
+configuration (`wiki librarian mobile repo root`). It freshens that repo's Dart index and lints
+`src/docs/wiki` against it. Its rollup rows go under their own correlation key, owned by the
+mobile wiki's owner persona. The mobile repo is only read: nothing is committed, staged or written
+inside it, and its index lives in the fleet data folder.
+
 The tick also carries the vector set's staleness verdict (vector_status.py) on its report. It does so
 whether or not the daily vector refresh job is switched on.
 
@@ -31,7 +37,8 @@ import subprocess
 import sys
 
 from cosa.repo.symindex import build as build_mod
-from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, Librarian
+from cosa.repo.symindex import paths
+from cosa.repo.symindex.librarian_queue import CORRELATION_KEY, MOBILE_CORRELATION_KEY, MOBILE_ROLLUP_PREFIX, Librarian
 from cosa.repo.symindex.wiki_lint import queue
 
 CRON_TAG         = "# wiki-librarian-tick"
@@ -49,6 +56,15 @@ OWNER_KEY        = "wiki librarian owner persona"
 MANAGER_KEY      = "wiki librarian accountable manager"
 DEFAULT_CAP      = 10
 DEFAULT_PERSONA  = "cheech"
+WIKI_SUBPATH     = os.path.join( "src", "docs", "wiki" )
+
+MOBILE_ROOT_KEY     = "wiki librarian mobile repo root"
+MOBILE_INDEX_KEY    = "wiki librarian mobile index dir"
+MOBILE_OWNER_KEY    = "wiki librarian mobile owner persona"
+MOBILE_MANAGER_KEY  = "wiki librarian mobile accountable manager"
+MOBILE_PENDING_NAME = "pending-lupin-mobile.jsonl"
+MOBILE_PERSONA      = "tiffany"
+
 MISSES_NAME      = "misses.jsonl"
 PAGE_LIMIT       = 500
 EXIT_DISABLED    = 3
@@ -126,15 +142,37 @@ def read_enabled( reader=None, errors=None, key=ENABLED_KEY ):
     return ( read_value( key, reader, errors ) or "" ).strip().lower() in ( "true", "1", "yes", "on" )
 
 
-def read_persona( key, reader=None ):
+def read_persona( key, reader=None, default=DEFAULT_PERSONA ):
     """
     Read a persona name from the configuration file.
 
     Ensures:
-        - returns the stripped value, or DEFAULT_PERSONA when the key is absent or blank
+        - returns the stripped value, or default when the key is absent or blank
         - never raises
     """
-    return ( read_value( key, reader ) or "" ).strip() or DEFAULT_PERSONA
+    return ( read_value( key, reader ) or "" ).strip() or default
+
+
+def read_mobile_corpus( reader=None ):
+    """
+    Read the settings of the lupin-mobile corpus.
+
+    Requires:
+        - reader is a callable ( key ) returning a string or None, or None for the live disk reader
+
+    Ensures:
+        - returns None when `wiki librarian mobile repo root` is absent or blank, which switches the corpus off
+        - otherwise returns a dict with root, wiki_dir ( <root>/src/docs/wiki ), index_dir, owner and manager
+        - index_dir is the configured folder, or None when the key is blank, which means the default folder beside the fleet data
+        - owner defaults to MOBILE_PERSONA, and manager defaults to the owner
+        - never raises
+    """
+    root = ( read_value( MOBILE_ROOT_KEY, reader ) or "" ).strip()
+    if not root: return None
+    owner = read_persona( MOBILE_OWNER_KEY, reader, MOBILE_PERSONA )
+    return { "root": root, "wiki_dir": os.path.join( root, WIKI_SUBPATH ), "owner": owner,
+             "index_dir": ( read_value( MOBILE_INDEX_KEY, reader ) or "" ).strip() or None,
+             "manager": read_persona( MOBILE_MANAGER_KEY, reader, owner ) }
 
 
 def due( now, state ):
@@ -280,7 +318,39 @@ def notify_owner( persona, text, environ, post=None, api_key=None ):
     return status == 201
 
 
-def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_path, now, force=False, log=print, vector_check=None ):
+def run_mobile( corpus, librarian, log ):
+    """
+    Lint the lupin-mobile wiki against its Dart index and sync its rollup rows.
+
+    Requires:
+        - corpus is the dict read_mobile_corpus returned
+        - librarian is a Librarian built with the mobile correlation key and title prefix
+
+    Ensures:
+        - returns ( ok, summary ); summary holds findings and the sync counts when ok, and a reason when not
+        - the index is freshened, or built, in the configured index folder, or the default folder for that repo
+        - a wiki with no capability page, or an index with no symbols, is refused before the sync so an empty lint read cannot clear the rollups
+        - a store that could not be read returns not ok with the reason
+        - nothing is committed or written inside the mobile repo
+    """
+    wiki_dir = corpus[ "wiki_dir" ]
+    if not list( ( pathlib.Path( wiki_dir ) / "capabilities" ).glob( "*.md" ) ):
+        log( f"lupin-mobile corpus refused: no capability page under {wiki_dir}; an empty lint read would clear every open rollup" )
+        return False, { "reason": "no capability page" }
+    gen    = build_mod.ensure( corpus[ "root" ], corpus[ "index_dir" ] or paths.default_out_dir( corpus[ "root" ] ) )
+    header = build_mod.read_header( gen )
+    if not header[ "counts" ][ "symbols" ]:
+        log( "lupin-mobile corpus refused: the Dart index holds no symbols; an empty lint read would clear every open rollup" )
+        return False, { "reason": "no symbols in the index" }
+    findings = queue( pathlib.Path( wiki_dir ), gen )
+    try: counts = librarian.sync( findings, header[ "symbols_sha" ] )
+    except RuntimeError as error:
+        log( f"lupin-mobile corpus could not finish: {error}" )
+        return False, { "reason": str( error ) }
+    return True, { "findings": len( findings ), **counts }
+
+
+def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_path, now, force=False, log=print, vector_check=None, mobile=None ):
     """
     Run one tick.
 
@@ -289,6 +359,7 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         - export_fn is a callable ( rows, path ) returning an object with written and skipped, as miss_record.export_report does
         - now is a datetime in local time
         - vector_check is a callable () returning the vector status dict, or None to skip the check
+        - mobile is a callable () returning ( ok, summary ) as run_mobile does, or None when there is no second corpus
 
     Ensures:
         - returns ( exit_code, summary dict )
@@ -302,6 +373,9 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         - every block the export could not read is logged with its row title and reason
         - a vector_check that answers puts its stale flag and reasons in the summary under vector_status
         - a vector_check that raises OSError or ValueError is logged, leaves the summary without vector_status and does not fail the tick
+        - a mobile corpus runs after the lupin export and before the state is written, and its summary goes under lupin_mobile
+        - a mobile corpus that is not ok returns 1 and leaves the state as it was, so the next tick runs both corpora again
+        - held mobile rows make the exit code 2, like held lupin rows
     """
     state = read_state( state_path )
     if not force and not due( now, state ): return 0, { "ran": False, "reason": "not due" }
@@ -331,8 +405,13 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         return 1, { "ran": False, "reason": str( error ) }
     for item in report.skipped: log( f"miss block skipped: {item[ 'title' ]}: {item[ 'reason' ]}" )
     exported = report.written
+    mobile_summary = None
+    if mobile is not None:
+        mobile_ok, mobile_summary = mobile()
+        if not mobile_ok: return 1, { "ran": False, "reason": f"lupin-mobile: {mobile_summary[ 'reason' ]}" }
     write_state( state_path, { "last_run_date": now.date().isoformat(), "findings": len( findings ), **counts, "misses": exported } )
     summary = { "ran": True, "findings": len( findings ), "misses": exported, **counts }
+    if mobile_summary is not None: summary[ "lupin_mobile" ] = mobile_summary
     if vector_check is not None:
         try:
             verdict = vector_check()
@@ -340,7 +419,8 @@ def run_tick( root, wiki_dir, out_dir, librarian, export_fn, misses_path, state_
         except ( OSError, ValueError ) as error:
             log( f"vector status check failed: {error}" )
     log( "tick finished: " + json.dumps( summary, sort_keys=True ) )
-    return ( 2 if counts[ "pending" ] else 0 ), summary
+    held = counts[ "pending" ] or ( mobile_summary is not None and mobile_summary[ "pending" ] )
+    return ( 2 if held else 0 ), summary
 
 
 def cron_lines_for( run, schedule, boot_delay_seconds ):
@@ -469,15 +549,36 @@ def status_text( crontab_text, tag=CRON_TAG ):
     return f"installed: {count} lines" if count == 2 else f"partly installed: {count} lines"
 
 
-def _live_librarian( environ, pending_path, log ):
-    """Build the Librarian with the live store and the owner notice."""
+def _live_store():
+    """Build the store adapter over the live task-store client."""
     from lupin_cli.claude_code.hooks.lib import task_store_client as client
     from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
+    return LiveStore( load_task_store_settings(), client.read_api_key(), client )
+
+
+def _live_librarian( environ, pending_path, log ):
+    """Build the Librarian with the live store and the owner notice."""
     owner   = read_persona( OWNER_KEY )
     manager = read_persona( MANAGER_KEY )
-    store   = LiveStore( load_task_store_settings(), client.read_api_key(), client )
-    return Librarian( store, pending_path, log, notify=lambda text: notify_owner( manager, text, environ ), owner=owner, manager=manager,
+    return Librarian( _live_store(), pending_path, log, notify=lambda text: notify_owner( manager, text, environ ), owner=owner, manager=manager,
                       max_creates=read_create_cap( environ ) )
+
+
+def _live_mobile_librarian( corpus, environ, pending_path, log ):
+    """
+    Build the Librarian for the lupin-mobile corpus.
+
+    Requires:
+        - corpus is the dict read_mobile_corpus returned
+
+    Ensures:
+        - its rows carry the owner and manager of the corpus, the mobile correlation key and the mobile title prefix
+        - its pending file is separate from lupin's, set by the caller
+    """
+    manager = corpus[ "manager" ]
+    return Librarian( _live_store(), pending_path, log, notify=lambda text: notify_owner( manager, text, environ ), owner=corpus[ "owner" ],
+                      manager=manager, max_creates=read_create_cap( environ ), correlation_key=MOBILE_CORRELATION_KEY,
+                      rollup_prefix=MOBILE_ROLLUP_PREFIX )
 
 
 def _live_export():
@@ -486,7 +587,8 @@ def _live_export():
     return export_report
 
 
-def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, make_librarian=None, export_fn=None, enabled_fn=None ):
+def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, crontab_cmd=None, make_librarian=None, export_fn=None, enabled_fn=None,
+          make_mobile_librarian=None, mobile_corpus_fn=None ):
     """
     Run the command line.
 
@@ -496,6 +598,7 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     Ensures:
         - with no mode flag, runs one tick and returns its exit code
         - a tick that is switched off logs one line and returns EXIT_DISABLED before anything is built or read
+        - a configured lupin-mobile corpus is run in the same tick; an unset one is logged and skipped
         - the vector status check runs in every tick, whether or not the vector refresh switch is on, because a refresh that is off is when the set goes stale
         - --print-install prints the cron lines and changes nothing
         - --install, --uninstall and --status go through edit_crontab or read the crontab
@@ -541,8 +644,14 @@ def main( argv=None, environ=None, now=None, out=sys.stdout, err=sys.stderr, cro
     librarian = ( make_librarian or _live_librarian )( environ, pending, log )
     from cosa.repo.symindex import vector_status
     check     = lambda: vector_status.check( root, now, librarian=librarian, environ=environ, log=log )
+    corpus    = ( mobile_corpus_fn or read_mobile_corpus )()
+    mobile    = None
+    if corpus is None: log( f"lupin-mobile corpus skipped: {MOBILE_ROOT_KEY} is not set" )
+    else:
+        mobile_librarian = ( make_mobile_librarian or _live_mobile_librarian )( corpus, environ, os.path.join( folder, MOBILE_PENDING_NAME ), log )
+        mobile           = lambda: run_mobile( corpus, mobile_librarian, log )
     code, summary = run_tick( root, wiki_dir, None, librarian, export_fn or _live_export(), args.misses_out or os.path.join( folder, MISSES_NAME ),
-                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check )
+                              os.path.join( folder, STATE_NAME ), now, force=args.force, log=log, vector_check=check, mobile=mobile )
     print( json.dumps( summary, sort_keys=True ), file=out )
     return code
 

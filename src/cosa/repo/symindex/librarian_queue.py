@@ -20,6 +20,10 @@ from cosa.repo.symindex.wiki_lint import package_of
 
 CORRELATION_KEY = "epic:wiki-librarian"
 ROLLUP_PREFIX   = "[LUPIN] wiki-librarian rollup: "
+
+MOBILE_CORRELATION_KEY = "epic:wiki-librarian-lupin-mobile"
+MOBILE_ROLLUP_PREFIX   = "[LUPIN] wiki-librarian rollup (lupin-mobile): "
+
 MISS_PREFIX     = "[LUPIN] wiki-librarian miss: "
 FINGERPRINT_TAG = "rollup-fingerprint:"
 CLEARED_TAG     = "rollup-cleared:"
@@ -85,16 +89,17 @@ def _detail_line( finding ):
     return "- " + " ".join( parts )
 
 
-def render_rollup( package, findings ):
+def render_rollup( package, findings, prefix=ROLLUP_PREFIX ):
     """
     Build the title and body of one package rollup.
 
     Requires:
         - findings is a non-empty list for that package
+        - prefix is the title prefix of one corpus; the default is lupin's
 
     Ensures:
         - returns ( title, body )
-        - the title is ROLLUP_PREFIX plus the package, so the row can be found again
+        - the title is the prefix plus the package, so the row can be found again
         - the body counts findings by kind, lists at most DETAIL_LIMIT of them, and ends with the fingerprint line
     """
     counts = {}
@@ -105,7 +110,7 @@ def render_rollup( package, findings ):
     lines += shown
     if more > 0: lines.append( f"- and {more} more" )
     lines.append( f"{FINGERPRINT_TAG} {fingerprint( findings )}" )
-    return ROLLUP_PREFIX + package, "\n".join( lines )
+    return prefix + package, "\n".join( lines )
 
 
 def read_fingerprint( body ):
@@ -218,11 +223,13 @@ class Librarian:
         - pending_path is where refused creates are kept
     """
 
-    def __init__( self, store, pending_path, log, notify=None, project="lupin", owner="cheech", manager="cheech", priority="P5", max_creates=None ):
+    def __init__( self, store, pending_path, log, notify=None, project="lupin", owner="cheech", manager="cheech", priority="P5", max_creates=None,
+                  correlation_key=CORRELATION_KEY, rollup_prefix=ROLLUP_PREFIX ):
         """
         Keep the store, the pending path and the row settings.
 
         Ensures:
+            - correlation_key and rollup_prefix name one corpus's rows; a second corpus passes its own pair so neither sync reads, amends or clears the other's rows
             - owner is the persona that does the librarian's work and manager is the one that chases and closes the rows
             - max_creates caps the create calls one sync may make, or None for no cap
         """
@@ -237,11 +244,13 @@ class Librarian:
         self.owner        = owner
         self.manager      = manager
         self.priority     = priority
+        self.correlation_key = correlation_key
+        self.rollup_prefix   = rollup_prefix
 
     def _payload( self, title, body ):
         """Build the create payload for one row."""
         return { "item_class": "task", "title": title, "body": body, "project": self.project, "owner_persona": self.owner,
-                 "accountable_manager": self.manager, "priority": self.priority, "correlation_key": CORRELATION_KEY }
+                 "accountable_manager": self.manager, "priority": self.priority, "correlation_key": self.correlation_key }
 
     def _existing( self ):
         """
@@ -251,7 +260,7 @@ class Librarian:
             - returns a dict of title to row
             - raises RuntimeError when the store could not be read, so a failed read is never taken for no rows
         """
-        ok, status, body = self.store.query( CORRELATION_KEY )
+        ok, status, body = self.store.query( self.correlation_key )
         if not ok: raise RuntimeError( f"task store query failed: status {status}: {body}" )
         return { row[ "title" ]: row for row in body.get( "tasks", [] ) }
 
@@ -324,7 +333,7 @@ class Librarian:
                 made.add( entry[ "title" ] )
         wanted = {}
         for package, group in sorted( group_by_package( findings ).items() ):
-            title, body = render_rollup( package, group )
+            title, body = render_rollup( package, group, self.rollup_prefix )
             wanted[ title ] = body
         for title, body in wanted.items():
             row = existing.get( title )
@@ -339,11 +348,11 @@ class Librarian:
                 if ok: counts[ "amended" ] += 1
                 else: self.log( f"amend failed: {title}: status {status}: {reply}" )
         for title, row in existing.items():
-            if not title.startswith( ROLLUP_PREFIX ) or title in wanted: continue
+            if not title.startswith( self.rollup_prefix ) or title in wanted: continue
             if is_cleared( row.get( "body" ) ):
                 counts[ "waiting" ] += 1
                 continue
-            ok, status, reply = self.store.amend( row[ "id" ], clear_note( title[ len( ROLLUP_PREFIX ): ], index_sha ) )
+            ok, status, reply = self.store.amend( row[ "id" ], clear_note( title[ len( self.rollup_prefix ): ], index_sha ) )
             if ok:
                 counts[ "cleared" ] += 1
                 cleared.append( title )

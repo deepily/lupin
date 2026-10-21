@@ -369,3 +369,63 @@ def test_a_rollup_still_waiting_for_its_close_notifies_the_manager_again_each_ru
     lib, _ = make( tmp_path, FakeStore( [ rollup ] ), notify=said.append )
     assert lib.sync( [], "idx-2" )[ "waiting" ] == 1
     assert len( said ) == 1 and "1 wiki-librarian rollup" in said[ 0 ] and "still clear" in said[ 0 ]
+
+
+# ---- two corpora, one store ----
+
+
+class KeyedStore( FakeStore ):
+    """Answers each query with only the rows under the asked correlation key."""
+
+    def __init__( self, rows ):
+        super().__init__( rows )
+        self.queries = []
+
+    def query( self, correlation_key ):
+        self.queries.append( correlation_key )
+        return True, 200, { "tasks": [ r for r in self.rows if r[ "correlation_key" ] == correlation_key ] }
+
+
+def mobile_lib( tmp_path, store ):
+    return lq.Librarian( store, str( tmp_path / "pending-mobile.jsonl" ), lambda line: None, owner="tiffany", manager="tiffany",
+                         correlation_key=lq.MOBILE_CORRELATION_KEY, rollup_prefix=lq.MOBILE_ROLLUP_PREFIX )
+
+
+def test_mobile_prefix_and_key_differ_from_lupins_and_the_lupin_prefix_does_not_match_a_mobile_title():
+    assert lq.MOBILE_CORRELATION_KEY.startswith( "epic:" ) and lq.MOBILE_CORRELATION_KEY != lq.CORRELATION_KEY
+    assert not lq.MOBILE_ROLLUP_PREFIX.startswith( lq.ROLLUP_PREFIX ) and not lq.ROLLUP_PREFIX.startswith( lq.MOBILE_ROLLUP_PREFIX )
+
+
+def test_render_rollup_takes_the_corpus_prefix_and_defaults_to_lupins():
+    assert lq.render_rollup( "lib.ui", [ ORPHAN ], lq.MOBILE_ROLLUP_PREFIX )[ 0 ] == lq.MOBILE_ROLLUP_PREFIX + "lib.ui"
+    assert lq.render_rollup( "lib.ui", [ ORPHAN ] )[ 0 ] == lq.ROLLUP_PREFIX + "lib.ui"
+
+
+def test_a_mobile_rollup_is_created_for_the_mobile_owner_under_the_mobile_key_and_title( tmp_path ):
+    store = KeyedStore( [] )
+    counts = mobile_lib( tmp_path, store ).sync( [ dict( ORPHAN, package="lib.ui" ) ], "dart-sha" )
+    assert counts[ "created" ] == 1 and store.queries == [ lq.MOBILE_CORRELATION_KEY ]
+    made = store.created[ 0 ]
+    assert made[ "owner_persona" ] == "tiffany" and made[ "accountable_manager" ] == "tiffany"
+    assert made[ "correlation_key" ] == lq.MOBILE_CORRELATION_KEY and made[ "title" ] == lq.MOBILE_ROLLUP_PREFIX + "lib.ui"
+
+
+def test_a_lupin_rollup_is_still_created_for_the_lupin_owner_under_the_lupin_key( tmp_path ):
+    store = KeyedStore( [] )
+    lib, _ = make( tmp_path, store )
+    lib.sync( [ ORPHAN ], "sha" )
+    made = store.created[ 0 ]
+    assert made[ "owner_persona" ] == "cheech" and made[ "correlation_key" ] == lq.CORRELATION_KEY and made[ "title" ].startswith( lq.ROLLUP_PREFIX )
+
+
+def test_neither_corpus_clears_or_amends_the_other_corpus_rollups( tmp_path ):
+    mobile_row = { **row_for( "lib.ui", [ dict( ORPHAN, package="lib.ui" ) ], "m1" ), "correlation_key": lq.MOBILE_CORRELATION_KEY }
+    mobile_row[ "title" ] = lq.MOBILE_ROLLUP_PREFIX + "lib.ui"
+    lupin_row  = { **row_for( "cosa.rest", [ ORPHAN ], "l1" ), "correlation_key": lq.CORRELATION_KEY }
+    store = KeyedStore( [ mobile_row, lupin_row ] )
+    lib, _ = make( tmp_path, store )
+    counts = lib.sync( [ ORPHAN ], "sha" )                                  # lupin sync with a finding for cosa.rest only
+    assert counts[ "cleared" ] == 0 and counts[ "unchanged" ] == 1 and store.amended == [] and store.created == []
+    empty = KeyedStore( [ mobile_row, lupin_row ] )
+    mobile_lib( tmp_path, empty ).sync( [], "dart-sha" )                    # mobile sync with no findings clears only its own row
+    assert [ item for item, _ in empty.amended ] == [ "m1" ]
