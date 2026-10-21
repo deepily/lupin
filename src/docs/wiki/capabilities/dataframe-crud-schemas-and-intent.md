@@ -5,9 +5,10 @@ pins:
   - cosa.crud_for_dataframes.schemas.get_schema@4c2233901a
   - cosa.crud_for_dataframes.schemas.get_columns@6cb78d9d12
   - cosa.crud_for_dataframes.schemas.get_defaults@15918fe0c0
-  - cosa.crud_for_dataframes.schemas.get_date_columns@d0b77c4499
-  - cosa.crud_for_dataframes.schemas.get_time_columns@664a2c4104
-  - cosa.crud_for_dataframes.schemas.get_datetime_columns@a0053355ca
+  - cosa.crud_for_dataframes.schemas.get_date_columns@a2b62773c7
+  - cosa.crud_for_dataframes.schemas.get_time_columns@2e0c1ee507
+  - cosa.crud_for_dataframes.schemas.get_datetime_columns@d75096d70e
+  - cosa.crud_for_dataframes.schemas.get_columns_by_dtype@b9df42cc26
   - cosa.crud_for_dataframes.schemas.get_dedup_keys@f61fa40124
   - cosa.crud_for_dataframes.schemas.validate_schema_type@e65640cf71
   - cosa.crud_for_dataframes.xml_models.CRUDIntent@6954a19b86
@@ -20,7 +21,7 @@ The column definitions and the parsed intent behind [[dataframe-crud]]. Operatio
 ## What it does
 - Three schemas exist: `todo`, `calendar` and `generic`. All carry `id`, `list_name` and `created_at`. The todo adds `todo_item`, `due_date`, `priority`, `completed` and `tags`. The calendar adds `event` with date, time and recurrence columns, and the generic adds `name` and `value`.
 - `get_schema` returns one schema's `columns` and `defaults`, and raises `ValueError` for an unknown type. `get_columns` lists names in definition order, and `get_defaults` returns a copy of the defaults.
-- `get_date_columns`, `get_time_columns` and `get_datetime_columns` pick columns by dtype. `get_dedup_keys` returns the "same item" columns, or `[]` for a type with no key.
+- `get_columns_by_dtype( schema_type, dtype )` lists the columns of one dtype in definition order. `get_date_columns`, `get_time_columns` and `get_datetime_columns` call it with `date`, `time` and `datetime`. `get_dedup_keys` returns the "same item" columns, or `[]` for a type with no key.
 - `validate_schema_type` answers true or false and never raises.
 - `CRUDIntent` holds twelve string fields, because the model answers in text. An empty XML tag becomes an empty string for every field but `operation`.
 - `get_match_dict`, `get_fields_dict` and `get_filters_dict` parse the JSON fields. A blank, invalid or non-object value gives `{}`.

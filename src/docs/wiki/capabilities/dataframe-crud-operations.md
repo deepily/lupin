@@ -2,7 +2,8 @@
 capability: dataframe-crud-operations
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.crud_for_dataframes.calendar_crud_agent.CalendarCrudAgent@f5b260723b
+  - cosa.crud_for_dataframes.calendar_crud_agent.CalendarCrudAgent@294f366013
+  - cosa.crud_for_dataframes.agent.smoke_check_schema_agent@045f6df4d8
   - cosa.crud_for_dataframes.crud_operations.create_list@3e206733df
   - cosa.crud_for_dataframes.crud_operations.delete_list@ef702b377a
   - cosa.crud_for_dataframes.crud_operations.list_lists@b898a9146e
@@ -24,7 +25,8 @@ The list, query and voice-answer functions behind [[dataframe-crud]]. Each takes
 - `query_items` filters by list name, then by exact text match on each filter column. It then sorts by one column with missing values last and applies `limit`. `total_count` is taken before the limit. A filter column the table lacks is skipped.
 - `get_schema_info` returns each column's name, dtype and default, with `(required)` where there is none.
 - `format_result_for_voice` picks a sentence by operation and status. A pair it does not know falls back to the message. A query reads at most five items, then `...and N more.`
-- `CalendarCrudAgent` is `CrudForDataFramesAgent` with `default_schema_type` set to `calendar`. Its default routing command is the base agent's.
+- `CalendarCrudAgent` is `CrudForDataFramesAgent` with the class constant `DEFAULT_SCHEMA_TYPE` set to `calendar`. The base `__init__` copies it to `default_schema_type`. Its default routing command is the base agent's.
+- `smoke_check_schema_agent( agent_cls, schema_type )` is the smoke check both domain agents share. It confirms the constant and the base class, prints the result and returns `True` or `False`. A failure prints a traceback and is returned, never raised. It does not run the constructor, which needs config and an LLM.
 
 ## Don't
 - Don't expect `delete_list` to check the schema type. `DataFrameStorage` raises `ValueError` for an unknown one.

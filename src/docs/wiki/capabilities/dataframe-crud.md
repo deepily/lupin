@@ -2,24 +2,24 @@
 capability: dataframe-crud
 pin_algorithm: py3.13.xebd695/ts5.9.3
 pins:
-  - cosa.crud_for_dataframes.agent.CrudForDataFramesAgent@16f724f251
+  - cosa.crud_for_dataframes.agent.CrudForDataFramesAgent@52f930db9a
   - cosa.crud_for_dataframes.agent.CrudForDataFramesAgent.run_code@c773563ecc
   - cosa.crud_for_dataframes.xml_models.CRUDIntent.needs_confirmation@0e8aa96e45
   - cosa.crud_for_dataframes.dispatcher.dispatch@12402b9dc5
-  - cosa.crud_for_dataframes.dispatcher.extract_intent_xml@279881dcd7
+  - cosa.crud_for_dataframes.dispatcher.extract_intent_xml@d3b75fa25a
   - cosa.crud_for_dataframes.storage.DataFrameStorage@e38d1458ce
   - cosa.crud_for_dataframes.crud_operations.add_item@ed511dc774
   - cosa.crud_for_dataframes.crud_operations.delete_item@5435f06c26
   - cosa.crud_for_dataframes.intent_extractor.extract_intent_via_claude_code@b0f3ed7284
-  - cosa.crud_for_dataframes.todo_crud_agent.TodoCrudAgent@664396cb1d
+  - cosa.crud_for_dataframes.todo_crud_agent.TodoCrudAgent@7dcf451e1d
 ---
 # DataFrame CRUD
 
-A voice request such as "add milk to my groceries list" becomes a stored change to a per-user parquet table. `CrudForDataFramesAgent` is the entry point, and `TodoCrudAgent` and `CalendarCrudAgent` subclass it.
+A voice request such as "add milk to my groceries list" becomes a stored change to a per-user parquet table. `CrudForDataFramesAgent` is the entry point, and `TodoCrudAgent` and `CalendarCrudAgent` subclass it. A subclass sets only the class constant `DEFAULT_SCHEMA_TYPE`, and the base `__init__` copies it to `default_schema_type`.
 The operations and voice answers are in [[dataframe-crud-operations]]; schemas and intent parsing are in [[dataframe-crud-schemas-and-intent]].
 
 ## What it does
-- `run_prompt` asks the configured LLM for an `<intent>` block. `extract_intent_xml` cuts it out of the reply and `CRUDIntent.from_xml` parses it.
+- `run_prompt` asks the configured LLM for an `<intent>` block. `extract_intent_xml` cuts it out of the reply with the shared `extract_tagged_xml`. That drops code fences and raises `ValueError` for a blank reply or a missing block. Then `CRUDIntent.from_xml` parses it.
 - `run_code` generates no code. It passes the `CRUDIntent` to `dispatch`, which calls one `crud_operations` function by operation name.
 - The nine operations are `add`, `delete`, `update`, `query`, `mark_done`, `create_list`, `delete_list`, `list_lists` and `get_schema_info`.
 - `DataFrameStorage` keeps one file per user and schema at `<base>/<user_email>/<schema_type>.parquet`. The base comes from `crud for dataframes output path`.
