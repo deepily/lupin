@@ -384,7 +384,7 @@ KNOWN_DIVERGENT_ENV = {
 # differs from the host owner, so git needs a safe.directory entry per mount. Dev binds the
 # whole projects dir as the same user, so git never objects there and needs none.
 # test_preflight_vm_host_test_fixes.py pins this env to cloud-gpu's own bind table.
-for _n in range( 5 ):
+for _n in range( 7 ):
     KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_KEY_{_n}" ] = KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_VALUE_{_n}" ] = {
         "dev-dev"  : "2026-09-30 — dev binds the whole projects dir as the owning user; git never objects.",
         "dev-test" : "2026-09-30 — same.",

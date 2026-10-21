@@ -234,6 +234,16 @@ services:
         target: /var/external-projects/google/parallel-search
         read_only: false
         bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/mcp-and-a2ui-apps
+        target: /var/external-projects/google/mcp-and-a2ui-apps
+        read_only: false
+        bind: { create_host_path: false }
+      - type: bind
+        source: /mnt/lupin-data/google/weil-ge-mcp-server
+        target: /var/external-projects/google/weil-ge-mcp-server
+        read_only: false
+        bind: { create_host_path: false }
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
@@ -274,7 +284,7 @@ services:
       # git's env config, which — unlike `git config --global` run in the container —
       # survives a recreate. KEEP IN STEP with the external-projects binds above (a unit
       # test compares the two). ⚠️ Env resolves at container CREATE: --force-recreate.
-      GIT_CONFIG_COUNT: "5"
+      GIT_CONFIG_COUNT: "7"
       GIT_CONFIG_KEY_0: safe.directory
       GIT_CONFIG_VALUE_0: /var/external-projects/lupin
       GIT_CONFIG_KEY_1: safe.directory
@@ -285,6 +295,10 @@ services:
       GIT_CONFIG_VALUE_3: /var/external-projects/google/weil-nda-drafting-suite
       GIT_CONFIG_KEY_4: safe.directory
       GIT_CONFIG_VALUE_4: /var/external-projects/google/parallel-search
+      GIT_CONFIG_KEY_5: safe.directory
+      GIT_CONFIG_VALUE_5: /var/external-projects/google/mcp-and-a2ui-apps
+      GIT_CONFIG_KEY_6: safe.directory
+      GIT_CONFIG_VALUE_6: /var/external-projects/google/weil-ge-mcp-server
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
       # FIRST (before the INI `model server url` key), so flipping local→cloud
