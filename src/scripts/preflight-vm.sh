@@ -625,6 +625,26 @@ else
     esac
 fi
 
+# B7 — the built esbuild bundles are on the checkout (bug 527fec6e).
+# The compose file bind-mounts this checkout's ./src over the image's, so the bundles baked into the image are
+# hidden, and static/dist/ is gitignored so a code sync does not carry it. A script 404s and the feature it
+# carries never shows (measured 2026-10-20: the VM held multiplexer only, so the doc viewer lost its podcast button).
+# PHASE-AWARE TIER, like the schema check: BLOCK once the deploy has run (post, full), WARN in pre, because the
+# deploy that is about to run is what ships them.
+DIST_REQUIRED="multiplexer console doc-podcast"
+dist_tier="BLOCK"; [ "$PHASE" = "pre" ] && dist_tier="WARN"
+dist_present=""
+for dist_name in $DIST_REQUIRED; do
+    [ -f "$REPO_ROOT/src/lupin_app/static/dist/$dist_name/manifest.json" ] && dist_present="$dist_present $dist_name"
+done
+dist_status="$( pfv_dist_status "$DIST_REQUIRED" "$dist_present" )"
+case "$dist_status" in
+    OK)
+        report pass "$dist_tier" "built bundles present on the checkout: $DIST_REQUIRED" ;;
+    *)
+        report fail "$dist_tier" "built bundles absent from $REPO_ROOT/src/lupin_app/static/dist (${dist_status#MISSING:}), so the pages that load them lose that feature"                       "lupin-vm.sh push-dist   # from a checkout where npm run build has run" ;;
+esac
+
 # B4 — a committed .mcp.json with absolute dev paths pollutes every checkout.
 if sudo -n git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" ls-files --error-unmatch .mcp.json >/dev/null 2>&1; then
     report fail WARN ".mcp.json is TRACKED — it must not be (cosa-voice is a per-machine USER-scope MCP)" \

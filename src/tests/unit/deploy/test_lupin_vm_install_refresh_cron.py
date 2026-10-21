@@ -107,3 +107,4 @@ def test_deploy_carries_on_to_the_restart_when_the_planning_is_prompting_sync_fa
     assert "WARN: the planning-is-prompting refresh FAILED" in text
     assert done.returncode == 0 and "restarting :7999 rest" in text
     assert "docker compose" in calls.read_text()
+    assert "WARN: push-dist FAILED" in text

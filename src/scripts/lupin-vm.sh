@@ -37,6 +37,10 @@ VM_DEEPILY_PROJECTS_DIR="/mnt/lupin-data"       # parent of the on-VM checkouts;
 # SIBLING of the projects dir (…/projects-data); the VM has no such sibling — /mnt/lupin-data IS
 # the projects dir — so it nests under the data disk instead. Holds claude-permissions.json.
 VM_DEEPILY_DATA_DIR="/mnt/lupin-data/projects-data"
+# The gitignored esbuild bundles the pages load from static/dist/. The compose file bind-mounts the VM checkout's
+# ./src over the image's, so the image's copy is hidden and the checkout must carry them; git cannot (bug 527fec6e).
+# One name per build-*.sh in package.json's "build" script; preflight-vm-lib.sh keeps the same list.
+DIST_BUNDLES="multiplexer console doc-podcast"
 # The CPU VM (post GPU→CPU downgrade) runs the cloud-GPU topology: model-server on Cloud Run,
 # NO local nvidia container. Using cloud-test.yml here recreates a local GPU model-server that
 # cannot start on the CPU VM ("could not select device driver nvidia"). Source of truth:
@@ -184,6 +188,9 @@ Dev-box CLI parity (make the VM host feel like your dev box) — RUN FROM THE DE
                           on stdin: they are never in a command line, a log or this verb's output. It says
                           only set / replaced / unchanged. reuse-vector-refresh.sh --install names this
                           file in REUSE_VECTOR_REFRESH_ENV.
+  push-dist               ship the built static/dist bundles (multiplexer, console, doc-podcast) from this
+                          checkout to the VM checkout, which git cannot carry. Refuses, sending nothing, naming
+                          any bundle not built here (npm run build). deploy runs it after the code sync.
   install-refresh-cron [local|vm]
                           install the daily reuse-vector refresh cron lines on this host (local, the
                           default) or on the VM (vm), with nothing set by hand. On the VM it sets
@@ -723,6 +730,12 @@ case "$SUBCMD" in
             [ "$DRY_RUN" -eq 1 ] && PIP_SYNC_ARGS=( --dry-run "${PIP_SYNC_ARGS[@]}" )
             bash "${BASH_SOURCE[0]}" "${PIP_SYNC_ARGS[@]}" || log "WARN: the planning-is-prompting refresh FAILED; the VM copy may be stale (the refresh cron needs its crontab_lock.py)"
         fi
+        # 1c. The pages load gitignored bundles from static/dist/, and the VM's bind mount hides the image's copy,
+        #     so ship them from the local build. A failure is a loud warning: the app deploy is unaffected, the pages are not.
+        DIST_SYNC_ARGS=( push-dist )
+        [ "$DRY_RUN" -eq 1 ] && DIST_SYNC_ARGS=( --dry-run push-dist )
+        bash "${BASH_SOURCE[0]}" "${DIST_SYNC_ARGS[@]}" \
+            || log "WARN: push-dist FAILED; pages that load a bundle from static/dist (the doc viewer's podcast button) may be missing on the VM"
         # 2-4. restart both servers, then verify. `systemctl --user` needs XDG_RUNTIME_DIR wired
         #      up for the non-interactive SSH session; the arbiter bounce is best-effort (a failure
         #      is warned, not fatal) and the :8001 /health probe is the real proof it came back.
@@ -1320,6 +1333,33 @@ $RCMD_TM"
             fi
             unset tm_email tm_password
             log "done. Install the cron lines on that host with: src/scripts/reuse-vector-refresh.sh --install (a person runs it)."
+        fi
+        ;;
+
+    push-dist)
+        # The VM bind-mounts its checkout's ./src over the image, so the bundles baked into the image are hidden and the
+        # gitignored static/dist/ must be on the VM checkout itself. Ship the locally built folders by archive+SCP.
+        require_project
+        PD_LOCAL="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )/src/lupin_app/static/dist"
+        PD_MISSING=""
+        for PD_B in $DIST_BUNDLES; do
+            [ -f "$PD_LOCAL/$PD_B/manifest.json" ] || PD_MISSING="$PD_MISSING $PD_B"
+        done
+        [ -z "$PD_MISSING" ] || die "push-dist: not built in $PD_LOCAL:$PD_MISSING (run: npm run build). Nothing was sent."
+        PD_DEST="$VM_ROOT/src/lupin_app/static/dist"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "(dry-run) would: tar -czf dist.tar.gz $DIST_BUNDLES; gcloud compute scp -> VM:/tmp; sudo mkdir -p $PD_DEST; sudo tar -xzf -C $PD_DEST; chown 1001"
+        else
+            PD_TAR="$( mktemp -t "lupin-dist-XXXXXX.tar.gz" )"
+            # shellcheck disable=SC2086
+            tar -czf "$PD_TAR" -C "$PD_LOCAL" $DIST_BUNDLES || die "push-dist: tar failed"
+            gcloud compute scp "$PD_TAR" "$VM_NAME:/tmp/lupin-dist.tar.gz" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap
+            rm -f "$PD_TAR"
+            gcloud compute ssh "$VM_NAME" \
+                --zone="$VM_ZONE" --project="$LUPIN_GCP_PROJECT_ID" --tunnel-through-iap \
+                $SSH_KEEPALIVE \
+                --command "sudo mkdir -p $PD_DEST && sudo tar -xzf /tmp/lupin-dist.tar.gz -C $PD_DEST && sudo chown -R 1001:1001 $PD_DEST && rm -f /tmp/lupin-dist.tar.gz && echo DIST_SHIPPED && ls $PD_DEST"
         fi
         ;;
 

@@ -1005,6 +1005,29 @@ pfv_deployed_ref_status() {
     echo "STALE"; return 1
 }
 
+# ── pfv_dist_status ──────────────────────────────────────────────────────────
+# Classify the built esbuild bundles on the VM checkout (bug 527fec6e).
+#
+# The compose file bind-mounts the VM checkout's ./src over the image's, so the bundles baked into the image
+# are hidden and static/dist/ (gitignored) must be on the checkout. A page whose bundle is absent still loads;
+# its script 404s and the feature it carries (the doc viewer's podcast button) silently never appears.
+#
+# Requires:
+#   - $1 = space-separated bundle names that are required
+#   - $2 = space-separated names of the bundle folders on the checkout that hold a manifest.json ("" for none)
+# Ensures:
+#   - echoes OK and returns 0 when every required name is present
+#   - otherwise echoes MISSING: followed by the absent names, in the order required, and returns 1
+#   - pure: both facts are passed in, so the classification is tested without a VM
+pfv_dist_status() {
+    local required="$1" present=" $2 " name missing=""
+    for name in $required; do
+        case "$present" in *" $name "*) ;; *) missing="$missing $name" ;; esac
+    done
+    [ -z "$missing" ] && { echo "OK"; return 0; }
+    echo "MISSING:${missing}"; return 1
+}
+
 # ── pfv_environ_lookup ───────────────────────────────────────────────────────
 # Read ONE variable out of a container's real process environment.
 #
