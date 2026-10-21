@@ -19,5 +19,5 @@ Two small helpers the proxies share: the keyword builder for `voice_io.notify()`
 - Don't pass an empty string to mean unset. Only `None` leaves a key out.
 
 ## Invariants
-- The notify result is a plain dict with no side effects.
+- `build_notify_kwargs` returns a plain dict with no side effects. The notify call itself returns a bool.
 - `BaseResponder.print_stats` calls the table printer with its `STATS_TITLE`, which a subclass can override.

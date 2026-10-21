@@ -14,11 +14,11 @@ pins:
 ---
 # Proxy agent base
 
-The shared layer under the proxy agents: a WebSocket listener, a responder base class, a strategy protocol, a REST submitter, connection settings and command-line flags. Its modules import nothing from `notification_proxy`, `decision_proxy` or `swe_team`. [[decision-proxy]] builds on most of it. [[notification-proxy]] has its own listener and responder. It takes only the connection defaults, four reconnect constants, `get_credentials` and `get_anthropic_api_key`.
+The shared layer under the proxy agents: a WebSocket listener, a responder base class, a strategy protocol, a REST submitter, connection settings and command-line flags. Its modules import nothing from `notification_proxy`, `decision_proxy` or `swe_team`. [[decision-proxy]] builds on most of it. [[notification-proxy]] has its own responder. Its listener extends `BaseWebSocketListener`, and its responder prints through `print_stats_table`. It also takes the connection defaults, four reconnect constants, `get_credentials` and `get_anthropic_api_key`.
 
 ## Who uses what
 - `DecisionResponder` extends `BaseResponder`, and `DecisionListener` extends `BaseWebSocketListener`. The decision proxy's entry point also uses `add_common_args`.
-- Two other classes extend the listener: `OrchestratorNotificationClient` in `swe_team` and `CCNotificationListener` in the Claude Code hooks library.
+- Three other classes extend the listener: `OrchestratorNotificationClient` in `swe_team`, `CCNotificationListener` in the Claude Code hooks library and the notification proxy's `WebSocketListener`.
 - `BaseStrategy` and the two `route_to_strategies` methods have no caller outside the tests. Neither proxy's responder uses them.
 
 ## The listener

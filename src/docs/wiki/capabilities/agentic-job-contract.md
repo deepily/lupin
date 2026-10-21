@@ -19,7 +19,7 @@ pins:
 ## What a subclass provides
 - Two class attributes: `JOB_TYPE` (for example `"deep_research"`) and `JOB_PREFIX` (`"dr"`). The id is `{prefix}-{8 hex}`.
 - A `last_question_asked` property, `do_all()` and `async _execute()`. All three are abstract, so a class without them cannot be instantiated.
-- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error. `_run_execute( label, subject, failure_prefix )` holds that body for jobs with one `_execute()`: `ClaudeCodeJob`, the two chained jobs and `SweTeamJob` call it from `do_all`.
+- `do_all()` is what the queue calls. `DeepResearchJob.do_all` shows the shape: set `RUNNING` and `started_at`, run `asyncio.run( self._execute() )`, then end in `CANCELLED` or `COMPLETED` and return the conversational answer. On an exception it sets `FAILED` and re-raises, so the pool's `Future` carries the error. `_run_execute( label, subject, failure_prefix )` holds the running, completed and failed part. It has no cancelled branch. `ClaudeCodeJob`, the two chained jobs and `SweTeamJob` call it from `do_all`.
 - Thirteen production classes subclass it (grep of `src` outside tests at `08509073d`). They are `ClaudeCodeJob`, `DeepResearchJob`, `PodcastGeneratorJob`, `PresentationGeneratorJob`, `DeepResearchToPodcastJob`, `DeepResearchToPresentationJob`, `BugFixExpediterJob`, `TestFixExpediterJob`, `TestSuiteJob`, `SweTeamJob`, `HeartbeatPokerJob`, `ArbiterConsumerJob` and `MockAgenticJob`.
 
 ## What the base gives

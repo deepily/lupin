@@ -31,7 +31,7 @@ The podcast, presentation and deep-research agents each have one client class th
 - `sdk_cost_usd` is the SDK's telemetry, covered by the plan; the token prices in `CostEstimate` are approximate.
 
 ## How to extend
-- Add a `call_for_*` method that calls `_call_api` with a new `call_type`. Keep `tools=[]`. The nine `call_for_*` methods in podcast and presentation are one exact-clone group in the duplicate report. A change to one usually belongs in the other.
+- Add a `call_for_*` method that calls `_call_typed` with a new `call_type`. Keep `tools=[]`. The nine `call_for_*` methods in podcast and presentation are thin wrappers over the shared `_call_typed` ([[bounded-cc-client-base]]). A change to one usually belongs in the other.
 
 ## Don't
 - Don't set permission mode `"plan"` on a call without tools.

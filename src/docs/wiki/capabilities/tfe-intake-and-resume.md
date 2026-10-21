@@ -24,7 +24,7 @@ How a run starts from a failed test suite job, how failures are first grouped, a
 - `list_resume_candidates` returns the user's stalled test fix jobs first, then recent others, as flat dictionaries.
 - `fuzzy_match_candidates` ranks those candidates against a free-text description through a model and adds `confidence` and `reason`.
 - `ResumeTarget` is the result of resolving a resume request: job id, source type, matched path, confidence, candidates and a diagnostic.
-- `TestFixExpediterConfig` holds twelve settings. `from_config` loads them through `load_kwargs_from_ini` ([[agent-ini-config-loader]]), and pushing the fix branch is off unless switched on.
+- `TestFixExpediterConfig` holds 25 settings. `from_config` loads them through `load_kwargs_from_ini` ([[agent-ini-config-loader]]), and pushing the fix branch is off unless switched on.
 
 ## Invariants
 - `list_resume_candidates` and `fuzzy_match_candidates` return an empty list on any error and never raise.

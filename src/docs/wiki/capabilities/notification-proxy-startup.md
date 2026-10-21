@@ -22,5 +22,5 @@ pins:
 - `voice_io.notify` sends a status notice as the proxy's sender id, at low priority by default, with keywords from `build_notify_kwargs`. It returns whether the notice was sent.
 
 ## Invariants
-- A dropped connection reconnects with growing delays. This listener's delay is plain exponential, capped, with no jitter. After `RECONNECT_MAX_ATTEMPTS` failures in a row, `run` gives up. A successful login resets the count.
+- A dropped connection reconnects with growing delays. This listener's delay is plain exponential, capped, with no jitter. After `RECONNECT_MAX_ATTEMPTS` failures in a row, `run` gives up. The count resets when the server confirms the auth request, not at login.
 - A failed login or a refused auth ends that connection attempt and counts as a failure.

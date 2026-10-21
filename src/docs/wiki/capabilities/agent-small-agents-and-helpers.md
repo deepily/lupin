@@ -28,6 +28,6 @@ The code-generating agents share a base that runs generated code. These are the 
 - `singleton` is the decorator that makes `TwoWordIdGenerator` a single shared instance.
 
 ## Invariants
-- `TodoListAgent`, `ReceptionistAgent` and `IterativeDebuggingAgent` restore through `AgentBase._restore_from_data`. It rebuilds the agent from the saved question and flags, then copies every other saved field onto it.
+- `TodoListAgent`, `ReceptionistAgent` and `IterativeDebuggingAgent` restore through `AgentBase._restore_from_data`. It rebuilds the agent from its saved constructor arguments, then copies every other saved field onto it.
 - `DateAndTimeAgent` does not support restoring serialized state. It raises `NotImplementedError`.
 - Generated ids are two lowercase words, so they pass the session id check.

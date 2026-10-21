@@ -21,7 +21,7 @@ pins:
 Terminal entry points for the two chained pipelines in [[research-chained-pipelines]]: research to podcast, and research to presentation. Each is `python -m cosa.agents.<package>`.
 
 ## What it does
-- `parse_args` reads the query, user email, budget, lead model, audience and the CLI-mode and dry-run switches. `add_deep_research_arguments` adds the first six and `add_mode_arguments` adds the mode and debug switches, for both packages. Each package adds its own options: languages and segments, or duration, slide count and theme.
+- `parse_args` reads the query, user email, budget, lead model, audience, audience context and the CLI-mode and dry-run switches. `add_deep_research_arguments` adds the first seven and `add_mode_arguments` adds the mode and debug switches, for both packages. Each package adds its own options: languages and segments, or duration, slide count and theme.
 - `main` calls `run_chained_cli`. That answers `--user-visible-args` first, before argparse checks the required options. It runs `show_dry_run` for a dry run, and otherwise exits with the code from `run_pipeline`.
 - `parse_languages` splits a comma list of language codes. It returns `None` when the string is empty.
 - `show_dry_run` prints the settings and the planned phases and output paths. It makes no model calls.
