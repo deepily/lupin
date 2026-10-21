@@ -387,7 +387,7 @@ def test_a_report_over_a_canary_and_a_run_of_different_policies_is_refused( scra
     drive( scratch )
     canary_path = scratch.data / "e2e-results" / "p5st-canary.json"
     canary      = json.loads( canary_path.read_text( encoding="utf-8" ) )
-    canary_path.write_text( json.dumps( { **canary, "policy": "band off" } ), encoding="utf-8" )
+    canary_path.write_text( json.dumps( { **canary, "policy": "band on" } ), encoding="utf-8" )
     capsys.readouterr()
     assert p5.cli( stage_args( scratch, "stage-report" ) ) == 2
     assert "different verdict policies: band off, band on" in capsys.readouterr().err
