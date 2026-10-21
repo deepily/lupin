@@ -198,6 +198,11 @@ def _stamp_of( spec ):
     return spec[ "stamp" ] if "stamp" in spec else None
 
 
+def _factor_of( spec ):
+    """Ensures: returns the spec's over-estimate factor, or ESTIMATE_FACTOR if it has none."""
+    return spec[ "factor" ] if "factor" in spec else ESTIMATE_FACTOR
+
+
 def _canary_path( env, spec ): return env.results_dir / f"{spec[ 'prefix' ]}-canary.canary.json"
 
 
@@ -213,7 +218,8 @@ def run_canary( env, items, twins, ceiling_tokens, spec=None ):
         - writes the run file and the canary file, with `approved` empty, and returns the canary report
         - the report holds the ledger total read before the first send, tokens, requests, unasked, 429 and 529 counts, wall time,
           the projection (the canary's tokens times 100 over the members asked) and the allowance it is held against
-        - the allowance is the smaller of 1.5 times the estimate and the ledger's remaining allowance after the canary
+        - the allowance is the smaller of the over-estimate factor (1.5 unless the spec names another) times the estimate and the ledger's remaining allowance after the canary
+        - the report records the factor it used
         - tripped names each crossing: projection_over_allowance, incomplete, stopped
     """
     if spec is None: spec = copy.deepcopy( E2E_SPEC )
@@ -226,13 +232,14 @@ def run_canary( env, items, twins, ceiling_tokens, spec=None ):
     tokens = run[ "totals" ][ "spent_tokens" ]
     asked  = len( run[ "members" ] )
     projection = tokens * spec[ "members" ] // asked
-    allowance  = min( int( ESTIMATE_FACTOR * spec[ "estimate" ] ), limit - total )
+    allowance  = min( int( _factor_of( spec ) * spec[ "estimate" ] ), limit - total )
     tripped = [ name for name, hit in ( ( "projection_over_allowance", projection > allowance ), ( "incomplete", run[ "totals" ][ "complete" ] != run[ "totals" ][ "searches" ] ),
                                         ( "stopped", run[ "stopped" ] is not None ) ) if hit ]
     report = { "format": CANARY_FORMAT, "run_name": name, "members": asked, "searches": run[ "totals" ][ "searches" ], "ledger_total_before": run[ "ledger_total_before" ],
                "ledger_limit": run[ "ledger_limit" ], "tokens": tokens, "projection_tokens": projection, "allowance_tokens": allowance, "requests": run[ "totals" ][ "requests" ],
                "unasked": run[ "totals" ][ "unasked" ], "n429": sum( s[ "n429" ] for s in run[ "searches" ] ), "n529": sum( s[ "n529" ] for s in run[ "searches" ] ),
-               "wall_seconds": round( sum( s[ "wall_seconds" ] for s in run[ "searches" ] ), 3 ), "tripped": tripped, "approved": None }
+               "wall_seconds": round( sum( s[ "wall_seconds" ] for s in run[ "searches" ] ), 3 ), "tripped": tripped, "approved": None,
+               "over_estimate_factor": _factor_of( spec ) }
     _write_json( _canary_path( env, spec ), report )
     return report
 
@@ -280,7 +287,7 @@ def approve_canary( env, by, why, spec=None, revised_estimate=None ):
         if revised_estimate is None or report[ "tripped" ] != [ "projection_over_allowance" ]:
             raise s1.CanaryTripped( f"the canary tripped: {', '.join( report[ 'tripped' ] )}" )
         limit, total = env.ledger.snapshot()
-        allowance    = min( int( ESTIMATE_FACTOR * revised_estimate ), limit - total )
+        allowance    = min( int( _factor_of( spec ) * revised_estimate ), limit - total )
         if report[ "projection_tokens" ] > allowance:
             raise s1.CanaryTripped( f"the canary's projection {report[ 'projection_tokens' ]} is above the allowance {allowance} that a revised estimate of {revised_estimate} gives" )
         approval[ "revised_estimate" ] = { "old": spec[ "estimate" ], "new": revised_estimate, "allowance_tokens": allowance }

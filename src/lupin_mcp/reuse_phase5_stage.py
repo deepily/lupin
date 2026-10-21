@@ -7,6 +7,7 @@ Recall is agreement with the full search on the sampled needs, not ground truth.
 Nothing here opens the reserved fresh-needs file: the caller hands over items its own hash-checked reader returned.
 """
 import json
+import math
 import pathlib
 
 from cosa.repo.symindex import verdict as vd
@@ -224,15 +225,33 @@ def check_results( runs, pinned, sample_sha, repeats ):
     if len( names ) > 1: raise s1.DriverRefused( f"the runs ran under different verdict policies: {', '.join( sorted( names ) )}" )
 
 
+def check_factor( factor ):
+    """
+    Refuse an over-estimate factor that is not a finite number above zero.
+
+    Requires:
+        - factor is the value given on the command line, or the shared default
+    Ensures:
+        - returns the factor as a float
+    Raises:
+        - DriverRefused for a bool, a non-number, nan, infinity, zero or a negative number
+    """
+    if isinstance( factor, bool ) or not isinstance( factor, ( int, float ) ) or not math.isfinite( factor ) or factor <= 0:
+        raise s1.DriverRefused( f"the over-estimate factor is a finite number above zero, got {factor!r}" )
+    return float( factor )
+
+
 def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     """
     Run one spending step of the stage mode: the canary, its approval or the run.
 
     Requires:
-        - args carry command (stage-canary, stage-approve or stage-run), prefix, root, data, ledger, live, pack_size, needs_sha, and manifest_hash, ceiling and no_band for the steps that take them
+        - args carry command (stage-canary, stage-approve or stage-run), prefix, over_estimate_factor, root, data, ledger, live, pack_size, needs_sha, and manifest_hash, ceiling and no_band for the steps that take them
         - stage_factory is None for the live stage of the tree, or a function of the tree's path for a stand-in run
     Ensures:
-        - a ceiling above the estimate times the estimate factor is refused, and a stage on another vector set than the pin is refused, before anything is opened
+        - a ceiling above the estimate times the over-estimate factor (1.5 unless the step is given another) is refused, and a factor that is not a finite number above zero is refused
+        - the factor is stamped in the canary report and in the canary and run results
+        - a stage on another vector set than the pin is refused, before anything is opened
         - the results are named by the prefix, so another arm or policy can run again on the same sample under its own prefix
         - the results are stamped with the sample hash, the stage, the needs hash and the verdict policy word: the shipped policy with its band, or with --no-band the same policy without the band
         - an approval sends nothing, so it builds no stage
@@ -241,14 +260,15 @@ def run_step( args, items, sample_sha, stage_factory=None, repeats=bf.REPEATS ):
     """
     command = args.command[ len( "stage-" ): ]
     prefix  = bf.one_prefix( args.prefix )
+    factor  = check_factor( args.over_estimate_factor )
     spent   = bf.estimate( len( items ) )
-    if command in ( "canary", "run" ): bf.check_ceiling( args.ceiling, spent )
+    if command in ( "canary", "run" ): bf.check_ceiling( args.ceiling, spent, factor )
     stage = None if command == "approve" else ( stage_factory or bf.live_stage )( pathlib.Path( args.root ) )
     if stage is not None: bf.check_manifest( stage, args.manifest_hash )
     no_band = stage is not None and args.no_band                                              # an approval builds no stage, so it has no policy
     env   = e2r._open_env( args.root, args.data, args.ledger, args.live, stage_asks( stage, bf.Sink(), repeats, None if stage is None else args.manifest_hash, NO_BAND if no_band else None ), args.pack_size )
-    spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS,
-              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha, "policy": policy_name( no_band ) } }
+    spec  = { "prefix": prefix, "members": len( items ), "estimate": spent, "canary_members": e2r.CANARY_MEMBERS, "factor": factor,
+              "stamp": None if stage is None else { "sample_sha256": sample_sha, "stage": bf.stage_record( stage ), "needs_sha": args.needs_sha, "policy": policy_name( no_band ), "over_estimate_factor": factor } }
     if command in ( "canary", "run" ): frun.check_excludes( items, env.root, env.data )
     if command == "canary": print( e2r.canary_line( e2r.run_canary( env, items, {}, args.ceiling, spec=spec ) ) )
     elif command == "approve":

@@ -582,3 +582,9 @@ def test_packed_context_carries_a_given_policy_on_a_copy_and_keeps_the_runs_own_
     given = bf.packed_context( ctx, FakeStage(), { "threshold": 0.3 } )
     kept  = bf.packed_context( ctx, FakeStage() )
     assert given.policy == { "threshold": 0.3 } and kept.policy == "own" and ctx.policy == "own"
+
+
+def test_the_ceiling_cap_follows_the_factor_given_and_falls_back_to_the_shared_one():
+    assert bf.check_ceiling( 17_400_000, 5_800_000, 3 ) == 17_400_000
+    with pytest.raises( s1.DriverRefused, match="17400000, the estimate times 3" ): bf.check_ceiling( 17_400_001, 5_800_000, 3 )
+    with pytest.raises( s1.DriverRefused, match="8700000, the estimate times 1.5" ): bf.check_ceiling( 8_700_001, 5_800_000 )

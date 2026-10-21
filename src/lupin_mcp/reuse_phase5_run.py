@@ -291,6 +291,7 @@ def _parser():
         if name in ( "stage-canary", "stage-run", "stage-report" ): p.add_argument( "--manifest-hash", required=True )
         if name != "stage-sweep": p.add_argument( "--prefix", default=stg.STAGE_PREFIX )
         if name in ( "stage-canary", "stage-run" ): p.add_argument( "--no-band", action="store_true" )
+        if name in ( "stage-canary", "stage-approve", "stage-run" ): p.add_argument( "--over-estimate-factor", type=float, default=e2r.ESTIMATE_FACTOR )
         if name in ( "stage-canary", "stage-run", "stage-sweep" ): p.add_argument( "--ceiling", type=int, required=True )
         if name == "stage-approve":
             p.add_argument( "--by", required=True )

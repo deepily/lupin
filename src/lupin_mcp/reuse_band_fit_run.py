@@ -371,17 +371,20 @@ def stage_record( stage ):
     return { "arm": stage.arm, "K": stage.K, "manifest_hash": stage.manifest()[ "manifest_hash" ] }
 
 
-def check_ceiling( ceiling, estimated ):
+def check_ceiling( ceiling, estimated, factor=None ):
     """
     Refuse a ceiling above the estimate times the estimate factor.
 
+    Requires:
+        - factor is None for the shared estimate factor, or the factor this run was given
     Ensures:
-        - returns the ceiling when it is at most int( ESTIMATE_FACTOR x estimated )
+        - returns the ceiling when it is at most int( factor x estimated )
     Raises:
         - DriverRefused otherwise
     """
-    cap = int( e2r.ESTIMATE_FACTOR * estimated )
-    if ceiling > cap: raise s1.DriverRefused( f"the ceiling {ceiling} is above {cap}, the estimate times {e2r.ESTIMATE_FACTOR}" )
+    factor = e2r.ESTIMATE_FACTOR if factor is None else factor
+    cap    = int( factor * estimated )
+    if ceiling > cap: raise s1.DriverRefused( f"the ceiling {ceiling} is above {cap}, the estimate times {factor}" )
     return ceiling
 
 

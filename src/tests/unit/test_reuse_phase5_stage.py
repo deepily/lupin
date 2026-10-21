@@ -401,3 +401,34 @@ def test_a_result_with_no_policy_word_is_reported_as_not_recorded_and_still_read
 
 def test_the_approval_takes_no_band_flag_because_it_builds_no_stage( scratch ):
     with pytest.raises( SystemExit ): p5.cli( stage_args( scratch, "stage-approve", "--by", "x", "--why", "y", "--no-band" ) )
+
+
+@pytest.mark.parametrize( "bad", [ 0, -1, float( "nan" ), float( "inf" ), True, "3", None ] )
+def test_an_over_estimate_factor_that_is_not_a_finite_number_above_zero_is_refused( bad ):
+    with pytest.raises( s1.DriverRefused, match="finite number above zero" ): stg.check_factor( bad )
+
+
+def test_a_good_over_estimate_factor_comes_back_as_a_float():
+    assert stg.check_factor( 3 ) == 3.0 and isinstance( stg.check_factor( 3 ), float ) and stg.check_factor( 1.5 ) == 1.5
+
+
+def test_the_factor_given_widens_the_ceiling_cap_and_is_stamped_in_the_canary_and_the_run( scratch, capsys ):
+    scratch.sample( arm="B1" )
+    built = []
+    assert p5.cli( stage_args( scratch, "stage-run", "--ceiling", "17280001", "--over-estimate-factor", "3" ), stage_factory=lambda root: built.append( root ) ) == 2
+    assert "is above 17280000" in capsys.readouterr().err and built == []
+    stage = FakeStage()
+    for step in ( ( "stage-canary", "--ceiling", "1500000" ), ( "stage-approve", "--by", "cheech", "--why", "read it" ), ( "stage-run", "--ceiling", "17280000" ) ):
+        assert p5.cli( stage_args( scratch, *step, "--over-estimate-factor", "3" ), stage_factory=lambda root: stage ) == 0
+    folder = scratch.data / "e2e-results"
+    canary = json.loads( ( folder / f"{stg.STAGE_PREFIX}-canary.canary.json" ).read_text() )
+    run    = json.loads( ( folder / f"{stg.STAGE_PREFIX}-run.json" ).read_text() )
+    assert canary[ "over_estimate_factor" ] == 3.0 and run[ "over_estimate_factor" ] == 3.0 and [ r[ "policy" ] for r in results_of( scratch ) ] == [ "band on", "band on" ]
+
+
+@pytest.mark.parametrize( "bad", [ "0", "-2", "nan", "inf" ] )
+def test_a_bad_factor_on_the_command_line_is_refused_before_a_stage_is_built( scratch, capsys, bad ):
+    scratch.sample( arm="B1" )
+    built = []
+    assert p5.cli( stage_args( scratch, "stage-canary", "--ceiling", "1500000", "--over-estimate-factor", bad ), stage_factory=lambda root: built.append( root ) ) == 2
+    assert "finite number above zero" in capsys.readouterr().err and built == []

@@ -495,3 +495,27 @@ def test_the_estimate_is_held_against_the_room_after_the_spend_already_on_the_le
     assert not scratch.env().results_dir.exists()
     report = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5, spec=dict( run.E2E_SPEC, estimate=1_500_000 ) )
     assert report[ "allowance_tokens" ] <= 1_500_000
+
+
+def test_a_spec_that_names_a_factor_sets_the_canary_allowance_and_the_report_records_it( tmp_path, monkeypatch ):
+    room    = 10 * run.ESTIMATE_TOKENS
+    scratch = Env( tmp_path, limit=room )
+    spec    = { **run.E2E_SPEC, "factor": 3.0 }
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5, spec=spec )
+    assert report[ "over_estimate_factor" ] == 3.0 and report[ "allowance_tokens" ] == int( 3.0 * run.E2E_SPEC[ "estimate" ] ) and report[ "allowance_tokens" ] != int( run.ESTIMATE_FACTOR * run.E2E_SPEC[ "estimate" ] )
+    other  = Env( tmp_path, tag="b", limit=room )
+    assert run.run_canary( other.env(), items_of( 100 ), twins_of( 100 ), 10 ** 5 )[ "over_estimate_factor" ] == run.ESTIMATE_FACTOR
+
+
+def test_a_revised_estimate_is_held_against_the_factor_of_the_spec( tmp_path, monkeypatch ):
+    monkeypatch.setitem( run.E2E_SPEC, "estimate", 1000 )
+    scratch = Env( tmp_path, asks={ "old": ask_old } )
+    spec    = { **run.E2E_SPEC, "factor": 3.0 }
+    report  = run.run_canary( scratch.env(), items_of( 100 ), twins_of( 100 ), 10 ** 8, spec=spec )
+    assert report[ "tripped" ] == [ "projection_over_allowance" ]
+    revised = report[ "projection_tokens" ] // 2                                    # 1.5 x revised < projection <= 3 x revised
+    assert int( run.ESTIMATE_FACTOR * revised ) < report[ "projection_tokens" ] <= int( 3.0 * revised )
+    with pytest.raises( s1.CanaryTripped, match="above the allowance" ): run.approve_canary( scratch.env(), "cheech", "read", revised_estimate=revised )
+    run.approve_canary( scratch.env(), "cheech", "read", spec=spec, revised_estimate=revised )
+    approved = json.loads( ( scratch.data / "e2e-results" / "e2e-canary.canary.json" ).read_text() )[ "approved" ]
+    assert approved[ "revised_estimate" ][ "allowance_tokens" ] == int( 3.0 * revised )
