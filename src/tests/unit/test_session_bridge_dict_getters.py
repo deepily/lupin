@@ -75,6 +75,13 @@ class TestDictGetters:
         assert bridge.seen == [ "other-sid" ]
 
     @pytest.mark.parametrize( "getter, key", GETTERS )
+    @pytest.mark.parametrize( "payload", [ "[]", "[ 1 ]", "\"text\"", "7", "null", "true" ] )
+    def test_valid_json_that_is_not_an_object_is_none( self, bridge, getter, key, payload ):
+        # Row e674fe42: a top-level list or scalar made data.get() raise AttributeError
+        bridge.write_text( payload )
+        assert getter( "sid" ) is None
+
+    @pytest.mark.parametrize( "getter, key", GETTERS )
     def test_a_corrupt_file_is_none( self, bridge, getter, key ):
         bridge.write_text( "{not json" )
         assert getter( "sid" ) is None

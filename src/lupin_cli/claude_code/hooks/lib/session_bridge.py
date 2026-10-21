@@ -1472,7 +1472,7 @@ def _get_dict_field( session_id, key ):
 
     Ensures:
         - Returns the value when the bridge exists and the field is a non-empty dict
-        - Returns None for a missing bridge, parse error, unreadable file, or a missing, null, empty or non-dict field
+        - Returns None for a missing bridge, parse error, unreadable file, a file whose JSON is not an object, or a missing, null, empty or non-dict field
         - Never raises for those cases
     """
     path = find_session_path_by_id( session_id )
@@ -1482,6 +1482,8 @@ def _get_dict_field( session_id, key ):
     try:
         with open( path ) as f:
             data = json.load( f )
+        if not isinstance( data, dict ):
+            return None
         value = data.get( key )
         if isinstance( value, dict ) and value:
             return value
