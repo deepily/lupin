@@ -561,14 +561,7 @@ class HybridTTS {
         console.log(`[HybridTTS] Using reliable (batch) mode for: "${text.substring(0, 30)}..."`);
         
         // Use the existing speak implementation (OpenAI batch)
-        const currentApiUrl = this.apiUrl;
-        this.apiUrl = this.apiUrlBatch;
-        
-        try {
-            return await this.originalSpeak(text);
-        } finally {
-            this.apiUrl = currentApiUrl;
-        }
+        return await this.speakViaEndpoint(text, this.apiUrlBatch);
     }
     
     /**
@@ -578,8 +571,15 @@ class HybridTTS {
         console.log(`[HybridTTS] Using instant (streaming) mode for: "${text.substring(0, 30)}..."`);
         
         // Use ElevenLabs streaming endpoint
+        return await this.speakViaEndpoint(text, this.apiUrlStreaming);
+    }
+    
+    /**
+     * Speaks text through the given endpoint URL, then restores the old URL.
+     */
+    async speakViaEndpoint(text, endpointUrl) {
         const currentApiUrl = this.apiUrl;
-        this.apiUrl = this.apiUrlStreaming;
+        this.apiUrl = endpointUrl;
         
         try {
             return await this.originalSpeak(text);
