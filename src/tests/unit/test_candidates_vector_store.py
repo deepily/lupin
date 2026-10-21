@@ -7,6 +7,7 @@ So a wrong role or a wrong text changes the stored bytes, and a test sees it.
 import copy
 import hashlib
 import json
+import pathlib
 
 import numpy as np
 import pytest
@@ -440,14 +441,15 @@ def test_a_manifest_that_is_json_but_not_a_sealed_manifest_is_corrupt_not_a_key_
 
 
 def test_two_writers_of_the_same_need_interleaving_both_succeed_and_leave_one_file( built, tmp_path, monkeypatch ):
-    cache, real, inner = tmp_path / "q", vs.os.replace, []
+    cache, real, inner, temps = tmp_path / "q", vs.os.replace, [], []
 
     def replace_after_a_second_writer( src, dst ):
-        if not inner:
-            inner.append( None )                                                                            # only the first rename is overtaken
-            inner[ 0 ] = vs.query_vectors( "need", FakeClient(), cache, built[ "manifest" ] )              # a second run writes and renames this need before the first renames
+        temps.append( pathlib.Path( src ).parent )
+        if len( temps ) == 1:
+            inner.append( vs.query_vectors( "need", FakeClient(), cache, built[ "manifest" ] ) )            # a second run writes and renames this need before the first renames
         return real( src, dst )
 
     monkeypatch.setattr( vs.os, "replace", replace_after_a_second_writer )
     first = vs.query_vectors( "need", FakeClient(), cache, built[ "manifest" ] )
+    assert temps == [ cache, cache ]                                                                         # both temp files sit in the cache folder, so the rename stays on one filesystem
     assert first.keys() == inner[ 0 ].keys() and [ p.name for p in cache.iterdir() ] == [ f"{vs.query_key( 'need' )}.json" ]
