@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+## 2026.10.21 day to night - Session e448d721 (Cheech 🌿, manager; crew Maya, Pocholo, Clayton, all reaped by session end) | Band off, results page, problem statement for an outside expert, first expert response
+
+- **Landed by me** on the working branch. Pocholo passed each code change, with mutants.
+  - `24896fa5b` and the six commits before it: the Plan 2 final test results page (row `a9c46718`).
+  - `7b56e3ce6`, `abb823ba3`, `0aec536cd`: band off. Rick ruled "band off, fix later" at about 19:35 EDT. The shipped verdict policy has no band, and the shortlist judges a fixed 128. Pocholo: 3,146 passed, 7 mutants killed, 100% coverage on both files.
+  - `08c680d93`, `ec06f04a5`, `6d48bed97`, `85f61c393`: the reuse detection problem statement for an outside expert, on Rick's request. A false "write new" is the error to minimize; "not sure, read the source" does not count against the checker. It covers the shadow audit (built, never turned on) and the idea of putting code bodies into the embeddings.
+- **Expert response 1** uploaded by Rick and committed with this entry. Its headline: the judge is the binding leak; stop answering "write new" and send agents to read the source; build an evaluation before more tuning. Its podcast is job `pg-3ecf731e`. Expert response 2 is still uploading; a synthesis and its podcast are owed.
+- **Config**: the podcast script review timeout is 60 seconds (was 600), on Rick's word. Rick presses Config reload himself, because the test account cannot call the init endpoint.
+- **Memento sweep**: 9 from today digested, 31 trashed, live seats' newest kept. No new rules in them beyond the review-by-file rule already in memory.
+- **Open on row `a9c46718`**: the final call (rely on the checker or keep it advisory; I recommend advisory) is blocked on Rick.
+- **Files**: history.md, TODO.md, `src/conf/lupin-app.ini` (podcast line only), `src/conf/lupin-app-splainer.ini`, the expert response. Code arrived by the reviewed fast-forwards above.
+
 ## 2026.10.20 night - Session 21e472f2 (Cheech 🌿, manager; crew Clayton, Pocholo, Rachel, all reaped by 22:45 EDT) | Plan 2 baseline measured, band 0.076 shipped, VM half-deployed
 
 - **Landed by me** on the working branch. Pocholo passed each one, with mutants.

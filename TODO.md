@@ -16,6 +16,19 @@ Written 2026-09-30 for Rick's PR broadcast `0375db54`. At the time of writing, `
 **Timers from the 09-30 skeleton crew** (these clean themselves up; nothing to fold in): `stop-poke-restore-20260930` (dev and test, 17:00 EDT) and `ratio-gate-reenable-20260930` (test, 12:46 EDT).
 **Not mine and uncommitted in the main tree** (left alone): the phase6b `action_required` PNG baseline (dirty since 09-22) and María's three `src/rnd/v0.2.1/` docs (kill-switch design, console-tee plan, cascade handoff).
 
+## 📚 Decisions log 2026-10-21 day to night (Cheech 🌿 `e448d721`)
+
+### Rick's rulings
+- ~19:35: band off in the shipped verdict policy, fix later. He asked for, and read, an explainer of the band results first.
+- ~18:40: write a problem statement for an outside expert. A false "write new" is the error to minimize; "not sure, read the source" does not count against the checker. The expert may scrap the design, drop Jev, or say the similarity search is at its ceiling, and compare it with Claude Code's plain grep.
+- Include the shadow audit and the "more code in the embeddings" idea in it. Move it to `src/rnd/` without "-draft", with front matter naming him as requester.
+- Podcast script review timeout 600 → 60 seconds. He presses Config reload himself.
+- Once both expert responses are in: one synthesis document, then a podcast of it. A podcast of response 1 alone was started tonight (`pg-3ecf731e`).
+
+### Not ruled, waiting on Rick
+- Row `a9c46718`, the final call: rely on the reuse checker, or keep it advisory. I recommend advisory.
+- Expert response 2: still uploading at session end.
+
 ## 📚 Decisions log 2026-10-20 evening (Mr. Radio 🦉 `e8e1c10f`)
 
 ### Rick's rulings
