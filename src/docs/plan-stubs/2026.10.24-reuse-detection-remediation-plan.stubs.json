@@ -349,7 +349,7 @@
                     "name": "D3 Drafting",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "needs drafted by Fable through run_parallel and the Ledger after a 10-need live smoke that also measures the sampled route's yield; leak_check passes before the checker sees a draft; replacements are reported per cell and reason with the original seed list kept",
+                    "acceptance": "needs drafted by Fable through run_parallel and the Ledger after a 10-need live smoke that uses a test-only split and commit and marks every row smoke: true that also measures the sampled route's yield; leak_check passes before the checker sees a draft; replacements are reported per cell and reason with the original seed list kept",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph3-s3",
@@ -421,11 +421,23 @@
                     "name": "D6 Finalize and verify",
                     "item_class": "task",
                     "priority": "P2",
-                    "acceptance": "400 labelled needs committed with keys and verify_manifest passing",
+                    "acceptance": "400 labelled needs finalized with keys, no smoke rows, and verify_manifest passing; needset-status.json is committed as pending until the flip",
                     "owner_role": "implementer",
                     "depends_on": [
                         "ph3-s9"
                     ]
+                },
+                {
+                    "key": "ph3-s15",
+                    "name": "Rick flips the needset status to final",
+                    "item_class": "gate",
+                    "priority": "P2",
+                    "acceptance": "needset-status.json reads final in the commit that adds needset-final.jsonl and needset-manifest.json, and the census test passes",
+                    "owner_role": "rick",
+                    "depends_on": [
+                        "ph3-s10"
+                    ],
+                    "gate_class": "operator"
                 },
                 {
                     "key": "ph3-s11",
@@ -447,7 +459,8 @@
                     "owner_role": "tester",
                     "depends_on": [
                         "ph3-s10",
-                        "ph1-s10"
+                        "ph1-s10",
+                        "ph3-s15"
                     ]
                 },
                 {
