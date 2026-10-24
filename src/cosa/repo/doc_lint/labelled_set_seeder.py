@@ -40,6 +40,7 @@ import cosa.utils.util as cu
 from cosa.repo.doc_lint import claim_extractor, labelled_pairs, model_transport
 from cosa.repo.doc_lint import labelled_set_rules as rules
 from cosa.repo.doc_lint.labelled_set_rules import EDGE_PUNCT, PRONOUNS, sentences_of, words_of
+from cosa.repo.doc_lint.quota_split import quotas
 
 # One table; every number is a parameter and none is hard-coded where it is used.
 SIZES = {
@@ -391,14 +392,6 @@ def candidates_for( kind, old, stoplist ):
     if kind == "weaken": return weaken_candidates( old, stoplist )
     if kind == "relocate": return relocate_candidates( old )
     return [ { "text": old } ]
-
-
-def quotas( total, mix ):
-    """Split total by mix with largest remainders, so the parts sum to total exactly."""
-    raw   = { k: total * v for k, v in mix.items() }
-    parts = { k: int( math.floor( v ) ) for k, v in raw.items() }
-    for k in sorted( raw, key=lambda k: ( -( raw[ k ] - parts[ k ] ), k ) )[ :total - sum( parts.values() ) ]: parts[ k ] += 1
-    return parts
 
 
 class Shortfall( Exception ):
