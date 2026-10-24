@@ -152,6 +152,19 @@ def test_each_live_field_is_compared_on_its_own_and_named_when_it_differs( tmp_p
     assert caught.value.code == err.CONFIG_DRIFT and field in caught.value.detail.split( ": " )[ 1 ].split( ", " )
 
 
+def test_a_field_only_the_live_configuration_has_is_drift_and_so_is_one_only_the_frozen_file_has(tmp_path):
+    path = str( tmp_path / "f.json" )
+    cf.freeze( make(), path )
+    live_extra = { **make(), "added_since_freeze": 1 }
+    with pytest.raises( err.SemdupError, match="added_since_freeze" ) as caught:
+        cf.verify_frozen( path, live_extra )
+    assert caught.value.code == err.CONFIG_DRIFT
+    live_short = { key: value for key, value in make().items() if key != "body_chars" }
+    with pytest.raises( err.SemdupError, match="body_chars" ) as caught:
+        cf.verify_frozen( path, live_short )
+    assert caught.value.code == err.CONFIG_DRIFT
+
+
 def test_the_stored_sha_field_is_checked_against_the_file_and_not_against_live(tmp_path):
     path = str( tmp_path / "f.json" )
     cf.freeze( make(), path )
