@@ -11,6 +11,7 @@ import threading
 
 from cosa.repo.doc_lint.quota_split import quotas
 from lupin_mcp.reuse_needset import errors as er
+from lupin_mcp.reuse_needset import pool
 
 MATCHED_KINDS = ( "near_copy", "work_alike", "cross_language" )
 LANGS         = ( "ts", "py" )
@@ -156,11 +157,16 @@ def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, se
 
     Requires:
         - the arguments are JSON values; kind_split is the table plan_quota was given
+        - pool_reader is the name read_pool_symbols returned
 
     Ensures:
         - returns { format, seed, quota, kind_split, source_commit, pool_reader, kind_split_set_by, kind_split_set_at }
         - the quota keys are strings "kind/lang" so the record is JSON
+
+    Raises:
+        - NeedsetError QUOTA_INVALID when pool_reader is not the reader the pool uses
     """
+    if pool_reader != pool.READER: _invalid( f"pool_reader {pool_reader!r} is not the pool's reader {pool.READER!r}" )
     flat = { f"{kind}/{lang}": n for kind, row in quota.items() for lang, n in row.items() }
     return { "format": PLAN_FORMAT, "seed": seed, "quota": flat, "kind_split": dict( kind_split ), "source_commit": source_commit,
              "pool_reader": pool_reader, "kind_split_set_by": set_by, "kind_split_set_at": set_at }

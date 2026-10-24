@@ -166,6 +166,7 @@ def _strip_decorators( piece ):
     Ensures:
         - drops each leading @Name and @Name( ... ), however deeply the parentheses inside it nest
         - an unclosed argument list drops the rest of the piece
+        - a parenthesis inside a string in the arguments is not told apart from a real one, so it can end the list early
         - returns the text from the first thing that is not a decorator, left-trimmed
     """
     rest = piece.lstrip()

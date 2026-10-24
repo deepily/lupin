@@ -177,9 +177,9 @@ def test_the_draw_with_shared_ids_is_the_same_for_the_same_seed_and_pool_order_d
 
 def test_the_plan_record_carries_seed_table_split_commit_reader_and_who_set_it(tmp_path):
     table  = quota.plan_quota( 400, 300, 100, 0.6, EXAMPLE )
-    record = quota.plan_record( 20261024, table, EXAMPLE, "abc123", "read_symbols", "rick", "2026-10-25T09:00:00-04:00" )
+    record = quota.plan_record( 20261024, table, EXAMPLE, "abc123", "read_searchable", "rick", "2026-10-25T09:00:00-04:00" )
     assert record[ "format" ] == "needset-plan-1" and record[ "quota" ][ "near_copy/ts" ] == 72 and record[ "kind_split" ] == EXAMPLE
-    assert record[ "pool_reader" ] == "read_symbols" and record[ "kind_split_set_by" ] == "rick" and record[ "source_commit" ] == "abc123"
+    assert record[ "pool_reader" ] == "read_searchable" and record[ "kind_split_set_by" ] == "rick" and record[ "source_commit" ] == "abc123"
     path = tmp_path / "plan.json"
     quota.write_plan( path, record )
     assert json.loads( path.read_text( encoding="utf-8" ) ) == record
@@ -232,3 +232,9 @@ def test_spares_come_out_in_the_seeded_shuffle_not_in_id_order():
     assert any( o != sorted( o ) for o in orders ), "every spares list was in id order"
     assert len( { tuple( o ) for o in orders } ) > 1, "the spares order did not change with the seed"
     assert quota.draw( pool, table, 3 )[ ( "near_copy", "ts" ) ][ "spares" ] == quota.draw( pool, table, 3 )[ ( "near_copy", "ts" ) ][ "spares" ]
+
+
+def test_a_plan_record_refuses_a_reader_the_pool_does_not_use():
+    table = quota.plan_quota( 400, 300, 100, 0.6, EXAMPLE )
+    with pytest.raises( er.NeedsetError ) as e: quota.plan_record( 1, table, EXAMPLE, "abc123", "read_symbols", "rick", "2026-10-25T09:00:00-04:00" )
+    assert e.value.code == er.QUOTA_INVALID and "read_searchable" in e.value.detail

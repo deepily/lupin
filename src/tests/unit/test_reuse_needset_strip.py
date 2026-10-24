@@ -1,6 +1,7 @@
 """
 Member text for the need set: stripped names, raw bodies and named failures.
 """
+import collections
 import pathlib
 import re
 
@@ -115,3 +116,19 @@ def test_a_script_members_module_parts_are_stripped_from_its_text( tmp_path ):
     rec = { "id": "util.helpers.helperThing", "file": "util/helpers.ts", "name": "helperThing", "lang": "ts", "line": 1 }
     got = strip.strip_member( rec, tmp_path )
     assert "helpers" in got[ "forbidden" ] and got[ "text" ] == "export function NAME( ARG1: number ) { return MODULE + ARG1; }"
+
+
+def test_the_shape_mode_agrees_with_the_duplicate_finders_kinds_for_function_like_members( tmp_path ):
+    src = ( "export function plain( aaa: number, bbb = 'x' ) { const t = `y${aaa}`; return /re/.test( t ) ? 1n : 2.5; }\n"
+            "export class Box {\n    #hidden = 1;\n    constructor( public vvv: number ) {}\n    get size() { return this.#hidden; }\n"
+            "    set size( n ) { this.#hidden = n; }\n    async run<T>( x: T ): Promise<T> { return await x; }\n}\n" )
+    ( tmp_path / "s.ts" ).write_text( src, encoding="utf-8" )
+    lines  = src.splitlines()
+    at     = lambda text: next( i for i, l in enumerate( lines, 1 ) if text in l )
+    wanted = [ ( "plain", at( "function plain" ) ), ( "Box.constructor", at( "constructor(" ) ), ( "Box.size", at( "get size" ) ), ( "Box.size", at( "set size" ) ), ( "Box.run", at( "async run" ) ) ]
+    recs   = [ { "id": f"s.{n}@{ln}", "file": "s.ts", "name": n, "line": ln, "lang": "ts", "kind": "function" } for n, ln in wanted ]
+    mine   = [ r[ "kinds" ] for r in strip.script_results( tmp_path, recs, strip.MODE_SHAPE ) ]
+    theirs = collections.defaultdict( list )
+    for d in js_index.extract_js_shapes( tmp_path, [ tmp_path / "s.ts" ] )[ "defs" ]: theirs[ d[ "name" ] ].append( d[ "kinds" ] )
+    for ( name, _ ), kinds in zip( wanted, mine ): assert kinds in theirs[ name ], name
+    assert len( mine ) == 5 and all( len( k ) > 3 for k in mine )
