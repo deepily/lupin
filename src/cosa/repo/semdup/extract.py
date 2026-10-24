@@ -99,6 +99,23 @@ def _declared_names( node ):
     return list( names )
 
 
+def _dedent( segment, indent ):
+    """
+    Remove a definition's own indentation from the lines after its first.
+
+    Requires:
+        - segment is the source of one definition, whose first line was cut where the definition starts
+        - indent is the leading white space of the line the definition starts on
+
+    Ensures:
+        - returns the first line unchanged and every later line without a leading indent
+        - a later line that does not start with indent, such as a blank line or the inside of a multi-line string, is left as it is
+        - the same body gives the same text whether it sits in a class or at the top of a file
+    """
+    first, *rest = segment.split( "\n" )
+    return "\n".join( [ first ] + [ line[ len( indent ): ] if indent and line.startswith( indent ) else line for line in rest ] )
+
+
 def extract_python( root, path, origin ):
     """
     Extract one record per definition of a Python file, nested and private included.
@@ -110,7 +127,7 @@ def extract_python( root, path, origin ):
     Ensures:
         - classes are left out; the name, signature, line and public flag are those symindex.py_index.extract_python returns, so there is one
           signature builder in the tree
-        - each record adds end_line, text (the source of the definition), calls, nodes (ast nodes, counted as dups counts) and declared
+        - each record adds end_line, text (the source of the definition, without its own indentation), calls, nodes (ast nodes, counted as dups counts) and declared
 
     Raises:
         - ValueError if origin is neither "new" nor "server"
@@ -120,11 +137,14 @@ def extract_python( root, path, origin ):
     _check_origin( origin )
     spec    = sp.spec_for( root )
     source  = pathlib.Path( path ).read_text( encoding="utf-8" )
+    lines   = source.split( "\n" )
     records = []
     for r in py_index.extract_python( spec, pathlib.Path( path ), include_all=True ):
         if r[ "kind" ] == "class": continue
         node = r[ "_node" ]
-        records.append( _record( origin, "py", r[ "file" ], r[ "name" ], r[ "line" ], node.end_lineno, r[ "sig" ], ast.get_source_segment( source, node ),
+        first  = lines[ node.lineno - 1 ]
+        indent = first[ :len( first ) - len( first.lstrip() ) ]
+        records.append( _record( origin, "py", r[ "file" ], r[ "name" ], r[ "line" ], node.end_lineno, r[ "sig" ], _dedent( ast.get_source_segment( source, node ), indent ),
                                  _callee_names( node ), sum( 1 for _ in ast.walk( node ) ), r[ "public" ], _declared_names( node ) ) )
     return records
 

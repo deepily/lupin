@@ -85,6 +85,20 @@ def test_python_records_hold_every_field_and_leave_classes_out(tmp_path):
     assert got[ "Widget.fetch" ][ "text" ].startswith( "async def fetch" )
 
 
+def test_the_same_body_has_the_same_text_in_a_class_and_at_the_top_of_a_file(tmp_path):
+    body = "( self, x ):\n        y = x + 1\n        return y"
+    root, ( path, ) = tree( tmp_path, { "m.py": f"class K:\n    def f{body}\n\n\ndef f( self, x ):\n    y = x + 1\n    return y\n" } )
+    got = ex.extract_python( root, path, "new" )
+    assert [ r[ "name" ] for r in got ] == [ "K.f", "f" ] and got[ 0 ][ "text" ] == got[ 1 ][ "text" ] == "def f( self, x ):\n    y = x + 1\n    return y"
+    assert got[ 0 ][ "id" ] != got[ 1 ][ "id" ]                                                    # the file and name still tell them apart only through the id's other fields
+
+
+def test_a_line_inside_a_multi_line_string_that_does_not_start_with_the_indent_is_left_alone(tmp_path):
+    src = 'class K:\n    def f( self ):\n        return """\nraw at column zero\n    """\n'
+    root, ( path, ) = tree( tmp_path, { "m.py": src } )
+    assert ex.extract_python( root, path, "new" )[ 0 ][ "text" ] == 'def f( self ):\n    return """\nraw at column zero\n"""'
+
+
 def test_the_python_signature_is_the_one_py_index_builds(tmp_path):
     root, ( path, ) = tree( tmp_path, { "m.py": PY_SOURCE } )
     theirs = { r[ "name" ]: r[ "sig" ] for r in py_index.extract_python( sp.spec_for( root ), path, include_all=True ) if r[ "kind" ] != "class" }

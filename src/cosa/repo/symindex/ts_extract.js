@@ -139,10 +139,19 @@ function declaredIn( fn ) {
     return [ ...new Set( acc ) ];
 }
 
+// The source of a function without the indentation of the line it starts on, so the same body reads the same in a class and at the top of a file.
+function dedentedText( fn, sf ) {
+    const start  = fn.getStart( sf );
+    const line   = sf.getLineAndCharacterOfPosition( start ).line;
+    const indent = /^[ \t]*/.exec( sf.text.slice( sf.getPositionOfLineAndCharacter( line, 0 ), start ) )[ 0 ];
+    const [ first, ...rest ] = fn.getText( sf ).split( "\n" );
+    return [ first, ...rest.map( l => indent !== "" && l.startsWith( indent ) ? l.slice( indent.length ) : l ) ].join( "\n" );
+}
+
 // The fields a "bodies" request adds to a definition.
 function bodiesOf( fn, sf, isPublic ) {
     return { line: sf.getLineAndCharacterOfPosition( fn.getStart( sf ) ).line + 1, end_line: sf.getLineAndCharacterOfPosition( fn.getEnd() ).line + 1,
-             sig: params( fn, sf ), text: fn.getText( sf ), calls: callsOf( fn ), declared: declaredIn( fn ), public: isPublic };
+             sig: params( fn, sf ), text: dedentedText( fn, sf ), calls: callsOf( fn ), declared: declaredIn( fn ), public: isPublic };
 }
 
 function shapes( req ) {

@@ -266,3 +266,18 @@ test( "bodies: a file the parser reports errors for is skipped, and the good fil
     assert.deepEqual( out.scanned, [ { file: "good.js", function_like_total: 1, anonymous_walked: 0 } ] );
     assert.deepEqual( bodiesRun( { "good.js": "function a( x ) { return x; }\n" } ).skipped, [] );          // positive control: the repaired file is not skipped
 } );
+
+test( "bodies: text loses the indentation of the line the function starts on, so a method reads like the same body at the top of a file", () => {
+    const by = byName( bodiesRun() );
+    assert.ok( by[ "m.ts#Box.pub" ].text.split( "\n" )[ 1 ].startsWith( "    const total" ) && !by[ "m.ts#Box.pub" ].text.split( "\n" )[ 1 ].startsWith( "        " ) );
+    const src = "class C {\n    m( a ) {\n        const t = a;\n        return t;\n    }\n}\nnamespace N {\n    class D {\n        m( a ) {\n            const t = a;\n            return t;\n        }\n    }\n}\n";
+    const defs = bodiesRun( { "n.ts": src } ).defs;
+    assert.deepEqual( defs.map( ( d: any ) => d.name ), [ "C.m", "D.m" ] );
+    assert.equal( defs[ 0 ].text, defs[ 1 ].text );                                // a base of four spaces and a base of eight give the same text
+    assert.equal( defs[ 0 ].text, "m( a ) {\n    const t = a;\n    return t;\n}" );
+} );
+
+test( "bodies: a line that does not start with the indent, such as the inside of a template literal, is left as it is", () => {
+    const src = "class C {\n    m() {\n        return `a\nraw\n`;\n    }\n}\n";
+    assert.equal( bodiesRun( { "t.ts": src } ).defs[ 0 ].text, "m() {\n    return `a\nraw\n`;\n}" );
+} );
