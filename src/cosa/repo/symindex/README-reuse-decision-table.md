@@ -105,10 +105,10 @@ first (plan 2, section 8).
 
 The shortlist holds at most `K` relevant entries, best `p_overlap` first, ties broken by symbol id.
 The receipt also stores `shortlist_total`, the number of relevant entries before the cut, and
-`nearest`: the best `K` entries by `p_overlap` whatever their value. A NEW verdict therefore still
-names what the reviewer must read before ruling DISTINCT.
+`nearest`: the best `K` entries by `p_overlap` whatever their value. A `NO_MATCH` result therefore still
+names what the reviewer must read before ruling `DISTINCT`.
 
-A malformed answer never contributes to a verdict, and never becomes NEW or REUSE. `missing` lists the
+A malformed answer never contributes to a verdict, and never becomes `NO_MATCH` or `REUSE`. `missing` lists the
 expected ids that received no account at all.
 
 ## Worked rows

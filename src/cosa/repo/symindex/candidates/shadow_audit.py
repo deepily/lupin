@@ -298,7 +298,7 @@ def run_pending( data_dir, sweep_fn, today, limit=None ):
     Drain the audit queue through the full-sweep transport.
 
     Requires:
-        - sweep_fn takes a need and returns { verdict, causal_ids }
+        - sweep_fn takes a need and returns { verdict, causal_ids }, and the cause when the verdict is uncertain
 
     Ensures:
         - returns { audited, failed, corrupt, receipts }
