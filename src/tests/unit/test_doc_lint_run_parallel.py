@@ -12,8 +12,10 @@ from cosa.repo.doc_lint import model_transport as mt
 
 
 def go( items, run_one, parallel, key=lambda item: item ):
-    """Run run_parallel to completion and return its results."""
-    return asyncio.run( hn.run_parallel( items, run_one, parallel, key ) )
+    """Run run_parallel to completion and return its results; a hang fails after 5 seconds."""
+    async def bounded():
+        return await asyncio.wait_for( hn.run_parallel( items, run_one, parallel, key ), 5 )
+    return asyncio.run( bounded() )
 
 
 def test_results_come_back_in_input_order_for_items_that_are_not_pairs():
@@ -65,6 +67,27 @@ def test_parallel_below_one_is_refused_before_any_item_runs():
     with pytest.raises( ValueError, match="parallel must be 1 or more, got 0" ):
         go( [ 1 ], run_one, 0 )
     assert ran == []
+
+
+def peak_overlap_of_run_all( pairs, monkeypatch ):
+    """Run run_all over pairs with a stub run_pair and return the most pairs in flight at once."""
+    state = { "now": 0, "peak": 0 }
+    async def stub_run_pair( pair, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None ):
+        state[ "now" ] += 1
+        state[ "peak" ] = max( state[ "peak" ], state[ "now" ] )
+        await asyncio.sleep( 0.01 )
+        state[ "now" ] -= 1
+        return pair
+    monkeypatch.setattr( hn, "run_pair", stub_run_pair )
+    asyncio.run( hn.run_all( pairs, None, None, parallel=2 ) )
+    return state[ "peak" ]
+
+
+def test_run_all_pairs_with_equal_texts_overlap_only_when_their_designs_differ( monkeypatch ):
+    same_design      = [ { "old": "o", "new": "n", "design": "d1" }, { "old": "o", "new": "n", "design": "d1" } ]
+    different_design = [ { "old": "o", "new": "n", "design": "d1" }, { "old": "o", "new": "n", "design": "d2" } ]
+    assert peak_overlap_of_run_all( same_design, monkeypatch ) == 1
+    assert peak_overlap_of_run_all( different_design, monkeypatch ) == 2
 
 
 def test_a_sequential_failure_is_raised_and_sets_the_stop_signal():
