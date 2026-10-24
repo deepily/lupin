@@ -110,3 +110,46 @@ def test_the_cache_holds_one_complete_file_per_text_and_no_temporary_file(tmp_pa
     bv.ensure_vectors( [ definition( "a", "alpha beta" ) ], FakeClient(), tmp_path, 1000 )
     files = [ p for sub in tmp_path.iterdir() for p in sub.iterdir() ]
     assert len( files ) == 1 and files[ 0 ].suffix == ".json" and json.loads( files[ 0 ].read_text() ) == [ 1.0, 1.0, 0.0, 0.0, 0.0, 0.0 ]
+
+
+def cached_file( tmp_path ):
+    """Return the one cache file left after embedding a single text."""
+    return [ p for sub in tmp_path.iterdir() for p in sub.iterdir() ][ 0 ]
+
+
+@pytest.mark.parametrize( "damage", [ "{not json", "", "{\"a\": 1}", "[]", "[\"x\", 1.0]", "[true, false]", "null" ] )
+def test_a_corrupt_or_wrong_shaped_cache_file_is_embedded_again_and_repaired( tmp_path, damage ):
+    d = definition( "a", "alpha beta" )
+    bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
+    cached_file( tmp_path ).write_text( damage, encoding="utf-8" )
+    client = FakeClient()
+    out    = bv.ensure_vectors( [ d ], client, tmp_path, 1000 )
+    assert len( client.calls ) == 1 and out[ "embedded" ] == 1 and out[ "vectors" ][ d[ "id" ] ] == [ 1.0, 1.0, 0.0, 0.0, 0.0, 0.0 ]
+    assert json.loads( cached_file( tmp_path ).read_text() ) == [ 1.0, 1.0, 0.0, 0.0, 0.0, 0.0 ]
+    assert len( bv.ensure_vectors( [ d ], client, tmp_path, 1000 )[ "vectors" ] ) == 1 and len( client.calls ) == 1
+
+
+def test_an_unreadable_cache_file_is_embedded_again(tmp_path):
+    d = definition( "a", "alpha" )
+    bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
+    cached_file( tmp_path ).write_bytes( b"\xff\xfe\x00" )                                   # not valid utf-8
+    client = FakeClient()
+    assert bv.ensure_vectors( [ d ], client, tmp_path, 1000 )[ "embedded" ] == 1 and len( client.calls ) == 1
+
+
+def test_integers_in_a_cached_vector_are_read_as_floats(tmp_path):
+    d = definition( "a", "alpha" )
+    bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
+    cached_file( tmp_path ).write_text( "[1, 0, 0, 0, 0, 0]", encoding="utf-8" )
+    out = bv.ensure_vectors( [ d ], FakeClient(), tmp_path, 1000 )
+    assert out[ "reused" ] == 1 and out[ "vectors" ][ d[ "id" ] ] == [ 1.0, 0.0, 0.0, 0.0, 0.0, 0.0 ] and all( isinstance( x, float ) for x in out[ "vectors" ][ d[ "id" ] ] )
+
+
+def test_two_writes_of_the_same_text_use_different_temporary_names_that_carry_the_process_id(tmp_path, monkeypatch):
+    sources = []
+    real    = bv.os.replace
+    monkeypatch.setattr( bv.os, "replace", lambda src, dst: ( sources.append( str( src ) ), real( src, dst ) )[ 1 ] )
+    bv._write( tmp_path, "abc", [ 1.0 ] )
+    bv._write( tmp_path, "abc", [ 2.0 ] )
+    assert len( set( sources ) ) == 2 and all( f".{bv.os.getpid()}." in s and s.endswith( ".tmp" ) for s in sources )
+    assert json.loads( ( tmp_path / "abc.json" ).read_text() ) == [ 2.0 ] and sorted( p.name for p in tmp_path.iterdir() ) == [ "abc.json" ]

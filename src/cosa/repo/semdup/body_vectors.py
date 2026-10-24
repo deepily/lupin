@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import time
+import uuid
 
 from cosa.repo.symindex.candidates import vector_build as vb
 from cosa.repo.symindex.candidates import vector_store as vs
@@ -49,27 +50,36 @@ def engine_tag( client ):
 
 def _read( folder, sha ):
     """
-    Read one cached vector, or None when it is not cached.
+    Read one cached vector, or None when it is missing or unusable.
 
     Requires:
         - folder is the cache folder of one engine
+
+    Ensures:
+        - returns the list of floats in the file
+        - a file that is not valid JSON, is not a non-empty list of numbers, or cannot be read counts as missing, so the text is embedded again
     """
     path = folder / f"{sha}.json"
     if not path.is_file(): return None
-    return json.loads( path.read_text( encoding="utf-8" ) )
+    try:
+        vector = json.loads( path.read_text( encoding="utf-8" ) )
+    except ( ValueError, OSError ):
+        return None
+    usable = isinstance( vector, list ) and vector and all( isinstance( x, ( int, float ) ) and not isinstance( x, bool ) for x in vector )
+    return [ float( x ) for x in vector ] if usable else None
 
 
 def _write( folder, sha, vector ):
     """
-    Write one vector so a reader never sees half of it.
+    Write one vector so a reader never sees half of it, even beside another writer.
 
     Requires:
         - folder exists and vector is a list of floats
 
     Ensures:
-        - the file appears under its final name only once it is complete
+        - the bytes go to a temporary name unique to this process and call, then replace the final name in one step
     """
-    tmp = folder / f"{sha}.json.tmp"
+    tmp = folder / f"{sha}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     tmp.write_text( json.dumps( vector ), encoding="utf-8" )
     os.replace( tmp, folder / f"{sha}.json" )
 
