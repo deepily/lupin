@@ -81,20 +81,22 @@ def extract_js( root, files ):
     return out
 
 
-def _run( root, files, extra ):
+def _run( root, files, extra, script=None ):
     """
     Run the compiler script once and return its decoded JSON.
 
     Requires:
         - files is a non-empty list of absolute paths under root
+        - script is None for the symbol extractor, or a node script that reads the JSON request on stdin and writes JSON to stdout
     Raises:
         - DependencyMissing when node or typescript is absent
         - RuntimeError when the compiler script exits non-zero
     """
-    node = find_node()
-    ts   = find_typescript( root )
+    script = EXTRACTOR if script is None else script
+    node   = find_node()
+    ts     = find_typescript( root )
     req  = json.dumps( { "root": str( root ), "files": [ str( f ) for f in files ], "typescript": str( ts ), **extra } )
-    res  = subprocess.run( [ node, str( EXTRACTOR ) ], input=req, capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT )
+    res  = subprocess.run( [ node, str( script ) ], input=req, capture_output=True, text=True, encoding="utf-8", timeout=TIMEOUT )
     if res.returncode != 0: raise RuntimeError( f"ts_extract.js failed: {res.stderr.strip()[ :400 ]}" )
     return json.loads( res.stdout )
 
