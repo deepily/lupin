@@ -129,6 +129,12 @@ def test_a_pair_found_by_two_clones_keeps_the_larger_size_and_pairs_come_largest
     assert [ ( p[ "ids" ], p[ "size" ] ) for p in st.parse_jscpd( report, defs, 0.5 ) ] == [ ( [ "a", "b" ], 90 ), ( [ "a", "c" ], 70 ) ]
 
 
+def test_the_larger_size_wins_whichever_clone_reports_it_first():
+    defs = [ definition( "a", "a.ts", 1, 10 ), definition( "b", "b.ts", 1, 10 ) ]
+    report = { "duplicates": [ clone( ( "a.ts", 1, 10 ), ( "b.ts", 1, 10 ), 90 ), clone( ( "a.ts", 1, 10 ), ( "b.ts", 1, 10 ), 60 ) ] }
+    assert [ p[ "size" ] for p in st.parse_jscpd( report, defs, 0.5 ) ] == [ 90 ]
+
+
 def test_equal_sizes_are_ordered_by_ids():
     defs   = [ definition( "a", "a.ts", 1, 10 ), definition( "b", "b.ts", 1, 10 ), definition( "c", "c.ts", 1, 10 ) ]
     report = { "duplicates": [ clone( ( "c.ts", 1, 10 ), ( "a.ts", 1, 10 ), 50 ), clone( ( "b.ts", 1, 10 ), ( "a.ts", 1, 10 ), 50 ) ] }
