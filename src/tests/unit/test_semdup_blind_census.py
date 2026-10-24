@@ -92,6 +92,17 @@ def test_each_pinned_definition_still_makes_blind_definition_raise_at_run_time()
         assert caught.value.code == err.BLINDNESS_BREACH
 
 
+def test_assert_blind_itself_raises_on_the_text_of_each_pinned_definition():
+    """A prompt built from a pinned definition is refused by assert_blind itself."""
+    pinned = [ d for d in server_definitions() if ( d[ "file" ], d[ "name" ] ) in PINNED_BREACHES ]
+    assert len( pinned ) == 19
+    for d in pinned:
+        shown = "\n".join( ( d[ "file" ], d[ "name" ], d[ "sig" ], bl.strip_comment_lines( d[ "text" ], d[ "lang" ], SCRUB ) ) )
+        with pytest.raises( err.SemdupError ) as caught:
+            bl.assert_blind( f"Definition under review:\n{shown}\nRule on every candidate.", SCRUB )
+        assert caught.value.code == err.BLINDNESS_BREACH
+
+
 def test_the_guard_goes_red_when_a_definition_carrying_a_token_is_added(tmp_path):
     root = tmp_path / "tree"
     root.mkdir()
