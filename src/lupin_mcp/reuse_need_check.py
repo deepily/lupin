@@ -39,7 +39,7 @@ FORM_STARTS      = ( "a function that ", "a method that ", "a class that " )
 RESEND_NAME      = { "member_text_run": "text_run", "twin_text_run": "text_run" }       # one neutral name: a twin is not mentioned to the writer
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
 TS_TYPE_WORDS    = frozenset( { "string", "number", "boolean", "any", "unknown", "void", "never", "object", "undefined", "null", "bigint", "symbol" } )     # type keywords, never names
-DECORATORS       = re.compile( r"^(@[A-Za-z_$][A-Za-z0-9_$.]*(\([^()]*\))?\s*)+" )               # leading @Name or @Name(args) on a parameter; nested parentheses in the arguments are not handled
+DECORATOR_NAME   = re.compile( r"@[A-Za-z_$][A-Za-z0-9_$.]*" )                                 # the @Name that opens a decorator on a parameter
 TS_MODIFIERS     = frozenset( { "public", "private", "protected", "readonly", "override" } )
 
 
@@ -156,6 +156,32 @@ def _pattern_text( piece ):
     return piece[ 1 : ]
 
 
+def _strip_decorators( piece ):
+    """
+    Remove the decorators that open a parameter.
+
+    Requires:
+        - piece is one parameter of a TypeScript signature
+
+    Ensures:
+        - drops each leading @Name and @Name( ... ), however deeply the parentheses inside it nest
+        - an unclosed argument list drops the rest of the piece
+        - returns the text from the first thing that is not a decorator, left-trimmed
+    """
+    rest = piece.lstrip()
+    while True:
+        found = DECORATOR_NAME.match( rest )
+        if found is None: return rest
+        rest = rest[ found.end() : ]
+        if rest.startswith( "(" ):
+            depth = 0
+            for end, ch in enumerate( rest ):
+                depth += ( ch == "(" ) - ( ch == ")" )
+                if depth == 0: break
+            rest = rest[ end + 1 : ]
+        rest = rest.lstrip()
+
+
 def _ts_argument_names( sig ):
     """
     Return the parameter names of a TypeScript signature, and never their types.
@@ -170,7 +196,7 @@ def _ts_argument_names( sig ):
     """
     names = set()
     for piece in _split_top_level( _ts_parameter_text( sig ) ):
-        words = DECORATORS.sub( "", piece.strip() ).lstrip( "." ).split()
+        words = _strip_decorators( piece ).lstrip( "." ).split()
         while words and words[ 0 ] in TS_MODIFIERS: words.pop( 0 )
         piece = " ".join( words )
         if piece.startswith( ( "{", "[" ) ):
