@@ -1,0 +1,287 @@
+{
+  "scanned": [
+    "m.ts",
+    "p.js"
+  ],
+  "skipped": [],
+  "defs": [
+    {
+      "file": "m.ts",
+      "name": "Box.cb",
+      "kinds": [
+        "ArrowFunction",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "EqualsGreaterThanToken",
+        "BinaryExpression",
+        "Identifier",
+        "PlusToken",
+        "Literal"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.pub",
+      "kinds": [
+        "MethodDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "NumberKeyword",
+        "Block",
+        "VariableStatement",
+        "VariableDeclarationList",
+        "VariableDeclaration",
+        "Identifier",
+        "BinaryExpression",
+        "Identifier",
+        "PlusToken",
+        "Identifier",
+        "VariableStatement",
+        "VariableDeclarationList",
+        "VariableDeclaration",
+        "Identifier",
+        "ObjectLiteralExpression",
+        "PropertyAssignment",
+        "Identifier",
+        "Identifier",
+        "MethodDeclaration",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "Literal",
+        "ExpressionStatement",
+        "CallExpression",
+        "PropertyAccessExpression",
+        "CallExpression",
+        "Identifier",
+        "Identifier",
+        "Identifier",
+        "ExpressionStatement",
+        "CallExpression",
+        "Identifier",
+        "Identifier",
+        "ReturnStatement",
+        "CallExpression",
+        "PropertyAccessExpression",
+        "NewExpression",
+        "Identifier",
+        "PropertyAccessExpression",
+        "Identifier",
+        "Identifier",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.pub.<locals>.other",
+      "kinds": [
+        "MethodDeclaration",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "Literal"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.priv",
+      "kinds": [
+        "MethodDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "StringKeyword",
+        "Block",
+        "ReturnStatement",
+        "PropertyAccessExpression",
+        "Identifier",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.#secret",
+      "kinds": [
+        "MethodDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.make",
+      "kinds": [
+        "MethodDeclaration",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "NewExpression",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.size",
+      "kinds": [
+        "GetAccessor",
+        "Identifier",
+        "NumberKeyword",
+        "Block",
+        "ReturnStatement",
+        "PropertyAccessExpression",
+        "ThisKeyword",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "Box.constructor",
+      "kinds": [
+        "Constructor",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "Block"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "arrow",
+      "kinds": [
+        "ArrowFunction",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "Parameter",
+        "ObjectBindingPattern",
+        "BindingElement",
+        "Identifier",
+        "BindingElement",
+        "Identifier",
+        "TypeLiteral",
+        "PropertySignature",
+        "Identifier",
+        "NumberKeyword",
+        "PropertySignature",
+        "Identifier",
+        "NumberKeyword",
+        "EqualsGreaterThanToken",
+        "BinaryExpression",
+        "BinaryExpression",
+        "Identifier",
+        "PlusToken",
+        "Identifier",
+        "PlusToken",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "outer",
+      "kinds": [
+        "FunctionDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "ArrayType",
+        "NumberKeyword",
+        "Block",
+        "FunctionDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "Block",
+        "ReturnStatement",
+        "BinaryExpression",
+        "Identifier",
+        "AsteriskToken",
+        "Literal",
+        "ReturnStatement",
+        "CallExpression",
+        "PropertyAccessExpression",
+        "CallExpression",
+        "PropertyAccessExpression",
+        "Identifier",
+        "Identifier",
+        "ArrowFunction",
+        "Parameter",
+        "Identifier",
+        "EqualsGreaterThanToken",
+        "CallExpression",
+        "Identifier",
+        "Identifier",
+        "Identifier",
+        "Identifier"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "outer.<locals>.inner",
+      "kinds": [
+        "FunctionDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "NumberKeyword",
+        "Block",
+        "ReturnStatement",
+        "BinaryExpression",
+        "Identifier",
+        "AsteriskToken",
+        "Literal"
+      ]
+    },
+    {
+      "file": "m.ts",
+      "name": "entry",
+      "kinds": [
+        "FunctionExpression",
+        "Block",
+        "ReturnStatement",
+        "Literal"
+      ]
+    },
+    {
+      "file": "p.js",
+      "name": "twice",
+      "kinds": [
+        "FunctionDeclaration",
+        "Identifier",
+        "Parameter",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "BinaryExpression",
+        "Identifier",
+        "AsteriskToken",
+        "Literal"
+      ]
+    },
+    {
+      "file": "p.js",
+      "name": "thrice",
+      "kinds": [
+        "FunctionExpression",
+        "Parameter",
+        "Identifier",
+        "Block",
+        "ReturnStatement",
+        "BinaryExpression",
+        "Identifier",
+        "AsteriskToken",
+        "Literal"
+      ]
+    }
+  ]
+}

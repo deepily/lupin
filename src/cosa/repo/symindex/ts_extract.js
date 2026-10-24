@@ -4,6 +4,9 @@
 // With "mode": "shapes" in the request the output is instead { scanned: [ file ... ], skipped: [ file ... ], defs: [ { file, name, kinds } ... ] }:
 // one entry per function-like definition at any depth, private and nested included ("public_only": true drops both),
 // kinds being the pre-order node kind names of its body with names, literal values and access modifiers erased, for the duplicate finder.
+// With "bodies": true as well, each entry of defs also carries line, end_line, sig, text, calls, declared and public, and each entry of scanned is
+// { file, function_like_total, anonymous_walked }: function_like_total is counted by a separate walk over every node, so reported + anonymous_walked
+// can be checked against it. Without the flag the output is exactly what it was. The account holds only when "public_only" is off.
 // A pin hashes the node's leaf tokens joined by one space, so comments and whitespace never change it.
 const fs     = require( "fs" );
 const path   = require( "path" );
@@ -86,6 +89,62 @@ function fnName( n, sf ) {
     return null;
 }
 
+const MAX_CALLS = 50;
+
+// Every function-like node of a file, anonymous and nested included, counted without using the definition walk.
+function countFnLike( node ) {
+    let total = isFnLike( node ) ? 1 : 0;
+    ts.forEachChild( node, c => { total += countFnLike( c ); } );
+    return total;
+}
+
+// The name a call goes by: the identifier called, or the member name of a.b(); anything else (a[0](), f()()) has none.
+function calleeName( call ) {
+    const e = call.expression;
+    if ( ts.isIdentifier( e ) ) return e.text;
+    return ts.isPropertyAccessExpression( e ) ? e.name.text : null;
+}
+
+// The distinct callee names inside a function, in order of first appearance, at most MAX_CALLS.
+function callsOf( fn ) {
+    const seen = new Set();
+    const visit = n => {
+        if ( ts.isCallExpression( n ) || ts.isNewExpression( n ) ) {
+            const name = calleeName( n );
+            if ( name !== null && seen.size < MAX_CALLS ) seen.add( name );
+        }
+        ts.forEachChild( n, visit );
+    };
+    ts.forEachChild( fn, visit );
+    return [ ...seen ];
+}
+
+// The names bound by a parameter or variable name, which may be a destructuring pattern.
+function bindingNames( name, acc ) {
+    if ( ts.isIdentifier( name ) ) acc.push( name.text );
+    else for ( const el of name.elements ) if ( ts.isBindingElement( el ) ) bindingNames( el.name, acc );
+    return acc;
+}
+
+// The parameter, variable and property names declared inside a function, not its own name, in order of first appearance.
+function declaredIn( fn ) {
+    const acc = [];
+    const visit = n => {
+        if ( ts.isParameter( n ) || ts.isVariableDeclaration( n ) ) bindingNames( n.name, acc );
+        else if ( ( ts.isPropertyAssignment( n ) || ts.isShorthandPropertyAssignment( n ) || ts.isPropertyDeclaration( n ) || ts.isMethodDeclaration( n ) ) &&
+                  ( ts.isIdentifier( n.name ) || ts.isPrivateIdentifier( n.name ) ) ) acc.push( n.name.text );
+        ts.forEachChild( n, visit );
+    };
+    ts.forEachChild( fn, visit );
+    return [ ...new Set( acc ) ];
+}
+
+// The fields a "bodies" request adds to a definition.
+function bodiesOf( fn, sf, isPublic ) {
+    return { line: sf.getLineAndCharacterOfPosition( fn.getStart( sf ) ).line + 1, end_line: sf.getLineAndCharacterOfPosition( fn.getEnd() ).line + 1,
+             sig: params( fn, sf ), text: fn.getText( sf ), calls: callsOf( fn ), declared: declaredIn( fn ), public: isPublic };
+}
+
 function shapes( req ) {
     const defs = [], scanned = [], skipped = [];
     for ( const abs of req.files ) {
@@ -94,7 +153,8 @@ function shapes( req ) {
         const sf   = ts.createSourceFile( abs, fs.readFileSync( abs, "utf8" ), ts.ScriptTarget.Latest, true, kind );
         // A file the parser reported errors for is skipped whole, as the Python pass skips a file that does not parse.
         if ( sf.parseDiagnostics.length > 0 ) { skipped.push( rel ); continue; }
-        scanned.push( rel );
+        const account = req.bodies ? { file: rel, function_like_total: countFnLike( sf ), anonymous_walked: 0 } : null;
+        scanned.push( req.bodies ? account : rel );
         const walk = ( node, prefix, nested ) => {
             ts.forEachChild( node, c => {
                 if ( ts.isClassDeclaration( c ) || ts.isClassExpression( c ) ) {
@@ -106,7 +166,11 @@ function shapes( req ) {
                     const field  = ts.isPropertyDeclaration( c.parent );
                     const hidden = ( ts.isMethodDeclaration( c ) || ts.isConstructorDeclaration( c ) || ts.isGetAccessorDeclaration( c ) || ts.isSetAccessorDeclaration( c ) || field ) && isPrivate( field ? c.parent : c );
                     const skip = req.public_only && ( nested || hidden );
-                    if ( name !== null && !skip ) defs.push( { file: rel, name: prefix.concat( [ name ] ).join( "." ), kinds: preorder( c, [] ) } );
+                    if ( name === null && req.bodies ) account.anonymous_walked++;
+                    if ( name !== null && !skip ) {
+                        const entry = { file: rel, name: prefix.concat( [ name ] ).join( "." ), kinds: preorder( c, [] ) };
+                        defs.push( req.bodies ? Object.assign( entry, bodiesOf( c, sf, !( nested || hidden ) ) ) : entry );
+                    }
                     walk( c, name === null ? prefix : prefix.concat( [ name, "<locals>" ] ), true );
                 } else walk( c, prefix, nested );
             } );

@@ -101,7 +101,7 @@ def _run( root, files, extra, script=None ):
     return json.loads( res.stdout )
 
 
-def extract_js_shapes( root, files, public_only=False ):
+def extract_js_shapes( root, files, public_only=False, bodies=False ):
     """
     Extract the structural shape of every function-like definition in script files.
 
@@ -115,9 +115,14 @@ def extract_js_shapes( root, files, public_only=False ):
         - private and protected members, including functions held in a private or protected class property,
           and nested functions, are returned unless public_only
         - an empty file list returns an empty result without starting node
+        - with bodies each def also holds line, end_line, sig, text, calls, declared and public, and each scanned entry is
+          { file, function_like_total, anonymous_walked } instead of a path; without it the result is what it was before
+        - the account function_like_total == definitions reported + anonymous_walked holds only with public_only off
     Raises:
         - DependencyMissing when node or typescript is absent
         - RuntimeError when the compiler script exits non-zero
     """
     if not files: return { "scanned": [], "skipped": [], "defs": [] }
-    return _run( root, files, { "mode": "shapes", "public_only": bool( public_only ) } )
+    extra = { "mode": "shapes", "public_only": bool( public_only ) }
+    if bodies: extra[ "bodies" ] = True
+    return _run( root, files, extra )
