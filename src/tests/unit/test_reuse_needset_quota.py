@@ -2,6 +2,7 @@
 The kind-by-language table, the census, the seeded draw and the plan record.
 """
 import json
+import threading
 
 import pytest
 
@@ -113,12 +114,65 @@ def test_a_cell_one_short_raises_with_the_cell_named():
     assert e.value.code == er.QUOTA_UNFILLABLE and "cross_language/ts" in str( e.value ) and "has 3" in str( e.value )
 
 
-def test_an_id_taken_as_a_primary_by_one_cell_is_not_offered_to_the_next():
+def two_cell_table( a, b ):
+    """Return a quota of a near_copy and b work_alike ts seeds, and nothing elsewhere."""
     table = { k: { "ts": 0, "py": 0 } for k in quota.ALL_KINDS }
-    table[ "near_copy" ][ "ts" ] = 2
-    table[ "work_alike" ][ "ts" ] = 2
+    table[ "near_copy" ][ "ts" ]  = a
+    table[ "work_alike" ][ "ts" ] = b
+    return table
+
+
+def test_cells_that_need_the_same_ids_raise_and_name_the_cell_when_the_ids_run_out():
     pool = { ( "near_copy", "ts" ): [ "a", "b", "c" ], ( "work_alike", "ts" ): [ "a", "b", "c" ] }
-    with pytest.raises( er.NeedsetError, match="work_alike/ts has 1" ): quota.draw( pool, table, 3 )
+    with pytest.raises( er.NeedsetError ) as e: quota.draw( pool, two_cell_table( 2, 2 ), 3 )
+    assert e.value.code == er.QUOTA_UNFILLABLE and "work_alike/ts" in str( e.value ) and "other cells need the same ones" in str( e.value )
+
+
+def test_a_valid_assignment_is_found_when_a_scarce_cell_shares_its_only_seeds_with_an_earlier_cell():
+    pool = { ( "cross_language", "ts" ): [ "a", "b" ], ( "work_alike", "ts" ): [ "a" ] }
+    table = { k: { "ts": 0, "py": 0 } for k in quota.ALL_KINDS }
+    table[ "cross_language" ][ "ts" ] = 1
+    table[ "work_alike" ][ "ts" ]     = 1
+    for seed in range( 60 ):
+        got = quota.draw( pool, table, seed )
+        assert got[ ( "work_alike", "ts" ) ][ "primary" ] == [ "a" ] and got[ ( "cross_language", "ts" ) ][ "primary" ] == [ "b" ]
+
+
+def test_a_chain_of_shared_ids_is_untangled_by_moving_earlier_picks():
+    pool = { ( "cross_language", "ts" ): [ "a", "b" ], ( "near_copy", "ts" ): [ "b", "c" ], ( "work_alike", "ts" ): [ "c" ] }
+    table = { k: { "ts": 0, "py": 0 } for k in quota.ALL_KINDS }
+    for kind in ( "cross_language", "near_copy", "work_alike" ): table[ kind ][ "ts" ] = 1
+    for seed in range( 40 ):
+        got = quota.draw( pool, table, seed )
+        assert [ got[ ( k, "ts" ) ][ "primary" ] for k in ( "cross_language", "near_copy", "work_alike" ) ] == [ [ "a" ], [ "b" ], [ "c" ] ]
+
+
+def test_a_cell_short_on_its_own_says_so_and_does_not_blame_the_others():
+    pool = { ( "near_copy", "ts" ): [ "a" ] }
+    with pytest.raises( er.NeedsetError ) as e: quota.draw( pool, two_cell_table( 2, 0 ), 3 )
+    assert "near_copy/ts has 1 eligible seeds, needs 2" in str( e.value ) and "other cells" not in str( e.value )
+
+
+def test_every_spare_belongs_to_one_cell_and_is_never_a_primary_anywhere():
+    table = quota.plan_quota( 40, 30, 10, 0.6, { "near_copy": 12, "work_alike": 12, "cross_language": 6 } )
+    shared = [ f"shared{i}" for i in range( 30 ) ]
+    pool   = { cell: ids + shared for cell, ids in pool_of( 12 ).items() }
+    for seed in range( 10 ):
+        got       = quota.draw( pool, table, seed )
+        primaries = [ s for cell in got.values() for s in cell[ "primary" ] ]
+        spares    = [ s for cell in got.values() for s in cell[ "spares" ] ]
+        assert len( primaries ) == len( set( primaries ) ) == 40
+        assert len( spares ) == len( set( spares ) ) and not set( spares ) & set( primaries )
+        for cell, row in got.items():
+            assert set( row[ "primary" ] + row[ "spares" ] ) <= set( pool[ cell ] )
+        assert set( spares ) | set( primaries ) == { s for ids in pool.values() for s in ids }
+
+
+def test_the_draw_with_shared_ids_is_the_same_for_the_same_seed_and_pool_order_does_not_matter():
+    pool  = { ( "near_copy", "ts" ): [ "a", "b", "c", "d" ], ( "work_alike", "ts" ): [ "c", "d", "e", "f" ] }
+    table = two_cell_table( 2, 2 )
+    again = { cell: list( reversed( ids ) ) for cell, ids in pool.items() }
+    assert quota.draw( pool, table, 11 ) == quota.draw( again, table, 11 )
 
 
 def test_the_plan_record_carries_seed_table_split_commit_reader_and_who_set_it(tmp_path):
@@ -137,3 +191,32 @@ def test_the_plan_is_written_once_and_a_second_write_leaves_the_first_untouched(
     before = path.read_bytes()
     with pytest.raises( er.NeedsetError ) as e: quota.write_plan( path, { "seed": 2 } )
     assert e.value.code == er.PLAN_ALREADY_WRITTEN and path.read_bytes() == before
+
+
+def test_of_many_writers_racing_for_one_path_exactly_one_succeeds_and_the_file_is_whole(tmp_path):
+    path    = tmp_path / "plan.json"
+    barrier = threading.Barrier( 16 )
+    results = {}
+
+    def writer( n ):
+        barrier.wait()
+        try:
+            quota.write_plan( path, { "seed": n, "pad": "x" * 5000 } )
+            results[ n ] = "ok"
+        except er.NeedsetError as e:
+            results[ n ] = e.code
+
+    threads = [ threading.Thread( target=writer, args=( n, ) ) for n in range( 16 ) ]
+    for th in threads: th.start()
+    for th in threads: th.join()
+    winners = [ n for n, r in results.items() if r == "ok" ]
+    assert len( winners ) == 1 and sorted( r for r in results.values() if r != "ok" ) == [ er.PLAN_ALREADY_WRITTEN ] * 15
+    assert json.loads( path.read_text( encoding="utf-8" ) )[ "seed" ] == winners[ 0 ]
+    assert sorted( p.name for p in tmp_path.iterdir() ) == [ "plan.json" ]
+
+
+def test_a_failed_link_leaves_no_plan_and_no_temporary_file(tmp_path, monkeypatch):
+    def broken( src, dst ): raise OSError( "disk full" )
+    monkeypatch.setattr( quota.os, "link", broken )
+    with pytest.raises( OSError, match="disk full" ): quota.write_plan( tmp_path / "plan.json", { "seed": 1 } )
+    assert list( tmp_path.iterdir() ) == []

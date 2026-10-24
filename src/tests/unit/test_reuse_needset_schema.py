@@ -121,6 +121,67 @@ def test_the_check_block_follows_the_status():
     with pytest.raises( er.NeedsetError, match="check block" ): schema.validate_need( rec )
 
 
+def checked():
+    """Build a valid checked need."""
+    rec = matched()
+    rec[ "status" ] = "checked"
+    rec[ "check" ]  = { "model": "claude-opus-5-5", "result": "agree", "note": "does the job", "mechanical": [] }
+    schema.validate_need( rec )
+    return rec
+
+
+def test_a_stale_id_is_refused_whatever_else_changed():
+    rec = matched()
+    rec[ "need" ] = "A function that pads a string on the left to a fixed width."
+    with pytest.raises( er.NeedsetError, match="id does not match need_id" ): schema.validate_need( rec )
+    rec[ "id" ] = schema.need_id( rec )
+    schema.validate_need( rec )
+
+
+@pytest.mark.parametrize( "key", schema.CHECK_KEYS )
+def test_every_key_of_the_check_block_is_required(key):
+    rec = checked()
+    del rec[ "check" ][ key ]
+    with pytest.raises( er.NeedsetError, match="check block" ): schema.validate_need( rec )
+
+
+@pytest.mark.parametrize( "key, value, message", [
+    ( "model",      "",        "check.model must be a non-empty string" ),
+    ( "model",      3,         "check.model must be a non-empty string" ),
+    ( "result",     "yes",     "check.result must be one of" ),
+    ( "result",     None,      "check.result must be one of" ),
+    ( "note",       None,      "check.note must be a string" ),
+    ( "mechanical", "none",    "check.mechanical must be a list" ),
+] )
+def test_every_value_of_the_check_block_is_typed(key, value, message):
+    rec = checked()
+    rec[ "check" ][ key ] = value
+    with pytest.raises( er.NeedsetError, match=message ): schema.validate_need( rec )
+
+
+@pytest.mark.parametrize( "result", schema.RESULTS )
+def test_each_check_result_is_accepted(result):
+    rec = checked()
+    rec[ "check" ][ "result" ] = result
+    schema.validate_need( rec )
+
+
+@pytest.mark.parametrize( "key", schema.DRAFTER_KEYS )
+def test_every_key_of_the_drafter_block_is_required_and_non_empty(key):
+    for broken in ( "delete", "" ):
+        rec = matched()
+        if broken == "delete": del rec[ "drafter" ][ key ]
+        else: rec[ "drafter" ][ key ] = broken
+        with pytest.raises( er.NeedsetError, match="drafter needs" ): schema.validate_need( rec )
+
+
+@pytest.mark.parametrize( "key", [ "symbols", "key_lang", "version" ] )
+def test_every_key_of_the_key_block_is_required(key):
+    rec = matched()
+    del rec[ "key" ][ key ]
+    with pytest.raises( er.NeedsetError ): schema.validate_need( rec )
+
+
 def test_a_record_that_is_not_a_dict_is_refused():
     with pytest.raises( er.NeedsetError, match="not a dict" ): schema.validate_need( [] )
 

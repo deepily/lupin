@@ -10,7 +10,7 @@ pins:
   - cosa.repo.doc_lint.labelled_set_seeder.stratum_of@6e2d4d856b
   - cosa.repo.doc_lint.labelled_set_seeder.unit_of@9f734d2d36
   - cosa.repo.doc_lint.labelled_set_seeder.is_short@08c509dd3d
-  - cosa.repo.doc_lint.labelled_set_seeder.quotas@7199bfeea2
+  - cosa.repo.doc_lint.quota_split.quotas@7199bfeea2
   - cosa.repo.doc_lint.labelled_set_seeder.short_quota@fc2fd97093
   - cosa.repo.doc_lint.labelled_set_seeder.strata_mix_of@f1d9ee8ecf
   - cosa.repo.doc_lint.labelled_set_seeder.split_units@530812ef62

@@ -4,8 +4,10 @@ The kind-by-language table of the need set, the seed census and the seeded draw.
 The split of the matched needs by kind is not defaulted: plan_quota refuses to run without one.
 """
 import json
+import os
 import pathlib
 import random
+import threading
 
 from cosa.repo.doc_lint.quota_split import quotas
 from lupin_mcp.reuse_needset import errors as er
@@ -58,7 +60,7 @@ def plan_quota( total, matched, none, ts_share, kind_split=None ):
     shares     = { k: ( n / matched if matched else 0 ) for k, n in kind_split.items() }
     ts_by_kind = quotas( ts_matched, shares )
     for kind in MATCHED_KINDS: table[ kind ] = { "ts": ts_by_kind[ kind ], "py": kind_split[ kind ] - ts_by_kind[ kind ] }
-    if sum( row[ "ts" ] for row in table.values() ) != ts_total or any( n < 0 for row in table.values() for n in row.values() ):  # pragma: no cover - holds for every total, none and share in the tested grid
+    if sum( row[ "ts" ] for row in table.values() ) != ts_total or any( n < 0 for row in table.values() for n in row.values() ):  # pragma: no cover - each kind's ts count is its size times a share of at most 1
         _invalid( f"the language margins do not hold for total {total}, none {none}, ts_share {ts_share}" )
     return { kind: table[ kind ] for kind in ALL_KINDS }
 
@@ -76,6 +78,39 @@ def census( pool ):
     return { kind: { lang: len( set( pool.get( ( kind, lang ), [] ) ) ) for lang in LANGS } for kind in ALL_KINDS }
 
 
+def _assign( slots, eligible, rng ):
+    """
+    Match every slot of every cell to its own seed id, or find the first slot that cannot be.
+
+    Requires:
+        - slots is a list of ( kind, lang ) cells, one entry per seed the cell needs, in sorted cell order
+        - eligible maps a cell to its sorted list of ids
+
+    Ensures:
+        - returns ( owner, None ) with owner mapping each matched id to the slot index it fills, when every slot matches
+        - returns ( owner, index ) with the first slot index that no augmenting path could fill, when one cannot
+        - an id eligible for several cells is reassigned along an augmenting path, so a valid assignment is never missed
+        - the candidates of each slot are tried in an order shuffled by rng
+    """
+    owner = {}
+
+    def place( index, seen ):
+        """Try to give slot index an id, moving earlier slots to other ids when needed."""
+        ids = list( eligible[ slots[ index ] ] )
+        rng.shuffle( ids )
+        for sid in ids:
+            if sid in seen: continue
+            seen.add( sid )
+            if sid not in owner or place( owner[ sid ], seen ):
+                owner[ sid ] = index
+                return True
+        return False
+
+    for index in range( len( slots ) ):
+        if not place( index, set() ): return owner, index
+    return owner, None
+
+
 def draw( pool, quota, seed ):
     """
     Draw the seeds of every cell, with spares, from a sorted pool and a fixed seed.
@@ -88,27 +123,29 @@ def draw( pool, quota, seed ):
     Ensures:
         - returns { ( kind, lang ): { "primary": [ids], "spares": [ids] } } for every cell in sorted cell order
         - the result is the same for the same seed whatever order the pool lists its ids in
-        - a seed id is the primary of at most one cell
-        - spares are the cell's other eligible ids, shuffled, that no cell took as a primary
+        - a seed id is the primary of at most one cell, and a valid assignment is found whenever one exists, even when cells share their ids
+        - a spare is an id no cell took as a primary, listed under exactly one cell that finds it eligible
+        - spares are shuffled within each cell
 
     Raises:
-        - NeedsetError QUOTA_UNFILLABLE naming the first cell, in sorted order, with fewer eligible ids than its count
+        - NeedsetError QUOTA_UNFILLABLE naming the first cell, in sorted order, whose seeds cannot all be found
     """
-    rng     = random.Random( seed )
-    taken   = set()
-    drawn   = {}
-    cells   = sorted( ( kind, lang ) for kind in ALL_KINDS for lang in LANGS )
-    for kind, lang in cells:
-        want  = quota[ kind ][ lang ]
-        have  = sorted( set( pool.get( ( kind, lang ), [] ) ) - taken )
-        if len( have ) < want: raise er.NeedsetError( er.QUOTA_UNFILLABLE, f"cell {kind}/{lang} has {len( have )} eligible seeds, needs {want}" )
-        picked = rng.sample( have, want )
-        taken.update( picked )
-        drawn[ ( kind, lang ) ] = { "primary": picked, "spares": [] }
-    for kind, lang in cells:
-        rest = sorted( set( pool.get( ( kind, lang ), [] ) ) - taken )
-        rng.shuffle( rest )
-        drawn[ ( kind, lang ) ][ "spares" ] = rest
+    rng      = random.Random( seed )
+    cells    = sorted( ( kind, lang ) for kind in ALL_KINDS for lang in LANGS )
+    eligible = { cell: sorted( set( pool.get( cell, [] ) ) ) for cell in cells }
+    slots    = [ cell for cell in cells for _ in range( quota[ cell[ 0 ] ][ cell[ 1 ] ] ) ]
+    owner, failed = _assign( slots, eligible, rng )
+    if failed is not None:
+        cell = slots[ failed ]
+        have, want = len( eligible[ cell ] ), quota[ cell[ 0 ] ][ cell[ 1 ] ]
+        why = f"has {have} eligible seeds, needs {want}" if have < want else f"has {have} eligible seeds, needs {want}, but the other cells need the same ones"
+        raise er.NeedsetError( er.QUOTA_UNFILLABLE, f"cell {cell[ 0 ]}/{cell[ 1 ]} {why}" )
+    drawn = { cell: { "primary": [], "spares": [] } for cell in cells }
+    for sid in sorted( owner ): drawn[ slots[ owner[ sid ] ] ][ "primary" ].append( sid )
+    for cell in cells: rng.shuffle( drawn[ cell ][ "primary" ] )
+    leftovers = sorted( { sid for cell in cells for sid in eligible[ cell ] } - set( owner ) )
+    for sid in leftovers:
+        drawn[ rng.choice( [ cell for cell in cells if sid in eligible[ cell ] ] ) ][ "spares" ].append( sid )
     return drawn
 
 
@@ -130,17 +167,26 @@ def plan_record( seed, quota, kind_split, source_commit, pool_reader, set_by, se
 
 def write_plan( path, record ):
     """
-    Write the plan record once.
+    Write the plan record once, all at once.
 
     Requires:
         - path is writable and its folder exists
 
     Ensures:
+        - the record is written to a temporary file beside path and hard-linked into place, so a reader sees the whole file or none
+        - of several writers racing for one path exactly one succeeds
+        - no temporary file is left behind, whether the link succeeds or not
         - the file holds the record as sorted-key JSON with a final newline
 
     Raises:
         - NeedsetError PLAN_ALREADY_WRITTEN when a file exists at path, which is left untouched
     """
     target = pathlib.Path( path )
-    if target.exists(): raise er.NeedsetError( er.PLAN_ALREADY_WRITTEN, str( target ) )
-    target.write_text( json.dumps( record, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    temp   = target.with_name( f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp" )
+    temp.write_text( json.dumps( record, sort_keys=True, indent=4 ) + "\n", encoding="utf-8" )
+    try:
+        os.link( temp, target )
+    except FileExistsError as e:
+        raise er.NeedsetError( er.PLAN_ALREADY_WRITTEN, str( target ) ) from e
+    finally:
+        temp.unlink()

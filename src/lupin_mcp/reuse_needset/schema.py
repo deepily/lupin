@@ -18,6 +18,7 @@ ROUTED      = ( "work_alike", "cross_language" )
 TOP_KEYS    = ( "id", "kind", "write_lang", "seed", "selection_route", "key", "need", "source_commit", "drafter", "check", "status" )
 DRAFTER_KEYS = ( "model", "prompt_version", "server" )
 CHECK_KEYS   = ( "model", "result", "note", "mechanical" )
+RESULTS      = ( "agree", "disagree", "unsure" )
 
 
 def need_id( rec ):
@@ -81,7 +82,8 @@ def validate_need( rec ):
         - returns None when the record is valid
         - a matched kind has a seed and a non-empty key; a nothing need has neither
         - selection_route is vector or sampled for the two routed kinds and None otherwise
-        - a record at status checked or later carries a check block
+        - a record at status checked or later carries a check block with a model, a result of agree, disagree or unsure, a note and a mechanical list
+        - the id equals need_id of the record
 
     Raises:
         - NeedsetError BAD_NEED naming the first violation
@@ -111,5 +113,11 @@ def validate_need( rec ):
     check = rec[ "check" ]
     if rec[ "status" ] == "drafted":
         if check is not None: _fail( rec, "a drafted need has no check yet" )
-    elif not isinstance( check, dict ) or any( k not in check for k in CHECK_KEYS ): _fail( rec, f"a checked need needs a check block with {CHECK_KEYS}" )
+    else:
+        if not isinstance( check, dict ) or any( k not in check for k in CHECK_KEYS ): _fail( rec, f"a checked need needs a check block with {CHECK_KEYS}" )
+        if not _text( check[ "model" ] ): _fail( rec, "check.model must be a non-empty string" )
+        if check[ "result" ] not in RESULTS: _fail( rec, f"check.result must be one of {RESULTS}" )
+        if not isinstance( check[ "note" ], str ): _fail( rec, "check.note must be a string" )
+        if not isinstance( check[ "mechanical" ], list ): _fail( rec, "check.mechanical must be a list" )
     if "smoke" in rec and rec[ "smoke" ] is not True: _fail( rec, "smoke is only ever true" )
+    if rec[ "id" ] != need_id( rec ): _fail( rec, f"id does not match need_id: {need_id( rec )}" )
