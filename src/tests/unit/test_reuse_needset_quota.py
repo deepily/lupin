@@ -220,3 +220,15 @@ def test_a_failed_link_leaves_no_plan_and_no_temporary_file(tmp_path, monkeypatc
     monkeypatch.setattr( quota.os, "link", broken )
     with pytest.raises( OSError, match="disk full" ): quota.write_plan( tmp_path / "plan.json", { "seed": 1 } )
     assert list( tmp_path.iterdir() ) == []
+
+
+def test_spares_come_out_in_the_seeded_shuffle_not_in_id_order():
+    table = quota.plan_quota( 40, 30, 10, 0.6, { "near_copy": 12, "work_alike": 12, "cross_language": 6 } )
+    pool  = pool_of( 30 )
+    orders = []
+    for seed in range( 8 ):
+        got = quota.draw( pool, table, seed )
+        orders.append( got[ ( "near_copy", "ts" ) ][ "spares" ] )
+    assert any( o != sorted( o ) for o in orders ), "every spares list was in id order"
+    assert len( { tuple( o ) for o in orders } ) > 1, "the spares order did not change with the seed"
+    assert quota.draw( pool, table, 3 )[ ( "near_copy", "ts" ) ][ "spares" ] == quota.draw( pool, table, 3 )[ ( "near_copy", "ts" ) ][ "spares" ]

@@ -39,6 +39,7 @@ FORM_STARTS      = ( "a function that ", "a method that ", "a class that " )
 RESEND_NAME      = { "member_text_run": "text_run", "twin_text_run": "text_run" }       # one neutral name: a twin is not mentioned to the writer
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
 TS_TYPE_WORDS    = frozenset( { "string", "number", "boolean", "any", "unknown", "void", "never", "object", "undefined", "null", "bigint", "symbol" } )     # type keywords, never names
+DECORATORS       = re.compile( r"^(@[A-Za-z_$][A-Za-z0-9_$.]*(\([^()]*\))?\s*)+" )               # leading @Name or @Name(args) on a parameter; nested parentheses in the arguments are not handled
 TS_MODIFIERS     = frozenset( { "public", "private", "protected", "readonly", "override" } )
 
 
@@ -106,7 +107,7 @@ def _ts_parameter_text( sig ):
     angle = 0
     for start, ch in enumerate( sig ):
         if ch == "<": angle += 1
-        elif ch == ">": angle -= 1
+        elif ch == ">" and sig[ start - 1 : start ] != "=": angle -= 1
         elif ch == "(" and angle == 0: break
     else:
         return ""
@@ -124,6 +125,7 @@ def _split_top_level( text ):
     Ensures:
         - brackets are ( ), [ ], { } and < >; the arrow "=>" does not close an angle bracket
         - returns the pieces in order, untrimmed
+        - a comma inside a string default and a comparison "<" inside a default value are not told apart from the brackets
     """
     pieces, depth, last = [], 0, 0
     for i, ch in enumerate( text ):
@@ -162,13 +164,13 @@ def _ts_argument_names( sig ):
         - sig is "(params): returns", optionally led by a generic list
 
     Ensures:
-        - plain, optional, defaulted, rest and modifier-led parameters give their own name
+        - plain, optional, defaulted, rest, decorated and modifier-led parameters give their own name
         - a destructured parameter gives every identifier inside its pattern
         - the return type, the parameter types, TS_TYPE_WORDS and "this" are never returned
     """
     names = set()
     for piece in _split_top_level( _ts_parameter_text( sig ) ):
-        words = piece.strip().lstrip( "." ).split()
+        words = DECORATORS.sub( "", piece.strip() ).lstrip( "." ).split()
         while words and words[ 0 ] in TS_MODIFIERS: words.pop( 0 )
         piece = " ".join( words )
         if piece.startswith( ( "{", "[" ) ):

@@ -41,6 +41,9 @@ def test_the_measured_typescript_record_gives_names_and_no_type_words():
     ( "",                                                       set() ),
     ( "({ a",                                                   { "a" } ),
     ( "(a, b",                                                  { "a", "b" } ),
+    ( "<T extends () => void>(a: T, b: number): void",          { "a", "b" } ),
+    ( "(@Inject() private foo: Foo, bar: string)",              { "foo", "bar" } ),
+    ( "(@Input @Optional() readonly x: number)",                { "x" } ),
 ] )
 def test_typescript_signatures_give_only_parameter_names(sig, names):
     assert nc._ts_argument_names( sig ) == names

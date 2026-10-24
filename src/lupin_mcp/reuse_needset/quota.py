@@ -146,6 +146,7 @@ def draw( pool, quota, seed ):
     leftovers = sorted( { sid for cell in cells for sid in eligible[ cell ] } - set( owner ) )
     for sid in leftovers:
         drawn[ rng.choice( [ cell for cell in cells if sid in eligible[ cell ] ] ) ][ "spares" ].append( sid )
+    for cell in cells: rng.shuffle( drawn[ cell ][ "spares" ] )
     return drawn
 
 
