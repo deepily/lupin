@@ -320,6 +320,65 @@ def unquotable_seeds( pairs ):
              if p.get( "seed_span" ) is not None and claim_extractor.locate_quote( p[ "old" ][ p[ "seed_span" ][ 0 ]:p[ "seed_span" ][ 1 ] ], p[ "old" ] ) is None ]
 
 
+async def run_parallel( items, run_one, parallel, key ):
+    """
+    Run one async call per item and return the results in input order.
+
+    Requires:
+        - items is a list
+        - run_one is an async callable taking one item
+        - key is a callable returning a hashable twin key for an item
+        - parallel is an int of 1 or more
+
+    Ensures:
+        - with parallel 1 the items run one at a time
+        - with parallel N above 1, up to N items are in flight at once; the ledger and the call budget are
+          written without an await between check and write, so lines stay whole and a cap is never passed
+        - items with an equal key run one after another, so a resumed or repeated item never makes a call a
+          twin has finished
+        - once one item fails, items not yet started are skipped, every item in flight finishes (its ledger
+          rows are kept), and then the failure of the earliest item in input order is raised; a wait another
+          item's failure cut short is passed over for the failure that cut it, unless every failure is one
+        - a stop signal left from an earlier run is cleared first, and an item's failure sets it, so a call
+          waiting out a 503 in another item gives up at once
+
+    Raises:
+        - ValueError if parallel is below 1
+        - whatever run_one raises
+    """
+    if parallel < 1: raise ValueError( f"parallel must be 1 or more, got {parallel}" )
+    model_transport.AGY_WAKE.clear()
+    if parallel == 1:
+        try:
+            return [ await run_one( item ) for item in items ]
+        except Exception:
+            model_transport.AGY_WAKE.set()
+            raise
+    slots  = asyncio.Semaphore( parallel )
+    twins  = {}
+    errors = {}
+
+    async def one( index, item ):
+        """Run one item under its twin lock and a slot; record, rather than raise, its failure."""
+        lock = twins.setdefault( key( item ), asyncio.Lock() )
+        outcome = None
+        async with lock, slots:
+            if not errors:
+                try:
+                    outcome = await run_one( item )
+                except Exception as e:
+                    errors[ index ] = e
+                    model_transport.AGY_WAKE.set()
+        return outcome
+
+    results = await asyncio.gather( *[ one( i, item ) for i, item in enumerate( items ) ] )
+    if errors:
+        # A call woken by another item's failure reports a cut-short wait; the failure that woke it is the cause.
+        causes = [ i for i in errors if not isinstance( errors[ i ], model_transport.ModelWaitCutShort ) ]
+        raise errors[ min( causes ) if causes else min( errors ) ]
+    return list( results )
+
+
 async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_unreadable=None, parallel=1 ):
     """
     Run every pair and return their results in input order.
@@ -329,49 +388,14 @@ async def run_all( pairs, config, ledger, query_fn=None, judge_backend=None, on_
         - parallel is an int of 1 or more
 
     Ensures:
-        - with parallel 1 the pairs run one at a time, as before
-        - with parallel N above 1, up to N pairs are in flight at once; the ledger and the call budget are
-          written without an await between check and write, so lines stay whole and a cap is never passed
-        - pairs with the same old text, new text and design run one after another, so a resumed or repeated
-          pair never makes a call a twin has finished
-        - once one pair fails, pairs not yet started are skipped, every pair in flight finishes (its ledger
-          rows are kept), and then the failure of the earliest pair in input order is raised; a wait another
-          pair's failure cut short is passed over for the failure that cut it, unless every failure is one
-        - a stop signal left from an earlier run is cleared first, and a pair's failure sets it, so a call
-          waiting out a 503 in another pair gives up at once
+        - the pairs are run by run_parallel, keyed on old text, new text and design, so its guarantees hold here
+        - results are in input order
 
     Raises:
         - ValueError if parallel is below 1
         - whatever run_pair raises
     """
-    if parallel < 1: raise ValueError( f"parallel must be 1 or more, got {parallel}" )
-    model_transport.AGY_WAKE.clear()
-    if parallel == 1:
-        try:
-            return [ await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ) for pair in pairs ]
-        except Exception:
-            model_transport.AGY_WAKE.set()
-            raise
-    slots  = asyncio.Semaphore( parallel )
-    twins  = {}
-    errors = {}
-
-    async def one( index, pair ):
-        """Run one pair under its twin lock and a slot; record, rather than raise, its failure."""
-        lock = twins.setdefault( ( pair[ "old" ], pair[ "new" ], pair.get( "design" ) ), asyncio.Lock() )
-        outcome = None
-        async with lock, slots:
-            if not errors:
-                try:
-                    outcome = await run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable )
-                except Exception as e:
-                    errors[ index ] = e
-                    model_transport.AGY_WAKE.set()
-        return outcome
-
-    results = await asyncio.gather( *[ one( i, pair ) for i, pair in enumerate( pairs ) ] )
-    if errors:
-        # A call woken by another pair's failure reports a cut-short wait; the failure that woke it is the cause.
-        causes = [ i for i in errors if not isinstance( errors[ i ], model_transport.ModelWaitCutShort ) ]
-        raise errors[ min( causes ) if causes else min( errors ) ]
-    return list( results )
+    return await run_parallel( pairs,
+                               lambda pair: run_pair( pair, config, ledger, query_fn=query_fn, judge_backend=judge_backend, on_unreadable=on_unreadable ),
+                               parallel,
+                               lambda pair: ( pair[ "old" ], pair[ "new" ], pair.get( "design" ) ) )
