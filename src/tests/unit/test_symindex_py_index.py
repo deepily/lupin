@@ -54,6 +54,14 @@ def test_init_module_name_drops_the_init_suffix( tmp_path ):
     assert recs[ 0 ][ "module" ] == "pkg"
 
 
+def test_a_top_level_init_module_has_the_empty_name( tmp_path ):
+    root = make_repo( tmp_path )
+    ( root / "__init__.py" ).write_text( "def top():\n    return 1\n", encoding="utf-8" )
+    spec = sp.spec_for( root )
+    assert pi.module_name( spec, root / "__init__.py" ) == ""
+    assert pi.extract_python( spec, root / "__init__.py" )[ 0 ][ "module" ] == ""
+
+
 def test_pin_ignores_docstrings_and_whitespace_but_not_code():
     base   = ast.parse( 'def f( a ):\n    """old doc"""\n    return a + 1\n' ).body[ 0 ]
     doc    = ast.parse( 'def f( a ):\n    """NEW doc\n\n    more"""\n    return   a+1\n' ).body[ 0 ]
