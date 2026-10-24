@@ -38,6 +38,8 @@ RUN_LENGTH       = 4                                              # John's numbe
 FORM_STARTS      = ( "a function that ", "a method that ", "a class that " )
 RESEND_NAME      = { "member_text_run": "text_run", "twin_text_run": "text_run" }       # one neutral name: a twin is not mentioned to the writer
 CHECKS           = ( "form", "identifier", "member_text_run", "twin_text_run", "sample" )
+TS_TYPE_WORDS    = frozenset( { "string", "number", "boolean", "any", "unknown", "void", "never", "object", "undefined", "null", "bigint", "symbol" } )     # type keywords, never names
+TS_MODIFIERS     = frozenset( { "public", "private", "protected", "readonly", "override" } )
 
 
 def entry_text_of( rec ):
@@ -89,6 +91,94 @@ def _argument_names( sig ):
     return { x.arg for x in named }
 
 
+def _ts_parameter_text( sig ):
+    """
+    Return the text between the parameter parentheses of a TypeScript signature.
+
+    Requires:
+        - sig is "(params): returns", optionally led by a generic list such as "<T>"
+
+    Ensures:
+        - returns the text inside the first parentheses that sit outside any angle brackets
+        - returns "" when the signature has no parentheses, as a class has none
+        - a parenthesis inside a string literal is not told apart from a real one
+    """
+    angle = 0
+    for start, ch in enumerate( sig ):
+        if ch == "<": angle += 1
+        elif ch == ">": angle -= 1
+        elif ch == "(" and angle == 0: break
+    else:
+        return ""
+    depth = 0
+    for end in range( start, len( sig ) ):
+        depth += ( sig[ end ] == "(" ) - ( sig[ end ] == ")" )
+        if depth == 0: return sig[ start + 1 : end ]
+    return sig[ start + 1 : ]
+
+
+def _split_top_level( text ):
+    """
+    Split a parameter list on the commas that sit outside every bracket.
+
+    Ensures:
+        - brackets are ( ), [ ], { } and < >; the arrow "=>" does not close an angle bracket
+        - returns the pieces in order, untrimmed
+    """
+    pieces, depth, last = [], 0, 0
+    for i, ch in enumerate( text ):
+        if ch in "([{<": depth += 1
+        elif ch in ")]}" or ( ch == ">" and text[ i - 1 : i ] != "=" ): depth -= 1
+        elif ch == "," and depth == 0:
+            pieces.append( text[ last : i ] )
+            last = i + 1
+    pieces.append( text[ last : ] )
+    return pieces
+
+
+def _pattern_text( piece ):
+    """
+    Return the text inside the destructuring pattern that opens a parameter.
+
+    Requires:
+        - piece starts with "{" or "["
+
+    Ensures:
+        - returns the text between that opener and its matching closer, nested patterns included
+        - returns the rest of the piece when the closer is missing
+    """
+    depth = 0
+    for i, ch in enumerate( piece ):
+        depth += ( ch in "{[" ) - ( ch in "}]" )
+        if depth == 0: return piece[ 1 : i ]
+    return piece[ 1 : ]
+
+
+def _ts_argument_names( sig ):
+    """
+    Return the parameter names of a TypeScript signature, and never their types.
+
+    Requires:
+        - sig is "(params): returns", optionally led by a generic list
+
+    Ensures:
+        - plain, optional, defaulted, rest and modifier-led parameters give their own name
+        - a destructured parameter gives every identifier inside its pattern
+        - the return type, the parameter types, TS_TYPE_WORDS and "this" are never returned
+    """
+    names = set()
+    for piece in _split_top_level( _ts_parameter_text( sig ) ):
+        words = piece.strip().lstrip( "." ).split()
+        while words and words[ 0 ] in TS_MODIFIERS: words.pop( 0 )
+        piece = " ".join( words )
+        if piece.startswith( ( "{", "[" ) ):
+            names.update( re.findall( r"[A-Za-z_$][A-Za-z0-9_$]*", _pattern_text( piece ) ) )
+        else:
+            m = re.match( r"[A-Za-z_$][A-Za-z0-9_$]*", piece )
+            if m: names.add( m.group( 0 ) )
+    return names - TS_TYPE_WORDS - { "this" }
+
+
 def identifier_tokens( rec ):
     """
     Return the identifier tokens of one symbol record.
@@ -97,8 +187,12 @@ def identifier_tokens( rec ):
         - returns the lowercase identifier tokens of one symbol record
         - the tokens are the dotted parts of its id, its file stem and its argument names, each whole
         - a word that is only a piece of one of those names is not a token
+        - a record whose lang is "ts" reads its argument names from the TypeScript syntax, so type words are not tokens
+        - any other record reads them as Python, unchanged
     """
-    return _name_tokens( rec ) | { n.lower() for n in _argument_names( rec[ "sig" ] ) }
+    is_ts = "lang" in rec and rec[ "lang" ] == "ts"
+    args  = _ts_argument_names( rec[ "sig" ] ) if is_ts else _argument_names( rec[ "sig" ] )
+    return _name_tokens( rec ) | { n.lower() for n in args }
 
 
 def _name_tokens( rec ):
