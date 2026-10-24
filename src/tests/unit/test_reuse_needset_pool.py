@@ -124,6 +124,24 @@ def test_measure_counts_nodes_for_both_languages_and_skips_what_it_cannot_read( 
     assert out[ "web.m.tsOne" ].nodes >= dp.DEFAULT_MIN_NODE and out[ "web.m.tsOne" ].shingles == out[ "web.m.tsTwo" ].shingles
 
 
+def test_a_name_defined_twice_in_a_file_gets_one_measure_per_record( tmp_path ):
+    ( tmp_path / "web" ).mkdir()
+    ( tmp_path / "dup.py" ).write_text( "class K:\n    def m( self ):\n        return 1\n\n    def m( self, a ):\n        if a:\n            return a + 1\n        return a * 2\n", encoding="utf-8" )
+    ( tmp_path / "web" / "d.ts" ).write_text( "export class D {\n    get v() { return 1; }\n    set v( x ) { if ( x ) { this.w = x; } this.w = 0; }\n}\n", encoding="utf-8" )
+    recs = [ rec( "dup.K.m", "dup.py", "K.m", line=2 ), rec( "dup.K.m#2", "dup.py", "K.m", line=5 ),
+             rec( "web.d.D.v", "web/d.ts", "D.v", "ts", kind="method", line=2 ), rec( "web.d.D.v#2", "web/d.ts", "D.v", "ts", kind="method", line=3 ),
+             rec( "dup.K.m#3", "dup.py", "K.m", line=9 ) ]
+    out  = pool.measure( tmp_path, recs )
+    assert sorted( out ) == [ "dup.K.m", "dup.K.m#2", "web.d.D.v", "web.d.D.v#2" ], "the third record has no third definition"
+    assert out[ "dup.K.m" ].nodes < out[ "dup.K.m#2" ].nodes and out[ "web.d.D.v" ].nodes < out[ "web.d.D.v#2" ].nodes
+    assert pool.measure( tmp_path, list( reversed( recs ) ) ).keys() == out.keys(), "record order does not matter, line order does"
+    first = "class K:\n    def m( self ):\n        return 1\n"
+    ( tmp_path / "solo.py" ).write_text( first, encoding="utf-8" )
+    ( tmp_path / "one.py" ).write_text( first + "\n    def m( self, a ):\n        return a * 2 + 1\n", encoding="utf-8" )
+    both = pool.measure( tmp_path, [ rec( "solo.K.m", "solo.py", "K.m", line=2 ), rec( "one.K.m", "one.py", "K.m", line=2 ) ] )
+    assert both[ "one.K.m" ].nodes == both[ "solo.K.m" ].nodes, "a definition with no record of its own changes no other record"
+
+
 def test_measure_of_python_only_records_never_starts_node( tmp_path, monkeypatch ):
     root = write_tree( tmp_path )
     monkeypatch.setattr( pool.js_index, "extract_js_shapes", lambda *a, **k: pytest.fail( "node was started for a Python-only list" ) )

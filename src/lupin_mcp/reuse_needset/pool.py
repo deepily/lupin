@@ -55,6 +55,22 @@ class Measure:
         self.shingles = shingles
 
 
+def nth_record( rows, seen, key ):
+    """
+    Pick the record for the next definition of a name in a file.
+
+    Requires:
+        - rows are the records of that name sorted by line; seen is a Counter that the caller keeps for one walk
+
+    Ensures:
+        - the first definition met takes the first record, the second takes the second, and so on
+        - returns None when the file holds more definitions of the name than the index has records
+    """
+    k = seen[ key ]
+    seen[ key ] += 1
+    return rows[ k ] if k < len( rows ) else None
+
+
 def measure( root, records ):
     """
     Count nodes and take structural shingles for the definitions of an index.
@@ -69,21 +85,24 @@ def measure( root, records ):
         - a record whose source cannot be found is absent from the result
     """
     root, out = pathlib.Path( root ), {}
-    by_file   = collections.defaultdict( dict )
-    for r in records: by_file[ r[ "file" ] ][ r[ "name" ] ] = r
+    by_file   = collections.defaultdict( lambda: collections.defaultdict( list ) )
+    for r in sorted( records, key=lambda r: r[ "line" ] ): by_file[ r[ "file" ] ][ r[ "name" ] ].append( r )
     for rel, names in sorted( by_file.items() ):
         if not rel.endswith( ".py" ): continue
         try:
             tree = ast.parse( ( root / rel ).read_text( encoding="utf-8" ), rel )
         except ( SyntaxError, UnicodeDecodeError, OSError ):
             continue
+        seen = collections.Counter()
         for parts, node, _ in _walk_scope( tree.body, [], False, True ):
-            rec = names.get( ".".join( parts ) )
+            name = ".".join( parts )
+            rec  = nth_record( names[ name ], seen, name )
             if rec is not None: out[ rec[ "id" ] ] = Measure( sum( 1 for _ in ast.walk( node ) ), frozenset( dups.shingles( node ) ) )
     script_files = [ root / rel for rel in sorted( by_file ) if not rel.endswith( ".py" ) ]
     if script_files:
+        seen = collections.Counter()
         for d in js_index.extract_js_shapes( root, script_files )[ "defs" ]:
-            rec = by_file[ d[ "file" ] ].get( d[ "name" ] )
+            rec = nth_record( by_file[ d[ "file" ] ][ d[ "name" ] ], seen, ( d[ "file" ], d[ "name" ] ) )
             if rec is not None: out[ rec[ "id" ] ] = Measure( len( d[ "kinds" ] ), frozenset( dups.shingles_of( d[ "kinds" ] ) ) )
     classes = [ r for r in records if r[ "lang" ] != "py" and r[ "kind" ] == "class" ]
     for r, res in zip( classes, strip.script_results( root, classes, strip.MODE_SHAPE, strict=False ) ):
