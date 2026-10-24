@@ -14,6 +14,8 @@ from cosa.repo.symindex import spec as sp
 CLIENT_DIR = "src/lupin_app/static/js"
 # The frozen server commit of plan 7.1 does not exist yet, so the server census reads the working tree. This is the one constant to change at the freeze.
 CENSUS_SERVER_COMMIT = None
+# Whoever merges Phase 1 items 1.2 and 1.3 (record_search, the SEARCHED parser and rulings) adds scrub-token definitions to src/lupin_mcp and turns this red.
+# The fix is to update this pin in the same commit as a visible, reviewed diff that names row 1afc9fee, never to widen it quietly.
 # INTERIM, waiting on parking item P8 (row 1afc9fee): whether the frozen server keeps src/lupin_mcp, drops its breaching candidates from the pool, or goes
 # unscorable. Measured 2026-10-24 over 8,804 server definitions: these 19 carry a scrub token. Any other breach turns the census red, and so does a pinned
 # definition that stops breaching, so the pin cannot go stale. Nothing here changes the run-time rule: blind_definition still raises for every one of them.
@@ -38,7 +40,9 @@ PINNED_BREACHES = frozenset( {
     ( "src/lupin_mcp/reuse_tools.py", "run_question" ),
     ( "src/lupin_mcp/reuse_tools.py", "sweep_need_impl" ),
 } )
-SCRUB = bl.scrub_tokens( [] )              # the arm labels are added at the freeze
+# The arm labels come from the Phase 5 harness at the freeze. Until then the census runs without them, which is only honest while the server commit is unfrozen.
+ARM_LABELS = ()
+SCRUB = bl.scrub_tokens( ARM_LABELS )
 
 
 def breaches( definitions ):
@@ -101,6 +105,11 @@ def test_assert_blind_itself_raises_on_the_text_of_each_pinned_definition():
         with pytest.raises( err.SemdupError ) as caught:
             bl.assert_blind( f"Definition under review:\n{shown}\nRule on every candidate.", SCRUB )
         assert caught.value.code == err.BLINDNESS_BREACH
+
+
+def test_the_census_cannot_be_frozen_with_an_empty_arm_label_list():
+    """Once the server commit is set, the arm labels must be set too."""
+    assert CENSUS_SERVER_COMMIT is None or len( ARM_LABELS ) > 0
 
 
 def test_the_guard_goes_red_when_a_definition_carrying_a_token_is_added(tmp_path):
