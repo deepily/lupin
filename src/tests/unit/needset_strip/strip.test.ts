@@ -156,3 +156,18 @@ test( "strip: a function held in a const loses the const's name and the function
     assert.equal( got.text, "export const NAME = ( a ) => a * 2;" );
     assert.deepEqual( got.replaced, { mul: "NAME" } );
 } );
+
+test( "shape: a class and a function give their node kind names, with names and literals erased and modifiers left out", () => {
+    const src = "export class Tiny {\n    m( a ) { return 1; }\n}\nexport function tf( b: string ) { return \"x\" + `y`; }\n";
+    const out = run( { "a.ts": src }, "shape", [ { file: "a.ts", name: "Tiny", line: 1 }, { file: "a.ts", name: "tf", line: 4 } ] );
+    assert.deepEqual( out[ 0 ], { ok: true, kind: "class", kinds: [ "ClassDeclaration", "Identifier", "MethodDeclaration", "Identifier", "Parameter", "Identifier", "Block", "ReturnStatement", "Literal" ] } );
+    assert.equal( out[ 1 ].kind, "function" );
+    assert.deepEqual( out[ 1 ].kinds.slice( 0, 4 ), [ "FunctionDeclaration", "Identifier", "Parameter", "Identifier" ] );
+    assert.ok( out[ 1 ].kinds.includes( "BinaryExpression" ) && out[ 1 ].kinds.filter( ( k: string ) => k === "Literal" ).length === 2 );
+} );
+
+test( "shape: a private identifier is one kind with the plain ones", () => {
+    const src = "export class Priv {\n    #hidden = 1;\n    show() { return this.#hidden; }\n}\n";
+    const [ got ] = run( { "a.ts": src }, "shape", [ { file: "a.ts", name: "Priv", line: 1 } ] );
+    assert.ok( !got.kinds.includes( "PrivateIdentifier" ) && got.kinds.includes( "Identifier" ) );
+} );

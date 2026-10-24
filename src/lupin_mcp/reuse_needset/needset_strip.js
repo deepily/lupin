@@ -8,6 +8,7 @@
 // Mode "strip" replaces the member's name, its class, the module parts, its parameters and the names it reads off
 // this, with the same placeholders the Python step uses (name, class, module, arg N and attr N, in capitals).
 // Mode "text" returns the member unchanged.
+// Mode "shape" returns the member's pre-order node kind names, as ts_extract.js writes them for the duplicate finder, so a class can be measured.
 const fs   = require( "fs" );
 const path = require( "path" );
 
@@ -15,6 +16,9 @@ const req = JSON.parse( fs.readFileSync( 0, "utf8" ) );
 const ts  = require( req.typescript );
 
 const MIN_NAME_LEN = 3;
+const KIND_NAMES   = require( path.join( __dirname, "../../cosa/repo/symindex/ts_kind_names.cjs" ) )( ts );
+const LITERALS     = new Set( [ ts.SyntaxKind.NumericLiteral, ts.SyntaxKind.StringLiteral, ts.SyntaxKind.BigIntLiteral,
+                                ts.SyntaxKind.NoSubstitutionTemplateLiteral, ts.SyntaxKind.RegularExpressionLiteral ] );
 
 function scriptKind( abs ) {
     if ( abs.endsWith( ".tsx" ) ) return ts.ScriptKind.TSX;
@@ -134,6 +138,19 @@ function strip( node, sf, target, text ) {
     return { forbidden, replaced: Object.fromEntries( repl ), text: text.replace( re, ( m ) => repl.get( m ) ) };
 }
 
+// The kind name the duplicate finder gives a node: identifiers and literals are erased to one name each.
+function kindName( n ) {
+    if ( n.kind === ts.SyntaxKind.PrivateIdentifier ) return "Identifier";
+    return LITERALS.has( n.kind ) ? "Literal" : KIND_NAMES.get( n.kind );
+}
+
+// The kind names of a node and everything under it, parents first, without doc comments and modifiers.
+function preorder( node, acc ) {
+    acc.push( kindName( node ) );
+    ts.forEachChild( node, ( c ) => { if ( !ts.isJSDoc( c ) && !ts.isModifier( c ) ) preorder( c, acc ); } );
+    return acc;
+}
+
 function kindOf( node ) {
     if ( ts.isClassDeclaration( node ) ) return "class";
     const owner = ts.isVariableDeclaration( node ) ? null : node.parent;
@@ -152,6 +169,7 @@ const results = req.targets.map( ( target ) => {
     if ( node === null ) return { ok: false, error: "no member " + target.name + " starts on line " + target.line + " of " + target.file };
     const text = memberText( node, sf );
     if ( req.mode === "text" ) return { ok: true, kind: kindOf( node ), text };
+    if ( req.mode === "shape" ) return { ok: true, kind: kindOf( node ), kinds: preorder( node, [] ) };
     return Object.assign( { ok: true, kind: kindOf( node ) }, strip( node, sf, target, text ) );
 } );
 process.stdout.write( JSON.stringify( { results } ) );

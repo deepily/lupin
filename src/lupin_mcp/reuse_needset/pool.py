@@ -12,6 +12,7 @@ import re
 from cosa.repo.symindex import build, dups, js_index
 from cosa.repo.symindex.py_index import _walk_scope
 from lupin_mcp import reuse_need_check as nc
+from lupin_mcp.reuse_needset import strip
 
 READER_PUBLIC     = "read_symbols"
 READER_SEARCHABLE = "read_searchable"
@@ -62,11 +63,12 @@ def measure( root, records ):
     Count nodes and take structural shingles for the definitions of an index.
 
     Requires:
-        - root is the index root and records are index records with lang, file and name
+        - root is the index root and records are index records with id, lang, kind, file, name and line
 
     Ensures:
         - returns { record id: Measure } for every record found in its source
         - Python records are measured from the AST, script records from the compiler's node kinds, as the duplicate finder does
+        - a script class, which the duplicate finder skips, is measured the way a Python class is: its whole node tree
         - a record whose source cannot be found is absent from the result
     """
     root, out = pathlib.Path( root ), {}
@@ -86,6 +88,9 @@ def measure( root, records ):
         for d in js_index.extract_js_shapes( root, script_files )[ "defs" ]:
             rec = by_file[ d[ "file" ] ].get( d[ "name" ] )
             if rec is not None: out[ rec[ "id" ] ] = Measure( len( d[ "kinds" ] ), frozenset( dups.shingles_of( d[ "kinds" ] ) ) )
+    classes = [ r for r in records if r[ "lang" ] != "py" and r[ "kind" ] == "class" ]
+    for r, res in zip( classes, strip.script_results( root, classes, strip.MODE_SHAPE, strict=False ) ):
+        if res[ "ok" ]: out[ r[ "id" ] ] = Measure( len( res[ "kinds" ] ), frozenset( dups.shingles_of( res[ "kinds" ] ) ) )
     return out
 
 

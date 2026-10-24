@@ -13,6 +13,7 @@ from lupin_mcp.reuse_needset import errors as er
 STRIP_SCRIPT = pathlib.Path( __file__ ).resolve().with_name( "needset_strip.js" )
 MODE_STRIP   = "strip"
 MODE_TEXT    = "text"
+MODE_SHAPE   = "shape"
 
 
 def module_of( rec ):
@@ -70,17 +71,18 @@ def python_text( rec, root ):
     return textwrap.dedent( "\n".join( source.splitlines()[ first - 1 : node.end_lineno ] ) )
 
 
-def script_results( root, recs, mode ):
+def script_results( root, recs, mode, strict=True ):
     """
     Run needset_strip.js once over script records.
 
     Requires:
-        - recs is a list of script index records with id, file, name and line; mode is strip or text
+        - recs is a list of script index records with id, file, name and line; mode is strip, text or shape
 
     Ensures:
-        - returns the script's results in the order of recs; an empty list starts no process
+        - returns the script's results in the order of recs, a member that was not found as { ok: False } when strict is off
+        - an empty list starts no process
     Raises:
-        - NeedsetError STRIP_FAILED when a member is not found
+        - NeedsetError STRIP_FAILED when a member is not found and strict is set
         - DependencyMissing when node or typescript is absent
     """
     if not recs: return []
@@ -89,7 +91,7 @@ def script_results( root, recs, mode ):
     files   = sorted( { root / r[ "file" ] for r in recs } )
     out     = js_index._run( root, files, { "mode": mode, "targets": targets }, script=STRIP_SCRIPT )[ "results" ]
     for r, res in zip( recs, out ):
-        if not res[ "ok" ]: raise er.NeedsetError( er.STRIP_FAILED, f"{r[ 'id' ]}: {res[ 'error' ]}" )
+        if strict and not res[ "ok" ]: raise er.NeedsetError( er.STRIP_FAILED, f"{r[ 'id' ]}: {res[ 'error' ]}" )
     return out
 
 

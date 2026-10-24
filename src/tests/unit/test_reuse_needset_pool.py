@@ -45,7 +45,25 @@ export function tsTwo( cells: number[] ): number {
     }
     return sum;
 }
+
+/** Holds rows. */
+export class Holder {
+    keep( rows: number[] ): number {
+        const seen = new Set<number>();
+        let acc = 0;
+        while ( acc < rows.length ) {
+            seen.add( rows[ acc ] );
+            acc += 1;
+        }
+        return seen.size + rows.length;
+    }
+}
 '''
+
+
+def ts_line( needle ):
+    """Return the 1-based line of the TypeScript fixture that holds the needle."""
+    return next( i for i, l in enumerate( TS_TWINS.splitlines(), 1 ) if needle in l )
 
 
 @pytest.fixture( autouse=True )
@@ -66,9 +84,9 @@ def write_tree( tmp_path ):
     return tmp_path
 
 
-def rec( id, file, name, lang="py", doc="Docs." ):
+def rec( id, file, name, lang="py", doc="Docs.", kind="function", line=1 ):
     """Return a minimal index record."""
-    return { "id": id, "file": file, "name": name, "lang": lang, "doc": doc }
+    return { "id": id, "file": file, "name": name, "lang": lang, "doc": doc, "kind": kind, "line": line }
 
 
 def test_the_reader_is_read_searchable_when_the_builder_has_it_else_the_public_one( monkeypatch ):
@@ -97,9 +115,12 @@ def test_measure_counts_nodes_for_both_languages_and_skips_what_it_cannot_read( 
     records = [ rec( "pkg.a.twin_a", "pkg/a.py", "twin_a" ), rec( "pkg.a.twin_b", "pkg/a.py", "twin_b" ), rec( "pkg.a.tiny", "pkg/a.py", "tiny" ),
                 rec( "pkg.broken.x", "pkg/broken.py", "x" ), rec( "pkg.binary.y", "pkg/binary.py", "y" ), rec( "pkg.gone.z", "pkg/gone.py", "z" ),
                 rec( "pkg.a.missing_name", "pkg/a.py", "missing_name" ),
-                rec( "web.m.tsOne", "web/m.ts", "tsOne", "ts" ), rec( "web.m.tsTwo", "web/m.ts", "tsTwo", "ts" ), rec( "web.m.absent", "web/m.ts", "absent", "ts" ) ]
+                rec( "web.m.tsOne", "web/m.ts", "tsOne", "ts" ), rec( "web.m.tsTwo", "web/m.ts", "tsTwo", "ts" ), rec( "web.m.absent", "web/m.ts", "absent", "ts" ),
+                rec( "web.m.Holder", "web/m.ts", "Holder", "ts", kind="class", line=ts_line( "export class Holder" ) ),
+                rec( "web.m.Ghost", "web/m.ts", "Ghost", "ts", kind="class", line=999 ) ]
     out     = pool.measure( root, records )
-    assert sorted( out ) == [ "pkg.a.tiny", "pkg.a.twin_a", "pkg.a.twin_b", "web.m.tsOne", "web.m.tsTwo" ]
+    assert sorted( out ) == [ "pkg.a.tiny", "pkg.a.twin_a", "pkg.a.twin_b", "web.m.Holder", "web.m.tsOne", "web.m.tsTwo" ]
+    assert out[ "web.m.Holder" ].nodes >= dp.DEFAULT_MIN_NODE and out[ "web.m.Holder" ].shingles, "a script class is measured, as a Python class is"
     assert out[ "pkg.a.twin_a" ].nodes == out[ "pkg.a.twin_b" ].nodes >= dp.DEFAULT_MIN_NODE > out[ "pkg.a.tiny" ].nodes
     assert out[ "pkg.a.twin_a" ].shingles == out[ "pkg.a.twin_b" ].shingles and out[ "pkg.a.twin_a" ].shingles
     assert out[ "web.m.tsOne" ].nodes >= dp.DEFAULT_MIN_NODE and out[ "web.m.tsOne" ].shingles == out[ "web.m.tsTwo" ].shingles
@@ -184,6 +205,7 @@ def test_a_real_tree_runs_through_the_index_the_finder_and_the_pool( tmp_path ):
     cells = pool.cell_pool( kept, twins, ids )
     assert cells[ ( "near_copy", "py" ) ] == [ f"{spec.name}:pkg.a.twin_a", f"{spec.name}:pkg.a.twin_b" ]
     assert cells[ ( "near_copy", "ts" ) ] == [ f"{spec.name}:web.m.tsOne", f"{spec.name}:web.m.tsTwo" ]
+    assert f"{spec.name}:web.m.Holder" in cells[ ( "work_alike", "ts" ) ], "a documented TypeScript class seeds a need like a Python class"
     assert dropped.get( "no_docstring", 0 ) + dropped.get( "small", 0 ) >= 2
 
 
