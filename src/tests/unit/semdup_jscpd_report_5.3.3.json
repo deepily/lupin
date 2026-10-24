@@ -1,0 +1,71 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 15,
+        "endLoc": {
+          "column": 1,
+          "line": 15,
+          "position": 380
+        },
+        "name": "src/one.ts",
+        "start": 1,
+        "startLoc": {
+          "column": 27,
+          "line": 1,
+          "position": 27
+        }
+      },
+      "format": "typescript",
+      "fragment": "export function scaleAndSum( items: number[], factor: number ): number {\n    let total = 0;\n    const scaled: number[] = [];\n    for ( const item of items ) {\n        if ( item > 10 ) {\n            scaled.push( item * factor );\n        } else {\n            scaled.push( item + factor );\n        }\n    }\n    for ( const s of scaled ) {\n        total += s;\n    }\n    return total;\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 15,
+      "secondFile": {
+        "end": 19,
+        "endLoc": {
+          "column": 1,
+          "line": 19,
+          "position": 446
+        },
+        "name": "src/two.ts",
+        "start": 5,
+        "startLoc": {
+          "column": 28,
+          "line": 5,
+          "position": 93
+        }
+      },
+      "tokens": 84
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-10-24T23:30:45.102Z",
+    "formats": {
+      "typescript": {
+        "clones": 1,
+        "duplicatedLines": 15,
+        "duplicatedTokens": 84,
+        "lines": 42,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 35.714285714285715,
+        "percentageTokens": 31.69811320754717,
+        "sources": 3,
+        "tokens": 265
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 15,
+      "duplicatedTokens": 84,
+      "lines": 42,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 35.714285714285715,
+      "percentageTokens": 31.69811320754717,
+      "sources": 3,
+      "tokens": 265
+    }
+  }
+}
