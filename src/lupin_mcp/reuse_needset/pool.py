@@ -14,8 +14,7 @@ from cosa.repo.symindex.py_index import _walk_scope
 from lupin_mcp import reuse_need_check as nc
 from lupin_mcp.reuse_needset import strip
 
-READER_PUBLIC     = "read_symbols"
-READER_SEARCHABLE = "read_searchable"
+READER            = "read_searchable"
 LANG_OF           = { "py": "py", "ts": "ts" }
 TEST_PARTS        = frozenset( { "tests", "test", "__tests__" } )
 NONE_MIN_SYMBOLS  = 3
@@ -24,18 +23,16 @@ SUFFIX_RE         = re.compile( r"~(\d+)$" )
 
 def read_pool_symbols( gen ):
     """
-    Read the pool's symbols and name the reader that supplied them.
+    Read the pool's symbols, public and private, and name the reader that supplied them.
 
     Requires:
-        - gen is a built index generation directory
+        - gen is a built index generation directory written with scopes
 
     Ensures:
-        - returns ( records, reader ) where reader is READER_SEARCHABLE when the index builder has read_searchable, else READER_PUBLIC
-        - the manifest records the reader, because a draw made from the public symbols differs from one made after private members are indexed
+        - returns the records and the name of the reader that supplied them
+        - the manifest records the reader, because a draw made from other symbols would differ under the same seed
     """
-    if hasattr( build, "read_searchable" ):          # absent until the index fixes of phase 1 land; the reader name is recorded either way
-        return build.read_searchable( gen ), READER_SEARCHABLE
-    return build.read_symbols( gen ), READER_PUBLIC
+    return build.read_searchable( gen ), READER
 
 
 def is_test_path( path ):

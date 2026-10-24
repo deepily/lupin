@@ -89,12 +89,10 @@ def rec( id, file, name, lang="py", doc="Docs.", kind="function", line=1 ):
     return { "id": id, "file": file, "name": name, "lang": lang, "doc": doc, "kind": kind, "line": line }
 
 
-def test_the_reader_is_read_searchable_when_the_builder_has_it_else_the_public_one( monkeypatch ):
-    monkeypatch.setattr( bd, "read_searchable", lambda gen: [ "S", gen ], raising=False )
-    monkeypatch.setattr( bd, "read_symbols", lambda gen: [ "P", gen ] )
-    assert pool.read_pool_symbols( "g" ) == ( [ "S", "g" ], pool.READER_SEARCHABLE )
-    monkeypatch.delattr( bd, "read_searchable" )
-    assert pool.read_pool_symbols( "g" ) == ( [ "P", "g" ], pool.READER_PUBLIC )
+def test_the_pool_reads_the_searchable_listing_and_names_that_reader( monkeypatch ):
+    monkeypatch.setattr( bd, "read_searchable", lambda gen: [ "S", gen ] )
+    monkeypatch.setattr( bd, "read_symbols", lambda *a, **k: pytest.fail( "the public-only reader was used" ) )
+    assert pool.read_pool_symbols( "g" ) == ( [ "S", "g" ], "read_searchable" ) and pool.READER == "read_searchable"
 
 
 def test_test_paths_are_found_by_directory_and_by_file_name():
@@ -120,7 +118,7 @@ def test_measure_counts_nodes_for_both_languages_and_skips_what_it_cannot_read( 
                 rec( "web.m.Ghost", "web/m.ts", "Ghost", "ts", kind="class", line=999 ) ]
     out     = pool.measure( root, records )
     assert sorted( out ) == [ "pkg.a.tiny", "pkg.a.twin_a", "pkg.a.twin_b", "web.m.Holder", "web.m.tsOne", "web.m.tsTwo" ]
-    assert out[ "web.m.Holder" ].nodes >= dp.DEFAULT_MIN_NODE and out[ "web.m.Holder" ].shingles, "a script class is measured, as a Python class is"
+    assert ( out[ "web.m.Holder" ].nodes, len( out[ "web.m.Holder" ].shingles ) ) == ( 52, 48 ), "a script class is measured over its whole tree, as a Python class is"
     assert out[ "pkg.a.twin_a" ].nodes == out[ "pkg.a.twin_b" ].nodes >= dp.DEFAULT_MIN_NODE > out[ "pkg.a.tiny" ].nodes
     assert out[ "pkg.a.twin_a" ].shingles == out[ "pkg.a.twin_b" ].shingles and out[ "pkg.a.twin_a" ].shingles
     assert out[ "web.m.tsOne" ].nodes >= dp.DEFAULT_MIN_NODE and out[ "web.m.tsOne" ].shingles == out[ "web.m.tsTwo" ].shingles
@@ -197,7 +195,7 @@ def test_a_real_tree_runs_through_the_index_the_finder_and_the_pool( tmp_path ):
     kept, dropped = pool.eligible( records, measures )
     found   = dp.find_duplicates( spec, sorted( root.glob( "**/*.py" ) ), js_files=[ root / "web" / "m.ts" ] )
     twins   = pool.twin_map( found, prefix=f"{spec.name}:" )
-    assert reader in ( pool.READER_PUBLIC, pool.READER_SEARCHABLE )
+    assert reader == pool.READER
     assert twins and set( twins ) - ids == { f"{spec.name}:tests.test_a.test_thing" }       # the index leaves test code out; every other twin id is an index id
     kept_ids = [ r[ "id" ].split( ":", 1 )[ 1 ] for r in kept ]
     assert "pkg.a.twin_a" in kept_ids and "pkg.lone.lone" in kept_ids
