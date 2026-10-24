@@ -95,6 +95,29 @@ def test_freeze_writes_the_file_once_and_returns_the_sha(tmp_path):
     assert json.load( open( path ) ) == cfg
 
 
+def test_a_failed_write_leaves_no_frozen_file_and_no_temporary_file_so_a_later_freeze_still_works(tmp_path, monkeypatch):
+    path = str( tmp_path / "f.json" )
+    real = cf.os.link
+    def broken( src, dst ): raise OSError( "disk went away" )
+    monkeypatch.setattr( cf.os, "link", broken )
+    with pytest.raises( OSError, match="disk went away" ):
+        cf.freeze( make(), path )
+    assert os.listdir( tmp_path ) == []
+    monkeypatch.setattr( cf.os, "link", real )
+    assert cf.freeze( make(), path ) and os.listdir( tmp_path ) == [ "f.json" ]
+
+
+def test_freezing_leaves_exactly_the_frozen_file_in_its_folder(tmp_path):
+    cf.freeze( make(), str( tmp_path / "f.json" ) )
+    assert os.listdir( tmp_path ) == [ "f.json" ]
+
+
+def test_the_sha_is_the_sha256_of_sorted_compact_json_without_the_sha_field():
+    import hashlib
+    cfg = { "b": [ 2, 3 ], "a": 1, "config_sha": "ignored" }
+    assert cf.config_sha( cfg ) == hashlib.sha256( b'{"a":1,"b":[2,3]}' ).hexdigest()
+
+
 def test_freeze_accepts_a_temperature_of_zero(tmp_path):
     assert cf.freeze( make( backend="work-server", temperature=0 ), str( tmp_path / "f.json" ) )
 

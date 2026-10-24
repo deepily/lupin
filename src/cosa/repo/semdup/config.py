@@ -2,10 +2,12 @@
 import hashlib
 import json
 import os
+import uuid
 
 from cosa.repo.doc_lint import model_transport
 from cosa.repo.semdup import errors as err
 from cosa.repo.symindex import dups
+from cosa.repo.symindex.candidates.vector_store import canonical
 
 MODEL_ID       = "claude-fable-5-1"
 PROMPT_NAME    = "semdup"
@@ -57,7 +59,7 @@ def config_sha( cfg ):
         - a change to any field other than config_sha changes it
     """
     payload = { key: value for key, value in cfg.items() if key != ELIDED_FIELD }
-    return _sha( json.dumps( payload, sort_keys=True, separators=( ",", ":" ) ) )
+    return _sha( canonical( payload ) )
 
 
 def build_config( backend, temperature, unscorable_policy, system_prompt, user_template, parser_source, scrub, body_chars, jscpd, clone_cover=CLONE_COVER, min_nodes=dups.DEFAULT_MIN_NODE ):
@@ -115,7 +117,8 @@ def freeze( cfg, path ):
 
     Ensures:
         - nothing is written unless backend and temperature are both set (a temperature of 0 is set)
-        - the file is created exclusively, so two freezes cannot both succeed and no file is ever replaced
+        - the file appears under its final name complete or not at all: it is written to a temporary name and linked into place, and the link fails if a file is there
+        - so two freezes cannot both succeed, no file is ever replaced, and a kill mid-write leaves no partial frozen file
         - returns config_sha of the written configuration
 
     Raises:
@@ -126,11 +129,16 @@ def freeze( cfg, path ):
     unset = [ name for name in ( "backend", "temperature" ) if is_empty( cfg[ name ] ) ]
     if unset: raise err.SemdupError( err.CONFIG_UNDECIDED, f"{' and '.join( unset )} not decided (parking item P4)" )
     if cfg[ ELIDED_FIELD ] != config_sha( cfg ): raise err.SemdupError( err.CONFIG_DRIFT, "the configuration was edited after build_config" )
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
+    folder = os.path.dirname( path )
+    os.makedirs( folder, exist_ok=True )
+    tmp = os.path.join( folder, f".{os.path.basename( path )}.{os.getpid()}.{uuid.uuid4().hex}.tmp" )
+    with open( tmp, "w", encoding="utf-8" ) as f: f.write( json.dumps( cfg, indent=2, sort_keys=True ) + "\n" )
     try:
-        with open( path, "x", encoding="utf-8" ) as f: f.write( json.dumps( cfg, indent=2, sort_keys=True ) + "\n" )
+        os.link( tmp, path )
     except FileExistsError:
         raise err.SemdupError( err.CONFIG_ALREADY_FROZEN, f"a frozen configuration already exists at {path}" ) from None
+    finally:
+        os.unlink( tmp )
     return cfg[ ELIDED_FIELD ]
 
 
